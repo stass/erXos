@@ -981,9 +981,12 @@ load field.
   every process either: an unexpected message lengthens the queue of a
   process that never reads it, and `gen_server` logs it.
 * **What answers.** The Erlang commands answer as FreeBSD's tools do. `cp`
-  copies in pieces of 64 KiB, checks for a request between pieces, and
-  writes `from -> to  N%` to its standard error, the percent three columns
-  wide. `rm` writes the path it removed last to its standard output. `wc`
+  opens its target itself, copies in pieces of 64 KiB, checks for a
+  request between pieces, and writes `from -> to  N%` to its standard
+  error, the percent three columns wide; it reports a failed close of the
+  target as it reports a failed write, since a server may refuse at the close what it took write
+  by write, as `/apps` refuses a package that fails its check
+  ([design-packaging.md](design-packaging.md#installing-and-removing)). `rm` writes the path it removed last to its standard output. `wc`
   writes its counts so far to its standard error, as FreeBSD's does
   (`usr.bin/wc/wc.c:142`, `:176-186`). `cat`, `mv`, `ls`, `grep` and
   `sort` do not opt in, as FreeBSD's do not catch `SIGINFO`.

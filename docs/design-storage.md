@@ -1647,12 +1647,17 @@ reported as a durable checkpoint.
   operations through `erx_fs` and facets, one grant per client, rooted at
   a principal's directory or a service's
   ([design-files.md](design-files.md#the-file-protocol)); a grant whose
-  facet row carries `tree apps` is rooted at `apps/PRINCIPAL/`, among the
-  app directories, which no other grant reaches
+  facet row carries `tree apps` is rooted at `apps/NAME/SIGNER/`, the
+  app's name and its signer as the mint names them, among the app
+  directories, which no other grant reaches
   ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
   Each answers the operations its format cannot store, links, nodes or
   extended attributes, with the protocol's error; a client over its quota gets
-  `{error, enospc}`.
+  `{error, enospc}`. The data partition's service also serves the
+  `packages` tree, a service directory of its own holding installed app
+  packages, with the slot's package image read-only under `image/`:
+  read-write to the system domain's grant and read-only to the app
+  template's ([design-packaging.md](design-packaging.md#where-a-package-lies)).
 * **The EROFS reader**, `erx_erofs`, serves `prim_file`'s operations on an
   EROFS mount in the calling process
   ([design-runtime.md](design-runtime.md#files)); it reads through
@@ -1685,7 +1690,8 @@ reported as a durable checkpoint.
   before the vault answers it
   ([design-system.md](design-system.md#the-vault)). The data
   partition's service also takes **remove_app** `Name`, `Name` one
-  identifier, which removes `apps/Name` whole and reaches nothing outside
+  identifier, which removes `apps/Name` whole, every signer's directory
+  of the name with it, and reaches nothing outside
   `apps/`, and answers `ok` once a completed checkpoint holds the removal
   and every write the service acknowledged before it, or at once for a
   directory already absent; the system domain's package process alone

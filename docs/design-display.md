@@ -3433,7 +3433,7 @@ what starts, restarts and bounds every session the start table keeps:
   `{error, no_display}`.
 * **An app a person starts** runs in a session of its own principal,
   never in the person's: `service APP onestart display=D`, or a
-  launcher's `start APP display=D` written to `/apps/ctl`, starts the
+  launcher's `start APP display=D` written to `/etc/start/ctl`, starts the
   session of a row that is not enabled with `D` as its default display
   and nothing more, and
   its window opens beside the person's under the overlapping policy
@@ -4080,7 +4080,7 @@ the window and the reason.
   template again. Whether the app's principal can be enrolled and
   logged in to at a console line is the login design's (decision 14).
 * **Who holds a display's screen** is the start table's to say, and
-  the start table changes only through the `apps` grant, the manifest
+  the start table changes only through the `start` grant, the manifest
   and the data partition's `rc.conf`, which sets only rows the manifest
   declares, and only to displays their templates are granted
   ([design-apps.md](design-apps.md#security)).

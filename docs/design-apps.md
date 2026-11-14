@@ -32,7 +32,7 @@ Decisions every reader of this document needs:
   optionally a display, and a restart intensity. The manifest's `start`
   rows declare what may start and give each row's defaults, as
   FreeBSD's `rc.d` scripts and `/etc/defaults/rc.conf` do;
-  `/apps/rc.conf` holds the machine's own settings of those rows, as
+  `/etc/start/rc.conf` holds the machine's own settings of those rows, as
   `/etc/rc.conf` does. A kiosk is an enabled row that names an app and a
   display.
 * **The table keys on a principal, and on nothing about where the
@@ -45,11 +45,11 @@ Decisions every reader of this document needs:
 **Is there one place that says when and where everything starts?** Yes,
 in two parts of one manifest and one file. The manifest's `domain` rows
 start the system's services, in the order the build computes, and the
-start table, the manifest's `start` rows with `/apps/rc.conf` over them,
+start table, the manifest's `start` rows with `/etc/start/rc.conf` over them,
 starts everything else. `service -e` prints both.
 
 **Where do I add my kiosk app?** In a package of its own, which
-`tools/erx pack --app` adds to an image and a copy into `/apps/pkg/`
+`tools/erx pack --app` adds to an image and `cp NAME.app /apps/`
 installs on a running machine, within the `apps` row the board's
 manifest declares
 ([design-packaging.md](design-packaging.md)). An app that is part of the
@@ -138,7 +138,7 @@ device ([design-system.md](design-system.md#devices)).
  manifest: principal clock, its           system domain
    session template (release               erx_starter merges the `start` rows with rc.conf,
    @artifact.clock), facet rows                |       one supervisor and keeper per enabled
-   granting the template, `start` rows         |       row; serves /apps (ctl, rc.conf)
+   granting the template, `start` rows         |       row; serves /etc/start (ctl, rc.conf)
  the boot image's domain release:              |  erx_domain:start_session(clock, Start)
    clock's applications and its                v
    boot script bin/clock.boot             domain service: a session of clock's template,
@@ -258,7 +258,7 @@ start clock
   restart_period_s 600
 ```
 
-`/apps/rc.conf` holds the machine's own settings of those rows, in
+`/etc/start/rc.conf` holds the machine's own settings of those rows, in
 rc.conf(5)'s form, one variable per line:
 
 ```text
@@ -302,7 +302,7 @@ domain's own directory of the data partition, the root of the system
 domain's `data` grant, which the start service reads and writes. Every
 other grant of `data` is rooted at its own principal's or service's
 directory ([design-storage.md](design-storage.md#interfaces)), none of
-which is the system domain's, so no other domain reaches the file. The `apps` tree shows it read-only at `/apps/rc.conf`. The file is
+which is the system domain's, so no other domain reaches the file. The start service's tree shows it read-only at `/etc/start/rc.conf`. The file is
 at most 64 KiB, and the table at most `start_rows_max`, 256 rows.
 
 The configured domains are not rows of the table: they are the system
@@ -402,7 +402,7 @@ fall into the rescue configuration at its fifth boot.
 * **Iterate.** With the app running, `tools/erx watch DIR --domain
   clock_1` loads each changed module into the session through its code
   facet, as for any domain ([design-live.md](design-live.md#the-code-store)).
-* **A development build** gives `root`'s session the `apps` grant, so
+* **A development build** gives `root`'s session the `start` grant, so
   `service` works at its shell. Its banner says what such a build is:
   `development build: trusted code only`.
 
@@ -413,20 +413,20 @@ The start table keys on a principal with a session template and a
 registered within the manifest's `apps` row, its template is the one
 that row gives every app, and every admitted package has a start row,
 so the table, its keepers, the domain service and the display treat it
-as they treat an app of the manifest. Before a package is replaced or
-removed, the package process publishes a package set without it, and
+as they treat an app of the manifest. Before a package is removed, the
+package process publishes a package set without it, and
 the start service answers only once that app's sessions have ended
-([design-packaging.md](design-packaging.md#installing-updating-and-removing)).
+([design-packaging.md](design-packaging.md#installing-and-removing)).
 How a package declares what it needs, which of the `apps` row's
 services it may take, how it is authenticated, added to an image,
-installed, updated and removed, and what that does to its data, is
+installed and removed, and what that does to its data, is
 [design-packaging.md](design-packaging.md).
 
 ## Interfaces
 
 **Commands**, Erlang commands of the command shell
 ([design-shell.md](design-shell.md#commands)), each declaring
-`-erx_needs([apps])`:
+`-erx_needs([start])`:
 
 | Command | Does |
 | --- | --- |
@@ -435,23 +435,27 @@ installed, updated and removed, and what that does to its data, is
 | `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing |
 | `service NAME onestart [display=D]`, `onestop`, `onerestart`, `onestatus` | as above on any row: `onestart` starts the row's principal once, with no supervisor, and `onestop` stops it |
 | `service -e` | prints the configured domains in boot order, then the enabled rows that are not refused |
+| `service NAME purge` | removes the data of a package's app that is not installed, every signer's ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)) |
 
 For a configured domain, `service` answers every request that it is
 configured in the system manifest; its state is at `[domains, Id]`.
 
-**The `apps` tree**, a service of the system domain and an instance of
-`files`, which `erx_starter` serves with `erx_fs` and a session mounts at
-`/apps`:
+**The start service's tree**, the service `start` of the system domain
+and an instance of `files`, which `erx_starter` serves with `erx_fs` and a
+session mounts at `/etc/start`, so that `/apps` holds apps alone
+([design-packaging.md](design-packaging.md#apps)):
 
 | File | Read | Write |
 | --- | --- | --- |
-| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, and `stop NAME`. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no manifest row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` is unread, and `eio` for a failed write of `rc.conf` or start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
+| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, `stop NAME`, and `purge NAME`, which the package process carries out ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)). The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no manifest row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` is unread, and `eio` for a failed write of `rc.conf` or start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
 | `rc.conf` | the machine's settings | nothing |
-| `pkg/` | one `NAME.pkg` for every package | a copy into it installs a package and a deletion removes one; `ctl` also takes `purge NAME` ([design-packaging.md](design-packaging.md#interfaces)) |
 
-Which templates hold the `apps` grant is the manifest's: `root`'s in a
-development build, an administrator's in a release build. A session
-whose template holds no `apps` grant has no `/apps` at all.
+Which templates hold the `start` grant is the manifest's: `root`'s in a
+development build, an administrator's in a release build; the build
+gives each of them the `apps` grant too when the manifest has an `apps`
+row ([design-packaging.md](design-packaging.md#the-apps-row)). A session
+whose template holds no `start` grant has no `/etc/start` and no
+`/apps` at all.
 
 **Inspection**, in `abi/inspection.txt`, reported by the start service
 and shown at `/proc/apps`, to an inspect facet of scope `all`: `[apps]`,
@@ -600,7 +604,7 @@ and no more; the data partition, and so `rc.conf`; the storage domain.
   are its principal's limits; fill its own directory to its quota; use
   each grant within that grant's limits; and end. It binds names of its
   own `names` quota only. It cannot change the start table, since it
-  holds no `apps` grant unless its template was deliberately granted
+  holds no `start` grant unless its template was deliberately granted
   one, and it cannot reach `rc.conf`, which lies outside every grant but
   the system domain's.
 * **A crafted data partition, or a storage domain it has taken over,**
@@ -667,8 +671,8 @@ the configured domains.
   directly that names such a display leaves the row `refused` with its
   reason at `/proc/apps` and starts nothing; seeded: the merge's grant
   check removed, which starts a session that shows nothing;
-* a session whose template holds no `apps` grant finds no `/apps`, and
-  its `erx:cap(apps)` is undefined;
+* a session whose template holds no `start` grant finds no `/etc/start`
+  and no `/apps`, and its `erx:cap(start)` is undefined;
 * the rescue configuration starts no row;
 * a kiosk booted five times without an ordered end, its app reaching
   ready each time, never reaches the rescue configuration; seeded: a

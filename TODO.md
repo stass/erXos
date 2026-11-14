@@ -8,13 +8,15 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
-* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits a second outside
-  review and the answers to its questions for the owner (its "Risks and decisions"), the first of which, a
-  close that answers an errno, decides how a refused copy is reported; then Track A's parts 2 and 3 build it
-  ([plan.md](docs/plan.md#track-a-apps)). An app names its needs, memory and code, and one `apps` row bounds
-  every app; installing is a copy into `/apps/pkg/`, whose close verifies, admits and publishes the package by
-  one rename, and removing is deleting the file, which keeps the app's data; each app is a principal of its own,
-  its budget elastic under the `apps` budget, as design-kernel.md and design-system.md record.
+* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits an outside
+  review and the answers to its questions for the owner (its "Risks and decisions"), the first of which
+  decides how an app shown as a directory is removed and updated, the second where the start table's `ctl`
+  and `rc.conf` go; then Track A's parts 2 and 3 build it ([plan.md](docs/plan.md#track-a-apps)). An app
+  names its needs, memory and code, and one `apps` row bounds every app; installing is `cp NAME.app /apps/`,
+  whose close checks, admits and publishes the package by one rename, every app shows as a read-only
+  directory at `/apps/NAME.app` or `/apps/system/NAME.app` through the session's own `erx_appsfs`, and
+  `rm -r` removes it, keeping its data, which is named by app and signer; each app is a principal of its
+  own, its budget elastic under the `apps` budget, as design-kernel.md and design-system.md record.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
@@ -652,6 +654,12 @@ it; git history is the record of completed work.
   Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
   hands to nothing; the reset count cleared by the first kept session.
+* [Medium] apps, the start service's tree at `/etc/start` ([design-apps.md](docs/design-apps.md#interfaces)):
+  `/apps` holds apps alone, so the tree that `erx_starter_fs` serves at `/apps` with `ctl` and `rc.conf`
+  becomes the service `start`, mounted at `/etc/start`. Built code that names the old place: the development
+  manifests' `service apps` and `facet apps` rows, `erx_cmd_service` (`/apps/ctl`, `-erx_needs([apps])`), the
+  session's mount of the facet, and the QEMU checkpoints that read `/apps/rc.conf` or write `/apps/ctl`.
+  Depends on the packaging design's second question for the owner.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
   deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before
@@ -2207,10 +2215,15 @@ it; git history is the record of completed work.
   target is not reported. `cp` copies with `file:copy/2` between two names, which stock OTP runs in
   `file_server`, whose copy closes the target and drops the close's answer
   (`otp/lib/kernel/src/file_server.erl:177-193`), so `cp` succeeds where the target's server refused the
-  close. A copy into `/apps/pkg/` reports a refused package only through that close
+  close. A copy into `/apps` reports a refused package only through that close
   ([design-packaging.md](docs/design-packaging.md#other-subsystems)). Fix: `cp` opens the target itself and
   copies in the 64 KiB pieces design-shell.md's info report describes, checking `file:close/1`'s answer; a
   test with a tree whose close answers `eio`.
+* [Medium] files, `erx_fs_grant` (`erlang/apps/erx_files/src/erx_fs_grant.erl:229-244`, `run_job/3`): the
+  grant answers a client's clunk when it hands the clunk to the file's owner and drops the tree's `clunk`
+  answer, where design-files.md has every tree's `clunk` answer `ok` or an errno and the grant pass it back
+  once the owner has run it. Fix: the owner's clunk job answers with the callback's result, and the
+  behaviour's callback spec widens to `ok | {error, posix()}`; the test design-files.md names, with its seed.
 * [Medium] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`, `run/2`): a name or server
   argument with an empty label or a label over 63 bytes (`host a..b`, `host .foo`, `host www .foo`)
   crashes the command with `function_clause` from `inet_dns:encode_labels`, which stock OTP 29.1.2
@@ -5884,13 +5897,6 @@ to the corpus and follow rc
 
 ## Security residuals
 
-* [Medium] apps, a removed app's data passes to another signer
-  ([design-packaging.md](docs/design-packaging.md#security)): removing a package keeps the app's directory
-  under `apps/`, so after a reboot a package of the same name signed by a second trusted signer is admitted
-  and finds the first app's data. Every signer is a key the deployer put in the boot image; a deployer who
-  trusts more than one purges a removed app's directory first. When `purge` lands (M10), the storage
-  service's `remove_app` must refuse anything that is not an app name, and the package process must refuse a
-  purge of an installed or image package's name before any request.
 * [Medium] SSH before the vault, stages 2 and 3, development builds only
   ([design-ssh.md](docs/design-ssh.md#login-keys)): `erx_ssh_login`'s
   `login_key` admits root's development key on the SSH domain's own

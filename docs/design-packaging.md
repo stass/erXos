@@ -1,11 +1,11 @@
 # Apps: packages and the SDK
 
-A **package** is one file that carries an app built outside erXos's tree:
-a short declaration of what the app is and needs, and a read-only image
-of its code and data. This document says how a third party builds one
-with erXos's SDK, how an image builder adds it to an image, how an
-administrator installs, updates and removes it on a running machine, and
-what the app may take.
+A **package** is one file, `NAME.app`, that carries an app built outside
+erXos's tree: a short declaration of what the app is and needs, and a
+read-only image of its code and data. This document says how a third
+party builds one with erXos's SDK, how an image builder adds it to an
+image, how an administrator installs and removes it on a running
+machine, and what the app may take.
 
 **What an app author writes.** Three lines are a whole declaration:
 
@@ -28,15 +28,25 @@ apps
   services display data
 ```
 
-**What an administrator types.** Installing is a copy, removing a
-deletion, as an app is installed on macOS by copying it into
-`/Applications`:
+**What an administrator types.** Installing is a copy and removing a
+deletion, as on macOS, where an app is installed by copying it into
+`/Applications` and the system's own apps lie apart in
+`/System/Applications`:
 
 ```text
-cp dashboard.pkg /apps/pkg/
-service dashboard enable
-rm /apps/pkg/dashboard.pkg
+cp dashboard.app /apps/          install it
+ls /apps                         dashboard.app  system
+ls /apps/dashboard.app           bin  lib  share
+ls /apps/system                  the image's apps, read-only
+service dashboard enable         start it now and at every boot
+rm -r /apps/dashboard.app        remove it; its data stays
+service dashboard purge          remove its data as well
 ```
+
+`/apps` holds every installed app and `/apps/system` every app of the
+image, each `NAME.app` a read-only directory of its package's contents.
+Within `/apps` and `/apps/system` only names ending in `.app` are apps,
+and the tree reserves every other name, so `system` is never an app's.
 
 The central construction is that **an app is a principal of its own,
 made from its declaration and checked against that one row**. Its
@@ -52,15 +62,15 @@ keeps apps apart with no rule of its own.
 
 The start table, principals, session templates and facets are those of
 [design-apps.md](design-apps.md); this document adds the `apps` row, the
-package, the app principal and the SDK. The architecture is in
+package, `/apps`, the app principal and the SDK. The architecture is in
 [design.md](design.md); the manifest and its check in
 [design-system.md](design-system.md#the-manifest); principals and
 sessions in
 [design-domains.md](design-domains.md#principals-sessions-and-quotas);
 budgets in [design-kernel.md](design-kernel.md#budgets); read-only
 images in [design-storage.md](design-storage.md#reading-erofs-images);
-the file protocol in [design-files.md](design-files.md); native programs
-in [design-programs.md](design-programs.md); windows in
+the file protocol and namespaces in [design-files.md](design-files.md);
+native programs in [design-programs.md](design-programs.md); windows in
 [design-display.md](design-display.md).
 
 Decisions every reader of this document needs:
@@ -80,27 +90,41 @@ Decisions every reader of this document needs:
   atoms of session names are counted as `max` apps each holding every
   service of the row, so no app, however many arrive, takes what the
   build proved for the board's own domains.
-* **The code is an EROFS image under a hash tree, read by the app's own
-  session.** The session mounts its package's image at `/app` through
-  the hash-checking reader, against the root hash of a header the system
-  domain authenticated: by the hash the manifest records, for a package
-  in the image, or by the signature of a key the boot image carries, for
-  one installed at run time. The system domain reads only the header.
+* **The code is an EROFS image under a hash tree, read only by
+  sessions.** The app's own session mounts its package's image at `/app`,
+  and a person's session shows it under `/apps`, each through the
+  hash-checking reader in its own runtime, against the root hash of a
+  header the system domain authenticated: by the hash the manifest
+  records, for a package of the image, or by the signature of a key the
+  boot image carries, for one installed at run time. The system domain
+  reads only headers.
 * **One package, two ways onto a machine.** `tools/erx pack --app` adds a
-  package to an image; copying it into `/apps/pkg/` installs the same
-  file on a running machine. Both run the same admission and give the
-  same session.
-* **Installing is a file operation.** `/apps/pkg/` is a directory the
-  system domain serves. A file copied into it is checked when it is
-  closed and published under its name only if it is whole and admitted;
-  deleting it removes the app and keeps the app's data.
+  package to an image, where it shows at `/apps/system/NAME.app`;
+  `cp NAME.app /apps/` installs the same file on a running machine. Both
+  run the same file check and admission and give the same session.
+* **Installing and removing are file operations.** The system domain
+  serves the packages as files; each session that may install shows them
+  as directories through a file server of its own. A file copied into
+  `/apps` is checked when it is closed and published under its name only
+  if it is whole and admitted; removing its directory removes the app
+  and keeps the app's data.
+* **One lifetime owns every change of the package directory.** A run of
+  the package process owns the temporary files, the copies being written
+  and the publications; the processes that carry out its file operations
+  and its publications act only for a package process that is alive. So
+  after a crash, nothing of the ended run happens once the next run's
+  recovery has begun.
 * **The start service decides whether an app runs.** Its keepers are the
-  only starters of an app's sessions. Before an app's package changes,
-  the package process publishes a package set without the app, and the
-  start service answers that publication only once the app's sessions
-  have ended. Nothing starts because it was installed: the image builder
+  only starters of an app's sessions. Before an app's package goes, the
+  package process publishes a package set without the app, and the start
+  service answers that publication only once the app's sessions have
+  ended. Nothing starts because it was installed: the image builder
   enables a row of the image's packages, and the administrator an
   installed one with `service NAME enable`, as on FreeBSD.
+* **An app's data belongs to its name and its signer.** An app's
+  directory is named for both, so two signers' apps of one name never
+  share data, and removing a package keeps the directory for the next
+  package of that name and signer.
 * **The toolkit's programs ship with the toolkit.** `erx-lvgl` lies in the
   domain release's `bin/` of every image whose release holds `erx_ui`; no
   package carries it.
@@ -113,7 +137,7 @@ Decisions every reader of this document needs:
 **How do I make an app?** Write `app.txt`, put the app's OTP
 applications under `lib/` or its native program under `bin/`, and run
 `erx-app pack DIR`, which builds what needs building and writes
-`NAME.pkg`, signed with the SDK's development key unless `--key FILE`
+`NAME.app`, signed with the SDK's development key unless `--key FILE`
 names another ([Building and packing](#building-and-packing)).
 
 **How does it reach an image?** `tools/erx pack --app DIR` builds and
@@ -121,12 +145,13 @@ packs the app, checks it against the image's manifest and adds it;
 `--enable NAME` makes it start at boot. The board's manifest is not
 edited.
 
-**How does it reach a running machine?** `cp dashboard.pkg /apps/pkg/`
-at the shell of a session that holds the `apps` grant, then `service
-dashboard enable` if it should start at boot. Copying a newer
-`dashboard.pkg` over it updates it; `rm /apps/pkg/dashboard.pkg` removes
-it and keeps its data; `ls /apps/pkg` lists every package, and
-`/proc/packages` shows each one's state.
+**How does it reach a running machine?** `cp dashboard.app /apps/` at
+the shell of a session that holds the `start` grant, then `service
+dashboard enable` if it should start at boot. `rm -r
+/apps/dashboard.app` removes it and keeps its data; copying a newer
+`dashboard.app` in after that updates it, with its data and its
+`rc.conf` settings as they were. `ls /apps` lists the installed apps,
+and `/proc/packages` shows each one's state.
 
 **What may it take?** The services of the `apps` row that it names, the
 memory it declares out of the row's budget, and nothing of the person
@@ -140,9 +165,11 @@ An app is a principal with a session template, whose release is its code
 and whose facet rows are its authority, and the start table starts and
 keeps its session ([design-apps.md](design-apps.md#an-app)). Built:
 the `start` rows, `erx_start_table`, `erx_starter` with its keepers, the
-`apps` tree and `erx_domain:start_session/2` (TODO.md, the design-apps.md
-item). The EROFS reader `erx_erofs` and its block funnel `erx_verity`
-read images through a block window
+start service's tree (`erx_starter_fs`, with `ctl` and `rc.conf`, which
+sessions mount at `/apps`; design-apps.md places it at `/etc/start`, so
+that `/apps` holds apps alone) and `erx_domain:start_session/2`
+(TODO.md, the design-apps.md item). The EROFS reader `erx_erofs` and
+its block funnel `erx_verity` read images through a block window
 (`otp/erts/preloaded/src/erx_verity.erl`, which checks no hash tree yet).
 A native program runs either as a program of the boot image or as an
 executable file that a grant with `rx` reaches, through the loader
@@ -157,15 +184,29 @@ program's identity ([design-programs.md](design-programs.md#the-handler)).
 
 The file service answers a client's `clunk`, the protocol's close,
 itself: `erx_fs_grant` answers it when it hands the clunk to the file's
-owner, and the tree's `clunk` callback answers only `ok`
-(`erlang/apps/erx_files/src/erx_fs_grant.erl:229-244`,
-[design-files.md](design-files.md#serving-the-erx_fs-behaviour)). A
-`remove` reaches the tree's `unlink` callback, which answers `ok` or an
-errno. The shell's `cp` copies with `file:copy/2` between two names
+owner, and drops what the tree's `clunk` callback answers
+(`erlang/apps/erx_files/src/erx_fs_grant.erl:229-244`), where
+[design-files.md](design-files.md#serving-the-erx_fs-behaviour) has
+every tree's clunk answer `ok` or an errno and the grant pass that answer
+back once the owner has run it. The client already returns the clunk's
+reply from `close`
+(`otp/erts/preloaded/src/erx_file_remote.erl:487-492`). The shell's `cp`
+copies with `file:copy/2` between two names
 (`erlang/apps/erx_shell/src/erx_cmd_cp.erl`), which stock OTP runs in
 `file_server`, whose copy closes the target and drops the close's answer
-(`otp/lib/kernel/src/file_server.erl:177-193`). Installing by copy needs
-both to change ([Other subsystems](#other-subsystems)).
+(`otp/lib/kernel/src/file_server.erl:177-193`); design-shell.md has `cp`
+open its target itself and report a failed close.
+
+Two facts of the client decide how `/apps` presents a package. `prim_file`
+refuses to unlink a directory, with `eperm`, before any request reaches
+a server (`otp/erts/preloaded/src/prim_file.erl:1231-1238`), as
+FreeBSD's `unlink` does, and `erx_file_remote` refuses to open a
+directory for writing, with `eisdir`
+(`otp/erts/preloaded/src/erx_file_remote.erl:420-430`, `:453-460`). And
+OTP's `file:del_dir_r/1`, which the shell's `rm -r` calls
+(`erlang/apps/erx_shell/src/erx_cmd_rm.erl:38-42`), tries to remove each
+entry of a directory, passes over each one's failure, and then removes
+the directory itself (`otp/lib/kernel/src/file.erl:640-653`).
 
 ### What two demo apps found
 
@@ -187,7 +228,7 @@ branch `lvglscreen`, commit `82b02f4ff`) and Doom (the repository
 | the launcher invented a pid, parent, group, directory and masks for `erx_program:start/1` | Doom 7 | programs start through `erx_prog_handler`, which assigns them |
 | presents on a 100 ms timer, no keyboard | Doom 8, 11 | a program started with a window draws through `/dev/draw`, flushes when its frame is done, and reads `/dev/kbd` |
 | `erx_win:open/2` answered `{error, none}` until the display's grant arrived, so the launcher polled | Doom 9 | `erx_app` starts the app's code only once the session's ready answer has come, after its grants |
-| a crashed session's restart was refused with `no_memory` while the ended domain's budget was still held | Doom 10 | an app principal's cap holds a session beside the outer budget of one that ended ([An app's principal](#an-apps-principal)) |
+| a crashed session's restart was refused with `no_memory` while the ended domain's budget was still held | Doom 10 | an app principal's budget reaches the whole `apps` budget, and property 19 makes that budget hold a session beside the outer budget of one that ended ([An app's principal](#an-apps-principal)) |
 | `bin/erx-lvgl` reached only the programs suite's test image (`tools/lib/erx/production_image.rb:95-99`) | kiosk | the toolkit's programs ship with the toolkit in every image |
 | the host test used toolkit internals (`erx_ui:start/1`, `erx_ui_lvgl`'s `open` and `present` funs) | kiosk | `erx_ui_host`, the public host stand-in for a display |
 
@@ -198,8 +239,8 @@ for this design.
 
 | System | What erXos takes | What it leaves |
 | --- | --- | --- |
-| macOS | an app installed by copying it into `/Applications` and removed by deleting it; the app's data kept when the app is deleted | the app bundle's own layout and its signing format |
-| Android | a user id per app, so the separation between users is the separation between apps; a package signed by its author, and updates only from the same key | permissions granted one by one at run time; apps that grant each other services |
+| macOS | an app installed by copying it into `/Applications` and removed by deleting it, the system's apps apart in `/System/Applications`, each app a directory named `NAME.app`; the app's data kept when the app is deleted | the app bundle's own layout and its signing format; the disk image (DMG) as the container ([Alternatives considered](#alternatives-considered)) |
+| Android | a user id per app, so the separation between users is the separation between apps; a package signed by its author, whose data belongs to that signer | permissions granted one by one at run time; apps that grant each other services |
 | Android APEX and Fuchsia packages | code as a read-only image checked block by block against a hash a signed header names | their package managers and resolvers |
 | FreeBSD `pkg` | signature checks against keys the system trusts; a user's files kept when a package is deleted; an installed service starts only once `rc.conf` enables it | `pkg add`, `pkg delete` and `pkg info` as commands of their own; repositories and fetching by name |
 | Flatpak | an app built against a published runtime and SDK, with the runtime shipped by the system, not the app | runtimes as packages of their own |
@@ -211,60 +252,61 @@ for this design.
 * **PK-R2.** An app added to an image or installed at run time holds no
   authority the `apps` row does not offer, and takes nothing the build
   proved for the board's own domains.
-* **PK-R3.** Every byte of an app's code and data its session reads
-  matches what its author packed, whatever the storage domain does.
+* **PK-R3.** Every byte of an app's code and data a session reads, the
+  app's own or a person's browsing it, matches what its author packed,
+  whatever the storage domain does.
 * **PK-R4.** Two apps never read each other's files or see each other's
-  domains.
+  domains, and two signers' apps of one name never share data.
 * **PK-R5.** The same package and declaration serve the image builder
   and the administrator; the board's manifest is never edited to add an
   app.
-* **PK-R6.** Install, update and removal survive a power cut at any
-  point, writes reordered between flushes included: a package's name
-  holds the old package or the new one, whole, or none.
+* **PK-R6.** Install and removal survive a power cut, a crash and a
+  failed write at any point, writes reordered between flushes included:
+  a package's name holds the package whole, or none, and the published
+  package set agrees with the directory once recovery has run.
 * **PK-R7.** The system domain's atoms, tables, memory and work stay
   within bounds the build set, however many packages come and go in a
   boot and whatever the package directory holds.
 * **PK-R8.** Every package byte, header and declaration, and every entry
   of the package directory, is untrusted input to the system domain and
-  to the build host.
+  to the build host; a package's image is parsed only by a session.
 * **PK-R9.** No copyleft package enters an image erXos distributes.
 * **PK-R10.** An app author, a machine's builder and an administrator do
   as little as the first two requirements allow: every declaration field
   but the name and the code, and every `apps` field but the memory, has a
-  default; installing is copying a file into a directory, and removing is
-  deleting it.
+  default; installing is copying a file into `/apps`, removing is
+  removing its directory, and an installed app is seen and browsed where
+  it was copied.
 
 Outside this design: fetching packages by name (a fetcher is a command
 in a person's session that holds `net` and copies the file into
-`/apps/pkg/`); prompts that ask a person to approve a grant; apps that
-serve facets to other apps; keys at the vault for an app; packages of
-system services or drivers, which are configured domains of the
-manifest.
+`/apps`); prompts that ask a person to approve a grant; apps that serve
+facets to other apps; keys at the vault for an app; packages of system
+services or drivers, which are configured domains of the manifest.
 
 ## Overview
 
 ```text
- the developer's host                 the image builder               the machine
- --------------------                 -----------------               -----------
- DIR/app.txt  lib/ or bin/  share/    tools/erx pack --app DIR       system domain
-      |                                 --enable NAME                  erx_pkg: authenticates each
-      | erx-app pack (SDK)                |                              header, admits it against the
-      v                                   | admission on the host        apps row (erx_app_admit),
- NAME.pkg: header (declaration,           | against the manifest         registers the app's principal,
-   arch, root hash, signer,               v                              publishes the package set to
-   signature) + EROFS image          image: the manifest's apps row,     the start service
-   + hash tree                       a `package` row per app,                  |
-      |                              the package on the slot                   | start_session(app, Start)
-      | cp NAME.pkg /apps/pkg/ (administrator)                                 v
-      +---------------------------------------------------------------> domain service: a session of
-                                                                       the app template, as the app's
-                                                                       principal, with the services
-                                                                       it named and its package at /app
-                                                                               |
-                                                                       session dashboard_1: erx_app
-                                                                       starts the app's applications
-                                                                       from /app/lib, or its program
-                                                                       from /app/bin
+ the developer's host              the image builder              the machine
+ --------------------              -----------------              -----------
+ DIR/app.txt  lib/ or bin/  share/ tools/erx pack --app DIR      system domain
+      |                              --enable NAME                 erx_pkg: checks each package file
+      | erx-app pack (SDK)             |                             and header, admits it against
+      v                                | file check and admission    the apps row, registers the
+ NAME.app: header (declaration,        | on the host                 app's principal, publishes the
+   arch, root hash, signer,            v                             package set to the start service;
+   signature) + EROFS image       image: the apps row, a            serves the packages as files
+   + hash tree                    `package` row per app, the        (the `apps` tree)
+      |                           package on the slot                   |                  ^
+      | cp NAME.app /apps/ (administrator's session: erx_appsfs         |                  | files
+      | shows each package as a directory, relays create and remove)    |                  |
+      +-----------------------------------------------------------------+------------------+
+                                                                        | start_session(app, Start)
+                                                                        v
+                                                                 domain service: a session of
+                                                                 the app template, as the app's
+                                                                 principal, with the services
+                                                                 it named and its package at /app
 ```
 
 **An app's life, end to end.** A developer writes `app.txt` for
@@ -279,13 +321,20 @@ as `dashboard`, named `dashboard_1`, holding the row's `display` and
 `data` grants and the `packages` grant every app holds. Once the
 session's grants are in place, `erx_app` mounts the package's image at
 `/app`, puts `/app/lib/*/ebin` at the end of the code path and starts
-`erx_dashboard`, which opens its window with `erx_ui:open/1`. Later an
-administrator copies a newer `dashboard.pkg` into `/apps/pkg/`. When the
-copy closes, the package process authenticates and admits it, publishes
-a package set without `dashboard`, so the start service ends its
-session, renames the new file into place, and publishes the set with
-`dashboard` again; the start service starts the row, with the app's data
-where it was.
+`erx_dashboard`, which opens its window with `erx_ui:open/1`. An
+administrator's `ls /apps/system` shows `dashboard.app`, and `ls
+/apps/system/dashboard.app` its `lib/` and `share/`, read by the
+administrator's own session through the same hash check.
+
+Later the image builder ships a second app as a file, `clock.app`. The
+administrator types `cp clock.app /apps/`. The copy lands in a
+temporary file; when it closes, the package process checks the file and
+its header, admits it, makes it durable, renames it to `clock.app`,
+registers the principal `clock` and publishes the package set with it,
+and `cp` succeeds. `service clock enable` starts it. `rm -r
+/apps/clock.app` has the package process publish the set without
+`clock`, so the start service ends its session, and then delete the
+file; the app's data stays for the next `clock.app` of the same signer.
 
 ## Invariants
 
@@ -293,14 +342,15 @@ where it was.
 | --- | --- | --- | --- |
 | **PK1.** An app holds no grant the `apps` row does not offer, and its memory comes only from the row's budget | the declaration grammar names services and one amount of memory; admission keeps a need only if it is one of the row's services; the session's facets are the `packages` grant and the kept needs, both rows of the manifest, through the domain service's one funnel (A10); the app's principal budget is a child of the `apps` budget, so every session it starts is carved there or refused | a declaration field that carries a parameter or a grant; an admission that keeps a need the row lacks; a session plan that grants a row the app did not name; an app budget carved from the root | admission's corpus with a seeded admission that drops the subset test; the session plan's host test with a seeded plan that grants every row of the template |
 | **PK2.** The build's proof for the board's own domains holds with every app present | property 19 counts the app template as `max` principals in every sum that counts a principal or a template's rows (display pixel areas and connections, domain slots, start rows, principal table, name atoms), each holding every service of the row | a sum that counts the app template once; a service an app may take that no sum counts | the seeded violations of [The build's check](#the-builds-check) |
-| **PK3.** Every block of `/app` a session reads matched the root hash of a header the system domain authenticated | `erx_app` mounts `/app` only through `erx_verity`, with the root hash, salt and tree layout the domain service hands it in the ready answer; the domain service takes them only from a header `erx_pkg_header:verify/2` accepted | a mount whose root hash comes from the session's own read of the header; a read path around `erx_verity` | a QEMU test that flips one byte of an installed package's image and finds the read refused; the build check that only `erx_erofs` reads through `erx_verity` (`Erx::ErofsReads`) |
-| **PK4.** Two apps see nothing of each other | each is its own principal; the domain service computes every scope from the session's principal, the app's; the storage service roots each app's `data` grant at its own directory | a scope, storage root or name pool derived from the template's key; two apps registered under one principal | a QEMU test with two apps; seeded: the mint's scope taken from the template's key |
-| **PK5.** The system domain parses a package's header alone, through the generated reader, and loads no app code | the package process reads the header's bytes and hands them to `erx_pkg_header:verify/2`; the image is mounted only by the app's own session | a system-domain module that mounts or reads a package's image | a source check over the system release that no module but the package's reader names a package's bytes, with a seeded call of `erx_verity` from `erx_pkg` |
-| **PK6.** A package's name holds a whole package, admitted when it was published | a copy is written into a temporary file that no open can reach by name; at its close the package process checks that the file's length is exactly the header's, authenticates and admits it, makes the file durable, and only then renames it over `NAME.pkg`, one step; a removal is one durable deletion; boot and the package process's restart delete every temporary file before any admission | a rename before the file is durable; a temporary file reachable by a name another open can write; a length check that accepts a short file | the planners' crash test over every write, with writes reordered between flushes; the close's host test of a short, a long and a misnamed file |
-| **PK7.** No session of an app runs while its package file changes | the start service's keepers are the only starters of an app's sessions (AP2: an app principal has no credentials, so no login starts one); before the package process renames or deletes an app's file it publishes a package set without the app, which the start service answers only once the app's sessions have ended, and the start service starts none until a set with the app arrives | a second starter of app sessions; a publication answered before the sessions end | the start table's host test of a publication that drops a running app; a QEMU test that updates a running app and finds no session of the old version after the first publication's answer |
-| **PK8.** A removal or a purge reaches only what belongs to an app | a removal deletes one `NAME.pkg` inside the package directory, after a publication that drops only that package's row; a purge sends the storage service's `remove_app`, which reaches only the directory of app directories; a name that fails the app-name rule is refused before any effect | a removal that stops domains by principal name; a data removal through a grant wider than the app directories | the purge's host test with names `root`, a configured domain and a manifest principal, each refused with nothing stopped or deleted |
-| **PK9.** The system domain's atoms, tables and recovery work stay within the build's bounds | an app principal lives for the boot in one of `max` entries, which removal does not free until the next boot; its sessions take pooled names within its `names` quota; at most `max` copies are open at once; recovery reads at most `pkg_scan_max` entries | an unregister that frees an entry within the boot; a recovery that reads the directory unbounded | a host test that installs and removes `max` + 1 distinct names in one boot and finds the last refused with `apps_full`; the recovery's fuzz target over listings past the bound |
-| **PK10.** A package of the image and one installed at run time give the same session | both pass `erx_app_admit:admit/3` and the same session plan; only what authenticates the header differs | a second admission or plan for one of them | the session plan's host test over one header admitted both ways |
+| **PK3.** Every block of a package's image that a session reads, at `/app` or under `/apps`, matched the root hash of a header the system domain authenticated | `erx_app` mounts `/app` only through `erx_verity`, with the root hash, salt and tree layout the domain service hands it in the ready answer, which the domain service takes only from a header the file check accepted; `erx_appsfs` mounts a package only through `erx_verity`, with the layout of the header bytes the `apps` tree served, and the tree serves header bytes only once their SHA-256 is the one it recorded when the file check accepted them | a mount whose root hash comes from the session's own read of `packages`; a header read the tree answers without its hash check; a read path around `erx_verity` | from M11, a QEMU test that flips one byte of an installed package's image and finds the read refused at `/app` and under `/apps`; the `apps` tree's host test of a header changed on the medium after the check, answered `eio`; the build check that only `erx_erofs` reads through `erx_verity` (`Erx::ErofsReads`) |
+| **PK4.** Two apps see nothing of each other, and two signers' apps of one name share no directory | each is its own principal; the domain service computes every scope from the session's principal, the app's; the storage service roots each app's `data` grant at `apps/NAME/SIGNER/`, both parts from the principal's record | a scope, storage root or name pool derived from the template's key; a data root that leaves out the signer; two apps registered under one principal | a QEMU test with two apps; the mint's host test of one name under two signers, two roots; seeded: the mint's scope taken from the template's key, and a root of the name alone |
+| **PK5.** The system domain parses a package's header alone, through the generated reader, and loads no app code | the package process reads at most `pkg_header_max` bytes of a file and hands them to the file check; the image is parsed only in a session, the app's own at `/app` or a person's in `erx_appsfs` | a system-domain module that mounts or reads a package's image | a source check over the system release that no module but the file check names a package's bytes, and that no system-release module calls `erx_verity` or `erx_erofs` on a package, with a seeded call from `erx_pkg` |
+| **PK6.** A package's name holds a whole package that the file check accepted and admission admitted | a copy is written into a temporary file that no open can reach by name; at its close the package process runs the file check (name agreement, exact length, size bound, header) and admission, makes the file durable, and only then renames it to `NAME.app`, a name the directory does not hold; the recovery runs the same file check on every `NAME.app` before it admits one | a rename before the file is durable; a rename over an existing name; a recovery that admits without the file check; a length check that accepts a short file | the planners' crash test over every write, with writes reordered between flushes; the file check's host test of a short, a long, an oversized and a misnamed file, run through the close and through the recovery |
+| **PK7.** No session of an app runs while its package is removed | the start service's keepers are the only starters of an app's sessions (AP2: an app principal has no credentials, so no login starts one); before the package process deletes an app's file it publishes a package set without the app, which the start service answers only once the app's sessions have ended, and it starts none until a set with the app arrives; a name is installed only where the directory holds none, so no file is replaced under a running app | a second starter of app sessions; a publication answered before the sessions end; an install that renames over a published package | the start table's host test of a publication that drops a running app; a QEMU test that removes a running app and finds no session of it once the publication has answered |
+| **PK8.** A removal or a purge reaches only what belongs to an app | a removal deletes one `NAME.app` inside the package directory, after a publication that drops only that package's row; a purge sends the storage service's `remove_app`, which reaches only the directory of app directories; a name that fails the app-name rule is refused before any effect | a removal that stops domains by principal name; a data removal through a grant wider than the app directories | the purge's host test with names `root`, a configured domain and a manifest principal, each refused with nothing stopped or deleted |
+| **PK9.** The system domain's atoms, tables and recovery work stay within the build's bounds | an app principal lives for the boot in one of `max` entries, which removal does not free until the next boot; its sessions take pooled names within its `names` quota; at most `max` copies are open at once and each holds its temporary file until its close is decided or its lifetime ends; recovery reads at most `pkg_scan_max` entries; the package process keeps a header's SHA-256, not its bytes | an unregister that frees an entry within the boot; a slot freed before its file is deleted; a recovery that reads the directory unbounded | a host test that installs and removes `max` + 1 distinct names in one boot and finds the last refused with `apps_full`; the recovery's fuzz target over listings past the bound |
+| **PK10.** A package of the image and one installed at run time give the same session | both pass the file check, `erx_app_admit:admit/3` and the same session plan; only what authenticates the header differs | a second admission or plan for one of them | the session plan's host test over one header admitted both ways |
+| **PK11.** No effect of an ended package lifetime happens once the next lifetime's recovery has begun | a lifetime is one run of `erx_pkg`; `erx_pkg_io` takes every file operation on `packages` and the start service every publication, each one at a time, finishing the one it began before taking the next, and each refuses an effect whose lifetime has ended; the recovery's first request is taken after every earlier one; copy handles name their lifetime, so they end with it; `erx_pkg_io` is never restarted: its end resets the machine | an executor that takes a request without checking its lifetime; a restarted `erx_pkg_io` while a request of its predecessor may be in flight; a copy handle that outlives its lifetime | the lifetime's host test: a package process killed with two copies writing and a close queued, after which no request of the ended lifetime reaches the simulated storage after the recovery's listing; seeded: an `erx_pkg_io` without the lifetime check |
 
 ## Data model
 
@@ -313,7 +363,7 @@ machine takes no packages. Its fields:
 | --- | --- | --- |
 | `memory` | the budget all apps share, in bytes; property 4 counts it within `root_memory` as it counts a principal's budget | none: required |
 | `services` | the services an app may name in `needs`, each a service of the manifest | none, so an app holds only its `packages` grant |
-| `max` | how many apps a boot can hold, 1 to `apps_max_limit`, 64 | 8 |
+| `max` | how many apps a boot can hold, the image's and the installed ones together, 1 to `apps_max_limit`, 64 | 8 |
 
 From the row the build derives, as rows of the image's manifest that the
 board's source does not hold and the build record lists:
@@ -333,7 +383,12 @@ board's source does not hold and the build record lists:
   `tree apps`, which roots its grants among the app directories ([Where
   an app's files lie](#where-an-apps-files-lie));
 * **the `packages` rows**: the system domain's grant of the `packages`
-  service, read-write, and the app template's, read-only.
+  service, read-write, and the app template's, read-only;
+* **the `apps` rows**: the `apps` service, an instance of `files` that
+  the system domain serves, and its facet row granted to every session
+  template the manifest grants the start service's tree, `start`
+  ([design-apps.md](design-apps.md#interfaces)), so whoever may run the
+  start table may install, and no one else.
 
 An app principal's group is a child of the apps group, whose share of
 `users` is what the principals' shares leave of it, each app an equal
@@ -348,11 +403,11 @@ the packages are well formed**, beside the eighteen of
 
 1. at most one `apps` row; each name of `services` is a service of the
    manifest whose ABI file gives every parameter a default, other than
-   `packages`, which every app holds already, and `apps`, which would let
-   an app install packages and command the start table; when it names
-   `inspect`, the scope `erx_domain_core:inspect_scope/3` gives an app
-   principal is its own, never `all`, which would show an app the other
-   apps' domains;
+   `packages`, which every app holds already, and `start` and `apps`,
+   which would let an app command the start table and install packages;
+   when it names `inspect`, the scope `erx_domain_core:inspect_scope/3`
+   gives an app principal is its own, never `all`, which would show an
+   app the other apps' domains;
 2. wherever properties 4, 5, 17 and 18 count a principal or a session
    template's rows, the app template counts as `max` principals with a
    `domains` quota of 1, each holding every facet row granted to it: the
@@ -364,16 +419,18 @@ the packages are well formed**, beside the eighteen of
 4. the `apps` budget and the app template's limits let the planner of
    property 12 plan one session of the template at its default memory
    beside the outer budget of one that ended and has not retired;
-5. every `package` row's package passes admission on the host against
-   this manifest ([Admission](#admission)); the declared memory and the
+5. every `package` row's package passes the file check and admission on
+   the host against this manifest ([Admission](#admission)); the
+   `package` rows number at most `max`; the declared memory and the
    session's outer budget, as the resource policy sizes it, of every
    enabled package sum within the `apps` budget, so the image's enabled
    apps all start; and the row of an enabled one meets property 17's
    display and planning clauses as a manifest `start` row does;
 6. every `signer` row holds a 32-byte Ed25519 public key under a unique
    name;
-7. no facet row of the board's source is granted to the app template or
-   carries `tree apps`: only the rows the build derives do.
+7. no facet row of the board's source is granted to the app template,
+   carries `tree apps` or names the `apps` service: only the rows the
+   build derives do.
 
 Each clause has a seeded violation: a check that counts the app template
 once in property 18, which admits a row whose apps together pass the
@@ -443,93 +500,198 @@ checks every count, length and offset before it reads a field.
 
 ### The package
 
-A package is one file, `NAME.pkg`, of three parts, each starting at a
+A package is one file, `NAME.app`, of three parts, each starting at a
 4 KiB boundary:
 
 | Part | Holds |
 | --- | --- |
 | header, at most `pkg_header_max`, 64 KiB | the magic `ERXPKG`, the format version, the header's length, the `ERX_ABI_VERSION` and the target architecture (an architecture name of `abi/arch/`) the package was built for, the packed declaration, the image's length in blocks, the hash tree's length, salt and root hash (SHA-256, dm-verity format version 1, as [design-storage.md](design-storage.md#data-model) lays read-only images), the signer's Ed25519 public key, and the Ed25519 signature over every byte of the header before it |
-| image | an EROFS image of 4 KiB blocks in the layouts `erx_erofs` reads, whose root holds `lib/APP/ebin` and `lib/APP/priv` for each application, `bin/` for programs and `share/` for data |
-| hash tree | the image's dm-verity tree |
+| image | an EROFS image of 4 KiB blocks in the layouts `erx_erofs` reads, compressed as EROFS compresses, whose root holds `lib/APP/ebin` and `lib/APP/priv` for each application, `bin/` for programs and `share/` for data |
+| hash tree | the image's dm-verity tree, over the image's blocks as they lie in the file |
 
-The file's length must be exactly the header's length plus the image's
-and the tree's, with checked arithmetic. The image's entries carry fixed
-owner, mode and time, so the same inputs give the same bytes and no host
-metadata leaks into a package. The image names no device, socket or link
-leaving it.
+The image's entries carry fixed owner, mode and time, so the same inputs
+give the same bytes and no host metadata leaks into a package. The image
+names no device, socket or link leaving it.
 
-`erx_pkg_header:verify(Bytes, Authority)` is the one entry that reads a
-header. It checks the magic, version and lengths and decodes the
-declaration with the generated reader, then authenticates the header by
-one of two means, which `Authority` names:
+**The file check**, `erx_pkg_header:check_file(File, Authority)`, is the
+one entry that judges a package file, at a copy's close, at recovery and
+for the image's packages at boot and at build. `File` is the file's name
+in the directory, its length and its first bytes, at most
+`pkg_header_max`. It checks, the first failure answering:
 
-* `{hash, Sha256}`, for a package of the image: the header's SHA-256 must
-  equal the one its `package` row records. The signer and signature
-  fields are not read, so a package someone else signed is added to an
-  image without the machine trusting its signer, and the app's signer is
-  `image`;
-* `{signers, Keys}`, for a package installed at run time: the header's
-  signer must be one of `Keys` and its signature valid. The app's signer
-  is the key's `signer` row name, or `development`.
+1. the length is at most `pkg_bytes_max`, 1 GiB: `{too_large, L}`;
+2. the header's magic, version and lengths, with the declaration decoded
+   by the generated reader: `{header, Reason}`;
+3. the file's length is exactly the header's length plus the image's and
+   the tree's, with checked arithmetic: `{length, Have, Want}`;
+4. the name is `NAME.app` with NAME the declaration's app name:
+   `{name, File, App}`;
+5. the header is authenticated by the means `Authority` names:
+   * `{hash, Sha256}`, for a package of the image: the header's SHA-256
+     must equal the one its `package` row records. The signer and
+     signature fields are not read, so a package someone else signed is
+     added to an image without the machine trusting its signer, and the
+     app's signer is `image`;
+   * `{signers, Keys}`, for a package installed at run time: the header's
+     signer must be one of `Keys` and its signature valid. The app's
+     signer is the key's `signer` row name, or `development`;
+   `{untrusted, Reason}`.
 
-It answers `{ok, Header}` with the signer named, or `{error, Reason}`.
-It is pure but for the signature check, which the small Ed25519 verifier
-of [design.md](design.md#dependencies) makes, as for an update's
-manifest.
+It answers `{ok, Header}`, with the signer named, the header's SHA-256
+and the layout of its image, or `{error, Reason}`. It is pure but for
+the signature check, which the small Ed25519 verifier of
+[design.md](design.md#dependencies) makes, as for an update's manifest.
+`erx_pkg_header:layout/1` decodes the layout alone (the image's offset
+and length, the hash tree's offset, length and salt, and the root hash)
+from header bytes that some other party authenticated; `erx_appsfs` and
+`erx_app` use it, never on bytes they read from `packages` themselves.
 
 ### Where a package lies
 
 | | The image builder's packages | Installed packages |
 | --- | --- | --- |
-| placed by | `tools/erx pack --app` | a copy into `/apps/pkg/` |
+| placed by | `tools/erx pack --app` | `cp NAME.app /apps/` |
 | lies | in the system slot, in the package image, an EROFS image of package files that the manifest's `image` row records like the release's; the storage service serves its files read-only under `packages/image/` | in the data partition's `packages/` directory, which the storage service serves |
+| shown at | `/apps/system/NAME.app` | `/apps/NAME.app` |
 | header authenticated by | its SHA-256, which the manifest's `package` row records | a key of the manifest's `signer` rows, or in a development build the development key |
-| changes | with a system update, as the slot does | by a copy into, or a deletion from, `/apps/pkg/` |
+| changes | with a system update, as the slot does | by a copy into `/apps`, or a removal there |
 
 A machine trusts only the signer keys the boot image carries: the
 manifest's `signer` rows, and in a development build the SDK's
 development key. Trust therefore changes only with a system update, and
 no record a storage domain could rewrite adds a signer.
 
-Either way the system domain and the app's session reach the file
-through the `packages` service, an instance of `files` that the storage
-domain serves at a service directory of its own: the system domain reads
-and writes it, and the app template reads it. Since `erx_verity`
-checks every block against the root hash of the authenticated header,
-no property of a package rests on the storage domain but its presence:
-a storage domain can withhold a package or put back an older one of the
+The system domain and the app's session reach the file through the
+`packages` service, an instance of `files` that the storage domain
+serves at a service directory of its own: the system domain reads and
+writes it, and the app template reads it. Since `erx_verity` checks
+every block against the root hash of the authenticated header, no
+property of a package rests on the storage domain but its presence: a
+storage domain can withhold a package or put back an older one of the
 same signer, never change one. Every app can read every package's bytes:
 a package holds what its author ships, not anyone's secrets, and keeping
 each package to its own app would need a grant per package.
 
 **On the stopgap**, where the storage service does not yet serve a slot's
 image, the image builder's packages lie in the boot image's domain
-release at `pkg/NAME.pkg`, and their sessions read them through `/`,
+release at `pkg/NAME.app`, and their sessions read them through `/`,
 the release slice. They enlarge the boot image and the memory it holds,
 and every domain can read them (Phase 1).
+
+### `/apps`
+
+Two trees make `/apps`, so that the system domain parses no image and a
+person's session still browses every package.
+
+**The `apps` tree** is the packages as files. The package application
+serves it in the system domain with `erx_fs`
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)), and
+the `apps` rows grant it to the templates that hold `start`:
+
+| Name | Read | Create, write and remove |
+| --- | --- | --- |
+| `NAME.app` | the installed package's bytes | a create (`lcreate`) of a name that the directory does not hold starts a copy, published only at its close ([Installing and removing](#installing-and-removing)); a remove (`unlinkat`) removes the package |
+| `system/NAME.app` | the image package's bytes | none: every change answers `erofs` |
+
+It lists one `NAME.app` for every installed package, admitted or
+refused, and in `system/` one for every package of the image. A name that does not end in `.app`, but
+`system` at the root, is the tree's own: it lists none, and a create of
+one answers `einval`. A read that reaches into a package's header is
+answered from the header the package process reads again from
+`packages` and serves only if its SHA-256 is the one the file check
+recorded; otherwise it answers `eio`. So every header byte a reader gets
+is one the system domain authenticated, and the rest of the file is
+bytes the hash tree checks. An open records which package it opened,
+and once that package is removed its reads answer `eio`. Reads run in
+`erx_pkg_io` in turn with the directory's changes, each through a fid
+opened for it and clunked after, so no read meets a file being deleted.
+
+**The view**, `erx_appsfs`, is an `erx_fs` tree in the session's own
+runtime, which the runtime starts and mounts at `/apps` when the domain
+holds the `apps` facet, in place of mounting the facet there, as it
+serves `/proc` from its own `erx_procfs` over its inspect facet
+([design-files.md](design-files.md#building-binding-and-mounting)). It
+holds the `apps` facet and nothing else, and presents:
+
+* at its root and in `system/`, the `apps` tree's names, each `NAME.app`
+  as a directory, mode `r-x`, and `system` as a directory;
+* below `NAME.app`, the package's contents. At the first walk below a
+  `NAME.app`, the view opens that file on the `apps` facet for reading,
+  reads its header, decodes the layout with `erx_pkg_header:layout/1`,
+  and mounts the image with `erx_erofs` over `erx_verity`, reading the
+  open file at the image's offset and checking each block against the
+  header's root hash. Every request below `NAME.app` is answered from
+  that mount: reads as the reader answers, every change `erofs`. The
+  mount ends at the last clunk of a fid below `NAME.app`, and its reads
+  answer `eio` once the package is removed. A refused package mounts
+  nothing: a walk below it answers `eio`;
+* a create of `NAME.app` at its root is the `apps` tree's create of the
+  same name; the copy's writes go there in turn, and its close answers
+  what the `apps` tree's close answers;
+* removing the directory `NAME.app` at its root (`unlinkat` with
+  `AT_REMOVEDIR`) is the `apps` tree's remove of the file, whether or not
+  the directory lists anything: its contents are the package's and go
+  with it. `rm -r /apps/NAME.app` reaches that removal after trying each
+  entry inside, each of which answers `erofs` and which `rm -r` passes
+  over; `rm` without `-r` answers that the name is a directory, as
+  FreeBSD's `rm` does, since `prim_file` refuses to unlink a directory
+  before any request;
+* in `system/`, every create and remove answers `erofs`, and a create of
+  any name at its root that does not end in `.app` answers `einval`.
+
+The view's qid paths join the package's place in the listing with the
+EROFS inode number, so they are unique within its tree; a program of the
+session reaches `/apps` as it reaches `/tmp`, through a grant of the
+session's own runtime that its handler narrows
+([design-files.md](design-files.md#narrowing-for-a-program)).
+
+Three things follow from presenting a package as a directory. A copy can
+make only a new name: `erx_file_remote` refuses to open a directory for
+writing, so `cp dashboard.app /apps/` over an installed `dashboard` answers
+`EISDIR`, as FreeBSD's `cp` refuses to overwrite a directory with a file,
+and an update is a removal and a copy, which keep the app's data and its
+`rc.conf` settings. Removing takes `rm -r`, as removing an app from
+`/Applications` at a macOS shell does. And the package's bytes are not
+read through `/apps`: `cp -R /apps/dashboard.app DIR` copies its
+contents, and the package file itself is the one its builder made.
 
 ### Where an app's files lie
 
 The data partition's storage service keeps every app's directory under
 one directory of its own, `apps/`, apart from the directories of the
 manifest's principals and services. A grant from a facet row that
-carries `tree apps` is rooted at `apps/PRINCIPAL/`, where `PRINCIPAL` is
-the grantee's principal as the mint names it, the app's; property 19
-lets only the rows the build derives for the app template carry it.
+carries `tree apps` is rooted at `apps/NAME/SIGNER/`: `NAME` is the
+grantee's principal as the mint names it, the app's, and `SIGNER` is the
+signer its principal record holds, `image` for a package of the image
+and otherwise the first 16 bytes of the SHA-256 of the signer's public
+key, in hexadecimal. Property 19 lets only the rows the build derives
+for the app template carry `tree apps`.
+
+So the data belongs to the name and the signer together. A package of a
+name signed by another key finds an empty directory of its own and never
+the first signer's files, with no record to keep and no refusal to
+judge, as an Android app signed by another key is another app. An
+author who signs with a new key leaves the old key's directory behind,
+which a purge removes.
 
 Removing a package keeps its app's directory, as deleting an app keeps
 its data on macOS and deleting a package keeps a user's files on
-FreeBSD, so a package copied in again finds its data where it was. An
-administrator removes the directory on purpose with a purge, `echo purge
-NAME > /apps/ctl`, which the package process carries out with the
-storage service's `remove_app` request on the durability facet, which
-only the system domain holds and which reaches nothing outside `apps/`
+FreeBSD, so a package of the same name and signer copied in again finds
+its data where it was. An administrator removes the data on purpose with
+a purge, `service NAME purge`, which the start service's `ctl` takes as
+`purge NAME` and hands to the package process
+([design-apps.md](design-apps.md#interfaces)). The package process
+carries it out with the storage service's `remove_app` request on the
+durability facet, which only the system domain holds and which reaches
+nothing outside `apps/`
 ([design-storage.md](design-storage.md#interfaces)): it removes
-`apps/NAME` whole, NAME one identifier, answers `ok` once a completed
-checkpoint holds the removal and every write the service acknowledged
-before it, and answers `ok` for a directory already absent. The package
-process refuses a purge of a name that is not an app name, a name of
-the image's packages, or a name installed now, before any request.
+`apps/NAME` whole, every signer's directory of the name with it, NAME one
+identifier, answers `ok` once a completed checkpoint holds the removal
+and every write the service acknowledged before it, and answers `ok` for
+a directory already absent. The package process refuses a purge of a
+name that is not an app name, a name of the image's packages, or a name
+installed now, before any request, so no running app's directory is
+removed under it.
 
 ### An app's principal
 
@@ -537,26 +699,30 @@ The principal service registers an app's principal with
 `erx_principal:register_app/2`, which only the package process calls,
 in a free entry of the `max` the domain library's principal table holds
 for apps. Its record holds the app's name, its signer (`image` for one of
-the image's) and its declared memory. A principal of an app has no
+the image's) and its declared memory, and it is written only when a
+package of the name is committed: at an install, once the rename is
+durable, and at the recovery, for each package it admits. A refused or
+failed install leaves the record as it was. A principal of an app has no
 credentials: no one logs in as one. Its directory, its inspect scope and
-its name pool are those of any principal, keyed by its name. It is never
-unregistered within a boot: a removed app's principal keeps its entry and
-name, with nothing to run, until the machine reboots, so its atoms and
-its table entry stay within the build's count (PK9). Installing the name
-again in that boot takes the same entry, with the same signer only.
+its name pool are those of any principal, keyed by its name, and its
+data directory by its name and signer. It is never unregistered within a
+boot: a removed app's principal keeps its entry and name, with nothing to
+run, until the machine reboots, so its atoms and its table entry stay
+within the build's count (PK9). Installing the name again in that boot
+takes the same entry, with the same signer only, and writes the record
+again.
 
 Its budget is a child of the `apps` budget. Every principal of the
 manifest has a wall, a budget whose cap is its guarantee; an app's is
 **elastic** ([design-kernel.md](design-kernel.md#budgets)), with no
-guarantee and a cap of its declared memory plus twice the outer budget
-the resource policy sizes for its session, so a session fits beside the
-outer budget of one that ended and has not retired. Each session's own
-and outer budgets are walls carved from it, as every domain's are, so
-once a session runs, its memory depends on nothing outside it; what the
-kernel judges against the `apps` budget is only whether a session can
-start. An update that changes the declared memory changes the record and
-the cap the domain library gives the next session's plan; it carves
-nothing.
+guarantee and the `apps` budget's guarantee as its cap, fixed for the
+boot. Each session's own and outer budgets are walls carved from it, as
+every domain's are, at the memory the record holds when the session
+starts, so once a session runs, its memory depends on nothing outside
+it; what the kernel judges against the `apps` budget is only whether a
+session can start. A package of the name installed again with another
+`memory` changes the record and so the next session's plan, and no
+budget is resized.
 
 ### An app's session
 
@@ -575,15 +741,16 @@ from the app's admitted record:
   ([design-system.md](design-system.md#facets-a-configured-domain-serves));
 * the ready answer, which hands the session its default display
   ([design-apps.md](design-apps.md#starting-a-session)), also hands it
-  the app's record: the place of the package's file (`packages/...`, or
-  `/pkg/NAME.pkg` in the release on the stopgap), the header's image
-  offset, root hash, salt and tree layout, and its applications or its
-  program with its arguments and whether it has a window.
+  the app's record: the place of the package's file
+  (`packages/NAME.app` or `packages/image/NAME.app`, or `/pkg/NAME.app`
+  in the release on the stopgap), the header's layout, and its
+  applications or its program with its arguments and whether it has a
+  window.
 
 The record comes only after the session's grants are added, the
 `packages` grant among them, so the app's code never starts before its
 grants exist and its package is readable when it starts. `erx_app`
-mounts `/app`, `rx`, with `erx_ns:mount({erofs, {file, Place, Image}},
+mounts `/app`, `rx`, with `erx_ns:mount({erofs, {file, Place, Layout}},
 "/app", ...)` from the record; a mount the reader refuses ends the
 session with the reason. The root hash is the domain service's, so a
 session that mounted anything else would harm only itself. The
@@ -603,11 +770,11 @@ runs after a reboot is exactly its package's.
 ### Admission
 
 `erx_app_admit:admit(Header, Manifest, Registry)` is a pure function of
-the authenticated header, the manifest as `erx_manifest` reads it, and
-the boot's registry of app principals. It answers `{ok, Admitted}`, the
-principal's entry (the name's existing one or a new one), the indices of
-the facet rows kept and the start row, or `{error, Reason}`, the first
-of these that fails:
+a header the file check accepted, the manifest as `erx_manifest` reads
+it, and the boot's registry of app principals. It answers `{ok,
+Admitted}`, the principal's entry (the name's existing one or a free
+one, which it reserves nothing in), the indices of the facet rows kept
+and the start row, or `{error, Reason}`, the first of these that fails:
 
 1. the manifest has an `apps` row: `no_apps`;
 2. the header's ABI version and architecture are the image's: `{abi,
@@ -629,10 +796,10 @@ of these that fails:
 Nothing else is judged: a declaration can only name what the row
 offers, so the build's proof over the row is the proof over the app.
 Whether an app's session fits beside the others' is the kernel's to
-judge when the session starts. The packer runs the same module on the
-host, under the stock OTP 29.1.2 the build compiles with, over the packed
-manifest and each package's header bytes, so one implementation decides
-at build and on the machine.
+judge when the session starts. The packer runs the same modules, the
+file check and admission, on the host, under the stock OTP 29.1.2 the
+build compiles with, over the packed manifest and each package file, so
+one implementation decides at build and on the machine.
 
 ### Building and packing
 
@@ -651,14 +818,15 @@ DIR/Makefile           optional: builds bin/ with the SDK's make variables
   sources are newer than their output with the host's stock OTP 29.1.2
   `erlc`, `+deterministic`, against the SDK's public applications, and,
   when `DIR/Makefile` exists, runs `make` there with the SDK's variables.
-  It then parses `app.txt`, checks that each application has its `.app`
-  file or that the program exists and passes `erx_elf_plan` with the
-  SDK's ABI version, writes the image from an mtree manifest with
-  `fsimg`, computes the hash tree with a salt derived from the image's
-  contents, writes the header with the SDK's ABI version and target,
-  signs it with FILE's key or else the SDK's development key, and writes
-  `NAME.pkg` with its build record beside it. It follows no link out of
-  `DIR` and refuses any other kind of file. Packing runs the app's own
+  It then parses `app.txt`, checks that each application has its OTP
+  application resource file, `lib/APP/ebin/APP.app`, or that the program
+  exists and passes `erx_elf_plan` with the SDK's ABI version, writes the
+  image from an mtree manifest with `fsimg`, computes the hash tree with
+  a salt derived from the image's contents, writes the header with the
+  SDK's ABI version and target, signs it with FILE's key or else the
+  SDK's development key, writes `NAME.app` with its build record beside
+  it, and runs the file check on what it wrote. It follows no link out
+  of `DIR` and refuses any other kind of file. Packing runs the app's own
   build steps, its parse transforms and its makefile, on the host: pack
   only sources you trust.
 * `erx-app test DIR` runs the app's EUnit and Common Test suites on the
@@ -678,8 +846,8 @@ each package the build:
 2. adds a `package NAME` row with `input` naming it and `enable YES` when
    `--enable` names it, `NO` otherwise; the packer records the header's
    SHA-256 in the row, as it records an image's root hash;
-3. runs the manifest check, property 19's admission and memory clause
-   included;
+3. runs the manifest check, property 19's file check, admission and
+   memory clause included;
 4. judges the package's license as it judges an archive's, so a package
    whose license is absent or not permissive enters only a local test
    image built to allow restricted inputs, never a production image or an
@@ -724,80 +892,135 @@ again within its intensity. A native app draws with Plan 9's draw
 protocol and flushes when its frame is done, so no frame shows half drawn,
 and reads its keys from `/dev/kbd`.
 
-### Installing, updating and removing
+### The package lifetime
 
-The package process, `erx_pkg`, owns the package set; `erx_pkg_io` makes
-every file operation on `packages`; `erx_pkg_plan` decides each step as a
-pure function of the package set, the directory's state and the
-admission, and the package process applies its result. A step is
-**durable** once the data partition's storage service has answered a
-checkpoint on the durability facet requested after it: that answer comes
-only when a completed checkpoint holds every write the service
-acknowledged, the file's bytes and the directory's entries alike
-([design-storage.md](design-storage.md#interfaces)).
+A **lifetime** is one run of the package process, `erx_pkg`. It owns the
+package set, the slots of the temporary files and the copies being
+written. Its effects are carried out by two processes, each the one
+taker of its kind of effect:
 
-**`/apps/pkg/`** is a directory of the `apps` tree, which the system
-domain serves and a session holding the `apps` grant mounts at `/apps`
-([design-apps.md](design-apps.md#interfaces)). It lists one `NAME.pkg`
-for every package of the image, read-only, and for every package in the
-data partition's `packages/` directory, admitted or refused. A read of a
-file gives the package's bytes. Only a session holding the `apps` grant
-writes here, and only the system domain writes the storage service's
-`packages/` directory, so the package process is the one writer of the
-package directory.
+* `erx_pkg_io` takes every read, write, create, rename, deletion and
+  checkpoint request on `packages`, and every `remove_app`, and sends
+  each to the storage service itself;
+* the start service takes every publication of the package set,
+  `erx_starter:packages/2`.
+
+Each request names the lifetime it is for, the `erx_pkg` pid. Each taker
+takes one request at a time and finishes the one it has begun before it
+takes another, and refuses with `eio`, doing nothing, a request whose
+lifetime has ended, which it tells with `erlang:is_process_alive/1`,
+since `erx_pkg`, `erx_pkg_io`, the start service and the `apps` tree's
+file processes all run in the system domain's one runtime. A **copy
+handle**, which the `apps` tree's file process for a copy holds, is the
+pair of a lifetime and a slot, so its writes and its close are requests
+of that lifetime, refused once it has ended.
+
+So when a lifetime ends, by a crash or on purpose, nothing of it begins
+again: the request `erx_pkg_io` is carrying out finishes, and every later
+one of the ended lifetime is refused. The next lifetime starts with the
+recovery ([Boot and recovery](#boot-and-recovery)), whose first request
+`erx_pkg_io` takes only after that, so the recovery starts from a
+directory no earlier lifetime changes again, deletes every temporary
+file, and only then hands out slots. A slot is the lifetime's from the
+create that took it until its close is decided, the file published or
+deleted, or until the lifetime ends; the next lifetime counts no slot as
+free until the recovery has deleted its file. At most `max` temporary
+files therefore lie on the medium at any time, and a copy of an ended
+lifetime answers `eio` at its next write or its close, with nothing
+published.
+
+`erx_pkg_io` is never restarted, since a restarted one could not know
+whether a request of its predecessor was still on its way to the
+storage service. It is a permanent child with no restarts in the start
+service's application, which the system release holds permanent, so its
+end ends the system domain and resets the machine, and the boot's
+recovery, which no earlier lifetime precedes, is the one that follows.
+It parses nothing but the storage service's answers, which `erx_file_remote`
+checks, and every answer, an error and a down storage domain included,
+is an answer it passes on, so its end is a bug of the system domain like
+any other.
+
+**A failed change ends the lifetime.** A request that fails while it
+changes the directory, a rename, a deletion or a checkpoint, or a
+temporary file's deletion, leaves a directory the package set may no
+longer describe. The package process answers the request that caused it
+with `eio` and ends its lifetime, so the next lifetime's recovery
+reconciles the directory, the registry and the package set, and the
+start service, which still holds the last set, starts no session of an
+app that set dropped until the recovery publishes. A failed read or
+write of a temporary file fails only its copy. Past its supervisor's
+intensity the package process stays down: the `apps` tree answers every
+request `eio`, and the start service keeps the last set it was given.
+
+### Installing and removing
+
+A step is **durable** once the data partition's storage service has
+answered a checkpoint on the durability facet requested after it: that
+answer comes only when a completed checkpoint holds every write the
+service acknowledged, the file's bytes and the directory's entries alike
+([design-storage.md](design-storage.md#interfaces)). A rename or a
+deletion is **visible** at once and whole: before the checkpoint after
+it answers, a power cut may leave either the state before it or the one
+after, each whole.
 
 **Publishing.** The package process tells the start service which apps
-exist with `erx_starter:packages(Set)`. The call answers once the start
-service holds the set's rows and every session of an app the set no
-longer holds, its row's keeper and a `onestart` one alike, has ended.
-Since an app principal has no credentials, the start service's keepers
-are its only starters (AP2 of
+exist with `erx_starter:packages(Lifetime, Set)`. The call answers once
+the start service holds the set's rows and every session of an app the
+set no longer holds, its row's keeper and a `onestart` one alike, has
+ended. Since an app principal has no credentials, the start service's
+keepers are its only starters (AP2 of
 [design-apps.md](design-apps.md#invariants)), so once a set without an
 app is answered, no session of that app runs or can start until a set
-with it is published. Every change of a package's file sits between two
+with it is published. A package's file is deleted only between two
 publications.
 
-**Installing or updating**, `cp dashboard.pkg /apps/pkg/`:
+**Installing**, `cp clock.app /apps/`:
 
 | Step | Why it must exist |
 | --- | --- |
-| 1. the shell opens `/apps/pkg/dashboard.pkg` for writing. The `apps` tree accepts a name `NAME.pkg` with NAME an identifier and not a name of the image's packages, and opens a fresh, empty temporary file in the data partition's `packages/` directory, named `tmp.K` for the first of `max` slots that is free; the published package, if any, is untouched | copies land on the same file system as their final name, so the rename is atomic; a temporary file has no name in `/apps/pkg/`, so no other open can write it |
-| 2. the shell writes the bytes; the tree passes each write to the temporary file through the system domain's grant, at most `pkg_bytes_max` bytes in all | |
-| 3. the shell closes the file, and the close waits for the steps below. The writing open has ended, so nothing writes the file from here on | the bytes checked are the bytes published |
-| 4. the package process checks that the file's length is exactly the header's length plus the image's and the tree's, and that the header names the app the file is named for; it verifies the header with `{signers, Keys}` | a copy cut short or run on never gets a published name; only a trusted signer's package runs |
-| 5. it admits it ([Admission](#admission)) and plans the install; a name installed already needs its signer | the authority check; signer continuity |
-| 6. it registers the app's principal, the name's entry again for an update | the principal must exist before its row; this is the step the entry bound limits |
-| 7. it makes the temporary file durable | the rename must never publish a name whose bytes are not on the medium |
-| 8. for an update, it publishes the package set without the name | no session reads the file being replaced, and no keeper restarts old code |
-| 9. it renames `tmp.K` over `NAME.pkg` and makes the directory durable | the one commit point; durable before the close answers |
-| 10. it publishes the package set with the package admitted, and the close answers `ok`; a row `rc.conf` enables starts, with the app's directory as it was | the start service resumes the app |
+| 1. the shell's `cp` creates `/apps/clock.app`; the view passes the create to the `apps` tree, which accepts a name `NAME.app` with NAME an identifier that the directory does not hold, neither installed, refused nor of the image, and opens a fresh, empty temporary file in `packages/`, named `tmp.K` for the first of `max` slots that is free | copies land on the same file system as their final name, so the rename is atomic; a temporary file has no name in `/apps`, so no other open can write it |
+| 2. `cp` writes the bytes; each write is a request of the copy's handle to `erx_pkg_io`, at most `pkg_bytes_max` bytes in all | |
+| 3. `cp` closes the file, and the close waits for the steps below. The writing open has ended, so nothing writes the file from here on | the bytes checked are the bytes published |
+| 4. the package process runs the file check on the temporary file, its length and its first `pkg_header_max` bytes, under the name `clock.app` and with `{signers, Keys}` | a copy cut short, run on, too large or misnamed never gets a published name; only a trusted signer's package runs |
+| 5. it admits the header ([Admission](#admission)); a name the registry holds needs its signer | the authority check; signer continuity within a boot |
+| 6. it makes the temporary file durable | the rename must never publish a name whose bytes are not on the medium |
+| 7. it renames `tmp.K` to `clock.app`, visible at once, and makes the directory durable | the one commit point; the close answers only after it is durable |
+| 8. it registers the app's principal with its record, in the entry admission found | the record changes only with a committed package; the principal must exist before its row |
+| 9. it publishes the package set with the app, and the close answers `ok`; a row `rc.conf` enables starts, with the app's directory as it was | the start service learns of the app |
 
-A refusal at any step deletes the temporary file and the close answers
-the refusal's errno ([Interfaces](#interfaces)), with the reason in the
-log; for an update refused before step 8 the old package stays
-published and its app runs on. A crash before step 9's rename leaves the
-old package or none, and the temporary file, which the next recovery
-deletes; a crash after it leaves the new package, which the next scan
-admits. One file per name, replaced by one rename, means no crash brings
-back an older version. A session that ends with a copy open has its open
-closed by the file service, and the close takes the same steps: a file
-cut short fails step 4's length check and is deleted, so a half-copied
-file never gets a published name.
+A refusal at steps 1 to 6 deletes the temporary file, frees the slot,
+and the close answers the refusal's errno ([Interfaces](#interfaces)),
+with the reason in the log; nothing was published and the registry is
+as it was. A failure at step 7, the rename or its checkpoint, answers
+the close `eio` and ends the lifetime: the recovery then admits
+`clock.app` if the rename reached the directory and deletes the
+temporary file if it did not, so `cp`'s `EIO` means the outcome is the
+one `ls /apps` shows. A power cut before the rename leaves no name and a
+temporary file, which the next recovery deletes; after the rename and
+before its checkpoint, either no name or the whole package; after the
+checkpoint, the package, which the next recovery admits. A session that
+ends with a copy open has its open closed by the file service, and the
+close takes the same steps: a file cut short fails the file check's
+length and is deleted, so a half-copied file never gets a published
+name.
 
-**Removing**, `rm /apps/pkg/dashboard.pkg`, reaches the tree as the
-protocol's `remove`:
+**Removing**, `rm -r /apps/clock.app`, reaches the `apps` tree as the
+protocol's `remove` of `clock.app`:
 
 | Step | Why it must exist |
 | --- | --- |
-| 1. the package process publishes the package set without the name | no session runs while its file goes |
-| 2. it deletes `packages/NAME.pkg`, makes that durable, and the `remove` answers `ok` | one durable deletion is the whole removal |
+| 1. when the package is admitted, the package process publishes the package set without it | no session runs while its file goes |
+| 2. it deletes `packages/clock.app`, visible at once, makes that durable, and the `remove` answers `ok` | one durable deletion is the whole removal |
 
-A crash before the deletion is durable leaves the package, which the
-next recovery admits again; a crash after it leaves none. The app's
+A failed deletion or checkpoint answers `eio` and ends the lifetime, and
+the recovery admits the package again if its file is still there. A
+power cut before the deletion's checkpoint leaves either the package,
+which the next recovery admits again, or none; after it, none. The app's
 directory stays ([Where an app's files lie](#where-an-apps-files-lie));
 its principal keeps its entry until reboot. `rc.conf` lines naming the
 app stay, are reported as naming no row, and apply again if the app is
-installed again, as on FreeBSD.
+installed again, as on FreeBSD. A refused package is removed the same
+way, with no publication.
 
 A removal reaches nothing but what belongs to an app (PK8). The
 publication drops only the package's row; the deletion is inside the
@@ -808,27 +1031,31 @@ or delete a manifest principal's files.
 
 ### Boot and recovery
 
-The package process starts with the start service. It registers the
-image's packages from the manifest's `package` rows, reading each header
-through the `packages` grant (from the release on the stopgap) and
-verifying it with `{hash, H}`. Once the `packages` grant is in place,
-which it waits for as the start table waits for `rc.conf`, it runs the
-**recovery**, `erx_pkg_plan:recover/2`, over the listing of `packages/`
-and the manifest:
+The package process starts with the start service. A lifetime begins
+with the **recovery**, `erx_pkg_plan:recover/2`, whose first request
+`erx_pkg_io` takes after every request of an earlier lifetime
+([The package lifetime](#the-package-lifetime)). It registers the image's
+packages from the manifest's `package` rows, reading each header through
+the `packages` grant (from the release on the stopgap) and running the
+file check with `{hash, H}`. Once the `packages` grant is in place, which
+it waits for as the start table waits for `rc.conf`, it reads the
+listing of `packages/` and acts on it:
 
 1. `erx_pkg_io` reads at most `pkg_scan_max`, 1,024, entries, one bounded
    read at a time, and reports whether more remain. A valid directory
    holds at most `max` packages, `max` temporary files and `image/`,
    which property 19 keeps well under the bound;
 2. when the directory holds more, the recovery acts on nothing in it: no
-   installed package is admitted, every write and removal in
-   `/apps/pkg/` answers `eio`, and `/proc/packages` shows `scan` as
-   `overflow` with the count read. Image packages are unaffected;
-3. otherwise, each temporary file `tmp.K` is deleted, and each `NAME.pkg`
-   whose NAME is an app name is read, verified with `{signers, Keys}` and
-   admitted, in name order; a package refused stays on the medium, shown
-   `refused` with its reason at `/proc/packages`, and its refusal is
-   logged;
+   installed package is admitted, every create and remove in `/apps`
+   answers `eio`, and `/proc/packages` shows `scan` as `overflow` with
+   the count read. Image packages are unaffected;
+3. otherwise, each temporary file `tmp.K` is deleted, and each
+   `NAME.app` whose NAME is an app name gets its length and its first
+   `pkg_header_max` bytes read, the file check with `{signers, Keys}` and
+   admission, in name order, and the registration of each admitted
+   package; a package refused stays on the medium, listed in `/apps` and
+   shown `refused` with its reason at `/proc/packages`, and its refusal
+   is logged;
 4. an entry of no recognized form, or whose name is not an app name, is
    left as it is, with a log line. No entry's name becomes an atom:
    names stay binaries until a registration, which takes one of the
@@ -838,9 +1065,9 @@ and the manifest:
 
 The recovery reads at most `pkg_scan_max` names and headers of at most
 64 KiB each, one at a time, and keeps one record for each entry it
-admits or refuses, whatever the directory holds (PK9). The same recovery
-runs when the package process restarts after a crash, so there is one
-path from any state of the directory to the package set.
+admits or refuses, whatever the directory holds (PK9). Boot, a crash of
+the package process and a failed change all reach the directory through
+this one path.
 
 ### The start table's rows
 
@@ -959,37 +1186,51 @@ boundary fails there.
 
 ## Interfaces
 
-An administrator installs, updates, lists and removes packages with the
-shell's own `cp`, `ls` and `rm` on `/apps/pkg/`, and reads their state
-with `cat` under `/proc/packages`; there is no command of packaging's
-own.
+An administrator installs, lists, browses and removes apps with the
+shell's own `cp`, `ls`, `cat` and `rm -r` in `/apps`, enables, disables
+and purges them with `service`, and reads their state with `cat` under
+`/proc/packages`; there is no command of packaging's own. `/proc` is
+read-only, as all of it is ([design.md](design.md#decisions), "System
+values are one read-only tree"): it shows what an app's state is, and
+takes no command.
 
-**The `apps` tree** gains `pkg/` and one `ctl` command:
+**`/apps`**, the view ([`/apps`](#apps)), as the shell sees it:
 
-| Name | Read | Write |
-| --- | --- | --- |
-| `pkg/NAME.pkg` | the package's bytes | an open for writing, of a new name or an existing one, starts an empty file that is published only at its close ([Installing, updating and removing](#installing-updating-and-removing)); an open for reading and writing at once answers `einval`. Errnos at the open: `einval` for a name not of the form `NAME.pkg` with NAME an identifier; `eacces` for a package of the image, which is read-only; `enospc` while `max` copies are open; `eagain` while the `packages` grant is not in place; `eio` while the directory is past the scan bound. A write past `pkg_bytes_max`, 1 GiB, answers `efbig`. Errnos at the close: `einval` for a file whose length is not exactly the header's, whose header fails its checks or names another app, or whose name is not an app name; `eacces` for a header that names no trusted signer or carries a bad signature; `eperm` for an admission refused by `no_apps`, ABI, architecture, memory or need; `eexist` for a name of the manifest or of the image, or one another signer holds; `enospc` for no free entry; `eio` for a failed read, write or checkpoint of `packages` |
-| `pkg/NAME.pkg`, removed | | `remove` deletes an installed package and answers `ok`; `enoent` for no package of the name; `eperm` for a package of the image; `eio` for a failed deletion or checkpoint, or a directory past the scan bound |
-| `ctl` | | `purge NAME` removes the directory of an app that is not installed. Errnos: `einval` for a name that is not an app name; `ebusy` for a name installed now or of the image; `eio` for a failed `remove_app` |
+| Operation | Result |
+| --- | --- |
+| `cp NAME.app /apps/` | installs. Errnos at the create: `einval` for a name not of the form `NAME.app` with NAME an identifier; `eisdir` for a name `/apps` holds, from the client; `eexist` for a name of the image; `enospc` while `max` copies are open; `eagain` while the `packages` grant is not in place; `eio` while the directory is past the scan bound. A write past `pkg_bytes_max`, 1 GiB, answers `efbig`. Errnos at the close: `efbig` for a file past the size bound; `einval` for a file the file check refuses for its header, its length or its name, or whose name is not an app name; `eacces` for a header that names no trusted signer or carries a bad signature; `eperm` for an admission refused by `no_apps`, ABI, architecture, memory or need; `eexist` for a name of the manifest, or one another signer holds in this boot; `enospc` for no free entry; `eio` for a failed read, write, rename or checkpoint of `packages`, or a lifetime that ended |
+| `rm -r /apps/NAME.app` | removes the installed package and answers `ok`; `enoent` for no package of the name; `erofs` in `/apps/system`; `eio` for a failed deletion or checkpoint, a directory past the scan bound, or a lifetime that ended |
+| `ls /apps`, `ls /apps/system` | every package, installed or of the image, admitted or refused |
+| `ls`, `cat` below `/apps/NAME.app` | the package's contents; `eio` for a block that fails its hash, a package removed since the open, or a refused package |
 
-The reason of every refusal goes to the log. Who holds the `apps` grant
-is the manifest's ([design-apps.md](design-apps.md#interfaces)).
+The reason of every refusal goes to the log. Who holds `start`, and so
+`apps`, is the manifest's ([design-apps.md](design-apps.md#interfaces)).
 
-**The start service** gains `erx_starter:packages/1`, by which the
+**The `apps` tree**, in the system domain, takes `lcreate`, `write`,
+`clunk`, `read` and `unlinkat` as [`/apps`](#apps) says, with the same
+errnos. Its `clunk` answers the copy's verdict, which the file service
+passes back to the client once the file's owner has run it
+([design-files.md](design-files.md#serving-the-erx_fs-behaviour)).
+
+**The start service** gains `erx_starter:packages/2`, by which the
 package process publishes the package set; it answers once every session
-of an app the set drops has ended. It is a call of the package process
-alone.
+of an app the set drops has ended, and refuses a publication whose
+lifetime has ended. It is a call of the package process alone. Its `ctl`
+gains `purge NAME`, which `service NAME purge` writes; its errnos are
+`einval` for a name that is not an app name, `ebusy` for a name
+installed now or of the image, and `eio` for a failed `remove_app`
+([design-apps.md](design-apps.md#interfaces)).
 
 **Inspection**, in `abi/inspection.txt`, reported by the package process
 and shown at `/proc/packages` to an inspect facet of scope `all`:
 `[packages]`, of kind `packages`, gives `scan` (`ok` or `overflow`, with
 the entries read), `room`, the `apps` budget left as the kernel reports
 it, and lists the packages by name; `[packages, Name]` gives `version`,
-`memory`, `place` (`image` or `installed`), `signer` (a `signer` row's
+`memory`, `place` (`system` or `installed`), `signer` (a `signer` row's
 name, `development`, `image`, or `unchecked` where Phase 1 checks none),
 `state` (`admitted` or `refused`), `reason`, `needs` and `license`. An
-app's start row is at `[apps, Name]` and its sessions at `[domains, Id]`,
-as any row's and any session's.
+app's start row, with whether it is enabled, is at `[apps, Name]` and
+its sessions at `[domains, Id]`, as any row's and any session's.
 
 **Manifest rows**: `apps`, as in [The `apps` row](#the-apps-row);
 `package`, with `input` naming the package's artifact and `enable`,
@@ -1002,24 +1243,26 @@ declaration; the limits `apps_max_limit`, `app_memory_default`,
 `app_memory_min`, `pkg_header_max`, `pkg_needs_max`, `pkg_args_max`,
 `pkg_bytes_max` and `pkg_scan_max`.
 
-**Erlang**: `erx_pkg_header:verify/2`, `erx_app_admit:admit/3`,
-`erx_pkg_plan:install/3`, `remove/2` and `recover/2`,
-`erx_principal:register_app/2`; in a session, `erx_app`.
+**Erlang**: `erx_pkg_header:check_file/2` and `layout/1`,
+`erx_app_admit:admit/3`, `erx_pkg_plan:install/3`, `remove/2` and
+`recover/2`, `erx_principal:register_app/2`; in a session, `erx_app`
+and `erx_appsfs`.
 
 ### Other subsystems
 
 | Subsystem | Its part |
 | --- | --- |
 | the manifest check ([design-system.md](design-system.md#the-manifest)) | the `apps`, `package` and `signer` rows and the rows derived from `apps`; property 19; A10 holds, since an app selects among rows the manifest set |
-| the root task and the resource policy | the `apps` budget carved from the root at boot, the apps group under `users`; app principals' elastic budgets under it |
-| the domain library | the principal table sized for the manifest's principals and `max` apps; `erx_dom_plan_session` taking an app principal with the app template |
-| the domain service | the app's session: the kept rows, and the app's record, with its package's place and image facts, in the ready answer |
-| the principal service | `register_app/2`; no app principal is unregistered within a boot |
-| the start service ([design-apps.md](design-apps.md#the-start-table)) | the package rows after the manifest's; `packages/1`, answered once the dropped apps' sessions have ended; the merge's grants for an app from its admission; the `apps` tree's `pkg/` and `purge` |
+| the root task and the resource policy | the `apps` budget carved from the root at boot as a wall, the apps group under `users`; app principals' elastic budgets under it, with no guarantee and the `apps` budget's guarantee as cap |
+| the domain library | the principal table sized for the manifest's principals and `max` apps; `erx_dom_principal` carving an app principal's elastic budget under the `apps` budget; `erx_dom_plan_session` taking an app principal with the app template |
+| the domain service | the app's session: the kept rows, and the app's record, with its package's place and layout, in the ready answer |
+| the principal service | `register_app/2`, called at a committed install and at recovery; no app principal is unregistered within a boot |
+| the start service ([design-apps.md](design-apps.md#the-start-table)) | its tree at `/etc/start`; the package rows after the manifest's; `packages/2`, answered once the dropped apps' sessions have ended and refused for an ended lifetime; the merge's grants for an app from its admission; `purge` in its `ctl` |
 | the file service ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)) | a tree's `clunk` answers `ok` or `{error, Errno}`, and `erx_fs` answers the client's clunk with it once the file's owner has run it, after every request sent before it; the fid ends whatever the answer, as clunk(5) says |
-| the shell ([design-shell.md](design-shell.md#commands)) | `cp` opens its target itself, copies in pieces as its info report needs, and reports a failed close of the target as it reports a failed write |
-| the storage service ([design-storage.md](design-storage.md#interfaces)) | the `packages` tree: the data partition's directory and the slot's package image read-only; `apps/` and `tree apps`; `remove_app` on the durability facet |
-| the runtime and the EROFS reader | `erx_verity` reading an image from a file at an offset through the domain's namespace, as well as from a block window; the `/app` mount |
+| the runtime | `erx_appsfs`, started and mounted at `/apps` when the domain holds the `apps` facet |
+| the shell ([design-shell.md](design-shell.md#commands)) | `cp` opens its target itself, copies in pieces as its info report needs, and reports a failed close of the target as it reports a failed write; `service NAME purge` |
+| the storage service ([design-storage.md](design-storage.md#interfaces)) | the `packages` tree: the data partition's directory and the slot's package image read-only; `apps/` and `tree apps`, rooted at `apps/NAME/SIGNER/`; `remove_app` on the durability facet |
+| the EROFS reader | `erx_verity` reading an image from an open file at an offset, through the namespace for `/app` and through a fid for `erx_appsfs`, as well as from a block window |
 | programs ([design-programs.md](design-programs.md)) | an executable file from `/app/bin`; `open` through the handler; `erx_prog_handler:start/1` with a window |
 | the display ([design-display.md](design-display.md#the-window-tree)) | a program started with a window; `erx-lvgl` in every image whose release holds `erx_ui` |
 | live code ([design-live.md](design-live.md#the-code-store)) | an app principal's overlays live in memory only |
@@ -1027,31 +1270,39 @@ declaration; the limits `apps_max_limit`, `app_memory_default`,
 ## Concurrency
 
 The package process, `erx_pkg`, a process of the start service's
-application, owns the package set: each package's name, header,
-admission and state. It takes one close, removal or purge at a time, in
-the order they arrive, so two copies of one name closed together each
-run whole and the later one is what stays published. It does no file
-operation itself: every read, write, rename, deletion and checkpoint
-request on `packages` and every `remove_app` runs, one at a time, in
-`erx_pkg_io`, which answers each request when it is done, so a slow
-storage domain delays a close or a removal, not the package set's
-answers or the start table. The `apps` tree's file owner for a copy
-waits for the package process's answer before it answers the close, as
-any tree's owner runs a file's requests in turn
+application, owns the package set: each package's name, header hash,
+layout, admission and state. It takes one close, removal or purge at a
+time, in the order they arrive, so two copies of one new name closed
+together are decided in turn and the later one is refused `eexist`. It
+does no file operation itself: every request on `packages` and every
+`remove_app` runs, one at a time, in `erx_pkg_io`, which answers each
+request when it is done, so a slow storage domain delays a close, a
+removal or a read under `/apps`, not the package set's answers or the
+start table. The `apps` tree's file owner for a copy waits for the
+package process's answer before it answers the close, as any tree's
+owner runs a file's requests in turn
 ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)).
 
-The start service owns whether an app may run: the rows are part of the
-package set it was last given, kept with its rows' run records. A crash
-of the package process ends no session; it restarts and runs the
-recovery, which rebuilds the set from the manifest and the directory and
-publishes it. A crash between a publication without an app and the
-rename leaves the app stopped only until the recovery's publication,
-which brings the app back with whichever file the directory holds. A crash of the start
-service's table process loses nothing the package process holds: on its
-restart it asks the package process for the set, as it reads `rc.conf`.
-The registry of app principals belongs to the principal service and only
-grows within a boot, so a register that a crashed install left behind is
-an app principal with no package, as after a removal.
+A lifetime's effects are taken only while it is alive, by `erx_pkg_io`
+and the start service, each one at a time
+([The package lifetime](#the-package-lifetime)). A crash of the package
+process ends no session: the next lifetime's recovery rebuilds the set
+from the manifest and the directory and publishes it, and until then the
+start service keeps the last set it took. A crash between a publication
+without an app and its deletion leaves the app stopped only until the
+recovery's publication, which brings it back if its file is still there.
+A crash of the start service's table process loses nothing the package
+process holds: on its restart it asks the package process for the set,
+as it reads `rc.conf`. The registry of app principals belongs to the
+principal service and only grows within a boot, and the package process
+writes a record only for a committed package, so a crash leaves no
+record of a package that was never committed.
+
+Each session's `erx_appsfs` keeps one mount for each package a fid is
+open below, at most the boot's `max` packages, and is the only process of
+its session that reads a package's image under `/apps`. Its mount reads
+through a fid it owns on the `apps` grant, so the mount and its fid end
+with it.
 
 ## Compatibility and migration
 
@@ -1061,24 +1312,27 @@ The package format, `app.txt`'s grammar and the `apps`, `package` and
 development"). A package built for another `ERX_ABI_VERSION` or another
 architecture, after a system update or before it, is refused with `{abi,
 Have, Want}` or `{arch, Have, Want}` and shown so; it stays on the
-medium until the administrator copies a rebuilt one over it or deletes
-it. A package whose need an update's `apps` row no longer offers is
-refused with `{not_offered, S}`, and its data stays.
+medium until the administrator removes it and copies in a rebuilt one.
+A package whose need an update's `apps` row no longer offers is refused
+with `{not_offered, S}`, and its data stays.
 
 ## Failure handling, diagnostics and debuggability
 
 | Failure | Detected by | What happens |
 | --- | --- | --- |
-| a header fails its checks, its hash differs from its `package` row, or it names no trusted signer | `erx_pkg_header:verify/2`, the package process | a copy's close answers its errno and nothing is published; a package found on the medium is `refused` with the reason at `/proc/packages`; an image package refused at boot leaves its row out of the table |
+| a file fails the file check: its size, header, length, name or signer, or its hash differs from its `package` row | `erx_pkg_header:check_file/2`, the package process | a copy's close answers its errno and nothing is published; a package found on the medium is `refused` with the reason at `/proc/packages`; an image package refused at boot leaves its row out of the table |
 | admission refuses | `erx_app_admit:admit/3` | as above, with the reason |
-| a copy cut short or run on | the close's length check | the close answers `einval`, the temporary file is deleted, and no name is published |
 | an app's session does not fit what is left of the `apps` budget | the kernel's carve, through the domain library | the start answers `no_memory` naming the `apps` budget; the keeper counts an end, and the row goes down past its intensity, with the reason at `/proc/apps` |
-| a block of the image fails its hash | `erx_verity` in the app's session | the read answers `eio` with a log line naming the image and block; the code load or file read fails, the session ends, and the row counts an end, with the reason at `/proc/apps` |
-| the image does not mount | `erx_app` | the session ends at its start with the reader's reason |
+| a block of the image fails its hash | `erx_verity` in the reading session | the read answers `eio` with a log line naming the image and block; in the app's session the code load or file read fails, the session ends, and the row counts an end, with the reason at `/proc/apps`; under `/apps` the `ls` or `cat` fails |
+| a header changed on the medium after the file check | the `apps` tree's hash check | reads of the header answer `eio`, so nothing mounts it under `/apps`; the app's own session holds the layout from the record and fails at its first block |
+| the image does not mount | `erx_app`, `erx_appsfs` | the session ends at its start with the reader's reason; a walk below `/apps/NAME.app` answers `eio` |
 | a missing application or a refused program | `erx_app` | `erx_app` ends with the application's start error or `{program, Reason}`, and the session with it |
 | the storage domain is down at boot | the package process's read through `packages` | the image's packages wait for it, as `rc.conf` does, as do the installed ones; their rows are absent until the recovery runs; on the stopgap the image's packages, in the release, do not wait |
-| a power cut inside an install or a removal | the recovery | temporary files are deleted; each name holds its old package or its new one, or none |
-| the package directory holds more than the scan bound | the recovery | no installed package is admitted; `scan` is `overflow` at `/proc/packages`; writes and removals in `/apps/pkg/` answer `eio` |
+| a failed rename, deletion or checkpoint | `erx_pkg_io`'s answer | the request answers `eio`, the lifetime ends, and the recovery reconciles the directory, the registry and the set |
+| a crash of the package process | its supervisor | open copies answer `eio` at their next write or close and publish nothing; the recovery deletes their temporary files and publishes the set; past the supervisor's intensity the package process stays down and `/apps` answers `eio` |
+| an end of `erx_pkg_io` | the start service's application | the system domain ends and the machine resets; the boot's recovery follows |
+| a power cut inside an install or a removal | the recovery | temporary files are deleted; each name holds its package whole, or none |
+| the package directory holds more than the scan bound | the recovery | no installed package is admitted; `scan` is `overflow` at `/proc/packages`; creates and removals in `/apps` answer `eio` |
 | no free entry | admission | `apps_full`, until a reboot frees the entries of removed apps |
 
 Every state above is an attribute at `/proc/packages` or `/proc/apps`,
@@ -1089,9 +1343,9 @@ shown as admitted that the package process did not admit.
 
 **What is trusted.** The manifest, with its `apps` row, `package` rows,
 `signer` rows and the image's package hashes, as part of the boot image;
-the package process, the principal service, the start service and the
-domain service, in the system domain; the small Ed25519 verifier; each
-app's own runtime, for that app alone.
+the package process, `erx_pkg_io`, the principal service, the start
+service and the domain service, in the system domain; the small Ed25519
+verifier; each session's own runtime, for that session alone.
 
 **What is not.** Every package byte, header and declaration; the copied
 bytes; every entry of the package directory; the data partition and the
@@ -1099,10 +1353,12 @@ storage domain; an app's code; an app directory on the build host.
 
 * **The system domain reads a header, never an image.** The header is at
   most 64 KiB, read through a generated reader with a fuzz target over the
-  whole verification entry, locating the declaration, key and signature
-  in bytes an attacker wrote, truncated at each field and with every
-  length out of bounds. The image is parsed only by the app's own
-  session, whose failure is its own.
+  whole file check, locating the declaration, key and signature in bytes
+  an attacker wrote, truncated at each field and with every length out
+  of bounds. The image is parsed only by a session, the app's own or a
+  person's, whose failure is its own: a crafted image can crash the
+  browsing session's `erx_appsfs`, which ends that session's `/apps`
+  mount, never the system domain.
 * **A package cannot widen its authority**: the grammar names services,
   admission keeps only the row's, the build counted the row at its worst
   (PK1, PK2). What the administrator approves by copying is which of the
@@ -1110,10 +1366,10 @@ storage domain; an app's code; an app directory on the build host.
   prompt. Every app may take every service the row offers; a builder who
   wants a service for some apps only gives the machine no row for it, or
   signs only the apps that may have it.
-* **Who installs.** Only a session whose template holds the `apps` grant
-  sees `/apps`, so only it can copy into `/apps/pkg/`, delete there or
-  purge; the manifest grants it to `root`'s template in a development
-  build and to an administrator's in a release build.
+* **Who installs.** Only a session whose template holds `start` holds
+  `apps`, so only it has `/apps` and can copy into it, remove there or
+  purge; the manifest grants `start` to `root`'s template in a
+  development build and to an administrator's in a release build.
 * **Memory between apps.** All apps share the `apps` budget, so one app
   installed with a large `memory` leaves less for the others, and the
   kernel refuses a session that does not fit. No app can take memory from
@@ -1127,29 +1383,27 @@ storage domain; an app's code; an app directory on the build host.
 * **A crafted data partition, or a storage domain it took over,** can
   withhold or delete packages, put back an older package of the same
   signer, and swap an installed package for another package of the same
-  name that a trusted signer signed, which then runs with that app's
-  data. Since it can already read and destroy every app's data, that
-  gains it what copying and deleting would. It cannot run code no
-  trusted signer signed, change a byte of an image, widen a grant, start
-  an app with no start row, steer a purge at anything that is not an app
-  (PK8), or make the recovery spend past its bound (PK9). Refusing an
-  older package needs a counter the platform's trust root keeps, as for
-  system updates ([design-storage.md](design-storage.md#system-updates)).
-* **The bytes checked are the bytes published.** Verification runs at the
-  close, when the writing open has ended, on a temporary file that no
+  name and signer, which then runs with that app's data. Since it can
+  already read and destroy every app's data, that gains it what copying
+  and deleting would. It cannot run code no trusted signer signed, change
+  a byte of an image any session reads, hand another signer's app this
+  app's data, widen a grant, start an app with no start row, steer a
+  purge at anything that is not an app (PK8), or make the recovery spend
+  past its bound (PK9). Refusing an older package needs a counter the
+  platform's trust root keeps, as for system updates
+  ([design-storage.md](design-storage.md#system-updates)).
+* **The bytes checked are the bytes published.** The file check runs at
+  the close, when the writing open has ended, on a temporary file that no
   open can reach by name, so the administrator's session cannot change
   the bytes between the check and the rename. A storage domain that
   changed them could change only bytes the hash tree then refuses, since
-  the session's root hash is the one the package process verified.
-* **Signer continuity, and a residual.** An update needs the installed
-  signer, and within a boot a removed name keeps its principal and its
-  signer, so another signer's package of that name is refused
-  `signer_changed` until a reboot. Removal keeps the app's data, so after
-  a reboot a package of the same name from a second trusted signer is
-  admitted and finds the first app's directory. Every signer is a key
-  the deployer put in the boot image; a deployer who trusts more than one
-  purges a removed app's directory before another signer's app of that
-  name arrives. This is a security residual in `TODO.md`.
+  every session's root hash is one the package process authenticated.
+* **Data and signers.** An app's directory is named for its name and its
+  signer, so a second trusted signer's app of a name never finds the
+  first's data, after a reboot or within a boot; within a boot the
+  principal's entry also keeps its signer, and admission refuses another
+  with `signer_changed`. Signer continuity costs no record: the
+  directory's name is the record.
 * **Development builds** trust the SDK's development key, which every
   developer has; they run trusted code only, and say so in their banner.
   A release build trusts only its `signer` rows.
@@ -1166,9 +1420,10 @@ storage domain; an app's code; an app directory on the build host.
   nothing. The packer follows no link out of an app directory and writes
   no host metadata into an image. Diagnostics quote a declaration's bytes
   through the host terminal's escaper.
-* **Text from a package.** A package's name, version and license reach
-  `/proc/packages`, the log and the host through each sink's escaping
-  function, as all text attributed to a source does
+* **Text from a package.** A package's name, version and license, and
+  the names inside its image that `ls /apps/NAME.app` shows, reach
+  `/proc/packages`, the log, a terminal and the host through each sink's
+  escaping function, as all text attributed to a source does
   ([design-live.md](design-live.md#attributed-text)).
 * **Licenses.** A package's license is judged where an archive's is, so
   a copyleft package, or one that names no license, reaches only a local
@@ -1183,8 +1438,9 @@ what rests on parts that arrive later, reporting each as it is:
 | Deferred | Until | Meanwhile |
 | --- | --- | --- |
 | isolation between apps' domains, and budgets and quotas as limits | erXos's kernel | as for every domain ([design-apps.md](design-apps.md#phase-1)) |
-| rooting `data` grants by principal, `apps/` and `tree apps` | principals' directories (M10) | apps can reach each other's directories, the residual design-apps.md records; the directory half of PK4's test waits, its `/proc` half runs |
-| `purge` with `remove_app` | the same | `purge` answers `enotsup` |
+| the hash check in `erx_verity` | the security closure, M11 ([plan.md](plan.md#m11-security-closure)) | `erx_verity` passes blocks through unchecked, as for every image, so a byte changed on the medium is read as it is; PK3's QEMU test waits for M11 |
+| rooting `data` grants by principal, `apps/`, `tree apps` and the signer in an app's directory | principals' directories (M10) | apps can reach each other's directories, the residual design-apps.md records; the directory half of PK4's test waits, its `/proc` half runs |
+| `purge` with `remove_app` | the same | `service NAME purge` answers `enotsup` |
 | the image builder's packages on the system slot | the storage service serving a slot's image | they lie in the boot image's domain release, readable by every domain, enlarging the boot image and the memory it holds; a large one needs a larger root place on the stopgap |
 | checking an installed package's signature | the small verifier in the build ([plan.md](plan.md#m11-security-closure)) | a development build installs packages whose signature it cannot check and shows them `unchecked`; a release build installs none |
 
@@ -1198,15 +1454,20 @@ it guards.
 | Test | Passing case | Seeded fault |
 | --- | --- | --- |
 | the declaration's parser (Ruby, in the packer) | the two examples above pack to their expected records, the three-line one with every default; a declaration with both `applications` and `program`, and one with neither, refused; each bound of the table refuses one past it, naming the line | the bound on `needs` removed, which packs seventeen needs |
-| `erx_pkg_header:verify/2` | a package signed by a trusted key, one of an untrusted key, a flipped signature byte, a header cut at each field, lengths that overflow; under `{hash, H}`, a package signed by an unknown key and matching H accepted, and one byte off refused | a verify that skips the signature check, which accepts the flipped byte; a verify that reads the signer under `{hash, H}`, which refuses the unknown key |
+| the file check, `erx_pkg_header:check_file/2` | a package signed by a trusted key accepted, and refused: one of an untrusted key, a flipped signature byte, a header cut at each field, lengths that overflow, a file one byte short and one byte long, a file past `pkg_bytes_max`, and a file named for another app; under `{hash, H}`, a package signed by an unknown key and matching H accepted, and one byte off refused | a check that skips the signature, which accepts the flipped byte; one that reads the signer under `{hash, H}`, which refuses the unknown key; the length check made "at least", which accepts the long file |
+| the file check at the close and at recovery | each refused file of the row above, copied in, fails its close with nothing published and the temporary file gone; placed on the simulated medium, it is `refused` by the recovery | a recovery that admits without the file check, which admits the misnamed and the short file |
 | admission, one corpus run by the machine's module and by the packer's host run | each refusal of [Admission](#admission) and its accepting neighbour, the names `root`, `root_1`, a configured domain's and a service's among the refused | the subset test of step 6 dropped, which admits a need the row lacks; `root` dropped from the reserved names |
-| the close's checks | a file one byte short and one byte long of its header's lengths, and a file named for another app than its header's, each refused `einval` with nothing published and the temporary file gone | the length check made "at least", which publishes the long file |
-| the install, removal and recovery planners | a simulated directory records every write, cuts power after each and reorders the writes between checkpoints, as [design-storage.md](design-storage.md#read-write-storage)'s harness does; every resulting state recovers with each name holding its old package or its new one, whole, or none, and no temporary file | an install that renames before the temporary file is durable, after which a reordered cut leaves a published name with missing bytes |
+| the install, removal and recovery planners | a simulated directory records every write, cuts power after each and reorders the writes between checkpoints, as [design-storage.md](design-storage.md#read-write-storage)'s harness does, and separately answers `eio` to each rename, deletion, checkpoint, read and write in turn; every resulting state recovers with each name holding its package whole, or none, no temporary file, a package set that matches the directory, and no session of a dropped app started between the failure and the recovery's publication | an install that renames before the temporary file is durable, after which a reordered cut leaves a published name with missing bytes; a removal whose failed deletion answers `eio` without ending the lifetime, after which the set and the directory disagree |
+| the package lifetime | two copies writing and a third closed and waiting on a simulated storage that delays each request; the package process killed: both writers and the waiting close answer `eio`, the simulated storage's log holds no request of the ended lifetime after the recovery's listing, the recovery deletes the three temporary files before the first slot of the new lifetime is handed out, and a copy after the recovery installs | an `erx_pkg_io` that takes a request without checking its lifetime, after which the waiting close's rename lands after the listing; a slot freed at the crash, before the recovery's deletion, after which a fourth copy takes a slot whose file is still on the medium |
+| the principal's record | an install refused at its file check, at admission and at its checkpoint, after an earlier install and removal of the name in the boot with another `memory`: the record keeps the earlier memory | a registration before the rename is durable, which writes the refused memory |
 | purge targets | `purge` of `root`, a configured domain, a manifest principal, an image package's name and an installed app refused, with no `remove_app` | the app-name rule skipped, which sends `remove_app root` |
 | the recovery's bounds | a listing of `pkg_scan_max` + 1 entries gives `overflow` and no admission | the bound check removed, which reads the whole listing |
-| a publication that drops an app | the app's keeper and `onestart` session end before `packages/1` answers; `service NAME start` is refused until a set with the app arrives | a publication answered before the sessions end, which the test catches with a session still alive |
+| a publication that drops an app | the app's keeper and `onestart` session end before `packages/2` answers; `service NAME start` is refused until a set with the app arrives; a publication from an ended lifetime is refused | a publication answered before the sessions end, which the test catches with a session still alive |
 | the start table's grants for an app | an `rc.conf` line naming a display of the row the app did not need is refused `{no_grant, D}` | the merge given the app template's whole grant set, which accepts it |
 | the app session's plan in `erx_domain_core` | the session's rows are `packages` and the rows its needs name; every minted scope names the app's principal; the session's memory is the declared one; one header admitted as an image package and as an installed one gives the same plan (PK10) | a plan that grants every row of the template; a scope computed from the template's key; a plan that grants an image package the template's whole row set, which the comparison catches |
+| the storage mint's root for an app | one name under two signers and as an image package gives three roots, `apps/N/<hex>`, `apps/N/<hex2>` and `apps/N/image` | a root of the name alone, which gives one |
+| the `apps` tree's header reads | a header read answers the authenticated bytes; the same header changed on the simulated medium after the check answers `eio`; a read of a package removed since its open answers `eio` | the hash check removed, which serves the changed header |
+| `erx_appsfs` over a fixture `apps` tree | `ls` shows `NAME.app` and `system` as directories; a file below reads as the image holds it; a create of `NAME.app` reaches the tree's create and its close's errno reaches `cp`; `rm -r` sends one remove of the file; a create of `ctl` answers `einval`; creates and removes in `system/` answer `erofs` | a view that mounts with a root hash from a header it read from `packages`, which a fixture whose `packages` copy differs catches |
 | `erx_app` over a fixture `/app` | the declared applications start; a fixture app that ships a module of the release's name leaves the release's module loaded, and only the app fails | the app's paths added at the front of the code path, which loads the app's module |
 | entries | `max` + 1 distinct names installed and removed in one boot, the last refused with `apps_full`; a name installed again takes its entry again | a removal that frees the entry |
 | the build's check | each clause of property 19 | each seeded violation of [The build's check](#the-builds-check) |
@@ -1218,50 +1479,55 @@ it guards.
 
 * a kiosk image with `examples/dashboard` added by `tools/erx pack --app
   --enable dashboard` boots to its UI on the display, whose screendump
-  matches the host test's reference; seeded: `--enable` dropped, and the
-  screen stays blank;
+  matches the host test's reference, and `ls /apps/system` shows
+  `dashboard.app`; seeded: `--enable` dropped, and the screen stays
+  blank;
 * two apps: neither's `/proc` shows the other's domains; once `data`
   grants are rooted by principal, neither reads the other's `/data`;
 * a test program packaged with a display need draws through `/dev/draw`
   and changes its picture at a key that QMP sends; seeded: the program
   started without a window, which ends with its open of `/dev/draw`
   failing;
-* run-time install: `cp dashboard.pkg /apps/pkg/` succeeds and
-  `/proc/packages` shows it `admitted`; `service dashboard enable`
-  starts it; a reboot keeps it; copying a newer build over the running
-  app runs the new code with the app's files kept, and no session of the
-  old version exists once the first publication has answered; a copy
-  whose session is killed halfway publishes no name; one byte of an
-  installed image flipped on the medium gives `eio` and the row `down`
-  with the reason; a copy one byte short fails its `cp` with `EINVAL`
-  and publishes nothing; seeded: the update without
-  the first publication, after which the old version's keeper restarts
-  it during the rename;
-* removal: `rm /apps/pkg/dashboard.pkg` leaves no package or row and the
-  app's directory in place; `ls /apps/pkg` lists the image's packages and
-  `rm` of one answers `EPERM`;
-* from M10, `purge` removes the directory; from M11, a package of an
-  untrusted signer, and one whose header has a byte flipped, fails its
-  `cp` with `EACCES`, and an installed header flipped on the medium is
-  `refused` at the next boot;
+* run-time install: `cp dashboard.app /apps/` succeeds, `/proc/packages`
+  shows it `admitted`, `ls /apps/dashboard.app/lib` lists its
+  application and `cat` of a file under it matches the app directory's;
+  `service dashboard enable` starts it; a reboot keeps it; `cp` of it
+  again answers `EISDIR`; `rm -r` of it and a copy of a newer build run
+  the new code with the app's files kept; a copy whose session is killed
+  halfway publishes no name; a copy one byte short fails its `cp` with
+  `EINVAL` and publishes nothing;
+* removal: `rm -r /apps/dashboard.app` leaves no package or row, no
+  session of it once the publication has answered, and the app's
+  directory in place; `rm` without `-r` answers that it is a directory;
+  `rm -r` in `/apps/system` answers `EROFS`; seeded: the removal without
+  the publication, after which the app's keeper restarts it during the
+  deletion;
+* from M10, `service NAME purge` removes the directory; from M11, a
+  package of an untrusted signer, and one whose header has a byte
+  flipped, fails its `cp` with `EACCES`, an installed header flipped on
+  the medium is `refused` at the next boot, and one byte of an installed
+  image flipped on the medium gives `eio` at `/app`, with the row `down`
+  and its reason, and under `/apps`;
 * the states the inspector shows, each with a test: `admitted`,
   `refused` with its reason, `overflow`, and `unchecked` in Phase 1.
 
 **Fuzz targets**, each landing with its parser: the declaration's text
-parser on the host; `erx_pkg_header:verify/2` as a whole, over a
-generated corpus of headers; `erx_pkg_plan:recover/2` over generated
-directory listings, with names of every form, temporary files, reserved
-and manifest names, and listings past the bound; the names the `apps`
-tree's `pkg/` takes, and `ctl`'s grammar with `purge`.
+parser on the host; `erx_pkg_header:check_file/2` as a whole, over a
+generated corpus of headers, lengths and names; `erx_pkg_plan:recover/2`
+over generated directory listings, with names of every form, temporary
+files, reserved and manifest names, and listings past the bound; the
+names the `apps` tree and `erx_appsfs` take; the start service's `ctl`
+grammar with `purge`.
 
 **Chokepoints**, each a build check with a seeded violation:
 
 * only `erx_pkg_header` reads a package's bytes in the system domain,
-  and no system-domain module reaches `erx_verity` or `erx_erofs` for a
+  and no system-release module reaches `erx_verity` or `erx_erofs` for a
   package (PK5);
-* only `erx_pkg_io` writes the `packages` tree and sends `remove_app`;
+* only `erx_pkg_io` sends requests on the `packages` grant and sends
+  `remove_app`;
 * only `erx_pkg` calls `erx_principal:register_app/2` and
-  `erx_starter:packages/1`;
+  `erx_starter:packages/2`;
 * `erx_pkg` and `erx_pkg_io` call no `erx_domain:stop/2`: an app's
   sessions end only through the start service;
 * no list of the build names a path under `examples/`, and the examples
@@ -1280,34 +1546,49 @@ costs go on the watch list ([todo-performance.md](todo-performance.md)),
 each with the measurement that settles it: code loading from an
 installed package against the release; a full-window frame drawn by a
 program through `/dev/draw`, which a game draws every frame; and the
-bytes of a copy into `/apps/pkg/` through the system domain's `apps`
-tree. An install asks for two checkpoints and a removal for one;
-installs are rare enough that this is not on the list.
+bytes of a copy into `/apps`, and of a read under it, through the
+session's view and the system domain's `apps` tree. An install asks for
+two checkpoints and a removal for one; installs are rare enough that
+this is not on the list.
 
 ## Alternatives considered
 
 | Alternative | Why not |
 | --- | --- |
 | **Classes**: the manifest declares named classes, each a session template with its facet rows, a principal's shape and a count of places; an app joins one class and selects among its rows, and each place reserves its class's memory | Rejected as inflexible: an app that needs something between two classes needs a new class from the builder, every class reserves memory for places nobody fills, and an app author has to learn a concept that exists only for the proof. One `apps` row gives the same proof with the app naming what it needs |
-| **`pkg add`, `pkg delete` and `pkg info` commands over `install` and `remove` commands of the `apps` tree's `ctl`**, with a staging file per install | Each is a command, a grammar and an errno table for what a copy, a deletion and a listing already say, and staging adds a visible half-installed state with its own cleanup. A directory the system domain serves keeps the one writer and makes the close the commit, as copying an app into `/Applications` is on macOS |
+| **A disk image (DMG) as the package**, as macOS ships apps | `fsimg` can read and write DMG, but the machine would need a UDIF reader (an XML property list, zlib and bzip2) in every reading session, and checking blocks against a hash tree is awkward over compressed chunks. A small header and an EROFS image, compressed by EROFS itself under the dm-verity tree, need only the reader every domain already has |
+| **Preinstalled apps at `/sysapps`** | A second top-level place for apps. `/apps/system` keeps every app under one name, as macOS keeps `/System/Applications` next to `/Applications` |
+| **`/apps/user` and `/apps/system`** | The common path, installing, grows by a level for everyone. Installed apps at the top of `/apps` and the image's under `system`, which the `.app` rule keeps from ever being an app's name, cost nothing |
+| **Packages copied into `/apps/pkg/` and shown elsewhere** | Two places for one thing. Installing where the app then shows is the whole of the model |
+| **Package files shown as files in `/apps`** | `rm` without `-r` and copying a newer file over an installed one would work as for any file, but nothing would show what a package holds without a tool of its own. Owner question 1 weighs this |
+| **The image mounted over `/apps/NAME.app` in the session's namespace** | The name would be a mount point, which no remove can name (the resolver answers `{top, Entry}` for it), so `rm -r` could not remove the app; and each session would have to follow installs and removals to keep its mounts. The session's own `erx_appsfs` answers the name and what lies below it from one tree |
+| **The system domain serving packages' contents** | The EROFS reader would join the trusted base, and a crafted image would reach the system domain. A session reads its own |
+| **A `ctl` file in `/apps`**, for installs, removals, enabling and purges | `/apps` would mix apps with a control file. Installing and removing are file operations; enabling and disabling are the start table's, which `service` already commands; a purge is a row of the start service's `ctl` that `service` writes |
+| **Commands written into `/proc`** | `/proc` is one read-only tree ([design.md](design.md#decisions)): it shows an app's state, and no command reaches the system through it |
+| **Purge as `rm -r` of the app's directory through a grant over `apps/`** | Every administrator's session would hold a grant over every app's data, with a mount point of its own, and a purge could then remove the directory of a running app, whose grant's root would vanish under it, which the storage design does not define. `service NAME purge` uses the start service's `ctl` that `service` already writes and `remove_app`, which refuses a running app's name before any request |
+| **A recorded signer beside each app's directory, with a different signer refused until a purge** | It needs a record the system domain writes among the app directories, read at every admission and removed with the data, with its own crash ordering. Naming the directory for the signer gives the same separation with no record and no refusal |
+| **An app principal's cap sized from its declared memory** | A package installed again with another `memory` would need a resize of a budget whose ended session may not have retired. Each session is a wall at the declared memory already, so a cap of the whole `apps` budget bounds nothing less and is never resized |
+| **Replacing an installed package in place by copying over it** | The view shows an installed app as a directory, which the file client never opens for writing. Removing and copying keep the data and the `rc.conf` settings, and each name is only ever created or deleted, so no publication has to withdraw an app around a rename and no failed update has to restore anything. Owner question 1 weighs it |
+| **`pkg add`, `pkg delete` and `pkg info` commands** | Each is a command, a grammar and an errno table for what a copy, a removal and a listing already say. A tree the system domain serves keeps the one writer and makes the close the commit, as copying an app into `/Applications` is on macOS |
 | **An app chooses its facet parameters within the row's bounds**, or the builder overrides the derived rows | The build counts every row at its own parameters whatever the app picks, so a lower value saves the machine nothing and adds a rule per parameter to admission and to the mint. A builder who wants other values for every app sets them where the service's defaults live; one who wants them per app makes the app part of the manifest |
 | **An app declares a guarantee and a cap** | Each session's budgets are walls, as every domain's are, so a session's memory is one figure; the elasticity is between apps, in the `apps` budget, where the kernel already provides it |
 | **A sum of installed apps' memory checked at install** | It judges again what the kernel judges at every start, and it promises less than it seems: which apps run at once depends on what is enabled and started, not on what is installed. It also made recovery order matter, since the sum admitted packages in name order until the budget ran out. The build sums the image's enabled packages, and the kernel judges the rest |
-| **An app principal's budget a wall carved at install** | An update that changes the memory would resize a wall while the old session's outer budget may not have retired, and a removal would have to wait for every retire before giving the memory back. An elastic budget under the `apps` wall needs neither |
+| **An app principal's budget a wall carved at install** | A removal would have to wait for every retire before giving the memory back. An elastic budget under the `apps` wall needs no wait |
 | **A pool**: one principal pays for many apps, and each domain record names both the app it acts for and the pool that pays | Every reader of a principal must then choose the right one of two fields; the inspect scope and the grant records each chose wrong in the review of that design. Each app here is a whole principal, so every reader stays as it is |
 | **A package carries an OTP release with its own boot script** | A boot script pins the versions of the release's applications, so every system update would break every package. `erx_app` starts the app's applications over the `app` release |
 | **An environment field in the declaration** | Its one use was naming the UI renderer, which `erx_ui:open/1` takes as an option; anything else an app wants it can set itself |
 | **A check that refuses an app whose module names clash with the release's** | The app's paths come after the release's, so a clash breaks only the app that brought it; the check would be one more refusal to keep in step with the release |
-| **A version an update may not lower, with a flag to override it** | Against the administrator it only adds a flag; against a storage domain that puts back an older file it holds nothing without a counter the trust root keeps. The version is shown, not judged |
+| **A version an install may not lower, with a flag to override it** | Against the administrator it only adds a flag; against a storage domain that puts back an older file it holds nothing without a counter the trust root keeps. The version is shown, not judged |
 | **Packages unpacked into a directory of the data partition** | Their integrity would rest on the storage domain. An EROFS image under a hash tree, checked by the reader, makes it rest on the header alone |
 | **The image builder's packages in the boot image** | The boot image is held in memory and bounded by the root place; Doom's 28 MiB WAD made the image 88 MiB. On the slot they are read on demand and still change only with the system |
 | **Every package ships its own `erx-lvgl`** | One copy per app, a wire between toolkit and renderer that each app's build could skew, and LVGL's notices in every package |
 | **A launcher in Erlang for each native app** | The display already starts a program with a window and binds its draw and input files; `program` reaches that for every native app |
 | **A native window app draws into its buffer and presents through a pipe protocol, as `erx-lvgl` does** | It would be a second public path to the screen. `/dev/draw` is the designed one; the measurement on the watch list decides whether a faster one is needed |
 | **Signers trusted on first install, or added at run time** | The record of who is trusted would lie where the storage domain can rewrite it. Keys in the boot image cannot be |
-| **Unsigned packages in development builds** | A second mode in the header, the verifier and the inspector, for nothing: the packer signs with the development key by default, which costs a developer nothing, and development builds trust that key |
-| **The package process stops an app's domains itself** | A keeper restarts a session after every end, so old code could start again during the rename, and a removal would steer a lookup by principal name. The start service, the only starter of app sessions, ending the sessions of an app the published set drops removes both |
-| **Removing an app's data with its package** | Deleting a package file would destroy what the app wrote, which macOS and FreeBSD do not do, and a removal of two things needs a durable marker and a recovery to finish it. A purge is a separate, explicit act |
+| **Unsigned packages in development builds** | A second mode in the header, the file check and the inspector, for nothing: the packer signs with the development key by default, which costs a developer nothing, and development builds trust that key |
+| **The package process stops an app's domains itself** | A keeper restarts a session after every end, so the app could start again during the deletion, and a removal would steer a lookup by principal name. The start service, the only starter of app sessions, ending the sessions of an app the published set drops removes both |
+| **A restarted `erx_pkg_io`, or a recovery that deletes temporary files while copies may still act** | A request of the ended run could reach the storage service after the new recovery had listed the directory, and a late rename could publish a file the new run never checked. One lifetime whose effects are taken only while it lives, by takers that are never restarted, closes that by construction |
+| **Removing an app's data with its package** | Deleting a package would destroy what the app wrote, which macOS and FreeBSD do not do, and a removal of two things needs a durable marker and a recovery to finish it. A purge is a separate, explicit act |
 | **App data removed through a system-domain grant over the whole data partition** | The system domain would hold write access to every principal's files for one operation, and a wrong name would reach them. `remove_app` reaches only `apps/` |
 | **The administrator's session writes packages straight into the storage domain** | It needs a writable grant on part of the package tree and lets an administrator's session change installed files behind the package process. Copying through the `apps` tree keeps one writer |
 | **Rows generated into the manifest for each app, a principal and template of its own, with the sums grown** | Doom's `run.rb` did that. It grows the board's sums with each app and is a second path beside run-time install; the `apps` row makes one path |
@@ -1320,59 +1601,74 @@ installs are rare enough that this is not on the list.
 | installed apps together want more than the `apps` budget | medium | the last one started is refused `no_memory` and its row goes down | the builder sizes `memory`; `room` at `/proc/packages` and the row's reason at `/proc/apps` show it |
 | a full-window frame through `/dev/draw` is too slow for a game | medium | Doom runs below its frame rate | the watch-list measurement; a faster path is a design change of the display's, if needed |
 | the app's code reads slowly through the file protocol and the hash check | medium | slow app starts | `tools/erx bench app-start`; the shared code design maps prepared code later ([design-shared-code.md](design-shared-code.md)) |
-| a restart while the `apps` budget is full waits for the ended session's outer budget to retire | low | one refused restart, counted against the row's intensity | the app's cap holds a session beside one outer budget not yet retired |
+| browsing under `/apps` reads each block through two trees and the storage domain | medium | a slow `ls -R` or `cat` of a large package | the watch-list measurement; browsing is rare and reads no app's hot path |
+| a restart while the `apps` budget is full waits for the ended session's outer budget to retire | low | one refused restart, counted against the row's intensity | property 19 makes the `apps` budget hold a session beside one outer budget not yet retired |
+| a package's suffix, `.app`, is also the suffix of an OTP application resource file | low | a reader confuses `/apps/dashboard.app` with `lib/erx_dashboard/ebin/erx_dashboard.app` | the two never share a directory; the SDK's documentation names both |
+| an author who signs a new version with a new key finds the app's data gone | low | the data lies under the old key's directory | `/proc/packages` shows the signer; a purge removes the old directory, and the author keeps the key |
 
 Decisions:
 
 1. **An app is a principal of its own**, made from its declaration and
    bounded by one `apps` row; no app joins a class or a pool.
 2. **Memory is shared through one elastic level**: app principals'
-   budgets are elastic under the `apps` wall; each session is walled;
-   the build sums the image's enabled packages, and the kernel judges
-   every start.
+   budgets are elastic under the `apps` wall, each capped at the whole
+   of it and never resized; each session is walled; the build sums the
+   image's enabled packages, and the kernel judges every start.
 3. **A machine trusts only the signer keys its boot image carries**:
    the manifest's `signer` rows, and the development key in a development
    build. Every package is signed.
 4. **Every app may read every package's bytes**, as stated in
    [Where a package lies](#where-a-package-lies).
-5. **Installing is a copy into `/apps/pkg/` and enables nothing**; the
-   image builder enables a row of the image's packages, the administrator
-   an installed one.
-6. **One file per name**, replaced by rename at the close that wrote it.
+5. **Installed apps are `/apps/NAME.app` and the image's
+   `/apps/system/NAME.app`**, each shown as a directory by the session's
+   own view; installing is a copy into `/apps` and enables nothing; the
+   image builder enables a row of the image's packages, the
+   administrator an installed one.
+6. **A name is only created or deleted**: a copy makes a name the
+   directory does not hold, by one rename at the close that wrote it.
 7. **A name the image holds is the image's**: it is not installed over
    or removed at run time, and changes with a system update.
-8. **Removing a package keeps its data**; `purge` removes it; no prompt
-   asks a person to approve grants; no fetch by name.
+8. **One lifetime owns every change of the package directory**, and
+   its effects are taken only while it lives.
+9. **An app's data belongs to its name and signer**; removing a package
+   keeps it; `service NAME purge` removes it; no prompt asks a person to
+   approve grants; no fetch by name.
 
 Questions for the owner, each with a recommendation:
 
-1. **A close that answers an errno.** Installing by copy reports a
-   refused package through the copy's close, which needs the file
-   service to pass a tree's answer to a clunk back to the client
-   ([Other subsystems](#other-subsystems)); today `erx_fs_grant` answers
-   a clunk itself and the tree's callback answers only `ok`.
-   Recommended: every tree's `clunk` answers `ok` or an errno, and the
-   grant answers the client with it once the file's owner has run it,
-   which costs a close the wait for the writes sent before it, as POSIX's
-   `close` already may with `EIO`. The alternative keeps the file
-   service as it is: a close always answers `ok`, and an administrator
-   learns of a refusal only from the log and `/proc/packages`.
-2. **The shipped manifests' `apps` rows.** Recommended: the development
+1. **Removing and updating an app shown as a directory.** `/apps` shows
+   an installed app as a directory, as asked. The file client refuses to
+   unlink a directory or open one for writing, as FreeBSD's does, so
+   removal is `rm -r /apps/NAME.app` (plain `rm` answers that it is a
+   directory), and an update is `rm -r` and then `cp`, which keeps the
+   app's data and `rc.conf` settings but leaves no app while the new
+   copy is checked, and none if it is refused. Recommended: accept this,
+   under which a name is only ever created or deleted, never replaced. The
+   alternative shows `NAME.app` as a plain file, which keeps `rm` and
+   copying over an installed app, and gives up browsing its contents.
+2. **Where the start table's `ctl` and `rc.conf` go.** `/apps` holds
+   apps alone, so the start service's tree, which held them at `/apps`,
+   needs a place of its own. Recommended: `/etc/start`, holding `ctl`
+   and `rc.conf`, as FreeBSD keeps `rc.conf` under `/etc`, granted as
+   the `start` facet ([design-apps.md](design-apps.md#interfaces)). The
+   alternative is a top-level `/service`, named for the command that
+   writes it.
+3. **The shipped manifests' `apps` rows.** Recommended: the development
    manifests declare one `apps` row with `max 8`, `services display data
    net`, and a `memory` that holds eight apps at the default 64 MiB; a
    kiosk board's manifest `max 1` and `services display data`.
-3. **The program launcher's needs of `erx_prog_handler`.** The handler
+4. **The program launcher's needs of `erx_prog_handler`.** The handler
    being built takes pipe ends and a window's buffer; a native app with a
    display need needs it to start a program with a window as
    [design-display.md](design-display.md#the-window-tree) says.
    Recommended: that option lands with the handler, so no second launcher
    exists.
-4. **The Doom submodule's row in the dependency table.** Doom and
+5. **The Doom submodule's row in the dependency table.** Doom and
    Freedoom are fetched only on request and enter no distributed image.
    Recommended: a row marked `example`, neither `permanent` nor
    `stopgap`, naming GPL-2.0 and the rule that keeps it out of
    distributed images.
-5. **A policy per signer.** The `apps` row offers its services to every
+6. **A policy per signer.** The `apps` row offers its services to every
    app. Recommended: no per-signer policy until a machine needs one; the
    builder's lever is which keys it trusts.
 

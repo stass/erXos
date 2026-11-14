@@ -414,7 +414,7 @@ and back ([Errors](#errors)).
 | statfs | `{statfs, Fid}` | `{ok, Statfs}` | `Statfs` a map of 9P2000.L's fields, `type` to `namelen` |
 | read | `{read, Fid, Offset, Count}` | `{ok, Data}` | `Count` at most 65,536 inside the machine ([Bytes](#how-a-request-names-its-bytes)) |
 | write | `{write, Fid, Offset, Data}` | `{ok, Count, At}` | `Data` at most 65,536 bytes inside the machine; 9P2000.L's count field is `Data`'s size; `At` the offset the bytes were written at, the file's end for an append fid, which 9P2000.L's `Rwrite` does not carry: the codec drops it at an edge and reads an `Rwrite` from outside as `At` = `unknown` ([Open files and offsets](#open-files-and-offsets)) |
-| clunk | `{clunk, Fid}` | `ok` | releases the fid's locks |
+| clunk | `{clunk, Fid}` | `ok` | releases the fid's locks; for an opened file, the tree's answer, an errno when the tree could not complete what the close commits, as `close(2)` may answer `EIO`; the fid ends whatever the answer |
 | remove | `{remove, Fid}` | `ok` | `Fid` is clunked whatever the outcome |
 | flush | `{flush, OldTag}` | `ok` | `OldTag` the alias of a request; answered `ok` for a completed or unknown request too ([Flush](#flush)) |
 
@@ -1478,7 +1478,9 @@ writes in Erlang form the `erx_files` application
 -callback readlink(Node :: term(), Fs :: term()) ->
               {ok, binary()} | {error, file:posix()}.
 -callback statfs(Fs :: term()) -> {ok, statfs()}.
--callback clunk(Handle :: term(), Fs :: term()) -> ok.
+%% ok, or the errno of what the close could not complete; the fid ends
+%% either way.
+-callback clunk(Handle :: term(), Fs :: term()) -> ok | {error, file:posix()}.
 %% A tree whose reads never wait for a medium answers immediate; absent: helper.
 -callback read_mode() -> helper | immediate.
 %% A tree that writes adds these; one without them is read-only (F5).
@@ -1606,7 +1608,13 @@ other client's request can come between its parts:
   only the answers that carry the owner's tag; a clunk therefore runs
   after every request sent before it, and the owner ends once it has
   run the file's last clunk, so every live owner is one of a file still
-  open through the grant or one finishing the clunks it was sent.
+  open through the grant or one finishing the clunks it was sent. The
+  grant answers a client's clunk of an opened fid with what the tree's
+  `clunk` answered, once the owner has run it, so a close reports what
+  the tree could not commit, after every request sent before it; the
+  fid has ended whatever the answer, as clunk(5) says. A clunk the grant
+  makes itself, at an owner's `DOWN` or at the grant's end, has no one to
+  answer, and its answer is dropped.
 * **Checks before callbacks.** Every message a grant receives, but its
   owners' `DOWN`s, passes one decoding funnel, which takes the frame and
   the grant's rights and admits a request only if it came from the client
@@ -2747,7 +2755,10 @@ report, so a passing run shows the code under test ran.
   after its last fid, which the short-lived owners case catches; a grant
   that takes a frame out of any domain's envelope, and one for another
   domain that takes its own domain's bare frames, which the envelope
-  cases catch. A tree
+  cases catch. A tree whose `clunk` answers `{error, eio}` for an opened
+  file makes the client's close answer `eio`, after a write sent before
+  it has run, and the fid is gone; seeded: a grant that answers the
+  clunk when it hands it to the owner, which answers `ok`. A tree
   whose callbacks answer with a next state appended, in the grant and in
   an owner, is answered `eio` at the client and the grant goes on
   serving; seeded: a grant that takes a directory's `make` answering

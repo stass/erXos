@@ -1229,7 +1229,7 @@ NIFs, since none of them waits:
 
 | Entry | What it does | Result |
 | --- | --- | --- |
-| `erx_dom_principal(number, configuration)` | validates the complete normalized principal configuration, stores its resolved default and ceiling profiles, carves its budget from the root budget and creates its group under `users`, with its domain quota | `ERX_OK`, `ERX_EEXIST`, `ERX_ENOMEM`, `ERX_EINVAL` |
+| `erx_dom_principal(number, configuration)` | validates the complete normalized principal configuration, stores its resolved default and ceiling profiles, carves its budget and creates its group under `users`, with its domain quota: a manifest principal's budget a wall from the root budget, an app principal's elastic from the `apps` budget, with no guarantee and that budget's guarantee as cap ([design-packaging.md](design-packaging.md#an-apps-principal)) | `ERX_OK`, `ERX_EEXIST`, `ERX_ENOMEM`, `ERX_EINVAL` |
 | `erx_dom_create(spec)` | validates an `erx_dom_spec_t` into a plan and applies it ([Creating a domain](#creating-a-domain)); a configured row's plan also gives the domain the devices the manifest places on that row ([Devices](#devices)) | the domain's record, with the number of its connection to the system domain and the system domain's values of that connection's objects, or the failing step's status after every applied step is undone, `ERX_EBUSY` when a device of the row is held by a living domain |
 | `erx_dom_start(id)` | starts the built domain's first thread | `ERX_OK`; `ERX_EDEAD` for a stopped space; `ERX_EINVAL` for any state but built |
 | `erx_dom_stop(id, status)` | stops the domain's space, and with it every sub-space below it | `ERX_OK`; `ERX_EINVAL` for an unknown or ended id |
@@ -2500,8 +2500,8 @@ process behind them. For a service of the `files` interface the process
 behind it is the supervisor of its tree's grants (`erx_fs_grants`), and
 the domain service asks it for an `erx_fs` grant bound to the grantee and
 ending with its domain pid, in place of a facet in front of it, as a
-files service's mint does for its grantees (`apps`, served by the start
-service, is one). A
+files service's mint does for its grantees (`start`, served by the start
+service, and `apps`, served by the package process, are such). A
 service that has named no living process by then is left out and logged; the domain finds the name absent, as it
 finds any unavailable service, until it restarts. The domain service
 creates the configured domains as it starts, so a service whose facets
@@ -2853,12 +2853,18 @@ hold, the sum property 18 computes over the facet rows of its
 ([Ending a domain](#ending-a-domain)). An
 introduction carves a child from the reader's outer budget, which the
 policy sized for it, so an introduction fails with `ERX_ENOMEM` only
-beyond the domain's own quota. Every budget the domain library carves,
-the connection children included, is a wall, so the kernel admits or
-refuses every charge of a domain's at the domain's own budget, counts
-none of it against another domain's, no principal spends beyond its own,
-and a domain's memory depends on nothing outside it but the kernel (K32,
-[design-kernel.md](design-kernel.md#budgets)); and the library's grant
+beyond the domain's own quota. Every domain budget the domain library
+carves, own, outer and the connection children, and every manifest
+principal's budget, the `apps` budget included, is a wall, so the kernel
+admits or refuses every charge of a domain's at the domain's own budget,
+counts none of it against another domain's, no principal of the manifest
+spends beyond its own, and a domain's memory depends on nothing outside
+it but the kernel (K32,
+[design-kernel.md](design-kernel.md#budgets)). The one elastic budget
+the library carves is an app principal's, with no guarantee and the
+`apps` budget's guarantee as its cap, fixed for the boot; it holds
+nothing but its sessions' walls, so apps share the `apps` wall's memory
+and none of it reaches past that wall; and the library's grant
 table passes no budget with `DESTROY`, so no domain resizes a budget of
 its own (A7). The policy corrects the size of a domain it created at run
 time with `erx_budget_resize` through the domain library's
@@ -3480,7 +3486,7 @@ manifest lists: the vault.
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
-| start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; the `apps` tree | [design-apps.md](design-apps.md) |
+| start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; its tree, `start`; the package process and its `apps` tree ([design-packaging.md](design-packaging.md#apps)) | [design-apps.md](design-apps.md) |
 | file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
 | web login, `erx_web_login` | the web domain's facet with two operations: `login`, which checks a login with the vault as the console does, starts a session and introduces it to the web domain, and `logout`, which ends a session a login through it started; the sessions it started end with it | [design-web.md](design-web.md#logging-in-and-the-line) |
 | SSH login, `erx_ssh_login` | the SSH domain's facet with five operations: `cookie`, which issues a cookie for a connection's first key exchange; `key_ok` and `login_key`, which check a principal's login keys from the vault and, for `login_key`, a signature over a session identifier the facet derives from that exchange; `login_passphrase`, which checks a passphrase with the vault as the console does; and `logout`; a login starts a session and introduces it to the SSH domain, and the sessions it started end with it | [design-ssh.md](design-ssh.md#logging-in) |
