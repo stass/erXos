@@ -9,8 +9,17 @@ module Erx
     # LicenseRef-DJB-public-domain is the statement "D. J. Bernstein / Public domain." in
     # ChaCha20's own files. It states no conditions; listing it here is the judgement that
     # such a statement permits what the licenses beside it do.
+    # LicenseRef-RSA-PKCS3 and LicenseRef-RSA-PKCS5v2-0 are the notices of public_key's PKCS #3
+    # and PKCS #5 ASN.1 specifications, as OTP names them: the Internet Society's RFC notice,
+    # which lets derivative works that assist in implementing the document be copied and
+    # distributed with its copyright notice and that paragraph kept, and RSA Security's, which
+    # lets the document be copied if it is identified as RSA Security PKCS. Listing them is the
+    # judgement that both permit shipping the modules made from those specifications, with each
+    # notice's text carried in the image. Their notice documents are rows for public_key's
+    # asn1 directory alone in config/provenance/import-notices.json.
     PERMISSIVE = %w[BSD-2-Clause BSD-3-Clause MIT ISC 0BSD Apache-2.0 Zlib
-                    BSL-1.0 Unicode-3.0 Unicode-DFS-2016 LicenseRef-DJB-public-domain].freeze
+                    BSL-1.0 Unicode-3.0 Unicode-DFS-2016 LicenseRef-DJB-public-domain
+                    LicenseRef-RSA-PKCS3 LicenseRef-RSA-PKCS5v2-0].freeze
     # Licenses that cover font data only. A caller that states its input's OFL-1.1 content is
     # font data (font_data: true) has them admitted for that input alone, as grants that are
     # not permissive; every other input, and every other license, is judged by PERMISSIVE and

@@ -24,6 +24,10 @@
     {"path": "musl", "notices": [], "grants": {
       "MIT": [{"path": "musl/COPYRIGHT", "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"}]
     }},
+    {"path": "otp/lib/public_key/asn1", "notices": [], "grants": {
+      "LicenseRef-RSA-PKCS3": [{"path": "otp/LICENSES/LicenseRef-RSA-PKCS3.txt", "sha256": "7ffa15804690e9fb3538301963adb8a80a420568322d5028dc41ed9a7d5d03a9"}],
+      "LicenseRef-RSA-PKCS5v2-0": [{"path": "otp/LICENSES/LicenseRef-RSA-PKCS5v2-0.txt", "sha256": "d607ae3934f9a407a5ae0f00eda4302e482f7e48d50da5215f3b218bd5a4362c"}]
+    }},
     {"path": "otp/erts/emulator/zstd", "notices": [], "grants": {
       "BSD-3-Clause": [{"path": "otp/erts/emulator/zstd/LICENSE", "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"}],
       "GPL-2.0-only": [{"path": "otp/erts/emulator/zstd/COPYING", "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505"}]

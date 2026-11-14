@@ -5544,10 +5544,11 @@ to the corpus and follow rc
   Unverified that these files reach a packed image's records; if they do,
   look up the profile for the selected grants other than erXos's own.
 * [Low] build, license selection (`tools/lib/erx/license_expression.rb`,
-  `PERMISSIVE`, and `PackProvenance#attribute`): the entry for ChaCha20's
-  public-domain statement is global, so a file outside any import that
-  declares `LicenseRef-DJB-public-domain` passes a release pack with
-  erXos's `LICENSE` as its notice. Refuse it outside an import.
+  `PERMISSIVE`, and `PackProvenance#attribute`): the entries for ChaCha20's
+  public-domain statement and public_key's RSA notices are global, so a
+  file outside any import that declares `LicenseRef-DJB-public-domain`,
+  `LicenseRef-RSA-PKCS3` or `LicenseRef-RSA-PKCS5v2-0` passes a release pack
+  with erXos's `LICENSE` as its notice. Refuse them outside an import.
 * [Low] build, notices (`tools/lib/erx/pack_provenance.rb`,
   `leading_notice`): `#` counts as a comment leader in every language, so a
   C file's leading `#include` and `#define` lines, and comments after them,
