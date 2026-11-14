@@ -670,6 +670,11 @@ it; git history is the record of completed work.
   deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before
   `rc.conf` is known, so a row `rc.conf` disables runs until the read succeeds. Waiting through a storage
   restart within its intensity would close it (`erlang/apps/erx_starter/src/erx_starter.erl`).
+* [Medium] A keeper's restart of a crashed session can be refused once with `{refused,no_memory}` before the
+  next retry succeeds, seen with a principal whose memory is exactly one session wall plus one outer budget:
+  the ended domain's budget is apparently not back when the keeper retries (`erlang/apps/erx_starter`, the domain
+  service's budget release). Unverified whether the keeper should wait for the ended domain's exit record, or the
+  principal needs headroom; reproduce with a session that crashes at start.
 * [Low] The `apps` tree (`erx_starter_fs`) is served once `erx_starter` starts, after `erx_domain`, whose start
   has the console ask for root's session: root's session gets `/apps` only because its boot outlasts the next
   application's start. A session that reported ready before then has no `/apps` until it restarts. Serving the
