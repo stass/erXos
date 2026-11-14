@@ -1322,19 +1322,26 @@ only as a third party would build it, through the SDK.
   its license: `app.txt`, `lib/erx_dashboard/` and its host test, which
   checks a frame through `erx_ui_host` against
   `test/display/reference/dashboard`.
-Doom is not an example and not a dependency. It is a demo outside the
-tree, in a repository of its own (`erxos-doom`) that holds doomgeneric,
-under GPL-2.0, its glue, its `app.txt` and a `Makefile` over the SDK's
-`sdk.mk`, and builds against an exported SDK as any third party's app
-does. No file, submodule or list of erXos names it, nothing erXos
-builds, tests or distributes uses it, so the dependency table has no
-row for it, and it never ships: its license keeps it out of every image
-erXos distributes (step 4 of [Adding an app to an image](#adding-an-app-to-an-image)).
-No erXos code includes or links it, so working on erXos never needs
-reading it.
+* **`examples/doom/`**, the Doom demo, structured as a separate app:
+  `ORIGIN.md` beside `doom/`, a git submodule pinned by its gitlink, as
+  `display/lvgl/lvgl` is ([design.md](design.md#dependencies)). The
+  submodule's repository holds doomgeneric, under GPL-2.0, the erXos
+  glue, its `app.txt` and a `Makefile` over the SDK's `sdk.mk`, and a
+  list of pinned downloads in `deps.lock`'s form, for Freedoom's WAD.
+  erXos's tree holds only the gitlink, a commit id, so no GPL code
+  enters the tree. `git clone` does not check it out, and `tools/erx
+  fetch` fetches it, and its downloads against their SHA-256, only with
+  `--example doom`; no part of `make check`, the landing gate or the
+  milestone gate builds it; `tools/erx app run examples/doom/doom` runs
+  it on request. It never ships: its license keeps it out of every image
+  erXos distributes (step 4 of [Adding an app to an
+  image](#adding-an-app-to-an-image)). Nothing erXos builds, tests or
+  distributes depends on it, so the dependency table has no row for it.
+  No erXos code includes or links it, so working on erXos never needs
+  reading it.
 
-To the packer the dashboard is an app directory with an `app.txt`, as
-is a third party's anywhere on disk, the Doom demo's included. The landing gate exports the SDK, packs
+To the packer both are app directories with an `app.txt`, as is a
+third party's anywhere on disk. The landing gate exports the SDK, packs
 and host-tests `examples/dashboard` with nothing but the SDK on its
 paths, and checks that every call the example makes into erXos's
 modules is one of `public.txt`'s functions, so a change that breaks the
@@ -1851,8 +1858,10 @@ Decisions:
     option**, and the handler's start returns a monitor whose `'DOWN'`
     is the program's one end report, so no second launcher and no second
     end message exist ([design-programs.md](design-programs.md#the-handler)).
-13. **Doom is a demo outside the tree** that never ships, with no
-    submodule and no row in the dependency table ([Examples](#examples)).
+13. **Doom is a demo app under `examples/`**, a submodule whose gitlink
+    is all the tree holds; it never ships, and since nothing in erXos
+    depends on it, the dependency table has no row for it
+    ([Examples](#examples)).
 14. **No policy per signer**: the `apps` row offers its services to every
     app, and the builder's lever is which signer keys the image trusts.
 

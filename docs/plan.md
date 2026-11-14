@@ -1689,8 +1689,9 @@ time.
    export`, `erx-app pack` and `test`, the declaration's parser
    with its fuzz target, `erx_ui_host`; `tools/erx pack --app` and
    `tools/erx app run`; `erx-lvgl` beside `erx_ui` in every image's
-   domain release; `examples/dashboard` built through the SDK alone. On
-   the stopgap the image's packages lie in the boot image's domain release.
+   domain release; `examples/dashboard` built through the SDK alone, and
+   `examples/doom` as a submodule built only on request. On the stopgap
+   the image's packages lie in the boot image's domain release.
 3. **Installing at run time**, after part 2, M6's data partition and
    1b-E's storage domain. The `packages` tree of the storage service;
    the `apps` tree's installed packages, whose close installs or
@@ -1743,7 +1744,8 @@ two apps see none of each other's domains at `/proc`; a packaged test program wi
 draws through `/dev/draw` and answers a key; each seeded fault of
 design-packaging.md's host tests and each seeded violation of property
 19 fails as designed; the header's and the declaration's fuzz targets
-run their budgets clean; no build list names `examples/`.
+run their budgets clean; no build list names `examples/`, and `make
+check` needs no `examples/doom`.
 
 **Exit criteria, installing at run time.** In a development build,
 `cp` of a package into `/apps` shows it `admitted` at
