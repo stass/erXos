@@ -146,10 +146,9 @@ with its SHA-256 in [References](#references):
   0 will lock up the memory controller" (`:291-307`); DMA is kept below
   960 MiB because the author saw corruption above it and calls the true
   limit unclear (`:92-106`).
-* **The GICv2m frame.** `MSI_TYPER` at `0x008` gives the first line and
-  the count, `MSI_SETSPI_NS` at `0x040` is the doorbell, the data is the
-  line's interrupt id, and every line of the frame is configured
-  edge-triggered (`gic.c:288-310`, `:1330-1365`, `:1418-1428`).
+* **The platform's MSI frame.** Its registers, its doorbell and the data
+  a function writes are platform facts, with FreeBSD's driver cited, in
+  [design-platforms.md](design-platforms.md#msi-frames).
 
 The clean-room facts record of the BCM2711's bridge and the VL805,
 [research-brcmstb-pcie.md](research-brcmstb-pcie.md), gives the vendor's
@@ -186,7 +185,8 @@ PCIe function gets no DMA range
 ([design-device-tree.md](design-device-tree.md#the-reader)), and it reads
 no bridge's `ranges`, `bus-range` or `interrupt-map`. The device service,
 `erx_devices`, hands on the library's catalogue and keeps no state. The
-QEMU harness starts `virt` with `msi=gicv2m` under TCG and attaches no
+QEMU harness starts `virt` with its MSI frame under TCG
+([design-platforms.md](design-platforms.md#msi-frames)) and attaches no
 PCIe function (`tools/lib/erx/qemu.rb`).
 
 ### The consumers
@@ -922,10 +922,10 @@ the frame's lines, which Fiasco binds as wired lines:
   lowest free line of the range, sets it edge-triggered through Fiasco's
   `l4_icu_set_mode` with `L4_IRQ_F_POS_EDGE`
   (`fiasco/l4re-core/l4sys/include/icu.h:82`, `:266`), as FreeBSD sets
-  every frame line (`gic.c:288-310`), binds it as `ERX_IRQ_LINE` binds a
+  every frame line ([design-platforms.md](design-platforms.md#msi-frames)), binds it as `ERX_IRQ_LINE` binds a
   line, and answers the doorbell, the frame's base plus `0x40`, and the
-  data, the line's interrupt id (`gic.c:1418-1428`). Whether the fork's
-  GIC honours the mode for these lines is probe 4's second half.
+  data, the line's interrupt id. Whether the fork's
+  interrupt controller honours the mode for these lines is probe 4's second half.
 * **The address the function writes.** The doorbell answered is the
   frame's CPU address, which is the address the function writes only
   where its host bridge maps the frame one to one. The give checks the
@@ -1543,8 +1543,6 @@ from the project's GitHub mirror, read as data:
 | `sys/arm/broadcom/bcm2835/bcm2838_xhci.c` | `ad6b745a07c7aa2d227f22f9839ce26fe2162df7cb2c4a41b815e5ba66d24a60` |
 | `sys/dev/usb/controller/xhci_pci.c` | `d13585891d30fd9171c4c75929a2aa3e48a1bcf7dad6f791871247fbc02a779a` |
 | `sys/dev/virtio/pci/virtio_pci.c` | `551322dffc0141532b963006063164db88d343128419a1413b4e0310eadb7679` |
-| `sys/arm/arm/gic.c` | `e32059f306ff4ec09f83c1c814936f2ee2fa186777e1a7e2f18aaa9904814a33` |
-| `sys/arm/arm/gic_fdt.c` | `c927b76c4f03c163681a6411f89215c92b7a341c7a817318e9eb6492c0951ace` |
 
 The virtio specification, Virtual I/O Device (VIRTIO) Version 1.2,
 Committee Specification Draft 01, OASIS,

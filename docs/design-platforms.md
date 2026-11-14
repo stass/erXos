@@ -555,6 +555,16 @@ the frame's `MSI_TYPER`, QEMU `virt`'s platform record names the frame's
 base and line range, and the backend binds each line edge-triggered
 ([design-pcie.md](design-pcie.md#the-msi-frame-on-the-stopgap)).
 
+The GICv2m frame's registers, from FreeBSD's driver at releng/15.1:
+`MSI_TYPER` at `0x008` gives the first line and the count,
+`MSI_SETSPI_NS` at `0x040` is the doorbell, the data a function writes
+is the line's interrupt id, and every line of the frame is configured
+edge-triggered (`sys/arm/arm/gic.c:288-310`, `:1330-1365`,
+`:1418-1428`; SHA-256
+`e32059f306ff4ec09f83c1c814936f2ee2fa186777e1a7e2f18aaa9904814a33`; and
+`sys/arm/arm/gic_fdt.c`, SHA-256
+`c927b76c4f03c163681a6411f89215c92b7a341c7a817318e9eb6492c0951ace`).
+
 ### DMA
 
 A DMA device's driver is an Erlang process over the device NIF in the
