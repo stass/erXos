@@ -2197,12 +2197,6 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
-* [Medium] network, `erx_tcp_conn` (bind to a socket process already gone): the connection closes gracefully, as
-  at its owner's exit ([design-network-stack.md](docs/design-network-stack.md#the-listener)), so its listener
-  answers the `accept` `{error, econnaborted}` only when the connection ends, after TIME-WAIT or its
-  retransmissions, and the listener's socket process holds one of its 64 calls in flight that long. A pool of
-  acceptors killed together can fill those places for about 2MSL. Aborting instead, a RST and an end at once,
-  would answer at once; the design's "closes" should be settled first.
 * [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection
   ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
   state before the event, with a RST, `{error, econnaborted}` to its socket process and an exit with

@@ -9,8 +9,10 @@ interface that calls erx_tcp_conn:accept/1, its driver, the listener whose entry
 the socket process an accept binds the connection to. The cases check that the accept unit
 has one holder at a time: kept by a queued connection, released at `abandon` and at a
 refused adoption, which hands the interface its RST; that a queued connection pushes nothing
-and keeps the peer's bytes until its socket process's first message; and that its
-listener's exit aborts it with a RST.
+and keeps the peer's bytes until its socket process's first message; that its
+listener's exit aborts it with a RST; that a `bind` from any process but its listener, or a
+second one, ends it; and that a `bind` to a socket process already gone aborts it with a
+RST and an end at once.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -42,8 +44,8 @@ accept_test_() ->
       {"a bind that does not name its listener ends the connection",
        fun bind_from_another_process_ends_the_connection/0},
       {"a second bind ends the connection", fun second_bind_ends_the_connection/0},
-      {"a bind to a socket process already gone sends no bound and closes",
-       fun bind_to_a_gone_socket_process_closes/0}]].
+      {"a bind to a socket process already gone sends no bound and aborts",
+       fun bind_to_a_gone_socket_process_aborts/0}]].
 
 %% --- The stand-ins ---------------------------------------------------------------
 
@@ -200,17 +202,20 @@ second_bind_ends_the_connection() ->
     end.
 
 %% The socket process an accept names has ended before the bind: the connection's link
-%% meets `noproc`, so it answers nothing and closes as at its socket process's exit, and
-%% its listener answers the accept at the connection's own exit.
-bind_to_a_gone_socket_process_closes() ->
+%% meets `noproc`, so it answers nothing and aborts, a RST and its end at once, and its
+%% listener answers the accept `{error, econnaborted}` at that end, not after a graceful
+%% close has run its course.
+bind_to_a_gone_socket_process_aborts() ->
     Conn = queued(),
+    ConnRef = monitor(process, Conn),
     Gone = spawn(fun() -> ok end),
     Ref = monitor(process, Gone),
     receive {'DOWN', Ref, process, Gone, _} -> ok end,
     Conn ! {bind, self(), Gone},
-    await_flag(?TH_FIN),
+    await_rst(),
+    receive {'DOWN', ConnRef, process, Conn, normal} -> ok after ?WAIT -> error(still_running) end,
     receive {bound, Conn} -> error(bound) after 0 -> ok end,
-    ?assertMatch(#{owner := none}, owner(Conn)).
+    ?assertEqual([], erx_net_tables:demux(?KEY)).
 
 %% A connection queued on the test process as its listener, with its unit.
 queued() ->

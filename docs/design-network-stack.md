@@ -3952,10 +3952,14 @@ waits for its socket process's first message as every socket does
 [The socket process](#the-socket-process)); the bytes it took while
 queued are pushed within that first credit. A `SockProc` already gone
 answers the link with `noproc`, which the connection looks for at once,
-before it answers: finding it, it sends no `{bound, self()}` and closes
-as at its socket process's exit, and that exit answers the call
-`{error, econnaborted}`. ERTS queues the `noproc` before `link/1`
-returns once the process has left its process table (`bif.c`,
+before it answers: finding it, it sends no `{bound, self()}` and steps
+`abort`, as it does at its listener's exit while queued: it sends a RST
+and ends at once. The listener sees that exit through their link and
+answers the call `{error, econnaborted}`. It does not close gracefully: a close would keep the
+connection, and the listener's socket process's call with it, for its
+FIN's retransmissions or TIME-WAIT's 2MSL, so a pool of acceptors killed
+together would fill the listener's calls in flight for that long.
+ERTS queues the `noproc` before `link/1` returns once the process has left its process table (`bif.c`,
 `link_opt`); a `SockProc` still in its exit phases answers later, after
 the `bound`, so the call may be answered `{ok, Conn}` for a socket
 process that is ending, whose exit then closes the connection as any
@@ -6148,7 +6152,7 @@ stops reading stalls only its own sockets.
 | a listener ends: its socket process ends, its grant ends, or its step raises | its queued connections and its acceptors' socket processes, by their links; its socket process, by theirs | the connections it has handed out | each queued connection, with a RST, its backlog with it; the `accept` calls it has not answered, answered `{error, closed}` by its socket process ([The listener](#the-listener)) |
 | a queued connection ends: a peer's RST, a timeout, a raise | its listener, by their link | the listener and the rest of its queue | that connection, whose backlog place is free at once; an `accept` it was chosen for is answered `{error, econnaborted}` |
 | a grant refuses an accepted connection's adoption, or has ended | the connection, which releases its accept unit | the listener, which never hears of it | the connection, with FreeBSD's RST for a handshake it cannot give a socket |
-| an acceptor's socket process ends while its `accept` waits | the listener, by their link | everything else | that `accept`, answered `{error, econnaborted}`, which frees its place in flight; the next connection goes to the next caller |
+| an acceptor's socket process ends while its `accept` waits, or before the connection it is handing takes `bind` | the listener, by their link; in the second case the connection too, which aborts with a RST at the `bind` | everything else | that `accept`, answered `{error, econnaborted}`, which frees its place in flight; the next connection goes to the next caller |
 | the interface ends before its verdict on a connection it spawned | the connection, by its monitor, which releases its accept unit | everything else | the connection; its grant deletes any entry inserted for it |
 | a socket process's step raises (a bug) | the socket process, which presents the end as `{error, econnaborted}` from its state before the event, then exits with the exception | everything else | the socket process and, by their link, its socket |
 | a push breaks the socket protocol | the socket process, through `erx_sock_admit` | everything else | the socket, aborted ([Untrusted input](#untrusted-input)) |

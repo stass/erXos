@@ -101,7 +101,7 @@ nothing and admits no request; its listener's exit is its abort, a RST and its e
 crosses to a socket process before that process's first message; from that first admitted
 message on the owner is `SockProc`, as an active open's is. A `SockProc` already gone
 answers the link with `noproc`, which the connection looks for at once: it then answers
-nothing and closes as at its owner's exit. A bind naming another listener, or one once
+nothing and aborts, a RST and its end. A bind naming another listener, or one once
 bound, ends the connection. An accepted connection traps exits: its
 grant's exit ends it without a step, its owner's closes it as the owner's `'DOWN'` closes an
 active open, and any other exit, its listener's once bound among them, changes nothing.
@@ -383,8 +383,10 @@ handle_info({'EXIT', _, _}, S) ->
 %%
 %% A SockProc that has left the process table answers the link of this trapping process
 %% with `{'EXIT', SockProc, noproc}`, queued before link/1 returns (bif.c, link_opt): found
-%% at once, the connection answers nothing and closes as at its socket process's exit, so
-%% its own exit answers the accept `{error, econnaborted}`. One still in its exit phases
+%% at once, the connection answers nothing and steps abort, as at its listener's exit while
+%% queued: it sends a RST and ends at once. The listener sees that exit and answers the
+%% accept `{error, econnaborted}` at once; a graceful close would hold the call through a
+%% FIN's retransmissions or TIME-WAIT's 2MSL. One still in its exit phases
 %% answers the link later; the connection is bound by then, and that exit closes it in turn.
 %%
 %% A bind that does not name its listener, or one once bound, is a programming error that
@@ -393,7 +395,7 @@ handle_info({bind, Listener, SockProc}, #state{owner = {listener, Listener}} = S
     true = link(SockProc),
     receive
         {'EXIT', SockProc, noproc} ->
-            settle(owner_closed(S))
+            settle(step({user, abort}, S))
     after 0 ->
         Listener ! {bound, self()},
         settle(S#state{owner = {bound, SockProc}})

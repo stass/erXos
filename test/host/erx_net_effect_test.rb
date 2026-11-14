@@ -109,7 +109,7 @@ class ErxNetEffectTest < Minitest::Test
     ],
     # A bind that never looks for its socket process's noproc: the listener is told bound
     # for a socket process already gone, and would answer the accept {ok, Conn}.
-    bind_to_a_gone_socket_process_closes: [
+    bind_to_a_gone_socket_process_aborts: [
       "{'EXIT', SockProc, noproc} ->", "{'EXIT', SockProc, noproc_seeded} ->"
     ]
   }.freeze
@@ -119,6 +119,14 @@ class ErxNetEffectTest < Minitest::Test
       output = refute_erx_net_eunit(:erx_tcp_accept_tests, fault: { 'erx_tcp_conn' => fault })
       assert_match(/#{name}/, output)
     end
+  end
+
+  # A bind to a socket process already gone that closes gracefully instead of aborting: no
+  # RST, and the connection outlives the bind, holding its listener's accept call.
+  def test_seeded_fault_fails_a_gone_socket_process_closed_gracefully
+    fault = ["settle(step({user, abort}, S))\n    after 0", "settle(owner_closed(S))\n    after 0"]
+    output = refute_erx_net_eunit(:erx_tcp_accept_tests, fault: { 'erx_tcp_conn' => fault })
+    assert_match(/bind_to_a_gone_socket_process_aborts/, output)
   end
 
   # A failed check that keeps the token it spent starves the interface of its bucket.
