@@ -49,8 +49,9 @@ start table, the manifest's `start` rows with `/apps/rc.conf` over them,
 starts everything else. `service -e` prints both.
 
 **Where do I add my kiosk app?** In a package of its own, which
-`tools/erx pack --app` adds to an image and `pkg add` installs on a
-running machine, within the `apps` row the board's manifest declares
+`tools/erx pack --app` adds to an image and a copy into `/apps/pkg/`
+installs on a running machine, within the `apps` row the board's
+manifest declares
 ([design-packaging.md](design-packaging.md)). An app that is part of the
 board itself may instead be rows of the board's manifest: a principal, its
 session template naming the app's release, a facet row granting the
@@ -412,8 +413,9 @@ The start table keys on a principal with a session template and a
 registered within the manifest's `apps` row, its template is the one
 that row gives every app, and every admitted package has a start row,
 so the table, its keepers, the domain service and the display treat it
-as they treat an app of the manifest. The start service holds a
-package's row while its package is replaced or removed
+as they treat an app of the manifest. Before a package is replaced or
+removed, the package process publishes a package set without it, and
+the start service answers only once that app's sessions have ended
 ([design-packaging.md](design-packaging.md#installing-updating-and-removing)).
 How a package declares what it needs, which of the `apps` row's
 services it may take, how it is authenticated, added to an image,
@@ -428,7 +430,7 @@ installed, updated and removed, and what that does to its data, is
 
 | Command | Does |
 | --- | --- |
-| `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no row, a display another enabled row holds (with that row's name), a display not among the principal's `windows` services (for a package's app, those its admission kept), and a row the start service holds (`ebusy`) |
+| `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no row, a display another enabled row holds (with that row's name), a display not among the principal's `windows` services (for a package's app, those its admission kept) |
 | `service NAME disable` | stops the row and sets it disabled |
 | `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing |
 | `service NAME onestart [display=D]`, `onestop`, `onerestart`, `onestatus` | as above on any row: `onestart` starts the row's principal once, with no supervisor, and `onestop` stops it |
@@ -445,6 +447,7 @@ configured in the system manifest; its state is at `[domains, Id]`.
 | --- | --- | --- |
 | `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, and `stop NAME`. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no manifest row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` is unread, and `eio` for a failed write of `rc.conf` or start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
 | `rc.conf` | the machine's settings | nothing |
+| `pkg/` | one `NAME.pkg` for every package | a copy into it installs a package and a deletion removes one; `ctl` also takes `purge NAME` ([design-packaging.md](design-packaging.md#interfaces)) |
 
 Which templates hold the `apps` grant is the manifest's: `root`'s in a
 development build, an administrator's in a release build. A session

@@ -1689,7 +1689,8 @@ reported as a durable checkpoint.
   `apps/`, and answers `ok` once a completed checkpoint holds the removal
   and every write the service acknowledged before it, or at once for a
   directory already absent; the system domain's package process alone
-  sends it ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
+  sends it, for an administrator's purge of an app that is not installed
+  ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
   Under littlefs a
   checkpoint syncs every file open in the volume, then has the block
   driver flush the medium, and answers only then. Before a freezing

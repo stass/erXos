@@ -8,17 +8,13 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
-* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits its simplicity review,
-  then a second outside review, and the answers to its remaining questions for the owner (its "Risks and decisions");
-  then Track A's parts 2 and 3 build it ([plan.md](docs/plan.md#track-a-apps)). It answers the first outside review:
-  removal acts only on app-owned things (a held row, the package directory, the storage service's `remove_app`),
-  durable points by checkpoint with crash tests over reordered writes, the start service's hold over an app's row
-  during update and removal, a bounded recovery with its own fuzz target, the `packages` grant every app holds, the
-  complete principal-name reservation in admission, start rows counted against `start_rows_max`, the start table's
-  display check against an app's admitted grants, two authentication modes for headers, the architecture in the
-  header, signer changes only through deletion and a reboot, and checks by module, function and arity at the SDK's
-  boundary. Each app is a principal of its own within one `apps` row, its budget elastic under the `apps` budget,
-  as design-kernel.md and design-system.md record.
+* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits a second outside
+  review and the answers to its questions for the owner (its "Risks and decisions"), the first of which, a
+  close that answers an errno, decides how a refused copy is reported; then Track A's parts 2 and 3 build it
+  ([plan.md](docs/plan.md#track-a-apps)). An app names its needs, memory and code, and one `apps` row bounds
+  every app; installing is a copy into `/apps/pkg/`, whose close verifies, admits and publishes the package by
+  one rename, and removing is deleting the file, which keeps the app's data; each app is a principal of its own,
+  its budget elastic under the `apps` budget, as design-kernel.md and design-system.md record.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
@@ -2207,6 +2203,14 @@ it; git history is the record of completed work.
   answer does not fit in 512 bytes fails to resolve. Give the connection `{packet, 2}` framing, or
   have `erx_gen_tcp` frame the two-byte length itself, and test a truncated reply against a name
   server on the host.
+* [Medium] shell, `cp` (`erlang/apps/erx_shell/src/erx_cmd_cp.erl`, `copy_bytes/2`): a failed close of the
+  target is not reported. `cp` copies with `file:copy/2` between two names, which stock OTP runs in
+  `file_server`, whose copy closes the target and drops the close's answer
+  (`otp/lib/kernel/src/file_server.erl:177-193`), so `cp` succeeds where the target's server refused the
+  close. A copy into `/apps/pkg/` reports a refused package only through that close
+  ([design-packaging.md](docs/design-packaging.md#other-subsystems)). Fix: `cp` opens the target itself and
+  copies in the 64 KiB pieces design-shell.md's info report describes, checking `file:close/1`'s answer; a
+  test with a tree whose close answers `eio`.
 * [Medium] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`, `run/2`): a name or server
   argument with an empty label or a label over 63 bytes (`host a..b`, `host .foo`, `host www .foo`)
   crashes the command with `function_clause` from `inet_dns:encode_labels`, which stock OTP 29.1.2
@@ -5880,6 +5884,13 @@ to the corpus and follow rc
 
 ## Security residuals
 
+* [Medium] apps, a removed app's data passes to another signer
+  ([design-packaging.md](docs/design-packaging.md#security)): removing a package keeps the app's directory
+  under `apps/`, so after a reboot a package of the same name signed by a second trusted signer is admitted
+  and finds the first app's data. Every signer is a key the deployer put in the boot image; a deployer who
+  trusts more than one purges a removed app's directory first. When `purge` lands (M10), the storage
+  service's `remove_app` must refuse anything that is not an app name, and the package process must refuse a
+  purge of an installed or image package's name before any request.
 * [Medium] SSH before the vault, stages 2 and 3, development builds only
   ([design-ssh.md](docs/design-ssh.md#login-keys)): `erx_ssh_login`'s
   `login_key` admits root's development key on the SSH domain's own
@@ -6551,6 +6562,9 @@ document's "residual risks accepted" paragraph.
   full-speed devices with control, bulk and interrupt transfers. It serves QEMU `raspi4b` alone, since a real
   Pi 4's DWC2 is the USB-C power connector's, so it comes after Track U's parts
   ([plan.md](docs/plan.md#track-u-usb-proposed)); its design keeps the three rules the USB design records.
+* [Low] apps, [design-packaging.md](docs/design-packaging.md#the-apps-row): a setting for the apps group's
+  CPU share of `users`. The apps group takes what the principals' shares leave, each app an equal part, with
+  no field of the `apps` row to set it; a builder who wants apps held to a smaller share has no lever.
 * [Low] bootstrap, boot lines: print `/chosen/bootloader/build-timestamp` from the device tree
   (`rpi-eeprom-update` of `raspberrypi/rpi-eeprom` at `3831e51dba65f4493f3f88c1d049de73165c082e`, l.48), so a
   board report shows the bootloader version, which the Pi 4's A/B card needs to be 2022-12-01 or later
