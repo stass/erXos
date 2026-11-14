@@ -137,7 +137,7 @@ names; the table's order is the order.
 | 1b-C Track D, parts 1 to 4 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser; a QEMU `virt` display showing the window of a session that starts at boot with no login, drawn by that session into a buffer the display domain composes; and the same interface on a QEMU `virt` kiosk, drawn by LVGL as a program of the kiosk's session | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and track A's first part; part 4 also 1b-B's sub-space ports and pipes, 1b-D's first slice and track A's second part | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage and network domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
-| Track A, part 2 | an app built outside the tree with the SDK alone, added to an image with `tools/erx pack --app`, boots into its session from its class with exactly the rows its declaration names, its code read from its package at `/app` | estimated before it starts | part 1 | |
+| Track A, part 2 | an app built outside the tree with the SDK alone, added to an image with `tools/erx pack --app`, boots into its session with exactly the `apps` row's services its declaration names, its code read from its package at `/app` | estimated before it starts | part 1 | |
 | Track A, part 3 | the same package installed on a running machine with `pkg add` starts from the start table once enabled, survives a reboot, updates in place and is removed with its data | estimated before it starts | part 2, M6's data partition and 1b-E | |
 | 1b-F Track D, parts 6 to 8 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-C's part 3; part 8 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
@@ -1390,8 +1390,8 @@ land after M11 repeat M11's closure over what they add.
    the generated C reader of `ui.txt`'s binary form, with its `screen`,
    `input`, `repaint` and `presented` records and its `damage` reports.
    The kiosk's session: `examples/dashboard`, a package added to the
-   image in the development manifest's `kiosk` class, whose declaration
-   sets `ui_renderer` and whose start row names the display, from track
+   image within the development manifest's `apps` row, whose declaration
+   sets `ui_renderer` and whose start row is on the display, from track
    A's second part, with `erx-lvgl` in the domain release beside `erx_ui`
    ([design-packaging.md](design-packaging.md#the-sdk)); the application's restart by its supervisor
    and the session's by the row's keeper. The LVGL program holds its
@@ -1536,7 +1536,7 @@ sub-space maps its buffer's pages and no other page of the pixel area,
 and the program draws nothing between a `damage` report and its
 `presented`; killing the application brings its window back from its
 supervisor, and ending its session's domain brings a new session while
-a second app of the same class holding the display's grant stays
+a second app holding the display's grant stays
 hidden; the kiosk's image boots into its app with no login, and two
 images whose `app` and `start` rows name different apps share every
 other row of the manifest and the display domain's release; an idle
@@ -1666,10 +1666,12 @@ time.
    `service`; `/proc/apps`. An app is a principal of the manifest with its own template
    and release.
 2. **Packages added to an image**, after part 1
-   ([design-packaging.md](design-packaging.md)). The `class`, `package`
-   and `signer` rows in `abi/manifest.txt` and property 19; the domain
-   library's places and `erx_dom_plan_session` taking a place as
-   principal; `erx_principal:register_app/1`; the package format in
+   ([design-packaging.md](design-packaging.md)). The `apps`, `package`
+   and `signer` rows in `abi/manifest.txt`, the rows the build derives
+   from `apps`, and property 19; the `apps` budget and app principals'
+   elastic budgets under it; the domain library's app entries and
+   `erx_dom_plan_session` taking an app principal;
+   `erx_principal:register_app/2`; the package format in
    `abi/formats/package.txt`, `erx_pkg_header:verify/2` with its fuzz
    target, `erx_app_admit` with its corpus, run on the host by the
    packer; `erx_verity` reading an image from a file; the app's session
@@ -1684,11 +1686,14 @@ time.
    the image's packages lie in the boot image's domain release.
 3. **Installing at run time**, after part 2, M6's data partition and
    1b-E's storage domain. The `packages` tree of the storage service;
-   the `apps` tree's `pkg/` and its `install`, `discard` and `remove`
-   commands with their fuzz target; `erx_pkg_plan` with its crash-point
-   tests, `erx_pkg_io` and the recovery; signature checks with the small
-   verifier once it is in the build; removing a principal's directory;
-   `pkg add`, `pkg delete` and `pkg info`.
+   the `apps` tree's `pkg/` and its `install` and `remove` commands with
+   their fuzz target; `erx_starter:hold/1`; `erx_pkg_plan` with its
+   crash tests over reordered writes, `erx_pkg_io` and the bounded
+   recovery with its fuzz target; `pkg add`, `pkg delete` and `pkg
+   info`. Two checks of design-packaging.md's Phase 1 table land later:
+   an installed package's signature with the small verifier, at M11, and
+   removing an app's directory with the storage service's `remove_app`,
+   with principals' directories at M10.
 
 **Exit criteria, the start table.** The merge's host tests and their
 seeded faults (a row added for an undeclared principal, the display
@@ -1715,25 +1720,31 @@ can, a residual recorded in `TODO.md`.
 **Exit criteria, packages added to an image.** `examples/dashboard`
 builds, packs and passes its host test with nothing but the exported
 SDK on its paths, and the boundary check refuses its seeded call of a
-private module; a kiosk image made with `tools/erx pack --app
+private function; a kiosk image made with `tools/erx pack --app
 examples/dashboard --enable dashboard` boots to the dashboard on the
 display, with the board's manifest source unchanged, its session holding
-exactly the rows its declaration names; two apps of one class see none
-of each other's domains at `/proc`; a packaged test program with a window
+exactly the services its declaration names and the `packages` grant;
+two apps see none of each other's domains at `/proc`; a packaged test program with a window
 draws through `/dev/draw` and answers a key; each seeded fault of
 design-packaging.md's host tests and each seeded violation of property
 19 fails as designed; the header's and the declaration's fuzz targets
 run their budgets clean; no build list names `examples/`, and `make
 check` needs no `examples/doom`.
 
-**Exit criteria, installing at run time.** `pkg add` of a signed package
-shows it `admitted` at `/proc/packages`, `service NAME enable` starts it,
-and a reboot keeps it; a higher version replaces it with its files kept;
-`pkg delete` leaves no package, row or directory; a machine reset
-inside a removal finishes it at the next boot; a flipped image byte gives
-`eio` and the row `down`, a flipped header byte `refused`, an untrusted
-signer `eacces`; installing and removing more distinct names than a
-class's places in one boot refuses the last with `class_full`.
+**Exit criteria, installing at run time.** In a development build,
+`pkg add` of a package shows it `admitted` at `/proc/packages`, with its
+signer `unchecked` where it names one, `service NAME enable` starts it,
+and a reboot keeps it; a higher version of a running app replaces it
+with its files kept and no session of the old version alive once the
+hold has answered; `pkg delete` leaves no package or row, and shows its
+directory `kept`; a machine reset inside a removal finishes it at the
+next boot; a flipped image byte gives `eio` and the row `down`, a
+flipped header byte `refused`; the planners' crash tests over reordered
+writes and the recovery's fuzz target pass, with their seeded faults;
+installing and removing more distinct names than the `apps` row's `max`
+in one boot refuses the last with `apps_full`. The refusal of an
+untrusted signer is an exit criterion of M11, and `pkg delete` leaving
+no directory one of M10.
 
 ## M6: Immutable code, lasting data
 
@@ -2600,7 +2611,11 @@ its system shell; a host-link session holds exactly its configured facets;
 an overlay survives its domain's restarts and the machine's reboots, and
 is dropped when its release changes; each principal's hot store answers
 only for its own blobs; the code service's decoder of overlays and stores
-runs its fuzz budget clean.
+runs its fuzz budget clean; an app's `data` grant is rooted at its own
+directory under `apps/`, and `pkg delete` removes that directory
+through the storage service's `remove_app`, with no directory of a
+manifest principal reachable by it
+([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
 
 ## Track Q: The second tier
 
@@ -2757,7 +2772,10 @@ either fixed or recorded in `TODO.md` as accepted, with its reason. Every
 EROFS image the packer writes passes `erx_verity`'s check on the host; one byte flipped in an
 image fails the reads of its block with `eio` while every other file reads
 on; the hash-checking reader runs its fuzz budget clean; a release
-manifest that lists the host link's `web` facet fails the manifest check.
+manifest that lists the host link's `web` facet fails the manifest check;
+`pkg add` of a package of an untrusted signer answers `eacces`, and a
+release build refuses an unsigned one
+([design-packaging.md](design-packaging.md#the-package)).
 Release images are
 built with exactly LLVM 23.1.3, and their SHA-256 hashes are published, so
 anyone can rebuild an image with that release and compare the bytes.
@@ -3158,7 +3176,7 @@ Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm besid
              --> session domain (1b-B's first slice) --> 1b-C track D part 1 (GW) --> part 2
              --> 1b-E M9 on the stopgap --> track A part 3, installing at run time (on 1b-E's storage domain)
            track A part 1, the start table (on the session domain and M6's data partition)
-             --> track A part 2, packages added to an image (the SDK, classes, erx_app, examples/)
+             --> track A part 2, packages added to an image (the SDK, the apps row, erx_app, examples/)
              --> 1b-G network domain, GN-QEMU, M14 on QEMU
            1b-G's driver and stack in the system domain (from Phase 1, beside 1b-A)
              --> 1b-C track D part 3, the window stack on QEMU

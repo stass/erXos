@@ -8,12 +8,17 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
-* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits its outside review and
-  the answers to its questions for the owner (its "Risks and decisions"); then Track A's parts 2 and 3 build it
-  ([plan.md](docs/plan.md#track-a-apps)). It covers the app-class draft's review findings: places of a class
-  instead of a pool, overlays of an app in memory only, signer continuity, removal marked first and finished at
-  boot, install by sync and rename, the package's own read grant (`packages`, required on every class), and the
-  whole verification entry fuzzed.
+* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits its simplicity review,
+  then a second outside review, and the answers to its remaining questions for the owner (its "Risks and decisions");
+  then Track A's parts 2 and 3 build it ([plan.md](docs/plan.md#track-a-apps)). It answers the first outside review:
+  removal acts only on app-owned things (a held row, the package directory, the storage service's `remove_app`),
+  durable points by checkpoint with crash tests over reordered writes, the start service's hold over an app's row
+  during update and removal, a bounded recovery with its own fuzz target, the `packages` grant every app holds, the
+  complete principal-name reservation in admission, start rows counted against `start_rows_max`, the start table's
+  display check against an app's admitted grants, two authentication modes for headers, the architecture in the
+  header, signer changes only through deletion and a reboot, and checks by module, function and arity at the SDK's
+  boundary. Each app is a principal of its own within one `apps` row, its budget elastic under the `apps` budget,
+  as design-kernel.md and design-system.md record.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the

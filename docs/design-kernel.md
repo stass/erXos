@@ -1227,7 +1227,11 @@ ancestor's room. An **elastic** budget's cap may exceed its guarantee.
 The root budget, each
 principal's budget, each domain's budgets and a session's pool for its
 programs are walls, so a domain's memory depends on nothing outside it
-but the kernel ([design-system.md](design-system.md#resource-policy)); a
+but the kernel ([design-system.md](design-system.md#resource-policy)); an
+app principal's budget is elastic, with no guarantee, under the wall all
+apps share, so apps share that wall's memory while each of their
+domains' budgets is still a wall
+([design-packaging.md](design-packaging.md#an-apps-principal)); a
 program's budget is elastic, with the pool as its cap, so a program
 spends what its siblings are not using, as a QNX process draws on the
 system's pool within its `RLIMIT_AS`

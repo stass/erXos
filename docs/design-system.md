@@ -2835,7 +2835,10 @@ change only when a run moves, a capacity changes by more than a tenth, or
 
 **Budgets.** Each principal's budget is carved from the root budget at the
 manifest's size, as a wall, a budget whose cap is fixed equal to its
-guarantee ([design-kernel.md](design-kernel.md#budgets)); each domain's
+guarantee ([design-kernel.md](design-kernel.md#budgets)), and so is the
+budget the manifest's `apps` row gives all apps to share, under which
+each app principal's budget is elastic with no guarantee
+([design-packaging.md](design-packaging.md#an-apps-principal)); each domain's
 two budgets from its principal's, side by side and each a wall:
 its own budget at its spec's `memory`, and its outer
 budget at its spec's `outer`, which the policy sizes from the

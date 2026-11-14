@@ -50,7 +50,7 @@ starts everything else. `service -e` prints both.
 
 **Where do I add my kiosk app?** In a package of its own, which
 `tools/erx pack --app` adds to an image and `pkg add` installs on a
-running machine, into a class the board's manifest declares
+running machine, within the `apps` row the board's manifest declares
 ([design-packaging.md](design-packaging.md)). An app that is part of the
 board itself may instead be rows of the board's manifest: a principal, its
 session template naming the app's release, a facet row granting the
@@ -278,11 +278,14 @@ manifest declared and adds nothing.
 **The merge** is one pure function, `erx_start_table:merge(Rows, Local,
 Grants)`, over the manifest's rows and the admitted packages'
 ([design-packaging.md](design-packaging.md#the-start-tables-rows)), the
-parsed `rc.conf` and each template's `windows` grants. It applies the settings and then takes the
+parsed `rc.conf` and, for each row's principal, the `windows` services
+its sessions will hold: its template's grants, or for a package's app
+the `windows` services its admission kept, never every row the `apps`
+row offers. It applies the settings and then takes the
 enabled rows in the manifest's order:
 
-1. a row whose display is not a `windows` service granted to its
-   principal's template is refused with `{no_grant, Display}`;
+1. a row whose display is not one of its principal's `windows`
+   services is refused with `{no_grant, Display}`;
 2. a row whose display an earlier enabled row holds is refused with
    `{display_held, Name}`;
 3. every other enabled row is the table's.
@@ -406,11 +409,14 @@ fall into the rescue configuration at its fifth boot.
 
 The start table keys on a principal with a session template and a
 `start` row, and on nothing else. A package's app is a principal
-registered in a place of a class the manifest declares, its template is
-the class's, and its start row comes from its declaration, so the table,
-its keepers, the domain service and the display treat it as they treat
-an app of the manifest. How a package declares those, which of its
-class's grants it may take, how it is authenticated, added to an image,
+registered within the manifest's `apps` row, its template is the one
+that row gives every app, and every admitted package has a start row,
+so the table, its keepers, the domain service and the display treat it
+as they treat an app of the manifest. The start service holds a
+package's row while its package is replaced or removed
+([design-packaging.md](design-packaging.md#installing-updating-and-removing)).
+How a package declares what it needs, which of the `apps` row's
+services it may take, how it is authenticated, added to an image,
 installed, updated and removed, and what that does to its data, is
 [design-packaging.md](design-packaging.md).
 
@@ -422,7 +428,7 @@ installed, updated and removed, and what that does to its data, is
 
 | Command | Does |
 | --- | --- |
-| `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no manifest row, a display another enabled row holds (with that row's name), and a display the principal's template is not granted |
+| `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no row, a display another enabled row holds (with that row's name), a display not among the principal's `windows` services (for a package's app, those its admission kept), and a row the start service holds (`ebusy`) |
 | `service NAME disable` | stops the row and sets it disabled |
 | `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing |
 | `service NAME onestart [display=D]`, `onestop`, `onerestart`, `onestatus` | as above on any row: `onestart` starts the row's principal once, with no supervisor, and `onestop` stops it |
@@ -695,7 +701,7 @@ compiler, flags, workload and baseline.
 
 | Alternative | Why not |
 | --- | --- |
-| **App classes** for the manifest's own apps | Classes are what packages need, and [design-packaging.md](design-packaging.md#a-class) takes them up, each place of a class a principal of its own. For apps of the manifest a principal and a template of their own give per-app identity, authority and accounting with no mechanism beyond what principals already have |
+| **App classes** for the manifest's own apps | [design-packaging.md](design-packaging.md#alternatives-considered) weighs classes for packages too and takes one `apps` row instead. For apps of the manifest a principal and a template of their own give per-app identity, authority and accounting with no mechanism beyond what principals already have |
 | **Local rows for any principal with a template** | A crafted data partition could then start a person's session at a display without a login, or start any app. Declaring the rows in the manifest, as FreeBSD declares its services in `rc.d`, leaves the data partition able only to set what the builder declared |
 | **Apps run in the session of whoever starts them**, as programs do | The app holds the person's whole authority; see [Security](#security). Programs keep that model, deliberately: a tool a person runs acts for that person |
 | **An app is a configured domain** | A configured domain is part of the system: it sits in the boot order, its group is a child of `system`, it may hold devices, and its restarts are the domain service's. An app is a principal's code, charged to that principal under `users` |

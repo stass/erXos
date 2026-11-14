@@ -1646,9 +1646,12 @@ reported as a durable checkpoint.
 * **The storage services and the FAT server** implement 9P2000.L's
   operations through `erx_fs` and facets, one grant per client, rooted at
   a principal's directory or a service's
-  ([design-files.md](design-files.md#the-file-protocol)), each answering
-  the operations its format cannot store, links, nodes or extended
-  attributes, with the protocol's error; a client over its quota gets
+  ([design-files.md](design-files.md#the-file-protocol)); a grant whose
+  facet row carries `tree apps` is rooted at `apps/PRINCIPAL/`, among the
+  app directories, which no other grant reaches
+  ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
+  Each answers the operations its format cannot store, links, nodes or
+  extended attributes, with the protocol's error; a client over its quota gets
   `{error, enospc}`.
 * **The EROFS reader**, `erx_erofs`, serves `prim_file`'s operations on an
   EROFS mount in the calling process
@@ -1680,7 +1683,14 @@ reported as a durable checkpoint.
   client of its storage service, may also ask that service for a
   checkpoint without a freeze, so a change the vault publishes is durable
   before the vault answers it
-  ([design-system.md](design-system.md#the-vault)). Under littlefs a
+  ([design-system.md](design-system.md#the-vault)). The data
+  partition's service also takes **remove_app** `Name`, `Name` one
+  identifier, which removes `apps/Name` whole and reaches nothing outside
+  `apps/`, and answers `ok` once a completed checkpoint holds the removal
+  and every write the service acknowledged before it, or at once for a
+  directory already absent; the system domain's package process alone
+  sends it ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)).
+  Under littlefs a
   checkpoint syncs every file open in the volume, then has the block
   driver flush the medium, and answers only then. Before a freezing
   checkpoint reaches that module, `erx_fs` closes mutation admission at
