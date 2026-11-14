@@ -681,8 +681,10 @@ callers as it says.
 `erx_entropy_read` leaves the generator's bytes in the caller's UTCB, where the next call that writes the
 message words, or anything that reads them, would find them. So no caller calls it but one:
 `erx_entropy_take(out, len)` (`liberx/backend/core/entropy_take.c`, the same on every backend) makes the read,
-moves the bytes into `out` and zeroes each message word that held them, and the `entropy-take` chokepoint keeps
-`erx_entropy_read` to it, the backends that define it and the function-API set that tests it. musl's
+moves the bytes into `out` and zeroes each message word that held them. `liberx/backend/api.h` declares only
+the take; the read is declared in a header private to it, `liberx/backend/core/entropy_read.h`, so a caller
+that names the read without that header fails to build, and the `entropy-take` chokepoint keeps the header and
+the name to the take, the backends that define the read and the function-API set that tests it. musl's
 `getrandom` row, `AT_RANDOM`'s bytes, the runtime's reference key and `erx_bytes:entropy/1` all take their bytes
 through it.
 

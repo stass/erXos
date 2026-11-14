@@ -1382,10 +1382,6 @@ it; git history is the record of completed work.
   `sdot`, `fcmla`, `fjcvtzs`, a half-precision `fadd`) under TCG and HVF; and tie each claim to the Fiasco fact
   behind it (`Sctlr_uci` in `Sctlr_el1_generic`, `CONFIG_FPU` required) in the host test.
   domain at load (`docs/design-crypto.md`, K4).
-* [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`,
-  `liberx/backend/fiasco/libc_start.c` `random_fill`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
-  `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
-  leaves them in the UTCB. One liberx call that reads into a caller's buffer and erases mr would make that hold for every caller.
 * [Medium] musl, `musl/src/thread/erxos/pthread_create_executor.c`, `musl/src/internal/erxos/syscall.c`: only the boot covers them. `test/guest/native_musl` needs the hosted
   driver's cases (no attribute, no free slot, the slot given back at exit).
 * [Low] `otp/erts/emulator/sys/erxos/sys.c`, `beam/erl_process.c`, `beam/erl_driver.h`: what signals' deletion leaves unused: the break flag and `erts_do_break_handling`, `thr_create_sigmask`,
@@ -4995,13 +4991,12 @@ handing call's socket process exit and its connection's, is not yet looked for. 
     exist yet with `{error, unsupported}`, and any other request, an
     unlisted name included, with `{error, badarg}`.
 * [Medium] security, host-link session identifiers
-  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `entropy/0`): no Erlang
-  entry reaches `erx_entropy_read`, so a session identifier is `rand:bytes/1`
-  under the seed `rand` takes from the time and the node, which the design
-  accepts only in trusted development modes. Draw it from
-  `erx_bytes:entropy/1`
-  ([design-runtime.md](docs/design-runtime.md#per-byte-primitives)) once
-  that call is written.
+  (`erlang/apps/erx_hostlink/src/erx_hostlink.erl`, `entropy/0`): a session
+  identifier is `rand:bytes/1` under the seed `rand` takes from the time and
+  the node, which the design accepts only in trusted development modes. Draw
+  it from `erx_bytes:entropy/1`
+  ([design-runtime.md](docs/design-runtime.md#per-byte-primitives)), which
+  takes the generator's bytes through `erx_entropy_take`.
 * [Medium] live, host-link sink check: "only the host link's own sink
   writes its UART" holds because erx_hostlink alone asks for the `hostlink`
   device record and owns its erx_pl011, but no build check refuses another

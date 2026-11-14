@@ -19,6 +19,7 @@
 #include "erx/abi.h"
 #include "liberx/backend/api.h"
 #include "erx/abi_reader.h"
+#include "liberx/backend/core/entropy_read.h"
 #include "liberx/backend/core/group_report.h"
 #include "test/guest/function_api/cases.h"
 
@@ -1177,11 +1178,12 @@ static bool
 case_entropy_add(void)
 {
 	erx_utcb_t *const utcb = erx_utcb_self();
+	uint8_t out[16];
 
 	for (uint32_t word = 0; word < 8; word++)
 		atomic_store(&utcb->mr[word], word);
 	return (erx_entropy_add(0, 0, 0) == ERX_OK && erx_entropy_add(0, 8 * sizeof(uint64_t) - 1, 0) == ERX_OK &&
-	    erx_entropy_read(16) == ERX_OK);
+	    erx_entropy_take(out, sizeof(out)) == ERX_OK);
 }
 
 static bool

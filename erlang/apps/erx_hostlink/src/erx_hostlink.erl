@@ -310,10 +310,10 @@ root(_Request, _Link) ->
 versions() ->
     #{hostlink => ?ERX_HOSTLINK_VERSION}.
 
-%% A session identifier. Phase 1 has no entropy source in the system domain,
-%% so this is rand's generator under the seed it takes from the time and the
-%% node, which the design accepts only in trusted development modes
-%% (docs/design-live.md, "Sessions"; TODO.md).
+%% A session identifier: rand's generator under the seed it takes from the
+%% time and the node, which the design accepts only in trusted development
+%% modes (docs/design-live.md, "Sessions"). TODO.md has drawing it from
+%% erx_bytes:entropy/1 instead.
 entropy() ->
     rand:bytes(16).
 

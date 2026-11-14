@@ -8,8 +8,11 @@
  * erx_entropy_read leaves its bytes in the caller's UTCB mr, where the next call that
  * writes mr, or anything that reads this thread's UTCB, would find them. Taking them
  * means three steps in one place: read, move each word into the caller's buffer, and
- * zero the word in mr. A chokepoint (tools/lib/erx/chokepoint_rules/entropy.rb) keeps
- * erx_entropy_read to this file, so no caller can do the first step and forget the last.
+ * zero the word in mr. The read is declared only in its private header,
+ * liberx/backend/core/entropy_read.h, which this file includes and the entropy-take
+ * chokepoint (tools/lib/erx/chokepoint_rules/entropy.rb) keeps from every other caller
+ * but the function-API set that tests the read, so no caller can do the first step and
+ * forget the last.
  */
 
 #include <stdint.h>
@@ -17,6 +20,7 @@
 #include "erx/abi.h"
 #include "erx/explicit_bzero.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/entropy_read.h"
 
 _Static_assert(ERX_ENTROPY_BYTES_MAX <= ERX_MSG_WORDS * sizeof(uint64_t), "a read fits in mr");
 

@@ -197,21 +197,20 @@ int	erx_mem_dma_addr(uint64_t mem, uint64_t offset, uint64_t *addr) ERX_WARN_UNU
 int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t offset, uint32_t prot) ERX_WARN_UNUSED_RESULT;
 
 /*
- * Entropy: at most ERX_ENTROPY_BYTES_MAX bytes a call, at the head of the caller's UTCB's
- * mr, packed from each word's low byte. A read touches no byte past len, and after a read
- * that fails mr's first len bytes hold none of this read's bytes: they are zero, or as they
- * were. More bytes, or an unknown flag, is ERX_EINVAL, and ERX_ENTROPY_CREDIT is
- * ERX_ENOTSUP, since no source is trusted. What the bytes are worth natively, the root's
- * banner line says. res is ignored.
- */
-int	erx_entropy_read(uint32_t len) ERX_WARN_UNUSED_RESULT;
-/*
- * The one way to the generator's bytes (liberx/backend/core/entropy_take.c): len bytes from
- * one erx_entropy_read, moved into out, with every mr word that held them zeroed, so no copy
- * stays in this thread's mr. Only it calls erx_entropy_read, a build check. A read that fails
- * returns its status and leaves out untouched.
+ * Entropy, at most ERX_ENTROPY_BYTES_MAX bytes a call. erx_entropy_take is the one way to
+ * the generator's bytes (liberx/backend/core/entropy_take.c): len bytes from one read of
+ * the generator, moved into out, with every mr word that held them zeroed, so no copy stays
+ * in this thread's mr. The read itself is private to it (liberx/backend/core/entropy_read.h).
+ * A read that fails returns its status and leaves out untouched; more bytes is ERX_EINVAL.
+ * What the bytes are worth natively, the root's banner line says.
  */
 int	erx_entropy_take(void *out, uint32_t len) ERX_WARN_UNUSED_RESULT;
+/*
+ * len bytes from the head of the caller's UTCB's mr, packed from each word's low byte, to
+ * mix into the generator where the backend has one (the hosted backend discards them).
+ * More bytes, or an unknown flag, is ERX_EINVAL, and ERX_ENTROPY_CREDIT is ERX_ENOTSUP,
+ * since no source is trusted. res is ignored.
+ */
 int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_RESULT;
 
 /*

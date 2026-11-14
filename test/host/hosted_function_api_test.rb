@@ -112,6 +112,20 @@ class HostedFunctionApiTest < Minitest::Test
     end
   end
 
+  # liberx's header offers the generator's bytes only through erx_entropy_take, so a
+  # caller that reads the generator itself, leaving its bytes in mr, does not build; the
+  # same file with the take does, so the refusal is the missing declaration alone.
+  def test_a_caller_outside_the_funnel_cannot_name_the_read
+    { 'erx_entropy_take(out, 16)' => true, 'erx_entropy_read(16)' => false }.each do |call, builds|
+      source = File.join(@directory, 'caller.c')
+      File.write(source, "#include <stdint.h>\n#include \"liberx/backend/api.h\"\n" \
+                         "int f(uint8_t out[16]) { (void)out; return #{call}; }\n")
+      log, status = Open3.capture2e(compiler, *FLAGS, '-fsyntax-only', source, chdir: ROOT, stdin_data: '')
+      assert_equal builds, status.success?, log
+      assert_match(/erx_entropy_read/, log) unless builds
+    end
+  end
+
   # Nothing in the set may depend on what only one backend gives.
   def test_the_set_reads_no_backend_identifier
     %w[cases.c cases.h irq_cases.c].each do |name|

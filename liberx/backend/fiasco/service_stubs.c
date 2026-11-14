@@ -20,6 +20,7 @@
 #include "erx/explicit_bzero.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/device_check.h"
+#include "liberx/backend/core/entropy_read.h"
 #include "liberx/backend/core/gate.h"
 #include "liberx/backend/fiasco/service.h"
 #include "liberx/backend/fiasco/thread.h"
