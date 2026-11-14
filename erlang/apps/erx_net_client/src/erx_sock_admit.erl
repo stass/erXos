@@ -42,14 +42,14 @@ in another domain, an envelope of another domain, or a change from another grant
 refused.
 
 **Pushes.** push/4 takes a message the socket process received, for its socket `Socket`
-of kind `tcp`, `udp` or `icmp`, whose grant's domain arrives by `Origin`. A message bare
+of kind `tcp`, `tcp_listen`, `udp` or `icmp`, whose grant's domain arrives by `Origin`. A message bare
 from a `local` socket, or `{erx_origin, D, Msg}` with `D` the origin, and `Msg`
 `{erx_net, Socket, Body}` from that very socket, is the socket's; anything else is
 `unknown`, for the caller to drop and count. Of the socket's, `Body` must be one of the
 pushes its kind's socket makes:
 
 * any kind: `{reply, N, Result}`, `N` a request count, `Result` checked by result/2 once
-  the socket process knows which request `N` was;
+  the socket process knows which request `N` was; a listener pushes nothing else;
 * `tcp`: `{data, Pieces}`, a proper list of 1 to 64 binaries of 1 to 65,536 bytes in all,
   counted without walking past the 64th element, so a long list costs no more; `eof`;
   and `{error, Reason}` with `Reason` one of the end reasons;
@@ -71,6 +71,10 @@ kind's reply type, its errors from that kind's closed list:
   (`edestaddrreq`, `emsgsize`, `enobufs`, `enetunreach`, `ehostunreach`,
   `eaddrnotavail`, `einval`, `badarg`); `udp_connect`: `ok`;
 * `echo_send`: `ok`, or a refusal of its path or of the driver;
+* `{accept, Node}`, a listener's answer to `accept`, `Node` the listener's node: `{ok, Conn}`
+  with `Conn` a pid of that node, as an open's socket is checked, so a network domain cannot
+  hand a program a process of a third domain as its connection; or `econnaborted`,
+  `timeout` or `badarg`;
 * `close`: `ok`.
 
 The errors of the replies answered at once (`setopts`, `getopts`, `sockname`,
@@ -91,7 +95,7 @@ that breaks the protocol.
 -doc """
 The check that refused a term: `operation`, an operation with no declared reply type;
 `shape`, a term of none of the reply's forms; `socket`, an open's socket that is not a
-pid of the grant's node; `interface`, an interface the interfaces check refuses; `reason`, an error reason outside the operation's closed list;
+pid of the grant's node, or an accepted connection not of its listener's; `interface`, an interface the interfaces check refuses; `reason`, an error reason outside the operation's closed list;
 `resolver`, a resolver answer the resolver check refuses; `origin`, a change message
 without the grant's envelope or from another grant; `push`, a socket's push of none of
 the protocol's shapes. The socket process adds its own checks of a push: `reply`, a
@@ -100,12 +104,12 @@ or `eof` after `eof`.
 """.
 -type check() :: operation | shape | socket | interface | reason | resolver | origin | push | reply | credit | order.
 
--doc "A socket's kind: a TCP connection, a UDP datagram socket or an ICMP echo socket.".
--type kind() :: tcp | udp | icmp.
+-doc "A socket's kind: a TCP connection, a TCP listener, a UDP datagram socket or an ICMP echo socket.".
+-type kind() :: tcp | tcp_listen | udp | icmp.
 
 -doc "What a request was, for result/2: the reply type its result is checked against.".
 -type result_kind() :: send | shutdown | setopts | getopts | sockname | peername | udp_send | udp_connect
-                     | echo_send | close.
+                     | echo_send | close | {accept, node()}.
 
 -doc "A socket's push, as push/4 admits it.".
 -type push() :: {reply, non_neg_integer(), term()} | {data, [binary(), ...]} | eof
@@ -145,6 +149,9 @@ or `eof` after `eof`.
 %% `badarg`, and the end that answers a send still waiting.
 -define(SEND_REASONS, [epipe, ebusy, enotconn, badarg | ?END_REASONS]).
 -define(SHUTDOWN_REASONS, [enotconn, badarg | ?END_REASONS]).
+%% A listener's answers to an accept: a connection that ended before it was handed out,
+%% the deadline, and the socket protocol's `badarg`.
+-define(ACCEPT_REASONS, [econnaborted, timeout, badarg]).
 -define(PIECE, 65536).
 -define(MAX_PIECES, 64).
 -define(IS_BYTE(X), (is_integer(X) andalso X >= 0 andalso X =< 255)).
@@ -220,6 +227,10 @@ Checks `Result`, a socket's reply to a request of kind `Kind`, against that kind
 type; answers it rebuilt from its checked parts, or the check that refused it.
 """.
 -spec result(result_kind(), term()) -> {ok, term()} | {refused, check()}.
+result({accept, Node}, {ok, Conn}) when is_pid(Conn), node(Conn) =:= Node ->
+    {ok, {ok, Conn}};
+result({accept, _Node}, {ok, _}) ->
+    {refused, socket};
 result(Kind, ok) when Kind =:= send; Kind =:= shutdown; Kind =:= setopts; Kind =:= udp_send;
                       Kind =:= udp_connect; Kind =:= echo_send; Kind =:= close ->
     {ok, ok};
@@ -231,7 +242,7 @@ result(Kind, {ok, {{A, B, C, D}, Port}})
   when (Kind =:= sockname orelse Kind =:= peername), ?IS_BYTE(A), ?IS_BYTE(B), ?IS_BYTE(C), ?IS_BYTE(D),
        is_integer(Port), Port >= 0, Port =< 16#ffff ->
     {ok, {ok, {{A, B, C, D}, Port}}};
-result(Kind, {error, Reason}) when is_atom(Kind) ->
+result(Kind, {error, Reason}) ->
     case lists:member(Reason, reasons(Kind)) of
         true -> {ok, {error, Reason}};
         false -> {refused, reason}
@@ -243,6 +254,7 @@ result(_Kind, _Result) ->
 reasons(send) -> ?SEND_REASONS;
 reasons(shutdown) -> ?SHUTDOWN_REASONS;
 reasons(Kind) when Kind =:= udp_send; Kind =:= echo_send -> ?DATAGRAM_REASONS;
+reasons({accept, _}) -> ?ACCEPT_REASONS;
 reasons(_) -> [badarg].
 
 %% The reply type of each operation: what its `ok` carries, and its error reasons.

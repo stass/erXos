@@ -17,8 +17,7 @@ lookup method, so the case needs no network.
 -define(WAIT, 3000).
 
 unsupported_test_() ->
-    [{"listen is not offered", ?_assertEqual({error, enotsup}, erx_gen_tcp:listen(8080, [binary]))},
-     {"fdopen is not offered", ?_assertEqual({error, enotsup}, erx_gen_tcp:fdopen(3, []))},
+    [{"fdopen is not offered", ?_assertEqual({error, enotsup}, erx_gen_tcp:fdopen(3, []))},
      {"connect with a socket-address map is not offered",
       ?_assertEqual({error, enotsup},
                     erx_gen_tcp:connect(#{family => inet, addr => {10, 0, 2, 2}, port => 80}, [], 1000))}].

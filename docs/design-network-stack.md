@@ -5214,10 +5214,12 @@ socket is gone: the socket process sends `close`, moves to `closed` and
 answers every call it holds `{error, closed}`, except the sends waiting
 for credit, of which the first meets the end's reason as **Send credit**
 below says. Since it traps exits, an exit from any other process reaches
-it as a message too: one from a process of its own domain stops it with
-that reason, as the exit would stop it if it did not trap, and one from
-another domain is dropped and counted, since only its socket is linked
-to it there. In active mode it presents what it holds,
+it as a message too, and is dropped and counted: once the socket process
+holds its socket, only its socket is linked to it, and a domain that
+runs the stack itself, a development host among them, cannot tell the
+stack's processes from its own by their node, so an exit of a listener
+that ended between its answer to an `accept` and its unlink must not end
+the accepted socket. In active mode it presents what it holds,
 then `{tcp_error, S, Reason}` where stock shows the reason (`econnreset`
 only under `show_econnreset`) and `{tcp_closed, S}`. In passive mode the
 end waits for the owner as above, and the first recv that what is held

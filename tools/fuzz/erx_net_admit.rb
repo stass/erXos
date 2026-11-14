@@ -49,11 +49,14 @@ module ErxNetAdmitFuzz
     ],
     'sock' => [
       Fault.new(what: 'an interfaces check without the name bound', source: SOCK,
-                anchor: 'byte_size(Name) >= 1, byte_size(Name) =< ?IFNAMSIZ,',
-                replacement: 'byte_size(Name) >= 1,', marker: 'answer_admitted_bad'),
+                anchor: 'byte_size(Name) =< ?IFNAMSIZ, is_integer(Mtu)',
+                replacement: 'is_integer(Mtu)', marker: 'answer_admitted_bad'),
       Fault.new(what: 'a datagram push check without the datagram bound', source: SOCK,
                 anchor: 'is_binary(Data), byte_size(Data) =< ?MAX_UDP ->',
-                replacement: 'is_binary(Data) ->', marker: 'push_admitted_bad')
+                replacement: 'is_binary(Data) ->', marker: 'push_admitted_bad'),
+      Fault.new(what: 'an accept check that does not compare the node of the connection', source: SOCK,
+                anchor: 'result({accept, Node}, {ok, Conn}) when is_pid(Conn), node(Conn) =:= Node ->',
+                replacement: 'result({accept, _Node}, {ok, Conn}) when is_pid(Conn) ->', marker: 'result_admitted_bad')
     ]
   }.freeze
 

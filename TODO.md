@@ -502,9 +502,10 @@ it; git history is the record of completed work.
   as `ENOSYS` tracing shows it;
 * [Low] `test/fixtures/runtime_event_harness.c`: the sleep step's model copies the park core by hand and has no waker; driving
   `erx_backend_park_step` and a waker would pin the reason the epochs come before the flag.
-* [Low] `erlang/apps/erx_net_client/src/erx_gen_tcp.erl`: `listen/2` answers `{error, enotsup}`, where
-  `docs/design-runtime.md` says `{error, eacces}` without a grant. The answer changes when the network service offers
-  listening sockets and checks the grant.
+* [Low] `erlang/apps/erx_net_client/src/erx_inet.erl` (`find/0`): without a grant, `gen_tcp:connect/4`,
+  `gen_tcp:listen/2` and `gen_udp:open/2` answer the grant key's `{error, enotconn}` (`erx_net:local_grant/0` on a node
+  without the stack), where `docs/design-runtime.md` says `{error, eacces}`. Map a missing grant to `eacces` in the one
+  path to the grant, with a case per open.
 * [Low] `otp/erts/emulator/test/binary_SUITE.erl`: `make_port/0` is `hd(erlang:ports())`, and `ports()` is empty by design,
   so its term-ordering cases fail with `hd([])`. Opening `{spawn_driver, "ram_file_drv"}` there gives a real port (checked on
   hosted), and is the route when the suite is next run for its results.
@@ -1799,7 +1800,8 @@ it; git history is the record of completed work.
   (`brgphy.c:356-383`), so a negotiation that sticks leaves the link down until the driver restarts.
   Restart it every few link polls without a link if the board shows a stuck negotiation.
 * [Medium] hosted runtime test, network rows (`test/integration/runtime_hosted_smoke_test.rb`,
-  `test_init_runs_from_the_archive_alone`): the rows `gen_tcp:listen(0, [])` (expects `{error,enotsup}`) and
+  `test_init_runs_from_the_archive_alone`): the rows `gen_tcp:listen(0, [])` (expects `{error,enotsup}`, which
+  `erx_gen_tcp:listen/2` does not answer: it asks the grant) and
   `gen_udp:open(0, [])` (expects an `erx_gen_udp` socket) assume the system release ships `erx_net`, but it has
   not since the stack left the system domain (`ReleaseFiles::SYSTEM_APPLICATIONS`), so the first answers `undefined
   function erx_gen_tcp:listen/2` and the test fails; `erx_gen_tcp` also exports `listen/2` now. Decide what
@@ -1919,8 +1921,7 @@ it; git history is the record of completed work.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:
-  `listen/2` and `accept` (the listener's socket process), local `controlling_process/2`
-  (`enotsup`), the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
+  the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
   options, the schema-generated request validators, `erxos/erx_net_client_erxos`'s
   `expose/2`, and the session template's `grant` key naming its `grant/0` once the grant is
   in another domain.
@@ -1932,9 +1933,30 @@ it; git history is the record of completed work.
   `{active, 0}` or a count that stays at or below 0 fails waiting recvs `einval` though the
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
-  met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`.
+  met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`. `listen/2` and
+  `connect/4` answer an option the backend does not take `{error, einval}`, where stock raises
+  `badarg` for one it does not know either.
+  The listening socket (`erx_gen_tcp`, `erx_gen_tcp_core`): it is a `listening` state of the
+  connection's `#core{}`, so a listener core can hold connection fields and its protocol is
+  spread over the connection's helpers; give it its own record and step sharing only the
+  requests-in-flight helpers. A listening socket with `{active, N}`, `N =< 0`, sends no
+  `{tcp_passive, L}` and hands that count to its accepted sockets, where stock goes passive at
+  once. `opening` answers calls `einval` and drops pushes, where the design postpones calls and
+  stops with `econnaborted`. An accept's socket process is started before the core decides,
+  and `{hand_over, ...}` is taken from any local caller, not only the starter.
+  `controlling_process/2` to a dead process is refused before anything moves, where stock
+  forwards the queued messages to it and answers `badarg` (a documented difference without its
+  test yet); a new owner that dies between the two calls is answered `ok`, then closes the
+  socket. Not yet tested: no socket process survives an accept timeout, a close with accepts
+  waiting or an accept caller's death; a hand-over to an ended socket process; the owner's
+  exit mid-transfer.
+  The socket process's monitor of its socket and its plain sends may suspend it behind a busy
+  lane, where the design says it never makes a monitor or call towards the network domain once
+  it holds its socket (no `erx_sock_out`, no `{async_dist, false}`).
 * [Medium] network (the client side of `net`; design-domains, "Floors from a protocol"):
-  the socket protocol's floors are not generated from `abi/services/net.txt`, and no client
+  the socket protocol's floors are not generated from `abi/services/net.txt` (the client keeps copies:
+  `?ACCEPT_REASONS`, `listener_option/1`, `?IS_TIMEOUT`, the 64 in flight; a request the network
+  side refuses goes unanswered, so its client call hangs), and no client
   checks them at run time. The manifest check holds each `net` grantee's `max_frame` to
   `net_max_frame_min` (property 15), a limit set by hand in that file; nothing checks the
   serving domain's `max_frame` against it at build, as design-domains says the manifest
@@ -2241,8 +2263,9 @@ it; git history is the record of completed work.
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
 which its grant adopts and which queues itself on its listener; the grant's `tcp_listen` starts the listener
 (`erx_tcp_listen`), which claims its key by an explicit bind within the ports `erx_net_grant_core:bind_ports/3`
-derives from the `ports`, `listen` and `addresses` limits, and rewrites its entry at a `setopts` of `nodelay`.
-Missing: `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's
+derives from the `ports`, `listen` and `addresses` limits, and rewrites its entry at a `setopts` of `nodelay`;
+`erx_gen_tcp`'s `listen/2` and `accept/2` reach it through the listening socket's process.
+Missing: the grant's
 `sockets` limit, so `adopt/2` refuses only past `buffers` and a listen never answers `emfile`; pausing, since the grant has no account to pause a
 listener for; and the QEMU case. The core's exploration runs at one end per run, the landing gate's bound; its
 two-end run, `explore(#{ends => 2})`, tens of millions of states, belongs to the milestone gate, on the remote
@@ -2254,7 +2277,7 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   TIME-WAIT (E3, counted `reinject`); the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
   holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
-  stays open until its owner closes it), `controlling_process/2` (`enotsup`), the packet modes,
+  stays open until its owner closes it), the packet modes,
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
@@ -6672,9 +6695,6 @@ document's "residual risks accepted" paragraph.
   [design-runtime.md](docs/design-runtime.md)): `inet:getifaddrs/0` and `inet:gethostname/0` take the
   `inet` backend's path, which `inet_backend/0` maps `erx` to, and answer from ERTS's own calls rather than
   ask the domain's network grant. Add the grant operations and the `erx` clauses, with tests on the host.
-* [Medium] network, `erx_gen_tcp:listen/2`: it answers `{error, enotsup}`, since the grant opens no
-  listening socket, so `gen_tcp:listen/2` fails on erXos. Add the grant's listen and accept operations
-  over the stack's listener and `erx_gen_tcp:accept/1,2`, with the same tests as active open.
 * [Low] shell, `host` (`erlang/apps/erx_shell/src/erx_cmd_host.erl`): FreeBSD's host(1) also asks for MX
   records and writes `name mail is handled by N exchange.`; erXos's asks only A, AAAA and PTR. Add the MX
   query and its line, with a case in `test/erlang/erx_cmd_host_tests.erl`.

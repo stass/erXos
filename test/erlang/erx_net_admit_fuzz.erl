@@ -17,12 +17,12 @@ tools/fuzz/erx_net_admit.rb. Two targets:
   module's own reading of the design's rules; a verdict that admits what
   the rules refuse prints `request2_admitted_bad`, `request3_admitted_bad`
   or `mint_admitted_bad`.
-* `sock`: erx_sock_admit's answer/3, change/3, push/3 and result/2 on the
+* `sock`: erx_sock_admit's answer/3, change/3, push/4 and result/2 on the
   same kind of input, as the network domain could send it. An admitted
   answer must be rebuilt of checked parts only (an interface of exactly its
   six keys, names of 1 to 15 bytes of letters, digits, `.`, `-` and `_`, at
   most 64 interfaces and 64 addresses each, socket pids of the grant's node
-  only, data of at most 64 pieces and 65536 bytes). A verdict that admits
+  only, accepted connections of the listener's node only, data of at most 64 pieces and 65536 bytes). A verdict that admits
   what the rules refuse prints `answer_admitted_bad`, `change_admitted_bad`,
   `push_admitted_bad` or `result_admitted_bad`.
 
@@ -429,9 +429,11 @@ kind_reasons(send) -> [epipe, ebusy, enotconn, badarg | end_reasons()];
 kind_reasons(shutdown) -> [enotconn, badarg | end_reasons()];
 kind_reasons(Kind) when Kind =:= udp_send; Kind =:= echo_send ->
     [edestaddrreq, emsgsize, enobufs, enetunreach, ehostunreach, eaddrnotavail, eacces, einval, badarg];
+kind_reasons({accept, _}) -> [econnaborted, timeout, badarg];
 kind_reasons(_) -> [badarg].
 
-result_kinds() -> [send, shutdown, setopts, getopts, sockname, peername, udp_send, udp_connect, echo_send, close].
+result_kinds() -> [send, shutdown, setopts, getopts, sockname, peername, udp_send, udp_connect, echo_send, close,
+                    {accept, node()}].
 
 %% Every reason of any list above, and some of none.
 reason() ->
@@ -664,11 +666,16 @@ push() ->
     Origin = grantee(),
     Socket = pick([self(), pid(other_node(), 3)]),
     Wrong = pick([Socket, Socket, Socket, pid(other_node(), 4)]),
+    Body = push_body(),
     Message = case rand:uniform(12) of
                   1 -> garbage();
-                  _ -> frame(Origin, {erx_net, Wrong, push_body()})
+                  _ -> frame(Origin, {erx_net, Wrong, Body})
               end,
-    Kind = pick([tcp, udp, icmp]),
+    %% Half the time the kind whose push the body is, as for requests.
+    Kind = case rand:uniform(2) of
+               1 -> push_kind_of(Body);
+               2 -> pick([tcp, tcp_listen, udp, icmp])
+           end,
     judge(push, fun() -> erx_sock_admit:push(Kind, Origin, Socket, Message) end,
           expected_push(Kind, Origin, Socket, Message), {Kind, Origin, Socket, Message}).
 
@@ -701,6 +708,10 @@ push_verdict(tcp, {error, Reason} = Body) ->
         false -> {refused, push}
     end;
 push_verdict(_Kind, _) -> {refused, push}.
+
+push_kind_of({datagram, _, _, _}) -> udp;
+push_kind_of({echo, _, _, _, _}) -> icmp;
+push_kind_of(_) -> pick([tcp, tcp_listen]).
 
 %% 1 to 64 binaries of 1 to 65536 bytes in all.
 pieces_ok(Pieces) ->
@@ -761,6 +772,8 @@ result_value() ->
                    {ok, [{nodelay, true}, {nodelay, true}]}, {ok, [nodelay]}, {ok, x}]);
         3 -> {ok, {pick([gen_ip4(), gen_ip4(), {10, 0, 2, 3}]), port(0)}};
         4 -> {ok, {gen_ip6(), 80}};
+        5 -> {ok, pick([self(), self(), pid(other_node(), 5), sock, make_ref()])};
+        6 -> {error, pick([econnaborted, timeout])};
         7 -> {error, timeout};
         8 -> {error, reason()};
         9 -> {error, reason()};
@@ -774,7 +787,7 @@ result_value() ->
 expected_result(Kind, Result) ->
     case result_ok(Kind, Result) of
         true -> {ok, Result};
-        false -> result_refusal(Result)
+        false -> result_refusal(Kind, Result)
     end.
 
 result_ok(Kind, ok) ->
@@ -785,13 +798,16 @@ result_ok(getopts, {ok, [{nodelay, Boolean}]}) ->
     is_boolean(Boolean);
 result_ok(Kind, {ok, {Ip, Port}}) ->
     lists:member(Kind, [sockname, peername]) andalso ip4(Ip) andalso within(Port, 0, 16#ffff);
+result_ok({accept, Node}, {ok, Conn}) ->
+    is_pid(Conn) andalso node(Conn) =:= Node;
 result_ok(Kind, {error, Reason}) ->
     lists:member(Reason, kind_reasons(Kind));
 result_ok(_Kind, _Result) ->
     false.
 
-result_refusal({error, _}) -> {refused, reason};
-result_refusal(_Result) -> {refused, shape}.
+result_refusal(_Kind, {error, _}) -> {refused, reason};
+result_refusal({accept, _}, {ok, _}) -> {refused, socket};
+result_refusal(_Kind, _Result) -> {refused, shape}.
 
 %% --- messages and pids -----------------------------------------------------------
 

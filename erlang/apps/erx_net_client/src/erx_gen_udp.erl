@@ -58,21 +58,13 @@ open(Port) ->
 -spec open(integer(), list()) -> {ok, socket()} | {error, term()}.
 open(Port, Opts) when is_integer(Port), Port >= -1, Port =< 16#ffff, is_list(Opts) ->
     maybe
-        {ok, Local, Rest} ?= local(Opts, any, []),
+        {ok, Local, Rest} ?= erx_gen_tcp_core:local(Opts),
         {ok, Own, []} ?= own(erx_gen_tcp_core:options(Rest, #{mode => list, active => true})),
         {ok, Pid} ?= start(udp, {{udp_open, inet, Local, max(Port, 0), []}, Own}),
         {ok, {'$inet', ?MODULE, Pid}}
     end;
 open(_Port, _Opts) ->
     {error, einval}.
-
-%% The family and the local address, which the grant takes apart from the options.
-local([], Local, Rest) -> {ok, Local, lists:reverse(Rest)};
-local([inet | Opts], Local, Rest) -> local(Opts, Local, Rest);
-local([Family | _], _, _) when Family =:= inet6; Family =:= local -> {error, eafnosupport};
-local([{Key, {_, _, _, _} = Ip} | Opts], _, Rest) when Key =:= ip; Key =:= ifaddr ->
-    local(Opts, Ip, Rest);
-local([Opt | Opts], Local, Rest) -> local(Opts, Local, [Opt | Rest]).
 
 %% The socket process's own options; one it does not keep is refused, since the
 %% datagram socket takes none.

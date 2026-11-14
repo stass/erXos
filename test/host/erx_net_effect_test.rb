@@ -64,7 +64,7 @@ class ErxNetEffectTest < Minitest::Test
       'erx_net_admit', ['when Origin =/= local, D =:= Origin, is_pid(SockProc) ->', 'when Origin =:= Origin, D =:= D, is_pid(SockProc) ->']
     ],
     active_mode_delivers_to_the_owner: [
-      'erx_gen_tcp', ['Conn ! {erx_net, self(), {credit, Bytes}},', '_ = {Conn, Bytes},']
+      'erx_gen_tcp', ['Sock ! {erx_net, self(), {credit, Bytes}},', '_ = {Sock, Bytes},']
     ]
   }.freeze
 

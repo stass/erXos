@@ -354,3 +354,110 @@ pieces_joined() ->
     ?assertEqual([200, 1500], [binary:referenced_byte_size(B) || B <- [Joined, Left]]),
     {L1, _} = pieces([<<"ab">>, <<"cd">>], new(#{mode => list})),
     ?assertEqual("abc", element(1, recv(f1, 3, L1))).
+
+%% --- Options, a listening socket and a transfer's hold ----------------------------------
+
+%% An option given twice is forwarded once, the last value: the socket admits one `nodelay`
+%% in a `setopts`, and refuses a request of two without an answer.
+options_forwarded_once_test() ->
+    Own = #{mode => binary, active => false},
+    ?assertEqual({ok, Own, [{nodelay, false}]}, erx_gen_tcp_core:options([{nodelay, true}, {nodelay, false}], Own)).
+
+listen_options_test() ->
+    ?assertEqual({ok, #{mode => binary, active => true}, [{backlog, 8}, {reuseaddr, true}, {nodelay, true}]},
+                 erx_gen_tcp_core:listen_options([{backlog, 8}, binary, {nodelay, true}, {reuseaddr, true}])),
+    ?assertEqual({error, einval}, erx_gen_tcp_core:listen_options([{keepalive, true}])).
+
+listener(Own) ->
+    erx_gen_tcp_core:listener(?SOCK, maps:merge(#{mode => binary, active => false}, Own),
+                              #{nodelay => false, node => node()}).
+
+listener_test_() ->
+    [{"an accepted connection is handed over with the listening socket's options", fun accept_hands_over/0},
+     {"an accept answered with an error ends its socket process", fun accept_error_discards/0},
+     {"an accepted connection of another node aborts the listening socket", fun accept_other_node/0},
+     {"the listener's exit answers every accept closed", fun listener_down/0},
+     {"a listening socket answers what only a connection answers enotconn", fun listener_enotconn/0},
+     {"a listening socket keeps its options and forwards nodelay", fun listener_options/0},
+     {"an accept's reply type", fun accept_result/0}].
+
+accept_hands_over() ->
+    {C1, A1} = call(f1, {accept, sp1, infinity}, listener(#{active => once})),
+    ?assertEqual([{request, 0, {accept, sp1, infinity}}], A1),
+    {_, A2} = reply(0, {ok, self()}, C1),
+    ?assertEqual([{hand_over, f1, sp1, self(), #{mode => binary, active => once}}], A2).
+
+accept_error_discards() ->
+    {C1, _} = call(f1, {accept, sp1, 10}, listener(#{})),
+    ?assertEqual([{reply, f1, {error, timeout}}, {discard, sp1}], element(2, reply(0, {error, timeout}, C1))),
+    ?assertEqual([{reply, f2, {error, einval}}, {discard, sp2}], element(2, call(f2, {accept, sp2, -1}, C1))).
+
+accept_other_node() ->
+    {C1, _} = call(f1, {accept, sp1, infinity}, listener(#{})),
+    {C2, A2} = reply(0, {ok, remote_pid()}, C1),
+    ?assertEqual([{count, socket}, {request, 1, close}, {reply, f1, {error, closed}}, {discard, sp1}], A2),
+    ?assertEqual([{reply, f2, {error, closed}}, {discard, sp2}], element(2, call(f2, {accept, sp2, infinity}, C2))).
+
+listener_down() ->
+    {C1, _} = call(f1, {accept, sp1, infinity}, listener(#{})),
+    {C2, _} = call(f2, {accept, sp2, 100}, C1),
+    {C3, A3} = step(socket_down, C2),
+    ?assertEqual([{request, 2, close}, {reply, f1, {error, closed}}, {reply, f2, {error, closed}},
+                  {discard, sp1}, {discard, sp2}], A3),
+    ?assertEqual([{reply, f3, ok}, stop], element(2, call(f3, close, C3))).
+
+listener_enotconn() ->
+    C = listener(#{}),
+    [?assertEqual([{reply, f1, {error, enotconn}}], element(2, call(f1, Call, C)))
+     || Call <- [{send, <<"x">>}, {recv, 0, 0}, {shutdown, write}, peername]],
+    ?assertEqual([{reply, f1, {error, einval}}], element(2, call(f1, {no_such_call}, C))).
+
+listener_options() ->
+    {C1, A1} = call(f1, {setopts, [{active, true}, {nodelay, true}]}, listener(#{})),
+    ?assertEqual([{request, 0, {setopts, [{nodelay, true}]}}], A1),
+    ?assertEqual([{reply, f1, ok}], element(2, reply(0, ok, C1))),
+    ?assertEqual([{reply, f2, {ok, [{active, true}, {nodelay, true}, {mode, binary}]}}],
+                 element(2, call(f2, {getopts, [active, nodelay, mode, packet]}, C1))),
+    ?assertEqual([{reply, f3, {error, einval}}], element(2, call(f3, {setopts, [{backlog, 5}]}, C1))),
+    ?assertEqual([{request, 1, sockname}], element(2, call(f4, sockname, C1))).
+
+accept_result() ->
+    ?assertEqual({ok, {ok, self()}}, erx_sock_admit:result({accept, node()}, {ok, self()})),
+    ?assertEqual({refused, socket}, erx_sock_admit:result({accept, node()}, {ok, remote_pid()})),
+    ?assertEqual({refused, socket}, erx_sock_admit:result({accept, node()}, {ok, erx_net_grant})),
+    ?assertEqual({ok, {error, econnaborted}}, erx_sock_admit:result({accept, node()}, {error, econnaborted})),
+    ?assertEqual({refused, reason}, erx_sock_admit:result({accept, node()}, {error, eperm})).
+
+hold_test_() ->
+    [{"a held socket presents nothing until its release", fun hold_then_release/0},
+     {"a held socket takes no more than its credit", fun hold_within_credit/0},
+     {"a socket that has shown its end cannot be moved", fun hold_after_end/0}].
+
+hold_then_release() ->
+    {ok, C1} = erx_gen_tcp_core:hold(new(#{active => true})),
+    {C2, A2} = data(10, C1),
+    {C3, A3} = step({push, {ok, eof}}, C2),
+    ?assertEqual([], [T || {tell, _} = T <- A2 ++ A3]),
+    {_, A4} = erx_gen_tcp_core:release(C3),
+    ?assertEqual([{tcp, ?SOCK, binary:copy(<<"d">>, 10)}, {tcp_closed, ?SOCK}], [M || {tell, M} <- A4]).
+
+hold_within_credit() ->
+    {ok, C1} = erx_gen_tcp_core:hold(new(#{active => true})),
+    {C2, A2} = data(?PIECE, C1),
+    ?assertEqual([], [A || {Kind, _} = A <- A2, Kind =:= credit orelse Kind =:= tell]),
+    ?assertMatch({_, [{count, credit} | _]}, data(1, C2)).
+
+hold_after_end() ->
+    {C1, _} = step({push, {ok, eof}}, new(#{active => true})),
+    ?assertEqual({error, closed}, erx_gen_tcp_core:hold(C1)),
+    {C2, _} = step({push, {ok, eof}}, new(#{})),
+    ?assertMatch({ok, _}, erx_gen_tcp_core:hold(C2)),
+    %% A passive recv that met the end leaves stock's port open, so the socket still moves.
+    {C3, _} = call(f1, {recv, 0, infinity}, C2),
+    ?assertMatch({ok, _}, erx_gen_tcp_core:hold(C3)).
+
+%% A pid of the node 'erx_other@nowhere', from its external form (NEW_PID_EXT with a
+%% SMALL_ATOM_UTF8_EXT node name).
+remote_pid() ->
+    Node = <<"erx_other@nowhere">>,
+    binary_to_term(<<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 1:32>>).
