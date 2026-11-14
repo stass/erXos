@@ -1,4 +1,10 @@
 /*
+ * Modified by erXos: under __erxos__, syscall_random() takes FreeBSD's
+ * branch: no weak getentropy() lookup, and a direct call of getrandom(),
+ * which erXos's C library answers from the kernel's generator alone
+ * (docs/design-crypto.md, "Seeding").
+ */
+/*
  * Copyright 1995-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -35,6 +41,9 @@
 #include <sys/param.h>
 #endif
 #if defined(__FreeBSD__) && __FreeBSD_version >= 1200061
+#include <sys/random.h>
+#endif
+#if defined(__erxos__)
 #include <sys/random.h>
 #endif
 #if defined(__OpenBSD__)
@@ -351,7 +360,8 @@ static ssize_t syscall_random(void *buf, size_t buflen)
      * Note: Sometimes getentropy() can be provided but not implemented
      * internally. So we need to check errno for ENOSYS
      */
-#if !defined(__DragonFly__) && !defined(__NetBSD__) && !defined(__FreeBSD__)
+#if !defined(__DragonFly__) && !defined(__NetBSD__) && !defined(__FreeBSD__) \
+    && !defined(__erxos__)
 #if defined(__GNUC__) && __GNUC__ >= 2 && defined(__ELF__) && !defined(__hpux)
     extern int getentropy(void *buffer, size_t length) __attribute__((weak));
 
@@ -390,7 +400,8 @@ static ssize_t syscall_random(void *buf, size_t buflen)
     return syscall(__NR_getrandom, buf, buflen, 0);
 #elif (defined(__DragonFly__) && __DragonFly_version >= 500700) \
     || (defined(__NetBSD__) && __NetBSD_Version >= 1000000000)  \
-    || (defined(__FreeBSD__) && __FreeBSD_version >= 1200061)
+    || (defined(__FreeBSD__) && __FreeBSD_version >= 1200061)       \
+    || defined(__erxos__)
     return getrandom(buf, buflen, 0);
 #elif (defined(__FreeBSD__) || defined(__NetBSD__)) && defined(KERN_ARND)
     return sysctl_random(buf, buflen);

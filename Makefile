@@ -16,7 +16,7 @@ DOCKER_CONTEXT ?=
 .PHONY: oracle-bootstrap oracle-build check-oracle check-oracle-host check-oracle-hosted bench
 .PHONY: generate web pack
 .PHONY: check-reproducible check-fuzz check-sanitizers check-asan check-ubsan check-tsan
-.PHONY: check-runtime-seam check-runtime-hosted
+.PHONY: check-runtime-seam check-runtime-hosted check-openssl
 .PHONY: check-stack-proof check-conformance check-debug-log check-qemu check-qemu-mutant check-native-seeds check-boot-image
 
 all: build
@@ -75,6 +75,11 @@ check-qemu:
 # Seeds a failure into a copy of the sources and checks the gate reports it.
 check-qemu-mutant:
 	$(RUBY) test/integration/qemu_gate_mutant_test.rb
+
+# OpenSSL's libcrypto.a for erxos-aarch64, its import check, and each seeded fault of
+# the two seen to fail (docs/design-crypto.md, Verification). `make check` excuses it.
+check-openssl:
+	$(RUBY) test/integration/libcrypto_build_test.rb
 
 # Each seeded failure of the threads and watchdog suites, seen to fail.
 check-native-seeds:

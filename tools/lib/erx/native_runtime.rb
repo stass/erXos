@@ -87,7 +87,7 @@ module Erx
       musl = Musl.new(root: @root, runner: @runner, compiler: @compiler)
       directory = File.join(@base, 'musl')
       libc = musl.build(directory: directory, jobs: jobs)
-      merge_headers(musl.include_directories(directory: directory))
+      musl.merge_headers(directory: directory, into: File.join(@root, NativeRoot::LIBC_HEADERS))
       lib = File.join(@sysroot, 'lib')
       FileUtils.mkdir_p(lib)
       FileUtils.cp(libc, lib)
@@ -97,22 +97,6 @@ module Erx
       FileUtils.cp(@fiasco.boot_core_archive, File.join(lib, 'libboot_cores.a'))
       EMPTY_LIBRARIES.each { |name| archive(File.join(lib, "lib#{name}.a"), []) }
       [libc, builtins]
-    end
-
-    # configure looks for headers under one directory, so musl's search order, first one
-    # winning, becomes one tree: the last layer copied is the first searched. Each copy
-    # keeps its source's time, so a build that copies again leaves BeamAsm's precompiled
-    # asmjit header, which clang judges by its headers' times, valid.
-    def merge_headers(search_order)
-      include_dir = File.join(@root, NativeRoot::LIBC_HEADERS)
-      FileUtils.rm_rf(include_dir)
-      search_order.reverse.each do |layer|
-        Dir.glob('**/*.h', base: layer).each do |path|
-          target = File.join(include_dir, path)
-          FileUtils.mkdir_p(File.dirname(target))
-          FileUtils.cp(File.join(layer, path), target, preserve: true)
-        end
-      end
     end
 
     def build_liberx

@@ -116,7 +116,10 @@ What the sources say, read at the pins of [Sources](#sources):
 * `otp/ORIGIN.md` excludes `lib/asn1`, `lib/crypto`, `lib/public_key`,
   `lib/ssh` and `lib/ssl` as "outside the shipped OTP application set in
   the runtime design".
-* No OpenSSL is fetched or built; `deps.lock` names none.
+* OpenSSL 3.5.9 is imported into `openssl/` with its two edits, pinned in
+  `deps.lock`, and `tools/erx build openssl` makes `libcrypto.a` for
+  `erxos-aarch64` (`tools/lib/erx/libcrypto.rb`,
+  `config/openssl/erxos-aarch64.conf`); nothing links it yet.
 * The Fiasco backend's start block (`liberx/backend/fiasco/libc_start.c`,
   `erx_fiasco_libc_start`) gives musl `AT_HWCAP` and `AT_HWCAP2` from the
   boot information page's feature words (`hwcap` and `hwcap2`,

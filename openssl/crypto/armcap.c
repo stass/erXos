@@ -1,4 +1,9 @@
 /*
+ * Modified by erXos: under __erxos__, CPU features come from getauxval(),
+ * which erXos's C library answers from the kernel's report, so the SIGILL
+ * probe is never compiled (docs/design-crypto.md, "Building OpenSSL").
+ */
+/*
  * Copyright 2011-2026 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -101,6 +106,12 @@ static unsigned long getauxval(unsigned long key)
  * getauxval is supported starting with API level 18
  */
 #if defined(__ANDROID__) && defined(__ANDROID_API__) && __ANDROID_API__ >= 18
+#include <sys/auxv.h>
+#define OSSL_IMPLEMENT_GETAUXVAL
+#endif
+
+/* erXos: musl's getauxval() reads AT_HWCAP and AT_HWCAP2 from the kernel's report. */
+#if defined(__erxos__)
 #include <sys/auxv.h>
 #define OSSL_IMPLEMENT_GETAUXVAL
 #endif

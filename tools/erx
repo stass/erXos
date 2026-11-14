@@ -183,9 +183,9 @@ module Erx
     # An integration test runs in `make check` unless it is excused here: these
     # rebuild the stopgap kernel, boot it under QEMU, need the stock OTP
     # suites' runtime, need the hosted runtime built, or need Arm's register
-    # archive fetched. check ensures the rc oracle first (ensure_rc_oracle),
+    # archive fetched, or build OpenSSL. check ensures the rc oracle first (ensure_rc_oracle),
     # so the tests that read plan9port's rc run in it.
-    STANDALONE_INTEGRATION_TESTS = %w[domain_image fiasco_reproducible native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant runtime_console runtime_device runtime_genet runtime_hosted_smoke runtime_literal_token runtime_prim_file runtime_release sysreg_refresh oracle_log_tree].freeze
+    STANDALONE_INTEGRATION_TESTS = %w[domain_image fiasco_reproducible libcrypto_build native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant runtime_console runtime_device runtime_genet runtime_hosted_smoke runtime_literal_token runtime_prim_file runtime_release sysreg_refresh oracle_log_tree].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }
@@ -818,6 +818,17 @@ module Erx
       Lvgl::Build.new(root: ROOT, runner: runner, jobs: jobs).call
     end
 
+    # OpenSSL's libcrypto.a for erxos-aarch64, into build/openssl/obj, against a musl of
+    # its own build (Libcrypto).
+    def self.build_openssl(jobs)
+      require_relative 'lib/erx/libcrypto'
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      compiler = host_environment(runner: runner).fetch('ERX_CLANG')
+      sysroot = Libcrypto.sysroot(root: ROOT, runner: runner, compiler: compiler, jobs: jobs)
+      Libcrypto.new(root: ROOT, runner: runner, compiler: compiler)
+             .build(directory: File.join(ROOT, Libcrypto::BASE, 'obj'), sysroot: sysroot, jobs: jobs)
+    end
+
     # The hosted runtime and the release it boots, both of which `make check-runtime-hosted` reads.
     def self.build_runtime(jobs)
       built = Runtime.new(root: ROOT).build(jobs: jobs)
@@ -849,8 +860,8 @@ module Erx
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7 lvgl web].include?(component)
-        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg, herd7, lvgl or web'
+      unless %w[fiasco runtime jit-runtime rc-oracle fsimg herd7 lvgl openssl web].include?(component)
+        raise OptionParser::InvalidArgument, 'build accepts fiasco, runtime, jit-runtime, rc-oracle, fsimg, herd7, lvgl, openssl or web'
       end
       jobs = 4
       parser = OptionParser.new do |options|
@@ -865,6 +876,7 @@ module Erx
              when 'fsimg' then build_fsimg(jobs)
              when 'herd7' then build_herd7(jobs)
              when 'lvgl' then build_lvgl(jobs)
+             when 'openssl' then build_openssl(jobs)
              when 'web' then WebBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end

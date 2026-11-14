@@ -32,7 +32,20 @@ runs on the build host and is never compiled into `libcrypto`. erXos's
 changes are under Apache-2.0.
 
 Each file erXos changes says so in a `Modified by erXos` notice at its
-top, which lists the changes.
+top, which lists the changes. Two are changed, each taking FreeBSD's
+branch under `__erxos__`, which erXos's target defines
+([design-crypto.md](../docs/design-crypto.md#building-openssl)):
+
+* `crypto/armcap.c` defines `OSSL_IMPLEMENT_GETAUXVAL` under `__erxos__`,
+  so CPU features come from musl's `getauxval(AT_HWCAP)` and `AT_HWCAP2`,
+  and the `SIGILL` probe is never compiled.
+* `providers/implementations/rands/seeding/rand_unix.c` includes
+  `<sys/random.h>` and, in `syscall_random`, skips the weak `getentropy`
+  lookup and returns `getrandom(buf, buflen, 0)` under `__erxos__`.
+
+erXos builds the tree with OpenSSL's own `Configure` and make, for its
+target `config/openssl/erxos-aarch64.conf`, through
+`tools/erx build openssl` (`tools/lib/erx/libcrypto.rb`).
 
 The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.

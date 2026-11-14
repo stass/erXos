@@ -55,6 +55,23 @@ module Erx
        File.join(source, 'arch/generic'), File.join(source, 'include')]
     end
 
+    # The headers of include_directories as one tree under into, for a build that looks
+    # for headers under one directory (OTP's configure, OpenSSL's target): the first
+    # directory searched wins, so it is copied last. Each copy keeps its source's time,
+    # so a build that copies again leaves a precompiled header that clang judges by its
+    # headers' times (BeamAsm's asmjit) valid.
+    def merge_headers(directory:, into:)
+      FileUtils.rm_rf(into)
+      include_directories(directory: directory).reverse.each do |layer|
+        Dir.glob('**/*.h', base: layer).each do |path|
+          target = File.join(into, path)
+          FileUtils.mkdir_p(File.dirname(target))
+          FileUtils.cp(File.join(layer, path), target, preserve: true)
+        end
+      end
+      into
+    end
+
     private
 
     def source = File.join(@root, 'musl')
