@@ -22,9 +22,9 @@ and a `gen_server` would act on a `system` message from it. It takes:
 * calls of its own domain's processes, in `gen_server`'s call shape: the
   tree's callbacks, which run in the grants and their file processes, and
   attach/2, the screen's;
-* input/1's events, the `DOWN`s of its grants, holders and screen, and
-  the `EXIT`s of its window processes, its grants' supervisor and its
-  parent.
+* input/2's records, the `DOWN`s of its grants, holders, screen and
+  input sources, its repeat timer, and the `EXIT`s of its window
+  processes, its grants' supervisor and its parent.
 
 A message from another domain arrives only in the envelope
 `{erx_origin, D, Msg}`, so a bare call shape is always of this domain;
@@ -39,6 +39,16 @@ decorations. `erx_winfs` calls the policy's arrange/4 after every change
 it makes itself, and whenever the session it derives differs from the one
 it last passed, so the table always holds the policy's answer for the
 current session.
+
+**Input.** A driver calls input/2, which returns once the record is
+routed, so each source has at most one record waiting here. Each record,
+a source's end and a timer's tick is stamped with this process's
+monotonic clock in milliseconds and stepped by the router's core,
+erx_input, which alone asks the policy about input; this process
+performs its answers: an event cast to a window process, a new table
+committed, the one repeat timer replaced. It monitors each source from
+its first record, so a source's end releases what it held, and tells the
+screen of each record first, for its idle clock.
 
 **The session.** The display's session is derived, never stored apart from
 the grants: the client directory of the live grant most recently minted
@@ -58,7 +68,7 @@ writes come here; every other file is its window process's
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, attach/2, input/1, mint_request/3]).
+-export([start_link/1, attach/2, input/2, mint_request/3]).
 %% The process.
 -export([winfs_init/2, loop/1]).
 %% The erx_fs callbacks of the tree.
@@ -75,13 +85,23 @@ writes come here; every other file is its window process's
                      area := fun((pos_integer()) -> {ok, term(), pos_integer()} | {error, term()}),
                      clients := domain | own,
                      provide := boolean(),
-                     policy := {module(), map()}}.
+                     policy := {module(), map()},
+                     input => erx_input:config()}.
+
+%% The input router's configuration when the options name none: the layout us,
+%% FreeBSD's normal repeat of 500 and 126 milliseconds, and no reserved chord.
+-define(INPUT, #{keymap => us, repeat_delay => 500, repeat_period => 126, chord => none}).
 
 -record(winfs, {options :: options(),
                 parent :: pid(),
                 grants_sup :: pid(),
                 policy :: module(),
                 policy_state :: term(),
+                %% The input router's state, each input source's monitor and the
+                %% repeat timer erx_input last asked for.
+                input :: erx_input:state(),
+                sources = #{} :: #{pid() => reference()},
+                timer = none :: none | reference(),
                 %% Each live grant: its client directory, pixel area, windows
                 %% quota, session mark, mint order and monitor.
                 grants = #{} :: #{pid() => map()},
@@ -107,7 +127,10 @@ themselves through; `minted`, how a mint is answered; `area`, how a
 client's pixel area is opened;
 `clients`, `domain` for grants bound to their grantee's domain, or `own`
 for a host test's grants of this domain; `provide`, whether it names
-itself the mint; and `policy`, the window policy and its configuration.
+itself the mint; `policy`, the window policy and its configuration; and
+`input`, the input router's configuration (erx_input:new/1). The
+display domain's router has the layout `us`, FreeBSD's `normal` repeat
+of 500 and 126 milliseconds and no reserved chord.
 """.
 -spec start_link(atom() | options()) -> {ok, pid()} | {error, term()}.
 start_link(Service) when is_atom(Service) ->
@@ -127,7 +150,8 @@ winfs_init(Parent, #{service := Service, policy := {Policy, Config}} = Options) 
              #{} -> ok
          end,
     State = #winfs{options = Options, parent = Parent, grants_sup = Sup, policy = Policy,
-                   policy_state = Policy:init(Config)},
+                   policy_state = Policy:init(Config),
+                   input = erx_input:new(maps:get(input, Options, ?INPUT))},
     proc_lib:init_ack(Parent, {ok, self()}),
     loop(State).
 
@@ -143,13 +167,15 @@ attach(Rect, Chan) ->
         {error, _} -> []
     end.
 
--doc "Routes one input event through the policy; dropped with no window system.".
--spec input(erx_wm:input()) -> ok.
-input(Input) ->
-    case whereis(?MODULE) of
-        undefined -> ok;
-        Pid -> Pid ! {erx_winfs_input, Input}, ok
-    end.
+-doc """
+For an input driver: routes one record of its device, named Device in the
+device table, and returns once it is routed; dropped with no window
+system. The caller is the record's source.
+""".
+-spec input(binary(), erx_input:record()) -> ok.
+input(Device, Record) ->
+    _ = call_winfs({input, Device, Record}),
+    ok.
 
 -doc """
 What the mint of the service Service does with Message, in a domain whose
@@ -176,8 +202,8 @@ loop(#winfs{options = #{system := System, service := Service}, parent = Parent, 
             {Reply, Next} = handle_call(Request, Pid, State),
             gen_server:reply(From, Reply),
             ?MODULE:loop(Next);
-        {erx_winfs_input, Input} ->
-            ?MODULE:loop(route(Input, State));
+        {timeout, Timer, erx_input_tick} when Timer =:= State#winfs.timer ->
+            ?MODULE:loop(route({tick, now_ms()}, State#winfs{timer = none}));
         {'DOWN', Ref, process, Pid, _} ->
             ?MODULE:loop(down(Ref, Pid, State));
         {'EXIT', Parent, Reason} ->
@@ -281,7 +307,7 @@ handle_call({attach, Rect, Chan}, Pid, #winfs{screen = Old} = State) ->
             Arranged = arrange(State#winfs{screen_rect = Rect, chan = Chan, depth = Depth,
                                            screen = none}),
             Screen = {Pid, erlang:monitor(process, Pid)},
-            {{ok, layout(Arranged)}, Arranged#winfs{screen = Screen}};
+            {{ok, layout(Arranged)}, route({screen, Rect}, Arranged#winfs{screen = Screen})};
         _ ->
             {{error, einval}, State}
     end;
@@ -304,6 +330,17 @@ handle_call({remove, Client, Name, Expect}, _Pid, State) ->
     end;
 handle_call({wctl, Client, Id, Bytes}, _Pid, State) ->
     place_request(Client, Id, Bytes, State);
+handle_call({input, Device, Record}, Pid, #winfs{sources = Sources, screen = Screen} = State)
+  when is_binary(Device) ->
+    Monitored = case Sources of
+                    #{Pid := _} -> State;
+                    #{} -> State#winfs{sources = Sources#{Pid => erlang:monitor(process, Pid)}}
+                end,
+    ok = case Screen of
+             {ScreenPid, _} -> gen_server:cast(ScreenPid, input);
+             none -> ok
+         end,
+    {ok, route({record, Pid, Device, now_ms(), Record}, Monitored)};
 handle_call(_Request, _Pid, State) ->
     {{error, einval}, State}.
 
@@ -385,31 +422,38 @@ place_request(Client, Id, Bytes, State) ->
 
 %% Input ---------------------------------------------------------------------
 
-%% The screen hears of the event first, for its idle clock; then the policy routes it.
-route(Input, #winfs{windows = Windows, session = Session, policy = Policy,
-                    policy_state = PolicyState, screen = Screen} = State) ->
-    ok = case Screen of
-             {Pid, _} -> gen_server:cast(Pid, input);
-             none -> ok
+%% One step of the router over the table as it stands, and its answers performed in order.
+route(In, #winfs{windows = Windows, session = Session, policy = Policy,
+                 policy_state = PolicyState, input = Input} = State) ->
+    View = #{windows => Windows, session => Session, policy => Policy, policy_state => PolicyState},
+    {Outs, PolicyState1, Input1} = erx_input:step(In, View, Input),
+    lists:foldl(fun perform/2, State#winfs{policy_state = PolicyState1, input = Input1}, Outs).
+
+perform({to, Id, Event}, #winfs{windows = Windows} = State) ->
+    _ = [gen_server:cast(Proc, {input, Event}) || #{id := I, proc := Proc} <- Windows, I =:= Id],
+    State;
+perform({windows, Table}, State) ->
+    commit(Table, State);
+perform({wm, _Term}, State) ->
+    State;
+perform({wake, At}, #winfs{timer = Old} = State) ->
+    ok = case Old of
+             none -> ok;
+             _ -> erlang:cancel_timer(Old, [{async, true}, {info, false}])
          end,
-    {Route, PolicyState1} = Policy:input(Input, Windows, Session, PolicyState),
-    Next = State#winfs{policy_state = PolicyState1},
-    case Route of
-        {to, Id, Event} ->
-            _ = [gen_server:cast(Proc, {input, Event}) || #{id := I, proc := Proc} <- Windows, I =:= Id],
-            Next;
-        {windows, Table} ->
-            commit(Table, Next);
-        {wm, _} ->
-            Next;
-        drop ->
-            Next
-    end.
+    State#winfs{timer = case At of
+                            none -> none;
+                            _ -> erlang:start_timer(At, self(), erx_input_tick, [{abs, true}])
+                        end}.
+
+now_ms() -> erlang:monotonic_time(millisecond).
 
 %% Ends ----------------------------------------------------------------------
 
 down(Ref, Pid, #winfs{screen = {Pid, Ref}} = State) ->
     State#winfs{screen = none};
+down(Ref, Pid, #winfs{sources = Sources} = State) when map_get(Pid, Sources) =:= Ref ->
+    route({gone, Pid, now_ms()}, State#winfs{sources = maps:remove(Pid, Sources)});
 down(Ref, Pid, #winfs{grants = Grants, windows = Windows} = State) ->
     case Grants of
         #{Pid := #{monitor := Ref}} ->

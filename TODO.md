@@ -588,19 +588,54 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
-* [Medium] `erlang/apps/erx_fb/src/erx_virtio_input_core.erl`, [Input
-  events](docs/design-display.md#input-events): the core parses event records and identifies the device, but
-  turning one update (the events up to `SYN_REPORT`) into `input()` needs three answers the design does not
-  give. A pointer event's X and Y are screen coordinates, so a mouse's relative moves need a position kept and
-  clamped to the screen, and a tablet's axes need scaling to it, yet no input driver is told the screen's size;
-  the key `Code`'s number space (evdev's codes or another) and where a `Rune` comes from (a keymap, and whose)
-  are not stated; and evdev's repeat has no `input()` form (see the lost key ups item). Settle them in the
-  design before the driver's update step is written.
+* [High] `erlang/apps/erx_fb/src/erx_virtio_input_core.erl`, [Input events](docs/design-display.md#input-events):
+  the virtio-input driver process is not built, so no device's input reaches `erx_winfs:input/2` and a booted
+  display takes no input. Build its update fold as a pure core (events up to `SYN_REPORT` into `input()`, the
+  pointer kept and clamped, axes normalized, repeats dropped, `SYN_DROPPED` handled) with its fuzz target and
+  the fold's tests and seeded faults of [Verification and testing](docs/design-display.md#verification-and-testing)
+  (Drivers), the process over the device shim, and its rows in the display domain's supervisor.
+* [Medium] `abi/manifest.txt`, `liberx/system/dom_core.c`, `erlang/apps/erx_display/src/erx_winfs.erl`, [A display's
+  session](docs/design-display.md#a-displays-session): a display's manifest entry carries no `display_keymap`,
+  `display_repeat_delay_ms`, `display_repeat_period_ms` or reserved chord, and the domain service puts none of
+  them in the display domain's environment, so `erx_winfs` starts the router with the stopgap defaults: keymap
+  `us`, a repeat delay of 500 ms and a period of 126 ms, and no chord. Add the entry's fields, the environment
+  variables and their reading, and check the repeat values against the entry's as the router's tests require.
+* [Medium] `test/erlang/erx_input_tests.erl`, [Verification and testing](docs/design-display.md#verification-and-testing)
+  (The input router): some of the router's properties are not tested: that the repeats a window receives are
+  the same when the other window's presses of the letter are taken out of the sequence (the keys run gives the
+  second source only the letter); that the layer a key types at follows from the modifiers held and the locks
+  on alone; that no pointer event carries a button its window did not see pressed, which the pointer run cannot
+  catch with only button 1 in its alphabet (a single case covers it); and that `erx_winfs:input/2` does not
+  return while the router holds the record. Of the seeded faults that list names, the chord's, a repeat sent to
+  the window that takes the keyboard, one repeating key for the display, a button's up or a source's end whose
+  pointer event the policy routes, a touch down at a held slot that moves it and a modifier kept as a flag are
+  not planted.
+* [Low] `erlang/apps/erx_display/src/erx_input.erl`, [The input router](docs/design-display.md#the-input-router):
+  a tick moves a repeat's time one period on from its last, as the design says, so after the window system
+  stalls for a while each following tick sends one repeat at once until the repeat catches up with the clock.
+  Settle in the design whether a late repeat skips to the next period after the tick.
+* [Medium] `test/erlang/erx_win_tests.erl`: `no_room_test` failed once in five runs of `test/host/erx_win_test.rb`
+  on the host, its `attach` of fid 900 answering `{error, einval}` (line 158); the other four passed. Whether
+  the flake predates the input router is not checked. Find the race and fix it.
+* [Low] `erlang/apps/erx_display/src/erx_window.erl`, [The window tree](docs/design-display.md#the-window-tree):
+  a window's set of held keys is keyed by code alone, so when two sources hold one key down to the same window
+  the first source's up drops it from the `K` set while the other still holds it. Key it by source and code.
+* [Low] `erlang/apps/erx_display/src/erx_window.erl`, [Input events](docs/design-display.md#input-events): a
+  wheel step reaches a window but is not encoded in its `mouse` file as buttons 8 and 16.
+* [Low] `tools/lib/erx/manifest.rb`, [A display's session](docs/design-display.md#a-displays-session): the
+  manifest check accepts `display_policy` `rio`, which the display domain refuses at boot because `erx_wm_rio`
+  is not built, so a valid image boots a display with no window system and one log line. Refuse it in the
+  check while the policy is missing.
+* [Low] `tools/lib/erx/keymap.rb`, [Input events](docs/design-display.md#input-events): the generator accepts
+  U+0000, which means no rune, as a modifier's or a lock's rune; `erx_input` drops such a
+  rune from `Mods`, but the generator should refuse it.
+* [Medium] `tools/lib/erx/chokepoint_rules/display.rb`, [Chokepoints](docs/design-display.md#chokepoints): no build
+  check enforces that only `erx_winfs` and `erx_input` call `erx_wm`'s callbacks, `erx_input` alone `input/4` and
+  `erx_keymap`; add the xref check the chokepoint table names, with a seeded violation.
 * [Medium] `tools/lib/erx/keymap.rb`, [Input events](docs/design-display.md#input-events): the generator
   writes `erx_keymap` alone, not the list of layout names the manifest check holds a display entry's
   `display_keymap` to, so until the manifest's display entry carries a layout nothing refuses one the tree
-  lacks; and nothing checks yet that the router alone calls `erx_keymap` (the xref row of the chokepoint
-  table). Add both with the display entry's layout and with `erx_input`.
+  lacks. Add it with the display entry's layout.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
   the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
   device up and shows a client's window; its failure paths have run only as its pure core's host tests. A host test
@@ -1022,13 +1057,6 @@ it; git history is the record of completed work.
   after the `windows` quota instead of before it. Settle in the design where a client reads the screen's size before
   it makes a window (a window's own `ctl` comes too late; for example a file of the client's directory), then
   allocate before the `mkdir`.
-* [Medium] `erlang/apps/erx_display/src/erx_wm*.erl`, [Windows and the window
-  system](docs/design-display.md#windows-and-the-window-system): settle this when `erx_winfs` is written, with a
-  property case.
-  * **Lost key ups.** A key whose up is lost (a keyboard unplugged mid-press) stays held in the chord's state; a
-    lost up of the chord's completing key leaves it withheld, so its next downs are dropped as repeats and the chord
-    does not fire again. Give `input()` a `repeat` direction (virtio-input reports one) so a `down` of a held key
-    means its up was lost, and keep held keys per device, cleared when the device goes away.
 * [Medium] `erlang/apps/erx_win/src/erx_vt.erl`, [The terminal
   emulator](docs/design-display.md#the-terminal-emulator): the core is built without `key/2`. The oracle test
   (`test/host/erx_vt_oracle_test.rb`, libvterm 0.3.3 with `test/vt/vterm_dump.c`) runs only the per-row cases

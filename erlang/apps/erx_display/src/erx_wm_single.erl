@@ -6,11 +6,10 @@
 The single window policy of a kiosk, a dashboard or a pair of glasses
 (docs/design-display.md, "Windows and the window system"): one window
 is shown, it has the whole screen and no decoration, and every input
-event but the reserved chord goes to it.
+event the router asks it about goes to it.
 
-Configuration, from the manifest: optionally `chord`, the reserved
-chord's key codes (erx_wm:chord_init/1). It names no session:
-erx_winfs passes every call the directory of the display's session.
+Configuration: none. It names no session: erx_winfs passes every call
+the directory of the display's session.
 
 Which window is shown is derived, never stored: it is the live window
 of the display's session with the lowest id, shown/2, computed afresh from
@@ -25,9 +24,10 @@ and set each window's state from shown/2, so when the shown window ends
 the session's next oldest is shown. Every `wctl` request is refused with
 `einval`, so no window takes the screen by asking.
 
-Input. The reserved chord is answered with `{wm, chord}` and its
-repeats and its key up are dropped (erx_wm:chord/2); every other event
-goes to the shown window.
+Input. Every event the router asks about goes to the shown window, or
+nowhere while none is. The reserved chord is the router's and never
+reaches a policy, and what follows a down goes where the down went
+without the policy being asked (erx_input).
 """.
 
 -behaviour(erx_wm).
@@ -35,20 +35,15 @@ goes to the shown window.
 -export([init/1, place/6, arrange/4, decorate/2, input/4, shown/2]).
 -export_type([config/0, state/0]).
 
--doc "The manifest's configuration of the policy.".
--type config() :: #{chord => [0..16#ffff, ...]}.
--doc "The policy's state, threaded by erx_winfs.".
--type state() :: #{chord := erx_wm:chord()}.
+-doc "The policy's configuration, which is empty.".
+-type config() :: #{}.
+-doc "The policy's state, which is empty.".
+-type state() :: #{}.
 
--doc """
-The policy's state from its configuration; a bad one, or one with a key
-other than `chord`, raises `badarg`.
-""".
+-doc "The policy's state from its configuration; one with any key raises `badarg`.".
 -spec init(config()) -> state().
-init(Config) when is_map(Config), map_size(Config) =:= 0 ->
-    #{chord => erx_wm:chord_init(Config)};
-init(#{chord := _} = Config) when map_size(Config) =:= 1 ->
-    #{chord => erx_wm:chord_init(Config)};
+init(Config) when Config =:= #{} ->
+    #{};
 init(Config) ->
     error(badarg, [Config]).
 
@@ -83,18 +78,14 @@ arrange(Windows, Screen, Session, State) ->
 -spec decorate([erx_wm:window()], erx_wm:rect()) -> [].
 decorate(_Windows, _Screen) -> [].
 
--doc "Routes one input event; see the moduledoc.".
+-doc "Routes one input event the router asks about; see the moduledoc.".
 -spec input(erx_wm:input(), [erx_wm:window()], erx_wm:session(), state()) ->
           {erx_wm:route(), state()}.
-input(Input, Windows, Session, State = #{chord := Chord}) ->
-    {Seen, Next} = erx_wm:chord(Input, Chord),
-    Route = case {Seen, shown(Session, Windows)} of
-                {chord, _} -> {wm, chord};
-                {withheld, _} -> drop;
-                {pass, none} -> drop;
-                {pass, Id} -> {to, Id, Input}
-            end,
-    {Route, State#{chord := Next}}.
+input(Input, Windows, Session, State) ->
+    case shown(Session, Windows) of
+        none -> {drop, State};
+        Id -> {{to, Id, Input}, State}
+    end.
 
 -doc """
 The window the policy shows: the live window of session `Session` with

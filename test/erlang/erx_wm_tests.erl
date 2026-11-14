@@ -16,13 +16,10 @@
 %%   * at most one window is shown, and whenever the application's
 %%     session has a window, the shown one is its window with the lowest
 %%     id (single);
-%%   * the reserved chord is never delivered: neither the down that
-%%     completes it, nor a repeat of that key, nor its up reaches a window
-%%     (both policies);
-%%   * every other key event reaches the shown window (single).
-%% The key oracle keeps its own record of the keys held and the chord's
-%% keys, written from the moduledocs' rules with lists rather than from
-%% the policy's code. The sequences come from rand with a fixed seed, and
+%%   * every key event reaches the shown window (single).
+%% The reserved chord is the input router's, tested with it (erx_input_tests).
+%% The key oracle keeps its own record of the windows keys went down to,
+%% written from the moduledocs' rules rather than from the policy's code. The sequences come from rand with a fixed seed, and
 %% a failure names the policy, sequence, step and operation.
 %%
 %% A window's end and a change of screen are followed by arrange/3, as
@@ -34,7 +31,6 @@
 
 -define(SEQUENCES, 400).
 -define(STEPS, 60).
--define(CHORD, [1, 2]).
 -define(APP, <<"app">>).
 
 %% Properties
@@ -51,7 +47,7 @@ sequence(Policy, Sequence) ->
     Config = config(Policy),
     World = #{policy => Policy, screen => random_screen(), table => [],
               next => 1, state => Policy:init(Config), config => Config,
-              keys_held => [], chord_keys => [], got_down => #{}},
+              got_down => #{}},
     lists:foldl(fun(Step, Before) ->
                         Op = random_op(Before),
                         try
@@ -69,8 +65,7 @@ config(Policy) ->
                erx_wm_single -> #{}
            end,
     case rand:uniform(4) of
-        1 -> Base;
-        _ -> Base#{chord => ?CHORD}
+        _ -> Base
     end.
 
 %% One step of erx_winfs: make a window, end one, pass a wctl request or
@@ -144,47 +139,20 @@ same_windows(Before, After) ->
         false -> error({windows_changed, Before, After})
     end.
 
-%% The key oracle. A key down completes the chord when it is a chord key
-%% that was up and, with it, every chord key is held, whatever else is; it and every repeat of that
-%% key until its up are the chord's press. Any other key down must reach
-%% the single policy's shown window, when there is one.
-keys({key, down, Code, _}, Target, World = #{keys_held := HeldBefore,
-                                             chord_keys := ChordKeys}) ->
-    HeldAfter = lists:usort([Code | HeldBefore]),
-    Completes = not lists:member(Code, HeldBefore) andalso lists:member(Code, chord(World))
-        andalso chord(World) -- HeldAfter =:= [],
-    ChordPress = Completes orelse lists:member(Code, ChordKeys),
-    case {ChordPress, Target, shown_window(World)} of
-        {true, {to, _}, _} -> error({chord_delivered, Code});
-        {false, none, {single, _}} -> error({key_not_delivered, Code});
+%% The key oracle: under the single policy every key event the policy is asked about
+%% reaches the shown window, when there is one.
+keys({key, Edge, Code, _, _, _}, Target, World = #{got_down := GotDown}) ->
+    case {Target, shown_window(World)} of
+        {none, {single, _}} -> error({key_not_delivered, Edge, Code});
         _ -> ok
     end,
-    GotDown = case Target of
-                  {to, Id} -> (maps:get(got_down, World))#{Code => Id};
-                  none -> maps:remove(Code, maps:get(got_down, World))
-              end,
-    World#{keys_held := HeldAfter,
-           chord_keys := case ChordPress of
-                             true -> lists:usort([Code | ChordKeys]);
-                             false -> ChordKeys
-                         end,
-           got_down := GotDown};
-%% A key up that is not the chord's goes to the shown window.
-keys({key, up, Code, _}, Target, World = #{chord_keys := ChordKeys,
-                                           got_down := GotDown, policy := Policy}) ->
-    case {lists:member(Code, ChordKeys), Target, Policy, shown_window(World)} of
-        {true, {to, _}, _, _} -> error({chord_up_delivered, Code});
-        {false, none, _, {single, _}} -> error({key_not_delivered, Code});
-        _ -> ok
-    end,
-    World#{keys_held := lists:delete(Code, maps:get(keys_held, World)),
-           chord_keys := lists:delete(Code, ChordKeys),
-           got_down := maps:remove(Code, GotDown)};
+    World#{got_down := case {Edge, Target} of
+                           {down, {to, Id}} -> GotDown#{Code => Id};
+                           {up, _} -> maps:remove(Code, GotDown);
+                           _ -> GotDown
+                       end};
 keys(_Event, _Target, World) ->
     World.
-
-chord(#{config := #{chord := Chord}}) -> lists:usort(Chord);
-chord(_) -> [].
 
 %% Under the single policy, the window shown, if any.
 shown_window(#{policy := erx_wm_single, table := Table}) ->
@@ -251,7 +219,7 @@ random_input() ->
                 1 -> {pointer, coord(), coord(), pick([0, 0, 1, 2, 4, 5])};
                 2 -> {touch, rand:uniform(10) - 1, pick([down, move, up]), coord(), coord()};
                 3 -> {wheel, pick([-1, 1])};
-                _ -> {key, pick([down, up]), rand:uniform(5), none}
+                _ -> {key, pick([down, repeat, up]), rand:uniform(5), none, none, []}
             end,
     #{device => <<"test">>, at => 0, event => Event}.
 
@@ -281,7 +249,7 @@ window(Id, Session) ->
     #{id => Id, dir => {Session, integer_to_binary(Id)}, rect => {0, 0, 0, 0},
       state => hidden}.
 
-key(Direction, Code) -> #{device => <<"kbd">>, at => 0, event => {key, Direction, Code, none}}.
+key(Direction, Code) -> #{device => <<"kbd">>, at => 0, event => {key, Direction, Code, none, none, []}}.
 
 %% Makes windows 1..N under a policy, each placed as erx_winfs would.
 made(Policy, Config, Sessions) ->
@@ -316,17 +284,6 @@ single_refuses_every_wctl_request_test() ->
     [?assertEqual({error, einval}, erx_wm_single:place(R, 1, Table, screen(), ?APP, State))
      || R <- [hide, show, top, bottom, {move, {0, 0, 1, 1}}, {resize, screen()}]].
 
-single_chord_is_the_policys_test() ->
-    {Table, State} = made(erx_wm_single, #{chord => ?CHORD}, [?APP]),
-    {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, ?APP, State),
-    {{wm, chord}, S2} = erx_wm_single:input(key(down, 2), Table, ?APP, S1),
-    %% A driver repeating the held chord key: withheld, and no second chord.
-    {drop, S3} = erx_wm_single:input(key(down, 2), Table, ?APP, S2),
-    {drop, S4} = erx_wm_single:input(key(up, 2), Table, ?APP, S3),
-    {{to, 1, _}, S5} = erx_wm_single:input(key(up, 1), Table, ?APP, S4),
-    {{to, 1, _}, S6} = erx_wm_single:input(key(down, 2), Table, ?APP, S5),
-    ?assertMatch({{wm, chord}, _}, erx_wm_single:input(key(down, 1), Table, ?APP, S6)).
-
 single_without_chord_withholds_nothing_test() ->
     {Table, State} = made(erx_wm_single, #{}, [?APP]),
     {{to, 1, _}, S1} = erx_wm_single:input(key(down, 1), Table, ?APP, State),
@@ -334,10 +291,9 @@ single_without_chord_withholds_nothing_test() ->
 
 bad_configuration_is_refused_test() ->
     ?assertError(badarg, erx_wm_single:init(not_a_map)),
-    ?assertError(badarg, erx_wm_single:init(#{chord => []})),
-        ?assertError(badarg, erx_wm_single:init(#{chord => [16#10000]})),
+    ?assertError(badarg, erx_wm_single:init(#{chord => [1]})),
     ?assertError(badarg, erx_wm_single:init(#{app => ?APP})),
-    ?assertError(badarg, erx_wm_single:init(#{chord => [1], session => ?APP})).
+    ?assertError(badarg, erx_wm_single:init(#{session => ?APP})).
 
 %% With no session every window is hidden and input reaches none; a session that
 %% comes later shows its oldest window, and another session's shows another's.

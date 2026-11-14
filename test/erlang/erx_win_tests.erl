@@ -139,7 +139,9 @@ resized_test() ->
 kbd_label_resize_test() ->
     with(fun(_) ->
         {ok, Window} = erx_win:open(?SERVICE, #{}),
-        erx_winfs:input(#{device => <<"kbd">>, at => 0, event => {key, down, 30, $a}}),
+        %% A keyboard driver's record of KEY_A going down, evdev code 30.
+        ok = erx_winfs:input(<<"kbd">>, {key, down, 30}),
+        ?assertEqual({ok, {down, "a"}}, erx_win:kbd(Window)),
         ?assertEqual({ok, {typed, $a}}, erx_win:kbd(Window)),
         ok = erx_win:label(Window, <<"a label">>),
         ?assertEqual({error, einval}, erx_win:resize(Window, {0, 0, 4, 4}))

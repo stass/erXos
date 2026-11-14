@@ -162,8 +162,9 @@ state(Grant, Fid) ->
     {ok, Text} = read(Grant, Fid),
     lists:last(binary:split(string:trim(Text), <<" ">>, [global, trim_all])).
 
-key(Rune) ->
-    erx_winfs:input(#{device => <<"kbd">>, at => 0, event => {key, down, 30, Rune}}).
+%% A keyboard driver's record of KEY_A going down, evdev code 30.
+key_a() ->
+    erx_winfs:input(<<"kbd">>, {key, down, 30}).
 
 flushed() ->
     receive {flushed, Rects} -> Rects after ?WAIT -> error(no_flush) end.
@@ -209,7 +210,8 @@ single_policy() ->
     SecondKbd = open(Session, 5, <<"second">>, <<"kbd">>, ?O_RDONLY),
     HiddenRead = call_async(Session, {read, SecondKbd, 0, 64}),
     OtherKbd = call_async(Other, {read, open(Other, 3, <<"x">>, <<"kbd">>, ?O_RDONLY), 0, 64}),
-    ok = key($a),
+    ok = key_a(),
+    ?assertEqual({ok, <<"ka", 0>>}, read(Session, FirstKbd)),
     ?assertEqual({ok, <<"ca", 0>>}, read(Session, FirstKbd)),
     ok = unanswered(HiddenRead),
     ok = unanswered(OtherKbd),

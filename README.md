@@ -463,8 +463,10 @@ Error in process <0.150.0> with exit value:
   the `display_domain` suite compares the screen with a reference
   picture. The window server (`erx_winfs`) serves each window as files and
   takes its display's name from its domain's environment. The virtio-input
-  driver's event parser is a pure, fuzzed core; input is not yet routed to
-  windows. Evdev's key and button codes have one home,
+  driver's event parser is a pure, fuzzed core, and the input router
+  (`erx_input`) delivers a driver's records to windows' `mouse` and `kbd`
+  files under the single policy; the virtio-input driver process is not
+  built yet. Evdev's key and button codes have one home,
   `abi/formats/evdev.txt`, and the US keymap is generated from
   `abi/keymaps/us.txt`. Host-built parts around it: the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord

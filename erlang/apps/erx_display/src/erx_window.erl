@@ -29,9 +29,13 @@ the present in flight to be answered, goes before queued writes, and does
 nothing while there is no last buffer.
 
 **Input.** A pointer event is a 49-byte `mouse` record
-`m%11d %11d %11d %11d `, x, y, buttons and milliseconds, and a key down
-that types a rune a `kbd` record of `c`, the rune in UTF-8 and a NUL;
-other events are not encoded here. Each queue holds at most 4 KiB of
+`m%11d %11d %11d %11d `, x, y, buttons and milliseconds. A key's down
+is a `kbd` record `k` and its up a `K`, each followed by the set of
+runes held, in UTF-8, and a NUL: the unshifted runes of the keys whose
+downs the window received and whose ups it has not, with the modifiers
+held on the display, the event's `Mods`. A down or a repeat that types a
+rune is then a `c` record, the rune and a NUL. A wheel step is not
+encoded here. Each queue holds at most 4 KiB of
 records; past that the oldest is dropped and counted. A change of the
 window's size sets `resized`, which the next `mouse` read answers with an
 `r` record at the last pointer position. A read takes one record, waits
@@ -68,6 +72,9 @@ line written whole.
                  pointer = {0, 0, 0, 0} :: {integer(), integer(), integer(), integer()},
                  mouse = #records{} :: #records{},
                  kbd = #records{} :: #records{},
+                 %% The unshifted rune of each key whose down the window received and
+                 %% whose up it has not, or none for a key that has none.
+                 keys = #{} :: #{non_neg_integer() => erx_wm:rune() | none},
                  %% The present in flight, its buffer and whose write it answers.
                  in_flight = none :: none | {gen_server:request_id(), map(), gen_server:from() | again},
                  waiting = queue:new() :: queue:queue({gen_server:from(), map()}),
@@ -193,11 +200,24 @@ encode({pointer, X, Y, Buttons}, At, #window{mouse = Mouse} = W)
   when is_integer(X), is_integer(Y), is_integer(Buttons), is_integer(At) ->
     Msec = abs(At) rem 16#80000000,
     W#window{mouse = push(record($m, {X, Y, Buttons, Msec}), Mouse), pointer = {X, Y, Buttons, Msec}};
-encode({key, down, _Code, Rune}, _At, #window{kbd = Kbd} = W)
-  when is_integer(Rune), Rune >= 0, Rune =< 16#d7ff; is_integer(Rune), Rune >= 16#e000, Rune =< 16#10ffff ->
-    W#window{kbd = push(<<$c, Rune/utf8, 0>>, Kbd)};
+encode({key, down, Code, Typed, Unshifted, Mods}, _At, #window{keys = Keys} = W) ->
+    Held = W#window{keys = Keys#{Code => Unshifted}},
+    typed(Typed, held_record($k, Mods, Held));
+encode({key, repeat, _Code, Typed, _Unshifted, _Mods}, _At, W) ->
+    typed(Typed, W);
+encode({key, up, Code, _Typed, _Unshifted, Mods}, _At, #window{keys = Keys} = W) ->
+    held_record($K, Mods, W#window{keys = maps:remove(Code, Keys)});
 encode(_Event, _At, W) ->
     W.
+
+%% A k or K record: the runes of the keys held for the window with the modifiers held
+%% on the display, each once, in UTF-8.
+held_record(Kind, Mods, #window{keys = Keys, kbd = Kbd} = W) ->
+    Runes = lists:usort([Rune || Rune <- maps:values(Keys), Rune =/= none] ++ Mods),
+    W#window{kbd = push(<<Kind, (unicode:characters_to_binary(Runes))/binary, 0>>, Kbd)}.
+
+typed(none, W) -> W;
+typed(Rune, #window{kbd = Kbd} = W) -> W#window{kbd = push(<<$c, Rune/utf8, 0>>, Kbd)}.
 
 record(Kind, {X, Y, Buttons, Msec}) ->
     W = ?ERX_WINDOWS_FIELD,

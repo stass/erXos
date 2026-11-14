@@ -7,7 +7,8 @@
 %% core erx_screen_core, which decides what it fills, copies and
 %% pushes, and which erx_fb_sup starts behind the driver; the window policy
 %% behaviour erx_wm with erx_wm_single; the window system erx_winfs, the mint and
-%% tree of the windows service, which erx_fb_sup starts first, and erx_window, one
+%% tree of the windows service, which erx_fb_sup starts first, with erx_input, its
+%% input router's pure core, and erx_window, one
 %% process for each window; and erx_wctl and erx_winctl, the text of a window's wctl
 %% and ctl files; and erx_keymap, the keyboard layouts generated from abi/keymaps/.
 %% A library application: it starts no process of its own, and
@@ -16,7 +17,7 @@
 {application, erx_display,
  [{description, "erXos display services"},
   {vsn, "1"},
-  {modules, [erx_display, erx_keymap, erx_screen, erx_screen_core, erx_wctl, erx_window, erx_winctl,
+  {modules, [erx_display, erx_input, erx_keymap, erx_screen, erx_screen_core, erx_wctl, erx_window, erx_winctl,
               erx_winfs, erx_wm, erx_wm_single]},
   {registered, []},
   {applications, [kernel, stdlib, erx, erx_files, erx_memdraw]},

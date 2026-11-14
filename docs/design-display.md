@@ -1966,15 +1966,20 @@ The step's rules, by input:
   such as one that raises a window, gives no window any of that
   gesture. Every later pointer event and wheel step of the gesture goes
   to that destination: to the window as `{to, W, Event}`, except that
-  while `W` is hidden only an event that lets a button or touch go
-  reaches it; to the policy as a question of `input/4`, whose
+  while `W` is hidden only an event that lets go a button or touch `W`
+  saw pressed reaches it, carrying only the buttons `W` saw that are
+  still held, so a hidden window never hears of a press made after it
+  was hidden; to the policy as a question of `input/4`, whose
   `{to, _, _}` answer is dropped and counted, so no window receives the
   rest of a gesture whose start it did not; or nowhere. Between
   gestures the policy routes each pointer event and wheel step.
 * **A key's down**, of a code with no keymap row or of a key its source
   already holds, is dropped and counted, so a window never sees a key
   go down twice. Otherwise its runes come from the keymap at the layer
-  the modifiers held select, and a lock's down toggles its lock. When
+  the modifiers held select, and a lock's down toggles its lock. A
+  modifier's or a lock's key types no rune: its down and up carry its
+  rune as `Unshifted` alone, so a window reads them in `k` and `K`
+  records with no `c`, and it never repeats. When
   the down makes the keys held, over every source, include every key of
   the reserved chord, the answer is `{wm, chord}`; otherwise the
   policy's `input/4` routes it. Either way the step records where the

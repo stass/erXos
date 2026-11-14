@@ -20,7 +20,8 @@ class ErxWinfsTest < Minitest::Test
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   GRAMMAR = 'build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl'
   DISPLAY = %w[erx_display erx_screen erx_screen_core erx_wctl erx_window erx_winctl erx_winfs erx_wm
-               erx_wm_single].map { |name| "erlang/apps/erx_display/src/#{name}.erl" }
+               erx_wm_single erx_input].map { |name| "erlang/apps/erx_display/src/#{name}.erl" } +
+            ['build/gen/erlang/apps/erx_display/src/erx_keymap.erl']
   FILES = %w[erx_fs erx_fs_grant erx_fs_grants erx_fs_version].map { |name| "erlang/apps/erx_files/src/#{name}.erl" }
   MODULES = (['erlang/apps/erx_memdraw/src/erx_memdraw.erl', 'erlang/apps/erx_memdraw/src/erx_chan.erl', GRAMMAR] + DISPLAY + FILES +
              ['erlang/apps/erx/src/erx_facet.erl', 'erlang/apps/erx_fb/src/erx_fb_sup.erl', 'test/erlang/erx_winfs_tests.erl']).freeze

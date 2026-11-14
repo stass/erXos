@@ -34,13 +34,9 @@ class ErxWmTest < Minitest::Test
                                     text: 'Ids -> lists:min(Ids)',
                                     broken: 'Ids -> lists:max(Ids)',
                                     property: /app_window_not_shown/),
-    chord_unrecognised: Mutant.new(file: 'erx_wm.erl',
-                                   text: '{false, true} -> {chord, Next',
-                                   broken: '{false, true} -> {pass, Next',
-                                   property: /chord_delivered/),
     keys_dropped: Mutant.new(file: 'erx_wm_single.erl',
-                             text: '{pass, Id} -> {to, Id, Input}',
-                             broken: '{pass, _} -> drop',
+                             text: 'Id -> {{to, Id, Input}, State}',
+                             broken: '_Id -> {drop, State}',
                              property: /key_not_delivered/)
   }.freeze
 
@@ -55,8 +51,6 @@ class ErxWmTest < Minitest::Test
   def test_hiding_every_window_fails_the_single_property = assert_mutant_fails(:every_window_hidden)
 
   def test_showing_the_newest_window_fails_the_single_property = assert_mutant_fails(:newest_window_shown)
-
-  def test_an_unrecognised_chord_fails_the_chord_property = assert_mutant_fails(:chord_unrecognised)
 
   def test_dropped_keys_fail_the_delivery_property = assert_mutant_fails(:keys_dropped)
 
