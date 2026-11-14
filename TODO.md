@@ -5926,6 +5926,11 @@ to the corpus and follow rc
 * [Low] `erlang/apps/erx_fb/src/erx_fb_sup.erl`: the input drivers count toward the display supervisor's restart
   intensity (3 in 60 s), so an input device that breaks its queue four times a minute ends the display domain.
   A `one_for_one` supervisor of its own for the input drivers would end input alone.
+* [Medium] `config/platforms/qemu-virt.json`, `erlang/apps/erx_fb/src/erx_virtio_input.erl`: each input row's
+  64 KiB of DMA memory fits its 64 one-event buffers only when the cache granule is small. A review computed that
+  with the granule unreported (2048, `erx_device.c`'s pool rounding) `queue_create` needs 128 KiB and fails, so
+  the driver starts no process. Both devices come up under HVF; TCG and boards are not checked. Derive the row's
+  memory from the queue's needs at the granule the platform reports instead of writing a size by hand.
 
 * [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a spec's `peripheral` is the
   caller's, so a driver can open a window as any table peripheral whose block fits it, such as a virtio-mmio
