@@ -20,8 +20,8 @@
 %% %CopyrightEnd%
 %%
 %% Modified by erXos: #ssh{} keeps the first key exchange's hash input, kex_input, until
-%% authentication succeeds, and counts failed authentication attempts for the daemon
-%% option max_auth_tries, whose type and documentation are here.
+%% authentication succeeds, and counts authentication requests and failures for the
+%% daemon option max_auth_tries, whose type and documentation are here.
 
 %%
 
@@ -1299,13 +1299,13 @@ in the User's Guide chapter.
   > `infinity` there is no protection against DOS attacks.
 
 - **`max_auth_tries`{: #hardening_daemon_options-max_auth_tries }** - The maximum
-  number of failed authentication attempts of one connection. The attempt that
-  fails past it is answered with a disconnect
-  (`SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE`) instead of a failure. A
-  `none` request is not an attempt; a `publickey` query for a key that is not
-  authorized, a wrong password and a wrong keyboard-interactive answer are. A
-  request for a method the daemon does not offer is answered as a `none`
-  request, and is no attempt either.
+  number of failed authentication attempts of one connection, counted as
+  OpenSSH's `MaxAuthTries` is. The failure that brings the count to it is
+  answered with a disconnect (`SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE`)
+  instead of a failure. Every failed request counts: a `publickey` query for a
+  key that is not authorized, a wrong password, a wrong keyboard-interactive
+  answer, and a `none` request, or one for a method the daemon does not offer,
+  unless it is the connection's first request.
 
   By default there is no limit (`infinity`).
 
@@ -1433,6 +1433,7 @@ Experimental options that should not to be used in products.
 	  userauth_supported_methods,       %  string() eg "keyboard-interactive,password"
           userauth_pubkeys,
 	  kb_tries_left = 0,                %  integer(), num tries left for "keyboard-interactive"
+	  auth_requests = 0,                %  integer(), userauth requests, for max_auth_tries
 	  auth_failures = 0,                %  integer(), failed attempts, for max_auth_tries
 	  userauth_preference,
 	  available_host_keys,

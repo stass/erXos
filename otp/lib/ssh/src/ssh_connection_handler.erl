@@ -19,7 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
-%% Modified by erXos: neither status report quotes the first exchange's hash input.
+%% Modified by erXos: the normal status report leaves out the connection's secrets and
+%% buffers as the terminating one does, and both leave out the first exchange's hash input.
 %%
 %%----------------------------------------------------------------------
 %% Purpose: Handles an ssh connection, e.i. both the
@@ -1600,17 +1601,12 @@ format_status(A, B) ->
         _:_ -> "????"
     end.
 
-%% The normal report is the state as it is, but for the first exchange's hash
-%% input, which holds that exchange's shared secret; the terminating report
-%% leaves out every secret (clean/1).
-format_status0(normal, [_PDict, _StateName, #data{ssh_params = Ssh} = D]) ->
-    [{data, [{"State", D#data{ssh_params = redact_kex_input(Ssh)}}]}];
-format_status0(terminate, [_, _StateName, D]) ->
+%% Both reports leave out the connection's secrets and buffers (clean/1): the
+%% first exchange's hash input, the shared secret, the traffic keys and the
+%% packet buffers.
+format_status0(_Opt, [_PDict, _StateName, D]) ->
     [{data, [{"State", clean(D)}]}].
 
-
-redact_kex_input(#ssh{} = Ssh) -> Ssh#ssh{kex_input = '****'};
-redact_kex_input(Ssh) -> Ssh.
 
 clean(#data{}=R) ->
     fmt_stat_rec(record_info(fields,data), R,

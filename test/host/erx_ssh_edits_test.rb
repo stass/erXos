@@ -23,6 +23,9 @@ class ErxSshEditsTest < Minitest::Test
   NO_STRICT = Data.define(:from, :to).new(from: 'kex_strict_alg(client) -> [?kex_strict_c, ?kex_strict_c_pre];',
                                           to: 'kex_strict_alg(client) -> [];')
 
+  # The status reports' one clause, ahead of which a fault puts a normal one.
+  STATUS = "format_status0(_Opt, [_PDict, _StateName, D]) ->\n"
+
   # Each fault: the module it is compiled into, the text replaced and its replacement.
   Fault = Data.define(:name, :module_name, :from, :to)
   FAULTS = [
@@ -38,10 +41,17 @@ class ErxSshEditsTest < Minitest::Test
               from: 'ssh_params = Ssh#ssh{authenticated = true, kex_input = undefined}}.',
               to: 'ssh_params = Ssh#ssh{authenticated = true}}.'),
     Fault.new(name: 'format_status0(normal, ...) left stock', module_name: 'ssh_connection_handler',
-              from: '[{data, [{"State", D#data{ssh_params = redact_kex_input(Ssh)}}]}];',
-              to: '[{data, [{"State", D#data{ssh_params = Ssh}}]}];'),
+              from: STATUS, to: "format_status0(normal, [_, _, D]) -> [{data, [{\"State\", D}]}];\n#{STATUS}"),
+    Fault.new(name: 'the normal report redacting kex_input alone', module_name: 'ssh_connection_handler',
+              from: STATUS,
+              to: "format_status0(normal, [_, _, #data{ssh_params = S} = D]) ->\n" \
+                  "    [{data, [{\"State\", D#data{ssh_params = S#ssh{kex_input = x}}}]}];\n#{STATUS}"),
     Fault.new(name: 'max_auth_tries not passed', module_name: 'ssh_auth',
-              from: 'past_max_auth_tries(Failures, ?GET_OPT(max_auth_tries, Opts))', to: 'false'),
+              from: 'reached_max_auth_tries(Failures, ?GET_OPT(max_auth_tries, Opts))', to: 'false'),
+    Fault.new(name: 'max_auth_tries disconnecting one failure late', module_name: 'ssh_auth',
+              from: 'Failures >= Max.', to: 'Failures > Max.'),
+    Fault.new(name: 'every none request free', module_name: 'ssh_auth',
+              from: 'case Requests =:= 0 andalso Method =:= "none" of', to: 'case Method =:= "none" of'),
     Fault.new(name: 'verify_user/6 called for every module', module_name: 'ssh_auth',
               from: 'ssh_transport:key_cb_exports(verify_user, 6, Opts)', to: 'true')
   ].freeze

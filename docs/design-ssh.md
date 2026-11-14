@@ -143,7 +143,12 @@ What the sources say, read at the pins of [Sources](#sources):
   (`servconf.c:300-480`), `MaxAuthTries` 6 and `MaxSessions` 10
   (`servconf.h:39-40`); its `sshd_config` sets
   `AuthorizedKeysFile .ssh/authorized_keys` and the `sftp` subsystem
-  (`sshd_config:44`, `:117`).
+  (`sshd_config:44`, `:117`). Every user authentication request that
+  fails counts against `MaxAuthTries`, a `none` request too, except a
+  `none` request that is the connection's first, and the failure that
+  brings the count to `MaxAuthTries` is answered with a disconnect
+  instead of `SSH_MSG_USERAUTH_FAILURE` (`auth2.c:442-452`); a request
+  for a method it does not offer fails and counts (`:342-352`).
 
 ## Requirements
 
@@ -313,7 +318,7 @@ five operations:
 
 | Operation | Checks | Answer |
 | --- | --- | --- |
-| `cookie()` | none: the facet draws 16 bytes from `erx_bytes:entropy/1` and keeps them as an **outstanding cookie** for the login grace, 120 s; it keeps at most 128, and a new one beyond that drops the oldest | `{ok, Cookie}`, or `{error, unavailable}` when the generator fails |
+| `cookie()` | none: the facet draws 16 bytes from `erx_bytes:entropy/1` and keeps them as the **outstanding cookie** of the calling connection process, which it monitors, for the login grace, 120 s; a process holds one, a new one replacing its last, and the facet drops it when the process exits, when a login uses it or when the grace ends, so the table holds at most one cookie for each live connection, 64 at the daemon's limit, and never drops one to make room; past 128 outstanding, which only a domain that ignores its own limit reaches, it answers `unavailable` | `{ok, Cookie}`, or `{error, unavailable}` when the generator fails or 128 are outstanding |
 | `key_ok(User, KeyBlob)` | `User` names an enrolled principal whose login keys hold `KeyBlob` | `true` or `false`, the same for an unknown principal and an unknown key |
 | `login_key(User, Exchange, Alg, KeyBlob, Sig, Peer)` | as `key_ok`; `Alg` is `ssh-ed25519`; `Exchange` is the hash input of the connection's first key exchange, at most 64 KiB, which begins with five length-prefixed strings: the client's and the server's version lines, the client's and the server's `SSH_MSG_KEXINIT` payloads, and the host key. The server's payload begins with the byte `SSH_MSG_KEXINIT` and an outstanding cookie, and the host key is this machine's. The facet takes the SHA-256 of `Exchange` as the session identifier, builds the signed data of RFC 4252 section 7 itself from it, `User`, the service `ssh-connection`, `Alg` and `KeyBlob`, and checks the signature in `Sig`, the 83-byte signature blob of the name `ssh-ed25519` and 64 bytes, over that data with the system domain's Ed25519 verifier. A match retires the cookie | `{ok, Line}` or `{error, no_match \| limited \| unavailable}` |
 | `login_passphrase(User, Passphrase, Peer)` | the principal service hands it to the vault, as `erx_web_login`'s `login` does, under the vault's limit for network connections, 5 failures in 60 s per name | `{ok, Line}` or `{error, no_match \| limited \| unavailable}` |
@@ -341,11 +346,15 @@ machine's host key. Each requirement follows:
 * **Binding to this machine.** An exchange whose host key is another
   host's answers `no_match`, so a signature made for any other server,
   whoever chose its cookie, opens nothing here.
-* **Nothing remembered.** The facet keeps only outstanding cookies, at
-  most 128 of at most 120 s each, and drops the oldest first. Dropping one
-  fails only the login in progress on its connection, so the table's
-  bound, a restart of the facet and the SSH domain's end lose nothing a
-  guarantee rests on, and no record of past logins grows with them.
+* **Nothing remembered.** The facet keeps only outstanding cookies, one
+  for each live connection process of the SSH domain, each for at most
+  120 s, and drops a connection's cookie when its process exits. A
+  connection that closes takes its cookie with it, so no client, however
+  many short connections it makes, can push a waiting login's cookie
+  out. Losing a cookie fails only the login in progress on its
+  connection, so a restart of the facet and the SSH domain's end lose
+  nothing a guarantee rests on, and no record of past logins grows with
+  them.
 * **One reading of the input.** The five strings are length-prefixed, so
   a byte string has one parse, and finding two different inputs with the
   same SHA-256 hash is computationally infeasible: the fields the facet
@@ -627,8 +636,8 @@ closes, which the log record of each connection shows.
 | logins in progress (`parallel_login`) | true: one process per connection | a stalled connection holds its own slot, never the acceptor | the SSH domain |
 | login grace (`negotiation_timeout`) | 120 s, FreeBSD's `LoginGraceTime` | how long an unauthenticated connection holds a slot | the SSH domain |
 | version line (`hello_timeout`) | 30 s | idle connections before the version line | the SSH domain |
-| authentication attempts per connection (`max_auth_tries`) | 6, FreeBSD's `MaxAuthTries` | guesses per connection | the SSH domain |
-| outstanding cookies | 128, each for 120 s, the oldest dropped first | the login facet's memory | the system domain, bounded by the table |
+| authentication attempts per connection (`max_auth_tries`) | 6, FreeBSD's `MaxAuthTries`, counted as FreeBSD counts them ([Context](#context)) but for two cases recorded in `TODO.md`: an unoffered method as the first request goes free, and a change of user name between requests is not refused | guesses per connection | the SSH domain |
+| outstanding cookies | one per live connection process, each for at most 120 s and dropped when its process exits; past 128, `cookie` answers `unavailable` | the login facet's memory | the system domain, bounded by the table |
 | failed logins per name | the vault's 5 in 60 s from network connections | guessing across connections | the vault, on its own grant |
 | channels per connection (`max_channels`) | 10, FreeBSD's `MaxSessions` | ttys and jobs per connection | the session, for each tty or job |
 | a channel's receive window and packet | 64 KiB and 32 KiB | what the SSH domain holds for one channel | the SSH domain |
@@ -640,9 +649,9 @@ holding a full window, 40 MiB, within its own budget, so no client makes
 it take memory from anyone else. FreeBSD's random early drop of
 unauthenticated connections (`MaxStartups`) has no OTP counterpart: a
 flood of unauthenticated connections fills the 64 slots until their
-grace ends, refusing others, and a flood of short ones can drop a
-waiting login's cookie, so that login fails and its client may try
-again; both fail safe and are recorded as a residual in `TODO.md`.
+grace ends, refusing others; it fails safe and is recorded as a
+residual in `TODO.md`. A flood of short connections takes no waiting
+login's cookie, since each cookie ends with its connection.
 
 ### Logging
 
@@ -690,16 +699,18 @@ identifier.
 | `lib/ssh/src/ssh_transport.erl` | on a server whose `session_id` is still `undefined`, which holds only before the first exchange ends, `kex_init/1` takes the cookie from the key callback's `kex_cookie/1` when the module exports it; an answer that is not 16 bytes fails the connection; a rekeying, and every exchange of a module that does not export it, keeps `ssh_bits:random(16)` | modules that do not export it, and every client |
 | `lib/ssh/src/ssh_transport.erl`, `ssh.hrl` | a new `#ssh{}` field, `kex_input`, `undefined` until set; each server-side caller of `kex_hash/4` computes `kex_plaintext/3` once, hashes it, and when `session_id` is still `undefined` stores that input in the field of the `#ssh{}` it returns, beside the `session_id` that `sid/2` sets; a rekeying finds `session_id` set and leaves both as they are | no behaviour change; stock modules never read the field |
 | `lib/ssh/src/ssh_fsm_userauth_server.erl` | `connected_state/5`, the one success transition of every method, sets `kex_input` back to `undefined` | none to keep: the field is erXos's |
-| `lib/ssh/src/ssh_connection_handler.erl` | `clean/1` lists `kex_input`, and `format_status0(normal, ...)` replaces that one field of `#data.ssh_params` with `'****'`, as `clean/1` redacts, so neither the terminating report nor `sys:get_status/1` carries it; the rest of the normal report stays stock | every other field of both reports |
+| `lib/ssh/src/ssh_connection_handler.erl` | `clean/1` lists `kex_input`, and `format_status0(normal, ...)` is the terminating report's `clean/1`, so neither the terminating report nor `sys:get_status/1` carries `kex_input`, the shared secret, the traffic keys, the cipher contexts or the packet buffers | every field of the terminating report but `kex_input`'s |
 | `lib/ssh/src/ssh_auth.erl` | `verify_sig/7` calls the key callback's `verify_user/6` (`User`, `Alg`, `KeyBlob`, `kex_input`, `AlgSig`, options) after its own checks when the module exports it, and fails the attempt unless it answers `true`, as it does when `kex_input` is not a binary; `AlgSig` is the 83-byte signature blob, the algorithm name and the signature as strings, not the bare 64-byte `Sig` inside it | modules that do not export it |
-| `lib/ssh/src/ssh_auth.erl`, `ssh_options.erl`, `ssh.hrl` | a daemon option `max_auth_tries`, default `infinity`, and a count of failed attempts in `#ssh{}`: every server result of user authentication passes one function, which counts each `SSH_MSG_USERAUTH_FAILURE` except the answer to a `none` request, and the attempt that fails past the option's count is answered with a disconnect, `SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE`, instead | the default |
+| `lib/ssh/src/ssh_auth.erl`, `ssh_options.erl`, `ssh.hrl` | a daemon option `max_auth_tries`, default `infinity`, counted as FreeBSD's `MaxAuthTries` is ([Context](#context)), with counts of requests and failures in `#ssh{}`: every server result of user authentication passes one function, which counts each `SSH_MSG_USERAUTH_FAILURE` except the answer to a `none` request that is the connection's first request, and answers the failure that brings the count to `max_auth_tries` with a disconnect, `SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE`, instead; a request for a method the daemon does not offer reaches it as `none`, since OTP's user authentication answers such a request as `none`, so it counts unless it is the first | the default |
 | `lib/ssh/src/ssh_server_key_api.erl`, `ssh_transport.erl` | `host_key/2` may return `{ok, {ssh2_pubkey, Blob}}` and an optional `sign(Blob, Hash, Options)`, the shape of the client key API's `sign/3`, signs the exchange hash ([design-system.md](design-system.md#the-vault)); such a key is usable only when the module exports `sign/3` and `Blob` is the one encoding of a key of the negotiated algorithm | a callback that returns a private key |
 
 `kex_input` holds the first exchange's shared secret, from which that
 exchange's traffic keys follow, so it lives only in the connection's
 handler and in the one `login_key` request that carries it to the
 system domain, from the first exchange to authentication's success or
-the connection's end. No log record or status report quotes it.
+the connection's end. No log record or status report quotes it, nor
+the shared secret, the traffic keys and the packet buffers the handler
+keeps beside it.
 Dropping the term does not erase the memory
 that held it at once, as for every term of the SSH domain, its session
 keys included.
@@ -729,7 +740,8 @@ change.
 | a connection's process crashes on a malformed message | its exit | that connection closes; its ttys hang up, its jobs end and its session ends |
 | the SSH domain crashes | its exit record | every connection closes and every session its logins started ends; the facet and its cookies end with it; the domain service restarts it under its restart intensity and it listens again |
 | the facet's `cookie` answers `unavailable` (the kernel's generator fails) | `kex_cookie/1` raises | that connection closes before its key exchange, with one log line; others go on |
-| a cookie dropped as the oldest, or past its grace | `login_key` finds it not outstanding | that key login answers `no_match`; the client may try its passphrase or connect again |
+| a cookie past its grace | `login_key` finds it not outstanding | that key login answers `no_match`; the client may try its passphrase or connect again |
+| 128 cookies outstanding | `cookie` answers `unavailable` | that connection closes before its key exchange, as when the generator fails; others go on |
 | the host key file is missing (before the vault) | `ssh_file` finds none | a new key is made and logged with its fingerprint |
 | the host key file does not decode (before the vault) | `ssh_file`'s error | the daemon does not listen; one log line names the file; the domain stays up |
 | the vault answers `unavailable` (its partition or backend down) | the host key facet's or login's answer | the daemon waits, retrying every 10 s with one log line, and does not listen until the host key answers; logins answer `unavailable` |
@@ -742,7 +754,8 @@ change.
 The client sees SSH's own results: a refused method or a `no_match` is
 `SSH_MSG_USERAUTH_FAILURE`; `limited` and `unavailable` are failures too,
 logged with their reason, so a client learns nothing more than a wrong
-key; past `max_auth_tries` the connection is disconnected; a refused
+key; the failure that reaches `max_auth_tries` is answered with a
+disconnect; a refused
 channel request, a line's `limited` or `badarg` included, is
 `SSH_MSG_CHANNEL_FAILURE`, and a refused channel type
 `SSH_MSG_CHANNEL_OPEN_FAILURE` with `SSH_OPEN_ADMINISTRATIVELY_PROHIBITED`;
@@ -831,11 +844,11 @@ on the host; the QEMU suite runs the interop and the ends.
 | OTP's `ssh` suites through `make check-oracle` | every case agrees with stock OTP 29.1.2; the edits change nothing for stock callback modules | `verify_user/6` called for every module, exporting it or not: the key API cases fail |
 | the edits for each offered exchange, host tests of erXos's `ssh` on stock OTP's runtime, with a test key callback that exports the hooks | for each of `curve25519-sha256`, `curve25519-sha256@libssh.org`, `ecdh-sha2-nistp256` and `mlkem768x25519-sha256`, an OTP client offering that exchange alone logs in with an Ed25519 key, once with the strict key exchange negotiated and once with a client that does not offer it; in each, the server's first `SSH_MSG_KEXINIT` carries the cookie `kex_cookie/1` returned, and the callback's `verify_user/6`, which takes the SHA-256 of the input it is given as the session identifier, builds RFC 4252's signed data from it and checks the signature inside the 83-byte blob it is given with `public_key`, accepts | the input kept on the ECDH path alone: the `mlkem768x25519-sha256` case fails; `verify_user/6` handed the bare 64-byte signature: every case fails |
 | rekeying and the input's end, host tests as above | after a login by either method, the handler's `kex_input` is `undefined`; a client that then rekeys keeps its session identifier, the server's second `SSH_MSG_KEXINIT` carries a cookie of `ssh_bits:random(16)`, `kex_cookie/1` has been called once for the connection, and `kex_input` stays `undefined`. OTP 29.1.2's server takes a peer's `SSH_MSG_KEXINIT` only once connected (`ssh_connection_handler.erl:728`, `handle_event/4` in `{connected, Role}`), so no exchange starts between the first one and authentication | a rekeying that stores its own input: `kex_input` is set after the rekeying; the clear in `connected_state/5` removed: the field is still set after the login |
-| status reports, host tests as above | while a connection waits in user authentication, the test takes the handler's `kex_input`, marked by a cookie the test's `kex_cookie/1` chose, and finds no binary equal to it in `sys:get_status/1`'s report of the handler, nor in the terminating report of a handler the test then ends with an error | `format_status0(normal, ...)` left stock: the `sys:get_status/1` case finds the input |
+| status reports, host tests as above | while a connection waits in user authentication, the test takes the handler's `kex_input`, marked by a cookie the test's `kex_cookie/1` chose, and its `shared_secret`, and finds neither in `sys:get_status/1`'s report of the handler, nor in the terminating report of a handler the test then ends with an error | `format_status0(normal, ...)` left stock: the `sys:get_status/1` case finds the input; the normal report redacting `kex_input` alone: it finds the shared secret |
 | interop from the host's OpenSSH client through QEMU's forwarded port (the client's version recorded in the run) | `ssh -p PORT root@localhost echo hi` prints `hi` and exits 0, which at stage 4 shows the facet's session identifier is the client's; an interactive pty session runs `ls` and `stty size` matches the client's window; `ssh -T host cat` passes 1 MiB through unchanged; `git ls-remote` over SSH keeps stderr apart | the line relays extended data as data: the stderr check fails; at stage 4, the facet hashing the exchange input less its first string: the login fails |
 | algorithm policy, from the same client | `-o KexAlgorithms=` each of the four offered exchanges connects and, at stage 4, logs in with the key; `-o KexAlgorithms=diffie-hellman-group14-sha1`, `-o KexAlgorithms=ecdh-sha2-nistp384`, `-o Ciphers=aes128-cbc`, `-o HostKeyAlgorithms=ssh-rsa` and `-o MACs=hmac-md5` each fail to connect; `-vv` shows `kex-strict-s-v00@openssh.com` negotiated | `aes128-cbc` added to the daemon's list: the CBC connection succeeds and the test fails |
 | binding, host unit tests of the facet | a valid signature over an exchange that holds an outstanding cookie and this host's key logs in; the same signature over an exchange with another host's key answers `no_match` | the facet skipping the host key comparison: the other host's exchange logs in |
-| freshness, host unit tests of the facet | the same exchange and signature a second time, an exchange whose cookie the facet never issued, one whose cookie is past 120 s, and one whose cookie was dropped as the oldest of 129 each answer `no_match` | the facet not retiring a cookie at a login: the second presentation logs in |
+| freshness, host unit tests of the facet | the same exchange and signature a second time, an exchange whose cookie the facet never issued, one whose cookie is past 120 s, and one whose connection process has exited each answer `no_match`; with 128 cookies outstanding for live processes, a 129th `cookie` answers `unavailable` and each of the 128 still logs in | the facet not retiring a cookie at a login: the second presentation logs in; the facet keeping a cookie after its process exits: the exited connection's cookie logs in |
 | signed data, host unit tests of the facet | a signature over another user, another service or another key answers `no_match`; an unknown principal and an unknown key answer alike | the facet builds the signed data without the user name: the other-user case logs in |
 | the verifier, host unit tests calling it directly | RFC 8032 section 7.1's Ed25519 vectors verify; each with `S + L` in place of `S`, with `R` encoding `y = p`, with a public key of `x = 0` and the sign bit set, or with a public key whose `y` has no square root is refused; `add_login_key` refuses the encodings of the eight points of small order, the neutral point among them, a list the test checks with RFC 8032 section 5.1.4's addition | the range check on `S` removed from a test build of the verifier: the `S + L` case verifies; the small-order check removed: the neutral point's key is admitted, and a signature the test forges for it verifies |
 | `erx_ssh_wire`'s fuzz target | random and mutated blobs and exchange inputs, strings whose lengths run past the end among them, never crash the decoder and are refused with `badarg` when they do not fit; every accepted blob re-encodes to its input, and every accepted exchange input's five strings re-encode to its prefix | the length check off by one: the round trip fails; the string taken before its length is checked: a length past the end crashes the decoder |
@@ -844,7 +857,7 @@ on the host; the QEMU suite runs the interop and the ends.
 | parallel logins, on QEMU | while one connection has sent its version line and stalls, a second client logs in within 5 s | `parallel_login` left at its default: the second login waits for the first's grace and the test fails |
 | jobs, on QEMU | `printf 'a\nb\n' \| ssh host 'cat; echo done >&2; exit 3'` prints `a` and `b` on its output and `done` on its error output and exits 3; `ssh -t host 'exit 4'` exits 4 | `job_eof` handled as `job_hangup`: `done` and the status are lost and the test fails; the line sending no `exited` for a tty: the `-t` client does not exit 4 |
 | hangup and ends | closing the client ends the tty's shells and the session within 5 s; killing the SSH domain ends every session it started, and it listens again | `logout` not called at the connection's end: the session outlives it |
-| limits | the 65th connection is refused; the 11th channel is refused; the 7th failed attempt disconnects | `max_auth_tries` not passed: the 7th attempt is answered |
+| limits | the 65th connection is refused; the 11th channel is refused; after a first `none` request, which does not count, the 6th failed attempt is answered with a disconnect | `max_auth_tries` not passed: the 6th failure is answered with `SSH_MSG_USERAUTH_FAILURE` |
 | host key | its fingerprint is the same across a reboot; a corrupt key file stops the daemon with the file named | the key made anew at each start: the fingerprints differ |
 | logging | a login as a user name holding `ESC [`, a newline and a bidirectional override shows each escaped in the record and on the console | the record's user name written through without the sink's escaper: the raw escape reaches the console capture |
 | login keys (stage 4) | `sshkeys add` with a wrong passphrase is refused and with the right one admits the key; `sshkeys del` removes it at once; a key added under `device` and written to the medium by hand does not open | the add path skipping the passphrase check: the wrong-passphrase case succeeds |
@@ -960,6 +973,7 @@ parser erXos writes for SSH, and `sshkeys` parses its key line with OTP's
   `servconf.h` `0550011325e7c892d208ba1a7971522474d02af24f192ce78925e3620cd0323f`,
   `sshd_config` `c1fed6df2e2a5a44fa4481b163408e6f96bb0e5c8bc1331ecf063992ce229d08`,
   `version.h` `3605cf2244753b660a0d06f0946665f77ce2e446b367ecee5fe6e11db28318ff`,
+  `auth2.c` `d4364911846a7296bc232660ae3427e45b6fc7726c5c7ff34c86c50ef9f5cdbf`,
   `monitor.c` `f6a0096c9ade1fd45a485099c73c07044fb2f8bdf3d3da993513b38490aeace1`.
 * From `https://www.rfc-editor.org/rfc/`: RFC 4252, "The Secure Shell
   (SSH) Authentication Protocol", section 7, `rfc4252.txt`

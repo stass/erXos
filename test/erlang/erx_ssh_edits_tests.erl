@@ -14,8 +14,10 @@
 %%   checks the signature over the SHA-256 of the input it is given;
 %% * a rekeying after the login asks no cookie and keeps no input;
 %% * the input is gone after a login by either method, and neither
-%%   sys:get_status/1 nor a terminating handler's report quotes it;
-%% * max_auth_tries disconnects past its count, and its default does not;
+%%   sys:get_status/1 nor a terminating handler's report quotes it or the
+%%   shared secret;
+%% * max_auth_tries disconnects at its count, as FreeBSD counts MaxAuthTries,
+%%   and its default does not;
 %% * a host key callback may answer {ssh2_pubkey, Blob} and sign in sign/3;
 %% * a callback module written for stock OTP sees no change.
 -module(erx_ssh_edits_tests).
@@ -157,9 +159,13 @@ status() ->
     try
         Server = receive {kex_cookie, Pid, ?COOKIE} -> Pid after 5000 -> error(no_kex_cookie) end,
         receive waiting -> ok after 5000 -> error(not_waiting) end,
-        #ssh{kex_input = Input} = ssh_params(Server),
+        #ssh{kex_input = Input, shared_secret = Secret} = ssh_params(Server),
         ?assertMatch({_, _}, binary:match(Input, ?COOKIE)),
-        ?assertNot(holds(sys:get_status(Server), Input)),
+        ?assert(is_binary(Secret) andalso byte_size(Secret) >= 32),
+        Status = sys:get_status(Server),
+        ?assert(holds(Status, '****')),
+        ?assertNot(holds(Status, Input)),
+        ?assertNot(holds(Status, Secret)),
         ok = logger:add_handler(erx_ssh_edits, ?MODULE, #{config => #{test => Test}}),
         try
             sys:terminate(Server, erx_ssh_edits_error),
@@ -167,7 +173,8 @@ status() ->
                      after 5000 -> error(no_terminate_report)
                      end,
             ?assert(holds(Report, '****')),
-            ?assertNot(holds(Report, Input))
+            ?assertNot(holds(Report, Input)),
+            ?assertNot(holds(Report, Secret))
         after
             logger:remove_handler(erx_ssh_edits)
         end
@@ -181,41 +188,48 @@ log(Event, #{config := #{test := Test}}) ->
 
 %%% max_auth_tries
 
+%% FreeBSD's sshd counts MaxAuthTries so (auth2.c, userauth_finish): every
+%% failure counts but a first "none" request, and the failure that brings the
+%% count to the maximum is answered with a disconnect.
 auth_tries_test_() ->
     {setup, fun start/0, fun stop/1,
-     [fun disconnects_past_max/0, fun none_is_no_attempt/0, fun success_within_max/0,
-      fun keyboard_interactive_counts/0, fun default_is_infinity/0]}.
+     [fun disconnects_at_max/0, fun first_none_is_free/0, fun later_none_counts/0,
+      fun success_within_max/0, fun keyboard_interactive_counts/0, fun default_is_infinity/0]}.
 
-disconnects_past_max() ->
-    Ssh0 = auth_ssh([{max_auth_tries, 2}]),
-    Ssh1 = refused(password("wrong"), Ssh0),
-    Ssh2 = refused(password("wrong"), Ssh1),
+disconnects_at_max() ->
+    Ssh1 = refused(password("wrong"), auth_ssh([{max_auth_tries, 2}])),
     ?assertThrow({keep_state_and_data,
                   [{next_event, internal,
                     {send_disconnect, ?SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE, _, _, _}}]},
-                 ssh_auth:handle_userauth_request(password("wrong"), <<"sid">>, Ssh2)).
+                 ssh_auth:handle_userauth_request(password("wrong"), <<"sid">>, Ssh1)).
 
-none_is_no_attempt() ->
-    Ssh0 = auth_ssh([{max_auth_tries, 1}]),
-    Ssh1 = lists:foldl(fun(_, Ssh) -> refused(none(), Ssh) end, Ssh0, lists:seq(1, 5)),
+first_none_is_free() ->
+    Ssh1 = refused(none(), auth_ssh([{max_auth_tries, 2}])),
     Ssh2 = refused(password("wrong"), Ssh1),
     ?assertThrow({keep_state_and_data, [_]},
                  ssh_auth:handle_userauth_request(password("wrong"), <<"sid">>, Ssh2)).
 
+later_none_counts() ->
+    Ssh1 = refused(none(), auth_ssh([{max_auth_tries, 2}])),
+    Ssh2 = refused(password("wrong"), Ssh1),
+    ?assertThrow({keep_state_and_data, [_]},
+                 ssh_auth:handle_userauth_request(none(), <<"sid">>, Ssh2)).
+
 success_within_max() ->
-    Ssh1 = refused(password("wrong"), auth_ssh([{max_auth_tries, 1}])),
+    Ssh1 = refused(password("wrong"), auth_ssh([{max_auth_tries, 2}])),
     ?assertMatch({authorized, ?USER, _},
                  ssh_auth:handle_userauth_request(password("right"), <<"sid">>, Ssh1)).
 
 keyboard_interactive_counts() ->
-    Ssh1 = refused(password("wrong"), auth_ssh([{max_auth_tries, 1}])),
+    Ssh1 = refused(password("wrong"), auth_ssh([{max_auth_tries, 2}])),
     Response = #ssh_msg_userauth_info_response{num_responses = 1, data = <<5:32, "wrong">>},
     ?assertThrow({keep_state_and_data, [_]},
                  ssh_auth:handle_userauth_info_response(Response, Ssh1#ssh{user = ?USER,
                                                                            kb_tries_left = 3})).
 
 default_is_infinity() ->
-    lists:foldl(fun(_, Ssh) -> refused(password("wrong"), Ssh) end, auth_ssh([]), lists:seq(1, 20)).
+    lists:foldl(fun(_, Ssh) -> refused(password("wrong"), refused(none(), Ssh)) end,
+                auth_ssh([]), lists:seq(1, 20)).
 
 auth_ssh(Extra) ->
     Opts = ssh_options:handle_options(server, [{pwdfun, fun(_, P) -> P =:= "right" end} | Extra]),

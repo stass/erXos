@@ -20,7 +20,8 @@
 %% %CopyrightEnd%
 %%
 %% Modified by erXos: a key callback's verify_user/6 also checks a publickey signature,
-%% and a server disconnects past max_auth_tries failed attempts.
+%% and a server disconnects at max_auth_tries failed attempts, counted as OpenSSH counts
+%% MaxAuthTries.
 
 %%
 
@@ -230,8 +231,16 @@ init_userauth_request_msg(#ssh{opts = Opts} = Ssh) ->
 
 %%%----------------------------------------------------------------
 %%% called by server
+handle_userauth_request(#ssh_msg_userauth_request{method = Method} = Msg, SessionId,
+                        #ssh{auth_requests = Requests} = Ssh) ->
+    Count = case Requests =:= 0 andalso Method =:= "none" of
+                true -> free;
+                false -> counts
+            end,
+    count_failure(Count, userauth_request(Msg, SessionId, Ssh#ssh{auth_requests = Requests + 1}));
+%% A service request is no authentication attempt.
 handle_userauth_request(Msg, SessionId, Ssh) ->
-    count_failure(Msg, userauth_request(Msg, SessionId, Ssh)).
+    userauth_request(Msg, SessionId, Ssh).
 
 userauth_request(#ssh_msg_service_request{name = Name = "ssh-userauth"},
 			_, Ssh) ->
@@ -448,7 +457,7 @@ handle_userauth_info_request(#ssh_msg_userauth_info_request{name = Name,
 %%%----------------------------------------------------------------
 %%% keyboard-interactive server
 handle_userauth_info_response(Msg, Ssh) ->
-    count_failure(Msg, userauth_info_response(Msg, Ssh)).
+    count_failure(counts, userauth_info_response(Msg, Ssh)).
 
 userauth_info_response(#ssh_msg_userauth_info_response{num_responses = 1,
 							      data = <<?UINT32(Sz), Password:Sz/binary>>},
@@ -496,28 +505,31 @@ userauth_info_response(#ssh_msg_userauth_info_response{},
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-%% max_auth_tries: a server counts each attempt that fails, and answers the
-%% attempt that fails past the option's count with a disconnect instead of
-%% SSH_MSG_USERAUTH_FAILURE. A "none" request, which a client sends to learn
-%% the methods, is no attempt. Every server result passes through here, so an
-%% attempt counts whichever method it used.
-count_failure(#ssh_msg_userauth_request{method = "none"}, Result) ->
+%% max_auth_tries, counted as FreeBSD's sshd counts MaxAuthTries (auth2.c,
+%% userauth_finish): every failed request or keyboard-interactive answer
+%% counts, except a "none" request that is the connection's first (free), and
+%% the failure that brings the count to max_auth_tries is answered with a
+%% disconnect instead of SSH_MSG_USERAUTH_FAILURE. Every result of a user
+%% authentication request or answer passes through here, so a failure counts
+%% whichever method it used; a method the daemon does not offer arrives as
+%% "none" (ssh_fsm_userauth_server).
+count_failure(free, Result) ->
     Result;
-count_failure(_Msg, {not_authorized, Who, {#ssh_msg_userauth_failure{} = Reply,
+count_failure(counts, {not_authorized, Who, {#ssh_msg_userauth_failure{} = Reply,
                                          #ssh{auth_failures = Failures0, opts = Opts} = Ssh}}) ->
     Failures = Failures0 + 1,
-    case past_max_auth_tries(Failures, ?GET_OPT(max_auth_tries, Opts)) of
+    case reached_max_auth_tries(Failures, ?GET_OPT(max_auth_tries, Opts)) of
         true ->
             ?DISCONNECT(?SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE,
                         "Too many authentication failures");
         false ->
             {not_authorized, Who, {Reply, Ssh#ssh{auth_failures = Failures}}}
     end;
-count_failure(_Msg, Result) ->
+count_failure(counts, Result) ->
     Result.
 
-past_max_auth_tries(_Failures, infinity) -> false;
-past_max_auth_tries(Failures, Max) -> Failures > Max.
+reached_max_auth_tries(_Failures, infinity) -> false;
+reached_max_auth_tries(Failures, Max) -> Failures >= Max.
 
 method_preference(SigKeyAlgs) ->
     %% PubKeyAlgs: List of user (client) public key algorithms to try to use.

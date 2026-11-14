@@ -5780,9 +5780,7 @@ to the corpus and follow rc
   ([design-ssh.md](docs/design-ssh.md#limits-and-who-pays)): OTP has no
   counterpart of FreeBSD's `MaxStartups`, so a flood of unauthenticated
   connections holds the 64 slots until their 120 s grace ends, refusing
-  others, and a flood of short connections can drop a waiting login's
-  cookie from the login facet's 128, failing that login. Both refuse;
-  neither admits anyone.
+  others. It refuses; it admits no one.
 * [Low] SSH on a weak seed ([design-ssh.md](docs/design-ssh.md#host-keys)):
   on a boot whose `entropy_quality` is weak, as every stopgap boot's is
   (`liberx/backend/fiasco/entropy.c` seeds from the counter alone), the
@@ -6966,6 +6964,19 @@ document's "residual risks accepted" paragraph.
   files and `net` grant. Design them to run in the principal's session, as
   `open_job` runs a command, on the session's namespace and its own `net`
   grant.
+* [Low] ssh, `max_auth_tries` against FreeBSD's `MaxAuthTries`
+  ([design-ssh.md](docs/design-ssh.md#limits-and-who-pays),
+  `otp/lib/ssh/src/ssh_auth.erl`, `handle_userauth_request/3`): FreeBSD's
+  sshd (`crypto/openssh/auth2.c`) disconnects at 1,024 requests of any
+  kind (`:290-291`) and when the user name or service changes between
+  requests (`:323-328`), and counts an unoffered method sent as the first
+  request; OTP's daemon does none of these, so a client that knows an
+  authorized key can send `pk_ok` queries, each a `key_ok` call to the
+  system domain, for the whole 120 s grace.
+* [Low] ssh, a held host key's `sign/3` is not told the signature algorithm
+  (`otp/lib/ssh/src/ssh_transport.erl`, `sign_with/4`): fine for Ed25519,
+  the only host key erXos offers, but a held RSA key could not choose
+  between `rsa-sha2-256` and `rsa-sha2-512`.
 * [Medium] login, one login service for front ends
   ([design-ssh.md](docs/design-ssh.md#risks-and-open-questions),
   [design-web.md](docs/design-web.md#risks-and-open-questions)):
