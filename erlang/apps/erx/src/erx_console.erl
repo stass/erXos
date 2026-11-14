@@ -135,6 +135,13 @@
 %% console only: a session's relay reads every BEL as a byte, as a raw tty does.
 %% `owner` is the domain a pid belongs to, erx:owner/1 by default, which a host test
 %% replaces as it replaces the export table.
+%% `user` says what the console does with a `user` already registered as it starts
+%% (start_user/1). `replace`, which start_link/0 passes, kills it and starts its own.
+%% That is the system console's mode under erx_console_sup: in a runtime started with
+%% `-user erx_console` nothing but the console registers `user` (user_sup starts no
+%% user_drv and no relay), so a registered `user` is its predecessor's. `take`, the
+%% default, keeps it: a session's console takes its domain's, and a console a host
+%% test starts leaves the group of the runtime's own driver (user_drv) alone.
 -type config() :: #{role := system | session,
                     menu => boolean(),
                     principal => pos_integer(),
@@ -142,7 +149,8 @@
                     name := atom(),
                     driver := fun((Console :: pid()) -> {ok, pid(), Terminal :: boolean()}),
                     line_owners => fun(() -> {ok, [pid()]} | {error, term()}),
-                    first_shell := first_shell() | shell()}.
+                    first_shell := first_shell() | shell(),
+                    user => replace | take}.
 
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
@@ -160,7 +168,7 @@
                 %% The group the console started with, which the others return the input to:
                 %% the command shell's, or `user` with no shell.
                 base :: pid(),
-                %% The `user` group, which every console has (start_user/0): the
+                %% The `user` group, which every console has (start_user/1): the
                 %% groups ask it the line's encoding (shell:prompt_width/1), and a session's
                 %% domain, started with -nouser, has no other.
                 user :: pid(),
@@ -226,7 +234,8 @@ start_link() ->
                      #{role => system, name => ?MODULE,
                        driver => fun(Console) -> (driver_module()):start_link(Console) end,
                        line_owners => fun() -> line_owners(driver_module()) end,
-                       first_shell => first_shell(shell_arguments())}, []).
+                       first_shell => first_shell(shell_arguments()),
+                       user => replace}, []).
 
 -doc """
 Starts a console as Config says, linked to the caller and registered under Config's
@@ -363,7 +372,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
     TTY = banner(Role, prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
-    User = start_user(Role),
+    User = start_user(maps:get(user, Config, take)),
     Group = case FirstShell of
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
@@ -453,22 +462,20 @@ The first group never runs the Erlang shell (first_shell/1).
 erlang_shell_group([{Group, _Caller, {shell, start, _Args}} | _]) -> Group;
 erlang_shell_group(_Shells) -> undefined.
 
-%% The `user` group, started and registered as user_drv's start_user/0 does. The system
-%% console's `user` ends with it, as a group ends at its driver's exit, so a `user` still
-%% registered as the system console starts is its predecessor's, which may not have taken
-%% that exit yet: it is killed and its end awaited, which frees the name. Under
-%% `-user erx_console` nothing else registers `user` (user_sup starts no user_drv and no
-%% relay). A session's console takes the `user` its domain already has, if any.
-start_user(system) ->
-    case whereis(user) of
-        undefined -> ok;
-        Old -> ok = await_kill(Old)
-    end,
-    group:start(self(), noshell, [{name, user}]);
-start_user(session) ->
-    case whereis(user) of
-        undefined -> group:start(self(), noshell, [{name, user}]);
-        User -> User
+%% The `user` group: with none registered, one started and registered as user_drv's
+%% start_user/0 does; with one registered, what Mode, the config's `user` (config()),
+%% says. Under `replace` a registered `user` is the predecessor's, which ends with its
+%% console as a group ends at its driver's exit but may not have taken that exit yet: it
+%% is killed and its end awaited, which frees the name.
+start_user(Mode) ->
+    case {Mode, whereis(user)} of
+        {_, undefined} ->
+            group:start(self(), noshell, [{name, user}]);
+        {replace, Old} ->
+            ok = await_kill(Old),
+            group:start(self(), noshell, [{name, user}]);
+        {take, User} ->
+            User
     end.
 
 %% Kills Pid and returns once it has ended; its registered name is free by then.

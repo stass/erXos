@@ -3880,6 +3880,12 @@ it; git history is the record of completed work.
   signals the first driver's pid. So `erx_console_sup`'s restarts of a hosted console all fail at once and it gives
   up, leaving the hosted runtime without a console. Load the NIF once (`-on_load`) and let a start move the input to
   the new driver.
+* [Medium] session, `erlang/apps/erx_session/src/erx_session_tty.erl`: a restarted session console (its relay is
+  `transient` under `erx_session_sup`) takes the `user` its predecessor started, since its config leaves `user` at
+  `take` (erx_console:start_user/1); that group ends at its dead driver's exit, after which the session domain has
+  no `user` and nothing restarts the console. Session domains run `-nouser`, so nothing but the console registers
+  `user` there: pass `user => replace`, as the system console's start_link/0 does, with a session QEMU case that
+  kills the relay.
 * [Medium] runtime, `liberx/backend/fiasco`: the native root does not read the release's manifest: its page takes
   `erx.arg=WORD` alone, with `system_args`, `limits`, `pack_flags` and `release_addr` empty, and no archive holds
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
