@@ -68,9 +68,10 @@ module Erx
     LICENSE = 'LICENSE'
     # The trees imported into the source tree that the root builds from: BLAKE3 for its
     # reader of the archive and the entropy generator's mixing, ChaCha20 for that
-    # generator's stream, OTP for the release's beams, and libfdt for its device-tree reader.
+    # generator's stream, OTP for the release's beams, libfdt for its device-tree reader,
+    # and musl for the HWCAP_* bits the CPU feature decoder (cpu_features.c) takes from its header.
     IMPORTS = { 'kernel/crypto/blake3' => 'permanent', 'kernel/crypto/chacha20' => 'permanent', 'otp' => 'permanent',
-                'fiasco/libfdt' => 'permanent' }.freeze
+                'fiasco/libfdt' => 'permanent', 'musl' => 'permanent' }.freeze
 
     # The emulator's archive, which holds littlefs's objects beside ERTS's own
     # (otp/erts/emulator/Makefile.in's OS_OBJS), so its attribution carries

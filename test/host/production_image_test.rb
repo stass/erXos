@@ -59,11 +59,20 @@ class ProductionImageTest < Minitest::Test
     { 'ram_first' => 0x4000_0000, 'units' => [{ 'devices' => [device] }] }
   end
 
+  # The root's sources and the tree files they include directly by a path
+  # from the tree's top: the pack attributes each one, and refuses one inside
+  # an imported tree its table does not register. A header reached only
+  # through another header is not read here; the pack still refuses it.
   def test_every_import_the_root_links_is_registered
-    linked = Erx::NativeRoot::SERVICE.filter_map do |source|
-      Pathname(source).ascend.map(&:to_s).find { |directory| File.file?(File.join(ROOT, directory, 'ORIGIN.md')) }
+    sources = Erx::NativeRoot::SYSTEM.reject { |source| source.start_with?('build/') }
+    included = sources.flat_map do |source|
+      File.read(File.join(ROOT, source)).scan(/^\s*#\s*include\s+"([^"]+)"/).flatten
+          .select { |path| File.file?(File.join(ROOT, path)) }
     end
-    assert_empty linked.uniq - Erx::ProductionImage::IMPORTS.keys
+    trees = [*sources, *included].filter_map do |path|
+      Pathname(path).ascend.map(&:to_s).find { |directory| File.file?(File.join(ROOT, directory, 'ORIGIN.md')) }
+    end
+    assert_empty trees.uniq - Erx::ProductionImage::IMPORTS.keys
   end
 
   # The default runtimes read the machine's platform, so a machine of another type is refused

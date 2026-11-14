@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative '../sysreg_headers'
+
 module Erx
   module ChokepointRules
     # The asm keyword in any of its spellings, as GCC and clang accept it.
@@ -22,8 +24,9 @@ module Erx
       rules: [
         Chokepoints::Forbidden.new(
           name: 'inline-asm',
-          rule: 'inline assembly only in the listed files: the generated kernel-call stubs, the barrier, ' \
-                "counter and cache-maintenance helpers of liberx's backends and the DMA architecture layer, " \
+          rule: 'inline assembly only in the listed files: the generated kernel-call stubs and ' \
+                "system-register reads, the barrier, counter and cache-maintenance helpers of liberx's " \
+                'backends and the DMA architecture layer, ' \
                 "musl's cancellation-point labels, erx_net's checksum fence, and the test programs and " \
                 'fixtures that plant instructions',
           design: "#{KERNEL}#chokepoint-checks",
@@ -33,6 +36,9 @@ module Erx
             # The kernel-call stubs tools/lib/erx/abi_emit_calls.rb writes for each backend.
             Chokepoints::Site.new(glob: 'liberx/backend/erx/arch/aarch64/generated/calls.c'),
             Chokepoints::Site.new(glob: 'liberx/backend/fiasco/arch/aarch64/generated/trap.c'),
+            # The system-register reads tools/lib/erx/sysreg_headers.rb writes, one function per
+            # register; the sysreg-read rule below holds their callers to a list.
+            Chokepoints::Site.new(glob: SysregHeaders::READS),
             # erx_fiasco_cache_make_coherent.
             Chokepoints::Site.new(glob: 'liberx/backend/fiasco/arch/aarch64/cache.c'),
             # erx_fiasco_counter_hz and erx_fiasco_counter.
@@ -58,21 +64,27 @@ module Erx
                   'otp/erts/emulator/sys/erxos/seeded.c' => "void f(void) { __asm__(\"isb\"); }\n",
                   'kernel/core/seeded.c' => "void f(void) { __asm__ volatile(\"isb\"); }\n" }
         ),
-        # The generated system-register reads (tools/lib/erx/sysreg_headers.rb) hold their
-        # instruction in a header of the build tree, which the rule above does not see, so
-        # this one holds their callers to a list.
+        # The generated system-register reads (tools/lib/erx/sysreg_headers.rb) are a site of
+        # the rule above, so their instructions reach every file that includes their header
+        # without that file's text naming asm. This rule holds those files to a list: it refuses
+        # an include of the header as well as a reader's name, and each read is static inline,
+        # so a file that does not include the header has no read, however a macro spells its
+        # name (include-form refuses an include whose path a macro computes).
         Chokepoints::Forbidden.new(
           name: 'sysreg-read',
           rule: "generated system-register reads only in the listed files: the reader of the boot CPU's " \
                 'identification registers, which bootstrap calls',
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: [*INLINE_ASM_SCOPE.extra, 'fiasco/bootstrap/server/src/erx_*']),
-          pattern: /\berx_sysreg_\w+_read\b/,
+          pattern: Regexp.union(/\berx_sysreg_\w+_read\b/, include_of(SysregHeaders::READS)),
           sites: [
-            # erx_boot_cpu_id_read, which bootstrap calls in kernel mode.
+            # The header that defines the reads.
+            Chokepoints::Site.new(glob: SysregHeaders::READS),
+            # erx_boot_cpu_id_read, which bootstrap calls in kernel mode, and its include.
             Chokepoints::Site.new(glob: 'kernel/arch/aarch64/cpu_id.c')
           ],
           seed: { 'liberx/seeded.c' => "unsigned long f(void) { return erx_sysreg_id_aa64isar0_el1_read(); }\n",
+                  'kernel/core/seeded.c' => "#include \"erx/arch/aarch64/sysreg.h\"\n",
                   'fiasco/bootstrap/server/src/erx_image.cc' => "void f() { (void)erx_sysreg_cntvct_el0_read(); }\n" }
         )
       ]

@@ -15,8 +15,8 @@ module Erx
     # What keeps Fiasco's interface behind its backend and the glue, with the
     # stopgap's own pending rules: the seam every core and domain sits above.
     declare_group(
-      # The liberx files the object leg has not read yet: the generated calls
-      # and reader, and the ELF planner.
+      # The liberx files of the backends and their cores that the object leg
+      # has not read yet.
       unchecked_objects: %w[
         liberx/backend/erx/arch/aarch64/generated/calls.c
         liberx/backend/core/mem.h
@@ -91,6 +91,8 @@ module Erx
         liberx/backend/fiasco/root.ld
         liberx/backend/fiasco/root_open.c
         liberx/backend/fiasco/root_open.h
+        liberx/backend/fiasco/root_handoff.c
+        liberx/backend/fiasco/root_handoff.h
         liberx/backend/fiasco/root_mem.c
         liberx/backend/fiasco/root_mem.h
         liberx/backend/fiasco/service.c
@@ -140,6 +142,8 @@ module Erx
         liberx/backend/fiasco/budget.h
         liberx/backend/core/boot_info.c
         liberx/backend/core/boot_info.h
+        liberx/backend/core/cpu_features.h
+        liberx/backend/core/arch/aarch64/cpu_features.c
         liberx/backend/core/boot_manifest.c
         liberx/backend/core/manifest_dma.h
         liberx/backend/core/boot_manifest.h
