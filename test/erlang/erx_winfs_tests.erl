@@ -186,7 +186,7 @@ the_single_policy_shows_the_sessions_oldest_window_test_() ->
 
 single_policy() ->
     World = start(answer),
-    Session = mint(?SESSION, #{session => true}),
+    Session = mint(?SESSION, #{session => true, windows => 2}),
     Other = mint(?OTHER, #{windows => 2}),
     Holder = spawn(fun() -> receive stop -> ok end end),
     {ok, _} = call(Session, Holder, {mkdir, 1, <<"first">>, 8#755, 0}),
@@ -250,7 +250,7 @@ never_answers() ->
     World = #{screen := Screen} = start(never),
     ?assertMatch([_ | _], flushed()),
     _ = give_area(?SESSION),
-    Session = mint(?SESSION, #{session => true}),
+    Session = mint(?SESSION, #{session => true, windows => 2}),
     {ok, _} = mkdir(Session, <<"w">>),
     Wctl = open(Session, 2, <<"w">>, <<"wctl">>, ?O_RDWR),
     Ctl = open(Session, 3, <<"w">>, <<"ctl">>, ?O_RDWR),

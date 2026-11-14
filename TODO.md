@@ -823,7 +823,7 @@ it; git history is the record of completed work.
     display's session from a start row ([Track A](docs/plan.md#track-a-apps), part 1), with `session` carried by
     every mint of its grant from the session mark the domain service alone sets. A window's buffer at the screen's
     size, allocated once by `erx_win:open/2`, with
-    `resized/1` allocating nothing; the grant defaults of 8 windows, 64 MiB and `snarf` off at the server.
+    `resized/1` allocating nothing; the grant defaults of 1 window, 8 MiB and `snarf` off at the server.
   * **The reserved chord** ([The reserved chord](docs/design-display.md#windows-and-the-window-system)): its field in the
     `display` record, its source spelling and its key encoding, which land with the login design's choice of what
     the chord brings up ([Risks and decisions](docs/design-display.md#risks-and-decisions), 14). Until then no
@@ -5844,6 +5844,11 @@ to the corpus and follow rc
   sections, two relocations at one offset, and duplicate executable
   section names. Most need only hand-made tool output fed to
   `StackGraph.build`.
+* [Low] docs, [README.md](README.md#current-status): the sample boot transcript is out of date. Its
+  archive is 23.70 MiB (`0x17b4000`) and its `root_memory` 96 MiB (`100663296`), where the development
+  image packs an archive of about 54 MiB beside a `root_memory` of 231,079,936 bytes; its build and index
+  hashes, baseline, pool pages and entry count are of the same old build. Replace the transcript with one
+  from a fresh `tools/erx boot`.
 * [Low] docs/research-baselines.md: the experiments behind the record (the
   boot and exception probe and its generators, the ERTS round-trip
   benchmark, the restricted decoder, the decompiled device trees) live
@@ -6597,6 +6602,15 @@ document's "residual risks accepted" paragraph.
 * [Low] apps, [design-packaging.md](docs/design-packaging.md#the-apps-row): a setting for the apps group's
   CPU share of `users`. The apps group takes what the principals' shares leave, each app an equal part, with
   no field of the `apps` row to set it; a builder who wants apps held to a smaller share has no lever.
+* [Low] apps, [design-packaging.md](docs/design-packaging.md#the-apps-row): a board's own figure for a
+  parameter of the services its apps are granted. The derived rows take each service's ABI defaults, so
+  every board's apps get `windows_pixels_default`, 8 MiB, one 1920 by 1080 `x8r8g8b8` buffer. A board with a
+  screen above 1080p (3840 by 2160 needs about 32 MiB a buffer, and an app there is refused `enomem` when it
+  opens its window) or a small panel (800 by 480 needs 1.5 MiB, so 8 MiB reserves far more than it uses)
+  needs its own. Add it in the general form, `parameter SERVICE NAME VALUE` lines in the `apps` row, checked
+  against the service's schema as a facet row's parameters are, not a column for one service, and update the
+  row of [Alternatives considered](docs/design-packaging.md#alternatives-considered) that sends such values
+  to the service's defaults. Needed only once such a board gets an `apps` row.
 * [Low] bootstrap, boot lines: print `/chosen/bootloader/build-timestamp` from the device tree
   (`rpi-eeprom-update` of `raspberrypi/rpi-eeprom` at `3831e51dba65f4493f3f88c1d049de73165c082e`, l.48), so a
   board report shows the bootloader version, which the Pi 4's A/B card needs to be 2022-12-01 or later

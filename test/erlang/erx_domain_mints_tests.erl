@@ -133,7 +133,7 @@ windows_pair_rounds_its_pixels_to_pages_test() ->
 
 windows_pair_without_pixels_has_the_default_test() ->
     Mints = windows([{?G, display, ?S, #{}}]),
-    ?assertEqual({64 bsl 20, 5}, erx_domain_mints:pair_area({5, {configured, ?S}}, {6, {configured, ?G}}, Mints)).
+    ?assertEqual({8 bsl 20, 5}, erx_domain_mints:pair_area({5, {configured, ?S}}, {6, {configured, ?G}}, Mints)).
 
 other_pairs_have_no_area_test() ->
     Mints = windows([{?G, data, ?S, #{pixels => 4096}}, {{template, 0}, display, ?S, #{}}]),

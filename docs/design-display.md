@@ -481,7 +481,7 @@ header and no field: the display computes every address in it from the
 A display's grant carries its quotas, from the manifest's facet
 parameters: `windows`, the windows it may hold at once; `pixels`, the
 size of its pixel area; and `snarf`, whether its tree has the
-clipboard. Their defaults are 8 windows, a pixel area of 64 MiB, and no
+clipboard. Their defaults are 1 window, a pixel area of 8 MiB, and no
 clipboard. A window is at most 16,384 pixels on a side, so a buffer is
 at most 1 GiB, and its size is computed with checked arithmetic.
 
@@ -493,8 +493,9 @@ the client draws and presents within it, never the allocation, so a
 resize allocates nothing and nothing is left behind to free. A window's
 cost is therefore one screen's bytes, rounded up to pages, for each
 buffer it keeps, and a grant's `pixels` is sized as its `windows` times
-that: the defaults hold one buffer for each of 8 windows on a screen of
-1920 by 1080 pixels in `x8r8g8b8`, 8,294,400 bytes each. A client
+that: the defaults hold one buffer for one window on a screen of 1920
+by 1080 pixels in `x8r8g8b8`, 8,294,400 bytes, rounded up to 8 MiB,
+and two at 1280 by 800, 4,096,000 bytes each. A client
 whose area has no room for a new window's buffer is refused at `open`,
 which removes the window it made for the buffer
 ([The window tree](#the-window-tree)), and a screen that grows after a window was

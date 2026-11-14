@@ -9,8 +9,8 @@
 # of the display's session; the domain service alone sets it, from the start row that
 # names the display, so no facet row may (property 18). A row that states no windows or
 # pixels gets windows_default windows and a pixel area of windows_pixels_default bytes,
-# one 1920 by 1080 x8r8g8b8 buffer for each of 8 windows, rounded up to 64 MiB, and a
-# row that states no snarf has no clipboard. windows_grant is property 18 of the
+# one 1920 by 1080 x8r8g8b8 buffer, 8294400 bytes, rounded up to 8 MiB, and a row that
+# states no snarf has no clipboard. windows_grant is property 18 of the
 # manifest check (docs/design-system.md, "The manifest"): it sums each display's pixel
 # areas within its display domain's outer budget, refuses session, and holds windows
 # and snarf to their declared bounds; erx_winfs enforces windows and snarf at run time.
@@ -19,8 +19,8 @@ service windows 8
   parameter pixels 2 u64 optional range 4096 1099511627776 checked_by windows_grant
   parameter snarf 3 boolean optional boolean checked_by windows_grant
   parameter session 4 boolean optional boolean checked_by windows_grant
-limit windows_default u32 8
-limit windows_pixels_default u64 67108864
+limit windows_default u32 1
+limit windows_pixels_default u64 8388608
 # The window tree's wire (docs/design-display.md, "The window tree" and "Windows and
 # buffers"), which erx_winfs and its windows serve and erx_win reads, so both sides take
 # it from here. windows_tree is the tree's name in an attach; windows_file names a

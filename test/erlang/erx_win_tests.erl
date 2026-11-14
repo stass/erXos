@@ -65,7 +65,8 @@ serve(Test, Info) ->
 %% The window system and screen over the driver model, a grant minted for ?SESSION over a
 %% stand-in area, installed where the stand-in erx:cap/1 finds it, and the client's
 %% allocator. The area is one page of the host's, 16 KiB on Apple's, which the stand-in
-%% maps whole: four of erXos's pages.
+%% maps whole: four of erXos's pages. The grant holds two windows, so a second window
+%% is refused by the area, not by the windows quota.
 start() ->
     _ = [kill(Pid) || Name <- [erx_screen, erx_winfs, erx_pixels, ?DRIVER], Pid <- [whereis(Name)],
                       is_pid(Pid)],
@@ -81,7 +82,8 @@ start() ->
     {ok, Pixels} = gen_server:start({local, erx_pixels}, erx_pixels, [], []),
     [true = unlink(P) || P <- [Winfs, Screen]],
     Tag = erlang:unique_integer([positive]),
-    erx_winfs ! {erx_origin, ?SYSTEM, {erx_facet_mint, Tag, ?SERVICE, ?SESSION, root, #{session => true}}},
+    erx_winfs ! {erx_origin, ?SYSTEM,
+                 {erx_facet_mint, Tag, ?SERVICE, ?SESSION, root, #{session => true, windows => 2}}},
     Grant = receive {minted, Tag, {ok, G}} -> G after ?WAIT -> error(no_mint) end,
     persistent_term:put({erx_stand_in, cap, ?SERVICE}, Grant),
     persistent_term:put({erx_stand_in, owner, Grant}, ?SESSION),

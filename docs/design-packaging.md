@@ -251,7 +251,7 @@ branch `lvglscreen`, commit `82b02f4ff`) and Doom (the repository
 | manifest rows per app, and machine-wide sums grown by hand: display outer budget and connections, the system principal's memory, `root_memory`, `max_domains`, `max_connections` | kiosk, Doom 3 | the `apps` row: the board declares it once, and the build counts it for every app it can hold |
 | no SDK: the build drove `tools/lib/erx` internals (`NativeRoot`, `ProductionImage`, `Programs::PROGRAM_PREFIX`) | Doom 1 | [The SDK](#the-sdk) |
 | the program joined the one domain release's `bin/`, seen by every session | Doom 5 | the program is `/app/bin/NAME`, an executable file run through `erx_exec` |
-| app code in the boot image made it 88 MiB, past the stopgap's 64 MiB root place | Doom 6 | the image builder's packages lie on the system slot, outside the boot image ([Where a package lies](#where-a-package-lies)) |
+| app code in the boot image made it 88 MiB, which stays in RAM for the whole boot, out of the room `root_memory` leaves | Doom 6 | the image builder's packages lie on the system slot, outside the boot image ([Where a package lies](#where-a-package-lies)) |
 | no `open()` in a native program: `liberx/program/fd.h:37-41` has null, pipe and mem objects, and the C library seam answers every unlisted call `ENOSYS` (`musl/src/internal/erxos/syscall.c:536-537`), so the WAD was linked in | Doom 4 | designed, not built: [Descriptors and files](design-programs.md#descriptors-and-files) gives a program files through its handler; a package's data is `/app/share`, its writable files `/data` |
 | the launcher invented a pid, parent, group, directory and masks for `erx_program:start/1` | Doom 7 | programs start through `erx_prog_handler`, which assigns them |
 | presents on a 100 ms timer, no keyboard | Doom 8, 11 | a program started with a window draws through `/dev/draw`, flushes when its frame is done, and reads `/dev/kbd` |
@@ -450,9 +450,30 @@ no room for the row's memory. The row's size follows from how the build counts i
   display's pixel areas and connections, the domain and principal
   tables, the session-name atoms and every server's connections, whether
   or not an app ever arrives. So `max` is the number of apps a developer
-  keeps installed in one boot, not a bound to be generous with. The
-  development manifests take the default, 8, and lower it only if the
-  board's own sums then fail.
+  keeps installed in one boot, not a bound to be generous with. A
+  development manifest takes the default, 8, and lowers it only if the
+  board's own sums then fail. The sums are the packer's room check
+  (`RootStartup.check_archive`): the archive and `root_memory` together
+  fit in RAM less `fiasco_reserve` and what the boot keeps, and the row
+  adds to `root_memory` its `memory` and, in the display's outer budget,
+  `max` pixel areas of `windows_pixels_default`, 8 MiB each (the sums
+  below leave out the 4 KiB lane each grant adds, which the packer
+  counts):
+  * QEMU `virt`'s development machine, 512 MiB of RAM less a
+    `fiasco_reserve` of 32 MiB and the 22.5 MiB the boot keeps, leaves
+    457.5 MiB for the two. Its `root_memory` of 220.375 MiB grows by the
+    131 MiB of `memory` below. With `max` 8 it grows by 64 MiB more, to
+    415.375 MiB, and leaves the archive 42.125 MiB, less than the
+    development image's archive of about 54 MiB. Its manifest sets `max`
+    4: `root_memory` is 383.375 MiB, and the archive has 74.125 MiB.
+  * The Raspberry Pi 4, 948 MiB of RAM less a `fiasco_reserve` of 58 MiB
+    and the 12 MiB the boot keeps, leaves 878 MiB. Its `root_memory` of 185 MiB grows to
+    380 MiB at the default `max` 8, leaving 498 MiB for an archive of
+    about 60 MiB, so its manifest takes the default.
+
+  When the archive grows past the room `max` leaves it, the packer
+  refuses the image, and the board's `max` is lowered then; a `max` set
+  from the archive's size would change with every build.
 * `services` is `display data net`: the services both boards serve that
   the examples and a developer's apps need.
 * `memory` is not multiplied by `max`: it is one wall, carved from
@@ -1641,7 +1662,7 @@ what rests on parts that arrive later, reporting each as it is:
 | the hash check in `erx_verity` | the security closure, M11 ([plan.md](plan.md#m11-security-closure)) | `erx_verity` passes blocks through unchecked, as for every image, so a byte changed on the medium is read as it is; PK3's QEMU test waits for M11 |
 | rooting `data` grants by principal, `apps/`, `tree apps` and the signer in an app's directory | principals' directories (M10) | apps can reach each other's directories, the residual design-apps.md records; the directory half of PK4's test waits, its `/proc` half runs |
 | `purge` with `remove_app` | the same | `service NAME purge` answers `enotsup` |
-| the image builder's packages on the system slot | the storage service serving a slot's image | they lie in the boot image's domain release, readable by every domain, enlarging the boot image and the memory it holds; a large one needs a larger root place on the stopgap |
+| the image builder's packages on the system slot | the storage service serving a slot's image | they lie in the boot image's domain release, readable by every domain, enlarging the boot image, which stays in RAM, so each MiB of them comes out of the room `root_memory` leaves the archive |
 | checking an installed package's signature | the small verifier in the build ([plan.md](plan.md#m11-security-closure)) | a development build installs packages whose signature it cannot check and shows them `unchecked`; a release build installs none |
 
 ## Verification and testing
@@ -1797,7 +1818,7 @@ this is not on the list.
 | **A check that refuses an app whose module names clash with the release's** | The app's paths come after the release's, so a clash breaks only the app that brought it; the check would be one more refusal to keep in step with the release |
 | **A version an install may not lower, with a flag to override it** | Against the administrator it only adds a flag; against a storage domain that puts back an older file it holds nothing without a counter the trust root keeps. The version is shown, not judged |
 | **Packages unpacked into a directory of the data partition** | Their integrity would rest on the storage domain. An EROFS image under a hash tree, checked by the reader, makes it rest on the header alone |
-| **The image builder's packages in the boot image** | The boot image is held in memory and bounded by the root place; Doom's 28 MiB WAD made the image 88 MiB. On the slot they are read on demand and still change only with the system |
+| **The image builder's packages in the boot image** | The boot image stays in RAM for the whole boot, and every MiB of it comes out of the room `root_memory` leaves, which an `apps` row cuts to about 74 MiB on QEMU; Doom's 28 MiB WAD made the image 88 MiB. On the slot they are read on demand and still change only with the system |
 | **Every package ships its own `erx-lvgl`** | One copy per app, a wire between toolkit and renderer that each app's build could skew, and LVGL's notices in every package |
 | **A launcher in Erlang for each native app** | The display already starts a program with a window and binds its draw and input files; `program` reaches that for every native app |
 | **A native window app draws into its buffer and presents through a pipe protocol, as `erx-lvgl` does** | It would be a second public path to the screen. `/dev/draw` is the designed one; the measurement on the watch list decides whether a faster one is needed |
