@@ -71,11 +71,7 @@ module Erx
         selected = extracted
         verify_original_files(directory, original: selected)
         profile = import_profile(project, component: component, source: selected)
-        exclusions = profile.fetch('exclusions').dup
-        if component == 'otp'
-          exclusions.concat(select_otp_applications(selected, applications: profile.fetch('applications')))
-        end
-        profile.fetch('exclusions').each { |excluded| remove_exclusion(selected, excluded.fetch('path')) }
+        exclusions = remove_exclusions(selected, profile: profile, component: component)
         Origin.new(root: selected).write(repository: profile.fetch('repository'),
                                          revision: profile.fetch('revision'),
                                          archive_sha256: declaration.fetch('sha256'),
@@ -135,12 +131,65 @@ module Erx
       FileUtils.remove_entry(backup)
     end
 
+    # What the import removes from the unpacked tree, each path with its reason, as
+    # the origin record keeps them: the profile's exclusions, and for OTP each
+    # application outside the profile's set, which goes first, so that an exclusion
+    # beneath one finds nothing to take.
+    def remove_exclusions(root, profile:, component:)
+      applications = component == 'otp' ? select_otp_applications(root, applications: profile.fetch('applications')) : []
+      profile.fetch('exclusions').flat_map { |exclusion| remove_profile_exclusion(root, exclusion) } + applications
+    end
+
+    # A profile exclusion names a path that leaves whole, or, with keep, a directory
+    # each of whose entries leaves but those keep names, so the origin record lists
+    # each entry that went. A whole path is recorded even where the archive lacks it;
+    # a directory with keep must hold each name it keeps, unless the archive, or the
+    # pruning of OTP's applications, lacks a directory above it.
+    def remove_profile_exclusion(root, exclusion)
+      case exclusion.is_a?(Hash) && exclusion.keys.sort
+      when %w[path reason]
+        remove_exclusion(root, exclusion.fetch('path'))
+        [exclusion]
+      when %w[keep path reason]
+        remove_all_but(root, path: exclusion.fetch('path'), keep: exclusion.fetch('keep'), reason: exclusion.fetch('reason'))
+      else
+        raise Error, "invalid import exclusion #{exclusion.inspect}"
+      end
+    end
+    private_class_method :remove_profile_exclusion
+
+    def remove_all_but(root, path:, keep:, reason:)
+      unless keep.is_a?(Array) && keep.all? { |name| name.is_a?(String) && !name.include?('/') }
+        raise Error, "import exclusion #{path} keeps something other than names in it"
+      end
+      directory = reach(root, path)
+      return [] unless directory
+      unless File.directory?(directory) && !File.symlink?(directory)
+        raise Error, "import exclusion #{path} keeps names in something other than a directory of the archive"
+      end
+      entries = Dir.children(directory).sort
+      missing = keep - entries
+      raise Error, "import exclusion #{path} keeps #{missing.join(', ')}, which the archive lacks" unless missing.empty?
+
+      (entries - keep).map do |name|
+        remove_exclusion(root, "#{path}/#{name}")
+        { 'path' => "#{path}/#{name}", 'reason' => reason }
+      end
+    end
+    private_class_method :remove_all_but
+
     # An excluded path leaves the unpacked tree whole, file or directory, so the
-    # origin record lists nothing beneath it. The profile is checked in, but its
-    # path still names only a place inside root, and through no link the archive
-    # holds, so what goes is the path the record names (a link at the end goes
-    # itself).
+    # origin record lists nothing beneath it; a link at the end goes itself.
     def remove_exclusion(root, relative)
+      path = reach(root, relative)
+      FileUtils.remove_entry(path) if path && present?(path)
+    end
+    private_class_method :remove_exclusion
+
+    # The place a profile path names: inside root and through no link the archive
+    # holds, though the profile is checked in; nil when the archive lacks a
+    # directory on the way.
+    def reach(root, relative)
       if !relative.is_a?(String) || relative.start_with?('/') ||
          relative.split('/', -1).any? { |part| ['', '.', '..'].include?(part) }
         raise Error, "invalid import exclusion #{relative.inspect}"
@@ -149,15 +198,18 @@ module Erx
       parts = relative.split('/')
       parents = parts[0...-1].each_index.map { |index| File.join(root, *parts[0..index]) }
       parents.each do |parent|
-        return unless File.exist?(parent) || File.symlink?(parent)
+        return nil unless present?(parent)
         next if File.directory?(parent) && !File.symlink?(parent)
 
         raise Error, "import exclusion #{relative} passes through a link or a file in the archive"
       end
-      path = File.join(root, relative)
-      FileUtils.remove_entry(path) if File.exist?(path) || File.symlink?(path)
+      File.join(root, relative)
     end
-    private_class_method :remove_exclusion
+    private_class_method :reach
+
+    # A path the archive holds, a link to nowhere included.
+    def present?(path) = File.exist?(path) || File.symlink?(path)
+    private_class_method :present?
 
     def select_otp_applications(root, applications:)
       library = File.join(root, 'lib')

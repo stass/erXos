@@ -104,9 +104,10 @@ What the sources say, read at the pins of [Sources](#sources):
   constructor of it runs there.
 * **CR2.** OpenSSL's generator is seeded only from `erx_entropy_read`; a
   failed read fails the seeding, and no other source is tried.
-* **CR3.** `crypto`, `public_key`, `asn1` and `ssh` on erXos agree with
-  stock OTP 29.1.2 built against the same OpenSSL configuration, case by
-  case in OTP's own suites.
+* **CR3.** `crypto`, `public_key` and `ssh` on erXos agree with stock OTP
+  29.1.2 built against the same OpenSSL configuration, case by case in
+  OTP's own suites, whose `public_key` cases exercise `asn1`'s run-time
+  module, `asn1rt_nif`.
 * **CR4.** OpenSSL uses the CPU's AES and SHA instructions where the CPU
   has them and constant-time software where it does not, decided from the
   features the kernel reports, never from a probe that faults.
@@ -114,9 +115,10 @@ What the sources say, read at the pins of [Sources](#sources):
 
 ## What the code does today
 
-* `lib/crypto` and `lib/asn1` are imported into `otp/`; `otp/ORIGIN.md`
-  excludes `lib/public_key`, `lib/ssh` and `lib/ssl` as "outside the
-  shipped OTP application set in the runtime design".
+* `lib/crypto`, `lib/asn1`, `lib/public_key` and `lib/ssh` are imported
+  into `otp/` as "OTP's applications" below describes; `otp/ORIGIN.md`
+  excludes `lib/ssl` as "outside the shipped OTP application set in the
+  runtime design".
 * OpenSSL 3.5.9 is imported into `openssl/` with its three edits, pinned in
   `deps.lock`, and `tools/erx build openssl` makes `libcrypto.a` for
   `erxos-aarch64` (`tools/lib/erx/libcrypto.rb`,
@@ -378,9 +380,18 @@ words, so the choice follows the kernel's report:
 
 `lib/crypto`, `lib/asn1`, `lib/public_key`, `lib/ssh` and `lib/ssl` are
 imported into `otp/` from the same OTP 29.1.2 archive as the rest, as
-erXos's code, with their test suites as fixtures, and `otp/ORIGIN.md`
-drops their exclusions. Each ships its beams, `.app` and headers, as the
-other shipped applications do
+erXos's code, with the test suites of `crypto`, `public_key`, `ssh` and
+`ssl` as fixtures. The import leaves out what the build neither reads nor
+ships, each part with its reason in `config/imports/otp.json` and
+`otp/ORIGIN.md`: their `doc` directories, their prebuilt beams, the
+Erlang the ASN.1 compiler generated from `public_key`'s specifications,
+and all of `asn1` but its run-time module `asn1rt_nif`, its NIF and the
+files its make reads to build them, so the ASN.1 compiler, its test
+suites and its examples stay out. The ASN.1 compiler that generates
+`public_key`'s modules on the host is the stock oracle's, a build tool
+as its `erlc` is, so a copy in the tree would be one nothing builds or
+runs. Each ships its beams, `.app` and headers, as the other shipped
+applications do
 ([design-runtime.md](design-runtime.md#everything-else)), in releases that
 ask for them; the system release never does.
 
@@ -445,7 +456,7 @@ Each test names the seeded failure that proves it ran.
 
 | Test | Passes when | Seeded failure |
 | --- | --- | --- |
-| `crypto_SUITE`, `public_key_SUITE`, `pubkey_*_SUITE` and `asn1`'s run-time suites through `make check-oracle` | every case agrees with stock OTP 29.1.2 built against the same OpenSSL | erXos's OpenSSL configured with `no-chacha`: the ChaCha20 cases differ from the oracle and the comparison fails |
+| `crypto_SUITE`, `public_key_SUITE` and `pubkey_*_SUITE`, whose decoders call `asn1rt_nif`, through `make check-oracle` | every case agrees with stock OTP 29.1.2 built against the same OpenSSL | erXos's OpenSSL configured with `no-chacha`: the ChaCha20 cases differ from the oracle and the comparison fails |
 | the system image's link list, a host test (`test/host/native_runtime_link_test.rb`) | the system image's link list (`NativeRuntime::Built#system_archives`) names its own static NIF table once and no `libcrypto.a`, `crypto.a`, `asn1rt_nif.a` or `crypto`'s table; each domain image's names `crypto`'s table and not the system image's | stand-ins of `libbeam.a` and the two tables, linked from the list as an image is: with `crypto`'s table added the link fails on a duplicate symbol, and with the system table taken out on an undefined one; a list that takes `crypto`'s archives fails the test |
 | the import's configure check, `make check-openssl` | `Configure` with erXos's options succeeds on the imported tree and the build makes `libcrypto.a` | `ssl/build.info` left out of the import: `Configure` fails |
 | the seam's `getrandom` row, a host unit test of the seam | 1, 256, 257 and 4,096 bytes come back whole, from 1, 1, 2 and 16 reads of a stub generator; a stub failure on the second piece returns `-EIO` | the row returns the bytes read so far on a failure: the test fails on the short count |

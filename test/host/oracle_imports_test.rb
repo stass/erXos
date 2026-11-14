@@ -56,19 +56,74 @@ class OracleImportsTest < Minitest::Test
     assert_equal 'BSD-3-Clause', attribution.fetch('license')
   end
 
-  # A re-import applies the profile's exclusions, so every exclusion otp/ORIGIN.md
-  # records is one of them, or an application outside the profile's set, which the
-  # import prunes on its own; otherwise a re-import would bring back the prebuilt
-  # beams and boot scripts and record them as imported.
+  # otp/ORIGIN.md records what a re-import with the profile would exclude, each path
+  # for the profile's reason and in the order the import records them: the import's
+  # exclusions, run over a tree that holds every recorded path and every name an
+  # exclusion keeps, record the same. Otherwise a re-import would bring back the
+  # prebuilt beams, boot scripts and ASN.1 compiler and record them as imported.
   def test_the_import_profile_excludes_what_the_origin_record_excludes
     profile = JSON.parse(File.read(File.expand_path('../../config/imports/otp.json', __dir__)))
     recorded = Erx::Origin.new(root: File.expand_path('../../otp', __dir__)).inventory.fetch('exclusions')
-                          .map { |exclusion| exclusion.fetch('path') }
-    pruned = recorded.select do |path|
-      path.match?(%r{\Alib/[^/]+\z}) && !profile.fetch('applications').include?(File.basename(path))
+    kept = profile.fetch('exclusions').flat_map do |exclusion|
+      exclusion.fetch('keep', []).map { |name| "#{exclusion.fetch('path')}/#{name}" }
     end
-    assert_empty recorded - pruned - profile.fetch('exclusions').map { |exclusion| exclusion.fetch('path') }
-    assert_includes recorded, 'erts/ebin'
+    Dir.mktmpdir('erx-otp-replay-') do |root|
+      [*recorded.map { |exclusion| exclusion.fetch('path') }, *kept].each do |relative|
+        path = File.join(root, relative)
+        FileUtils.mkdir_p(File.dirname(path))
+        # The import prunes an application outside the profile's set only as a directory.
+        relative.match?(%r{\Alib/[^/]+\z}) ? FileUtils.mkdir_p(path) : File.write(path, '')
+      end
+      assert_equal recorded, Erx::ImportOrigins.remove_exclusions(root, profile: profile, component: 'otp')
+    end
+    assert_includes recorded.map { |exclusion| exclusion.fetch('path') }, 'erts/ebin'
+  end
+
+  # The exclusions below are tried alone, without OTP's pruning of applications,
+  # which remove_exclusions applies to the otp component only.
+  def exclude(root, path:, **keep)
+    profile = { 'exclusions' => [{ 'path' => path, **keep.transform_keys(&:to_s), 'reason' => 'the compiler' }] }
+    Erx::ImportOrigins.remove_exclusions(root, profile: profile, component: 'openssl')
+  end
+
+  # An exclusion with keep takes each entry of its directory but those it names,
+  # and the origin record lists each one that went.
+  def test_an_exclusion_keeps_the_entries_it_names
+    Dir.mktmpdir('erx-otp-keep-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'lib/asn1/src/deps'))
+      %w[Makefile asn1rt_nif.erl asn1ct.erl].each { |name| File.write(File.join(root, 'lib/asn1/src', name), '') }
+      assert_equal [{ 'path' => 'lib/asn1/src/asn1ct.erl', 'reason' => 'the compiler' },
+                    { 'path' => 'lib/asn1/src/deps', 'reason' => 'the compiler' }],
+                   exclude(root, path: 'lib/asn1/src', keep: %w[Makefile asn1rt_nif.erl])
+      assert_equal %w[Makefile asn1rt_nif.erl], Dir.children(File.join(root, 'lib/asn1/src')).sort
+    end
+  end
+
+  # A misspelt keep name or directory would bring back what the exclusion removes, so
+  # the import refuses both; an exclusion under an application the archive lacks, or
+  # the import pruned, records nothing.
+  def test_an_exclusion_keeps_only_what_the_archive_holds
+    Dir.mktmpdir('erx-otp-keep-missing-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'lib/asn1/src'))
+      File.write(File.join(root, 'lib/asn1/src/Makefile'), '')
+      error = assert_raises(Erx::Error) { exclude(root, path: 'lib/asn1/src', keep: %w[Makefile asn1rt_nif.erl]) }
+      assert_match(/keeps asn1rt_nif.erl, which the archive lacks/, error.message)
+      assert_raises(Erx::Error) { exclude(root, path: 'lib/asn1/scr', keep: %w[Makefile]) }
+      assert_raises(Erx::Error) { exclude(root, path: 'lib/asn1', keep: %w[src/Makefile]) }
+      assert_empty exclude(root, path: 'lib/megaco/src', keep: %w[Makefile])
+      assert File.file?(File.join(root, 'lib/asn1/src/Makefile'))
+    end
+  end
+
+  # An exclusion with keep takes the entries of a directory of the archive, never of
+  # one a link in it names.
+  def test_an_exclusion_keeps_nothing_through_a_link
+    Dir.mktmpdir('erx-otp-keep-link-') do |root|
+      FileUtils.mkdir_p(File.join(root, 'lib/empty'))
+      File.symlink('empty', File.join(root, 'lib/link'))
+      error = assert_raises(Erx::Error) { exclude(root, path: 'lib/link', keep: []) }
+      assert_match(/something other than a directory of the archive/, error.message)
+    end
   end
 
   # An excluded directory leaves the import whole, as an excluded file does.
@@ -88,11 +143,11 @@ class OracleImportsTest < Minitest::Test
     Dir.mktmpdir('erx-otp-exclusion-link-') do |root|
       FileUtils.mkdir_p(File.join(root, 'lib/kernel/ebin'))
       File.symlink('lib/kernel', File.join(root, 'erts'))
-      error = assert_raises(Erx::Error) { Erx::ImportOrigins.send(:remove_exclusion, root, 'erts/ebin') }
+      error = assert_raises(Erx::Error) { exclude(root, path: 'erts/ebin') }
       assert_match(/passes through a link/, error.message)
       assert File.directory?(File.join(root, 'lib/kernel/ebin'))
-      assert_raises(Erx::Error) { Erx::ImportOrigins.send(:remove_exclusion, root, '../outside') }
-      Erx::ImportOrigins.send(:remove_exclusion, root, 'absent/ebin')
+      assert_raises(Erx::Error) { exclude(root, path: '../outside') }
+      exclude(root, path: 'absent/ebin')
     end
   end
 
