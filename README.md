@@ -501,7 +501,7 @@ Error in process <0.150.0> with exit value:
   the session's own processes, each a link to its record; a path the
   session cannot see ends with `scope`. Records are the only view so far.
 * **Designed but not built yet:** the rest of erXos's own kernel, the
-  rest of the command shell, the virtio-input driver, the rest of the browser client, and the POSIX-lite layer. Each has a design document in
+  rest of the command shell, the rest of the browser client, and the POSIX-lite layer. Each has a design document in
   [docs/](docs/).
 
 ## Correctness and testing
