@@ -3899,6 +3899,10 @@ answered:
 * `{call, N, {accept, SockProc, Timeout}}` from its socket process: it
   links to `SockProc`, the acceptor's socket process, and keeps the call
   waiting, with its deadline on the stack's clock, behind any that wait.
+  A call past the 64 in flight is answered `{reply, N, {error,
+  badarg}}` at once ([Requests in flight](#requests-in-flight)), and so
+  is one that names the listener's own socket process or its grant as
+  `SockProc`, whose unlink would cut a link the listener ends by.
   While a call waits and a connection is queued, the oldest of each are
   paired: the listener takes the connection off the queue, takes its
   unit back and sends it `{bind, self(), SockProc}`, and the call is handing it.
@@ -4147,7 +4151,8 @@ the runtime seam nor the facet machinery changes them:
     | {refused, shape, From :: gen_server:from()}
     | unknown.
   %% A message to a socket of kind Kind whose socket process is SockProc.
-  erx_net_admit:request(Kind :: tcp | udp | icmp, Grantee :: local | pos_integer(),
+  erx_net_admit:request(Kind :: tcp | tcp_listen | udp | icmp,
+                        Grantee :: local | pos_integer(),
                         SockProc :: pid() | none, Msg :: term()) ->
       {ok, Body :: term()} | {refused, shape} | unknown.
   ```
@@ -4156,8 +4161,10 @@ the runtime seam nor the facet machinery changes them:
   `{send_to, Ip, Port, Data}`, `{send, Data}`, `{connect, Ip, Port}`,
   `sockname` and `close`; an echo socket `{echo_send, Ip, Seq, Ttl,
   Data}` and `close`; a connection those of
-  [The socket process](#the-socket-process); and every kind `{credit,
-  Bytes}`. A request of another kind is refused for its shape.
+  [The socket process](#the-socket-process); a listener, kind
+  `tcp_listen`, `{accept, SockProc, Timeout}`, its `SockProc` a pid of
+  the grantee's domain, and the `setopts` of its options; and every kind `{credit, Bytes}`. A
+  request of another kind is refused for its shape.
 
   A message wrapped as `{erx_origin, D, Inner}` comes from domain `D`; a
   message without an envelope comes from the receiver's own domain,

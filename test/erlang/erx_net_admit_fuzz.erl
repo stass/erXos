@@ -165,14 +165,14 @@ request3() ->
                   1 -> garbage();
                   _ -> frame(Origin, {erx_net, Wrong, socket_body()})
               end,
-    Kind = pick([tcp, udp, icmp]),
+    Kind = pick([tcp, tcp_listen, udp, icmp]),
     judge(request3, fun() -> erx_net_admit:request(Kind, Origin, Sock, Message) end,
           expected_request3(Kind, Origin, Sock, Message), {Kind, Origin, Sock, Message}).
 
 expected_request3(Kind, Origin, Sock, Message) ->
     case taken(Origin, Sock, Message) of
         {ok, Body} ->
-            case body_ok(Kind, Body) of
+            case body_ok(Kind, Origin, Body) of
                 true -> {ok, Body};
                 false -> {refused, shape}
             end;
@@ -184,15 +184,24 @@ taken(local, Sock, {erx_net, Sock, Body}) when is_pid(Sock) -> {ok, Body};
 taken(Origin, Sock, {erx_origin, Origin, {erx_net, Sock, Body}}) when Origin =/= local, is_pid(Sock) -> {ok, Body};
 taken(_Origin, _Sock, _Message) -> unknown.
 
-body_ok(_Kind, {credit, Bytes}) -> within(Bytes, 1, 67108864);
-body_ok(Kind, {call, N, Request}) -> is_integer(N) andalso N >= 0 andalso call_ok(Kind, Request);
-body_ok(_Kind, _) -> false.
+body_ok(_Kind, _Origin, {credit, Bytes}) -> within(Bytes, 1, 67108864);
+body_ok(Kind, Origin, {call, N, Request}) ->
+    is_integer(N) andalso N >= 0 andalso call_ok(Kind, Request) andalso acceptor_ok(Request, Origin);
+body_ok(_Kind, _Origin, _) -> false.
+
+%% The socket process an accept names is of the grantee's domain: of this node when the
+%% grantee is local, of the grantee's creation otherwise.
+acceptor_ok({accept, Acceptor, _}, local) -> node(Acceptor) =:= node();
+acceptor_ok({accept, Acceptor, _}, Grantee) -> creation(Acceptor) =:= Grantee;
+acceptor_ok(_Request, _Origin) -> true.
 
 call_ok(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< 65536;
 call_ok(tcp, {shutdown, How}) -> lists:member(How, [read, write, read_write]);
 call_ok(tcp, {setopts, Options}) -> lists:member(Options, [[], [{nodelay, true}], [{nodelay, false}]]);
 call_ok(tcp, {getopts, Options}) -> lists:member(Options, [[], [nodelay]]);
 call_ok(tcp, peername) -> true;
+call_ok(tcp_listen, {accept, Acceptor, Timeout}) -> is_pid(Acceptor) andalso timeout_ok(Timeout);
+call_ok(tcp_listen, _) -> false;
 call_ok(udp, {send_to, Ip, Port, Data}) -> ip4(Ip) andalso within(Port, 0, 65535) andalso datagram(Data, 65527);
 call_ok(udp, {send, Data}) -> datagram(Data, 65527);
 call_ok(udp, {connect, Ip, Port}) -> ip4(Ip) andalso within(Port, 1, 65535);
@@ -214,7 +223,9 @@ socket_body() ->
     end.
 
 socket_call() ->
-    case rand:uniform(24) of
+    case rand:uniform(30) of
+        N when N >= 25, N =< 28 -> {accept, acceptor(), timeout_value()};
+        N when N >= 29 -> {accept, acceptor(), infinity};
         1 -> {send, piece()};
         2 -> {send, piece()};
         3 -> {shutdown, pick([read, write, read_write, rw, 1])};
@@ -233,6 +244,10 @@ socket_call() ->
         16 -> {echo_send, address(), 1, 64};
         _ -> {send, <<"hello">>}
     end.
+
+%% An acceptor's socket process: of this node, of another domain's, or no pid.
+acceptor() ->
+    pick([self(), self(), pid(other_node(), pick([1, 2, 3, 7])), pid(atom_to_binary(node()), 2), x]).
 
 address() -> pick([{10, 0, 2, 3}, {10, 0, 2, 3}, {10, 0, 2, 3}, {10, 0, 2, 3}, {255, 255, 255, 255}, {0, 0, 0, 0}, {256, 0, 0, 1}, {1, 2, 3}, {-1, 0, 0, 0},
                    {0, 0, 0, 0, 0, 0, 0, 1}, "10.0.2.3", x]).

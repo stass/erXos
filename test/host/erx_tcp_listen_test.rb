@@ -45,4 +45,30 @@ class ErxTcpListenTest < Minitest::Test
       assert_match(/passive_open_is_explored_exhaustively/, output)
     end
   end
+
+  # The effect process, erx_tcp_listen, with stand-ins for its grant, its socket process,
+  # the acceptors and the connections (test/erlang/erx_tcp_listen_tests.erl).
+  def test_listener_effect_process_passes_under_eunit
+    assert_erx_net_eunit(:erx_tcp_listen_tests)
+  end
+
+  # The effect process's seeded failures, each failing the case named.
+  EFFECT_FAULTS = {
+    # No clock armed for the core's deadlines: an accept with a timeout waits on.
+    accept_times_out: [
+      '{noreply, S#state{armed = erx_net_clock:arm_by(to_us(erx_tcp_listen_core:next_deadline(Core)), Armed)}};',
+      '_ = {Core, Armed}, _ = fun to_us/1, {noreply, S};'
+    ],
+    # take_unit not performed: a connection that leaves the queue keeps its place in the backlog.
+    queued_exit_gives_the_unit_back: [
+      'erx_net_credit:take(Credit, 1).', '_ = Credit, ok.'
+    ]
+  }.freeze
+
+  EFFECT_FAULTS.each do |name, fault|
+    define_method("test_seeded_fault_fails_#{name}") do
+      output = refute_erx_net_eunit(:erx_tcp_listen_tests, fault: { 'erx_tcp_listen' => fault })
+      assert_match(/#{name}/, output)
+    end
+  end
 end

@@ -41,15 +41,18 @@ whatever the grantee.
 
 **Sockets.** request/4 takes a message a socket received, for its socket process
 `SockProc`, whose grantee's messages arrive by `Origin`, bare or enveloped as above; the
-socket's kind, `tcp` for a connection, `udp` for a datagram socket, `icmp` for an echo
-socket, names the requests it takes. `Msg` must be `{erx_net, SockProc, Body}` from that
-very socket process; anything else, an envelope of another domain included, is
-`unknown`, for the socket to drop and count, and no reply goes to a party that is not its
-socket process. `Body` must be `{credit, Bytes}` with `Bytes` from 1 to 64 MiB, or
+socket's kind, `tcp` for a connection, `tcp_listen` for a listener, `udp` for a datagram
+socket, `icmp` for an echo socket, names the requests it takes. `Msg` must be
+`{erx_net, SockProc, Body}` from that very socket process; anything else, an envelope of
+another domain included, is `unknown`, for the socket to drop and count, and no reply goes
+to a party that is not its socket process. `Body` must be `{credit, Bytes}` with `Bytes`
+from 1 to 64 MiB, or
 `{call, N, Request}` with `N` a request count and `Request` one of its kind's requests:
 
 * `tcp`: `{send, Piece}` (a binary of at most 64 KiB), `{shutdown, How}`, `close`,
   `{setopts, [{nodelay, Boolean}]}`, `{getopts, [nodelay]}`, `sockname` or `peername`;
+* `tcp_listen`: `{accept, SockProc, Timeout}`, with `SockProc` a pid of the grantee's
+  domain (of this node when the grantee is `local`) and `Timeout` as for `tcp_connect`;
 * `udp`: `{send_to, Ip, Port, Data}` with an IPv4 address tuple, a port and a binary of
   at most 65,527 bytes, the largest UDP payload; `{send, Data}` to the connected peer;
   `{connect, Ip, Port}` with a port from 1; `sockname` or `close`;
@@ -107,8 +110,11 @@ until it exists they are written here with its signatures.
                        | {reserve_buffer, reference(), snd | rcv, non_neg_integer()}
                        | {release_buffers, reference()} | counts.
 
--doc "A socket's kind: a TCP connection, a UDP datagram socket or an ICMP echo socket.".
--type kind() :: tcp | udp | icmp.
+-doc """
+A socket's kind: a TCP connection, a TCP listener, a UDP datagram socket or an ICMP echo
+socket.
+""".
+-type kind() :: tcp | tcp_listen | udp | icmp.
 
 -doc "A socket protocol request, as request/4 admits it.".
 -type request() :: {credit, pos_integer()}
@@ -117,7 +123,8 @@ until it exists they are written here with its signatures.
                     | {setopts, [{nodelay, boolean()}]} | {getopts, [nodelay]} | sockname | peername
                     | {send_to, inet:ip4_address(), inet:port_number(), binary()}
                     | {connect, inet:ip4_address(), 1..16#ffff}
-                    | {echo_send, inet:ip4_address(), 0..16#ffff, 1..255 | default, binary()}}.
+                    | {echo_send, inet:ip4_address(), 0..16#ffff, 1..255 | default, binary()}
+                    | {accept, pid(), timeout()}}.
 
 -doc """
 Takes `Message`, received by the grant of `Grantee`: the call it carries with its caller,
@@ -222,22 +229,29 @@ Takes `Message`, received by a socket of kind `Kind` whose socket process is `So
 """.
 -spec request(kind(), origin(), pid() | none, term()) -> {ok, request()} | unknown | {refused, shape}.
 request(Kind, local, SockProc, {erx_net, SockProc, Body}) when is_pid(SockProc) ->
-    body(Kind, Body);
+    body(Kind, local, Body);
 request(Kind, Origin, SockProc, {erx_origin, D, {erx_net, SockProc, Body}})
   when Origin =/= local, D =:= Origin, is_pid(SockProc) ->
-    body(Kind, Body);
+    body(Kind, Origin, Body);
 request(_Kind, _Origin, _SockProc, _Message) ->
     unknown.
 
-body(_Kind, {credit, Bytes}) when is_integer(Bytes), Bytes > 0, Bytes =< ?MAX_CREDIT ->
+body(_Kind, _Origin, {credit, Bytes}) when is_integer(Bytes), Bytes > 0, Bytes =< ?MAX_CREDIT ->
     {ok, {credit, Bytes}};
-body(Kind, {call, N, Request}) when is_integer(N), N >= 0 ->
-    case call(Kind, Request) of
+body(Kind, Origin, {call, N, Request}) when is_integer(N), N >= 0 ->
+    case call(Kind, Request) andalso of_grantee(Request, Origin) of
         true -> {ok, {call, N, Request}};
         false -> {refused, shape}
     end;
-body(_Kind, _) ->
+body(_Kind, _Origin, _) ->
     {refused, shape}.
+
+%% The socket process an `accept` names is of the grantee's domain, as the one a grant's
+%% `connect`, `listen` or `open` names is (docs/design-network-stack.md, "Sockets act for one
+%% domain"); the listener links to it and binds a connection to it.
+of_grantee({accept, SockProc, _}, local) -> node(SockProc) =:= node();
+of_grantee({accept, SockProc, _}, Grantee) -> domain(SockProc) =:= Grantee;
+of_grantee(_Request, _Origin) -> true.
 
 call(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< ?PIECE;
 call(tcp, {shutdown, How}) -> How =:= read orelse How =:= write orelse How =:= read_write;
@@ -246,6 +260,8 @@ call(tcp, {setopts, [{nodelay, B}]}) -> is_boolean(B);
 call(tcp, {getopts, []}) -> true;
 call(tcp, {getopts, [nodelay]}) -> true;
 call(tcp, peername) -> true;
+call(tcp_listen, {accept, SockProc, Timeout}) -> is_pid(SockProc) andalso timeout(Timeout);
+call(tcp_listen, _) -> false;
 call(udp, {send_to, Ip, Port, Data}) ->
     is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Port) andalso Port >= 0 andalso Port =< 16#ffff
         andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;

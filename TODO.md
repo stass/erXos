@@ -2173,14 +2173,16 @@ it; git history is the record of completed work.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
   opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
-which its grant adopts and which queues itself on its listener, but nothing yet serves as that
-listener: `erx_tcp_listen`, the effect process around `erx_tcp_listen_core` (the core and its
-exploration exist, the exploration at one end per run; its two-end run, `explore(#{ends => 2})`, tens of
-millions of states, is not yet wired into the milestone gate, so a core bug that needs two ends, such as
-one in the order of a handing call's socket process exit and its connection's, is not yet looked for; the connection still takes `{bind, SockProc}` without its sender and answers
-`bound` to a `SockProc` already gone, design L3 and L4), the grant's `tcp_listen` and explicit binds (`erx_net_bind:avail/2`, `update/2`, port 0),
-`erx_gen_tcp`'s `listen`, `accept` and `controlling_process`, and the QEMU case are missing; the
-grant's `sockets` limit is not built, so `adopt/2` refuses only past `buffers`; and an ICMP error quoting a SYN-ACK reaches the core as `unsupported` rather than
+which its grant adopts and which queues itself on its listener, and `erx_tcp_listen` serves as that
+listener around `erx_tcp_listen_core`, but no grant starts one yet. Missing: the grant's `tcp_listen` and the
+listener's explicit bind of its key (`erx_net_bind:avail/2` and `update/2`, port 0 within the ports the grant allows
+a listener, the transport filter), with `listen`'s options checked, its backlog an integer, and the listener's
+`setopts` of the options its entry holds; `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's
+`sockets` limit, so `adopt/2` refuses only past `buffers`; pausing, since the grant has no account to pause a
+listener for; and the QEMU case. The core's exploration runs at one end per run, the landing gate's bound; its
+two-end run, `explore(#{ends => 2})`, tens of millions of states, belongs to the milestone gate, on the remote
+development host that runs the 4-CPU gate cells, but nothing runs it yet, so a core bug that needs two ends, such as one in the order of a
+handing call's socket process exit and its connection's, is not yet looked for. Also, an ICMP error quoting a SYN-ACK reaches the core as `unsupported` rather than
   `erx_tcp_syncache:unreach/3`. A SYN-ACK whose route leaves by another interface is counted `other_interface` and
   never sent, as the closed-port RST already is.
   Not yet: a SYN reinjected from
@@ -2191,6 +2193,12 @@ grant's `sockets` limit is not built, so `adopt/2` refuses only past `buffers`; 
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
   is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
+* [Medium] network, `erx_tcp_conn` (bind to a socket process already gone): the connection closes gracefully, as
+  at its owner's exit ([design-network-stack.md](docs/design-network-stack.md#the-listener)), so its listener
+  answers the `accept` `{error, econnaborted}` only when the connection ends, after TIME-WAIT or its
+  retransmissions, and the listener's socket process holds one of its 64 calls in flight that long. A pool of
+  acceptors killed together can fill those places for about 2MSL. Aborting instead, a RST and an end at once,
+  would answer at once; the design's "closes" should be settled first.
 * [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection
   ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
   state before the event, with a RST, `{error, econnaborted}` to its socket process and an exit with

@@ -23,15 +23,18 @@ exactly once while the listener runs. The exit of the listener's own socket proc
 its grant is the listener's end, `stop`; its socket process then answers the calls it still
 holds.
 
-Two calls in flight naming the same number or the same socket process are a programming
-error of the listener's socket process, and so is a second notice from one connection;
-each raises, since each link, reply and unit belongs to one call or one connection, and the
-listener's end then answers every call. The notices are taken on their word: only a
-connection the stack's interface spawned holds the listener's pid, and a connection links
-to the listener before its notice, so its exit always follows.
+A call past the 64 in flight, or one naming the listener's own socket process or its grant
+as its acceptor, whose unlink would cut a link the listener ends by, is answered
+`{error, badarg}` at once and holds nothing. Two calls in flight naming the same number or
+the same socket process are a programming error of the listener's socket process, and so
+is a second notice from one connection; each raises, since each link, reply and unit
+belongs to one call or one connection, and the listener's end then answers every call. The
+notices are taken on their word: only a connection the stack's interface spawned holds the
+listener's pid, and a connection links to the listener before its notice, so its exit
+always follows.
 """.
 
--export([new/2, step/3, next_deadline/1, view/1]).
+-export([new/2, step/3, next_deadline/1, view/1, credit_limit/1]).
 -export_type([core/0, event/0, action/0, reply/0]).
 
 -record(core, {socket :: pid(),
@@ -44,6 +47,11 @@ to the listener before its notice, so its exit always follows.
                handing = #{} :: #{pid() => {call_id(), pid()}}}).
 
 -opaque core() :: #core{}.
+
+%% The calls a socket process may have in flight (docs/design-network-stack.md, "Requests in
+%% flight"), and FreeBSD's SOMAXCONN (socket.h:434), the largest backlog a listener takes.
+-define(MAX_IN_FLIGHT, 64).
+-define(SOMAXCONN, 128).
 -type call_id() :: non_neg_integer().
 -type deadline() :: integer() | infinity.
 
@@ -58,7 +66,7 @@ its timeout in milliseconds; the exit of a linked process; and the clock's turn.
                | {exit, pid()}
                | expired.
 
--type reply() :: {ok, pid()} | {error, econnaborted | timeout}.
+-type reply() :: {ok, pid()} | {error, econnaborted | timeout | badarg}.
 
 -doc """
 What the effect does: link to or unlink from a process; send a connection
@@ -83,7 +91,8 @@ step({queued, Conn}, #core{queue = Queue, handing = Handing} = Core, _Ctx) ->
         true -> erlang:error({duplicate_notice, Conn});
         false -> pair(Core#core{queue = Queue ++ [Conn]}, [])
     end;
-step({accept, N, SockProc, Timeout}, #core{waiting = Waiting} = Core, #{now := Now}) ->
+step({accept, N, SockProc, Timeout}, #core{socket = Socket, grant = Grant, waiting = Waiting,
+                                           handing = Handing} = Core, #{now := Now}) ->
     case is_call(N, SockProc, Core) of
         true -> erlang:error({duplicate_call, N, SockProc});
         false -> ok
@@ -93,7 +102,12 @@ step({accept, N, SockProc, Timeout}, #core{waiting = Waiting} = Core, #{now := N
                    _ when is_integer(Timeout), Timeout >= 0 -> Now + Timeout;
                    _ -> erlang:error({bad_timeout, Timeout})
                end,
-    pair(Core#core{waiting = Waiting ++ [{N, SockProc, Deadline}]}, [{link, SockProc}]);
+    Refused = SockProc =:= Socket orelse SockProc =:= Grant
+                  orelse length(Waiting) + map_size(Handing) >= ?MAX_IN_FLIGHT,
+    case Refused of
+        false -> pair(Core#core{waiting = Waiting ++ [{N, SockProc, Deadline}]}, [{link, SockProc}]);
+        true -> {Core, [{reply, N, {error, badarg}}]}
+    end;
 step({bound, Conn}, #core{handing = Handing} = Core, _Ctx) ->
     case maps:take(Conn, Handing) of
         {{N, SockProc}, Rest} ->
@@ -149,6 +163,19 @@ pair(Core, Acc) ->
 is_call(N, SockProc, #core{waiting = Waiting, handing = Handing}) ->
     Calls = [{M, P} || {M, P, _} <- Waiting] ++ maps:values(Handing),
     lists:any(fun({M, P}) -> M =:= N orelse P =:= SockProc end, Calls).
+
+-doc """
+The limit of a listener's accept credit for `listen`'s `Backlog`, `3 * Backlog div 2 + 1`:
+FreeBSD's `solisten_clone` refuses a connection once `sol_qlen > 3 * sol_qlimit / 2`
+(uipc_socket.c:1032), so a queue holds that many and one more. A backlog below zero or
+above 128 is taken as 128, as `solisten_proto` clamps it to `somaxconn`
+(uipc_socket.c:1542-1544).
+""".
+-spec credit_limit(integer()) -> pos_integer().
+credit_limit(Backlog) when is_integer(Backlog), Backlog >= 0, Backlog =< ?SOMAXCONN ->
+    3 * Backlog div 2 + 1;
+credit_limit(Backlog) when is_integer(Backlog) ->
+    credit_limit(?SOMAXCONN).
 
 -doc "The earliest deadline of a waiting call, or `infinity`.".
 -spec next_deadline(core()) -> deadline().
