@@ -4648,8 +4648,8 @@ ERTS; an explicit bind also runs its conflict check in the same step
 its options change, keeping the pid, credit and grant, so it never
 changes who holds a key or what a bind checks. It writes with one
 `ets:select_replace/2` whose match specification matches the key's
-object only while the entry's pid is the caller's
-(`map_get(pid, Entry) =:= self()` in its guard) and whose body is the
+object only while its holder is the caller
+(the object's holder bound to `self()` in its head, its entry's credit and grant to the new entry's in its guard) and whose body is the
 key with the caller's new entry, and ETS makes each object's match and replacement
 one atomic step (`ets.erl:1864-1870`). The holder is the one fact that
 changes when a key changes hands, and no other process has the caller's
@@ -4679,8 +4679,10 @@ one process: `erx_net_bind:bind/2` makes a call to `erx_net_tables`,
 the table's owner, which runs both, and two explicit binds are ordered
 by their calls. The check is a pure function, `erx_net_bind:avail/2`,
 of the request (transport, family, address or `any`, port, `reuseaddr`,
-`reuseport`, grant, and the ports the grant allows this bind) and the
-keys of the request's transport held on that port, with their entries:
+`reuseport`, grant, the ports the grant allows this bind, and the
+machine's own addresses of the family, which `erx_net_tables` reads from
+`erx_net_addrs` without waiting on an interface) and the keys of the
+request's transport held on that port, with their entries:
 TCP keys, connections' and listeners', for a listener, and UDP keys for
 a datagram socket, as FreeBSD checks a bind only within its protocol's
 own table, TCP's `V_tcbinfo` (`tcp_usrreq.c:168`) or UDP's `V_udbinfo`

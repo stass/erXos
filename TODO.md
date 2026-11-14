@@ -2178,9 +2178,13 @@ it; git history is the record of completed work.
   opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
 which its grant adopts and which queues itself on its listener, and `erx_tcp_listen` serves as that
-listener around `erx_tcp_listen_core`, but no grant starts one yet. Missing: the grant's `tcp_listen` and the
-listener's explicit bind of its key (`erx_net_bind:avail/2` and `update/2`, port 0 within the ports the grant allows
-a listener, the transport filter), with `listen`'s options checked, its backlog an integer, and the listener's
+listener around `erx_tcp_listen_core`, but no grant starts one yet. The explicit bind's check
+(`erx_net_bind:avail/2`) and the entry's rewrite (`update/2`) exist but nothing calls them. Missing: the grant's
+`tcp_listen` and the listener's explicit bind of its key (`erx_net_bind:bind/2`, the call to `erx_net_tables` that
+reads the port's keys and the machine's addresses, runs `avail/2` and inserts in one step, and walks the ephemeral
+range for port 0 within the ports the grant allows a listener), the Erlang form of the grant's `ports`, `listen`
+and `addresses` limits (`avail/2` takes ports as inclusive ranges, `[{1024, 65535}]`), with `listen`'s options
+checked, its backlog an integer, and the listener's
 `setopts` of the options its entry holds; `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's
 `sockets` limit, so `adopt/2` refuses only past `buffers`; pausing, since the grant has no account to pause a
 listener for; and the QEMU case. The core's exploration runs at one end per run, the landing gate's bound; its
