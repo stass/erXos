@@ -655,7 +655,7 @@ the protocol stands; if the numbers miss the gate, the lock is not taken.
   transaction and the outlet's refusals counted, run when the package is
   built. What
   remains after it is the hop itself, whose
-  removal the owner declined until measured: within one domain on a
+  removal waits for a measurement: within one domain on a
   standalone `erx_net` release, and as native code only when a
   measurement across domains shows the owner's side among the larger
   costs (decisions 16 and 17 of the design).
