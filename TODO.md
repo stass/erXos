@@ -2174,9 +2174,11 @@ it; git history is the record of completed work.
   opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
 which its grant adopts and which queues itself on its listener, but nothing yet serves as that
-listener: `erx_tcp_listen` and its core `erx_tcp_listen_core` with the exploration of
-[design-network-stack.md](docs/design-network-stack.md#the-listener-exploration-the-backlog-and-binds),
-the grant's `tcp_listen` and explicit binds (`erx_net_bind:avail/2`, `update/2`, port 0),
+listener: `erx_tcp_listen`, the effect process around `erx_tcp_listen_core` (the core and its
+exploration exist, the exploration at one end per run; its two-end run, `explore(#{ends => 2})`, tens of
+millions of states, is not yet wired into the milestone gate, so a core bug that needs two ends, such as
+one in the order of a handing call's socket process exit and its connection's, is not yet looked for; the connection still takes `{bind, SockProc}` without its sender and answers
+`bound` to a `SockProc` already gone, design L3 and L4), the grant's `tcp_listen` and explicit binds (`erx_net_bind:avail/2`, `update/2`, port 0),
 `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`, and the QEMU case are missing; the
 grant's `sockets` limit is not built, so `adopt/2` refuses only past `buffers`; and an ICMP error quoting a SYN-ACK reaches the core as `unsupported` rather than
   `erx_tcp_syncache:unreach/3`. A SYN-ACK whose route leaves by another interface is counted `other_interface` and

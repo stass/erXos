@@ -3881,7 +3881,7 @@ protocol.
 | Message | From | To | Meaning |
 | --- | --- | --- | --- |
 | `{queued, Conn}` | an adopted connection, under its unit | its listener | `Conn` has linked to the listener and holds a unit; the listener queues it |
-| `{bind, SockProc}` | the listener | a connection it has taken off its queue | an `accept` takes the connection for `SockProc` |
+| `{bind, Listener, SockProc}` | the listener, naming itself | a connection it has taken off its queue | an `accept` takes the connection for `SockProc` |
 | `{bound, Conn}` | the connection | its listener | `Conn` has linked to `SockProc` and taken it as its owner |
 
 The listener's step takes these, the `accept` calls, the exits of its
@@ -3901,7 +3901,7 @@ answered:
   waiting, with its deadline on the stack's clock, behind any that wait.
   While a call waits and a connection is queued, the oldest of each are
   paired: the listener takes the connection off the queue, takes its
-  unit back and sends it `{bind, SockProc}`, and the call is handing it.
+  unit back and sends it `{bind, self(), SockProc}`, and the call is handing it.
   The listener stays linked to the connection until the call is
   answered.
 * `{bound, Conn}`: the call handing `Conn` is answered `{reply, N, {ok,
@@ -3936,18 +3936,21 @@ sends leaves its calls in flight by exactly one reply, whether or not
 the caller still waits for it.
 
 The listener never waits on a connection, on its grant or on its socket
-process. A connection takes `{bind, SockProc}` from its own listener
-while queued: it links to `SockProc`, takes `SockProc` as its owner and
-sends `{bound, self()}`; a `bind` from any other process, or once bound,
-is a programming error that ends it. It leaves its link to the listener
+process. A connection takes `{bind, Listener, SockProc}` from its own
+listener while queued: it links to `SockProc`, takes `SockProc` as its
+owner and sends `{bound, self()}`; a `bind` that names any other
+process than its listener, or one once bound, is a programming error
+that ends it. It leaves its link to the listener
 for the listener to undo, and from the `bind` on it ignores its
 listener's exit, one of which may already wait in its mailbox, and
 waits for its socket process's first message as every socket does
 (**Nothing crosses before the first contact**, in
 [The socket process](#the-socket-process)); the bytes it took while
 queued are pushed within that first credit. A `SockProc` already gone
-answers the link with `noproc`, and the connection closes as at its
-socket process's exit, which answers the call `{error, econnaborted}`.
+answers the link with `noproc`, which the connection looks for at once,
+before it answers: finding it, it sends no `{bound, self()}` and closes
+as at its socket process's exit, and that exit answers the call
+`{error, econnaborted}`, never `{ok, Conn}`.
 The listener answers the `accept` only after `{bound, Conn}`, so the
 connection knows its socket process before that process, which learns
 of the connection only from the answer, can send it anything.
@@ -6793,6 +6796,20 @@ that a handshake refused at the limit is reached:
   sent, a link to an ended process delivers its exit at once, and an
   exit already delivered stays in the mailbox after an unlink.
 
+Three bounds keep the exploration small enough for the landing gate.
+Each run holds at most one end (two at the milestone gate), of the five kinds above (a connection's
+end or kill, an acceptor's socket process's end, the interface's, the
+grant's, or the listener's socket process's), and at most one pause; a
+step a party takes that no other party can see is one transition with
+the next step it takes that another party can, so a connection takes
+`go`, is adopted or refused and links to its listener in one
+transition, and the interface spawns and sends the verdict in one, its
+end in between kept as a transition of its own; and the listener's end
+is the last state of a run, since every call is answered there and the
+step takes nothing more; that no call is answered again after it holds
+by construction, not by the exploration. The five seeded failures below each need at
+most one end.
+
 In every reachable state:
 
 * every live connection holds a unit of the accept credit or is one of
@@ -6812,9 +6829,15 @@ In every reachable state:
   before, and a handing call never;
 * calls and connections pair oldest first.
 
+A state is final when no party owes a step: what is left is the
+environment's to choose, an end, an `accept`, a pause or the clock. In
+a final state while the listener runs, every call in flight is waiting
+on a live acceptor.
+
 *Seeded failures:* a connection that sends its notice before its
 adoption, which the first property catches once an `accept` has taken
-it and its acceptor has ended while the adoption is pending; a unit
+it while the adoption is pending, and the fourth, a `bind` to a
+connection not adopted, where the adoption is then refused; a unit
 also taken back at `{bound, C}`, the second; a listener that drops the
 call of an ended acceptor without a reply, the third; and a call paired
 again after its connection's end, under which a call whose acceptor
