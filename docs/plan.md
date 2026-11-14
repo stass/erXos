@@ -2448,6 +2448,56 @@ bootable file and the device tree, the entry state, the memory map,
 whether `stdout-path` names the mini UART, where the framebuffer lies,
 and the time to the system runtime's first pet.
 
+## Track U: USB (proposed)
+
+**Status.** Proposed, not scheduled: no milestone depends on it, and
+where it goes in the order below is undecided.
+
+**Goal.** A USB keyboard, mouse or tablet and a USB stick work on QEMU
+and on the Raspberry Pi 4, along [design-usb.md](design-usb.md): the
+controller's domain holds every USB device, HID reaches the display's
+input router through input numbers, and mass storage reaches a FAT
+server through drives.
+
+**Demo.** On QEMU's `raspi4b`, keys typed with QMP into a USB keyboard
+reach a window, a tablet moves its pointer, and a keyboard unplugged
+with a key held releases it; on QEMU `virt` the same over `qemu-xhci`,
+with a USB stick's sectors read and written through a drive; on the
+Pi 4, a USB keyboard types into the kiosk.
+
+**Parts.** Each is a proposal; (a) needs nothing new below it.
+
+* **(a) The cores, on the host.** The descriptor decoder, the bus core,
+  the HID parser and fold, the BOT core, the SCSI builders and the TRB
+  ring form's core, with their fuzz targets and exhaustive tests
+  ([design-usb.md](design-usb.md#verification)).
+* **(b) DWC2 on QEMU `raspi4b`, on the stopgap.** The controller by
+  programmed I/O, the bus, hubs, HID into a display domain and mass
+  storage into drives; it needs a display domain on `raspi4b` (1b-C's
+  part 3 and [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)) and no
+  PCIe.
+* **(c) xHCI on QEMU `virt`.** The TRB ring form and `qemu-xhci`, once a
+  PCIe domain and MSIs exist: at [M9's kernel
+  part](#m9-a-driver-is-an-erlang-process), unless a PCIe enumerator is
+  brought onto the stopgap first
+  ([design-usb.md](design-usb.md#open-decisions), decision 2).
+* **(d) The VL805 on the Pi 4.** After a design of the Pi 4's PCIe
+  bridge, which needs a clean-room facts record of Linux's
+  `pcie-brcmstb` and the Pi 4's device tree, and the board probes of
+  [design-usb.md](design-usb.md#the-vl805-on-the-raspberry-pi-4); on
+  the stopgap as a part of 1b-I, or at M12 on erXos's kernel
+  ([design-usb.md](design-usb.md#open-decisions), decision 3).
+
+Mass storage's files on a stick also need the FAT server, which
+[Beyond the plan](#beyond-the-plan) places after M13; until then (b) and
+(c) test drives with a raw window client.
+
+**Exit criteria, each part.** Its cores' exhaustive tests and fuzz
+targets pass their budgets, each with its seeded fault failing them; its
+QEMU suite passes, with its seeded fault failing it; a malformed report
+or status block ends at most its function; and a device unplugged in
+every state leaves no slot, place or window behind.
+
 ## M10: Users without a container runtime
 
 **Goal.** Principals with budgets, CPU shares and quotas; each user's
@@ -3152,5 +3202,6 @@ Each is small, adds its tests, and leaves `make check` green.
 | An MSI translation service in the interrupt controller | QEMU `virt`'s MSI frame serves both accelerators ([design-platforms.md](design-platforms.md#msi-frames)) | with a board that needs it |
 | Unmapping the kernel from user-mode page tables | needed only on cores that Arm lists as affected by rogue data cache loads | with each board port, from Arm's list of affected cores |
 | The release process: who keeps the release signing key and how it is replaced; whether release builds offer a host link | erXos is a prototype and makes no releases | when erXos makes releases |
-| Graphics, USB, audio | not needed for the thesis | not planned |
+| Graphics, audio | not needed for the thesis | not planned |
+| USB | not needed for the thesis; wanted for keyboards, pointers and USB sticks on QEMU and the Raspberry Pi 4 | proposed as [Track U](#track-u-usb-proposed), not scheduled |
 | x86-64 | out of scope | not planned |
