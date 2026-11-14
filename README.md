@@ -354,6 +354,10 @@ Error in process <0.150.0> with exit value:
   On the board the driver brings `genet0` up at 1000 Mb/s, DHCP gives
   it an address, and `ping` and `host` reach the internet; unplugging
   and replugging the cable takes the link down and back up.
+  A display domain drives the firmware's framebuffer (`erx_firmware_fb`):
+  the driver keeps the screen image in its own memory and copies changed
+  rectangles into the framebuffer. The model has no firmware to set one up,
+  so there the domain starts without a screen; the board is checked by hand.
 * **The machine is an object** (M4). A host link over the second serial
   line lets `tools/erx load` and `watch` replace modules in the running
   system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot

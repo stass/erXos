@@ -5767,6 +5767,10 @@ to the corpus and follow rc
   build twice. Give it a gate, or make `check-reproducible` rebuild the
   kernel.
 
+* [Low] tests, `test/host/erx_starter_test.rb`: the suite takes about 4.5 minutes, most of it seeded fault 0 (the keeper not linking), under which nearly every case waits out EUnit's 5 s timeout. Fail the fault's cases fast instead of by timeout.
+* [Low] tests, `liberx/system/dom_apply.c` (`apply_given_words`): no host test checks the record words written for a framebuffer handed to a domain other than the system domain; placement and the apply steps are tested, and the raspi4b suite only sees the display domain start without a screen.
+* [Medium] SSH stage 2, the login facet ([design-ssh.md](docs/design-ssh.md)): the cookie table is keyed by the connection process, but a service behind `erx_facet` sees the facet's forward (a fresh alias, `erx_facet.erl`'s request handling), not the grantee's pid. The stage-2 design must say how the facet learns the connection: carried in the request, or keyed by the facet's forward and its `'DOWN'`.
+
 ## Security residuals
 
 * [Medium] SSH before the vault, stages 2 and 3, development builds only
