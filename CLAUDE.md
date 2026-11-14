@@ -164,7 +164,8 @@ Third-party components are allowed when they pay for themselves.
   little modification of existing code as possible.
 * **Code erXos modifies or ships enters the tree as erXos's code.** OTP
   29.1.2's source (ERTS and the applications erXos ships), musl, the Fiasco
-  fork that serves as the stopgap kernel, littlefs, and toybox with `wak`
+  fork that serves as the stopgap kernel, littlefs, OpenSSL, ctaes, the
+  BLAKE3, ChaCha20 and SHA-2 cores, libmemdraw, and toybox with `wak`
   live in the tree, keep their license notices and change by ordinary
   edits. Upstream is not tracked, so erXos owns their fixes, security fixes
   included. Each records its origin (repository, release or commit, and the
@@ -176,8 +177,8 @@ Third-party components are allowed when they pay for themselves.
   same ASCII and review rules as code in the tree.
 * **Tools and test oracles stay out of the tree.** What only the build,
   the tests or development use unmodified (stock OTP as the oracle,
-  libc-test, plan9port, Arm's machine-readable register data, the TLA+
-  tools, the oracle guests) is fetched at a pinned version and verified
+  libc-test, plan9port, LLVM's libc++ and compiler-rt builtins, Arm's
+  machine-readable register data, the TLA+ tools, the oracle guests) is fetched at a pinned version and verified
   against a pinned SHA-256. npm packages are installed by the fetch step
   with pnpm against the integrity hashes of a checked-in lockfile. Both are
   built out of tree.
