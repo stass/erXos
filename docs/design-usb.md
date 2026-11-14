@@ -890,37 +890,41 @@ issues no DMA, so writing the windows again races nothing, and the USB
 domain's driver starts from a stopped controller and resets it
 ([design-system.md](design-system.md#devices), Resets).
 
-Probe B3 is the Pi 4's loader evidence for the VL805, the boot
-contract's security gate. On a board installed as the board port
-installs it, with the EEPROM's boot order and each slot's `config.txt`
-as written and a USB keyboard and a USB drive attached, a test build
-reads, at the PCIe domain's first start and before the bridge driver
-writes anything, that the handover meets the requirement in one of two
-ways:
-
-* the link is down or PERST# asserted, so the VL805 reaches no memory;
-  or
-* through the link check, the VL805's command register has bus
-  mastering (bit 2) clear, and its operational registers show a
-  controller software stopped: `USBCMD.R/S` clear, `USBSTS.HCH` set,
-  which the controller sets only once it has finished its pending
-  transactions (xHCI 5.4.1, p. 393; 5.4.2, p. 398), and `USBSTS.HSE`
-  and `HCE` clear, so that `HCH` does not come from a controller that
-  halted itself on an error after running past the handover (5.4.2,
-  pp. 398-399; 4.21.2, p. 336).
-
-Any other reading, or none, fails the gate: bus mastering clear alone,
-for instance, says nothing of the transactions a running controller
-already issued, and a link up that carries no configuration request
-leaves nothing to read. The boot contract's answer to a failed gate is
-the one that applies: the boot stops. The bridge's reset path is no
+What establishes the requirement is the loader's own act before kernel
+entry, while the firmware's buffers are still intact: an orderly stop
+of the controller, then a drain the platform documents. No source read
+for this design says the Pi 4's boot firmware does either. The Pi 4's
+handover of the VL805 is therefore unknown, and an unknown drain stops
+the boot, as the boot contract says. The bridge's reset path is no
 remedy, since it runs after the kernel has reclaimed the memory the
 VL805 may have written. The Pi 4's kernel cannot make that stop itself,
-so the gate is held where its evidence is: the board port admits only a
-handover B3 has established, and a handover B3 finds active or cannot
-establish is an unmet boot contract of the platform, recorded in [the
-hardware-contract audit](research-hardware-contracts.md), which no
-driver of this design works around.
+so the gate is the board port's admission: it admits a handover only on
+evidence that establishes the requirement, which no driver of this
+design works around, and an unmet requirement is recorded in [the
+hardware-contract audit](research-hardware-contracts.md). How the Pi 4
+comes to meet it is [an open decision](#open-decisions).
+
+Probe B3 corroborates the requirement; it cannot establish it. On a
+board installed as the board port installs it, with the EEPROM's boot
+order and each slot's `config.txt` as written and a USB keyboard and a
+USB drive attached, a test build reads, at the PCIe domain's first
+start and before the bridge driver writes anything, the link and
+PERST#, then through the link check the VL805's command register and
+its `USBCMD` and `USBSTS`. A reading that shows the VL805 running, bus
+mastering set in the command register, `USBCMD.R/S` set or
+`USBSTS.HCH` clear, contradicts the requirement, and the handover is
+refused. A reading of a stopped controller, or of a link down or PERST#
+asserted, is only consistent with it, for three reasons:
+
+* B3 reads after the kernel has reclaimed memory, so a controller
+  stopped then says nothing of when it stopped;
+* a link down or PERST# asserted stops further traffic, but whether a
+  reset with DMA still in flight is safe is unknown (facts record,
+  section 6);
+* `HCH` set follows a forced halt as well as an orderly one: the
+  controller halts within 16 ms of `R/S` being cleared whatever is
+  still queued, and without the orderly sequence pending transactions
+  may be lost or aborted (xHCI 5.4.1.1, pp. 396-397).
 
 A reset needs the firmware notification of
 [The VL805's firmware](#the-vl805s-firmware): without it, a board with
@@ -957,7 +961,7 @@ with this design's probes, each with what settles it:
 | that the VL805's INTA arrives on SPI 143 alone, apart from the bridge's SPI 147 and 148, as the tree says (record unknown 4), and what raises SPI 147 (unknown 3) | B2, with the VL805 driven: its line counted, the bridge's two read while masked |
 | the VL805's header type, its functions and its interrupt pin | B4: the enumerator's configuration-space dump |
 | the VL805's state at erXos's start: an EEPROM or none, `0x50` before and after the notification, what a missing notification looks like, and whether this board's boot firmware reloads firmware already present (unknown 7) | B1 |
-| whether the boot firmware's handover meets the boot contract for the VL805, stopped with its DMA drained: the link down or PERST# asserted, or bus mastering off with `USBCMD.R/S` clear, `USBSTS.HCH` set and `HSE` and `HCE` clear ([The boot firmware's handover](#the-bcm2711-bridge)); whether it leaves the link up and PERST# released (unknown 8); the bridge's `MISC_REVISION` (unknown 1) | B3, the loader evidence: any other reading fails the boot contract |
+| whether the boot firmware's handover leaves the VL805 running: bus mastering on, `USBCMD.R/S` set or `USBSTS.HCH` clear ([The boot firmware's handover](#the-bcm2711-bridge)); whether it leaves the link up and PERST# released (unknown 8); the bridge's `MISC_REVISION` (unknown 1) | B3, which refutes or corroborates the boot contract's requirement and cannot establish it; what establishes it is [an open decision](#open-decisions) |
 | the reference clock's source and whether anything must enable it (unknown 9) | B3: if bring-up finds no link, the clock is the first question, and no source answers it yet |
 | the real DMA limit, against FreeBSD's 960 MiB and the tree's 3 GiB (unknown 5) | B5 |
 | whether a narrowed inbound window blocks the VL805 outside it | B6 |
@@ -1358,12 +1362,14 @@ bounds above, and the rules that make a configuration one endpoint graph:
     times burst plus one (6.2.3.4, p. 455), computed with checked
     arithmetic, at most 1024 times 16. On a SuperSpeed interrupt
     endpoint it is the companion's `wBytesPerInterval`, which may be
-    less than that product: 0 refuses the device with `malformed
-    descriptor`, since an endpoint that moves nothing in an interval
-    has no bus time to reserve, and a value above the product, which
-    the endpoint's transfers cannot carry, or above 3 KiB, xHCI's
-    largest SuperSpeed interrupt payload (4.14.2, p. 259), refuses it
-    with `endpoint too large`.
+    less than that product. A value above the product, which the
+    endpoint's transfers cannot carry, or above 3 KiB, xHCI's largest
+    SuperSpeed interrupt payload (4.14.2, p. 259), refuses the device
+    with `endpoint too large`. A value of 0 is not one the sources call
+    invalid, but erXos does not admit it, refusing the device with
+    `zero interval payload`: the stack's interrupt endpoints are HID
+    reports and hub status changes, so an interrupt endpoint that moves
+    no bytes has no consumer in it.
   The payload must fit one buffer of the queue block the endpoint's type
   takes, or the device is refused with `endpoint too large`. Its
   consumer is the controller's bandwidth reservation: the NIF writes the
@@ -2417,7 +2423,7 @@ is lost:
 | [design-system.md](design-system.md), "Units" and "PCIe" | a USB device is a sub-device of its controller's unit and enters no catalogue; if the INTx decision is taken, a bus whose every position the platform record fixes gives a function its INTx line as a line of its unit |
 | [design-shared-devices.md](design-shared-devices.md) | if the INTx decision is taken, SD1 and its "PCIe INTx" paragraph admit the INTx line of a closed bus, as [Interrupts](#interrupts) says |
 | [design-stopgap.md](design-stopgap.md) | property 3 of the Phase 1 manifest check as [The Phase 1 part](#the-phase-1-part) says; `ERX_IRQ_MSI` over the lines of an MSI frame; the give of a PCIe function on a configured row; the VL805's notification in the root, if adopted; the residuals of [On the stopgap](#on-the-stopgap) in its deferred table, Fiasco's ignored SError among them |
-| [design-platforms.md](design-platforms.md) | the BCM2711 among the PCIe bridges, with the facts of [The BCM2711 bridge](#the-bcm2711-bridge): its bring-up, its link check, its bus-0 and bus-1 rules, its inbound limit and its INTA to INTD on SPIs 143 to 146; the Pi 4's INTx; the USB row of the platform table: `qemu-xhci` on QEMU `virt`, the VL805 through the PCIe domain on the Pi 4; in the bus masters row, the VL805 as a device the USB domain drives, whose handover the loader leaves stopped and drained, with probe B3 as its loader evidence ([The boot firmware's handover](#the-bcm2711-bridge)) |
+| [design-platforms.md](design-platforms.md) | the BCM2711 among the PCIe bridges, with the facts of [The BCM2711 bridge](#the-bcm2711-bridge): its bring-up, its link check, its bus-0 and bus-1 rules, its inbound limit and its INTA to INTD on SPIs 143 to 146; the Pi 4's INTx; the USB row of the platform table: `qemu-xhci` on QEMU `virt`, the VL805 through the PCIe domain on the Pi 4; in the bus masters row, the VL805 as a device the USB domain drives, whose handover the loader leaves stopped and drained, by the means [the open decision](#open-decisions) settles, with probe B3 as corroboration ([The boot firmware's handover](#the-bcm2711-bridge)) |
 | [design-kernel.md](design-kernel.md) | if adopted, the VL805's notification operation, and its place in the list of the mailbox's only referrers |
 | [design-device-tree.md](design-device-tree.md) | if the INTx decision is taken, the line a closed bus's `interrupt-map` routes for a position, in the platform facts and the device-tree fuzz target |
 | `include/erx/device_kinds.h` | rows for `qemu-xhci` and the VL805 by PCI identity and position, each with role `usb` and its SVD peripheral |
@@ -2527,7 +2533,7 @@ sink shows it.
 | a drive grant's `window` | `{error, no_medium}`, `{error, no_partition}` | the drive holds no ready medium; the medium's table has no entry for the grant's partition that the removable-media rule serves |
 | a window of a medium that has gone | no answer: the process has ended | the caller's monitor fires |
 | the transport | `{error, {device, {sense, Key, Asc, Ascq}}}`, `{error, {device, no_sense}}`, `{error, {device, reset}}`, `{error, {device, short}}`, `{error, {device, gone}}`, `{error, {device, deadline}}`, `{error, no_flush}` | a failed command; a failed command whose REQUEST SENSE failed too; a reset recovery; a transfer that moved less than asked; a request of an ended medium; the wait bound passed; a flush of a medium that cannot flush |
-| a device at enumeration | refused, with `descriptor too long`, `malformed descriptor`, `duplicate interface`, `missing setting`, `endpoint zero`, `duplicate endpoint`, `missing companion`, `unsupported speed`, `too deep`, `too many ports`, `too many devices` or `endpoint too large` | the decoder or a bound |
+| a device at enumeration | refused, with `descriptor too long`, `malformed descriptor`, `duplicate interface`, `missing setting`, `endpoint zero`, `duplicate endpoint`, `missing companion`, `unsupported speed`, `too deep`, `too many ports`, `too many devices`, `endpoint too large` or `zero interval payload` | the decoder or a bound |
 | an access of the bridge driver below the root port | `{error, link_down}` | the link was down before the access or after it |
 | the bridge's bring-up | fails, with `link down`, `endpoint mode` or `dma-ranges` in the bridge's inspection record, and no function reported | no link 200 ms after PERST#'s release; the block is not a root complex; the tree's inbound range breaks the window's rules |
 | the VL805's report | withheld, with `vl805 firmware not loaded` | `0x50` reads 0 or all ones after the notification, or a reset was needed and no notification operation exists |
@@ -2653,10 +2659,10 @@ at erXos's start and after a bring-up of erXos's own, the firmware
 version, and whether the board has the VL805's EEPROM (B1); the bridge
 node as the boot firmware hands it over, and which line the VL805's
 INTA raises (B2); the link, PERST#, `MISC_REVISION`, and the VL805's
-command register and xHCI status at erXos's start, which must show the
-boot firmware's handover stopped and drained, with its seeded fault the
+command register and xHCI status at erXos's start, which corroborate
+the boot firmware's handover or refute it, with its seeded fault the
 same reading taken after a PCIe domain restart under a running USB
-domain, which it must report as not stopped, and the reference clock if
+domain, which it must report as running, and the reference clock if
 no link comes up (B3); the VL805's header type, functions and interrupt pin
 (B4); DMA above 960 MiB (B5); whether a narrowed inbound window blocks
 the VL805 outside it (B6); the VL805's capability registers (B7); and
@@ -2826,6 +2832,82 @@ then settles three rules this design records:
 5. **DWC2.** Build it later as an optional part, for QEMU `raspi4b`
    alone, or not at all. Recommendation: later and optional; it adds no
    board.
+
+6. **Stopping the VL805 before kernel entry.** The boot contract
+   requires the loader to leave the VL805 stopped, its DMA drained,
+   before the kernel reclaims memory, and no evidence yet establishes
+   that the Pi 4's boot firmware does so; B3 only corroborates it
+   ([The boot firmware's handover](#the-bcm2711-bridge)). Three ways to
+   meet the requirement:
+   * **(a) The first stage stops it.** The code the loader enters,
+     `bootstrap` on the stopgap and erXos's kernel itself on erXos's
+     kernel ([design-kernel.md](design-kernel.md#the-bootable-file)),
+     stops the VL805 before allocator handoff. Through the bridge's
+     register window from the tree it reads `MISC_PCIE_STATUS`
+     (`0x4068`) for the link bits and bit 0 of `0x9210` for PERST#, and
+     does nothing more when the link is down or PERST# asserted. With
+     the link up it makes configuration accesses to bus 1, device 0,
+     function 0 through the index register `0x9000` and the data window
+     `0x8000`, each bracketed by the link check: the function's identity,
+     its command register and the BAR that holds the xHCI's registers,
+     after reading the root port's bus numbers in its own space; and it
+     reads the outbound window registers (`0x400c`,
+     `0x4010` and `0x4070` of each window, facts record, section 2) to
+     find the BAR's CPU address. Then it reads `CAPLENGTH` for the
+     operational base, clears `USBCMD.R/S`, polls `USBSTS.HCH` for up
+     to 16 ms, and clears bus mastering in the command register. The
+     orderly sequence of xHCI 5.4.1.1 (pp. 396-397), every endpoint
+     stopped and the command ring idle before `R/S` is cleared, needs
+     the firmware's rings, and `CRCR` reads its ring pointer as 0
+     (5.4.5, p. 403), so short of taking over the controller's rings,
+     a host driver of its own, the first stage can only force the
+     halt, and the drain still needs a mechanism the platform
+     documents. Its gain is order by construction: the stop precedes
+     reclamation while the firmware's buffers are intact. Its costs: it
+     amends the rule that the PCIe enumerator alone reaches
+     configuration space and the kernel touches none (CLAUDE.md, trust
+     placement; [design.md](design.md#security)) to name one more
+     reach, fixed and narrow: the platform-named function's command
+     register and BAR and three xHCI registers, from the first stage,
+     before allocator handoff, with a chokepoint check like every "only
+     X" rule; and it puts bridge and xHCI code into the trusted first
+     stage twice, in `bootstrap` and in erXos's kernel. BL31, which
+     runs before either, is the other place, at the cost of modifying
+     TF-A.
+   * **(b) A board configuration under which the firmware never starts
+     USB.** The board's installation already writes its EEPROM
+     configuration and each slot's `config.txt`
+     ([design-platforms.md](design-platforms.md)); a boot order of the
+     microSD card alone, never USB mass storage or the network, may keep
+     the boot firmware from running the VL805's schedule at all, and a
+     controller never started has nothing to drain. Unverified: no
+     source read for this design says what the boot firmware does with
+     the VL805 under any boot order, whether loading its firmware on a
+     board without the EEPROM starts the controller, or whether a
+     firmware update changes either. The evidence would be the vendor's
+     documentation, with B3 corroborating on every board. Its costs: no
+     booting erXos from USB on the Pi 4, and a dependence on the board
+     settings, which are the board port's choice and not this design's.
+   * **(c) The admission gate alone.** Keep [The boot firmware's
+     handover](#the-bcm2711-bridge) as written: a handover without
+     evidence that establishes the requirement is not admitted, and
+     the Pi 4 does not boot erXos. It costs no code, but on the
+     evidence in hand it admits no Pi 4 handover, and B3 can never
+     admit one.
+
+   The same question stands for the Pi 4's other bus masters, the SD
+   controller, Ethernet and the DMA engines, whose quiescing by the boot
+   firmware is equally undocumented, so the answer belongs in
+   [design-platforms.md](design-platforms.md#dma) once taken.
+   Recommendation: (b), with (c) as the rule for every handover (b)
+   does not cover. It meets the requirement without new code or an
+   amended rule, provided the vendor's documentation shows the firmware
+   leaves the controller unstarted under that configuration. Take (a)
+   only if (b) cannot be shown and a handover with the VL805 running
+   must be supported: it orders the stop before reclamation, but
+   without the firmware's rings it can only force a halt, so it still
+   needs a documented drain, and it costs an amended
+   configuration-space rule and bridge code in two first stages.
 
 Left for later and recorded when code lands, since each fails safe by
 being absent: consumer-page keys and digitizers in HID, keyboard LEDs,
