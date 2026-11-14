@@ -325,8 +325,8 @@ Error in process &lt;0.150.0&gt; with exit value:
       <div class="box"><span class="status-tag on">ON</span><strong>QEMU virt</strong><p>AArch64, on 1 to 8 CPUs.</p></div>
       <div class="box"><span class="status-tag on">ON</span><strong>Raspberry Pi 4</strong><p>Serial console, SD card and Ethernet, on the board.</p></div>
       <div class="box"><span class="status-tag on">ON</span><strong>In the browser</strong><p>The console above, on an AArch64 emulator.</p></div>
-      <div class="box"><span class="status-tag on">ON</span><strong>Domains</strong><p>Storage, network and sessions each run their own ERTS, in user mode.</p></div>
-      <div class="box"><span class="status-tag on">ON</span><strong>Drivers in Erlang</strong><p>Console, virtio block and net, SD and GENET.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Domains</strong><p>Storage, network, display and sessions each run their own ERTS, in user mode.</p></div>
+      <div class="box"><span class="status-tag on">ON</span><strong>Drivers in Erlang</strong><p>Console, virtio block, net and gpu, SD, GENET and the Pi's framebuffer.</p></div>
       <div class="box"><span class="status-tag on">ON</span><strong>Files</strong><p>Per-domain namespaces, <code>/tmp</code>, littlefs on <code>/data</code>, EROFS.</p></div>
       <div class="box"><span class="status-tag on">ON</span><strong>Network</strong><p>A TCP/IP stack in Erlang: DHCP, <code>ping</code>, <code>host</code>.</p></div>
       <div class="box"><span class="status-tag on">ON</span><strong>Shell</strong><p>rc, written in Erlang, with job control.</p></div>
@@ -336,7 +336,7 @@ Error in process &lt;0.150.0&gt; with exit value:
     <div class="status-grid">
       <div class="box dash"><span class="status-tag next">NEXT</span><strong>erXos's kernel</strong><p>Begun as host-tested C cores.</p></div>
       <div class="box dash"><span class="status-tag next">NEXT</span><strong>Programs</strong><p>Pipes are built; running programs, sockets and POSIX-lite come next.</p></div>
-      <div class="box dash"><span class="status-tag next">NEXT</span><strong>Display</strong><p>Windows work on QEMU virt; the Pi is next.</p></div>
+      <div class="box dash"><span class="status-tag next">NEXT</span><strong>Display</strong><p>Windows work on QEMU virt, and the Pi 4 has a display domain; the input driver is next.</p></div>
     </div>
   </div>
 </section>
