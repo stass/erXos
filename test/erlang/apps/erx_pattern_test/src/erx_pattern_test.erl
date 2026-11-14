@@ -22,8 +22,17 @@ name:
 
 or `erx_pattern_test: {error, Step, Reason}` naming the step that failed,
 `open` when the window was refused or the wait of ?POLLS polls ran out
-(Reason `none`). The process then waits for ever: it holds the window, which
-ends when its holder does.
+(Reason `none`). Once presented, it reads the window's input, which the
+harness types through QMP: the first typed rune among the next ?KBD_READS
+records of its `kbd` file, then the first record of its `mouse` file, each
+logged as one notice,
+
+    erx_pattern_test: kbd {typed,97}
+    erx_pattern_test: mouse {0,0,0}
+
+the mouse record's position and buttons, or one notice naming the read that
+failed. The process then waits for ever: it holds the window, which ends
+when its holder does.
 """.
 
 -export([show/0, pattern/0]).
@@ -31,6 +40,7 @@ ends when its holder does.
 -define(DISPLAY, display).
 -define(POLLS, 240).
 -define(POLL_MS, 500).
+-define(KBD_READS, 8).
 %% The fill's three constants are erx_screen's (erlang/apps/erx_display/src/erx_screen.erl).
 %% A fill's source channel, Plan 9's RGB24: CHAN3(CRed, 8, CGreen, 8, CBlue, 8)
 %% of draw(2)'s draw.h, the first channel in the highest byte, as erx_screen fills.
@@ -59,15 +69,46 @@ pattern() ->
 -spec show() -> no_return().
 show() ->
     logger:notice("erx_pattern_test: started"),
-    Outcome = maybe
-                  {ok, Window} ?= step(open, opened(?POLLS)),
-                  {ok, Image} ?= step(image, erx_win:image(Window)),
-                  ok ?= step(draw, drawn(Image, pattern())),
-                  ok ?= step(present, erx_win:present(Window, [])),
-                  presented
-              end,
-    logger:notice("erx_pattern_test: ~0p", [Outcome]),
+    case presented() of
+        {ok, Window} ->
+            logger:notice("erx_pattern_test: presented"),
+            read_input(Window);
+        Failed ->
+            logger:notice("erx_pattern_test: ~0p", [Failed])
+    end,
     receive after infinity -> ok end.
+
+presented() ->
+    maybe
+        {ok, Window} ?= step(open, opened(?POLLS)),
+        {ok, Image} ?= step(image, erx_win:image(Window)),
+        ok ?= step(draw, drawn(Image, pattern())),
+        ok ?= step(present, erx_win:present(Window, [])),
+        {ok, Window}
+    end.
+
+%% The window's first typed rune, from its kbd file, then its first mouse record, each
+%% logged as one notice; a read that fails is logged instead and ends the reads.
+read_input(Window) ->
+    maybe
+        {ok, Typed} ?= typed(Window, ?KBD_READS),
+        logger:notice("erx_pattern_test: kbd ~0p", [Typed]),
+        {ok, {mouse, X, Y, Buttons, _Msec}} ?= erx_win:mouse(Window),
+        logger:notice("erx_pattern_test: mouse ~0p", [{X, Y, Buttons}])
+    else
+        Failed -> logger:notice("erx_pattern_test: kbd or mouse read ~0p", [Failed])
+    end.
+
+%% The first typed record among the next N kbd records: a key's down and up come as
+%% records of the keys held besides its typed rune.
+typed(_Window, 0) ->
+    {error, no_typed};
+typed(Window, N) ->
+    case erx_win:kbd(Window) of
+        {ok, {typed, _} = Typed} -> {ok, Typed};
+        {ok, _Held} -> typed(Window, N - 1);
+        {error, _} = Error -> Error
+    end.
 
 %% Ends: each retry lowers the finite count.
 opened(0) ->

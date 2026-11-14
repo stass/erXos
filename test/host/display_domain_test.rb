@@ -83,12 +83,26 @@ class DisplayDomainTest < Minitest::Test
     assert Erx::Manifest.admit(source: Suite.manifest(KEPT), codec: codec, context: context, planner: planner)
   end
 
-  # The input devices sit off the gpu's register page, on a page no unit of the manifest holds.
-  def test_the_input_devices_are_off_the_gpus_page
-    per_page = Erx::QemuPlan::TRANSPORTS_PER_PAGE
-    gpu, keyboard, tablet = Suite::DISPLAY_BUSES.values_at(:gpu, :keyboard, :tablet)
-    refute_includes [keyboard / per_page, tablet / per_page], gpu / per_page
-    assert_equal [0, 0], [keyboard / per_page, tablet / per_page]
+  # The input drivers' paths are the platform record's input devices, on the gpu's page.
+  def test_the_input_drivers_are_the_records_input_devices
+    record = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
+    display = record.fetch('units').find { |unit| unit.fetch('key') == 'display' }.fetch('devices')
+    paths = display.select { |device| device.fetch('role') == 'input' }.map { |device| device.fetch('path') }
+    assert_equal paths.map { |path| "erx_virtio_input: #{path} driven" }, Suite::INPUT_DRIVEN
+  end
+
+  # Both bring-ups and the key's and the corner's reads pass; a missing bring-up, a failed
+  # one, a missing read, a read of another record or a second read fails.
+  def test_the_input_lines_are_two_bring_ups_and_two_reads
+    tablet, keyboard = Suite::INPUT_DRIVEN.map { |line| "% #6 0.4 debug space 1: #{line}\r\n" }
+    kbd, mouse = Suite::INPUT_READ.map { |line| "space 3: notice: #{line}\r\n" }
+    Suite.check_input_lines("boot\r\n#{tablet}#{keyboard}shell\r\n#{kbd}#{mouse}")
+    failed = "% #6 0.4 debug space 1: erx_virtio_input: /virtio_mmio@a001c00 not driven: {attach,ebusy}\r\n"
+    ["#{tablet}#{kbd}#{mouse}", "#{tablet}#{failed}#{kbd}#{mouse}", "#{tablet}#{keyboard}#{kbd}",
+     "#{tablet}#{keyboard}#{kbd}space 3: notice: erx_pattern_test: mouse {1,0,0}\r\n",
+     "#{tablet}#{keyboard}#{kbd}#{mouse}#{mouse}"].each do |log|
+      assert_raises(Erx::Error) { Suite.check_input_lines(log) }
+    end
   end
 
 # One presented passes; a refused open, a second outcome after the session was started
@@ -96,7 +110,7 @@ class DisplayDomainTest < Minitest::Test
 def test_the_client_lines_are_one_presented
   started = "space 3: notice: erx_pattern_test: started\r\n"
   presented = "space 3: notice: erx_pattern_test: presented\r\n"
-  Suite.check_client_lines("boot\r\n#{started}#{presented}shell\r\n")
+  Suite.check_client_lines("boot\r\n#{started}#{presented}shell\r\nspace 3: notice: erx_pattern_test: kbd {typed,97}\r\n")
   ["boot\r\n#{started}", "#{started}space 3: notice: erx_pattern_test: {error,open,none}\r\n",
    "#{started}#{presented}#{started}#{presented}"].each do |log|
     assert_raises(Erx::Error) { Suite.check_client_lines(log) }
@@ -117,7 +131,7 @@ end
     points = [{ name: 'boot' }.freeze, { name: 'release-shell', seconds: 60 }.freeze]
     shell = Suite.checkpoints(points, socket: '/nonexistent/qmp.sock', references: '/nonexistent', serial: '/nonexistent/serial.log').last
     assert_equal 'release-shell', shell.fetch(:name)
-    assert_equal 60 + Suite::WAIT_SECONDS + Suite::CLIENT_WAIT_SECONDS + 15, shell.fetch(:seconds)
+    assert_equal 60 + Suite::WAIT_SECONDS + (2 * Suite::CLIENT_WAIT_SECONDS) + 15, shell.fetch(:seconds)
     assert shell.fetch(:verify).respond_to?(:call)
     assert_raises(Erx::Error) { Suite.checkpoints([{ name: 'boot' }.freeze], socket: '/x', references: '/y', serial: '/z') }
   end

@@ -139,14 +139,14 @@ class ManifestStopgapTest < Minitest::Test
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
     assert_equal 4, view.count('domains')
-    assert_equal 5, view.count('devices')
+    assert_equal 12, view.count('devices')
     assert_equal 6, view.count('windows')
     assert_equal 1, view.count('images')
   end
 
   # The website's manifest passes the same check: its storage and network domains, without
   # the web and display domains, hold the same windows and image and every device but the
-  # display's gpu.
+  # display unit's, which lists every transport on the gpu's register page.
   def test_the_real_site_manifest_is_admitted
     result = admit(site_manifest)
     assert result.matches?(@context)

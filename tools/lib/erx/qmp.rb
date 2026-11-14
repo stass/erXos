@@ -12,7 +12,7 @@ module Erx
   # The harness's end of QEMU's machine protocol (QMP) on a UNIX socket QEMU listens on
   # (QemuPlan::Display): one JSON object per line, a greeting, a capabilities command, then
   # commands answered in order with a reply or an error, among events the client skips. It
-  # sends three commands: qmp_capabilities, screendump (format ppm) and quit.
+  # sends four commands: qmp_capabilities, screendump (format ppm), input-send-event and quit.
   #
   # QEMU is the peer, and what it says is untrusted all the same: every read is bounded
   # (MAX_LINE_BYTES a line, MAX_SKIPPED_EVENTS events between a command and its reply, one
@@ -112,6 +112,13 @@ module Erx
     def screendump_image(path)
       check_dump_path(path)
       dump(path)
+    end
+
+    # Sends events, an array of QMP InputEvent objects, to the guest's input devices as one
+    # batch, which QEMU ends with a report: key events go to the keyboard, absolute ones to
+    # the tablet.
+    def input_events(events)
+      command('input-send-event', { 'events' => events })
     end
 
     # Ends QEMU's machine. QEMU may close the connection before or after the reply.

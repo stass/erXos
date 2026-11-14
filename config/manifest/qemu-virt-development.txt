@@ -60,7 +60,8 @@
 # (TODO.md, "a refused restart is not retried"). The web and display domains each hold
 # a connection to the system domain alone, so their ends leave no such budget. With it
 # the baseline leaves root_memory the block device's 1 MiB, the network
-# device's 256 KiB, the gpu's 9 MiB and the 8 MiB margin no one is promised: the domain
+# device's 256 KiB, the gpu's 9 MiB, the keyboard's and the tablet's 64 KiB each and the
+# 8 MiB margin no one is promised: the domain
 # library charges a device's memory to the system's budget, not its holder's (dom_life.c,
 # ERX_DOM_STEP_CONTIGUOUS).
 # The web domain's 24 MiB is not measured yet: the bare release, loaded, on the
@@ -77,9 +78,9 @@
 # system share's reserve leaves beside the storage and network domains' one CPU each
 # (property 13); the web and display shares' cpuset, CPU 0 alone, gives each domain one
 # scheduler. The gpu's 9 MiB of DMA memory is made at every boot, a gpu attached or not,
-# since the manifest places the device; with it the devices' 10.25 MiB take the
+# since the manifest places the device; with it the devices' 10.375 MiB take the
 # contiguous pool to its 16 MiB bound (docs/design-stopgap.md, "The pool"), which the
-# boot keeps beside root_memory, and leave 5.75 MiB for any other device's memory.
+# boot keeps beside root_memory, and leave 5.625 MiB for any other device's memory.
 # The storage domain's 30 MiB is its
 # use rounded up to a whole MiB: 7,635 pool pages, 29.8 MiB, with BeamAsm (more than the
 # interpreter the row runs: docs/design-shared-code.md, DlJitExtra), erx_blk
@@ -146,7 +147,7 @@
 # the system principal's 156 MiB (root's session, 36 MiB and outer 1 MiB, the storage
 # domain, 30 MiB and outer 1 MiB, the network domain, 36 MiB and outer 1 MiB, the web
 # and display domains, 24 MiB and outer 1 MiB each, and an ended domain's outer 1 MiB)
-# and the devices' 10.25 MiB promise all of root_memory but its 8 MiB margin. The network
+# and the devices' 10.375 MiB promise all of root_memory but its 8 MiB margin. The network
 # domain's 36 MiB is its use rounded up to a whole MiB, 34 MiB, and 2 MiB of headroom:
 # 8,603 pool pages, 33.6 MiB, with BeamAsm (more than the interpreter the row runs) and
 # the users share's four schedulers, after
@@ -163,7 +164,7 @@
 # 19 MiB (the bare release's 18.3 MiB and the shell's modules), the storage domain's
 # 29.8 MiB, the network domain's 33.6 MiB and the web domain's about 19 MiB: about 133
 # to 138 MiB beside the display domain's, which is not measured. With the devices'
-# 10.25 MiB that leaves about 72 to 77 MiB of root_memory, less the display domain's
+# 10.375 MiB that leaves about 72 to 77 MiB of root_memory, less the display domain's
 # use, unused. RAM less
 # root_memory is left to Fiasco's kernel memory (fiasco_reserve, about 6% of RAM,
 # its boot log's "Reserved N MiB as kernel memory"), its image and sigma0, the
@@ -397,7 +398,7 @@ machine
   console "/pl011@9000000"
   hostlink "/pl011@9040000"
   platform "qemu-virt"
-  root_memory 230948864
+  root_memory 231079936
   system_baseline 48234496
   system_share @share.system
   users_share @share.users

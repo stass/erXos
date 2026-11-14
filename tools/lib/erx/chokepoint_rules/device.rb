@@ -217,16 +217,17 @@ module Erx
         # posts, and erx_blk_write is the one block module that posts: it builds
         # every request, and only its write/6 one whose type writes
         # (docs/design-storage.md, U4). The network transports post frames and
-        # the virtio-gpu driver requests its pure core built, to devices handed
-        # no medium (docs/design-display.md, "The display device"). Refused
+        # the virtio-gpu driver requests its pure core built and the virtio-input
+        # driver its empty event buffers, to devices handed no medium (docs/design-display.md, "The display device"). Refused
         # outside them: erx_device:post as a remote call or fun, erx_device with
         # post as an apply's next argument, and any import from erx_device.
         Chokepoints::ErlangForbidden.new(
           name: 'device-posters', rule: "only the block driver's one write path, erx_blk_write, the network transports and the " \
-                                        'virtio-gpu driver call erx_device:post/4, and each builds every request it posts',
+                                        'virtio-gpu and virtio-input drivers call erx_device:post/4, and each builds ' \
+                                        'every request it posts',
           design: 'docs/design-storage.md#data-model', pattern: DEVICE_ISSUE.call('post'),
           sites: [BLK_WRITE, 'erlang/apps/erx_net/erxos/erx_virtio_net.erl', 'erlang/apps/erx_net/erxos/erx_genet.erl',
-                  'erlang/apps/erx_fb/src/erx_virtio_gpu.erl'],
+                  'erlang/apps/erx_fb/src/erx_virtio_gpu.erl', 'erlang/apps/erx_fb/src/erx_virtio_input.erl'],
           seed: { 'erlang/apps/erx_blk/src/seeded.erl' => "f(D) -> erx_device:post(D, 0, <<>>, 0).\n",
                   'erlang/apps/erx_blk/src/seeded_import.erl' => "-import(erx_device, [post/4]).\n" }
         ),

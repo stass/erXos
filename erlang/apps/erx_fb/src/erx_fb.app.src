@@ -6,14 +6,14 @@
 %% shows a screen image and flushes the rectangles that changed. The virtio-gpu driver is
 %% erx_virtio_gpu, the process, and erx_virtio_gpu_core, its pure core; the firmware
 %% framebuffer's is erx_firmware_fb over erx_firmware_fb_core; erx_fb_sup starts the one
-%% the domain's record names and erx_screen over it. erx_virtio_input_core is the virtio-input driver's pure
-%% core. erx_display, the behaviour and the screen, and erx_memdraw, the pixel
+%% the domain's record names and erx_screen over it. erx_virtio_input is the virtio-input driver, one
+%% process for each input record, over erx_virtio_input_core, its pure core. erx_display, the behaviour and the screen, and erx_memdraw, the pixel
 %% primitives, are library applications this one depends on.
 {application, erx_fb,
  [{description, "erXos display drivers"},
   {vsn, "1"},
   {modules, [erx_fb_app, erx_fb_sup, erx_firmware_fb, erx_firmware_fb_core, erx_virtio_gpu, erx_virtio_gpu_core,
-             erx_virtio_input_core]},
+             erx_virtio_input, erx_virtio_input_core]},
   {registered, [erx_fb, erx_fb_sup, erx_screen, erx_winfs]},
   {applications, [kernel, stdlib, erx, erx_files, erx_memdraw, erx_display]},
   {env, []},

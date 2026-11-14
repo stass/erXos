@@ -25,6 +25,13 @@
 %% and a manifest gives a domain at most one display device, so more than one record, or a
 %% malformed one, starts nothing, as no record does.
 %%
+%% Then one virtio-input driver for each of the domain's `input virtio_input` records, the
+%% keyboard and the tablet on QEMU virt, each sending its device's records to the window
+%% system (erx_virtio_input). They come last, so an input driver's end restarts only the
+%% input drivers after it, never the display driver or the screen; its ends count toward
+%% the supervisor's one restart intensity all the same (TODO.md). A malformed input record
+%% starts no input driver, with one line in the kernel log; no record starts none, silently.
+%%
 %% erx_screen is a module of erx_display, a library application that starts no process,
 %% so the driver's supervisor starts it behind the driver, and no screen runs before a
 %% driver does.
@@ -51,8 +58,9 @@ init([]) ->
     Display = display(erx_device_record:find(gpu, virtio_mmio), erx_device_record:framebuffers()),
     Winfs = winfs(os:getenv(binary_to_list(?ERX_DISPLAY_KEY_BYTES)),
                   os:getenv(binary_to_list(?ERX_DISPLAY_POLICY_KEY_BYTES))),
+    Inputs = inputs(erx_device_record:find(input, virtio_input)),
     {ok, {#{strategy => rest_for_one, intensity => ?INTENSITY, period => ?PERIOD_S,
-            auto_shutdown => any_significant}, Winfs ++ Display}}.
+            auto_shutdown => any_significant}, Winfs ++ Display ++ Inputs}}.
 
 %% The window system's child for Display and Policy, the values of the domain's display
 %% and display_policy variables: the mint of the service Display names under the single
@@ -98,6 +106,18 @@ display({ok, _Gpus}, {ok, _Framebuffers}) ->
     [];
 display(_Gpus, _Framebuffers) ->
     _ = erx_log:debug(["erx_fb: the display device record is malformed"]),
+    [].
+
+%% One input driver for each input record, each child named by its record's path.
+inputs({ok, Specs}) ->
+    [#{id => {erx_virtio_input, Path},
+       start => {erx_virtio_input, start_link, [Spec]},
+       restart => permanent,
+       shutdown => 2000,
+       type => worker,
+       modules => [erx_virtio_input, erx_virtio_input_core]} || #{path := Path} = Spec <- Specs];
+inputs(_Malformed) ->
+    _ = erx_log:debug(["erx_fb: an input device record is malformed; no input"]),
     [].
 
 driver(Module, Record, Modules) ->

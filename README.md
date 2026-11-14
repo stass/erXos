@@ -483,8 +483,10 @@ Error in process <0.150.0> with exit value:
   display domain over virtio-gpu (no development boot attaches a gpu, so it
   shows its empty layout's background), `erx-lvgl` draws into its
   window's buffer in LVGL's direct mode, and the virtio-gpu driver's
-  decisions are written; the QEMU harness can add a virtio-gpu, keyboard
-  and tablet and compare screenshots.
+  decisions are written; the virtio-input driver sends a keyboard's and a
+  tablet's records to the window system, and the QEMU harness adds a
+  virtio-gpu, keyboard and tablet, compares screenshots, and types a key
+  and moves the pointer into a client's window.
 * **A browser shows the machine's records:** run `make web` first,
   which builds the client offline from pinned packages; boot with
   `tools/erx boot --hostlink`, run the `tools/erx web --socket PATH`

@@ -589,14 +589,6 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
-* [High] `erlang/apps/erx_fb/`, [The display device](docs/design-display.md#the-display-device):
-  the virtio-input driver process is not built, so no device's input reaches `erx_winfs:input/2` and a booted
-  display takes no input. Its pure core and update fold, `erx_virtio_input_core`, are built; the process over
-  the device shim, its rows in the display domain's supervisor and the display suite's QEMU case wait on two
-  design questions: an input device's record and unit in the device table; and the name its records reach
-  the router under (the device's `ID_NAME`, [facts record](docs/research-virtio-input-qemu.md), fact 21, or
-  the device table's). Its configuration registers are peripheral `VIRTIO_INPUT`'s, `select` and `subsel`
-  one byte each ([Registers by name](docs/design-runtime.md#the-device-nif)).
 * [Medium] `abi/manifest.txt`, `liberx/system/dom_core.c`, `erlang/apps/erx_display/src/erx_winfs.erl`, [A display's
   session](docs/design-display.md#a-displays-session): a display's manifest entry carries no `display_keymap`,
   `display_repeat_delay_ms`, `display_repeat_period_ms` or reserved chord, and the domain service puts none of
@@ -5916,19 +5908,25 @@ to the corpus and follow rc
   whose generator repeats that cookie, as a deterministic-mode boot does.
   Release builds refuse a weak seed.
 
-* [Medium] `liberx/system/dom_boot_view.c`, `boot_devices`: a give windows a device's whole register page, and the
-  library checks a page's sharing only among the platform record's device rows, so a device the machine has on
-  that page but the record does not list is reachable through the holder's window, with no manifest row giving
-  it. On QEMU virt, `QemuPlan::Display` by default puts the virtio-keyboard and virtio-tablet on the gpu's page
-  (`DISPLAY_TRANSPORTS`, buses .14 and .13), so a manifest that places the display unit gives the display
-  domain both input devices unseen, each able to drive unconfined DMA; the `display_domain` suite moves them to
-  the unplaced spare's page (`DisplayDomain::DISPLAY_BUSES`). The development manifest places the unit, and
-  no boot of its image attaches a display yet; one that attaches `QemuPlan::Display` with its defaults gives
-  the display domain both input devices. Make the record's unit on QEMU virt the transport
-  page, with every transport the board's tree has on it, so what a window reaches is what the unit lists by
-  construction. The display domain holds its keyboard and tablet only once the unit
-  is the transport page; QEMU virt's four transport pages are the spare's, the display's, the network
-  device's and the disks'.
+* [Medium] `liberx/system/dom_boot_view.c`, `boot_devices`, `config/platforms/qemu-virt.json`: a give windows a
+  device's whole register page, and the library checks a page's sharing only among the platform record's device
+  rows, so a device the machine has on that page but the record does not list is reachable through the holder's
+  window. On QEMU virt the display unit lists every transport on its page (`ordinary` rows for the empty ones), as
+  [design-stopgap.md](docs/design-stopgap.md) states for all four units, but the block, net and spare units still
+  list their driven transport alone: a device QEMU attached on another transport of those pages would reach their
+  holders unlisted. Listing them needs the tests and probes that take a unit's first device as its driven one
+  (`test/site/terminal_test.mjs`, `test/host/device_give_test.rb`, `test/host/dom_planner_test.rb`'s `device_of`
+  and net-unit fixtures, `MediumBoot`'s expected catalogue and `/dev` listing) to pick it by role, and the
+  `ERX_DOM_DEVICES_MAX` item below. Better still, generate the virtio rows, and `QemuPlan`'s transports, from one
+  table, or have the production image suite check that every tree node on a unit's pages is a row of that unit.
+* [Medium] `include/erx/dom.h`, `ERX_DOM_DEVICES_MAX` (8), `dom_boot_view.c`, `dom_core.c`: the per-domain device
+  limit counts devices of no kind, which get no give, record or memory, so a unit that lists every transport on a
+  QEMU virt page already holds 8 and the display domain can hold nothing more. Count driven devices only, since the
+  limit bounds gives and records.
+* [Low] `erlang/apps/erx_fb/src/erx_fb_sup.erl`: the input drivers count toward the display supervisor's restart
+  intensity (3 in 60 s), so an input device that breaks its queue four times a minute ends the display domain.
+  A `one_for_one` supervisor of its own for the input drivers would end input alone.
+
 * [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a spec's `peripheral` is the
   caller's, so a driver can open a window as any table peripheral whose block fits it, such as a virtio-mmio
   transport as `sdhci`, and reach the transport's owned offsets through that peripheral's writable registers,

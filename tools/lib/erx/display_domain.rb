@@ -50,11 +50,6 @@ module Erx
     CLIENT_SCRIPT = ReleaseFiles::RELEASE_SCRIPTS.fetch('client')
     CLIENT_APPLICATIONS = [*CLIENT_SCRIPT, 'erx_shell', 'erx_session', 'erx_pattern_test'].freeze
     BOOT = ReleaseFiles.domain_boot('pattern', applications: CLIENT_APPLICATIONS, test: true)
-    # The keyboard and tablet stay off the display's register page: the display domain's
-    # window is the gpu's whole page, and the domain library checks a page's sharing only
-    # among the platform record's devices (TODO.md, security residuals), so the input
-    # devices sit on the page of the spare unit, which this manifest does not place.
-    DISPLAY_BUSES = { gpu: QemuPlan::DISPLAY_TRANSPORTS.fetch(:gpu), keyboard: 6, tablet: 5 }.freeze
     # How long the harness reads the screen after the shell's banner before it fails, and
     # how often.
     WAIT_SECONDS = 90
@@ -150,7 +145,7 @@ module Erx
     # "presented" and no other, or Error naming them, so a client that failed, or whose
     # session was started again before the picture came, does not pass, and a failing
     # cell says what the client reported.
-    CLIENT_LINE = /erx_pattern_test: (?!started)[^\r\n]*/n
+    CLIENT_LINE = /erx_pattern_test: (?!started|kbd |mouse )[^\r\n]*/n
     PRESENTED = 'erx_pattern_test: presented'
     def check_client_lines(log)
       lines = log.b.scan(CLIENT_LINE)
@@ -164,18 +159,63 @@ module Erx
     # which may reach the log after the screen shows the picture.
     CLIENT_WAIT_SECONDS = 15
     def await_client_line(serial, wait_seconds: CLIENT_WAIT_SECONDS)
+      await_log(serial, wait_seconds: wait_seconds) { |log| log.match?(CLIENT_LINE) }
+    end
+
+    # The serial log at serial once the block says it is complete, or once wait_seconds
+    # have passed.
+    def await_log(serial, wait_seconds:)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_seconds
       loop do
-        log = File.binread(serial)
-        return log if log.b.match?(CLIENT_LINE) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        log = File.binread(serial).b
+        return log if yield(log) || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
         sleep POLL_SECONDS
       end
     end
 
+    # The input the harness types once the client has presented: the key a, down and up,
+    # then the tablet at the screen's top left corner, each a batch QEMU ends with a report.
+    # The corner is the least position QEMU's tablet sends, whatever its range, and the
+    # router scales it to the screen's first pixel, which the client's window covers.
+    TYPED = [true, false].map do |down|
+      { 'type' => 'key', 'data' => { 'down' => down, 'key' => { 'type' => 'qcode', 'data' => 'a' } } }
+    end.freeze
+    CORNER = %w[x y].map { |axis| { 'type' => 'abs', 'data' => { 'axis' => axis, 'value' => 0 } } }.freeze
+    # The input drivers' bring-ups, the tablet's then the keyboard's, on the display unit's
+    # transports (QemuPlan::DISPLAY_TRANSPORTS, at 0x0a000000 and 0x200 apart, the paths
+    # config/platforms/qemu-virt.json gives them), and what the client reads of the key and
+    # the corner from its window's kbd and mouse files (erx_pattern_test:show/0): the
+    # router's records for the key and the pointer, routed to the window.
+    INPUT_DRIVER_LINE = /erx_virtio_input: [^\r\n]*/n
+    INPUT_DRIVEN = %i[tablet keyboard].map do |role|
+      format('erx_virtio_input: /virtio_mmio@%x driven', 0x0a000000 + (0x200 * QemuPlan::DISPLAY_TRANSPORTS.fetch(role)))
+    end.freeze
+    INPUT_READ = ['erx_pattern_test: kbd {typed,97}', 'erx_pattern_test: mouse {0,0,0}'].freeze
+    INPUT_READ_LINE = /erx_pattern_test: (?:kbd|mouse) [^\r\n]*/n
+
+    # The input drivers' lines of a boot's serial log, one bring-up of each in transport
+    # order and no other, and the client's reads of the input, the key's then the corner's
+    # and no other, or Error naming them.
+    def check_input_lines(log)
+      drivers = log.scan(INPUT_DRIVER_LINE)
+      raise Error, "the input drivers logged #{drivers.first(4).inspect}, not #{INPUT_DRIVEN.inspect}" unless drivers == INPUT_DRIVEN
+
+      read = log.scan(INPUT_READ_LINE)
+      raise Error, "the client read #{read.first(4).inspect}, not #{INPUT_READ.inspect}" unless read == INPUT_READ
+    end
+
+    # The input typed through the QMP socket at socket.
+    def type_input(socket)
+      client = Qmp.connect(socket)
+      [TYPED, CORNER].each { |events| client.input_events(events) }
+    ensure
+      client&.close
+    end
+
     # The production checkpoints to the command shell, whose banner starts the screen's
-    # reads, then the driver's and the client's lines of the serial log at serial. points
-    # must end at the command shell.
+    # reads, then the driver's and the client's lines of the serial log at serial, then the
+    # input typed and its lines. points must end at the command shell.
     def checkpoints(points, socket:, references:, serial:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
@@ -185,8 +225,11 @@ module Erx
         log = await_client_line(serial)
         check_driver_lines(log)
         check_client_lines(log)
+        type_input(socket)
+        typed = await_log(serial, wait_seconds: CLIENT_WAIT_SECONDS) { |text| text.scan(INPUT_READ_LINE).size >= INPUT_READ.size }
+        check_input_lines(typed)
       end
-      [*points[0...-1], shell.merge(seconds: shell.fetch(:seconds) + WAIT_SECONDS + CLIENT_WAIT_SECONDS + 15,
+      [*points[0...-1], shell.merge(seconds: shell.fetch(:seconds) + WAIT_SECONDS + (2 * CLIENT_WAIT_SECONDS) + 15,
                                            verify: screen).freeze].freeze
     end
 
@@ -231,7 +274,7 @@ module Erx
         path = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/display-domain', "#{accel}-#{count}cpu"))
         boot = OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
         socket = File.join(boot, 'qmp.sock')
-        display = QemuPlan::Display.new(qmp_socket: socket, **DISPLAY_BUSES)
+        display = QemuPlan::Display.new(qmp_socket: socket)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
                                                          manifest_source: @manifest, memory_mib: @machine.memory_mib,
                                                          test_image: true)

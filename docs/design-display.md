@@ -1755,6 +1755,21 @@ controller's, an encoder's and a keypad's drivers send the same
 records from their buses, with evdev's codes. Each driver is a row of
 the device table.
 
+The virtio-input driver, `erx_virtio_input`, is one process for each of
+the display domain's `input virtio_input` device records, started by the
+display's supervisor after the display driver and the screen, so an
+input driver's restart touches neither. Its bring-up is the virtio
+driver's sequence: open, identify, the event queue, negotiate, the
+configuration's reads, the line, and every buffer of the event queue
+posted. It sends its records under its device record's PATH, the
+device-tree path the board's device table gives the transport
+([design-stopgap.md](design-stopgap.md#device-records)), never under the
+device's own `ID_NAME`: the path is the table's, fixed and known to the
+manifest before boot, and a device's name is text the device writes,
+untrusted and the same for every QEMU keyboard ([facts
+record](research-virtio-input-qemu.md#what-the-devices-declare-and-send),
+fact 21), so the driver never reads it.
+
 **Input waits at its source.** `erx_winfs:input/2` returns once the
 router has stepped the record ([The input router](#the-input-router)),
 so a driver has at most one record in the router's mailbox, and it

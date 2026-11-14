@@ -1703,16 +1703,20 @@ before then, so what the old holder left in the device or its memory is not trus
 
 Which of QEMU's 32 virtio-mmio transports is which device is configuration: the platform
 record names a transport for each role, the bus the harness pins that role's device to,
-and the manifest's unit says who holds it. A 4 KiB page holds eight transports and is one
-device's alone, since `erx_device` opens and maps a device's registers by the page and
-refuses a second device on an open page, so each role takes its own page: the disks the top
-page, `/virtio_mmio@a003e00` for the first and each next disk the transport below it, and
-the network device the page below, `/virtio_mmio@a002e00`, the display unit the page below
-that, whose graphics device is `/virtio_mmio@a001e00`, the transport the harness pins
-virtio-gpu to (`QemuPlan::DISPLAY_TRANSPORTS`), with 9 MiB of DMA memory: the screen image of
-the largest mode the display design sizes, 1920 by 1080 in `x8r8g8b8`, 8,294,400 bytes, and
-1,142,784 bytes for the control queue's ring and buffers; and a spare unit the page below
-that, `/virtio_mmio@a000e00`, which QEMU leaves without a device: the development manifest
+and the manifest's unit says who holds it. A 4 KiB page holds eight transports, and a
+give windows whole pages, so each of the record's four virtio units is one page with every
+transport on it ([The unit rule](design-shared-devices.md#the-unit-rule)): the driven
+transports by their role and the others as devices of no kind, `ordinary`, which no
+driver opens, so what a holder's window reaches is what its unit lists. The disks take the
+top page, `/virtio_mmio@a003e00` for the first and each next disk the transport below it,
+and the network device the page below, `/virtio_mmio@a002e00`; the display unit the page
+below that, whose graphics device is `/virtio_mmio@a001e00`, the keyboard
+`/virtio_mmio@a001c00` and the tablet `/virtio_mmio@a001a00`, the transports the harness
+pins them to (`QemuPlan::DISPLAY_TRANSPORTS`). The gpu has 9 MiB of DMA memory: the screen
+image of the largest mode the display design sizes, 1920 by 1080 in `x8r8g8b8`, 8,294,400
+bytes, and 1,142,784 bytes for the control queue's ring and buffers; each input device has
+64 KiB, room for its event queue's ring and 64 buffers of one event. A spare unit takes the
+page below that, `/virtio_mmio@a000e00`, which QEMU leaves without a device: the development manifest
 leaves it unplaced, and the `device_give` QEMU suite places it on a configured row, whose
 domain reads the transport's magic, is halted, and reads it again from what the row's
 restart gave it. The website's machine, v64,
