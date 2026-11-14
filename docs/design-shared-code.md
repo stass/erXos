@@ -67,7 +67,7 @@ Decisions every reader needs:
 
 ## The problem and its evidence
 
-The owner's question was why ERTS code is not shared between domains to
+The question is why ERTS code is not shared between domains to
 save memory, with the constraint that the machine stays small: the RAM of
 the development machine (`config/platforms/qemu-virt.json`), and "we can't
 be eating 512M of ram" for an

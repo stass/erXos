@@ -116,11 +116,11 @@ Decisions every reader needs:
 
 Three things fix the stack's behaviour.
 
-* **The protocols, as FreeBSD implements them at the pin.** The owner
-  chose to "take freebsd stack as a reference and translate logic to
-  erlang ... so we don't discover problems from scratch", and agreed to
-  translate FreeBSD's decisions, not its structure, against one pinned
-  tree ([Decisions](#decisions), 9).
+* **The protocols, as FreeBSD implements them at the pin.** The stack
+  takes FreeBSD's as its reference and translates its logic to Erlang,
+  so its problems are not discovered from scratch: FreeBSD's decisions,
+  not its structure, against one pinned tree ([Decisions](#decisions),
+  9).
   FreeBSD's networking code is BSD-licensed, maintained, tested by
   FreeBSD's own TCP test suite, and is the UNIX that erXos follows where
   UNIX systems differ (CLAUDE.md, principle 5).
@@ -7917,8 +7917,8 @@ These are settled. Two questions remain open
     the hack's numbers, measured on a standalone release of `erx_net`,
     where every socket is within one domain, show the gain worth the
     second configuration.
-17. **The client half stays Erlang.** The owner declined an ERTS object
-    in the owner's runtime, shaped as stock's inet port, which would
+17. **The client half stays Erlang.** It is not an ERTS object in the
+    owner's runtime, shaped as stock's inet port, which would
     remove the socket process's hop in every mode and configuration:
     callers would reach it in their own scheduling with no message, the
     funnel would deliver the connection's pushes to it, and it would
