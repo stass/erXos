@@ -44,11 +44,15 @@ module Erx
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
     # OTP's applications whose NIFs only the domains' runtime images link
-    # (docs/design-crypto.md, "Three runtime images"): neither the system release nor the
-    # hosted runtime, which links neither NIF, can load them, so the hosted oracle's tree
-    # leaves them out (OracleHosted.application_files) and a suite there skips them as on a
-    # stock OTP built without crypto.
-    DOMAIN_IMAGE_ONLY = %w[asn1 crypto].freeze
+    # (docs/design-crypto.md, "Three runtime images"), and those that need them:
+    # public_key and ssh, whose every key operation calls crypto. Neither the system
+    # release nor the hosted runtime, which links neither NIF, can run them, so the hosted
+    # oracle's tree leaves them out (OracleHosted.application_files) and a suite there
+    # skips them as on a stock OTP built without crypto. Every release only loads them
+    # (release_entry): the boot script puts them on the code path and starts nothing of
+    # theirs, so a domain runs no ssh supervisor until a program of its own calls
+    # ssh:start/0 (docs/design-ssh.md, "Stages"); ssh alone has processes to start.
+    DOMAIN_IMAGE_ONLY = %w[asn1 crypto public_key ssh].freeze
     raise Error, "DOMAIN_IMAGE_ONLY names what the release does not ship: #{DOMAIN_IMAGE_ONLY - APPLICATIONS}" unless
       (DOMAIN_IMAGE_ONLY - APPLICATIONS).empty?
 
@@ -78,6 +82,9 @@ module Erx
       (SYSTEM_APPLICATIONS - APPLICATIONS).empty?
     raise Error, 'SYSTEM_APPLICATIONS is not in release order (APPLICATIONS)' unless
       SYSTEM_APPLICATIONS == APPLICATIONS & SYSTEM_APPLICATIONS
+    # The system domain's runtime links neither NIF, so it could not run them.
+    raise Error, "SYSTEM_APPLICATIONS names what only a domain's runtime image runs: #{DOMAIN_IMAGE_ONLY & SYSTEM_APPLICATIONS}" unless
+      (DOMAIN_IMAGE_ONLY & SYSTEM_APPLICATIONS).empty?
     SYSTEM = Release.new(name: NAME, prefix: 'system/', applications: SYSTEM_APPLICATIONS, system: true,
                          boots: { 'start' => SYSTEM_APPLICATIONS }.freeze)
     # The build's release scripts table: each domain boot script's applications under its
@@ -93,7 +100,10 @@ module Erx
     #   sessions and quotas"): the network client, whose `grant` key the session
     #   template's arguments set; the command shell; the session's line to the web domain
     #   (docs/design-web.md, "Views on the line"), which must be up before init's ready
-    #   report names it, so the script starts it; and erx_session (DOMAIN_ONLY);
+    #   report names it, so the script starts it; erx_session (DOMAIN_ONLY); and asn1,
+    #   crypto, public_key and ssh (DOMAIN_IMAGE_ONLY), which it only loads, so that a
+    #   principal can run OTP's ssh daemon in its own session (docs/design-ssh.md,
+    #   "Stages", stage 1) and no session runs ssh's supervisors unasked;
     # * storage: the block driver and littlefs's volume (docs/design-stopgap.md, "littlefs
     #   in the storage domain"), so no system domain loads the driver of a device the
     #   manifest gives the storage domain, and none reads its windows;
@@ -112,18 +122,19 @@ module Erx
     #   the display domain (G9, DisplayRelease).
     #   No manifest names it yet: it is the client side's release, which DisplayRelease
     #   reads, and a client domain's own script takes the same applications.
-    # * ssh, the SSH domain's (docs/design-ssh.md, "The SSH domain"): asn1 and crypto
-    #   (DOMAIN_IMAGE_ONLY), and public_key, ssh and erx_ssh as the runtime builds them.
-    #   No other script names crypto, so no other domain has it on its code path.
-    #   No manifest names it yet; the native domain tests boot it (NativeDomain).
+    # * ssh, the SSH domain's (docs/design-ssh.md, "The SSH domain"): asn1, crypto,
+    #   public_key and ssh (DOMAIN_IMAGE_ONLY). Only this script and session's name them,
+    #   so no other domain has crypto on its code path. No manifest names it yet; the
+    #   native domain tests boot it (NativeDomain).
     RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
-                        'session' => [*DOMAIN_BASE, 'erx_net_client', 'erx_shell', 'erx_web_line', 'erx_session'].freeze,
+                        'session' => [*DOMAIN_BASE, 'asn1', 'crypto', 'public_key', 'ssh', 'erx_net_client', 'erx_shell',
+                                      'erx_web_line', 'erx_session'].freeze,
                         'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
                         'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
                         'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
                         'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
                         'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win', 'erx_ui'].freeze,
-                        'ssh' => [*DOMAIN_BASE, 'asn1', 'crypto'].freeze }.freeze
+                        'ssh' => [*DOMAIN_BASE, 'asn1', 'crypto', 'public_key', 'ssh'].freeze }.freeze
 
     # Refuses applications of which no release holds one: an application the runtime
     # builds that neither the system release (system) nor a script of the release
@@ -342,10 +353,10 @@ module Erx
       base = File.basename(name, '.*')
       return [File.join(source, "#{base}.app.src")] if name.end_with?('.app')
 
-      found = ErlangApps.own?(application) ? erxos_source(application, base) : otp_source(application, base)
-      raise Error, "no source in #{self.class.source_directory(application)} for #{name}" unless found
+      found = ErlangApps.own?(application) ? [erxos_source(application, base)].compact : otp_sources(application, base)
+      raise Error, "no source in #{self.class.source_directory(application)} for #{name}" if found.empty?
 
-      [found]
+      found
     end
 
     def erxos_source(application, base)
@@ -353,10 +364,34 @@ module Erx
       module_path && File.join(@root, module_path)
     end
 
-    def otp_source(application, base)
+    # An OTP module's source: its Erlang, or the parser or lexer definition yecc or leex
+    # generates it from, or, for a module public_key's asn1 make generates, its ASN.1
+    # specification, or a set of them (M.set.asn) with each specification the set names,
+    # since the generated module carries each one's license.
+    def otp_sources(application, base)
       directory = File.join(@root, self.class.source_directory(application))
-      %w[erl yrl xrl].map { |extension| File.join(directory, 'src', "#{base}.#{extension}") }.find { |path| File.file?(path) } ||
-        Dir.glob(File.join(directory, '**', "#{base}.erl")).min
+      found = %w[erl yrl xrl].map { |extension| File.join(directory, 'src', "#{base}.#{extension}") }
+                             .find { |path| File.file?(path) } ||
+              Dir.glob(File.join(directory, '**', "#{base}.erl")).min
+      return [found] if found
+
+      asn1 = File.join(directory, 'asn1')
+      specification = File.join(asn1, "#{base}.asn1")
+      return [specification] if File.file?(specification)
+
+      set = File.join(asn1, "#{base}.set.asn")
+      File.file?(set) ? [set, *set_members(set, asn1)] : []
+    end
+
+    # The specifications a set names, one per line after its comment header.
+    def set_members(set, asn1)
+      File.readlines(set, chomp: true).reject { |line| line.empty? || line.start_with?('%') }.map do |name|
+        member = File.join(asn1, name)
+        raise Error, "#{set} names #{name}, which is not a specification beside it" if
+          name.include?('/') || !File.file?(member)
+
+        member
+      end
     end
 
     def version(application) = self.class.app_version(File.join(@otp, 'lib', application, 'ebin'), application)
@@ -384,11 +419,11 @@ module Erx
     end
 
     # An application's term in the boot script's release file: its name and version, and
-    # the start type load for one only loaded, DOMAIN_ONLY's among them, in every release;
-    # the others take systools' default, permanent.
+    # the start type load for one only loaded, DOMAIN_ONLY's and DOMAIN_IMAGE_ONLY's among
+    # them, in every release; the others take systools' default, permanent.
     def release_entry(application)
       term = "#{application},\"#{version(application)}\""
-      if [*LOAD_ONLY, *DOMAIN_ONLY].include?(application)
+      if [*LOAD_ONLY, *DOMAIN_ONLY, *DOMAIN_IMAGE_ONLY].include?(application)
         "{#{term},load}"
       else "{#{term}}"
       end

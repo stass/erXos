@@ -371,9 +371,9 @@ ask for them; the system release never does.
 * **`crypto`** is unchanged. Its NIF is built as `crypto.a` against
   `openssl/`'s `libcrypto.a` and linked into the interpreter and BeamAsm
   images. Its `on_load` finds the NIF in the static table.
-* **`asn1`** ships its run-time modules and `asn1rt_nif`, which
-  `public_key`'s generated decoders call; the ASN.1 compiler runs at build
-  time on the host to generate `public_key`'s modules.
+* **`asn1`** ships its run-time module `asn1rt_nif`, which
+  `public_key`'s generated decoders call, and none of the ASN.1 compiler,
+  which runs at build time on the host to generate `public_key`'s modules.
 * **`public_key`** is unchanged.
 * **`ssh`** takes the edits of [design-ssh.md](design-ssh.md#edits-to-otps-ssh).
 * **`ssl`** is TLS's, under [design-web.md](design-web.md#the-network-front-end).

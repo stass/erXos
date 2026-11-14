@@ -209,8 +209,9 @@ class RuntimeBuildTest < Minitest::Test
   # compiler; only its Erlang is, since its c_src holds drivers the design does not ship.
   def test_the_build_makes_runtime_tools_erlang_only
     build
-    assert_includes @runner.steps, 'runtime-runtime_tools'
-    assert_equal %w[kernel stdlib compiler runtime_tools asn1 crypto].map { |application| "lib/#{application}/src" },
+    assert_includes @runner.steps, 'runtime-runtime_tools-src'
+    assert_equal [*%w[kernel stdlib compiler runtime_tools asn1 crypto].map { |application| "lib/#{application}/src" },
+                  'lib/public_key/asn1', 'lib/public_key/src', 'lib/ssh/src'],
                  @runner.directories
   end
 
@@ -218,8 +219,29 @@ class RuntimeBuildTest < Minitest::Test
   # its make is told to build none of the ASN.1 compiler's modules; crypto's is not.
   def test_the_build_makes_asn1_run_time_module_only
     build
-    assert_includes @runner.argvs.fetch('runtime-asn1'), 'CT_MODULES='
-    refute_includes @runner.argvs.fetch('runtime-crypto'), 'CT_MODULES='
+    assert_includes @runner.argvs.fetch('runtime-asn1-src'), 'CT_MODULES='
+    refute_includes @runner.argvs.fetch('runtime-crypto-src'), 'CT_MODULES='
+  end
+
+  # public_key's make generates the Erlang of its ASN.1 modules on the host, first in its
+  # asn1 and then in its src, each told ERL_DETERMINISTIC=yes so that no directory reaches
+  # a generated module (public_key_generation_test checks the bytes). A second build keeps
+  # the beam of a module generated from a specification while the copy holds the Erlang
+  # generated from it, and removes it once that Erlang is gone, as make would otherwise
+  # find the beam current and generate neither the Erlang nor the headers beside it.
+  def test_public_key_generates_its_asn1_modules_deterministically
+    %w[DSS.asn1 OTP-PKIX.asn1 PKCS-FRAME.set.asn].each { |name| write_otp("lib/public_key/asn1/#{name}", 'spec') }
+    build
+    %w[runtime-public_key-asn1 runtime-public_key-src].each do |step|
+      assert_includes @runner.argvs.fetch(step), 'ERL_DETERMINISTIC=yes', step
+    end
+    application = File.join(@output.root, 'lib/public_key')
+    FileUtils.mkdir_p(File.join(application, 'src'))
+    %w[DSS PKCS-FRAME].each { |name| File.write(File.join(application, 'src', "#{name}.erl"), 'generated') }
+    beams = %w[DSS.beam OTP-PKIX.beam PKCS-FRAME.beam stale.beam]
+    beams.each { |beam| File.write(File.join(application, 'ebin', beam), 'beam') }
+    build
+    assert_equal %w[DSS.beam PKCS-FRAME.beam], Dir.glob('*.beam', base: File.join(application, 'ebin')).sort
   end
 
   # An application's make writes into ../ebin without creating it, and otp/ tracks none.
@@ -429,7 +451,7 @@ class RuntimeBuildTest < Minitest::Test
   # OTP's makefiles and the cross file read the generated headers through ERX_GEN.
   def test_configure_and_make_see_the_generated_tree
     build
-    %w[runtime-configure runtime-preloaded runtime-emulator runtime-kernel].each do |step|
+    %w[runtime-configure runtime-preloaded runtime-emulator runtime-kernel-src].each do |step|
       assert_equal File.join(@root, Erx::Generated::OUTPUT), @runner.options.fetch(step).fetch(:env).fetch('ERX_GEN'), step
     end
   end

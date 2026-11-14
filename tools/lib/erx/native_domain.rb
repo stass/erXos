@@ -23,9 +23,10 @@ module Erx
   # runs the domain runtime image (NativeRoot::DOMAIN_RUNTIME) on a domain release of
   # ReleaseFiles::DOMAIN_BASE to init, and BeamAsm domains run the BeamAsm image
   # (NativeRoot#build_jit_runtime_receipted) on the same release with the JIT test
-  # modules beside it (JIT_MODULES); a domain of each image boots the release's ssh script
-  # and calls crypto's and asn1rt_nif's NIFs. Each case says one line, and the transcript must show each
-  # passed, in order.
+  # modules beside it (JIT_MODULES); domains of each image boot the release's ssh script,
+  # one calling crypto's and asn1rt_nif's NIFs, another making an Ed25519 key with
+  # public_key and encoding it with ssh's ssh_file. Each case says one line, and the
+  # transcript must show each passed, in order.
   module NativeDomain
     MEMORY_MIB = 512
     PROGRAM_PATH = 'boot/native-domain'
@@ -33,7 +34,7 @@ module Erx
     RELEASE_PATH = 'domains/native/release'
     RELEASE_SOURCE = 'test/guest/native_domain/release.txt'
     # ERTS's image and the domain release, with its boot scripts bin/erts.boot and
-    # bin/ssh.boot, the crypto cases' (ReleaseFiles::RELEASE_SCRIPTS), at the paths guest.c
+    # bin/ssh.boot, the crypto and ssh_key cases' (ReleaseFiles::RELEASE_SCRIPTS), at the paths guest.c
     # finds them by. Both runtimes are image entries, as a domain runtime is in a system
     # image, so their read-only segments are shared by every domain that runs them.
     ERTS_PATH = 'runtimes/emu'
@@ -55,8 +56,8 @@ module Erx
                     'test/guest/native_domain/guest.c'].freeze
     ROOT_FLAGS = %w[-DERX_DOM_TEST_HOOKS].freeze
     PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_domain/program.c'].freeze
-    CASES = %w[library warm halt fault stop lanes erts logger crypto erts_refused crash jit_reload jit_write_rx jit_run_rw
-                 jit_crypto connection
+    CASES = %w[library warm halt fault stop lanes erts logger crypto ssh_key erts_refused crash jit_reload jit_write_rx
+                 jit_run_rw jit_crypto jit_ssh_key connection
                  exports refs origins link_warm link link_area link_undo link_end undo
                  given_undo given given_kept].freeze
     RECORD = NativeRoot::DOMAIN_RECORD
@@ -64,8 +65,8 @@ module Erx
     # order: init ran the ERTS domain's release; the logger case's two log records, which
     # the logger proxy wrote into the kernel log, each whole with its tab, escape and
     # newline shown as the log's tokens, the first formatted on one line by erx_log_h and
-    # the second of the domain's own making; each crypto case's checks passed, in the
-    # interpreter image and in the BeamAsm image; the connection's system connection ended
+    # the second of the domain's own making; each crypto and ssh_key case's checks passed,
+    # in the interpreter image and in the BeamAsm image; the connection's system connection ended
     # with the party's flood unread; the exports case's filler filled the export table; the
     # refs case's system connection ended on the party's malformed reference, after its steps;
     # and the spoiled page's runtime ended with the reader's reason.
@@ -79,7 +80,8 @@ module Erx
                 'erts_refused' => /\A#{RECORD}erx: the boot information page: the page is of another version/n,
                 'jit_reload' => /\A#{RECORD}\{jit_reload_passed,jit,[1-9]\d*\}/n,
                 'jit_write_rx' => /\A#{RECORD}jit_alias_runs/n, 'jit_run_rw' => /\A#{RECORD}jit_alias_runs/n,
-                'crypto' => /\A#{RECORD}crypto_passed/n, 'jit_crypto' => /\A#{RECORD}crypto_passed/n }.freeze
+                'crypto' => /\A#{RECORD}crypto_passed/n, 'jit_crypto' => /\A#{RECORD}crypto_passed/n,
+                'ssh_key' => /\A#{RECORD}ssh_key_passed/n, 'jit_ssh_key' => /\A#{RECORD}ssh_key_passed/n }.freeze
     CASE_LINE = /\Aerx: domain: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
 
     module_function

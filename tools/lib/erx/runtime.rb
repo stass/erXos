@@ -55,16 +55,25 @@ module Erx
     # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
     # loads without starting (ReleaseFiles::LOAD_ONLY). OTP's `libs` and `start_scripts`
     # targets are not usable: lib/tools's crashdump.erl includes public_key.hrl and
-    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both. asn1 and
-    # crypto ship in the domain releases that ask for them (ReleaseFiles::RELEASE_SCRIPTS),
-    # never in the system release, and their NIFs are in the domains' runtime images alone
+    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both. asn1,
+    # crypto, public_key and ssh ship in the domain releases that ask for them
+    # (ReleaseFiles::RELEASE_SCRIPTS), never in the system release: asn1's and crypto's
+    # NIFs are in the domains' runtime images alone, and public_key and ssh call them
     # (docs/design-crypto.md, "OTP's applications").
-    APPLICATIONS = %w[kernel stdlib compiler runtime_tools asn1 crypto].freeze
+    APPLICATIONS = %w[kernel stdlib compiler runtime_tools asn1 crypto public_key ssh].freeze
     # What an application's make is given beyond the build's own variables. asn1 ships
     # its run-time module, asn1rt_nif, alone: with CT_MODULES empty its make builds that
     # module and the .app, which lists only it, and neither the ASN.1 compiler nor the
     # templates it is generated from (docs/design-crypto.md, "OTP's applications").
-    MAKE_VARIABLES = { 'asn1' => %w[CT_MODULES=].freeze }.freeze
+    # public_key's asn1 make runs the ASN.1 compiler, the stock oracle's erlc, on the
+    # host, writing the Erlang it generates from public_key's specifications into its
+    # src; ERL_DETERMINISTIC=yes passes +deterministic, which keeps the directories it
+    # ran in out of every generated module, so another checkout generates the same bytes.
+    MAKE_VARIABLES = { 'asn1' => %w[CT_MODULES=].freeze, 'public_key' => %w[ERL_DETERMINISTIC=yes].freeze }.freeze
+    # Where an application's make runs, in order: its src, and for public_key first its
+    # asn1, whose make generates the Erlang of public_key's ASN.1 modules and compiles it
+    # into the same ebin, in the order of OTP's own lib/public_key/Makefile.
+    MAKE_DIRECTORIES = { 'public_key' => %w[asn1 src].freeze }.freeze
     # Where OTP keeps beams and boot scripts built from its sources: the build's own make
     # writes erts/ebin and each application's ebin, and the others held prebuilt copies.
     # otp/ORIGIN.md excludes each, so make check refuses a file there, and the copy takes
@@ -211,14 +220,28 @@ module Erx
 
     # make removes nothing, so a beam it built for a module whose source has since left
     # otp/lib, or moved to erlang/apps, would stay in the copy's ebin and reach the release.
-    # Each one goes before make runs.
+    # Each one goes before make runs. A module's source is its Erlang, the parser or lexer
+    # definition yecc or leex generates it from, or the ASN.1 specification public_key's
+    # asn1 make generates it from (modules_with_generated_erlang).
     def remove_orphan_beams(otp)
       APPLICATIONS.each do |application|
-        modules = Dir.glob('**/*.{erl,yrl,xrl}', base: File.join(otp, 'lib', application)).map { |path| File.basename(path, '.*') }
+        sources = Dir.glob('**/*.{erl,yrl,xrl}', base: File.join(otp, 'lib', application))
+        modules = [*sources.map { |path| File.basename(path, '.*') }, *modules_with_generated_erlang(otp, application)]
         ebin = in_copy(File.join('lib', application, 'ebin'))
         Dir.glob('*.beam', base: ebin).reject { |beam| modules.include?(File.basename(beam, '.beam')) }
            .each { |beam| FileUtils.rm_f(File.join(ebin, beam)) }
       end
+    end
+
+    # The modules generated from an application's ASN.1 specifications (M.asn1, or a set
+    # M.set.asn that is one module) whose generated Erlang the copy holds. A beam of one
+    # whose Erlang is gone goes too: make takes that Erlang for an intermediate file, which
+    # it does not generate again for a beam it finds newer than the specification, and
+    # the src make would then miss the headers generated beside it.
+    def modules_with_generated_erlang(otp, application)
+      specifications = Dir.glob('asn1/*.{asn1,set.asn}', base: File.join(otp, 'lib', application))
+                          .map { |path| File.basename(path).delete_suffix('.set.asn').delete_suffix('.asn1') }
+      specifications.select { |name| File.file?(in_copy(File.join('lib', application, 'src', "#{name}.erl"))) }
     end
 
     def build_liberx
@@ -319,15 +342,18 @@ module Erx
     end
 
     # An application's Erlang alone: runtime_tools's c_src holds the trace port drivers
-    # and the dyntrace NIF, which docs/design-runtime.md does not ship. The application's
-    # make writes into ../ebin without creating it, and otp/ tracks no ebin, so the build
-    # makes the directory.
+    # and the dyntrace NIF, which docs/design-runtime.md does not ship, and public_key's
+    # holds the reader of the system's certificate store, a NIF only on Windows. The
+    # application's make writes into ../ebin without creating it, and otp/ tracks no ebin,
+    # so the build makes the directory.
     def build_application(application, jobs:)
       FileUtils.mkdir_p(in_copy(File.join('lib', application, 'ebin')))
-      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/src", 'opt', "TARGET=#{self.class::TARGET}",
-                   *MAKE_VARIABLES.fetch(application, [])],
-                  name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
-                  env: build_environment)
+      MAKE_DIRECTORIES.fetch(application, %w[src]).each do |directory|
+        @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/#{directory}", 'opt', "TARGET=#{self.class::TARGET}",
+                     *MAKE_VARIABLES.fetch(application, [])],
+                    name: "runtime-#{application}-#{directory}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
+                    env: build_environment)
+      end
     end
 
     # erXos's own applications, into the copy's lib/ beside OTP's, by the same erlc.
