@@ -105,10 +105,15 @@ class ProductionImageTest < Minitest::Test
   def test_emulator_archive_carries_the_littlefs_notice
     fiasco = Struct.new(:boot_core_archive) { def user_library(name) = "/fiasco/#{name}" }.new('/fiasco/boot_cores.a')
     erts = Erx::NativeRuntime::Built.new(otp_archives: ['/otp/erl_main.o', '/otp/libbeam.a'], libc: '/musl/libc.a',
-                                         builtins: '/crt/libclang_rt.builtins.a', otp: '/otp')
+                                         builtins: '/crt/libclang_rt.builtins.a', otp: '/otp', openssl: '/openssl',
+                                         crypto_archives: ['/otp/driver_tab_crypto.o', '/otp/asn1rt_nif.a', '/otp/crypto.a',
+                                                           '/openssl/lib/libcrypto.a'])
     image = Erx::ProductionImage.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: DEVELOPMENT, fiasco: fiasco,
                                      runtime: nil)
     archives = image.send(:archives, erts).to_h { |archive| [File.basename(archive.path), archive] }
+    crypto = image.send(:crypto_archives, erts, erts).to_h { |archive| [File.basename(archive.path), archive] }
+    assert_equal ['Apache-2.0', ['openssl/LICENSE.txt']], crypto.fetch('libcrypto.a').then { |a| [a.license, a.notices] }
+    assert_equal ['Apache-2.0', ['otp/LICENSE.txt']], crypto.fetch('crypto.a').then { |a| [a.license, a.notices] }
     assert_equal 'Apache-2.0 AND BSD-3-Clause', archives.fetch('libbeam.a').license
     assert_equal %w[otp/LICENSE.txt littlefs/LICENSE.md], archives.fetch('libbeam.a').notices
     assert_equal %w[otp/LICENSE.txt], archives.fetch('erl_main.o').notices

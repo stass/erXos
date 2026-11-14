@@ -113,13 +113,20 @@ What the sources say, read at the pins of [Sources](#sources):
 
 ## What the code does today
 
-* `otp/ORIGIN.md` excludes `lib/asn1`, `lib/crypto`, `lib/public_key`,
-  `lib/ssh` and `lib/ssl` as "outside the shipped OTP application set in
-  the runtime design".
-* OpenSSL 3.5.9 is imported into `openssl/` with its two edits, pinned in
+* `lib/crypto` and `lib/asn1` are imported into `otp/`; `otp/ORIGIN.md`
+  excludes `lib/public_key`, `lib/ssh` and `lib/ssl` as "outside the
+  shipped OTP application set in the runtime design".
+* OpenSSL 3.5.9 is imported into `openssl/` with its three edits, pinned in
   `deps.lock`, and `tools/erx build openssl` makes `libcrypto.a` for
   `erxos-aarch64` (`tools/lib/erx/libcrypto.rb`,
-  `config/openssl/erxos-aarch64.conf`); nothing links it yet.
+  `config/openssl/erxos-aarch64.conf`).
+* Each runtime build (`tools/lib/erx/native_runtime.rb`) makes
+  `libcrypto.a` against its own musl, points OTP's configure at it with
+  `--with-ssl`, builds `crypto.a` and `asn1rt_nif.a` by their
+  applications' `static_lib` targets, and makes `driver_tab_crypto.o`,
+  the static NIF table that names them (`erts/emulator/Makefile.in`,
+  `erx_crypto_tab`). The interpreter and BeamAsm images link the four
+  ahead of `libbeam.a`; the system image links none.
 * The Fiasco backend's start block (`liberx/backend/fiasco/libc_start.c`,
   `erx_fiasco_libc_start`) gives musl `AT_HWCAP` and `AT_HWCAP2` from the
   boot information page's feature words (`hwcap` and `hwcap2`,
@@ -178,7 +185,9 @@ gains one column, the images each NIF is linked into.
 A domain that runs the interpreter or BeamAsm image maps OpenSSL whether
 or not it uses it, and the library's constructor on AArch64,
 `OPENSSL_cpuid_setup` (`armcap.c:65-67`), runs there at load, reading
-the feature words and `OPENSSL_armcap` (below) and nothing else. Nothing
+the feature words and `OPENSSL_armcap` (below), and the CPU's `MIDR_EL1`
+only when those claim `HWCAP_CPUID`, which the kernel's feature words
+never do (below). Nothing
 more of
 OpenSSL runs in a domain that never calls `crypto`. The network domain
 is one: no module of the network stack calls `crypto`, which a build
@@ -208,9 +217,11 @@ by default), `engines/` (`no-engine`), `os-dep/`, `VMS/` and `ms/`, which
 other systems' configurations name, and the seven empty directories the
 release carries (`cloudflare-quiche/`, `oqs-provider/`,
 `pkcs11-provider/`, `python-ecdsa/`, `tlsfuzzer/`, `tlslite-ng/` and
-`wycheproof/`). The import step proves the set: it runs
-`Configure` on the imported tree with erXos's options on the host, which
-fails on a `build.info` it cannot open. OpenSSL's `Configure` and its
+`wycheproof/`). `make check-openssl`'s integration test
+(`test/integration/libcrypto_build_test.rb`) proves the set: it runs
+`Configure` with erXos's options on the imported tree and builds
+`libcrypto.a`, and on a copy without `ssl/build.info` sees `Configure`
+fail on the `build.info` it cannot open. OpenSSL's `Configure` and its
 Perl assembler generators are inherited build machinery, invoked through
 one entry point of erXos's top-level build, as OTP's `configure` is
 ([design.md](design.md#build-and-toolchain)), and the build makes the
@@ -244,18 +255,33 @@ Each option has one reason:
 The assembler is kept: OpenSSL's AArch64 code is where its AES, GHASH,
 SHA and ChaCha20 are fast and constant-time.
 
-**Two edits**, each taking FreeBSD's branch under `__erxos__`; the origin
-file lists both:
+**Three edits**, each under `__erxos__`, the first two taking FreeBSD's
+branch; each file carries its notice:
 
 * `crypto/armcap.c` defines `OSSL_IMPLEMENT_GETAUXVAL` under `__erxos__`,
   so CPU features come from `getauxval(AT_HWCAP)` and `AT_HWCAP2`, which
   the seam answers from the boot information page, and the `SIGILL`
-  probe is never compiled.
+  probe is never compiled. One read of the CPU stays: when the words
+  claim `HWCAP_CPUID`, `OPENSSL_cpuid_setup` reads `MIDR_EL1` (in the
+  tree's `armcap.c`, the `ARMV8_CPUID` test before `_armv8_cpuid_probe`)
+  to pick code tuned for the core, and user mode's read of it traps on
+  erXos. The kernel's feature words never claim `HWCAP_CPUID` (the rule
+  `TODO.md`'s feature-words item carries to where the words are filled),
+  so the read is not reached. `OPENSSL_armcap` sets the features and
+  returns before that test, so it never causes the read. With the words
+  0, as on the stopgap, no feature bit is set, `OPENSSL_armcap_P` stays
+  0, and every algorithm takes its software path.
 * `providers/implementations/rands/seeding/rand_unix.c` includes
   `<sys/random.h>` and, in `syscall_random`, skips the weak `getentropy`
   lookup and returns `getrandom(buf, buflen, 0)` under `__erxos__`, so
   the seed path is a direct, strong call that the link resolves to musl's
   `getrandom`.
+* `crypto/arm64cpuid.pl`'s `_armv7_tick` returns 0 under `__erxos__`
+  instead of reading the timer's counter, which only the C library's
+  `erx_fiasco_counter` reads (the counter-read build check of every
+  linked program refuses the read). OpenSSL calls it only when
+  `OPENSSL_armcap` sets `ARMV7_TICK`, and `OPENSSL_rdtsc` answers 0
+  without that bit anyway.
 
 ### Seeding
 
@@ -323,7 +349,9 @@ words, so the choice follows the kernel's report:
 * **`OPENSSL_armcap`** in a domain's environment still overrides the
   feature words (`armcap.c:265`). A domain's environment is set by its
   own specification or by its own processes, so the override can only
-  slow or weaken that domain's own cryptography, never another's.
+  slow or weaken that domain's own cryptography, or, by claiming a
+  feature the CPU lacks, end that domain at the first use of the
+  algorithm that needs it, never another's.
 
 ### OTP's applications
 
@@ -347,7 +375,7 @@ ask for them; the system release never does.
 
 The oracle's stock OTP 29.1.2 builds `crypto` on the development host
 against the same OpenSSL 3.5.9 with the same options, the target and the
-two edits aside, so `crypto:supports/0` agrees on both sides and a
+three edits aside, so `crypto:supports/0` agrees on both sides and a
 difference between them is erXos's
 ([design-host-oracle.md](design-host-oracle.md)).
 
@@ -358,8 +386,8 @@ difference between them is erXos's
 | **K1.** The system domain holds no OpenSSL | its image is linked without it; a build check proves it (below) |
 | **K2.** OpenSSL's only seed is `erx_entropy_read` | `getrandom` is the only seed method compiled in, `syscall_random` calls it directly, and the seam's row reads nothing else |
 | **K3.** A failed seed never yields bytes | the seam answers `EIO` and OpenSSL's unseeded generator refuses |
-| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no probe |
-| **K5.** OpenSSL loads no code and reads no file | `no-shared`, `no-module`, `no-dso`, `no-engine`, `no-autoload-config` |
+| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no `SIGILL` probe; its one read of the CPU, `MIDR_EL1`, runs only when the feature words claim `HWCAP_CPUID`, which the kernel's never do |
+| **K5.** OpenSSL loads no code, and reads no file unless a caller names one | `no-shared`, `no-module`, `no-dso` and `no-engine` leave no loader; `no-autoload-config` reads no configuration file at start. OpenSSL's file functions (`BIO_new_file`, the configuration and store loaders) stay compiled and run only on a path a caller passes, and `crypto`'s NIF passes none |
 
 ## Failure handling
 
@@ -367,9 +395,9 @@ difference between them is erXos's
 | --- | --- | --- |
 | the kernel's generator does not answer (the stopgap's generator service down) | `getrandom` fails with `EIO` | OpenSSL's generator stays unseeded, or fails its next reseed; `crypto:strong_rand_bytes/1` raises; the caller's operation fails and is retried by its own supervisor |
 | a weak seed on a development build | the banner's `entropy_quality` | keys work and are as weak as the seed; a release build never boots so |
-| a domain's environment sets `OPENSSL_armcap` | slower or software code paths | that domain's own cryptography only |
+| a domain's environment sets `OPENSSL_armcap` | slower or software code paths, or a fault at the first use of an instruction the CPU lacks | that domain's own cryptography only; a fault ends that domain |
 | a `crypto` beam in the system release | `on_load` fails: no static NIF `crypto` | the system release does not boot; the build's release check refuses it first |
-| the imported tree lacks a directory `Configure` reads | `Configure` fails at import | the import fails, naming the `build.info` it could not open |
+| the imported tree lacks a directory `Configure` reads | `Configure` fails in the build and in `make check-openssl` | the build fails, naming the `build.info` it could not open |
 
 ## Security
 
@@ -397,9 +425,9 @@ Each test names the seeded failure that proves it ran.
 | Test | Passes when | Seeded failure |
 | --- | --- | --- |
 | `crypto_SUITE`, `public_key_SUITE`, `pubkey_*_SUITE` and `asn1`'s run-time suites through `make check-oracle` | every case agrees with stock OTP 29.1.2 built against the same OpenSSL | erXos's OpenSSL configured with `no-chacha`: the ChaCha20 cases differ from the oracle and the comparison fails |
-| the system image's symbol check, a build check | the system image's link map holds no symbol of `libcrypto` and its NIF table no `crypto` | `crypto` added to the system image's NIF column: the build fails |
-| the seed path's symbol check, a build check of the interpreter and BeamAsm images | each image defines `getrandom`, from musl's `getrandom.o`, referenced by `libcrypto`'s `syscall_random`, and holds no weak undefined `getentropy` | `rand_unix.c` built without its edit: the weak `getentropy` is left undefined, no `getrandom` is linked, and the check fails |
-| the import's configure check | `Configure` with erXos's options succeeds on the imported tree and the build makes `libcrypto.a` | `ssl/build.info` left out of the import: `Configure` fails |
+| the system image's symbol check, a build check on every link of it (`CryptoImage.check_system`) | the system image's link map takes no member of `libcrypto.a`, `crypto.a` or `asn1rt_nif.a`, and its symbols hold neither NIF's init function | a host test gives the check the link map and symbols of a system image linked with `libcrypto.a` and `crypto`'s table: the check fails |
+| the seed path's symbol check, a build check on every link of the interpreter and BeamAsm images (`CryptoImage.check_seed`) | each image's link map takes musl's `getrandom.o` and `libcrypto`'s `rand_unix` member, whose `syscall_random` calls it, the image defines `getrandom`, holds no weak undefined `getentropy`, and its NIF table names `crypto` and `asn1rt_nif` | a host test gives the check what `rand_unix.c` built without its edit links: no `getrandom.o` and a weak undefined `getentropy`; the check fails |
+| the import's configure check, `make check-openssl` | `Configure` with erXos's options succeeds on the imported tree and the build makes `libcrypto.a` | `ssl/build.info` left out of the import: `Configure` fails |
 | the seam's `getrandom` row, a host unit test of the seam | 1, 256, 257 and 4,096 bytes come back whole, from 1, 1, 2 and 16 reads of a stub generator; a stub failure on the second piece returns `-EIO` | the row returns the bytes read so far on a failure: the test fails on the short count |
 | first seeding on QEMU | `crypto:strong_rand_bytes(32)` returns 32 bytes in a fresh domain of the interpreter image and in one of the BeamAsm image; in a domain of each started with the backend's generator made to fail by the test image's hook, so that its first seed fails, the first call raises, and in the SSH domain so made a key exchange fails | the seam falls back to zeros on failure: the call returns and the test fails |
 | OpenSSL's start on QEMU | a domain that loads `crypto` starts on a CPU model with the cryptographic extension and on one without (`-cpu cortex-a72` under TCG), and AES-256-GCM vectors pass on both | `armcap.c` built without its edit: the probe's `SIGILL` ends the domain at load and the test fails |
@@ -446,7 +474,7 @@ which OpenSSL's tests do not.
 * **Fetching OpenSSL unchanged and setting `OPENSSL_armcap` in every
   domain's environment.** Rejected: an environment variable every domain
   must carry is a rule each specification must remember, and the seed
-  path would still end in `ENOSYS`; the two edits make the feature words
+  path would still end in `ENOSYS`; the edits make the feature words
   and the seam's row the only inputs.
 * **Keeping the weak `getentropy` and forcing musl's `getentropy.o` into
   the link** with `-u getentropy`. Rejected: a link flag every image must

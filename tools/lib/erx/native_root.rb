@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require_relative 'compile_memo'
 require_relative 'counter_reads'
+require_relative 'crypto_image'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'platform'
@@ -184,12 +185,13 @@ module Erx
 
     # The system's root task, as the archive's boot/stopgap-root entry: SYSTEM over the
     # archives that hold ERTS and musl, with the objects' debug information left out. It is
-    # the interpreter image, which this one link of it checks for JIT and C++ before
+    # the system image, which this one link of it checks for JIT, C++ and OpenSSL before
     # anything packs it.
     def build_system(directory:, archives:, place:)
       program = build(name: 'stopgap-root', sources: SYSTEM, directory: directory, archives: archives, strip_debug: true,
                       place: place)
-      InterpreterImage.check(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      InterpreterImage.check(program: program, nm: nm, runner: @runner)
+      CryptoImage.check_system(program: program, map: map_path(program), nm: nm, runner: @runner)
       program
     end
 
@@ -210,11 +212,14 @@ module Erx
 
     # A domain's runtime image (DOMAIN_RUNTIME) over the archives that hold ERTS and musl,
     # with its receipt, as build_system_receipted gives the root's. It is the interpreter
-    # image too, which InterpreterImage checks for JIT and C++ before anything packs it.
+    # image, which InterpreterImage checks for JIT and C++ and CryptoImage for OpenSSL's
+    # seed path before anything packs it; archives hold crypto's NIFs and libcrypto
+    # (NativeRuntime::Built#domain_archives).
     def build_domain_runtime_receipted(directory:, archives:)
       program = build(name: 'erts-emu', sources: DOMAIN_RUNTIME, directory: directory, archives: archives, strip_debug: true,
                       script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS, place: nil)
-      InterpreterImage.check(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      InterpreterImage.check(program: program, nm: nm, runner: @runner)
+      CryptoImage.check_seed(program: program, map: map_path(program), nm: nm, runner: @runner)
       receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
@@ -226,7 +231,8 @@ module Erx
     def build_jit_runtime_receipted(directory:, archives:)
       program = build(name: 'erts-jit', sources: DOMAIN_RUNTIME, directory: directory, archives: archives, strip_debug: true,
                       script: TASK_LINK_SCRIPT, link_flags: [*TASK_LINK_FLAGS, '--no-demangle'], place: nil)
-      InterpreterImage.check_beamasm(program: program, nm: File.join(File.dirname(@compiler), 'llvm-nm'), runner: @runner)
+      InterpreterImage.check_beamasm(program: program, nm: nm, runner: @runner)
+      CryptoImage.check_seed(program: program, map: map_path(program), nm: nm, runner: @runner)
       receipted(program, sources: DOMAIN_RUNTIME, script: TASK_LINK_SCRIPT, directory: directory)
     end
 
@@ -306,6 +312,8 @@ module Erx
     def object_path(source, directory) = File.join(directory, "#{source.tr('/', '_').tr('.', '_')}.o")
 
     def map_path(program) = "#{program}.map"
+
+    def nm = File.join(File.dirname(@compiler), 'llvm-nm')
 
     # A linked receipt over program: its objects, compiled from sources into directory,
     # their dependency files, the link map and the link script; and every file it names.

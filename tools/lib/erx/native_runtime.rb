@@ -7,6 +7,7 @@ require 'open3'
 require_relative 'compiler_rt'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'libcrypto'
 require_relative 'musl'
 require_relative 'native_root'
 require_relative 'runtime'
@@ -24,8 +25,21 @@ module Erx
     # configure and ERTS ask for these libraries by name, and musl keeps them all in libc.a.
     EMPTY_LIBRARIES = %w[m pthread rt dl util].freeze
     # What the root's link takes: OTP's objects and archives, musl's libc.a, and
-    # compiler-rt's builtins (CompilerRt).
-    Built = Data.define(:otp_archives, :libc, :builtins, :otp)
+    # compiler-rt's builtins (CompilerRt). openssl is the directory OTP's configure built
+    # crypto's NIF against (build_openssl), which the BeamAsm build's configure is pointed
+    # at too. crypto_archives are what a domain's interpreter image links beyond the system
+    # image's (docs/design-crypto.md, "Three runtime images"): the static NIF table that
+    # names crypto and asn1rt_nif, the two NIFs' archives, and OpenSSL's libcrypto.a.
+    Built = Data.define(:otp_archives, :libc, :builtins, :otp, :openssl, :crypto_archives) do
+      # The interpreter image's link, in link order. The table comes first: its symbols are
+      # then defined before libbeam.a is read, so libbeam.a's own driver_tab.o, the system
+      # image's table, is never taken, and a table that missed one of its symbols would
+      # make the link fail on a duplicate rather than mix the two.
+      def domain_archives = [*crypto_archives, *otp_archives, libc, builtins]
+    end
+
+    # Each static NIF archive a domain's image links, by the OTP application that builds it.
+    NIF_ARCHIVES = { 'asn1' => 'asn1rt_nif.a', 'crypto' => 'crypto.a' }.freeze
 
     BASE = 'build/runtime/native'
     # The musl sysroot, which the BeamAsm build (NativeJitRuntime) shares.
@@ -63,17 +77,19 @@ module Erx
       # Also brings build/gen up to date, which the steps below read.
       digest = self.class.source_digest(root: @root, generated: @generated)
       libc, builtins = build_sysroot(jobs: jobs)
+      @openssl = build_openssl(jobs: jobs)
       build_liberx
       copy_sources
       configure unless File.file?(in_copy('.erx-configured'))
       build_emulator(jobs: jobs)
+      crypto_archives = build_crypto_nifs(jobs: jobs)
       APPLICATIONS.each { |application| build_application(application, jobs: jobs) }
       build_erlang_apps
       check_imports
       File.write(self.class.record_path(@output), digest)
       Built.new(otp_archives: [File.join(@output.objects, 'erl_main.o'), File.join(File.dirname(@output.beam), 'libbeam.a'),
                        *RuntimeSeam.libraries(@output, target: TARGET)].freeze, libc: libc, builtins: builtins,
-                otp: @output.root)
+                otp: @output.root, openssl: @openssl, crypto_archives: crypto_archives)
     end
 
     # Takes away everything build made, so the next build reruns musl's and OTP's own.
@@ -99,6 +115,46 @@ module Erx
       [libc, builtins]
     end
 
+    # OpenSSL's libcrypto.a, built against this build's musl (Libcrypto), and the directory
+    # OTP's configure is pointed at with --with-ssl (ERX_OPENSSL): OpenSSL's headers with
+    # those its Configure generates, as one include/, and lib/libcrypto.a, the layout
+    # configure looks for. rsync and a preserving copy keep unchanged files' times, so
+    # make rebuilds no crypto object for a build that changed nothing. Returns the directory.
+    def build_openssl(jobs:)
+      directory = File.join(@base, 'openssl')
+      archive = Libcrypto.new(root: @root, runner: @runner, compiler: @compiler)
+                         .build(directory: File.join(directory, 'obj'), sysroot: @sysroot, jobs: jobs)
+      prefix = File.join(directory, 'prefix')
+      FileUtils.mkdir_p(File.join(prefix, 'lib'))
+      [File.join(@root, 'openssl/include/'), File.join(directory, 'obj/include/')].each do |headers|
+        @runner.run(['rsync', '-a', headers, File.join(prefix, 'include/')], name: 'native-runtime-openssl-headers',
+                                                                           deadline: DEADLINES.fetch(:copy))
+      end
+      FileUtils.cp(archive, File.join(prefix, 'lib', Libcrypto::ARCHIVE), preserve: true)
+      prefix
+    end
+
+    # OTP's asn1rt_nif and crypto NIFs as static archives, by each application's own
+    # static_lib target, and the emulator's static NIF table that names them
+    # (erts/emulator/Makefile.in, erx_crypto_tab). Returns crypto_archives (Built).
+    def build_crypto_nifs(jobs:)
+      %w[asn1 crypto].each do |application|
+        @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}", 'static_lib', 'BUILD_STATIC_LIBS=1',
+                     "TARGET=#{TARGET}"],
+                    name: "runtime-#{application}-nif", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
+                    env: build_environment)
+      end
+      # The configured makefile itself: erts/emulator/Makefile forwards only OTP's own targets.
+      @runner.run(['gmake', '-C', 'erts/emulator', '-f', "#{TARGET}/Makefile", 'erx_crypto_tab', 'TYPE=opt',
+                   "FLAVOR=#{self.class::FLAVOR}", "TARGET=#{TARGET}"],
+                  name: 'runtime-crypto-tab', deadline: DEADLINES.fetch(:emulator), chdir: @output.root,
+                  env: build_environment)
+      [File.join(@output.objects, 'driver_tab_crypto.o'), *nif_archives, File.join(@openssl, 'lib', Libcrypto::ARCHIVE)].freeze
+    end
+
+    # The two NIF archives build_crypto_nifs makes, which check_imports counts as inside.
+    def nif_archives = NIF_ARCHIVES.map { |application, archive| in_copy(File.join('lib', application, 'priv/lib', TARGET, archive)) }
+
     def build_liberx
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
                                  fiasco: @fiasco)
@@ -120,7 +176,8 @@ module Erx
     def check_imports_of(cxx_runtime:)
       report = RuntimeSeam.check_elf_objects(objects: RuntimeSeam.objects(@output, target: TARGET),
                                              imports_text: File.read(in_copy(RuntimeSeam::IMPORTS_FILE)),
-                                             nm: File.join(@tools, 'llvm-nm'), cxx_runtime: cxx_runtime)
+                                             nm: File.join(@tools, 'llvm-nm'), cxx_runtime: cxx_runtime,
+                                             nifs: nif_archives)
       warn("listed and imported by nothing on the native build: #{report.unused.join(' ')}") unless report.unused.empty?
       return if report.violations.empty?
 
@@ -141,6 +198,7 @@ module Erx
         'ERX_SYSROOT' => @sysroot,
         'ERX_TREE' => @root,
         'ERX_GEN' => File.join(@root, Generated::OUTPUT),
+        'ERX_OPENSSL' => @openssl,
         # root.ld's place for ERTS's own links (otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf).
         'ERX_ROOT_PLACE_FLAGS' => NativeRoot.place_flags(NativeRoot.development_place(@platform), ram_first: @platform.ram_first).map { |flag| "-Wl,#{flag}" }.join(' ')
       ).merge(flavour_environment).freeze

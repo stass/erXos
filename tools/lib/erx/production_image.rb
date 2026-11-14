@@ -380,7 +380,7 @@ module Erx
       erofs, images = ReleaseMedium.image(entries: release, directory: directory, runner: @runner)
       # Only domains run the BeamAsm image, so an image without them does not build it.
       jit = domains.empty? ? nil : @jit_runtime.build(interpreter: erts)
-      domain = domain_parts(domains, erts: erts, jit: jit, archives: archives, facts: facts, directory: directory)
+      domain = domain_parts(domains, erts: erts, jit: jit, archives: erts.domain_archives, facts: facts, directory: directory)
       report = pack(entries: [*entries(root_task, kernel, sigma0), *release, *system_release.directories, *domain.entries, *added.entries],
                     root_task: root_task, added_archives: added.archives,
                     images: images, manifest_source: manifest_source, erts: erts, jit: jit, output: archive,
@@ -1634,7 +1634,20 @@ module Erx
     def external(erts, jit, added)
       resource = @runner.run([@compiler, '-print-resource-dir'], name: 'clang-resource-directory', deadline: 30)
       ToolchainProvenance.llvm(root: @root, resource_dir: File.read(resource.fetch('log')).strip) +
-        [*archives(erts), *jit_archives(jit), *added].map { |archive| external_archive(archive) }
+        [*archives(erts), *crypto_archives(erts, jit), *jit_archives(jit), *added].map { |archive| external_archive(archive) }
+    end
+
+    # What the interpreter and BeamAsm images link beyond the system image: each flavour's
+    # static NIF table and NIF archives, OTP's, and OpenSSL's libcrypto.a, which both
+    # flavours link from one build. The images exist only beside jit (domain_parts).
+    def crypto_archives(erts, jit)
+      return [] unless jit
+
+      libcrypto = erts.crypto_archives.last
+      [*otp_archives(erts.crypto_archives - [libcrypto], flavour: 'emu'),
+       *otp_archives(jit.crypto_archives - [libcrypto], flavour: 'jit'),
+       Archive.new(path: libcrypto, label: 'openssl libcrypto', license: 'Apache-2.0', status: 'permanent',
+                   notices: ['openssl/LICENSE.txt'])]
     end
 
     def archives(erts)

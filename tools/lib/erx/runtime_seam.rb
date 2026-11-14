@@ -94,8 +94,10 @@ module Erx
     # carry no prefix. OTP's own link of beam.emu has already shown that no name is missing.
     # cxx_runtime are the archives of the C++ runtime the BeamAsm image links: what they
     # define counts as inside, and the sections only BeamAsm uses join the list. Without
-    # them those sections stay out, so they do not count as unused.
-    def check_elf_objects(objects:, imports_text:, nm:, cxx_runtime: [])
+    # them those sections stay out, so they do not count as unused. nifs are the static
+    # NIF archives a domain's image links, crypto's and asn1rt_nif's: the init functions
+    # they define, which driver_tab_crypto.o names, count as inside too.
+    def check_elf_objects(objects:, imports_text:, nm:, cxx_runtime: [], nifs: [])
       names = lambda do |*arguments|
         output, error, status = Open3.capture3(nm, '--format=just-symbols', *arguments, stdin_data: '')
         raise Error, "llvm-nm #{arguments.join(' ')}: #{error.lines.first}" unless status.success?
@@ -103,7 +105,7 @@ module Erx
         output.each_line(chomp: true).reject { |line| line.empty? || line.end_with?(':') }.uniq
       end
       check(undefined_by_object: objects.to_h { |object| [object, names.call('--undefined-only', object)] },
-            inside: (objects + cxx_runtime).flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
+            inside: (objects + cxx_runtime + nifs).flat_map { |object| names.call('--defined-only', '--extern-only', object) }.uniq,
             imports: parse_imports(imports_text).except(*HOSTED_ONLY, *(cxx_runtime.empty? ? JIT_ONLY : [])))
     end
 

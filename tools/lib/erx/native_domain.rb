@@ -132,7 +132,7 @@ module Erx
         program = native.build_task(name: 'native-domain', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: [])
         erts = NativeRuntime.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform, fiasco: fiasco).build
         runtime = native.build_domain_runtime_receipted(directory: File.join(@build, 'erts'),
-                                                        archives: [*erts.otp_archives, erts.libc, erts.builtins])
+                                                        archives: erts.domain_archives)
         root_task = native.build(name: 'domain-root', sources: ROOT_SOURCES, directory: File.join(@build, 'root'), flags: ROOT_FLAGS)
         programs = { PROGRAM_PATH => program, RELEASE_PATH => File.join(@root, RELEASE_SOURCE),
                      **release(erts), **jit_modules }

@@ -1361,6 +1361,7 @@ it; git history is the record of completed work.
   instruction of it (`dc cvap`, `cfinv`, `ldapr`, `ldaddal`, `crc32x`, `aese`, `pmull`, `sha512h`, `eor3`, `sm4e`,
   `sdot`, `fcmla`, `fjcvtzs`, a half-precision `fadd`) under TCG and HVF; and tie each claim to the Fiasco fact
   behind it (`Sctlr_uci` in `Sctlr_el1_generic`, `CONFIG_FPU` required) in the host test.
+  domain at load (`docs/design-crypto.md`, K4).
 * [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`,
   `liberx/backend/fiasco/libc_start.c` `random_fill`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
   `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
@@ -1605,9 +1606,21 @@ it; git history is the record of completed work.
 
 * [Low] OpenSSL, file access (`docs/design-crypto.md`, K5 and CR5): `libcrypto.a` still references `fopen`, `open`,
   `opendir`, `stat` and `syslog` (file BIOs, the `file:` store loader, `X509_LOOKUP` by directory) and keeps
-  `OPENSSLDIR="/usr/local/ssl"`; K5's "reads no file" holds only because `no-autoload-config` stops the implicit loads and
-  OTP's `crypto` names no file. Restate K5 as "reads a file only when its caller names one", and give Configure an
-  `--openssldir` of erXos's.
+  `OPENSSLDIR="/usr/local/ssl"`; K5 holds because `no-autoload-config` stops the implicit loads and OTP's `crypto` names
+  no file. Give Configure an `--openssldir` of erXos's, so a caller that does name OpenSSL's directory finds erXos's.
+* [Medium] crypto NIFs, rebuild (`tools/lib/erx/native_runtime.rb`, `build_openssl`): the static objects of `crypto.a` and
+  `asn1rt_nif.a` have no header dependencies (`otp/lib/crypto/c_src/Makefile.in`'s `%_static` rule, `otp/lib/asn1/c_src/Makefile`)
+  and the configure stamp does not cover OpenSSL's options or headers, so a change to `Libcrypto::OPTIONS`, `openssl/include` or
+  `erl_nif.h` leaves them compiled against the old headers. Fold a digest of the OpenSSL prefix into the stamp, as
+  `NativeJitRuntime#sdk_root` does for libc++, and give the prefix's header copy `--delete`.
+* [Medium] OTP import, prebuilt beams (`config/imports/otp.json`): the crypto and asn1 import keeps upstream's beams in
+  `lib/asn1/ebin`, `lib/crypto/ebin` and `lib/asn1/src`, which the other applications' exclusions leave out; make could take them
+  as up to date once the applications are built. Exclude them with the same reason.
+* [Low] crypto NIFs, link lists (`tools/lib/erx/native_runtime.rb`, `production_image.rb`): `crypto_archives` is a positional
+  array whose last entry `ProductionImage#crypto_archives` takes as libcrypto; make it a `Data` with named parts, name the two
+  flavours' link lists alike (`domain_archives`, `link_archives`), and derive the system image's list beside them.
+* [Low] crypto NIFs, seam check (`tools/lib/erx/runtime_seam.rb`, `nifs:`): the NIF archives' definitions count as inside ERTS's
+  import check, but their own imports from musl and libcrypto are not compared with `imports.txt`.
 * [Low] OpenSSL, build (`tools/lib/erx/libcrypto.rb`): `__FILE__` in libcrypto's error records is the source's path
   relative to the build directory (`../../../openssl/...`), so a build at another depth (a runtime's) makes different
   bytes; build at a fixed depth or configure `no-filenames`. `tools/erx build openssl` and `make check-openssl` share
@@ -1615,9 +1628,6 @@ it; git history is the record of completed work.
 * [Low] OpenSSL, stack protector (`config/openssl/erxos-aarch64.conf`): libcrypto is built with `-fno-stack-protector`, as
   ERTS is by `otp/xcomp/erl-xcomp-aarch64-unknown-erxos.conf`, though musl provides `__stack_chk_guard` and seeds it from
   `AT_RANDOM`; decide for both whether `-fstack-protector-strong` is wanted.
-* [Low] OpenSSL, import check (`docs/design-crypto.md`, "Building OpenSSL"): the design says the import step proves the
-  file set by running `Configure`; `tools/import_origins.rb` does not, `make check-openssl`
-  (`test/integration/libcrypto_build_test.rb`) does, outside `make check`. Run it at import, or say so in the design.
 
 * [Medium] `erlang/apps/erx_display/src/erx_winfs.erl`: `start_link/1` given a service starts the single policy with an
   empty configuration; the window policy and its chord come from the display domain's manifest entry

@@ -1,4 +1,6 @@
 #! /usr/bin/env perl
+# Modified by erXos: under __erxos__, _armv7_tick returns 0 and reads no counter, since only
+# erXos's C library reads the timer's counter (docs/design-crypto.md, "Building OpenSSL").
 # Copyright 2015-2022 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -40,7 +42,9 @@ _armv7_neon_probe:
 .type	_armv7_tick,%function
 _armv7_tick:
 	AARCH64_VALID_CALL_TARGET
-#ifdef	__APPLE__
+#if defined(__erxos__)
+	mov	x0, #0
+#elif defined(__APPLE__)
 	mrs	x0, CNTPCT_EL0
 #else
 	mrs	x0, CNTVCT_EL0
