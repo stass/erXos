@@ -143,7 +143,7 @@ names; the table's order is the order.
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
 | 1b-H M13 erXos's F2FS on QEMU | erXos's F2FS, written in Erlang, keeps a QEMU disk's files through power cuts and its images mount in the Linux guest; on the Pi 4 with M12 | estimated in its design document | M6 | G13 |
-| 1b-I The Raspberry Pi 4 on the stopgap | the Pi 4 boots from its firmware to the shell on its console; a file synced on its SD card survives a power cut; its Ethernet carries UDP echo and a TCP transfer; the kiosk shows on its screen; every guarantee deferred | estimated per part before it starts; the designs give no figure | part (a): Phase 1; (b): 1b-E; (c): 1b-E and 1b-G; (d): 1b-C's part 3 | GR |
+| 1b-I The Raspberry Pi 4 on the stopgap | the Pi 4 boots from its firmware to the shell on its console; a file synced on its SD card survives a power cut; its Ethernet carries UDP echo and a TCP transfer; the kiosk shows on its screen; an LED and a button on its header answer the shell, and a clock module keeps the time across a power cut; every guarantee deferred | estimated per part before it starts; the designs give no figure | part (a): Phase 1; (b): 1b-E; (c): 1b-E and 1b-G; (d): 1b-C's part 3; (e): (a) and 1b-E | GR |
 | **Phase 2** | | | | |
 | Track K erXos's kernel | the pilot, then the kernel, booting Phase 1 and 1b's boot image and passing the conformance suite | 25,000 to 40,000 lines of C17, of which the capability core and the budget core exist; the pilot calibrates the figure | the pilot: M0, starting before Phase 1 is complete; the kernel in full: 1b-A | GK1, GK2, GK3 |
 | M7 The stopgap leaves | erXos's kernel boots Phase 1 and 1b's system and runs every test and benchmark it ran on the stopgap | integration | track K | GK3 |
@@ -2282,7 +2282,9 @@ card, to the shell on its console; a file synced under `/data` on the SD
 card survives a power cut; the network domain carries UDP echo and a TCP
 bulk transfer to a peer over the Pi's Ethernet; the kiosk application of
 [1b-C](#track-d-windows-widgets-and-the-web)'s part 3 shows on the Pi's
-screen. Every guarantee is deferred, as on QEMU.
+screen; an LED on the header lights from the shell, a button wakes a
+read of its `event` file, and a real-time clock module keeps the time
+across a power cut. Every guarantee is deferred, as on QEMU.
 
 **Decided.** The port runs on the stopgap Fiasco. The firmware boots the
 single bootable file directly as `kernel8.img`, with TF-A's BL31 as the
@@ -2308,9 +2310,9 @@ device secret and the random generator, are deferred as Phase 1
 residuals ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)).
 
 **Parts.** Each ends in a demo reproduced on the board by hand; stage (a)'s
-also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c) and
-(d) each need only (a) on the board, and may go in any order or side by
-side.
+also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c), (d)
+and (e) each need only (a) on the board, and may go in any order or side
+by side.
 
 * **(a) A serial shell on the Pi, on QEMU's `raspi4b` first.** Its
   packages, in order:
@@ -2422,6 +2424,31 @@ side.
   long-lived region the device scans out, filled by rectangle with
   `erx_device:fill/3`. Panels, touch, keypads and encoders stay with
   part 4.
+* **(e) The header: GPIO, I2C, SPI and PWM**, along
+  [design-header-io.md](design-header-io.md). Its packages, in order:
+  1. **The header map.** The platform record's `header` rows and
+     `hw/pins/bcm2711.txt` from the datasheet's Table 94; the record
+     reader's checks of the map; `config.txt`'s `gpio=` lines,
+     `enable_jtag_gpio` and `core_freq` generated from it, replacing
+     `OVERLAY_PINS`; the `PINS` field of the manifest's device row and
+     of the GPIO record; the units `gpio`, `i2c`, `spi`, `pwm` and
+     `clocks`, their device-kind rows and roles, their CMSIS-SVD files,
+     and the devices domain on the Pi's development manifest. One
+     package, since every later one reads these files.
+  2. **GPIO**: `erx_hold`, `erx_gpio_core`, the driver and
+     `/dev/gpio` with its `gpio` interface and `pins` parameter, and
+     the LED and button.
+  3. **I2C and the clock module**: `erx_bsc_core`, BSC1's driver,
+     `/dev/i2c1`, and `erx_rtc` with `/dev/rtc` granted to the system
+     domain.
+  4. **SPI**: `erx_spi_core`, SPI0's driver and `/dev/spi0`; the
+     vault's TPM driver uses the same core with the vault's TPM design.
+     Packages 3 and 4 each need only package 1, and go side by side
+     with 2; package 4 takes `erx_hold` from 2.
+  5. **PWM**, last and only once the clock manager's holder is
+     decided ([design-header-io.md](design-header-io.md#open-decisions)):
+     `erx_cprman`'s boot write, `erx_pwm_core`, PWM0's driver and
+     `/dev/pwm0`.
 
 **Dependencies.**
 
@@ -2435,6 +2462,9 @@ side.
 * (d): (a); 1b-C's part 3, the display domain and the kiosk; the device
   NIF's region call, `erx_device:fill/3` (`TODO.md`,
   `docs/design-display.md`).
+* (e): (a); 1b-E's configured domains, for the devices domain; for
+  package 5, the decision on the clock manager's holder; for the TPM,
+  the vault's TPM design and a module on the board.
 
 **Testing.**
 
@@ -2481,6 +2511,13 @@ side.
 * Every parser of what a Pi device writes (the SD controller's responses
   and status, GENET's receive status and descriptors) lands with its fuzz
   target, as the ground rules require.
+* **The header's checks** are
+  [design-header-io.md](design-header-io.md#verification)'s: the pure
+  cores on the host, each case with its seeded fault; the `raspi4b`
+  suite's cases on the model's GPIO, BSC1 with an emulated clock chip
+  and SPI0 with an emulated flash, whose first run records which of
+  them the model supports; and the board checklist with its loopback
+  jumpers, run by hand once per package.
 
 **Exit criteria.**
 
@@ -2512,6 +2549,16 @@ side.
 * (d): the frame in the Pi's framebuffer, read back through the display
   driver, equals the frame the same kiosk draws on QEMU `virt`; a
   display driver killed and restarted repaints the screen.
+* (e): the header map reader refuses each of its seeded maps; on
+  `raspi4b`, the clock chip's time written through `/dev/rtc/time` reads
+  back, a missing I2C device answers `eio`, and a second session's
+  open of a held pin answers `ebusy` until the first ends, each case
+  failing with its seeded fault; by hand on the board, the GPIO, SPI
+  and PWM loopbacks pass, the clock module keeps the time across a
+  power cut, the boot probe's register values and the GPLEV check are
+  recorded, and the core clock measured over SPI agrees with the
+  record's within 1%; the `ctl` grammars and the clock chip's decoder
+  run their fuzz budgets clean.
 
 **Gate GR, before the first board boot.** The board is a 4 GB
 one, with no automated rig; the answers are recorded in
@@ -3209,7 +3256,8 @@ Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm besid
              --> 1b-F track D part 6 --> part 7 --> part 8
            1b-H M13 on QEMU (any time; lowest priority)
            1b-I the Pi 4: (a) serial shell on raspi4b after Phase 1, then once on the board (GR)
-             --> (b) storage after 1b-E, (c) network after 1b-G, (d) display after 1b-C part 3
+             --> (b) storage after 1b-E, (c) network after 1b-G, (d) display after 1b-C part 3,
+                 (e) the header after 1b-E
 
 Track K:   pilot (GK1), beside Phase 1b --> kernel in full (GK2), after 1b-A --> M7 (GK3, parity over Phase 1 and 1b)
 
