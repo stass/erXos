@@ -100,7 +100,7 @@ The declaration forms are:
 | `cap NAME SLOT KIND [optional]` | a well-known root slot and the creation kind its capability is installed as, which fixes its object type and rights; `optional` when the boot may leave the slot null. Slots run from 1 without a gap, and the generator derives the layout `erx_boot_root_extension` from these lines, one `cap` field per slot |
 | `call NAME NUMBER` | the call metadata and members described below |
 | `reader NAME ROOT_LAYOUT MAX_BYTES` | bounded tables and references described below |
-| `translation NAME SOURCE TARGET` | a complete directed mapping for one named consumer context |
+| `translation NAME SOURCE TARGET` | a directed mapping for one named consumer context, from a closed enum or a base integer type to a closed enum; `erx_abi_translations` gives each as a function of its name from a source value to its target's value, or `none` |
 | `service NAME NUMBER` | a named interface, its operation identifiers and its typed manifest-parameter declarations; callable operations retain the admission contract of the service design |
 | `inspection SCHEMA` | the inspection schema, with its units, value types, stopgap reporters, kinds and paths as members described in [Inspection schema](#inspection-schema); exactly one, in `inspection.txt` |
 | `trap OPCODE IMMEDIATE` | the architecture's trap operation and its immediate, checked by its binding |
@@ -350,10 +350,14 @@ already declared argument values. Bound units are unique within a call.
 `type` declarations use one `rights LIST` and one `pass LIST` member,
 and `kind` declarations one `default LIST` member, with the same list
 syntax. Root capabilities have a namespace of their own, as the
-`root_slot_NAME` constants they produce do. A translation has one
-`map SOURCE_VALUE TARGET_VALUE` or `omit SOURCE_VALUE REASON` member per
-source value; the reason is a quoted diagnostic and the context decides
-whether omission is legal. An unlisted exposed source value fails.
+`root_slot_NAME` constants they produce do. A translation from an enum
+has one `map SOURCE_VALUE TARGET_VALUE` or `omit SOURCE_VALUE REASON`
+member per source value; the reason is a quoted note for the reader of
+the source, and an omitted value has no target. An unlisted exposed
+source value fails. A translation from a base integer type, such as
+HID's keyboard usages to evdev codes in `formats/hid.txt`, has `map`
+members only, each an integer within the type, and a value it does not
+list has no target.
 
 ### Structural readers
 

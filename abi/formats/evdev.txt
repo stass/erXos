@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # evdev's codes, the one home of every evdev value erXos reads (docs/design-display.md,
 # "Input events"): the event types, the end of one update and the report of dropped
-# events, the key states, the codes of the keys of the US layout and of the pointer's
+# events, the key states, the codes of the keys of a USB keyboard and of the pointer's
 # buttons, and the relative and absolute axes a mouse and a tablet report. A code erXos
 # has no use for is not entered.
 #
@@ -35,7 +35,9 @@ limit evdev_key_event_repeat i32 2
 # The codes of the keys and buttons erXos reads, the closed set a row of a keyboard
 # layout names (abi/keymaps/, tools/lib/erx/keymap.rb): the keys of a US PC keyboard,
 # its keypad included (lines 66-148, 152-153, 161-165, 167-176, 184 and 192-193), the
-# pointer's buttons (lines 341-343) and a touch (line 397). The key states and KEY_MAX
+# other keys of the USB keyboard map (abi/formats/hid.txt), each at its #define and
+# KEY_DASHBOARD as the alias of KEY_ALL_APPLICATIONS (lines 271-272), the pointer's
+# buttons (lines 341-343) and a touch (line 397). The key states and KEY_MAX
 # are limits outside it. A member's generated name is evdev_ and the member, as a
 # limit's would be: key_a is ERX_EVDEV_KEY_A.
 enum evdev u16
@@ -122,8 +124,17 @@ enum evdev u16
   value key_kp3 81
   value key_kp0 82
   value key_kpdot 83
+  value key_zenkakuhankaku 85
+  value key_102nd 86
   value key_f11 87
   value key_f12 88
+  value key_ro 89
+  value key_katakana 90
+  value key_hiragana 91
+  value key_henkan 92
+  value key_katakanahiragana 93
+  value key_muhenkan 94
+  value key_kpjpcomma 95
   value key_kpenter 96
   value key_rightctrl 97
   value key_kpslash 98
@@ -139,9 +150,64 @@ enum evdev u16
   value key_pagedown 109
   value key_insert 110
   value key_delete 111
+  value key_mute 113
+  value key_volumedown 114
+  value key_volumeup 115
+  value key_power 116
+  value key_kpequal 117
   value key_pause 119
+  value key_scale 120
+  value key_kpcomma 121
+  value key_hangeul 122
+  value key_hanja 123
+  value key_yen 124
   value key_leftmeta 125
   value key_rightmeta 126
+  value key_compose 127
+  value key_stop 128
+  value key_again 129
+  value key_props 130
+  value key_undo 131
+  value key_front 132
+  value key_copy 133
+  value key_open 134
+  value key_paste 135
+  value key_find 136
+  value key_cut 137
+  value key_help 138
+  value key_calc 140
+  value key_sleep 142
+  value key_wakeup 143
+  value key_www 150
+  value key_coffee 152
+  value key_back 158
+  value key_forward 159
+  value key_ejectcd 161
+  value key_nextsong 163
+  value key_playpause 164
+  value key_previoussong 165
+  value key_stopcd 166
+  value key_refresh 173
+  value key_edit 176
+  value key_scrollup 177
+  value key_scrolldown 178
+  value key_f13 183
+  value key_f14 184
+  value key_f15 185
+  value key_f16 186
+  value key_f17 187
+  value key_f18 188
+  value key_f19 189
+  value key_f20 190
+  value key_f21 191
+  value key_f22 192
+  value key_f23 193
+  value key_f24 194
+  value key_dashboard 204
+  value key_brightnessdown 224
+  value key_brightnessup 225
+  value key_kbdillumdown 229
+  value key_kbdillumup 230
   value btn_left 0x110
   value btn_right 0x111
   value btn_middle 0x112

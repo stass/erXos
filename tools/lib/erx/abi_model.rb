@@ -114,6 +114,10 @@ module Erx
     FieldBinding = Struct.new(:type, :args, keyword_init: true)
     Reader = Struct.new(:name, :root, :maximum, :tables, :strings, :rules,
                         :order, :source_role, :extent, :line, keyword_init: true)
+    # A translation from the source type's values to the target enum's
+    # members: map holds each source value that has a target, in value
+    # order, with the target member's name.
+    Translation = Struct.new(:name, :source, :target, :map, keyword_init: true)
     Constant = Struct.new(:name, :value, :type, :description, keyword_init: true)
     Schema = Struct.new(:version, :architecture, :types, :type_order,
                         :constants, :rights, :objects, :kinds, :caps, :calls,

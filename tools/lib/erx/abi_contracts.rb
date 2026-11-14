@@ -507,25 +507,60 @@ module Erx
         end
       end
 
+      # A translation's source is a closed enumeration, whose every member has
+      # one map or omit line, or a base integer type, whose values a map line
+      # names and every other value has no target. Its target is a closed
+      # enumeration. The result keeps the map lines alone, as source value to
+      # target member in source value order: an omitted or unlisted source
+      # value has no target either way.
       def translations(declarations, types:)
         declarations.map do |declaration|
           Model.arity(declaration.line, 4)
           name, source_name, target_name = declaration.args
           source = types[source_name]
           target = types[target_name]
-          declaration.fail!('translation requires closed source/target enumerations') unless [source, target].all? { |type| type.is_a?(EnumType) && !type.flags }
-          mappings = {}
+          unless (closed_enum?(source) || source.is_a?(IntegerType)) && closed_enum?(target)
+            declaration.fail!('translation requires a closed or integer source and a closed target enumeration')
+          end
+          map = {}
+          omitted = []
           declaration.members.each do |line|
             Model.arity(line, 3)
             operation, from, to = line.words
-            line.fail!('unknown or duplicate translation source') unless source.members.key?(from) && !mappings.key?(from)
-            line.fail!('unknown translation operation') unless %w[map omit].include?(operation)
-            line.fail!('unknown translation target') if operation == 'map' && !target.members.key?(to)
-            mappings[from] = { operation: operation, value: to }.freeze
+            value = translation_source(source, from, line)
+            line.fail!('duplicate translation source') if map.key?(value) || omitted.include?(value)
+            case operation
+            when 'map'
+              line.fail!('unknown translation target') unless target.members.key?(to)
+              map[value] = to
+            when 'omit'
+              line.fail!('an integer source takes map lines only') unless closed_enum?(source)
+              omitted << value
+            else
+              line.fail!('unknown translation operation')
+            end
           end
-          declaration.fail!('incomplete translation') unless mappings.keys.sort == source.members.keys.sort
-          { name: name, source: source_name, target: target_name, mappings: mappings.freeze }.freeze
+          if closed_enum?(source) && (map.keys + omitted).sort != source.members.values.sort
+            declaration.fail!('incomplete translation')
+          end
+          Translation.new(name: name, source: source_name, target: target_name, map: map.sort.to_h.freeze).freeze
         end.freeze
+      end
+
+      def closed_enum?(type) = type.is_a?(EnumType) && !type.flags
+
+      # A translation line's source value: an enumeration's member by name,
+      # or an integer within the integer type's range.
+      def translation_source(source, from, line)
+        if source.is_a?(EnumType)
+          source.members.fetch(from) { line.fail!('unknown translation source') }
+        else
+          number = Syntax.integer(from, line: line)
+          unless number.between?(source.minimum, source.maximum)
+            line.fail!("translation source is outside #{source.minimum}..#{source.maximum}")
+          end
+          number
+        end
       end
 
       # Service interfaces have a namespace of their own, as their constants'

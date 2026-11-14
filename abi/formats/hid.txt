@@ -1,0 +1,298 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# HID's constants, the one home of every HID value erXos reads (docs/design-usb.md,
+# "HID"): the boot interface's codes, the class descriptors and requests the HID
+# function uses, the report descriptor's items and bounds, the usages it reads, and the
+# keyboard page's map to evdev codes. A value erXos has no use for is not entered.
+#
+# The sources are the USB Device Class Definition for HID 1.11 and the HID Usage Tables
+# 1.5 (sections cited), and FreeBSD's sources at release/15.1.0-p6 (95719d8a), under the
+# BSD-2-Clause license: sys/dev/usb/usb.h, sys/dev/usb/usbhid.h, sys/dev/hid/hid.h,
+# sys/dev/hid/hid.c, sys/dev/hid/hkbd.c and sys/dev/evdev/evdev_utils.c. A value FreeBSD
+# defines is FreeBSD's; the others are the specification's or erXos's own, as their
+# comments say.
+
+# A boot interface (subclass 1) and its two protocols, keyboard and mouse, read from
+# bInterfaceSubClass and bInterfaceProtocol (HID 1.11, sections 4.2 and 4.3; usb.h,
+# lines 455-457).
+limit hid_subclass_boot u8 1
+enum hid_boot_protocol u8
+  value keyboard 1
+  value mouse 2
+
+# The class descriptor types: the HID descriptor in the configuration, and the report
+# descriptor it names (HID 1.11, section 7.1; usbhid.h, lines 40-41).
+limit hid_descriptor_hid u8 0x21
+limit hid_descriptor_report u8 0x22
+
+# The class requests the function sends, as bRequest (HID 1.11, section 7.2;
+# usbhid.h, lines 47 and 49), and SET_PROTOCOL's wValue: 0 for the boot protocol, as
+# hkbd.c sends it (line 1015), and 1 for the report protocol (HID 1.11, section 7.2.6).
+limit hid_request_set_idle u8 0x0a
+limit hid_request_set_protocol u8 0x0b
+enum hid_protocol u16
+  value boot 0
+  value report 1
+
+# A report descriptor's items (HID 1.11, section 6.2.2; hid.c, lines 305-318): a short
+# item's prefix holds its tag in bits 7-4, its type in bits 3-2 and its size in bits 1-0,
+# 0, 1, 2 or 4 bytes of data, the last coded 3; the prefix 0xfe opens a long item, which
+# the parser skips.
+limit hid_item_long u8 0xfe
+enum hid_item_type u8
+  value main 0
+  value global 1
+  value local 2
+
+# The tags of the items the parser reads, by type (hid.c, lines 353-408, 412-479 and
+# 483-558). A tag of a known type that is not listed sets nothing the layout keeps.
+enum hid_main_tag u8
+  value input 8
+  value output 9
+  value collection 10
+  value feature 11
+  value end_collection 12
+enum hid_global_tag u8
+  value usage_page 0
+  value logical_minimum 1
+  value logical_maximum 2
+  value report_size 7
+  value report_id 8
+  value report_count 9
+  value push 10
+  value pop 11
+enum hid_local_tag u8
+  value usage 0
+  value usage_minimum 1
+  value usage_maximum 2
+
+# The data bits of an Input item that the layout keeps: a constant field, which is
+# padding; a variable field, one value per usage, where unset is an array of usage
+# indices; a relative field, where unset is absolute (HID 1.11, section 6.2.2.4; hid.h,
+# lines 183-185).
+flags hid_field_flags u32
+  bit constant 0
+  bit variable 1
+  bit relative 2
+
+# The bounds of a report descriptor. FreeBSD's: at most 64 usages a main item, 16
+# report ids with id 0 among them, so 15 ids where a descriptor uses them, a report
+# count of 2048, and a push stack of four levels, the current one included, so at most
+# three pushes outstanding (hid.c, lines 66-69, 130-139 and 448). erXos's: a field of
+# 1 to 32 bits, an input report of at most the 1 KiB interrupt buffer with its report id
+# byte, and a descriptor of at most one 4 KiB control buffer (docs/design-usb.md, "What
+# a device can make the domain spend").
+limit hid_usages_max u32 64
+limit hid_report_ids_max u32 16
+limit hid_report_count_max u32 2048
+limit hid_push_levels_max u32 4
+limit hid_field_bits_max u32 32
+limit hid_input_report_max u32 1024
+limit hid_report_descriptor_max u32 4096
+
+# The usage pages the function reads (HID Usage Tables 1.5, chapters 4, 10 and 12;
+# hid.h, lines 35, 40 and 42).
+enum hid_usage_page u16
+  value generic_desktop 0x01
+  value keyboard 0x07
+  value button 0x09
+
+# The Generic Desktop usages of a pointer and a wheel (hid.h, lines 77, 78 and 85).
+enum hid_desktop_usage u16
+  value x 0x30
+  value y 0x31
+  value wheel 0x38
+
+# The Keyboard page's ErrorRollOver, which every array field of a report holds when
+# more keys are down than it can carry (HID 1.11, Appendix C; hkbd.c, line 213), and
+# its modifiers, the eight one-bit variables from Left Control to Right GUI (HID 1.11,
+# Appendix B.1).
+limit hid_key_error_roll_over u8 0x01
+limit hid_key_modifier_first u8 0xe0
+limit hid_key_modifier_last u8 0xe7
+
+# The Button page's first three buttons, as FreeBSD's hms maps them from BTN_MOUSE,
+# which is BTN_LEFT (docs/design-usb.md, "The report descriptor").
+translation hid_button_key u8 evdev
+  map 1 btn_left
+  map 2 btn_right
+  map 3 btn_middle
+
+# The Keyboard page's usages to evdev key codes: FreeBSD's evdev_usb_scancodes
+# (evdev_utils.c, lines 44-118), entry by entry, each KEY_ name lowercased; a usage the
+# table gives KEY_RESERVED has no line, and no code. test/host/abi_hid_usage_test.rb
+# compares this map with FreeBSD's table at deps.lock's freebsd-evdev-utils pin.
+translation hid_keyboard_key u8 evdev
+  map 0x04 key_a
+  map 0x05 key_b
+  map 0x06 key_c
+  map 0x07 key_d
+  map 0x08 key_e
+  map 0x09 key_f
+  map 0x0a key_g
+  map 0x0b key_h
+  map 0x0c key_i
+  map 0x0d key_j
+  map 0x0e key_k
+  map 0x0f key_l
+  map 0x10 key_m
+  map 0x11 key_n
+  map 0x12 key_o
+  map 0x13 key_p
+  map 0x14 key_q
+  map 0x15 key_r
+  map 0x16 key_s
+  map 0x17 key_t
+  map 0x18 key_u
+  map 0x19 key_v
+  map 0x1a key_w
+  map 0x1b key_x
+  map 0x1c key_y
+  map 0x1d key_z
+  map 0x1e key_1
+  map 0x1f key_2
+  map 0x20 key_3
+  map 0x21 key_4
+  map 0x22 key_5
+  map 0x23 key_6
+  map 0x24 key_7
+  map 0x25 key_8
+  map 0x26 key_9
+  map 0x27 key_0
+  map 0x28 key_enter
+  map 0x29 key_esc
+  map 0x2a key_backspace
+  map 0x2b key_tab
+  map 0x2c key_space
+  map 0x2d key_minus
+  map 0x2e key_equal
+  map 0x2f key_leftbrace
+  map 0x30 key_rightbrace
+  map 0x31 key_backslash
+  map 0x32 key_backslash
+  map 0x33 key_semicolon
+  map 0x34 key_apostrophe
+  map 0x35 key_grave
+  map 0x36 key_comma
+  map 0x37 key_dot
+  map 0x38 key_slash
+  map 0x39 key_capslock
+  map 0x3a key_f1
+  map 0x3b key_f2
+  map 0x3c key_f3
+  map 0x3d key_f4
+  map 0x3e key_f5
+  map 0x3f key_f6
+  map 0x40 key_f7
+  map 0x41 key_f8
+  map 0x42 key_f9
+  map 0x43 key_f10
+  map 0x44 key_f11
+  map 0x45 key_f12
+  map 0x46 key_sysrq
+  map 0x47 key_scrolllock
+  map 0x48 key_pause
+  map 0x49 key_insert
+  map 0x4a key_home
+  map 0x4b key_pageup
+  map 0x4c key_delete
+  map 0x4d key_end
+  map 0x4e key_pagedown
+  map 0x4f key_right
+  map 0x50 key_left
+  map 0x51 key_down
+  map 0x52 key_up
+  map 0x53 key_numlock
+  map 0x54 key_kpslash
+  map 0x55 key_kpasterisk
+  map 0x56 key_kpminus
+  map 0x57 key_kpplus
+  map 0x58 key_kpenter
+  map 0x59 key_kp1
+  map 0x5a key_kp2
+  map 0x5b key_kp3
+  map 0x5c key_kp4
+  map 0x5d key_kp5
+  map 0x5e key_kp6
+  map 0x5f key_kp7
+  map 0x60 key_kp8
+  map 0x61 key_kp9
+  map 0x62 key_kp0
+  map 0x63 key_kpdot
+  map 0x64 key_102nd
+  map 0x65 key_compose
+  map 0x66 key_power
+  map 0x67 key_kpequal
+  map 0x68 key_f13
+  map 0x69 key_f14
+  map 0x6a key_f15
+  map 0x6b key_f16
+  map 0x6c key_f17
+  map 0x6d key_f18
+  map 0x6e key_f19
+  map 0x6f key_f20
+  map 0x70 key_f21
+  map 0x71 key_f22
+  map 0x72 key_f23
+  map 0x73 key_f24
+  map 0x74 key_open
+  map 0x75 key_help
+  map 0x76 key_props
+  map 0x77 key_front
+  map 0x78 key_stop
+  map 0x79 key_again
+  map 0x7a key_undo
+  map 0x7b key_cut
+  map 0x7c key_copy
+  map 0x7d key_paste
+  map 0x7e key_find
+  map 0x7f key_mute
+  map 0x80 key_volumeup
+  map 0x81 key_volumedown
+  map 0x85 key_kpcomma
+  map 0x87 key_ro
+  map 0x88 key_katakanahiragana
+  map 0x89 key_yen
+  map 0x8a key_henkan
+  map 0x8b key_muhenkan
+  map 0x8c key_kpjpcomma
+  map 0x90 key_hangeul
+  map 0x91 key_hanja
+  map 0x92 key_katakana
+  map 0x93 key_hiragana
+  map 0x94 key_zenkakuhankaku
+  map 0xc0 key_brightnessdown
+  map 0xc1 key_brightnessup
+  map 0xc2 key_scale
+  map 0xc3 key_dashboard
+  map 0xc4 key_kbdillumdown
+  map 0xc5 key_kbdillumup
+  map 0xe0 key_leftctrl
+  map 0xe1 key_leftshift
+  map 0xe2 key_leftalt
+  map 0xe3 key_leftmeta
+  map 0xe4 key_rightctrl
+  map 0xe5 key_rightshift
+  map 0xe6 key_rightalt
+  map 0xe7 key_rightmeta
+  map 0xe8 key_playpause
+  map 0xe9 key_stopcd
+  map 0xea key_previoussong
+  map 0xeb key_nextsong
+  map 0xec key_ejectcd
+  map 0xed key_volumeup
+  map 0xee key_volumedown
+  map 0xef key_mute
+  map 0xf0 key_www
+  map 0xf1 key_back
+  map 0xf2 key_forward
+  map 0xf3 key_stop
+  map 0xf4 key_find
+  map 0xf5 key_scrollup
+  map 0xf6 key_scrolldown
+  map 0xf7 key_edit
+  map 0xf8 key_sleep
+  map 0xf9 key_coffee
+  map 0xfa key_refresh
+  map 0xfb key_calc
+  map 0xff key_wakeup

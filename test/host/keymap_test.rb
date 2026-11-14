@@ -47,10 +47,10 @@ class KeymapTest < Minitest::Test
   end
 
   # The key states and KEY_MAX share the KEY_ prefix and are entries of evdev.txt, and
-  # KEY_RESERVED and BTN_MISC are evdev's names too, but none of them is a member of the
+  # KEY_RESERVED, BTN_MISC and KEY_PROG1 are evdev's names too, but none of them is a member of the
   # enum evdev.
   def test_a_key_state_is_no_key
-    %w[KEY_EVENT_DOWN KEY_EVENT_UP KEY_RESERVED KEY_MAX BTN_MISC EV_KEY KEY_COMPOSE key_a].each do |name|
+    %w[KEY_EVENT_DOWN KEY_EVENT_UP KEY_RESERVED KEY_MAX BTN_MISC EV_KEY KEY_PROG1 key_a].each do |name|
       assert_refused(/#{name} is not a key or button code of the enum evdev/,
                      "key #{name} Kesc Kesc Kesc Kesc Kesc")
     end

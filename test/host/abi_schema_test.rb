@@ -7,6 +7,7 @@ require_relative '../../tools/lib/erx/abi_model'
 require_relative '../../tools/lib/erx/abi_emit_c'
 require_relative '../../tools/lib/erx/abi_emit_calls'
 require_relative '../../tools/lib/erx/abi_emit_reader'
+require_relative '../../tools/lib/erx/abi_emit_erlang'
 require_relative '../../tools/lib/erx/runner'
 require 'tmpdir'
 require 'fileutils'
@@ -140,6 +141,52 @@ class AbiSchemaTest < Minitest::Test
     assert_raises(Erx::ABI::SchemaError) do
       schema("layout sample wire_le 8 8\n  field return u64 0\n")
     end
+  end
+
+  TRANSLATION_TARGET = "enum key u16\n  value a 30\n  value b 48\n"
+
+  # A translation from an integer type keeps its map lines in value order,
+  # and a value it does not list has no target.
+  def test_integer_translation_keeps_its_map_in_value_order
+    translation = schema("#{TRANSLATION_TARGET}translation usage_key u8 key\n  map 0x05 b\n  map 4 a\n")
+                  .translations.fetch(0)
+    assert_equal({ 4 => 'a', 5 => 'b' }, translation.map)
+  end
+
+  def test_integer_translation_refuses_a_bad_line
+    { "  map 0x100 a\n" => /outside 0\.\.255/, "  omit 4 none\n" => /map lines only/,
+      "  map 4 a\n  map 0x04 b\n" => /duplicate translation source/,
+      "  map 4 c\n" => /unknown translation target/ }.each do |lines, message|
+      error = assert_raises(Erx::ABI::SchemaError) { schema("#{TRANSLATION_TARGET}translation usage_key u8 key\n#{lines}") }
+      assert_match message, error.message
+    end
+    error = assert_raises(Erx::ABI::SchemaError) do
+      schema("#{TRANSLATION_TARGET}scalar usage u8\ntranslation usage_key usage key\n  map 4 a\n")
+    end
+    assert_match(/closed or integer source/, error.message)
+  end
+
+  # A translation's name is its generated Erlang function's, so an Erlang
+  # reserved word or module_info is refused when the module is generated.
+  def test_translation_name_must_name_an_erlang_function
+    %w[end module_info].each do |name|
+      model = schema("#{TRANSLATION_TARGET}translation #{name} u8 key\n  map 4 a\n")
+      error = assert_raises(Erx::ABI::SchemaError) { Erx::ABI::ErlangEmitter.translations(model) }
+      assert_match(/cannot name an Erlang function/, error.message)
+    end
+  end
+
+  # A translation from an enum names each member once; an omitted member has
+  # no target, like an unlisted integer.
+  def test_enum_translation_is_complete_and_drops_omits
+    source = "enum letter u8\n  value x 1\n  value y 2\n"
+    translation = schema("#{TRANSLATION_TARGET}#{source}translation letter_key letter key\n  map x a\n  omit y none\n")
+                  .translations.fetch(0)
+    assert_equal({ 1 => 'a' }, translation.map)
+    error = assert_raises(Erx::ABI::SchemaError) do
+      schema("#{TRANSLATION_TARGET}#{source}translation letter_key letter key\n  map x a\n")
+    end
+    assert_match(/incomplete translation/, error.message)
   end
 
   def test_enum_constants_cannot_overwrite_explicit_limits

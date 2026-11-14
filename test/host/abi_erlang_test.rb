@@ -150,6 +150,22 @@ class AbiErlangTest < Minitest::Test
     assert_equal expected, File.binread(record.fetch('log'))
   end
 
+  # The generated erx_abi_translations gives a mapped usage its evdev code
+  # and none for a usage FreeBSD's table leaves unmapped (00h, A0h), past the
+  # u8 source (100h) or not an integer.
+  def test_generated_translations_map_usages_to_codes
+    @runner.run([File.join(@oracle, 'erlc'), '-Werror', '-o', @directory,
+                 File.join(@directory, 'erx_abi_translations.erl')], name: 'erlc-translations', deadline: 60,
+                                                                     env: @environment)
+    script = 'io:format("~w~n", [[erx_abi_translations:hid_keyboard_key(U) || ' \
+             'U <- [16#04, 16#28, 16#64, 16#e0, 16#e7, 16#ff, 16#00, 16#a0, 16#100, a]]]), ' \
+             'io:format("~w~n", [[erx_abi_translations:hid_button_key(B) || B <- [0, 1, 2, 3, 4]]]), halt().'
+    record = @runner.run([File.join(@oracle, 'erl'), '+S', '1:1', '+SDcpu', '1', '+SDio', '1', '-noshell',
+                          '-noinput', '-pa', @directory, '-eval', script], name: 'translations', deadline: 60,
+                                                                           env: @environment)
+    assert_equal "[30,28,86,29,126,143,none,none,none,none]\n[none,272,273,274,none]\n", File.binread(record.fetch('log'))
+  end
+
   # erx_prog:status/1 over every kind of end (docs/design-programs.md, "A
   # program's end"): ERX_EXIT_SIGNAL + N for N from 0 to 255 is signaled
   # with the name erx_abi_signals gives N, or exited 255 where it gives

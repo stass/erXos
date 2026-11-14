@@ -179,6 +179,16 @@
       "status": "permanent"
     },
     {
+      "id": "freebsd-evdev-utils",
+      "kind": "file",
+      "version": "95719d8a895bf8170851e9844d9b4092b1d2b6fe",
+      "url": "https://raw.githubusercontent.com/freebsd/freebsd-src/95719d8a895bf8170851e9844d9b4092b1d2b6fe/sys/dev/evdev/evdev_utils.c",
+      "sha256": "a91849f3a871cac42ba1186bd34ab68779174b618bfe86f0fe916b49b0bfcc2a",
+      "filename": "evdev_utils.c",
+      "license": "BSD-2-Clause",
+      "status": "permanent"
+    },
+    {
       "id": "libvterm",
       "kind": "tar",
       "version": "0.3.3",
