@@ -22,10 +22,13 @@ deletion of a stopped writer's rows.
 * `erx_net_drivers`, `{Name, Pid}`: each interface's driver, which registers itself there
   so that its interface, started after it by their link supervisor, finds it; a
   restarted driver's registration replaces its predecessor's, and nothing else reads it;
-* `erx_net_secrets`, `{tcp, Isn}`: the stack's TCP secrets, drawn at start, held in a
-  closure that gives a four-tuple's initial sequence number and timestamp offset
-  (erx_tcp_isn), so no crash report prints the keys; only this process writes it, and
-  only erx_net_bind's claim reads it.
+* `erx_net_secrets`, `{tcp, Isn}` and `{syncache, Secrets}`: the stack's TCP secrets,
+  drawn at start, held in closures, so no crash report prints the keys. `Isn` gives a
+  four-tuple's initial sequence number and timestamp offset (erx_tcp_isn), and only
+  erx_net_bind's claim reads it; `Secrets` is the syncache's (erx_tcp_syncache:secrets/3),
+  the timestamp secret and the two SYN cookie keys, one of them replaced every 15 s
+  (`syncookie_reseed`, sys/netinet/tcp_syncache.c), and only an interface reads it, for a
+  segment to a listener. Only this process writes the table.
 
 Each process registered with watch_resolver/1, a grant, gets `{erx_net_tables, resolver}`
 when the interfaces' name servers or search list may have moved: after an interface
@@ -46,7 +49,7 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 
 -export([start_link/0, register_driver/2, driver/1, register_interface/1, watch_holder/1,
          generation/0, configuration/0, interfaces/0, interface/1, neighbour/2, first_hint/2, demux/1,
-         tcp_isn/0, watch_resolver/1, resolver_moved/0]).
+         tcp_isn/0, syncache_secrets/0, watch_resolver/1, resolver_moved/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(IFS, erx_net_ifs).
@@ -57,6 +60,8 @@ then the rows, so a reader that raced a writer finds a newer generation at its n
 -define(DEMUX, erx_net_demux).
 -define(DRIVERS, erx_net_drivers).
 -define(SECRETS, erx_net_secrets).
+%% SYNCOOKIE_LIFETIME (sys/netinet/tcp_syncache.h), in milliseconds: the cookie keys' rotation.
+-define(SYNCOOKIE_LIFETIME, 15000).
 
 -doc "Starts the owner and creates the tables.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -147,6 +152,15 @@ time in microseconds, under the stack's secrets; erx_net_bind's claim calls it.
 tcp_isn() ->
     ets:lookup_element(?SECRETS, tcp, 2).
 
+-doc """
+The syncache's secrets, current at the call: the timestamp secret and the two cookie keys
+(docs/design-network-stack.md, "Connection setup"). An interface reads them for each
+segment to a listener and passes them in that step's context.
+""".
+-spec syncache_secrets() -> erx_tcp_syncache:secrets().
+syncache_secrets() ->
+    ets:lookup_element(?SECRETS, syncache, 2).
+
 -doc "Monitors `Pid`, which gets `{erx_net_tables, resolver}` whenever the name servers may have moved.".
 -spec watch_resolver(pid()) -> ok.
 watch_resolver(Pid) ->
@@ -170,6 +184,10 @@ init([]) ->
                                               {erx_tcp_isn:isn(Secrets, FourTuple, Now),
                                                erx_tcp_isn:ts_offset(Secrets, FourTuple)}
                                       end}),
+    Syncache = erx_tcp_syncache:secrets(Secrets, erx_net_clock:entropy(16),
+                                        erx_net_clock:entropy(16)),
+    true = ets:insert(?SECRETS, {syncache, Syncache}),
+    _ = erlang:send_after(?SYNCOOKIE_LIFETIME, self(), syncookie_reseed),
     {ok, #{}}.
 
 -doc false.
@@ -185,6 +203,11 @@ handle_cast(_Msg, Watched) ->
     {noreply, Watched}.
 
 -doc false.
+handle_info(syncookie_reseed, Watched) ->
+    Syncache = erx_tcp_syncache:rotate(erx_net_clock:entropy(16), syncache_secrets()),
+    true = ets:insert(?SECRETS, {syncache, Syncache}),
+    _ = erlang:send_after(?SYNCOOKIE_LIFETIME, self(), syncookie_reseed),
+    {noreply, Watched};
 handle_info({'DOWN', Ref, process, _, _}, Watched) ->
     case maps:take(Ref, Watched) of
         {{interface, Pid}, Rest} ->

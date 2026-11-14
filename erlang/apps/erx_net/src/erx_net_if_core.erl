@@ -9,11 +9,22 @@ to the sub-core it belongs to and returns the actions for erx_net_if to perform 
 
 It holds the interface's IPv4 configuration (static, or a DHCP lease that the interface's
 erx_dhcp4 configures), the ARP table (erx_arp), the ICMP limiters (erx_net_bandlim), the
-ingress bucket, its copy of the stack's configuration, its generator and its counters.
-The paths it carries are ARP, ICMP echo, the DHCP client's messages, UDP and TCP to a
-closed port, and the RSTs connections hand it; every other local item and event, a segment
-for a listener among them, is counted as `unsupported`, until the cores of IPv6,
-reassembly and the syncache join the step.
+ingress bucket, the syncache (erx_tcp_syncache), its copy of the stack's configuration, its
+generator and its counters. The paths it carries are ARP, ICMP echo, the DHCP client's
+messages, UDP and TCP to a closed port, IPv4 TCP to a listener, and the RSTs connections
+hand it; every other local item and event is counted as `unsupported`, until the cores of
+IPv6 and reassembly join the step.
+
+**Passive open.** A segment for a listener goes to the interface's syncache, as FreeBSD's
+`tcp_input` hands a listen socket's segments to `syncache_add`, `syncache_expand` and
+`syncache_chkrst` (sys/netinet/tcp_input.c:1069-1229), so a SYN flood reaches no other
+process and creates none (docs/design-network-stack.md, "Connection setup"). The step's
+context then carries the stack's secrets, which the loop reads for that segment alone. A
+completed handshake becomes an `accept` action, carrying the listener's entry, the
+four-tuple, the handshake, the completing segment and a generator split for the
+connection; the loop starts the connection, or steps `accept_refused` when the listener
+has no room, and the core answers that with a RST. The table's SYN-ACK retransmissions run
+from `{expired, Now}` and its deadline joins `next_deadline/1`.
 
 **RSTs.** Every RST the stack sends passes the interface's `tcp_rst` limit
 (`badport_bandlim`): the answer to a segment for a closed port, which the core builds as
@@ -48,7 +59,7 @@ it while it asks.
 
 -export([new/1, step/3, view/1, next_deadline/1]).
 
--export_type([core/0, config/0, event/0, action/0, rows/0, status/0]).
+-export_type([core/0, config/0, context/0, event/0, action/0, rows/0, status/0]).
 
 -define(PROTO_UDP, 17).
 -define(DHCP_CLIENT_PORT, 68).
@@ -92,6 +103,8 @@ and its burst.
     | {neigh, publish, Ip :: binary(), LinkAddr :: binary(), fresh | stale}
     | {neigh, unpublish, Ip :: binary()}
     | {dhcp, {reply, #dhcp4{}} | {link, up | down}}
+    | {accept, erx_net_input:entry(), erx_tcp_syncache:conn(), erx_tcp_syncache:handshake(),
+       erx_tcp:segment(), erx_net_rand:gen()}  % a completed handshake, for the listener
     | {reply, From :: term(), Reply :: term()}.
 
 -doc """
@@ -134,6 +147,7 @@ added them, and its routes.
                routes = [] :: [erx_net_route:row()],
                lease = none :: none | erx_dhcp4_core:lease(),
                arp :: erx_arp:table(),
+               syncache = erx_tcp_syncache:new() :: erx_tcp_syncache:syncache(),
                lim :: erx_net_bandlim:lim(),
                bucket :: #bucket{},
                gen :: erx_net_rand:gen(),
@@ -198,20 +212,27 @@ stack4(Own, none) ->
 stack4(Own, Snapshot) ->
     Own ++ [A || <<_:32>> = A <- erx_net_frame:addresses(Snapshot), not lists:member(A, Own)].
 
+-doc """
+The step's context: the time in microseconds, and for a segment to a listener the stack's
+secrets, which erx_net_if reads from erx_net_tables for that segment alone.
+""".
+-type context() :: #{now := integer(), secrets => erx_tcp_syncache:secrets()}.
+
 -doc "When the core next needs `{expired, Now}`, in microseconds.".
 -spec next_deadline(core()) -> integer() | infinity.
-next_deadline(#core{arp = Arp}) ->
-    case erx_arp:next_deadline(Arp) of
+next_deadline(#core{arp = Arp, syncache = Cache}) ->
+    %% An integer is less than any atom, so min/2 keeps a deadline over infinity.
+    case min(erx_arp:next_deadline(Arp), erx_tcp_syncache:next_deadline(Cache)) of
         infinity -> infinity;
         Ms -> Ms * 1000
     end.
 
 -doc "The core's next value and the actions to perform, in order, after `Event`.".
--spec step(event(), core(), #{now := integer()}) -> {core(), [action()]}.
+-spec step(event(), core(), context()) -> {core(), [action()]}.
 step(start, Core, _Ctx) ->
     {Core, [publish(Core) | announce(Core)]};
-step({local, Pending}, Core, #{now := Now}) ->
-    local(Pending, Core, Now);
+step({local, Pending}, Core, Ctx) ->
+    local(Pending, Core, Ctx);
 step({resolve, NextHop, _Src, Packets}, Core, #{now := Now}) ->
     resolve(NextHop, Packets, Core, Now);
 step({reset, NextHop, _Src, Packets}, Core0, #{now := Now}) when is_binary(NextHop) ->
@@ -240,9 +261,17 @@ step({drop, Reason}, Core, _Ctx) when is_atom(Reason) ->
 %% read as segments per merged unit (docs/design-network-fastpath.md, "Verification").
 step({merged, Units, Segments}, Core, _Ctx) ->
     {add(units, Units, add(unit_segments, Segments, Core)), []};
-step({expired, Now}, #core{arp = Arp0} = Core, _Ctx) ->
-    {Arp, Actions} = erx_arp:expired(Now div 1000, arp_iface(Core), Arp0),
-    arp_actions(Actions, Core#core{arp = Arp});
+%% A handshake whose listener had no accept credit left: tcp_sc_rst_sock_fail's RST
+%% (tcp_syncache.c:215, tcp_input.c:1114-1135), under the RST limit.
+step({accept_refused, {Ours, _, Peer, _}, {#tcp{} = Tcp, Payload, _Ecn, _Link}}, Core,
+     #{now := Now}) ->
+    dropwithreset(Peer, Ours, Tcp, Payload, count(accept_refused, Core), Now);
+step({expired, Now}, #core{arp = Arp0, syncache = Cache0} = Core0, _Ctx) ->
+    {Arp, ArpActions} = erx_arp:expired(Now div 1000, arp_iface(Core0), Arp0),
+    {Core1, Out} = arp_actions(ArpActions, Core0#core{arp = Arp}),
+    {Cache, Actions} = erx_tcp_syncache:expired(Now div 1000, Cache0),
+    {Core, More} = syncache_actions(Actions, Core1#core{syncache = Cache}, Now),
+    {Core, Out ++ More};
 step(_Event, Core, _Ctx) ->
     {count(unsupported, Core), []}.
 
@@ -250,13 +279,13 @@ step(_Event, Core, _Ctx) ->
 
 %% A local frame spends a token unless it is a reply the table awaits, is verified, and
 %% gets its token back when the check fails.
-local(Pending, Core0, Now) ->
+local(Pending, Core0, #{now := Now} = Ctx) ->
     case charge(Pending, Core0, Now) of
         {refused, Core} ->
             {count(ingress, Core), []};
         {Charged, Core} ->
             case erx_net_input:verify(Pending) of
-                {ok, Item} -> item(Item, Core, Now);
+                {ok, Item} -> verified(Item, Core, Ctx);
                 {drop, Reason} -> {count(Reason, refund(Charged, Core)), []}
             end
     end.
@@ -283,6 +312,13 @@ refill(B, _Now) ->
 refund(free, Core) -> Core;
 refund(token, #core{bucket = #bucket{tokens = T, burst = Burst} = B} = Core) ->
     Core#core{bucket = B#bucket{tokens = min(Burst * ?TOKEN, T + ?TOKEN)}}.
+
+%% A segment for a listener goes to the syncache; every other item needs the time alone.
+verified({tcp, #{family := inet} = Head, #tcp{} = Tcp, Payload, #{listener := _} = Entry}, Core,
+         Ctx) ->
+    listener(Head, Tcp, Payload, Entry, Core, Ctx);
+verified(Item, Core, #{now := Now}) ->
+    item(Item, Core, Now).
 
 item({arp, Arp}, #core{arp = Table0} = Core, Now) ->
     {Table, Actions} = erx_arp:input(Arp, Now div 1000, arp_iface(Core), Table0),
@@ -313,23 +349,26 @@ item(_Item, Core, _Now) ->
 %% for an ACK, a RST at the acknowledged number; otherwise a RST acknowledging all the
 %% segment occupied, its SYN and FIN included; each within the RST limit. Classification
 %% already refused a segment to a broadcast or multicast destination.
-closed_port(_Peer, _Ours, #tcp{flags = Flags}, _Payload, Core, _Now)
+closed_port(Peer, Ours, Tcp, Payload, Core, Now) ->
+    dropwithreset(Peer, Ours, Tcp, Payload, count(closed_port, Core), Now).
+
+dropwithreset(_Peer, _Ours, #tcp{flags = Flags}, _Payload, Core, _Now)
   when Flags band ?TH_RST =/= 0 ->
-    {count(closed_port, Core), []};
-closed_port(Peer, Ours, Tcp, Payload, Core0, Now) ->
-    case rst_allowed(count(closed_port, Core0), Now) of
+    {Core, []};
+dropwithreset(Peer, Ours, Tcp, Payload, Core0, Now) ->
+    case rst_allowed(Core0, Now) of
         {deny, Core} ->
             {count(rst_limited, Core), []};
         {allow, Core} ->
-            Rst = closed_port_rst(Tcp, Payload),
+            Rst = dropwithreset_rst(Tcp, Payload),
             with_path(Peer, Ours, Core,
                       fun(Path, Gen) -> erx_net_frame:tcp(Path, [Rst], Gen) end, Now)
     end.
 
-closed_port_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, ack = Ack}, _Payload)
+dropwithreset_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, ack = Ack}, _Payload)
   when Flags band ?TH_ACK =/= 0 ->
     rst(Dport, Sport, Ack, 0, ?TH_RST);
-closed_port_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, seq = Seq}, Payload) ->
+dropwithreset_rst(#tcp{sport = Sport, dport = Dport, flags = Flags, seq = Seq}, Payload) ->
     Len = byte_size(Payload) + (Flags band ?TH_SYN) div ?TH_SYN + (Flags band ?TH_FIN),
     rst(Dport, Sport, 0, erx_tcp_seq:wire(Seq + Len), ?TH_RST bor ?TH_ACK).
 
@@ -340,6 +379,78 @@ rst(Sport, Dport, Seq, Ack, Flags) ->
 rst_allowed(#core{lim = Lim0} = Core, Now) ->
     {Verdict, Lim} = erx_net_bandlim:check(tcp_rst, Now div 1000, Lim0),
     {Verdict, Core#core{lim = Lim}}.
+
+%% --- Passive open ------------------------------------------------------------------
+
+%% tcp_input's branch for a listen socket (tcp_input.c:1069-1229), by the segment's flags:
+%% ACK without SYN or RST to syncache_expand; a RST to syncache_chkrst; a segment without
+%% SYN, or with SYN and ACK, dropped (:1181, :1192); SYN, with FIN too since drop_synfin is
+%% 0 (:157, :1211), to syncache_add. The checks of a SYN that read the four-tuple alone are
+%% the syncache's (:1295-1338); the input row already dropped a link-layer broadcast or
+%% multicast and a broadcast or multicast destination (:1288, :1326-1338). The syncache
+%% keeps milliseconds.
+listener(#{src := Src, dst := Dst} = Head,
+         #tcp{sport = Sport, dport = Dport, flags = Flags} = Tcp, Payload,
+         #{listener := Listener} = Entry, #core{syncache = Cache0} = Core0,
+         #{now := Now, secrets := Secrets}) ->
+    Conn = {Dst, Dport, Src, Sport},
+    NowMs = Now div 1000,
+    CacheCtx = #{now => NowMs, secrets => Secrets},
+    if
+        Flags band (?TH_RST bor ?TH_ACK bor ?TH_SYN) =:= ?TH_ACK ->
+            {Outcome, Cache, Actions} =
+                erx_tcp_syncache:expand(Conn, Tcp, Listener, CacheCtx, Cache0),
+            {Core, Out} = syncache_actions(Actions, Core0#core{syncache = Cache}, Now),
+            Segment = erx_net_input:segment(Head, Tcp, Payload),
+            {Core1, More} = expanded(Outcome, Conn, Segment, Entry, Core, Now),
+            {Core1, Out ++ More};
+        Flags band ?TH_RST =/= 0 ->
+            {Cache, Actions} = erx_tcp_syncache:chkrst(Conn, Tcp, NowMs, Cache0),
+            syncache_actions(Actions, Core0#core{syncache = Cache}, Now);
+        Flags band ?TH_SYN =:= 0 ->
+            {count(listen_no_syn, Core0), []};
+        Flags band ?TH_ACK =/= 0 ->
+            {count(listen_syn_ack, Core0), []};
+        true ->
+            {Cache, Actions} = erx_tcp_syncache:add(Conn, Tcp, Listener, CacheCtx, Cache0),
+            syncache_actions(Actions, Core0#core{syncache = Cache}, Now)
+    end.
+
+%% syncache_expand's result (tcp_input.c:1081-1135): a handshake becomes the connection,
+%% with a generator split from the interface's; a drop is silent; a reset is the RST of
+%% tcp_dropwithreset once the lookup without wildcard finds no connection either.
+expanded({ok, Handshake}, Conn, Segment, Entry, #core{gen = Gen0} = Core, _Now) ->
+    {ConnGen, Gen} = erx_net_rand:split(Gen0),
+    {count(syncache_completed, Core#core{gen = Gen}),
+     [{accept, Entry, Conn, Handshake, Segment, ConnGen}]};
+expanded(drop, _Conn, _Segment, _Entry, Core, _Now) ->
+    {count(syncache_dropped, Core), []};
+expanded(reset, {Ours, _, Peer, _}, {Tcp, Payload, _Ecn, _Link}, _Entry, Core, Now) ->
+    dropwithreset(Peer, Ours, Tcp, Payload, count(syncache_reset, Core), Now).
+
+%% The syncache's actions: a SYN-ACK or challenge ACK leaves from the four-tuple's local
+%% end over the path to its foreign end; a challenge ACK charges the RST limit and is sent
+%% whatever it answers (tcp_challenge_ack_check), and charge_rst only charges it. The flow
+%% label is IPv6's and has no use over IPv4.
+syncache_actions(Actions, Core0, Now) ->
+    lists:foldl(fun(Action, {Core, Acc}) ->
+                        {Core1, More} = syncache_action(Action, Core, Now),
+                        {Core1, Acc ++ More}
+                end, {Core0, []}, Actions).
+
+syncache_action({send, Conn, Tcp, _FlowLabel}, Core, Now) ->
+    send_tcp(Conn, Tcp, Core, Now);
+syncache_action({challenge_ack, Conn, Tcp, _FlowLabel}, Core0, Now) ->
+    {_, Core} = rst_allowed(Core0, Now),
+    send_tcp(Conn, Tcp, Core, Now);
+syncache_action(charge_rst, Core0, Now) ->
+    {_, Core} = rst_allowed(Core0, Now),
+    {Core, []}.
+
+send_tcp({Ours, _, Peer, _}, Tcp, Core, Now) ->
+    with_path(Peer, Ours, Core,
+              fun(Path, Gen) -> erx_net_frame:tcp(Path, [{Tcp, #{ecn => 0, df => true}, []}], Gen) end,
+              Now).
 
 icmp_ctx(Now) ->
     #{now => Now div 1000, time_of_day => (Now div 1000) rem 86400000}.

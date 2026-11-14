@@ -247,7 +247,7 @@ against the view's `groups`, which hold no IPv4 group until sockets join one.
 -include("erx_udp_wire.hrl").
 -include("erx_tcp_wire.hrl").
 
--export([classify/2, verify/1, units/1, arp_reply/1]).
+-export([classify/2, verify/1, units/1, arp_reply/1, for_listener/1, segment/3]).
 
 -export_type([input/0, view/0, key/0, entry/0, verdict/0, pending/0, item/0, head/0,
               link_cast/0, reason/0]).
@@ -766,7 +766,7 @@ ip_header(#{ip := #ip6{}}) -> 0.
 %% A consumer above IP, with Sum the sum of its bytes above IP, the third element of each, or none.
 verify_above({conn, Head, Upper}, Sum) ->
     then(tcp_wire(Head, Upper, Sum),
-         fun(Tcp, Payload) -> {Tcp, Payload, ecn(Head), maps:get(link, Head)} end);
+         fun(Tcp, Payload) -> segment(Head, Tcp, Payload) end);
 verify_above({tcp, Head, Upper, Listener}, Sum) ->
     then(tcp_wire(Head, Upper, Sum), fun(Tcp, Payload) -> {tcp, Head, Tcp, Payload, Listener} end);
 verify_above({datagram, #{src := Src, dst := Dst} = Head, Upper}, Sum) ->
@@ -825,3 +825,20 @@ decision alone.
 -spec arp_reply(pending()) -> {ok, <<_:32>>} | none.
 arp_reply({arp, <<_:6/binary, 2:16, _:6/binary, Spa:4/binary, _/binary>>}) -> {ok, Spa};
 arp_reply(_) -> none.
+
+-doc """
+Whether a pending frame is a TCP segment for a listener, the one item whose step needs the
+stack's secrets (docs/design-network-stack.md, "Connection setup"): the interface reads
+them for that frame alone. A unit of the merge is never one: classification reduces a
+unit no connection owns to its last frame.
+""".
+-spec for_listener(pending()) -> boolean().
+for_listener({above, _From, {tcp, _Head, _Upper, Entry}}) -> Entry =/= none;
+for_listener(_) -> false.
+
+-doc """
+The connection's segment for a TCP header and payload that arrived under `Head`, the shape
+of a connection's verified item, which a completed handshake hands its new connection.
+""".
+-spec segment(head(), #tcp{}, binary()) -> erx_tcp:segment().
+segment(Head, Tcp, Payload) -> {Tcp, Payload, ecn(Head), maps:get(link, Head)}.

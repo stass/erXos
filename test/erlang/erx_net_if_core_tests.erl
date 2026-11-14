@@ -307,6 +307,98 @@ link_change_goes_to_the_client_only_under_dhcp_test() ->
     ?assertMatch({_, [{dhcp, {link, up}}]}, step({link, up}, started(#{ip4 => dhcp}))),
     ?assertMatch({_, []}, step({link, up}, started(static()))).
 
+%% --- Passive open: the syncache in the step ------------------------------------------
+
+-define(LISTENER, #{rcv_buf => 65536, mss => 1460, rcv_scale => 6}).
+-define(CONN, {?ME4, 80, ?PEER4, 4000}).
+
+listener_entry() -> #{pid => self(), credit => none, listener => ?LISTENER}.
+
+secrets() ->
+    erx_tcp_syncache:secrets(erx_tcp_isn:secrets(<<1:128>>, <<2:128>>), <<3:128>>, <<4:128>>).
+
+%% A frame classified against a listener on port 80, stepped with the secrets the loop
+%% reads for it.
+to_listener(Frame, Core) -> to_listener(Frame, Core, ?NOW).
+to_listener(Frame, Core, Now) ->
+    Demux = fun({tcp_listen, inet, any, 80}) -> [listener_entry()]; (_) -> [] end,
+    View = (erx_net_if_core:view(Core))#{demux => Demux},
+    {local, Pending} = erx_net_input:classify({frame, Frame, none}, View),
+    true = erx_net_input:for_listener(Pending),
+    erx_net_if_core:step({local, Pending}, Core, #{now => Now, secrets => secrets()}).
+
+syn_frame(Seq) ->
+    tcp_frame(#tcp{sport = 4000, dport = 80, seq = Seq, ack = 0, flags = ?TH_SYN, win = 65535,
+                   urp = 0, opts = #tcp_opts{mss = 1460}}, <<>>).
+
+tcp_frame(#tcp{} = Tcp, Payload) ->
+    Segment = iolist_to_binary(erx_tcp_wire:encode(Tcp, Payload, erx_ip4_wire:pseudo_sum(?PEER4, ?ME4, 0, 6), sender)),
+    eth(?MINE, ?ETHERTYPE_IP, ip4(?PEER4, ?ME4, 6, Segment)).
+
+%% A core that knows the peer's link address, so what it sends leaves at once.
+resolved() ->
+    Core = started(static()),
+    {Core1, _} = step(local(who_has_me(), Core), Core),
+    Core1.
+
+syn_ack_of(Actions) ->
+    [#tcp{flags = Flags} = SynAck] = [rst_of(F) || F <- transmitted(Actions)],
+    ?assertEqual(?TH_SYN bor ?TH_ACK, Flags),
+    SynAck.
+
+syn_draws_a_syn_ack_and_its_ack_completes_the_handshake_test() ->
+    {Core1, Out1} = to_listener(syn_frame(100), resolved()),
+    #tcp{sport = 80, dport = 4000, seq = Iss, ack = 101, opts = #tcp_opts{mss = 1460}} = syn_ack_of(Out1),
+    Ack = tcp_frame(?TH_ACK, 101, erx_tcp_seq:wire(Iss + 1), <<>>),
+    {Core2, Out2} = to_listener(Ack, Core1),
+    ?assertMatch([{accept, #{listener := #{mss := 1460}}, ?CONN, #{iss := Iss, irs := 100, peer_mss := 1460},
+                   {#tcp{seq = 101, flags = ?TH_ACK}, <<>>, 0, unicast}, _}], Out2),
+    ?assertMatch(#{syncache_completed := 1}, counters(Core2)),
+    %% The entry is gone: the same ACK again finds no handshake and draws a RST.
+    {_, Out3} = to_listener(Ack, Core2),
+    ?assertMatch([#tcp{seq = Seq, flags = ?TH_RST}] when Seq =:= (Iss + 1) band 16#ffffffff,
+                 [rst_of(F) || F <- transmitted(Out3)]).
+
+ack_for_another_syn_ack_draws_a_rst_and_keeps_the_entry_test() ->
+    {Core1, Out1} = to_listener(syn_frame(100), resolved()),
+    #tcp{seq = Iss} = syn_ack_of(Out1),
+    {Core2, Out2} = to_listener(tcp_frame(?TH_ACK, 101, 12345, <<>>), Core1),
+    ?assertMatch([#tcp{seq = 12345, flags = ?TH_RST}], [rst_of(F) || F <- transmitted(Out2)]),
+    ?assertMatch(#{syncache_reset := 1}, counters(Core2)),
+    {_, Out3} = to_listener(tcp_frame(?TH_ACK, 101, erx_tcp_seq:wire(Iss + 1), <<>>), Core2),
+    ?assertMatch([{accept, _, ?CONN, _, _, _}], Out3).
+
+rst_at_the_next_sequence_number_drops_the_entry_test() ->
+    {Core1, Out1} = to_listener(syn_frame(100), resolved()),
+    #tcp{seq = Iss} = syn_ack_of(Out1),
+    {Core2, []} = to_listener(tcp_frame(?TH_RST, 101, 0, <<>>), Core1),
+    {_, Out3} = to_listener(tcp_frame(?TH_ACK, 101, erx_tcp_seq:wire(Iss + 1), <<>>), Core2),
+    ?assertMatch([#tcp{flags = ?TH_RST}], [rst_of(F) || F <- transmitted(Out3)]).
+
+segments_without_syn_and_syn_acks_are_dropped_silently_test() ->
+    {Core1, []} = to_listener(tcp_frame(?TH_FIN, 100, 0, <<>>), resolved()),
+    {Core2, []} = to_listener(tcp_frame(?TH_SYN bor ?TH_ACK, 100, 1, <<>>), Core1),
+    ?assertMatch(#{listen_no_syn := 1, listen_syn_ack := 1}, counters(Core2)).
+
+syn_ack_is_retransmitted_at_the_entry_deadline_test() ->
+    {Core1, Out1} = to_listener(syn_frame(100), resolved()),
+    First = syn_ack_of(Out1),
+    Deadline = erx_net_if_core:next_deadline(Core1),
+    %% The first retransmission is 1 s after the SYN, in the step's microseconds.
+    ?assertEqual((?NOW div 1000 + 1000) * 1000, Deadline),
+    ?assertMatch({_, []}, step({expired, Deadline - 1000}, Core1, Deadline - 1000)),
+    {_, Out2} = step({expired, Deadline}, Core1, Deadline),
+    ?assertEqual(First#tcp.seq, (syn_ack_of(Out2))#tcp.seq).
+
+refused_accept_is_answered_with_a_rst_test() ->
+    {Core1, Out1} = to_listener(syn_frame(100), resolved()),
+    #tcp{seq = Iss} = syn_ack_of(Out1),
+    {Core2, [{accept, _, Conn, _, Segment, _}]} =
+        to_listener(tcp_frame(?TH_ACK, 101, erx_tcp_seq:wire(Iss + 1), <<>>), Core1),
+    {Core3, Out3} = step({accept_refused, Conn, Segment}, Core2),
+    ?assertMatch([#tcp{sport = 80, dport = 4000, flags = ?TH_RST}], [rst_of(F) || F <- transmitted(Out3)]),
+    ?assertMatch(#{accept_refused := 1}, counters(Core3)).
+
 %% --- Counting --------------------------------------------------------------------
 
 drops_and_unsupported_events_are_counted_test() ->

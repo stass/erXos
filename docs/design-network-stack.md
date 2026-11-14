@@ -3649,13 +3649,15 @@ next_deadline(core()) -> integer() | infinity.
     | {neigh, unpublish, Ip :: binary()}
     | {dhcp, {reply, Msg :: term()} | {link, up | down}}
     | {ifid_request, Ref :: reference(), Message :: binary()}
-    | {accept, erx_tcp_syncache:listener(), Conn :: term(),
+    | {accept, Listener :: erx_net_input:entry(), Conn :: term(),
        erx_tcp_syncache:handshake(), erx_tcp:segment(), erx_net_rand:gen()}
     | {reply, From :: term(), Reply :: term()}.
 ```
 
-The context is the time alone, in microseconds; the sub-cores that keep
-milliseconds get it divided. The step of a `local` event does what
+The context is the time in microseconds; the sub-cores that keep
+milliseconds get it divided. A `local` step whose frame is a TCP segment
+for a listener also carries the stack's secrets, which the loop reads
+from `erx_net_tables` for that frame alone ([Connection setup](#connection-setup)). The step of a `local` event does what
 [Receiving](#receiving) gives the interface: `charge/2` decides whether
 the frame spends a token of the bucket, `erx_net_input:verify/1` checks
 it, a failed check gives the token back, and the verified item goes to

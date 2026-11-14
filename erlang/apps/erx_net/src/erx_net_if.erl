@@ -263,8 +263,18 @@ guarded(Event, S) ->
     end.
 
 step(Event, #state{core = Core0} = S) ->
-    {Core, Actions} = erx_net_if_core:step(Event, Core0, #{now => erx_net_clock:now()}),
+    {Core, Actions} = erx_net_if_core:step(Event, Core0, context(Event)),
     lists:foldl(fun perform/2, S#state{core = Core}, Actions).
+
+%% The time, and for a segment to a listener the stack's secrets, read for that frame alone
+%% (docs/design-network-stack.md, "Connection setup").
+context({local, Pending}) ->
+    case erx_net_input:for_listener(Pending) of
+        true -> #{now => erx_net_clock:now(), secrets => erx_net_tables:syncache_secrets()};
+        false -> #{now => erx_net_clock:now()}
+    end;
+context(_Event) ->
+    #{now => erx_net_clock:now()}.
 
 perform({transmit, Frames}, #state{driver = Driver, tx = Tx} = S) ->
     case erx_net_credit:hand(Driver, Tx, erx_net_frame:units(Frames), {transmit, Frames}) of
@@ -286,7 +296,12 @@ perform({dhcp, _Msg}, #state{dhcp = none} = S) ->
     S;
 perform({reply, From, Reply}, S) ->
     gen_server:reply(From, Reply),
-    S.
+    S;
+%% A completed handshake. Nothing starts an accepted connection, so every handshake
+%% is refused as one whose listener has no accept credit left, with the RST of
+%% tcp_sc_rst_sock_fail (TODO.md, "erx_tcp_listen").
+perform({accept, _Entry, Conn, _Handshake, Segment, _Gen}, S) ->
+    step({accept_refused, Conn, Segment}, S).
 
 %% The interface's complete rows: new and changed ones written first, those it no longer
 %% has deleted last, and then the generation moved.

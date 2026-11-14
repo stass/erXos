@@ -241,8 +241,8 @@ it; git history is the record of completed work.
      offload mode, the merge's visible behaviour against FreeBSD); a unit no connection owns
      is taken as its last frame, which answers a closed port as FreeBSD does but would hand a
      listener the last frame's sequence number where FreeBSD's syncache takes the first's
-     (latent while the core counts a listener's segment as unsupported: hand the listener
-     the merged segment once the syncache joins the step); the credit a merged item takes
+     (latent while no listener key exists: hand the syncache the merged segment, whose
+     ACK and sequence number are the first frame's); the credit a merged item takes
      back is read in two places (`erx_net_input:units/1`, `erx_tcp_conn:units/1`), which
      `{items, If, Items, Units}` would make one; a unit that finds less than N units of room
      is dropped whole where unmerged frames would deliver the first R, a cliff to measure
@@ -2171,7 +2171,14 @@ it; git history is the record of completed work.
   `erx_blk`, not generated from `abi/formats/virtio.txt`; `erx_net_if` has no `format_status/1`
   that keeps queued packets out of a crash report, as `erx_net_driver` has.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
-  opens over IPv4 only. Not yet: `listen`/`accept`, the syncache hand-off and a SYN reinjected from
+  opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
+  (`erx_net_if_core`), but `erx_net_if` refuses each completed handshake with a RST, since nothing
+  yet starts an accepted connection: the listener `erx_tcp_listen`, the `accept` effect (credit,
+  `proc_lib:spawn`, `erx_net_bind` insertion, `go`/`abandon`), a SYN-RECEIVED control block made
+  from the handshake (`syncache_socket`, `tcp_syncache.c:764`) and the grant's `tcp_listen` are
+  missing, and an ICMP error quoting a SYN-ACK reaches the core as `unsupported` rather than
+  `erx_tcp_syncache:unreach/3`. A SYN-ACK whose route leaves by another interface is counted `other_interface` and
+  never sent, as the closed-port RST already is. Not yet: a SYN reinjected from
   TIME-WAIT (E3, counted `reinject`); the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
   holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
