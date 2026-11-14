@@ -83,6 +83,10 @@ session's `pipes` quota of lanes, which erx_pipe:new/1 defaults and bounds.
 start_link(Opts) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Opts, []).
 
+%% A program handler's inherit of an end its starter, a session process,
+%% holds and names by the end it holds (forward/1).
+-type starter_inherit() :: {inherit, {process, pid()}, End :: term(), {program, pos_integer()}}.
+
 -doc """
 A pipe whose two ends the calling process holds: `{ok, Read, Write}`, or
 `{error, enfile}` at the session's quota and `{error, enomem}` when the
@@ -110,9 +114,12 @@ of erx_pipe:step/2 that names `{program, Pid}`: the step's reply for a
 request (`pipe`, `inherit`, `exec`), each end a `{pipe_hand, Number,
 Term}` for the handler's port driver to take, and `ok` for a notice
 (`closed`, `drained`, `install_failed`); `{error, badarg}` when the
-caller does not speak for the program the event names.
+caller does not speak for the program the event names. A session process
+that starts a program names its end as it holds it, so the program's
+handler forwards `{inherit, {process, Starter}, End, {program, Pid}}`
+with `End` the starter's end: `{error, ebadf}` unless `Starter` holds it.
 """.
--spec forward(erx_pipe:event()) -> term().
+-spec forward(erx_pipe:event() | starter_inherit()) -> term().
 forward(Event) when is_tuple(Event) ->
     gen_server:call(?MODULE, {forward, Event}, infinity).
 
@@ -193,6 +200,13 @@ handle_call({inherit, {process, Pid} = Holder, EndRes, {process, Child} = ChildH
             {noreply, run({inherit, Holder, Pipe, End, ChildHolder}, {ChildHolder, From}, S)};
         [] ->
             {reply, {error, ebadf}, S}
+    end;
+handle_call({forward, {inherit, {process, Starter}, EndRes, {program, _} = Child}}, From, #srv{ends = Ends} = S) ->
+    %% A session process starter names its end as it holds it, an end of its
+    %% own; the inherit then runs as any program's handler forwards it.
+    case [Key || Key := {Owner, Res} <- Ends, Owner =:= Starter, Res =:= EndRes] of
+        [{Pipe, End}] -> handle_call({forward, {inherit, {process, Starter}, Pipe, End, Child}}, From, S);
+        [] -> {reply, {error, ebadf}, S}
     end;
 handle_call({forward, Event}, {Caller, _} = From, #srv{nif = Nif} = S) ->
     case speaker(Event) of

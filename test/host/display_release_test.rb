@@ -77,4 +77,17 @@ class DisplayReleaseTest < Minitest::Test
     violations = Erx::DisplayRelease.violations(display: display(source: source), client: client)
     assert_equal ['erlang/apps/erx_display/src/erx_screen.erl:3: names the client module erx_tile'], violations.map { |v| "#{v.where}: #{v.rule}" }
   end
+
+  # The program handler may name the pixel allocator (MAY_NAME); any other module of the
+  # display side that names it still fails, and the handler naming another client module too.
+  def test_only_the_handler_names_the_pixel_allocator
+    handler = 'erlang/apps/erx/src/erx_prog_handler.erl'
+    other = 'erlang/apps/erx/src/erx_pipe_srv.erl'
+    sources = { handler => "f() -> erx_pixels:alloc(1, 2), erx_tile:decode(<<>>).\n",
+                other => "f() -> erx_pixels:alloc(1, 2).\n" }
+    violations = Erx::DisplayRelease.violations(display: { 'erx' => app('erx', %w[erx_prog_handler erx_pipe_srv], sources) },
+                                                client: client)
+    assert_equal ["#{handler}:1: names the client module erx_tile", "#{other}:1: names the client module erx_pixels"],
+                 violations.map { |v| "#{v.where}: #{v.rule}" }
+  end
 end

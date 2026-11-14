@@ -2511,15 +2511,46 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   `{discard}`, `{withdraw}` and the collector of deposits no reader can reach
   (docs/design-pipes.md, "The second tier" and "Deposits"), and `holder()` has no
   `{deposit, Ticket}`. `test/erlang/erx_pipe_explore.erl` gains their events with them.
-* [Medium] session, `erx_prog_handler`: no program holds an end of a session's pipe yet. The pipe NIF's
-  hand-offs and holder entries, `erx_pipe_srv`'s side and the program driver's takes, installs, binds and
-  hold release (`erx_program:start/1`'s `{N, {pipe_hand, Number, Descriptor}}` entries and
-  `erx_program:install/2`) are built (docs/design-pipes.md, "Hand-offs"); what remains is
-  `erx_prog_handler`, which makes the program's holder entry, asks for the ends on its starter's behalf,
-  forwards the program's notices with `erx_pipe_srv:forward/1`, holds and writes its reports, and drops its
-  hand-offs and hold after a failed start; and the QEMU tests of hand-offs between domains
-  (docs/design-pipes.md, "Verification and testing"). The programs suite's `pipe_hand` and `install` cases
-  stand in for the handler at root_1's shell.
+* [Medium] session, `erx_prog_handler`: the handler starts a program for a session process with its pipe
+  ends and a window's buffer, forwards its notices and reports, and tells the starter its end; what
+  remains is the command server that assigns process ids (start/1 takes `pid`, `ppid` and `pgid` from its
+  caller, so nothing yet keeps a pid from being given twice over a session's life: a pid reused while the
+  pipe server still holds the ends of the program that last had it, or reused once that program's holder
+  entry is gone but before the pipe server has read its gone, names those ends as the new program's, so
+  the old program's reports reach the new one and the old one's gone, read late, takes the new one's ends
+  away; start/1 refuses a pid whose holder
+  entry still exists with `einval`, which narrows but does not close the window), the program's requests
+  (the protocol's `request` union is empty), a program as a starter (step 3's checks of its table), and the
+  QEMU tests of hand-offs between domains (docs/design-pipes.md, "Verification and testing"). The programs
+  suite's `handler` case runs the handler at root_1's shell; `pipe_hand` and `install` test the driver's
+  takes and installs directly.
+* [Medium] session, `erx_prog_handler_core` tests: the exploration in
+  `test/erlang/erx_prog_handler_core_tests.erl` offers neither hand-off reports, the install answers, a
+  send error nor `pipes_lost`, and does not walk the reserving phase against every refusal point; a protocol
+  state machine is explored exhaustively.
+* [Low] session, `erx_prog_handler`: the core's running clauses read the queue head's kind by matching
+  it (`{install_refused, _}` with a frame at the head crashes, which the effect layer never produces);
+  an `out` of `{sending, frame | hand}` makes those states unrepresentable. Errno decisions (`none` to
+  `einval`, `undef`/`noproc` to `enodev`, a lost pipe server to `enomem`, `badarg` to `einval`) sit in the
+  effect layer, and `error:undef` also reads a missing function of a present allocator as `enodev`. A
+  buffer's `Bytes` is not bounded by `prog_mem_bytes` before the alloc. `watch_pipes/0` is not retried
+  after a loss that finds no restarted server, so a second loss does not reach the program. `perform/2`
+  runs a nested step's actions before the rest of its list and is not a tail call; the `exit` action does
+  nothing. `pipe_report` and `erx_prog_stop` are taken from any process (session code is trusted), and
+  the pipe server's starter-named inherit trusts the `Starter` the handler names. In the reserving
+  phase an event the core does not expect is ignored, which leaves `start/1` waiting; refusing it as
+  `einval` ends the phase by construction. `start/1` passes through `noproc` from `erx_pixels:lend/2`
+  and `badarg` from the pipe server, neither an errno it documents. A `closed` or `drained` notice
+  taken ahead of the pipe server's `'DOWN'` goes to the restarted server before `pipe_server_lost`
+  reaches the program, against docs/design-pipes.md, "The pipe server" (harmless: the restarted server
+  numbers its pipes past the old ones, so the notice names no end).
+* [Medium] session, `erx_prog_handler`: the starter hears of its program's end only from a handler that
+  does not crash, since `start/1` drops its monitor of the handler before answering; a crash (a
+  `hand_drop` or `unlend` that does not answer `ok`, an answer of the pipe server outside its spec)
+  leaves a starter that waits only for `erx_prog_exit` waiting. Answering the monitor with the handler
+  (`{ok, Handler, Monitor, Offsets}`) makes the report hold by construction. A port the driver closes
+  with no status (`ERX_PROGRAM_LOST`, when a record of the end may be lost) ends the handler with no
+  report either, as it read no status; the starter needs to hear that its program ended, status unknown.
 * [Medium] session, `erx_pipe_nif.c` and `erx_event.c`: each ring of a session end's doorbell is one
   `{erx_pipe_ready, _, _}` message, uncoalesced, so while an end waits (bits set for that wait only) a
   co-reader that loops on the lock or a writer's repeated crossings can queue many messages before the

@@ -164,6 +164,21 @@ module Erx
             {hold_kept, Failed, Installed}
           end)().
        ERLANG
+       # The handler path (erx_prog_handler): the shell's process, as a session process
+       # starter, makes a pipe and starts exit42 with the pipe's write end as descriptor 3.
+       # The handler asks the pipe server for the program's end, starts the program and
+       # tells the shell its end; once the shell has closed its own write end, its read end
+       # reads the end of the stream only after the program's end is gone, which the pipe
+       # NIF reports once the handler and the port have both let the program go.
+       Case.new(name: 'handler', seconds: 60, answer: '{handler,{exited,42},eof}', expression: line(<<~ERLANG)),
+         (fun() ->
+            {ok, R, W} = erx_pipe_srv:pipe(),
+            {ok, H, []} = erx_prog_handler:start((#{spec('exit42', 40)})\#{fds => [{3, {pipe, W}}]}),
+            ok = erx_pipe_srv:close(W),
+            Status = receive {erx_prog_exit, H, S} -> S after #{WAIT_MS} -> timeout end,
+            {handler, Status, erx_pipe_srv:read(R, 16, #{WAIT_MS})}
+          end)().
+       ERLANG
        Case.new(name: 'install', seconds: 60, answer: '{install,{error,einval},ok,{error,einval},ok}',
                 expression: line(<<~ERLANG)),
          (fun() ->

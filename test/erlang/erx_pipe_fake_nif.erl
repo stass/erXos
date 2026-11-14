@@ -14,7 +14,7 @@ program holder entries are kept in persistent_term.
 
 -export([setup/1, fail/1, owner/2, make_lock/1, pipes_made/0, make_lane/1, make_bell/3,
          store_wends/2, free_lock/2, close/1, open_end/3, apply/2, hand_make/2,
-         holder_owner/1]).
+         holder_owner/1, program_holder/1, holder_drop/1, hand_drop/1]).
 
 -doc "Sends every later call to Pid, and fails none.".
 setup(Pid) ->
@@ -82,6 +82,23 @@ holder_owner(Program) ->
         #{Program := Owner} when is_pid(Owner) -> {ok, Owner};
         _ -> none
     end.
+
+-doc "Makes the caller the owner of Program's entry, refusing a Program that has one.".
+program_holder(Program) ->
+    answer(program_holder, {program_holder, Program},
+           fun() ->
+                   case holder_owner(Program) of
+                       {ok, _} -> {error, eexist};
+                       none -> owner(Program, self()), ok
+                   end
+           end).
+
+-doc "Forgets Program's entry.".
+holder_drop(Program) ->
+    answer(holder_drop, {holder_drop, Program}, fun() -> owner(Program, none), ok end).
+
+hand_drop(Number) ->
+    answer(hand_drop, {hand_drop, Number}, fun() -> ok end).
 
 answer(Name, Call, Ok) ->
     #{test := Test, fail := Fail} = persistent_term:get(?MODULE),

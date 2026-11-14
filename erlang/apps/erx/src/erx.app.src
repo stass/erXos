@@ -62,6 +62,8 @@
              erx_pipe_srv,
              erx_present,
              erx_process_records,
+             erx_prog_handler,
+             erx_prog_handler_core,
              erx_runtime_records,
              erx_schema,
              erx_source,

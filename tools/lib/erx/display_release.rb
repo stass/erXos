@@ -36,6 +36,13 @@ module Erx
     CLIENT_FAMILIES = /\Aerx_(?:draw|ui|vt|term|font|png|inflate|pixels|win)(?:_|\z)/
     DISPLAY = ReleaseFiles::RELEASE_SCRIPTS.fetch('display')
     CLIENT = (ReleaseFiles::RELEASE_SCRIPTS.fetch('client') - DISPLAY).freeze
+    # The client modules a source of the display side may name, each for the reason the
+    # design gives: a program's handler, in erx, allocates and lends the window buffer it
+    # maps into its program from the client's pixel allocator, erx_pixels, since the
+    # buffer belongs to the handler (docs/design-display.md, "The pixel area"), and in a
+    # domain without the allocator, the display domain's included, refuses the buffer
+    # with enodev, so the name loads nothing there.
+    MAY_NAME = { 'erlang/apps/erx/src/erx_prog_handler.erl' => %w[erx_pixels].freeze }.freeze
     Violation = Data.define(:where, :rule) do
       def to_s = "display release (G9): #{where}: #{rule}"
     end
@@ -77,9 +84,10 @@ module Erx
 
     # The lines of a source that name a client module, by number.
     def names(path, text, clients)
+      allowed = MAY_NAME.fetch(path, [])
       code(text).each_line.with_index(1).flat_map do |line, number|
         line.scan(/(?<![A-Za-z0-9_@])erx_[A-Za-z0-9_@]+/).uniq
-            .select { |atom| clients.include?(atom) || CLIENT_FAMILIES.match?(atom) }
+            .select { |atom| (clients.include?(atom) || CLIENT_FAMILIES.match?(atom)) && !allowed.include?(atom) }
             .map { |atom| Violation.new(where: "#{path}:#{number}", rule: "names the client module #{atom}") }
       end
     end
