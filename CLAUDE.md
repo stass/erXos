@@ -68,6 +68,12 @@ These shape every design and change; the rules below apply them.
 * I'm always open to ideas on better ways to do things. Please don't hesitate
   to suggest a better way, or one that has long lasting impact over a tactical
   change.
+* **Fix the tool, don't work around it.** When a tool, language, library,
+  format or rule in this file is inadequate for the job, stop and propose
+  the change: extend the tool, switch to a better one, or relax the rule.
+  Never absorb the gap with layers of workaround code; bloat that exists
+  only to compensate for a weak tool is a design failure. State what the
+  gap costs (lines, duplication, special cases) so the trade-off is visible.
 * Security is paramount and on equal footing with correctness.
 * **If you discover a bug, discrepancy, or something unexpected, fix it**
   whether or not it relates to the task at hand. Fix it if it is
@@ -254,6 +260,18 @@ scripts live in `~/erxos-scratch/tools/`.
 ## Design
 
 * Code should be simple and clean, never over-complicate things.
+* **Simplicity over speed in host tooling.** In the Ruby build, the
+  generators, image packing, the QEMU harness and the other host tools,
+  the simplest correct design wins. Optimize a step only when its slowness
+  is a reported problem; a slow build or test run is one, because iteration
+  speed comes first. Code that runs on the target is exempt: its
+  performance is measured (see "Latency is UX").
+* **Port by redesign, not translation.** When logic moves into erXos from
+  another system or language (FreeBSD's `netinet` into Erlang, Fiasco's
+  design into the C17 kernel, a stopgap into its replacement), matching
+  observable behavior is the acceptance test, but the structure is designed
+  afresh for the target: idiomatic, simple and elegant there, never a
+  line-by-line translation of the old code.
 * **Judge complexity by the model a maintainer must understand.** Compare
   the concepts, entities, independently varying states, ownership rules and
   coordination obligations a change introduces with those it removes across
@@ -282,6 +300,20 @@ scripts live in `~/erxos-scratch/tools/`.
   [readability standard](docs/style.md#readability-standard): another
   developer must understand purpose, data flow, invariants and failure paths
   without reconstructing the implementation or reading the conversation.
+  A review blocks code that is not readable. In C, Erlang and Ruby alike:
+  * one type per concept: no parallel models of the same data and no copied
+    type, record or struct declarations;
+  * one failure path per module: a multi-step reader or generator fails at
+    its first error through one module-private route (one error exit
+    in C, a `throw` caught once at the public entry in Erlang, a typed
+    `Erx::Error` in Ruby) instead of returning an error
+    from every step for each caller to re-check;
+  * a sequence is read through a cursor, or destructured after one length
+    check, never by scattered positional indexing;
+  * defend once, at the trust boundaries this file lists; never re-validate
+    our own generated code or outputs, re-check at run time what a type
+    already guarantees, or guard against an attacker outside the threat
+    model.
 * **Functional core, effects at the edge.** Every decision that can be a
   pure function is one. Kernel and runtime code is a functional core (pure
   decisions, pure state machines that return the next action, and plans
@@ -317,6 +349,17 @@ scripts live in `~/erxos-scratch/tools/`.
   whether changing the architecture would make the edge cases disappear rather
   than handling them one by one. A simpler design that eliminates a class of
   problems beats a clever one that patches each instance.
+* **Question every requirement before building for it.** Before a design
+  adds a mechanism (a borrowed algorithm, a dependency, a format feature, a
+  test harness, a process), it names the consumer that needs the property
+  and what breaks without it. A requirement inherited from a previous
+  implementation, from a stopgap or tool that provided it for free, or from
+  "matching" something is suspect: re-derive it from a real consumer or
+  drop it. (Behaving like stock OTP, musl and POSIX where the tests require
+  it has its consumer: the programs that rely on it.) When a port or
+  rewrite makes a property expensive, ask first whether to keep the
+  property, then how. Design, simplicity and external reviews ask of every
+  costly mechanism: "what if we did not need this?"
 * **No new mechanism without a design that names it.** Before adding a
   facet, protocol, process kind, registry, flag or special case, find the
   mechanism the design documents already give for the job and use it. A
@@ -437,6 +480,36 @@ scripts live in `~/erxos-scratch/tools/`.
       on the ABI because all of them are generated from `abi/erx_abi.txt`.
 
     Keep new mechanisms in that spirit.
+* **Fix the class, not the instance:** in the type, module, format or
+  interface that allowed the bug, not at the call site that hit it.
+* **Make misuse impossible to write, not checked for.** A grep or lint
+  catches only the cases it was written for; a type or visibility boundary
+  makes wrong code fail to build. C: opaque types, single-member structs
+  that do not convert, `static` functions, module-private headers. Erlang:
+  unexported functions and one module that owns a representation. Ruby:
+  private methods and constructors that validate. Before claiming
+  something cannot be written, try to build it: if it builds, change the
+  design; if it does not, keep the attempt as a test that expects the
+  build to fail. A chokepoint check (see Code) covers what such a
+  boundary cannot express.
+* **Fix what produced a wrong result, not the result.** When a generator,
+  build step or tool of ours gives wrong output, fix the step or constrain
+  its input (types, build flags, a linker assertion, a source check);
+  never add a pass that scans or patches its output. Output checks are
+  acceptable only for properties no single input determines (the kernel's
+  whole-program stack depth) or tools we do not control (the C compiler),
+  and they state their assumption about the tool and how a failure gets
+  fixed. A check on untrusted input (the funnel, the image and ELF
+  readers, the manifest checks) is a security boundary, not an output
+  check: when it rejects something our own tooling produced, fix the
+  tooling, never relax or special-case the check.
+* **One source for every fact.** Every decision, table and format has
+  exactly one implementation. Never keep parallel copies that must change
+  together: the list of places to update is an enumeration. C, Erlang and
+  Ruby share a table only by generation from one source, and derived
+  values (offsets, sizes, counts, hashes) are computed by the generator. A
+  comment or test that keeps two implementations in step means a generator
+  is missing.
 
 ## Code
 
@@ -522,6 +595,23 @@ scripts live in `~/erxos-scratch/tools/`.
 * **Generated code is code too.** Generated C, Erlang and headers must be
   readable, ASCII-only and free of undefined behavior, and are produced by a
   Ruby generator checked into the tree.
+* **Spec discipline.** Whatever can be stated as facts and rules is
+  specified once and generated, not hand-written (principle 4); choose the
+  declarative form when it turns a property into a checked constraint,
+  even if the spec is larger than the code it replaces. A spec, whether
+  `abi/erx_abi.txt` or a Datalog program:
+  * states facts, and the generator derives every value that follows from
+    them; where the spec writes such a value down (a fixed binary
+    layout's field offsets), the generator checks it;
+  * gives every symbol column a closed set of allowed values, and its
+    generator validates every row it reads;
+  * makes every invariant either a declaration the engine checks or a
+    constraint with a test sample that breaks only it;
+  * runs strict: any warning fails the run;
+  * is sorted and deterministic.
+  Test data that depends on a spec (fuzz seeds, sample images) is
+  generated the same way; only spec-independent test data, fuzz findings
+  and goldens are committed.
 * **Chokepoints are build checks.** Every rule of the form "only X may do
   Y" is enforced by a check that fails the build on a new site, and every
   check has a test proving it catches a violation. For example: only a
