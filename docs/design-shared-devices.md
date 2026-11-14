@@ -132,7 +132,11 @@ Each requirement follows from that one closure:
   the holder needs such a function, a pin of a GPIO controller or a clock
   of a clock controller, gets it from the holder's driver: a file tree the
   holder serves, with a `ctl` file for one-shot control, or a facet of a
-  service `abi/services` declares, never the registers or the line.
+  service `abi/services` declares, never the registers or the line. The
+  Raspberry Pi 4's legacy SD controller, the WiFi chip's SDIO host,
+  shares EMMC2's line, so the storage domain drives it and serves its
+  card to the WiFi domain through the `sdio` interface
+  ([design-wifi.md](design-wifi.md#the-sdio-interface)).
 * **A device of no kind is held, not driven.** A device whose role and
   compatible string are in no row of `include/erx/device_kinds.h` gets
   no `-erx_record given` record, so no driver opens it, and no register window
@@ -147,10 +151,9 @@ Each requirement follows from that one closure:
   resource: the unit's give makes the IRQ object of each line a device of
   a kind in the unit names, from the first such device, so that the line
   has its one object as the line rule above requires. A line that
-  only devices of no kind name has no reader, so no give makes its object. The Raspberry
-  Pi 4's legacy SD controller, in the storage domain's `sd` unit, is such
-  a device, and the system domain's SPI controllers get no objects of
-  their own either: they lie in the mini UART's window and line.
+  only devices of no kind name has no reader, so no give makes its object. The
+  system domain's SPI controllers are such devices, and get no objects of
+  their own: they lie in the mini UART's window and line.
 
 **The check.** The domain library's boot view, which the build's
 manifest check runs and the root runs again at boot, computes each

@@ -344,20 +344,23 @@ is also the interrupt of the legacy SD controller, `&sdhci`
 (`bcm2711.dtsi:1147-1149`), so by the unit rule the two controllers are
 one unit, given whole to the storage domain
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and
-the record marks the line shared. The SD device process attaches through
-the line's owner, `erx_irq_line`, of which it is the one member, as every
-driver on a shared line does
-([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
-the legacy controller has no driver, as the SPI controllers on the mini
-UART's line have none. The platform record's unit `sd` holds both
+the record marks the line shared. The SD device process and the legacy
+controller's SDIO host, `erx_sdio_host`, attach through the line's owner,
+`erx_irq_line`, as every driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)).
+The platform record's unit `sd` holds both
 windows, EMMC2's at `0xfe340000` and the legacy controller's,
 `/soc/mmc@7e300000` (`bcm283x.dtsi:423-429`), at `0xfe300000`, each
 `0x100` bytes on record line 158 (GIC SPI 126, at the binding's offset of 32,
 unverified on the board). Its device-kinds row makes EMMC2's record
 `block sdhci`, the CMSIS-SVD peripheral of `hw/svd/sdhci/sdhci.svd`;
-the legacy controller, the board's Wi-Fi SDIO host (`non-removable`,
-`mmc-pwrseq = <&wifi_pwrseq>` in the board's tree), matches no row and
-gets no record; whether it can master the bus is for the board probe.
+the legacy controller, the board's WiFi SDIO host (`non-removable`,
+`mmc-pwrseq = <&wifi_pwrseq>` in the board's tree), has the record
+`sdio sdhci` of the same peripheral, with no DMA memory, its quirks as
+the record's data and its base clock from the unit entry's `clock`; the
+storage domain serves its card to the WiFi domain
+([design-wifi.md](design-wifi.md#the-sdio-host-in-the-storage-domain)).
+Whether it can master the bus is for the board probe.
 The record marks EMMC2 unconfined and `hostile`, with 1 MiB of DMA
 memory for the ADMA2 mode, as the virtio block device's. A
 manifest gives the unit to the storage domain as its unit `block`, the

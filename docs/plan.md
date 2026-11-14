@@ -2280,7 +2280,8 @@ brings.
 **Demo.** The Pi boots from its firmware, over the network or from its SD
 card, to the shell on its console; a file synced under `/data` on the SD
 card survives a power cut; the network domain carries UDP echo and a TCP
-bulk transfer to a peer over the Pi's Ethernet; the kiosk application of
+bulk transfer to a peer over the Pi's Ethernet, and over WiFi once the
+Pi has joined a WPA2 or WPA3 network; the kiosk application of
 [1b-C](#track-d-windows-widgets-and-the-web)'s part 3 shows on the Pi's
 screen; a real-time clock module on the header keeps the time across a
 power cut. Every guarantee is deferred, as on QEMU. An LED on the header
@@ -2314,7 +2315,7 @@ residuals ([What Phase 1 defers](design-stopgap.md#what-phase-1-defers)).
 **Parts.** Each ends in a demo reproduced on the board by hand; stage (a)'s
 also runs on QEMU's `raspi4b` model. Part (a) comes first; (b), (c), (d)
 and (e) each need only (a) on the board, and may go in any order or side
-by side.
+by side; (f) needs (b) and (c).
 
 * **(a) A serial shell on the Pi, on QEMU's `raspi4b` first.** Its
   packages, in order:
@@ -2456,6 +2457,33 @@ by side.
   PWM is not a package of 1b-I. It is built when a consumer needs
   it, along the design's PWM section, starting from the boot probe's
   reading of whether the firmware leaves the PWM clock running.
+* **(f) WiFi on the CYW43455.** The Pi's WiFi chip on the legacy SD
+  controller, along [design-wifi.md](design-wifi.md): the storage
+  domain's SDIO host serves the card through `sdio`, the WiFi domain
+  drives the chip and runs the station and its supplicant, and the
+  network domain carries `wlan0` over the medium the WiFi domain lends
+  through `ether`. The fetch step pins the Cypress firmware, NVRAM and
+  CLM files, and the Pi's image carries them in the WiFi application's
+  release. Its packages, in order, each proven on the board by hand:
+  1. **W0, the SDIO card up.** The legacy controller's `sdio sdhci`
+     record, `erx_blk_write`'s SDIO table, the SDIO host and the `sdio`
+     interface; the boot log names `CYW43455 rev N`. The power and pin
+     facts of [design-wifi.md](design-wifi.md#facts-this-design-does-not-have)
+     are settled here, by the board probe or a clean-room facts record.
+  2. **W1, firmware running.** Firmware, NVRAM and CLM loaded and read
+     back, `ver`, `cap` and the hardware address in the log and at
+     `/proc`, and `wlan0` offered to the network domain with its link
+     down, through `ether` and `erx_net_ether`.
+  3. **W2, scan.** `ifconfig wlan0 scan` lists the test access point in
+     FreeBSD's columns.
+  4. **W3, an open network.** DHCP, ping, UDP echo and a TCP transfer
+     over `wlan0`, as (c) runs them over GENET.
+  5. **W4, WPA2-PSK.** The 4-way and group handshakes on the host, keys
+     installed, a group rekey survived.
+  6. **W5, WPA3-SAE with PMF.** OTP `crypto`'s two point functions, SAE
+     with hash-to-element through the firmware's external
+     authentication, and PMF; it needs the firmware's `sae_ext`
+     capability, which W1 reads.
 
 **Dependencies.**
 
@@ -2472,6 +2500,11 @@ by side.
 * (e): (a); 1b-E's configured domains, for the devices domain; for
   package 4, the answer to Open decision 1 of design-header-io.md; for
   the TPM, the vault's TPM design and a module on the board.
+* (f): (b)'s storage domain and its line owner on the board; (c)'s
+  network domain on the board; for W5, the firmware's `sae_ext`, or
+  the decision of [design-wifi.md](design-wifi.md#open-decisions), 2;
+  a test access point, a FreeBSD host's hostapd or a commodity router,
+  offering open, WPA2 and WPA3 networks.
 
 **Testing.**
 
@@ -2516,8 +2549,10 @@ by side.
   lists the mark it followed and, for each file synced before it,
   whether the file survived whole; every synced file must.
 * Every parser of what a Pi device writes (the SD controller's responses
-  and status, GENET's receive status and descriptors) lands with its fuzz
-  target, as the ground rules require.
+  and status, GENET's receive status and descriptors, and for (f) the
+  SDIO responses, every format of the WiFi chip and the air, and
+  `wpa_supplicant.conf`) lands with its fuzz target, as the ground rules
+  require.
 * **The header's checks** are
   [design-header-io.md](design-header-io.md#verification)'s: the pure
   cores on the host, each case with its seeded fault; the `raspi4b`
@@ -2525,6 +2560,12 @@ by side.
   emulated flash and, with the GPIO package, the model's GPIO, whose
   first run records which of them the model supports; and the board
   checklist with its loopback jumpers, run by hand once per package.
+* **WiFi off the board.** QEMU has no WiFi device. (f)'s cores run on the
+  host against recordings, published vectors and wpa_supplicant and
+  hostapd 2.12 on the FreeBSD x86-64 test host; a fake chip behind the
+  `sdio` interface runs the WiFi domain in hosted mode and on QEMU
+  `virt`, where the network stack's suites run over `wlan0` unchanged
+  ([design-wifi.md](design-wifi.md#verification)).
 
 **Exit criteria.**
 
@@ -2569,6 +2610,16 @@ by side.
   unmeasured; the `ctl` grammars and the clock chip's decoder run
   their fuzz budgets clean. With the GPIO package, the GPIO loopback
   passes and the LED and button answer the shell.
+* (f): on the board, W0's and W1's log lines; a scan listing the test
+  access point; DHCP, ping, UDP echo and a TCP transfer on the open, the
+  WPA2 and, given `sae_ext`, the WPA3 network; a wrong passphrase refused
+  with its reason at `/proc`; the WiFi domain killed under load joining
+  again while `genet0` carries on; (b)'s power-cut checklist passing with
+  WiFi under load. Off the board, the station's exhaustive exploration,
+  the Annex J and J.10 vectors, the differential against wpa_supplicant's
+  recordings and the network stack's suites over the fake chip pass, each
+  failing on its seeded fault; the WiFi parsers run their fuzz budgets
+  clean.
 
 **Gate GR, before the first board boot.** The board is a 4 GB
 one, with no automated rig; the answers are recorded in

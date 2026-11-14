@@ -597,8 +597,10 @@ erx_net_sup  (one_for_one, intensity 0: restarts nothing)
  |         erx_udp_sock, each acting for that grant's domain alone
  |- erx_net_interfaces  (one_for_one)
  |   |- link supervisor per interface, its id the interface's name
- |       |                   (vtnet0 ...), permanent; rest_for_one
+ |       |                   (vtnet0 ...), permanent; rest_for_one; a lent
+ |       |                   link (wlan0) is temporary, started by its offer
  |       |- the driver       erx_net_driver over its transport: erx_virtio_net or erx_genet,
+ |       |                   erx_net_ether for a medium another domain lends,
  |       |                   erx_net_loop for loopback, or erx_net_pipe on a host
  |       |- erx_net_if       the interface process
  |       |- erx_dhcp4        when the interface is configured for DHCP
@@ -640,9 +642,13 @@ A link is also what the network domain's driver-control facet,
 `network_ctl`, stops, starts and restarts for the system domain
 ([design-system.md](design-system.md#the-holders-driver-control-facet)).
 Its units map the manifest's unit `net` to `{erx_net_interfaces,
-Name}`, the link of the stack's one interface, which its transport
-names after the domain's network device as FreeBSD names a driver's
-units: `vtnet0` of `erx_virtio_net`, `genet0` of `erx_genet`.
+Name}`, the link of the interface whose transport drives the domain's
+network device, which that transport
+names after the device as FreeBSD names a driver's
+units: `vtnet0` of `erx_virtio_net`, `genet0` of `erx_genet`. A link
+another domain lends through `ether`, `wlan0`, is no unit of the network
+domain, and `network_ctl` never names it
+([design-wifi.md](design-wifi.md#the-ether-interface-and-wlan0)).
 The runtime reads the name from the interfaces `children/1` is given,
 so no second list of names exists to fall out of step. One link stands
 for the unit only while the unit holds one network device; with none
@@ -2710,7 +2716,7 @@ tap device or another medium (N12).
 
 | Seam | erXos's implementation | The portable one | Chosen by |
 | --- | --- | --- | --- |
-| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp` or a test process; `erx_tap`, over a tap device; `erx_netmap`, over netmap's rings | each interface's entry in the `interfaces` key |
+| the medium | the driver's transport `erx_virtio_net`, over the device NIF | the transport `erx_net_pipe`, over `gen_udp` or a test process; `erx_tap`, over a tap device; `erx_netmap`, over netmap's rings; `erx_net_ether`, a medium another domain lends, on erXos and on a host alike | each interface's entry in the `interfaces` key |
 | the clock and entropy | `erx_net_clock` over ERTS's monotonic clock and `erx_bytes:entropy/1` | the same; in a test run, the virtual clock and its seeded generator | the `clock` key |
 | the per-byte primitives | `erx_bytes` of the `erx` application, BIFs of erXos's ERTS, those of the network over the C of `erx_net`'s `c_src/` | `erx_bytes` of `erx_net`'s `portable/` directory: the same C, loaded from `priv/erx_bytes_nif.so`, and `entropy/1` from `crypto:strong_rand_bytes/1` | the build: one of the two modules is present |
 | the runtime | `erx_net_erxos`: the request limit of erXos's ERTS, and `erx_facet` to run a grant | `erx_net_local`, in `portable/`: no envelopes, no limits, and a plain loop that runs a grant's callbacks | the `runtime` key |
@@ -2978,6 +2984,7 @@ credit, and the link stays stuck until the driver's next end.
 | `erx_net_pipe` | `ethernet`; the configured address, which must be unicast with the locally administered bit set, else `init` fails with `{error, {lladdr, Addr}}` | configured, default 1,500, from 1,280 to 9,000, else `{error, {mtu, N}}` | `up` from `init`; the far end's end stops the pipe, and the driver tells the interface `down` while it waits out its hold | configured | `none`; `copy` in the `process` end's offload mode |
 | `erx_tap` | `ethernet`; the configured address, checked as the pipe's | configured, checked as the pipe's | `up` from `init`; an error of its descriptor ends the medium, and the driver tells the interface `down` while it waits out its hold | configured, default 256 | `copy` |
 | `erx_netmap` | `ethernet`; the configured address, which must be unicast | configured, default 1,500, from 1,280 to 9,000 and within the port's buffer with the Ethernet header | `up` from a successful registration; `down` from an `init` whose registration failed, and while the driver waits out its hold | configured, default the transmit ring's slot count | `copy` |
+| `erx_net_ether` | `ethernet`; the address the lending domain's offer carries, which must be unicast ([design-wifi.md](design-wifi.md#the-ether-interface-and-wlan0)) | the offer's, from 1,280 to 1,500 | `down` until the lender's first link message, then the latest it sent; the lender's end stops the medium | the transmit credit the lender granted | `none` |
 
 `finish` says who finishes what the stack leaves unfinished, a run's
 cut and a delayed checksum: `copy` for a transport whose copy does it,
@@ -4446,6 +4453,15 @@ and its check ([design-system.md](design-system.md#the-manifest), rule
 8). The driver is a process of the network domain, and the stack talks to
 it as to any local process. No client domain reaches a driver, an
 interface process or a shared table.
+
+A domain that drives a medium the network domain cannot hold, the WiFi
+domain with the Raspberry Pi 4's WiFi chip behind the storage domain's
+SD controller, lends it through a facet of the network domain's `ether`
+interface, one service row per lent interface, named after it. An offer
+starts that interface's link, whose driver is a process of the network
+domain as every driver is, over the transport `erx_net_ether`; the
+lender sees only its own link's frames, credits and offer, and no other
+part of the stack ([design-wifi.md](design-wifi.md#the-ether-interface-and-wlan0)).
 
 ### The grant
 

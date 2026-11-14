@@ -395,7 +395,12 @@ applications do
 ([design-runtime.md](design-runtime.md#everything-else)), in releases that
 ask for them; the system release never does.
 
-* **`crypto`** is unchanged. Its NIF is built as `crypto.a` against
+* **`crypto`** takes one edit: `ec_point_mul/3` and `ec_point_add/3` on
+  `secp256r1`, the point arithmetic WiFi's SAE needs, over OpenSSL's
+  `EC_POINT_mul` and `EC_POINT_add` with every point decoded and checked
+  by `EC_POINT_oct2point`
+  ([design-wifi.md](design-wifi.md#otps-crypto-two-point-functions)).
+  Its NIF is built as `crypto.a` against
   `openssl/`'s `libcrypto.a` and linked into the interpreter and BeamAsm
   images. Its `on_load` finds the NIF in the static table.
 * **`asn1`** ships its run-time module `asn1rt_nif`, which
@@ -409,7 +414,9 @@ The oracle's stock OTP 29.1.2 builds `crypto` on the development host
 against the same OpenSSL 3.5.9 with the same options, the target and the
 three edits aside, so `crypto:supports/0` agrees on both sides and a
 difference between them is erXos's
-([design-host-oracle.md](design-host-oracle.md)).
+([design-host-oracle.md](design-host-oracle.md)). The two point
+functions exist on erXos alone; OTP's suites do not call them, and their
+own tests check them against `crypto:generate_key/3`.
 
 ## Invariants
 

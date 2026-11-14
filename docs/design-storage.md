@@ -308,6 +308,12 @@ functions build CMD17 and CMD18, CMD24 and CMD25, and CMD13 (SEND_STATUS). Only 
 write functions, one per transport, build a type or a command that
 writes the medium (virtio's `OUT`; SD's CMD24 and CMD25), and each
 calls the one trial check first.
+On the Raspberry Pi 4 it also issues the commands of the legacy
+controller's SDIO card, from a second table, CMD3, 5, 7, 52 and 53, built
+only by its SDIO builders and issued only on a record of kind `sdio`, as
+the SD table's commands are issued only on a `block` record
+([design-wifi.md](design-wifi.md#commands-go-through-erx_blk_write)).
+No SDIO command writes a medium, so none passes the trial check.
 The transfer-mode half of every command word it builds leaves DMA off,
 and `erx_device:command/2` refuses a word that turns it on, so no
 command starts a DMA transfer. DMA through the controller's ADMA2 tables
@@ -1040,14 +1046,20 @@ interrupt line with the SoC's legacy SD controller, `&sdhci`
 unit, given whole to the storage domain
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)),
 and the record marks the line shared. The device process attaches through
-the line's owner, `erx_irq_line`, with one member, itself, as every
-driver on a shared line does
-([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)):
-the legacy controller has no driver, as the SPI controllers on the mini
-UART's line have none. `erx_blk_sup` starts the owner before the device
-process, `rest_for_one`, from `erx_irq_line:owners/1` over the records.
-A delivery is a hint to look: a round the legacy controller raised finds
-EMMC2's `interrupt` empty, and the device process answers it done.
+the line's owner, `erx_irq_line`, as every driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
+and so does the line's second member, the legacy controller's SDIO host,
+`erx_sdio_host`, which serves the WiFi card to the WiFi domain
+([design-wifi.md](design-wifi.md#the-sdio-host-in-the-storage-domain)).
+`erx_blk_sup` starts the owner before the device process, `rest_for_one`,
+from `erx_irq_line:owners/1` over the records, and the SDIO host's
+supervisor after them as a `temporary` child, so the SDIO host's end
+never ends the storage domain. A delivery is a hint to look: a round the
+legacy controller raised finds EMMC2's `interrupt` empty, and the device
+process answers it done. The SDIO host enables only the card's interrupt
+on the line, masks it at each firing until its client rearms it, and
+answers between the blocks of a transfer, so it adds at most one block's
+time to a round.
 
 **Failure.** Outside the expected timeout above, any error bit in
 `interrupt`, an error bit in an R1, an inhibit that does not clear, a
