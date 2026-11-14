@@ -59,6 +59,9 @@ These shape every design and change; the rules below apply them.
   with each advisor's recommendation and yours. Scope, priorities,
   licenses, pushes, board settings, changes to what I have accepted, any
   weakening of a security commitment, and edits to this file stay mine.
+* **Open questions park only their slice.** A question waiting on me
+  blocks only the work whose outcome depends on its answer. Keep building
+  everything else meanwhile, and state the blocked slice when you ask.
 * **Read the source, not your memory.** Download the code, specification or
   data a design, plan or change relies on (FreeBSD, Linux, QEMU, a vendor's
   documentation, whatever applies) and work from what you read, citing file
