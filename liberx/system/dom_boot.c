@@ -79,6 +79,8 @@ erx_dom_boot_up(erx_dom_lib_t *lib, const erx_boot_info_t *system_page, uint64_t
 	/* On the stopgap the root names its one boot archive as image 0. */
 	lib->held.image = 0;
 	lib->pack_flags = system_page->pack_flags;
+	lib->hwcap = system_page->hwcap;
+	lib->hwcap2 = system_page->hwcap2;
 	lib->det = (system_page->flags & ERX_BOOT_DET) != 0;
 	for (uint32_t index = 0; index < lib->view.nprincipals; index++) {
 		principal = &lib->view.principals[index];

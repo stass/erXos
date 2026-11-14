@@ -100,6 +100,536 @@
         "schema": "2.9.6",
         "timestamp": "2026-09-21 13:58:23"
       }
+    },
+    {
+      "name": "ID_AA64ISAR0_EL1",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 0,
+        "CRn": 0,
+        "CRm": 6,
+        "op2": 0
+      },
+      "fields": [
+        {
+          "reserved": "RES0",
+          "offset": 0,
+          "width": 4
+        },
+        {
+          "name": "AES",
+          "offset": 4,
+          "width": 4
+        },
+        {
+          "name": "SHA1",
+          "offset": 8,
+          "width": 4
+        },
+        {
+          "name": "SHA2",
+          "offset": 12,
+          "width": 4
+        },
+        {
+          "name": "CRC32",
+          "offset": 16,
+          "width": 4
+        },
+        {
+          "name": "Atomic",
+          "offset": 20,
+          "width": 4
+        },
+        {
+          "reserved": "RES0",
+          "offset": 24,
+          "width": 4
+        },
+        {
+          "name": "RDM",
+          "offset": 28,
+          "width": 4
+        },
+        {
+          "name": "SHA3",
+          "offset": 32,
+          "width": 4
+        },
+        {
+          "name": "SM3",
+          "offset": 36,
+          "width": 4
+        },
+        {
+          "name": "SM4",
+          "offset": 40,
+          "width": 4
+        },
+        {
+          "name": "DP",
+          "offset": 44,
+          "width": 4
+        },
+        {
+          "name": "FHM",
+          "offset": 48,
+          "width": 4
+        },
+        {
+          "name": "TS",
+          "offset": 52,
+          "width": 4
+        },
+        {
+          "name": "TLB",
+          "offset": 56,
+          "width": 4
+        },
+        {
+          "name": "RNDR",
+          "offset": 60,
+          "width": 4
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "ID_AA64ISAR1_EL1",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 0,
+        "CRn": 0,
+        "CRm": 6,
+        "op2": 1
+      },
+      "fields": [
+        {
+          "name": "DPB",
+          "offset": 0,
+          "width": 4
+        },
+        {
+          "name": "APA",
+          "offset": 4,
+          "width": 4
+        },
+        {
+          "name": "API",
+          "offset": 8,
+          "width": 4
+        },
+        {
+          "name": "JSCVT",
+          "offset": 12,
+          "width": 4
+        },
+        {
+          "name": "FCMA",
+          "offset": 16,
+          "width": 4
+        },
+        {
+          "name": "LRCPC",
+          "offset": 20,
+          "width": 4
+        },
+        {
+          "name": "GPA",
+          "offset": 24,
+          "width": 4
+        },
+        {
+          "name": "GPI",
+          "offset": 28,
+          "width": 4
+        },
+        {
+          "name": "FRINTTS",
+          "offset": 32,
+          "width": 4
+        },
+        {
+          "name": "SB",
+          "offset": 36,
+          "width": 4
+        },
+        {
+          "name": "SPECRES",
+          "offset": 40,
+          "width": 4
+        },
+        {
+          "name": "BF16",
+          "offset": 44,
+          "width": 4
+        },
+        {
+          "name": "DGH",
+          "offset": 48,
+          "width": 4
+        },
+        {
+          "name": "I8MM",
+          "offset": 52,
+          "width": 4
+        },
+        {
+          "name": "XS",
+          "offset": 56,
+          "width": 4
+        },
+        {
+          "name": "LS64",
+          "offset": 60,
+          "width": 4
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "ID_AA64ISAR2_EL1",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 0,
+        "CRn": 0,
+        "CRm": 6,
+        "op2": 2
+      },
+      "fields": [
+        {
+          "name": "WFxT",
+          "offset": 0,
+          "width": 4
+        },
+        {
+          "name": "RPRES",
+          "offset": 4,
+          "width": 4
+        },
+        {
+          "name": "GPA3",
+          "offset": 8,
+          "width": 4
+        },
+        {
+          "name": "APA3",
+          "offset": 12,
+          "width": 4
+        },
+        {
+          "name": "MOPS",
+          "offset": 16,
+          "width": 4
+        },
+        {
+          "name": "BC",
+          "offset": 20,
+          "width": 4
+        },
+        {
+          "name": "PAC_frac",
+          "offset": 24,
+          "width": 4
+        },
+        {
+          "name": "CLRBHB",
+          "offset": 28,
+          "width": 4
+        },
+        {
+          "name": "SYSREG_128",
+          "offset": 32,
+          "width": 4
+        },
+        {
+          "name": "SYSINSTR_128",
+          "offset": 36,
+          "width": 4
+        },
+        {
+          "name": "PRFMSLC",
+          "offset": 40,
+          "width": 4
+        },
+        {
+          "name": "PCDPHINT",
+          "offset": 44,
+          "width": 4
+        },
+        {
+          "name": "RPRFM",
+          "offset": 48,
+          "width": 4
+        },
+        {
+          "name": "CSSC",
+          "offset": 52,
+          "width": 4
+        },
+        {
+          "name": "LUT",
+          "offset": 56,
+          "width": 4
+        },
+        {
+          "name": "ATS1A",
+          "offset": 60,
+          "width": 4
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "ID_AA64PFR0_EL1",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 0,
+        "CRn": 0,
+        "CRm": 4,
+        "op2": 0
+      },
+      "fields": [
+        {
+          "name": "EL0",
+          "offset": 0,
+          "width": 4
+        },
+        {
+          "name": "EL1",
+          "offset": 4,
+          "width": 4
+        },
+        {
+          "name": "EL2",
+          "offset": 8,
+          "width": 4
+        },
+        {
+          "name": "EL3",
+          "offset": 12,
+          "width": 4
+        },
+        {
+          "name": "FP",
+          "offset": 16,
+          "width": 4
+        },
+        {
+          "name": "AdvSIMD",
+          "offset": 20,
+          "width": 4
+        },
+        {
+          "name": "GIC",
+          "offset": 24,
+          "width": 4
+        },
+        {
+          "name": "RAS",
+          "offset": 28,
+          "width": 4
+        },
+        {
+          "name": "SVE",
+          "offset": 32,
+          "width": 4
+        },
+        {
+          "name": "SEL2",
+          "offset": 36,
+          "width": 4
+        },
+        {
+          "name": "MPAM",
+          "offset": 40,
+          "width": 4
+        },
+        {
+          "name": "AMU",
+          "offset": 44,
+          "width": 4
+        },
+        {
+          "name": "DIT",
+          "offset": 48,
+          "width": 4
+        },
+        {
+          "name": "RME",
+          "offset": 52,
+          "width": 4
+        },
+        {
+          "name": "CSV2",
+          "offset": 56,
+          "width": 4
+        },
+        {
+          "name": "CSV3",
+          "offset": 60,
+          "width": 4
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
+    },
+    {
+      "name": "ID_AA64PFR1_EL1",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "none",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 0,
+        "CRn": 0,
+        "CRm": 4,
+        "op2": 1
+      },
+      "fields": [
+        {
+          "name": "BT",
+          "offset": 0,
+          "width": 4
+        },
+        {
+          "name": "SSBS",
+          "offset": 4,
+          "width": 4
+        },
+        {
+          "name": "MTE",
+          "offset": 8,
+          "width": 4
+        },
+        {
+          "name": "RAS_frac",
+          "offset": 12,
+          "width": 4
+        },
+        {
+          "name": "MPAM_frac",
+          "offset": 16,
+          "width": 4
+        },
+        {
+          "reserved": "RES0",
+          "offset": 20,
+          "width": 4
+        },
+        {
+          "name": "SME",
+          "offset": 24,
+          "width": 4
+        },
+        {
+          "name": "RNDR_trap",
+          "offset": 28,
+          "width": 4
+        },
+        {
+          "name": "CSV2_frac",
+          "offset": 32,
+          "width": 4
+        },
+        {
+          "name": "NMI",
+          "offset": 36,
+          "width": 4
+        },
+        {
+          "name": "MTE_frac",
+          "offset": 40,
+          "width": 4
+        },
+        {
+          "name": "GCS",
+          "offset": 44,
+          "width": 4
+        },
+        {
+          "name": "THE",
+          "offset": 48,
+          "width": 4
+        },
+        {
+          "name": "MTEX",
+          "offset": 52,
+          "width": 4
+        },
+        {
+          "name": "DF2",
+          "offset": 56,
+          "width": 4
+        },
+        {
+          "name": "PFAR",
+          "offset": 60,
+          "width": 4
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
     }
   ]
 }

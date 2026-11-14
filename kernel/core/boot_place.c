@@ -529,11 +529,12 @@ erx_boot_pair_derive(const void *partition, size_t partition_len,
 bool
 erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
     size_t bootargs_len, const char *stdout_path, size_t stdout_len,
-    erx_boot_pair_t boot, erx_boot_range_t tree, uint8_t *record, size_t size)
+    erx_boot_pair_t boot, erx_boot_range_t tree,
+    const uint64_t cpu_id[ERX_BOOT_CPU_ID_COUNT], uint8_t *record, size_t size)
 {
 	erx_boot_handoff_t *handoff;
 
-	if (plan == NULL || record == NULL || size < ERX_BOOT_HANDOFF_SIZE ||
+	if (plan == NULL || cpu_id == NULL || record == NULL || size < ERX_BOOT_HANDOFF_SIZE ||
 	    bootargs_len > ERX_BOOT_STRINGS_MAX ||
 	    (bootargs == NULL && bootargs_len != 0) ||
 	    stdout_len > ERX_BOOT_STDOUT_PATH_MAX ||
@@ -566,5 +567,7 @@ erx_boot_handoff_write(const erx_boot_load_plan_t *plan, const char *bootargs,
 		handoff->bootargs[index] = (uint8_t)bootargs[index];
 	for (size_t index = 0; index < stdout_len; index++)
 		handoff->stdout_path[index] = (uint8_t)stdout_path[index];
+	for (size_t index = 0; index < ERX_BOOT_CPU_ID_COUNT; index++)
+		handoff->cpu_id[index] = cpu_id[index];
 	return (true);
 }

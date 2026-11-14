@@ -18,6 +18,8 @@ _Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) ==
     sizeof(((erx_boot_handoff_t *)0)->build_id) &&
     sizeof(((erx_boot_handoff_view_t *)0)->index_hash) ==
     sizeof(((erx_boot_handoff_t *)0)->index_hash), "the view holds the record's identifiers");
+_Static_assert(sizeof(((erx_boot_handoff_t *)0)->cpu_id) ==
+    ERX_BOOT_CPU_ID_COUNT * sizeof(uint64_t), "the seam's CPU words are the record's");
 
 const char *
 erx_boot_handoff_accept(const uint8_t *record, size_t length,
@@ -72,6 +74,8 @@ erx_boot_handoff_accept(const uint8_t *record, size_t length,
 		view->build_id[index] = handoff->build_id[index];
 	for (size_t index = 0; index < sizeof(view->index_hash); index++)
 		view->index_hash[index] = handoff->index_hash[index];
+	for (size_t index = 0; index < ERX_BOOT_CPU_ID_COUNT; index++)
+		view->cpu_id[index] = handoff->cpu_id[index];
 	return (NULL);
 }
 

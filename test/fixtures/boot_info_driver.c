@@ -41,7 +41,7 @@ static erx_boot_inputs_t
 good_inputs(void)
 {
 	return ((erx_boot_inputs_t){ .domain_id = 4, .flags = ERX_BOOT_ROOT, .pack_flags = 7, .group = { .raw = ERX_CAP_SELF },
-	    .release_addr = 0x1000, .cpuset = 0xf, .capacity_mcpu = 4000, .node = "system@host", .node_len = 11,
+	    .release_addr = 0x1000, .cpuset = 0xf, .hwcap = 0x3, .hwcap2 = 0x80, .capacity_mcpu = 4000, .node = "system@host", .node_len = 11,
 	    .args = good_args, .nargs = COUNT(good_args), .env = good_env, .nenv = COUNT(good_env),
 	    .limits = { .max_frame = 9 } });
 }
@@ -57,7 +57,8 @@ test_round_trip(void)
 	CHECK(view.info.version == ERX_BOOT_VERSION && view.info.abi_version == ERX_ABI_VERSION, "versions");
 	CHECK(view.info.domain_id == 4 && view.info.flags == ERX_BOOT_ROOT && view.info.pack_flags == 7, "header fields");
 	CHECK(view.info.group.raw == ERX_CAP_SELF && view.info.budget.raw == ERX_CAP_NULL && view.info.release_addr == 0x1000, "capabilities");
-	CHECK(view.info.seal_addr == 0 && view.info.hwcap == 0 && view.info.hwcap2 == 0, "zero fields");
+	CHECK(view.info.seal_addr == 0, "zero fields");
+	CHECK(view.info.hwcap == 0x3 && view.info.hwcap2 == 0x80, "feature words");
 	CHECK(view.info.cpuset == 0xf && view.info.capacity_mcpu == 4000 && view.info.limits.max_frame == 9, "cpus and limits");
 	CHECK(view.info.node_off == ERX_BOOT_INFO_SIZE + ERX_BOOT_ROOT_EXTENSION_SIZE, "strings lie past the root extension");
 	CHECK(view.info.node_len == 11 && memcmp(view.node, "system@host", 11) == 0, "node");

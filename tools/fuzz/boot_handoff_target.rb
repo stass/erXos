@@ -14,7 +14,11 @@ handoff_version = Erx::ABI::Generated::CODEC.constant('boot_handoff_version')
 handoff = lambda do |version: handoff_version, flags: 1, start: 0x4020_0000, size: 0x10_0000, bootargs: 7, stdout: '/pl011@9000000',
                      stdout_length: stdout.bytesize, boot: [2, 1]|
   [version, flags, 'B' * 8, 'H' * 32, start, size, 0x1000_0000, 0x10_0000, 1, bootargs].pack('VVa8a32Q<Q<Q<Q<VV')
-    .ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV') + ("\0".b * 4)
+    .ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV') + ("\0".b * 4) +
+    [0x4800_0000, 0x2000].pack('Q<Q<') + (1..8).map { |word| word * 0x1111 }.pack('Q<8')
+end
+unless handoff.call.bytesize == Erx::ABI::Generated::CODEC.layout_size('erx_boot_handoff')
+  raise Erx::Error, 'the handoff seed is not a whole record'
 end
 Erx::PackFuzz.declare_target(
   sources: ['kernel/core/boot_handoff.c'],

@@ -48,7 +48,9 @@ has two parts:
 The refresh refuses a `Registers.json` whose SHA-256 differs from
 `source_sha256`, a register with a conditional or feature-dependent layout,
 split or overlapping fields, fields that leave bits undeclared, and field
-enumerations, rather than guessing at them. Without the archive,
+enumerations, rather than guessing at them. A constant field, such as an
+identification register's feature field, keeps its name and position and
+not the values Arm lists for it: what a value means is the reading code's. Without the archive,
 `Erx::Sysreg.specification`, the file's one reader, checks every policy
 field and fact of the checked-in file (a host test runs it in `make check`),
 so a malformed edit fails there; whether the facts are Arm's is what

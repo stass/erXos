@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/core/boot_handoff.h"
 #include "erx/core/boot_pair.h"
 #include "erx/core/boot_range.h"
 
@@ -141,12 +142,13 @@ erx_boot_pair_t erx_boot_pair_derive(const void *, size_t, const void *, size_t)
  * stdout_len bytes of the node path /chosen/stdout-path names, at most
  * ERX_BOOT_STDOUT_MAX, stored empty unless it is a node path
  * (erx_boot_node_path_valid), the boot pair and the range of the device
- * tree's copy. Returns false when the record does not fit, the pair is one a reader refuses
+ * tree's copy, and the boot CPU's identification words (erx_boot_cpu_id_read). Returns false when the record does not fit, the pair is one a reader refuses
  * (erx_boot_pair_valid) or the tree's range is (erx_boot_tree_range_valid),
  * and then writes nothing.
  */
 bool erx_boot_handoff_write(const erx_boot_load_plan_t *, const char *, size_t,
-    const char *, size_t, erx_boot_pair_t, erx_boot_range_t, uint8_t *, size_t);
+    const char *, size_t, erx_boot_pair_t, erx_boot_range_t,
+    const uint64_t [ERX_BOOT_CPU_ID_COUNT], uint8_t *, size_t);
 
 #ifdef __cplusplus
 }

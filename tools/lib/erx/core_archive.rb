@@ -47,7 +47,7 @@ module Erx
     # What bootstrap links: those cores with what they call, and the image planner
     # the root's service reads an image entry with (NativeRoot links this archive). Translation is off
     # when they run, so every load and store must be aligned.
-    BOOT_SOURCES = [*BOOTSTRAP_SOURCES, 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
+    BOOT_SOURCES = [*BOOTSTRAP_SOURCES, 'kernel/arch/aarch64/cpu_id.c', 'kernel/crypto/blake3/blake3.c', 'kernel/crypto/blake3/blake3_portable.c',
                     'liberx/elf_plan.c', 'liberx/image_plan.c', 'build/gen/liberx/generated/abi_reader.c'].freeze
     BOOT_FLAGS = %w[-mstrict-align].freeze
     BOOT_ARCHIVE = 'erx_boot.a'

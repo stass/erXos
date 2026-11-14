@@ -65,6 +65,8 @@ typedef struct erx_boot_inputs {
 							 * all zero without one */
 	uint64_t		 release_addr;
 	uint64_t		 cpuset;
+	uint64_t		 hwcap;		/* the CPU feature words (cpu_features.h) */
+	uint64_t		 hwcap2;
 	const char		*node;
 	size_t			 node_len;
 	const char		*system_node;	/* the system connection's peer, or none: length 0 */

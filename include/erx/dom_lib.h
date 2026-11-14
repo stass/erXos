@@ -100,6 +100,8 @@ typedef struct erx_dom_lib {
 					 * holder's boot page */
 	uint64_t	 build_id;	/* the boot image's build identifier, as
 					 * -erx build gives it, for each boot page */
+	uint64_t	 hwcap;		/* the system's boot page's CPU feature words, */
+	uint64_t	 hwcap2;	/* for each boot page */
 	erx_dom_device_t *device_records; /* view.ndevices: the view's, which a
 					 * holder's creation and end write */
 	uint32_t	 cap_limit;	/* each domain's handle table */

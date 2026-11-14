@@ -7,10 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <l4/sigma0/sigma0.h>
-#include <l4/sys/consts.h>
-#include <l4/sys/kip.h>
-
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
@@ -18,6 +14,7 @@
 #include "liberx/backend/api.h"
 #include "kernel/crypto/blake3/blake3.h"
 #include "liberx/backend/fiasco/launcher.h"
+#include "liberx/backend/fiasco/root_handoff.h"
 #include "liberx/backend/fiasco/root_open.h"
 #include "liberx/backend/fiasco/vm.h"
 
@@ -40,20 +37,12 @@ root_bytes_equal(const uint8_t *first, const uint8_t *second, size_t length)
 const char *
 erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 {
-	const l4_kernel_info_t *kip;
 	erx_pack_error_t pack_error = { 0 };
 	erx_pack_entry_t entry;
 	const char *reason;
 	uint32_t last;
 
-	kip = l4sigma0_map_kip(L4_BASE_PAGER_CAP, (void *)ERX_FIASCO_KIP_WINDOW,
-	    L4_PAGESHIFT);
-	if (kip == NULL)
-		return ("kernel information page: not mapped");
-
-	/* A kernel started without bootstrap's handoff page has a user_ptr of 0. */
-	reason = erx_boot_handoff_accept((const uint8_t *)(uintptr_t)kip->user_ptr,
-	    ERX_BOOT_HANDOFF_SIZE, handoff);
+	reason = erx_fiasco_root_handoff(handoff);
 	if (reason != NULL)
 		return (reason);
 	root_tree = (const void *)(uintptr_t)handoff->tree.start;

@@ -229,6 +229,7 @@ module Erx
         raise Error, 'invalid Arm field' unless entry.is_a?(Hash)
         allowed = case entry['_type']
                   when 'Fields.Field' then %w[_type access description display name rangeset resets values volatile]
+                  when 'Fields.ConstantField' then %w[_type access description name rangeset value]
                   when 'Fields.Reserved' then %w[_type description rangeset value]
                   else []
                   end
@@ -252,6 +253,13 @@ module Erx
           unless entry['access'].nil? && values == { '_type' => 'Valuesets.Values', 'values' => [] }
             raise Error, 'Arm field overrides or enumerations require support'
           end
+          { 'name' => Hardware.identifier(entry.fetch('name')), 'offset' => offset, 'width' => width }
+        when 'Fields.ConstantField'
+          # A field the implementation fixes, such as an identification register's feature
+          # field: its position is kept, and the values Arm lists for it are not, since what a
+          # value means is decided by the code that reads the field.
+          raise Error, 'Arm field overrides require support' unless entry['access'].nil?
+
           { 'name' => Hardware.identifier(entry.fetch('name')), 'offset' => offset, 'width' => width }
         when 'Fields.Reserved'
           raise Error, 'unsupported Arm reserved-bit semantics' unless %w[RES0 RES1].include?(entry['value'])

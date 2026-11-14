@@ -63,7 +63,8 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	    view.boot.value != record.boot_value || view.boot.slot != record.boot_slot ||
 	    view.tree.start != record.tree_start || view.tree.size != record.tree_size ||
 	    memcmp(view.build_id, record.build_id, sizeof(view.build_id)) != 0 ||
-	    memcmp(view.index_hash, record.index_hash, sizeof(view.index_hash)) != 0)
+	    memcmp(view.index_hash, record.index_hash, sizeof(view.index_hash)) != 0 ||
+	    memcmp(view.cpu_id, record.cpu_id, sizeof(view.cpu_id)) != 0)
 		abort();
 	/* The whole string the view points to lies inside the record. */
 	if (view.bootargs != (const char *)at + ERX_BOOT_HANDOFF_OFF_BOOTARGS ||

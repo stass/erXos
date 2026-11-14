@@ -177,7 +177,7 @@ class SysregTest < Minitest::Test
   def test_checked_in_specification_parses_with_counter_facts
     bytes = File.binread(File.join(REPOSITORY, Erx::Sysreg::SPECIFICATION))
     specification = Erx::Sysreg.specification(bytes)
-    assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0],
+    assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0 ID_AA64ISAR0_EL1 ID_AA64ISAR1_EL1 ID_AA64ISAR2_EL1 ID_AA64PFR0_EL1 ID_AA64PFR1_EL1],
                  specification.fetch('registers').map { |register| register.fetch('name') }
     rows = specification.fetch('registers').to_h { |register| [register.fetch('name'), register] }
     assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 1 }, rows.fetch('CNTPCT_EL0').fetch('encoding'))
@@ -185,6 +185,26 @@ class SysregTest < Minitest::Test
     assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 2 }, rows.fetch('CNTVCT_EL0').fetch('encoding'))
     assert_equal [{ 'name' => 'VirtualCount', 'offset' => 0, 'width' => 64 }], rows.fetch('CNTVCT_EL0').fetch('fields')
     assert_equal({ 'name' => 'ClockFreq', 'offset' => 0, 'width' => 32 }, rows.fetch('CNTFRQ_EL0').fetch('fields').first)
+    assert_equal({ 'op0' => 3, 'op1' => 0, 'CRn' => 0, 'CRm' => 6, 'op2' => 0 }, rows.fetch('ID_AA64ISAR0_EL1').fetch('encoding'))
+    assert_includes rows.fetch('ID_AA64PFR0_EL1').fetch('fields'), { 'name' => 'SVE', 'offset' => 32, 'width' => 4 }
+  end
+
+  # An identification field is a constant field: its position is kept and its listed values
+  # are not; one that overrides its access is still refused.
+  def test_constant_fields_keep_their_position
+    constant = lambda do |access|
+      record = SysregFixture.record
+      record.fetch('fieldsets').first['values'] = [
+        { '_type' => 'Fields.ConstantField', 'name' => 'Low', 'access' => access,
+          'rangeset' => [{ '_type' => 'Range', 'start' => 0, 'width' => 4 }],
+          'value' => { '_type' => 'Values.ImplementationDefined' } },
+        { '_type' => 'Fields.Reserved', 'value' => 'RES0', 'rangeset' => [{ '_type' => 'Range', 'start' => 4, 'width' => 60 }] }
+      ]
+      record
+    end
+    fields = extract([constant.call(nil)]).fetch('registers').first.fetch('fields')
+    assert_equal [{ 'name' => 'Low', 'offset' => 0, 'width' => 4 }, { 'reserved' => 'RES0', 'offset' => 4, 'width' => 60 }], fields
+    assert_raises(Erx::Error) { extract([constant.call({ '_type' => 'Accessors.Override' })]) }
   end
 
   # Each mutation of a valid specification that a consumer must not trust.

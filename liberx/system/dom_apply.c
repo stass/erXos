@@ -605,6 +605,8 @@ apply_bootinfo(apply_t *apply)
 	inputs.domain_id = spec->id;
 	inputs.flags = apply->lib->det ? ERX_BOOT_DET : 0;
 	inputs.pack_flags = apply->lib->pack_flags;
+	inputs.hwcap = apply->lib->hwcap;
+	inputs.hwcap2 = apply->lib->hwcap2;
 	inputs.capacity_mcpu = spec->grant.capacity_mcpu;
 	inputs.cpuset = spec->grant.cpuset;
 	inputs.budget = (erx_cap_t){ .raw = apply->installed[ERX_DOM_OBJ_BUDGET] };

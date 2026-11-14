@@ -32,6 +32,8 @@
 _Alignas(8) static uint8_t record[ERX_BOOT_HANDOFF_RECORD_SIZE];
 static erx_boot_workspace_t workspace;
 static erx_boot_load_plan_t plan;
+/* Identification words a writer stores and a reader gives back in order. */
+static const uint64_t cpu_id[ERX_BOOT_CPU_ID_COUNT] = { 0x1010, 0x2020, 0x3030, 0x4040, 0x5050, 0x6060, 0x7070, 0x8080 };
 
 static uint8_t *
 read_file(const char *path, size_t *length)
@@ -116,7 +118,7 @@ run_plan(char **argv)
 	}
 	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14,
 	    (erx_boot_pair_t){ .value = ERX_BOOT_VALUE_UNKNOWN, .slot = ERX_BOOT_SLOT_NONE },
-	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, record, sizeof(record)))
+	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, cpu_id, record, sizeof(record)))
 		abort();
 	fwrite(record, 1, 48, stdout);
 	printf("\n");
@@ -147,6 +149,10 @@ print_accepted(size_t length)
 	    (int)view.stdout_path_len, view.stdout_path, covered,
 	    erx_boot_handoff_covered(&view, &range, 1), view.boot.value, view.boot.slot,
 	    view.tree.start, view.tree.size);
+	printf("cpu_id");
+	for (size_t index = 0; index < ERX_BOOT_CPU_ID_COUNT; index++)
+		printf(" %" PRIx64, view.cpu_id[index]);
+	printf("\n");
 }
 
 static int
@@ -171,7 +177,7 @@ run_write(char **argv)
 	plan.archive = (erx_boot_range_t){ .start = 0x40204000, .size = 0x8000 };
 	memset(record, 0xa5, sizeof(record));
 	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14, boot,
-	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, record, sizeof(record))) {
+	    (erx_boot_range_t){ .start = 0x48000000, .size = 0x2000 }, cpu_id, record, sizeof(record))) {
 		/* A refused write leaves the record as it was. */
 		for (size_t index = 0; index < sizeof(record); index++)
 			if (record[index] != 0xa5)

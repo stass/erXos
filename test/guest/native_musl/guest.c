@@ -678,18 +678,24 @@ case_entropy(void)
 }
 
 /*
- * The auxiliary vector holds AT_HWCAP and AT_HWCAP2, both 0 in a root that has no boot
- * information page, and AT_RANDOM, which names 16 bytes from the generator, not all zero.
- * getauxval sets errno to ENOENT for a key the vector lacks.
+ * The auxiliary vector holds AT_HWCAP, which on every CPU erXos runs on has FP and Advanced
+ * SIMD and never a feature whose state the stopgap kernel does not save or enable (SVE,
+ * pointer authentication) or CPUID, which it does not emulate; AT_HWCAP2, which claims
+ * nothing on the stopgap; and AT_RANDOM, which names 16 bytes from the generator, not all
+ * zero. getauxval sets errno to ENOENT for a key the vector lacks.
  */
 static int
 case_auxv(void)
 {
+	const unsigned long never = HWCAP_SVE | HWCAP_PACA | HWCAP_PACG | HWCAP_CPUID;
 	const unsigned char *bytes;
+	unsigned long hwcap;
 	unsigned char any = 0;
 
 	errno = 0;
-	if (getauxval(AT_HWCAP) != 0 || getauxval(AT_HWCAP2) != 0 || errno != 0)
+	hwcap = getauxval(AT_HWCAP);
+	if ((hwcap & HWCAP_FP) == 0 || (hwcap & HWCAP_ASIMD) == 0 || (hwcap & never) != 0 ||
+	    getauxval(AT_HWCAP2) != 0 || errno != 0)
 		return (0);
 	bytes = (const unsigned char *)getauxval(AT_RANDOM);
 	if (bytes == NULL || errno != 0)

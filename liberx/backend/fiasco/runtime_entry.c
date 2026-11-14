@@ -22,6 +22,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/core/boot_info.h"
 #include "liberx/backend/core/boot_manifest.h"
+#include "liberx/backend/core/cpu_features.h"
 #include "erx/dom_lib.h"
 #include "liberx/backend/fiasco/boot_args.h"
 #include "liberx/backend/fiasco/console.h"
@@ -138,6 +139,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
     const erx_pack_view_t *pack, const erx_boot_args_t *boot_args)
 {
 	erx_boot_inputs_t inputs = { 0 };
+	erx_cpu_features_t features;
 	erx_boot_manifest_t manifest;
 	erx_boot_info_status_t status;
 	const char *reason;
@@ -179,6 +181,9 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 	inputs.time_page = (erx_cap_t){ .raw = erx_fiasco_time_object() };
 	inputs.release_addr = (uint64_t)(uintptr_t)erx_release_addr();
 	inputs.cpuset = cpuset;
+	features = erx_cpu_features(handoff->cpu_id);
+	inputs.hwcap = features.hwcap;
+	inputs.hwcap2 = features.hwcap2;
 	inputs.node = manifest.node;
 	inputs.node_len = manifest.node_len;
 	inputs.args = arg_words;

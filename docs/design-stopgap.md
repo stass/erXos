@@ -191,7 +191,9 @@ Inherited code reads no executable and no modules.
    made: after `apply`, it packs the tree with `fdt_open_into` and `fdt_pack` into free RAM from
    `mem_manager->find_free_ram`, reserves the copy's whole pages as `Region::Root` with `Root_section_ro`, named
    `.erxtree`, and refuses the boot when the packed tree exceeds `ERX_BOOT_TREE_MAX` or a step fails
-   ([design-device-tree.md](design-device-tree.md#on-the-stopgap)))
+   ([design-device-tree.md](design-device-tree.md#on-the-stopgap)); and the boot CPU's
+   identification registers, which `erx_boot_cpu_id_read` reads in kernel mode, since user mode
+   cannot and the stopgap publishes no copy, into the record's `cpu_id` words)
    into the options block for the kernel. That block is mapped into no task, so it also writes the
    record, by `erx_image_load`, into the **handoff page**, a free page from
    `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
@@ -272,7 +274,7 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | node name | `system@` and the manifest's `host` | the same |
 | `args` | the manifest's `system_args`, the console's words, `-erx boot VALUE SLOT` ([image windows](#image-windows)), `-erx build ID`, the boot image's build identifier in decimal, and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
 | `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
-| `hwcap`, `hwcap2` | 0, which claims no optional feature; the interpreter asks for none | the same |
+| `hwcap`, `hwcap2` | the features the boot CPU's identification registers name that the kernel enables and saves for user mode, from the handoff's `cpu_id` words ([Boot handoff](#boot-handoff), step 4; the architecture's binding gives the mapping, [design-arch-aarch64.md](design-arch-aarch64.md#cpu-feature-words)) | 0, which claims no optional feature |
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
 
 `system_args` is a new string of the manifest's header, under the same rule as a domain's `args`, so

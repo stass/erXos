@@ -340,8 +340,11 @@ erx_image_load(Platform_base *plat)
     args_length = erx_boot_args_cut(args, strnlen(args, args_size), ERX_BOOT_ARGS_MAX);
   static char stdout_path[ERX_BOOT_STDOUT_MAX + 1];
   size_t stdout_length = chosen_stdout_path(fdt, chosen, stdout_path);
+  // The boot CPU's identification registers, which only kernel mode reads.
+  uint64_t cpu_id[ERX_BOOT_CPU_ID_COUNT];
+  erx_boot_cpu_id_read(cpu_id);
   if (!erx_boot_handoff_write(&plan, args, args_length, stdout_path, stdout_length,
-                              chosen_boot_pair(fdt, chosen), tree, options->erx_handoff,
+                              chosen_boot_pair(fdt, chosen), tree, cpu_id, options->erx_handoff,
                               sizeof(options->erx_handoff)))
     refuse("handoff record", "write");
 

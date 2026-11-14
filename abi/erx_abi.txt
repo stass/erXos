@@ -57,7 +57,7 @@ limit pack_path_max u32 4096
 limit pack_strings_max u32 4194304
 limit pack_hash_size u32 32
 limit boot_locator_version u32 1
-limit boot_handoff_version u32 5
+limit boot_handoff_version u32 6
 limit boot_kip_view_type u32 16
 limit boot_koptions_view_type u32 17
 limit boot_kip_view_min u32 4096

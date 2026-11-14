@@ -282,16 +282,17 @@ class BootPlaceTest < Minitest::Test
   end
 
   # stdout_path's length sits after the 2048 bytes of bootargs, its 256 bytes after that,
-  # then the boot value and its slot, a reserved word, and the device tree copy's range.
+  # then the boot value and its slot, a reserved word, the device tree copy's range and the
+  # boot CPU's identification words.
   def record(version: @codec.constant('boot_handoff_version'), flags: 1, start: 0x4020_4000, size: 0x8000, args: 'erx.a=1', stdout: '/pl011@9000000',
-             stdout_length: stdout.bytesize, boot: [2, 1], tree: [0x4800_0000, 0x2000])
+             stdout_length: stdout.bytesize, boot: [2, 1], tree: [0x4800_0000, 0x2000], cpu_id: (1..8).map { |word| word * 0x101 })
     bytes = [version, flags].pack('VV') + ("\x11".b * 8) + ("\x22".b * 32) + [start, size, 0, 0, 0, args.bytesize].pack('Q<4VV') + args.b
-    bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV') + [0].pack('V') + tree.pack('Q<Q<')
+    bytes = bytes.ljust(2136, "\0".b) + [stdout_length].pack('V') + stdout.b.ljust(256, "\0".b) + boot.pack('VV') + [0].pack('V') + tree.pack('Q<Q<') + cpu_id.pack('Q<8')
     bytes.ljust(@codec.layout_size('erx_boot_handoff'), "\0".b)
   end
 
   def test_the_kernel_accepts_a_good_record_and_says_what_it_holds
-    assert_equal 'flags 1 development 1 test_code 0 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0 boot 2 1 tree 48000000 2000',
+    assert_equal "flags 1 development 1 test_code 0 image 40204000 8000 bootargs erx.a=1 stdout /pl011@9000000 covered 1 0 boot 2 1 tree 48000000 2000\ncpu_id 101 202 303 404 505 606 707 808",
                  handoff(record)
     assert_match(/development 0 test_code 0 /, handoff(record(flags: 2)))
     assert_match(/flags 5 development 1 test_code 1 /, handoff(record(flags: 5)))
@@ -318,8 +319,8 @@ class BootPlaceTest < Minitest::Test
   # copy, one past ERX_BOOT_TREE_MAX and one whose end wraps never reach the reader.
   def test_the_tree_range_is_page_aligned_bounded_and_whole
     max = @codec.constant('boot_tree_max')
-    assert_match(/ tree 48000000 100000\z/, handoff(record(tree: [0x4800_0000, max])))
-    assert_match(/ tree 48000000 1\z/, handoff(record(tree: [0x4800_0000, 1])))
+    assert_match(/ tree 48000000 100000\n/, handoff(record(tree: [0x4800_0000, max])))
+    assert_match(/ tree 48000000 1\n/, handoff(record(tree: [0x4800_0000, 1])))
     assert_equal 'refused tree_range', handoff(record(tree: [0x4800_0800, 0x2000]))
     assert_equal 'refused tree_range', handoff(record(tree: [0x4800_0000, 0]))
     assert_equal 'refused tree_range', handoff(record(tree: [0x4800_0000, max + 1]))
@@ -348,7 +349,7 @@ class BootPlaceTest < Minitest::Test
 
   def test_the_kernel_accepts_exactly_the_pairs_of_the_machine_page
     ALL_PAIRS.each do |pair|
-      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')} tree 48000000 2000\z/ : /\Arefused boot_value\z/
+      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')} tree 48000000 2000\ncpu_id / : /\Arefused boot_value\z/
       assert_match expected, handoff(record(boot: pair)), pair.inspect
     end
   end
@@ -356,7 +357,7 @@ class BootPlaceTest < Minitest::Test
   # Bootstrap writes only a pair the kernel accepts; a refused write leaves the record alone.
   def test_the_record_carries_the_pair_bootstrap_writes
     ALL_PAIRS.each do |pair|
-      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')} tree 48000000 2000\z/ : /\Aunwritten\z/
+      expected = GOOD_PAIRS.include?(pair) ? / boot #{pair.join(' ')} tree 48000000 2000\ncpu_id 1010 2020 3030 4040 5050 6060 7070 8080\z/ : /\Aunwritten\z/
       assert_match expected, write(*pair), pair.inspect
     end
   end

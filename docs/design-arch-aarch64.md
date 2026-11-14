@@ -652,6 +652,45 @@ EL0 and traps SVE and SME. Every switch saves `q0` to `q31`, `FPCR` and
 the only FP instructions in the kernel's objects are those two routines
 (K10, K11).
 
+### CPU feature words
+
+The boot information page's `hwcap` and `hwcap2`, which musl's start gives
+a program as `AT_HWCAP` and `AT_HWCAP2`, come from the boot CPU's
+identification registers. EL0 cannot read them, so the stopgap's bootstrap
+reads `ID_AA64ISAR0_EL1`, `ID_AA64ISAR1_EL1`, `ID_AA64ISAR2_EL1`,
+`ID_AA64PFR0_EL1` and `ID_AA64PFR1_EL1` at EL1 through the accessors
+generated from `hw/sysreg/aarch64.json` (`kernel/arch/aarch64/cpu_id.c`,
+the one caller the `sysreg-read` chokepoint allows) into the handoff's
+`cpu_id` words, in the order `include/erx/arch/aarch64/cpu_id.h` gives.
+The root turns the words into feature bits with a pure core,
+`liberx/backend/core/arch/aarch64/cpu_features.c`, in two steps:
+
+1. **Decode.** Each feature field is compared with the least value that
+   has the feature, as FreeBSD 15.1.0 maps fields to bits
+   (`sys/arm64/arm64/identcpu.c`, `parse_cpu_features` and its
+   `MRS_HWCAP` tables, with the values of `sys/arm64/include/armreg.h`).
+   `FP` and `AdvSIMD` are signed: `0b1111` means absent. Field positions
+   are Arm's, through the generated field accessors; the bits are musl's
+   own, from its `arch/aarch64/bits/hwcap.h`, so no value is copied.
+2. **Allow.** Only features the kernel enables at EL0 and saves on a
+   switch survive. On the stopgap these are FP and Advanced SIMD with
+   their half-precision forms, AES, PMULL, SHA1, SHA2, SHA512, SHA3, SM3,
+   SM4, CRC32, the LSE atomics, the dot product, FCMA, JSCVT, LRCPC and
+   its immediate-offset form, DC CVAP and FLAGM: Fiasco saves `q0` to
+   `q31`, `FPCR` and `FPSR` on every switch, the flags live in `PSTATE`,
+   and `SCTLR_EL1.UCI` lets EL0 clean to the point of persistence.
+   `hwcap2` claims nothing. Never claimed: SVE and its extensions (Fiasco
+   neither enables nor saves their state, and `CONFIG_ARM_SVE` is
+   forbidden), pointer authentication and BTI (their `SCTLR_EL1` enables
+   are clear), MTE, and CPUID: a program that reads the identification
+   registers on its word, as OpenSSL's `armcap.c` reads `MIDR_EL1`, would
+   fault, since no kernel here emulates the read. A bit for state the
+   kernel does not save would let one thread read another's registers.
+
+A feature joins the allowed set only once the kernel's enable and its
+save are checked; the host test ties the refused set to the options
+`tools/lib/erx/fiasco_config.rb` forbids.
+
 ### Cache maintenance
 
 EL0 runs with `SCTLR_EL1.UCI` and `UCT` set, so it reads `CTR_EL0` and

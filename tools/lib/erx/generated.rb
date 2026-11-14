@@ -11,6 +11,7 @@ require_relative 'generation_plan'
 require_relative 'json_input'
 require_relative 'abi'
 require_relative 'hardware'
+require_relative 'sysreg_headers'
 require_relative 'facet_names'
 require_relative 'terminal_generation'
 require_relative 'keymap'
@@ -106,6 +107,7 @@ module Erx
     GENERATORS = [
       Generator.new(name: 'abi', plan: ->(root) { ABI::Generator.generation(root: root) }, code: CODE),
       Generator.new(name: 'hardware', plan: ->(root) { Hardware.generation(root: root) }, code: CODE),
+      Generator.new(name: 'sysreg', plan: ->(root) { SysregHeaders.generation(root: root) }, code: CODE),
       Generator.new(name: 'terminal', plan: ->(root) { TerminalRules.generation(root: root) }, code: CODE),
       Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE),
       Generator.new(name: 'keymap', plan: ->(root) { Keymap.generation(root: root) }, code: CODE)

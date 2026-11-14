@@ -57,6 +57,23 @@ module Erx
                   'otp/erts/emulator/nifs/erxos/arch/host/erx_dma_arch.c' => "void f(void) { asm(\"nop\"); }\n",
                   'otp/erts/emulator/sys/erxos/seeded.c' => "void f(void) { __asm__(\"isb\"); }\n",
                   'kernel/core/seeded.c' => "void f(void) { __asm__ volatile(\"isb\"); }\n" }
+        ),
+        # The generated system-register reads (tools/lib/erx/sysreg_headers.rb) hold their
+        # instruction in a header of the build tree, which the rule above does not see, so
+        # this one holds their callers to a list.
+        Chokepoints::Forbidden.new(
+          name: 'sysreg-read',
+          rule: "generated system-register reads only in the listed files: the reader of the boot CPU's " \
+                'identification registers, which bootstrap calls',
+          design: "#{KERNEL}#chokepoint-checks",
+          scope: Chokepoints::Scope.new(own: true, extra: [*INLINE_ASM_SCOPE.extra, 'fiasco/bootstrap/server/src/erx_*']),
+          pattern: /\berx_sysreg_\w+_read\b/,
+          sites: [
+            # erx_boot_cpu_id_read, which bootstrap calls in kernel mode.
+            Chokepoints::Site.new(glob: 'kernel/arch/aarch64/cpu_id.c')
+          ],
+          seed: { 'liberx/seeded.c' => "unsigned long f(void) { return erx_sysreg_id_aa64isar0_el1_read(); }\n",
+                  'fiasco/bootstrap/server/src/erx_image.cc' => "void f() { (void)erx_sysreg_cntvct_el0_read(); }\n" }
         )
       ]
     )

@@ -221,6 +221,8 @@ erx_boot_info_build(const erx_boot_inputs_t *inputs, void *page, size_t size)
 		.system_connection = system,
 		.release_addr = inputs->release_addr,
 		.cpuset = inputs->cpuset,
+		.hwcap = inputs->hwcap,
+		.hwcap2 = inputs->hwcap2,
 		.capacity_mcpu = inputs->capacity_mcpu,
 		.node_off = (uint32_t)fixed,
 		.node_len = (uint32_t)inputs->node_len,

@@ -581,10 +581,10 @@ it; git history is the record of completed work.
   or four segments are not driven through the check.
 * [Low] `hw/sysreg/aarch64.json`, CTR_EL0: the DMA architecture layer
   (`otp/erts/emulator/nifs/erxos/arch/aarch64/erx_dma_arch.c`) and `liberx/backend/fiasco/arch/aarch64/cache.c`
-  each write CTR_EL0's field positions by hand. `tools/erx sysreg refresh` refuses CTR_EL0 ("unsupported Arm
-  field attributes": its fields are `Fields.ConstantField`, which `extract_fields` does not take), and no
-  generator makes C accessors from `aarch64.json` yet, so `clock.c`'s counter reads are written by hand too. The
-  fix is ConstantField support in the refresh and a generator of C accessors that these files include.
+  each write CTR_EL0's field positions by hand, and `clock.c` writes its counter reads by hand. The refresh takes
+  `Fields.ConstantField` and `tools/lib/erx/sysreg_headers.rb` generates read and field accessors, so the fix
+  is to add CTR_EL0 to the file and have these files call the generated accessors, listing them on the
+  `sysreg-read` chokepoint.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
@@ -1346,6 +1346,21 @@ it; git history is the record of completed work.
   `libcrypto`) runs `_armv8_cpuid_probe`, an `mrs` of `MIDR_EL1`, which traps in user mode without emulation and ends the
   domain at load. `docs/design-crypto.md`'s K4 ("no probe") and "Domains that call no OpenSSL" ("the feature words and
   `OPENSSL_armcap` and nothing else") then need that rule stated.
+* [Medium] liberx, CPU feature words of programs (`liberx/backend/fiasco/program_task.c`,
+  `otp/erts/emulator/sys/erxos/erx_program_drv.c`): the root's and every domain's boot page carry the CPU's
+  feature words (`docs/design-arch-aarch64.md`, "CPU feature words"), but a program's `AT_HWCAP` and `AT_HWCAP2`
+  are 0: musl's start runs before the startup message arrives, and the message carries no feature words. Give
+  them in the program's argument registers, `program_arg` values 5 and 6 of `abi/erx_abi.txt`, set by the
+  session's port driver from its own boot page, and pass them to `erx_fiasco_libc_start`.
+* [Low] bootstrap, CPU feature words (`kernel/arch/aarch64/cpu_id.c`): only the boot CPU's identification
+  registers are read, and every CPU is taken to have its features. QEMU `virt` and the Raspberry Pi boards
+  have identical CPUs; a board whose CPUs differ needs the intersection over all of them.
+* [Medium] test, CPU feature words (`test/guest/native_musl/guest.c` `case_auxv`): the guest checks that `AT_HWCAP`
+  has FP and Advanced SIMD and no refused bit, but runs no claimed instruction, so a feature the kernel or a
+  hypervisor traps (EL0 `DC CVAP` under HVF is unchecked) would pass. For each claimed bit that is set, run one
+  instruction of it (`dc cvap`, `cfinv`, `ldapr`, `ldaddal`, `crc32x`, `aese`, `pmull`, `sha512h`, `eor3`, `sm4e`,
+  `sdot`, `fcmla`, `fjcvtzs`, a half-precision `fadd`) under TCG and HVF; and tie each claim to the Fiasco fact
+  behind it (`Sctlr_uci` in `Sctlr_el1_generic`, `CONFIG_FPU` required) in the host test.
 * [Medium] liberx, `erx_entropy_read` callers (`musl/src/internal/erxos/syscall.c` `entropy_take`,
   `liberx/backend/fiasco/libc_start.c` `random_fill`, `otp/erts/emulator/nifs/erxos/erx_bytes_bif.c`,
   `otp/erts/emulator/beam/erl_bif_unique.c`): each copies the bytes out of the UTCB's mr and zeroes them by hand, so a caller that forgets
