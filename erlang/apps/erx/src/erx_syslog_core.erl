@@ -70,7 +70,7 @@ message or keeps state between calls.
 
 -include("generated/erx_abi.hrl").
 
--export([line/5, new/1, write/4, turn/3]).
+-export([is_level/1, line/5, new/1, write/4, turn/3]).
 -export([note/3, consumers/0, lines/4, ask/5, ended/2, due/3]).
 -export_type([source/0, log_record/0, table/0]).
 -export_type([family/0, role/0, requester/0, action/0, consumers/0]).
@@ -124,6 +124,15 @@ message or keeps state between calls.
                   missed = 0 :: non_neg_integer(),
                   waiting = idle :: idle | {waiting, requester()}}).
 -opaque consumers() :: #{console := #backlog{}, store := #backlog{}}.
+
+-doc """
+Whether Level is one of the logger's eight levels, the only levels a record
+carries and the one definition of them in the log path, which erx_log_facet
+asks.
+""".
+-spec is_level(term()) -> boolean().
+is_level(Level) when ?IS_LEVEL(Level) -> true;
+is_level(_Level) -> false.
 
 -doc """
 The line of Record, which the domain Id, of principal Principal and named

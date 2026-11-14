@@ -20,6 +20,8 @@ module ErxLogFacetFuzz
   Erx::Generated.ensure(root: ROOT)
   DECODER = 'erlang/apps/erx/src/erx_log_facet.erl'
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
+  # The decoder asks the log service's core which atoms are levels.
+  CORE = 'erlang/apps/erx/src/erx_syslog_core.erl'
   TARGET = 'test/erlang/erx_log_facet_fuzz.erl'
   # Each seeded fault: the decoder's text, which occurs in it once, and its replacement
   # without the bound. test/host/erx_log_facet_test.rb checks at every landing that each
@@ -56,7 +58,7 @@ module ErxLogFacetFuzz
       decoder_path = File.join(work, 'erx_log_facet.erl')
       File.binwrite(decoder_path, decoder_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, decoder_path,
-                                       File.join(ROOT, TARGET), stdin_data: '')
+                                       File.join(ROOT, CORE), File.join(ROOT, TARGET), stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

@@ -24,6 +24,15 @@ web() ->
 system() ->
     #{id => 0, principal => unknown, name => <<"system">>}.
 
+%% The logger's eight levels, and nothing else, are levels: the logger's own
+%% all and none, another atom, text, a number and a tuple are not. A failure
+%% shows the terms that were misjudged.
+is_level_test() ->
+    Levels = [emergency, alert, critical, error, warning, notice, info, debug],
+    NotLevels = [warn, all, none, <<"info">>, "info", 7, {info}],
+    ?assertEqual([], [L || L <- Levels, not erx_syslog_core:is_level(L)]),
+    ?assertEqual([], [T || T <- NotLevels, erx_syslog_core:is_level(T)]).
+
 vectors() ->
     {ok, Json} = file:read_file(os:getenv("ERX_TEXT_VECTORS")),
     #{<<"vectors">> := Vectors} = json:decode(Json),

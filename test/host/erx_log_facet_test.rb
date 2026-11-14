@@ -33,7 +33,7 @@ class ErxLogFacetTest < Minitest::Test
               from: 'when is_binary(Text), byte_size(Text) =< ?ERX_LOG_WRITE_TEXT_MAX ->',
               to: 'when is_binary(Text) ->'),
     Fault.new(name: 'the level check removed',
-              from: 'level(_Level) -> false.', to: 'level(_Level) -> true.')
+              from: 'erx_syslog_core:is_level(Level);', to: 'true;')
   ].freeze
 
   def test_decoder_cases_pass_under_eunit

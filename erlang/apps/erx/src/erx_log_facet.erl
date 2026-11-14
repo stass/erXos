@@ -5,8 +5,9 @@
 -moduledoc """
 The decoder of a request a log facet admits (docs/design-log.md, "The log
 facet"): the one reader of the records another domain sends the system
-log, pure, so its fuzz target (test/erlang/erx_log_facet_fuzz.erl) runs it
-alone.
+log, pure, and so is the one question it asks of erx_syslog_core, whether an
+atom is a level (is_level/1): its fuzz target
+(test/erlang/erx_log_facet_fuzz.erl) runs the two modules alone.
 
 A request is the term the funnel decoded from the grantee's frame, in safe
 mode, so every atom in it already existed, and erx_facet has already held
@@ -76,17 +77,6 @@ records(_Records, _Count) ->
     false.
 
 record({Level, Text}) when is_binary(Text), byte_size(Text) =< ?ERX_LOG_WRITE_TEXT_MAX ->
-    level(Level);
+    erx_syslog_core:is_level(Level);
 record(_Record) ->
     false.
-
-%% The logger's eight levels (logger:level()).
-level(emergency) -> true;
-level(alert) -> true;
-level(critical) -> true;
-level(error) -> true;
-level(warning) -> true;
-level(notice) -> true;
-level(info) -> true;
-level(debug) -> true;
-level(_Level) -> false.
