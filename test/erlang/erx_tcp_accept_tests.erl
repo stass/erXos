@@ -50,8 +50,8 @@ accept_test_() ->
 %% --- The stand-ins ---------------------------------------------------------------
 
 setup() ->
-    %% The connections link to the test process as listener and owner; their exits at
-    %% the cleanup, which kills their grant, must not end it.
+    %% The connections link to the test process as listener and owner; their exits during
+    %% a case must not end it. cleanup/1 keeps their exits at the cleanup from ending it.
     process_flag(trap_exit, true),
     ok = persistent_term:put({erx_net_sup, runtime}, erx_net_local),
     {ok, Tables} = erx_net_tables:start_link(),
@@ -74,12 +74,28 @@ setup() ->
     unlink(Grant),
     {Tables, Grant}.
 
+%% Every connection still running is linked to its grant, which it links first, and those
+%% a case queued on the test process are linked to it as listener or owner. The cleanup
+%% kills them with the grant and the tables and waits for each one's DOWN before the test
+%% process stops trapping exits. A dying process sends its link exits before its DOWNs, so
+%% by then each exit signal is a message for flush/0. One that arrived after trapping
+%% stopped would kill the test process and cancel the cases after it, a seeded fault's
+%% failing case among them.
 cleanup({Tables, _Grant}) ->
-    Procs = [P || P <- [whereis(erx_net_grant), Tables], is_pid(P)],
-    [begin Ref = monitor(process, P), exit(P, kill), receive {'DOWN', Ref, _, _, _} -> ok end end
-     || P <- Procs],
+    Grant = whereis(erx_net_grant),
+    Procs = [P || P <- [Tables, Grant | linked(Grant)], is_pid(P), P =/= self()],
+    Refs = [monitor(process, P) || P <- Procs],
+    [exit(P, kill) || P <- Procs],
+    [receive {'DOWN', Ref, _, _, _} -> ok end || Ref <- Refs],
     flush(),
     process_flag(trap_exit, false).
+
+linked(Pid) when is_pid(Pid) ->
+    case process_info(Pid, links) of
+        {links, Links} -> Links;
+        undefined -> []
+    end;
+linked(undefined) -> [].
 
 flush() ->
     receive _ -> flush() after 0 -> ok end.
