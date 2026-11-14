@@ -5434,20 +5434,29 @@ to the corpus and follow rc
   kernel's polled early-console writes at a panic complete after the
   console driver has reconfigured the UART, on each board
   ([design-platforms.md](docs/design-platforms.md#uarts)).
-* [Medium] platforms, the Pi 4's VL805 at handover
+* [High] platforms, the Pi 4's VL805 at handover
   ([design-usb.md](docs/design-usb.md#the-bcm2711-bridge),
-  [design-platforms.md](docs/design-platforms.md#dma)): the boot contract's
-  stopped-and-drained bus master holds for the VL805 only because the
-  EEPROM's boot order names the microSD card alone, on the claim that the
-  boot firmware then never starts the VL805. No source read says so.
-  Verify it by hand on the 4 GB Pi 4: with that boot order and a USB
-  keyboard and stick attached, read at the PCIe domain's first start,
-  before the bridge driver writes anything, the link, PERST#, the VL805's
-  command register, `USBCMD` and `USBSTS` (probe B3); repeat on a board
-  without the VL805's EEPROM and after a bootloader update. A running
-  controller refutes the setting, and the Pi 4's handover is then
-  refused until a stop before kernel entry is designed. Record the
-  bootloader version and the boot order's value in the board's port.
+  [design-platforms.md](docs/design-platforms.md#dma)), part of the DMA
+  platform-evidence item: the board's installation sets the EEPROM's boot
+  order to the microSD card alone so that the boot firmware has no reason
+  to start the VL805, but no source read says what the firmware does
+  with it, so the VL805 counts as possibly running at entry and the
+  boot contract's stopped-and-drained rule is unmet for it. Establish it
+  for each firmware release the port supports: fetch and record
+  Raspberry Pi's documentation of the boot firmware and the EEPROM
+  bootloader at the pinned release, which must say that under this boot
+  order the firmware never starts the VL805, or stops and drains it by a
+  documented reset, before it starts the ARM cores, on boards with and
+  without the VL805's EEPROM; and on the 4 GB Pi 4, with a USB keyboard
+  and stick attached, halt the cores at the kernel's first instruction
+  with a JTAG probe and read the bridge's reset and PERST# bits, its link
+  state and, with the link up, the VL805's command register, `USBCMD`
+  and `USBSTS`. Probe B3, the same reading at the PCIe domain's first
+  start, comes after the kernel has reclaimed memory, so it can refute
+  the handover but never establish it. If the documentation is silent or
+  a reading refutes it, the Pi 4 needs a stop before kernel entry, which
+  is to be designed. Record the bootloader version and the boot order's
+  value in the board's port.
 * [Low] live, the host tree over virtio-9p: QEMU's 9p server on Darwin
   and FreeBSD hosts translates only six errnos to Linux numbering (its
   `errno_to_dotl` has a FIXME), so an error from `/host` on a macOS host

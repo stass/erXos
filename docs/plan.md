@@ -2224,8 +2224,8 @@ on a board before it counts as done; stages (b), (c) and (d) are proven
 on the board
 ([design-platforms.md](design-platforms.md#bring-up-under-qemu) lists
 what the model cannot check). The Pi has no input device: no USB
-keyboard, since the Pi 4's USB host sits
-behind the PCIe bridge no domain drives, so input comes over the serial
+keyboard, since the Pi 4's USB host sits behind the PCIe bridge, whose
+driver is [Track U](#track-u-usb-proposed)'s, so input comes over the serial
 console or the web front end over the host link. Drivers are Erlang,
 programmed I/O first where the device allows it. The kernel's platform
 items of M12, the hardware watchdog, the crash region, trial boot, the
@@ -2837,8 +2837,9 @@ no row, are built here and tested here.
   since neither board's tree confines its DMA devices, puts the TPM's SPI
   controller in the vault's domain
   ([design-system.md](design-system.md#devices)), gives PCIe
-  configuration space on a board that drives a bridge, the Pi 5, to the
-  PCIe domain alone (the Pi 4 drives none and has no PCIe domain), and
+  configuration space on a board that drives a bridge, the Pi 5, and the
+  Pi 4 once [Track U](#track-u-usb-proposed) drives its BCM2711 bridge,
+  to the PCIe domain alone, and
   passes the manifest check; Erlang drivers for each board's storage and
   network devices, with their reset sequences, each measured for its row
   or absence of a row in the driver table (G9); the IOMMU support a board

@@ -205,7 +205,12 @@ calls, so nothing above it depends on the controller:
   durable on the medium: on virtio a flush request
   (`virtio_blk_t_flush` of `abi/formats/virtio.txt`), whose feature the
   device process's start requires of the device, and on the SD
-  controller a status check ([The SD host controller](#the-sd-host-controller));
+  controller a status check ([The SD host controller](#the-sd-host-controller)).
+  A transport whose medium has no way to flush, which it learns before
+  any write, answers `{error, no_flush}` and never `ok`: a USB medium
+  that refuses SYNCHRONIZE CACHE
+  ([design-usb.md](design-usb.md#the-scsi-subset)); virtio and the SD
+  controller never answer it;
 * `erx_blk:info()`: `{ok, #{transport, capacity, max_sectors, detail}}`,
   the transport's name (`virtio_mmio` or `sdhci`), the medium's length
   in sectors of 512 bytes, the most sectors one request moves, and a map
@@ -218,12 +223,15 @@ bytes that are not whole sectors or a count above `max_sectors`, and
 `{error, out_of_range}` for sectors past the capacity, both before the
 controller is touched; `{error, erofs}` from the write path on a trial
 boot (U4); `{error, busy}` when the device process's backlog is full;
-`{error, no_device}` when no device process runs; and
+`{error, no_device}` when no device process runs; `{error, no_flush}`
+from `flush()` on a medium that cannot flush; and
 `{error, {device, Detail}}` for a request the controller or the medium
 failed, where `Detail` is built from fixed atoms and integers for the
 driver's log line, never from a controller's bytes, and never reaches a
 client. A window answers its client `einval` for `bad_count`, `erofs` for
-`erofs` and `eio` for every other error. The maximum request is the
+`erofs`, `enotsup` for `no_flush`, so a file system can tell a medium
+that cannot flush from one whose flush failed, and `eio` for every other
+error. The maximum request is the
 transport's: 8 sectors on virtio, the sectors one pool buffer holds
 beside its header and status byte; 64 sectors on the SD controller,
 32 KiB, the most whose write a card within its specification finishes
@@ -1418,12 +1426,26 @@ designed. It maps the format onto the file protocol as follows:
   dirty flag, so the server mounts a FAT12 volume read-only. A volume
   found dirty mounts read-only and reports it, so the files can be copied
   off and the volume repaired on another machine, never by a guess on
-  erXos. A medium that cannot flush mounts read-only too, since every
-  guarantee above rests on its flushes: the server sends one flush as it
-  mounts, and a window that answers it `enotsup`, as a USB medium that
-  refuses SYNCHRONIZE CACHE does, mounts read-only with
-  `no flush: read-only` in the mount's inspection record
-  ([design-usb.md](design-usb.md#the-scsi-subset)).
+  erXos. Every guarantee above rests on the medium's flushes, so the
+  server sends one flush as it mounts, before it writes anything, and
+  that answer alone admits the mount: `ok` lets the volume mount
+  writable, which a FAT12 or a dirty volume still does not; `enotsup`,
+  a medium that cannot flush, as a USB medium that refuses SYNCHRONIZE
+  CACHE is, mounts it read-only with `no flush: read-only` in the
+  mount's inspection record
+  ([design-usb.md](design-usb.md#the-scsi-subset)); and any other
+  answer, `eio` for a failed flush or the transport's deadline, or the
+  window's end before it answers, refuses the mount with nothing
+  written and the failure in the mount's inspection record; a client's
+  request on the refused mount fails with `eio`, and the next mount
+  tries again, as a drive's next walk does
+  ([design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)).
+  A refusal and not a
+  read-only mount, because such a failure says only that this flush
+  failed, not that the medium cannot flush, and a medium whose flush
+  fails with no write outstanding is failing or gone: a read-only mount
+  would show it as a working volume for as long as the window lasts,
+  while a refusal is tried again and adds no state.
 
 A FAT image is untrusted input like any other: the boot sector, the FATs,
 the directories and the long-name chains are decoded with checked bounds,
@@ -1608,8 +1630,9 @@ reported as a durable checkpoint.
   the medium acknowledged it; each may answer `{error, eio}` for a device
   error, `{error, einval}` for a request that names no whole sectors or
   more than the transport's maximum, `{error, erange}` for sectors
-  outside the window, and
-  `{error, erofs}` for a write on a trial boot outside the record's window.
+  outside the window,
+  `{error, erofs}` for a write on a trial boot outside the record's window,
+  and, for `flush` alone, `{error, enotsup}` when the medium cannot flush.
   A window's pid reaches its client at the client domain's creation, with
   its other grants, or locally in the driver's own domain.
 * **The transport.** Beneath the windows is the device process registered

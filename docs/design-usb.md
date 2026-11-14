@@ -280,16 +280,17 @@ QEMU's `raspi4b` lacks the PCIe root port
 (`docs/system/arm/raspi.rst:30-45`), so the VL805 runs only on a board;
 that model's USB is a DWC2, which [DWC2](#dwc2) covers.
 
-**The stopgap.** On Fiasco, `erx_irq_create` of `ERX_IRQ_MSI` is
-`ERX_ENOTSUP` and a line's IRQ object is the root's alone to make
-(`liberx/backend/fiasco/irq.c:188-190`); MSIs are among what [Phase 1
-defers](design-stopgap.md#what-phase-1-defers) to M9's kernel part.
+**The stopgap.** In the tree's backend, `erx_irq_create` of
+`ERX_IRQ_MSI` is `ERX_ENOTSUP` and a line's IRQ object is the root's
+alone to make (`liberx/backend/fiasco/irq.c:188-190`), and the tree's
+Phase 1 manifest check allows no holder of PCIe configuration space.
 Fiasco's own MSI support on this architecture serves a kind of
 interrupt controller that neither accelerator offers (its MSI source
 under `fiasco/kernel/src/kern/arm/`). QEMU `virt`'s MSI frame raises
-ordinary wired lines, which Fiasco binds as it binds any line. The Phase 1 manifest check allows no holder of PCIe configuration
-space (property 3 of [the Phase 1 manifest
-check](design-stopgap.md#the-phase-1-manifest-check)).
+ordinary wired lines, which Fiasco binds as it binds any line, so the
+root can make an MSI as it makes a line; [The Phase 1 part](#the-phase-1-part)
+says what the backend and the check become
+([design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check)).
 
 ### What the tree does today
 
@@ -642,7 +643,8 @@ and mounting what the window serves; with no medium its root is an empty
 read-only directory, and each walk asks again. When the window ends, the
 server unmounts at once, answers `eio` to every fid of that mount, and
 mounts again on the next walk. A medium that cannot flush it mounts
-read-only ([A medium that cannot flush](#the-scsi-subset)).
+read-only, and a mount whose flush fails otherwise it refuses, to try
+again at the next walk ([A medium that cannot flush](#the-scsi-subset)).
 
 Drives are numbered for the controller, not for the machine: two
 controllers' `da0` are two drives, each named by its own controller's
@@ -899,51 +901,87 @@ issues no DMA, so writing the windows again races nothing, and the USB
 domain's driver starts from a stopped controller and resets it
 ([design-system.md](design-system.md#devices), Resets).
 
-**The Pi 4 boots from its microSD card alone.** The board meets the
-requirement for the VL805 by never starting it. The board's
+**The Pi 4 boots from its microSD card alone.** The board's
 installation, which already writes the EEPROM's configuration and each
 slot's `config.txt`
 ([design-platforms.md](design-platforms.md#slots-and-the-boot-selection-record)),
 sets the EEPROM's boot order to the microSD card alone, never USB mass
 storage or the network, so the boot firmware has no USB device to boot
-from and no reason to run the VL805's schedule. A controller never
-started has issued no DMA and has nothing to drain, so nothing needs
-stopping before kernel entry, no first stage carries bridge or xHCI
-code, and only the PCIe enumerator reaches configuration space, as
-[design-system.md](design-system.md#devices) says. The bridge driver's
-first start then finds the link down or up, with the VL805's firmware
-present or not, and the table above decides; a reset of a controller
-that never ran races no DMA, and the notification of [The VL805's
-firmware](#the-vl805s-firmware) gives it its firmware. The cost is that
-erXos does not boot from USB or the network on the Pi 4.
+from and no reason to run the VL805's schedule. Nothing erXos runs needs
+the firmware to touch the VL805: no first stage carries bridge or xHCI
+code, only the PCIe enumerator reaches configuration space, as
+[design-system.md](design-system.md#devices) says, and the notification
+of [The VL805's firmware](#the-vl805s-firmware) gives the controller its
+firmware after erXos's own bring-up. A board whose EEPROM names any
+other boot order is not an installation the board port supports. The
+cost is that erXos does not boot from USB or the network on the Pi 4.
 
-This rests on a board setting that has not been verified. No source read
-for this design says what the boot firmware does with the VL805 under
-any boot order, whether loading the VL805's firmware on a board without
-its EEPROM starts the controller, or whether a firmware update changes
-either. Verifying it on the board is a `TODO.md` item; until it is
-verified, the Pi 4's handover of the VL805 rests on this setting alone.
-A board whose EEPROM names any other boot order is not an installation
-the board port supports: its handover is unknown, and the bridge's
-reset path is no remedy, since it runs after the kernel has reclaimed
-memory a running VL805 may have written. The same question for the
-Pi 4's other bus masters, the SD controller among them, which the boot
-firmware does use under this boot order, belongs to
+**The VL805 is possibly running at entry until evidence says
+otherwise.** The boot order is the configuration erXos supports, not
+evidence that it meets the boot contract. No source read for this
+design says what the boot firmware does with the VL805 under any boot
+order, whether loading the VL805's firmware on a board without its
+EEPROM starts the controller, or whether a firmware update changes
+either. The contract's rule therefore stands as written: quiescence
+that is unknown stops the boot before memory is reclaimed. The kernel
+reads nothing behind the bridge and cannot observe the VL805 before it
+reclaims memory, so on the Pi 4 the rule acts through the platform's
+admission rather than at run time: the Pi 4's DMA contract lists the
+VL805's handover as unknown, beside its other bus masters'
+([design-platforms.md](design-platforms.md#dma)), and the board meets
+the boot contract only once the evidence below is recorded for the
+firmware release and configuration the board port supports, as
+`TODO.md`'s DMA platform-evidence item requires of every platform.
+Until then this design claims nothing for the handover, and the
+bridge's reset path is no remedy, since it runs after the kernel has
+reclaimed memory a running VL805 may have written. The same question
+for the Pi 4's other bus masters, the SD controller among them, which
+the boot firmware does use under this boot order, belongs to
 [design-platforms.md](design-platforms.md#dma).
 
-Probe B3 can refute the setting or corroborate it; it cannot establish
-it. On a board installed as the board port installs it, with the
-EEPROM's boot order of the microSD card alone and each slot's
-`config.txt` as written and a USB keyboard and a
-USB drive attached, a test build reads, at the PCIe domain's first
-start and before the bridge driver writes anything, the link and
-PERST#, then through the link check the VL805's command register and
-its `USBCMD` and `USBSTS`. A reading that shows the VL805 running, bus
-mastering set in the command register, `USBCMD.R/S` set or
-`USBSTS.HCH` clear, refutes the setting: the boot firmware started the
-VL805 after all, and the handover is refused. A reading of a stopped
-controller, or of a link down or PERST# asserted, is only consistent
-with it, for three reasons:
+**What establishes the handover** is evidence for the time before the
+kernel's first instruction, which nothing erXos runs after it can
+observe. Two pieces, for each firmware release the board port supports:
+
+1. **The firmware's documented behaviour.** Raspberry Pi's own
+   documentation of the boot firmware and the EEPROM bootloader at the
+   release the board port pins, fetched and recorded in a research record
+   with its version and SHA-256, saying what the firmware does with the
+   PCIe bridge and the VL805 under a boot order of the microSD card
+   alone, on boards with and without the VL805's EEPROM: that it never
+   releases PERST# and never starts the controller, or that it stops the
+   controller and drains its DMA, by a reset whose completion it
+   documents, before it starts the ARM cores. Only the firmware's
+   supplier can say this; no source read for this design does.
+2. **A reading at entry**, since the hardware-contract audit takes
+   only executable evidence of a loader's quiescence
+   ([research-hardware-contracts.md](research-hardware-contracts.md#evidence-still-required)).
+   On a board installed as the board port installs it, with the JTAG
+   pins enabled in `config.txt` and a USB keyboard and a USB drive
+   attached, a debug probe halts the cores at the kernel's first
+   instruction and reads the bridge's reset and PERST# bits (bits 1 and
+   0 of `0x9210`) and its link state (`PHYLINKUP` and `DL_ACTIVE` in
+   `0x4068`), and, when the link is up, the VL805's command register
+   through the bridge's configuration window and its `USBCMD` and
+   `USBSTS`. A reading that differs from what (1) says the firmware
+   leaves, or shows the VL805 running (bus mastering set, `USBCMD.R/S`
+   set or `USBSTS.HCH` clear), refutes (1) for that release. The probe
+   adds nothing to the kernel.
+
+(1) speaks for the time before entry and (2) shows that the board in
+hand matches it; with both recorded, the Pi 4's DMA contract lists the
+VL805's handover as stopped for that release. Without (1), or with (2)
+refuting it, the handover stays unknown, and the Pi 4 then needs a stop
+before kernel entry, a first stage that resets the VL805 and waits out
+its drain, which this design does not define.
+
+Probe B3 repeats the reading of (2) later, at the PCIe domain's first
+start in a test build, before the bridge driver writes anything, with
+the same installation and devices attached. It can refute the handover
+or corroborate it; it cannot establish it. A reading that shows the
+VL805 running refutes it: the boot firmware started the VL805 after
+all. A reading of a stopped controller, or of a link down or PERST#
+asserted, is only consistent with it, for three reasons:
 
 * B3 reads after the kernel has reclaimed memory, so a controller
   stopped then says nothing of when it stopped;
@@ -989,7 +1027,7 @@ with this design's probes, each with what settles it:
 | that the VL805's INTA arrives on SPI 143 alone, apart from the bridge's SPI 147 and 148, as the tree says (record unknown 4), and what raises SPI 147 (unknown 3) | B2, with the VL805 driven: its line counted, the bridge's two read while masked |
 | the VL805's header type, its functions and its interrupt pin | B4: the enumerator's configuration-space dump |
 | the VL805's state at erXos's start: an EEPROM or none, `0x50` before and after the notification, what a missing notification looks like, and whether this board's boot firmware reloads firmware already present (unknown 7) | B1 |
-| whether the boot firmware's handover leaves the VL805 running: bus mastering on, `USBCMD.R/S` set or `USBSTS.HCH` clear ([The boot firmware's handover](#the-bcm2711-bridge)); whether it leaves the link up and PERST# released (unknown 8); the bridge's `MISC_REVISION` (unknown 1) | B3, which refutes or corroborates the microSD-only boot order's keeping the VL805 unstarted and cannot establish it; establishing it is the `TODO.md` item to verify the setting on the board |
+| whether the boot firmware's handover leaves the VL805 running: bus mastering on, `USBCMD.R/S` set or `USBSTS.HCH` clear ([The boot firmware's handover](#the-bcm2711-bridge)); whether it leaves the link up and PERST# released (unknown 8); the bridge's `MISC_REVISION` (unknown 1) | B3, which refutes or corroborates the handover and cannot establish it; establishing it takes the firmware's documented behaviour and the reading at entry of [What establishes the handover](#the-bcm2711-bridge) |
 | the reference clock's source and whether anything must enable it (unknown 9) | B3: if bring-up finds no link, the clock is the first question, and no source answers it yet |
 | the real DMA limit, against FreeBSD's 960 MiB and the tree's 3 GiB (unknown 5) | B5 |
 | whether a narrowed inbound window blocks the VL805 outside it | B6 |
@@ -1048,12 +1086,24 @@ bit of its command register). The line is a direct line of that unit,
 made and given as any device-tree unit's line is: on erXos's kernel by
 the give, on the stopgap by the root, which alone makes lines there.
 The tree answers the question of probe B2, whether the VL805's line is
-also one of the bridge's, with no; B2 confirms it on the board. Should
-the board show otherwise, the bridge and the VL805 would be one unit,
-which property 3 forbids; the VL805 is then given without an interrupt
-and its controller process polls the event ring, the existing rule for
-a function with no interrupt
-([design-system.md](design-system.md#devices)).
+also one of the bridge's, with no; B2 confirms it on the board.
+
+**A shared line is refused.** Were the VL805's line also one of the
+bridge's, the bridge and the VL805's position would be one unit, which
+property 3 forbids splitting between the PCIe domain and the USB
+domain, and which no placement could give whole without putting the
+USB stack in the PCIe domain. That topology is refused, not worked
+around: a tree that routes the position's INTx to one of the bridge's
+lines makes the device service's unit check at boot find one unit split
+across two domains, and it gives that unit to no domain with its
+diagnostic ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)),
+so such a board runs with neither PCIe nor USB. Giving the VL805 no
+interrupt and polling its event ring would not help, since units follow
+from the lines devices share, not from which lines are given, and the
+two would remain one unit. A B2 reading that contradicts the tree, the
+VL805's interrupts raised on a line the tree does not name, is a defect
+of the platform's facts: the platform record is corrected from it, and
+the same check then refuses the unit.
 
 ### The Phase 1 part
 
@@ -1127,18 +1177,81 @@ erXos's own, and records the firmware version, which the controller's
 inspection record shows too.
 
 The notification takes the mailbox, which only the kernel may reach
-(PL2), so it is a narrow kernel operation: it sends that one
-tag with the one value its platform names, `bus << 20 | slot << 15 |
-function << 12` for bus 1, device 0, function 0, that is `0x00100000`,
-at the request of the holder of a capability the system manifest gives
-the PCIe domain alone; it returns the mailbox's status and nothing the
-firmware wrote, since the tag's answer is empty (facts record,
+(PL2), so it is a narrow kernel call,
+`erx_firmware_notify(resource (CARVE))`. It sends the one notification
+the platform record names for the resource's device, here that tag with
+the one value the record gives, `bus << 20 | slot << 15 | function <<
+12` for bus 1, device 0, function 0, that is `0x00100000`, and returns
+a status alone, since the tag's answer is empty (facts record,
 section 5). PL2's reason, that the mailbox can read the device key,
-still holds, since no driver reaches the mailbox and the kernel sends a
-fixed tag with a fixed value. On the stopgap the backend implements the
-operation in the root task, which maps the mailbox's page and sends the
-same message; the root is the trusted base and the stopgap reads no
-device secret. The operation is what makes the bridge's reset path
+still holds: no driver reaches the mailbox, and the caller chooses
+neither the tag nor the value. Its contract:
+
+* **Authority.** The resource is the bridge's own, carved with
+  `ERX_CARVE_DEVICE` from the bridge's device entry, the one entry the
+  platform record names with the notification, and carries `CARVE`, the
+  right `erx_dma_create` takes for a device. A resource never passes
+  ([design-kernel.md](design-kernel.md#rights)), so only the root task
+  holds one, and the call is the device service's: the bridge driver
+  asks for it over the enumerator's connection to the device service,
+  which only the PCIe domain has, and the device service makes the call
+  with the resource it carved for the bridge's give and answers with
+  the result. No new capability reaches the PCIe domain, and the call
+  has the same caller in both phases. A resource that names another
+  device, or one of a platform whose record names no notification,
+  answers `ERX_ENOTSUP`, and one without `CARVE` `ERX_ERIGHTS`.
+* **Deadline.** The kernel writes the request into its buffer, posts
+  it, and polls the mailbox for the answer for at most 1 s, as the
+  trial request and the key read are polled
+  ([design-platforms.md](design-platforms.md#trial-requests)), with a
+  preemption point between reads, so the wait holds no lock and masks
+  no interrupt (K13). The call may wait, so an executor's is
+  `ERX_EWOULDBLOCK`. No answer within the deadline is `ERX_ETIMEDOUT`.
+  FreeBSD's property call waits 10 s (`bcm2835_mbox.c:244-247`); the
+  1 s is erXos's bound for every mailbox request, and probe B1 records
+  how long this one takes.
+* **The answer.** The mailbox's answer word carries the address of the
+  buffer it answers, which FreeBSD checks against its request's
+  (`bcm2835_mbox.c:348-351`). The kernel's one mailbox routine takes as
+  a request's answer only the word that names that request's own
+  buffer, and discards any other. The call returns `ERX_OK` when the
+  response code reads success and the tag's response bit is set, as
+  FreeBSD checks them (`:352-374`), and `ERX_ENOTSUP` for any other
+  answer: this firmware does not perform the notification.
+* **One buffer, kept for the boot.** The request's buffer is the
+  kernel's own, a page of its data that no allocator receives and
+  nothing but the notification uses, so the firmware's answer writes
+  only that page, whatever happened to the caller. After a timeout the
+  buffer is left to the firmware, as the key read leaves its page
+  ([design-platforms.md](design-platforms.md#device-secrets)): the
+  request may still be answered, and its answer would name the same
+  buffer as any later request's, so every later call of the boot answers
+  `ERX_ETIMEDOUT` at once without touching the mailbox, and a late
+  answer writes the fixed request's words into a page nothing reads.
+  The VL805 then stays out of the catalogue until the next boot, with
+  `vl805 firmware not loaded`, as when its firmware does not load.
+  FreeBSD frees its buffer after a timed-out read (`:424-436`), so a late
+  answer there writes freed memory; erXos never reuses the page.
+* **Concurrency.** The kernel serves one mailbox request at a time. A
+  notification that finds another request in flight answers `ERX_EBUSY`
+  at once and waits on no other caller; the device service calls from
+  one process, so this arises only beside a trial request. The trial
+  request, which never returns, waits out a notification in flight, at
+  most its deadline, before it posts its own, and a mailbox it cannot
+  take ends, as every failure of the trial request does, in the
+  watchdog's reset.
+* **The caller's end.** The device service runs in the root task, whose
+  end ends the machine (K31). A PCIe domain that ends while its request
+  is served loses only the answer; its successor's bring-up asks again
+  after its own PERST# cycle.
+
+On the stopgap the backend implements the call in the root task, which
+maps the mailbox's page and keeps a page of its own as the buffer, with
+the same deadline, answer match, rule after a timeout and results; the
+root is the trusted base and the stopgap reads no device secret. A call
+that answers other than `ERX_OK` leaves the function unreported, with
+`vl805 firmware not loaded`, and `0x50` is not read again. The
+operation is what makes the bridge's reset path
 work: without it, a reset would leave every board without the VL805's
 EEPROM with no USB until the next boot, and under the microSD-only boot
 order ([The boot firmware's handover](#the-bcm2711-bridge)) the boot
@@ -1526,9 +1639,9 @@ fails the controller: the process ends, and its restart resets it.
 interrupt and `IMAN`'s interrupt pending, both write-one-to-clear, then
 calls `erx_device:complete/2` until it answers `{ok, []}`, then
 acknowledges the line, so a level-triggered INTx line is not left
-asserted. A controller given with no interrupt runs the same loop on a
-timer of the core, and its install leaves both of the controller's
-interrupt gates closed ([Install](#install)). Each completion is a transfer's, with its tag, completion code
+asserted. Every controller of the kinds table is given with its
+interrupt, an MSI or the Pi 4's INTx line, so no controller is polled
+([A shared line is refused](#interrupts)). Each completion is a transfer's, with its tag, completion code
 and bytes; a command's, with its tag, code and, for enable slot, the
 slot, for address device, the address; or a port's event, with the port.
 Erlang names the codes from `abi/formats/xhci.txt`.
@@ -1846,9 +1959,8 @@ and `USBCMD` with run and `INTE`, in FreeBSD's order
 (`xhci.c:329-428`, which writes `INTE` with run at `:427-428`). The
 controller interrupts only with both gates open (4.2, p. 82), and a
 reset closes `INTE` (5.4.1, p. 394), so both are written by this one
-decision, which runs after every reset: open when the record has an
-interrupt, closed when the controller is polled, the record's
-interrupt mode and nothing else deciding. `USBCMD.HSEE` stays clear: a
+decision, which runs after every reset and opens both, since every
+controller is given with its interrupt. `USBCMD.HSEE` stays clear: a
 host system error is read from `USBSTS` on every pass of the event loop
 rather than signalled on the bus. The segment table must be clean
 before its base is written, since that write makes the controller read
@@ -2253,11 +2365,22 @@ and the FAT design's ordering of its writes rests on it. A window answers
 leaves the medium not ready, to be tried again at the next poll.
 
 The FAT server mounts such a medium **read-only**. It sends one flush as
-it mounts, before any write, and a window's `enotsup` mounts the volume
-read-only, as a FAT12 volume and a dirty one are mounted
-([design-storage.md](design-storage.md#removable-media-fat)): every write
-answers `erofs`, the mount's inspection record says
-`no flush: read-only`, and one log line says the same. FAT keeps no
+it mounts, before it writes anything, and that answer alone admits the
+mount ([design-storage.md](design-storage.md#removable-media-fat)):
+
+| The mount's flush answers | The mount |
+| --- | --- |
+| `ok` | writable, unless the volume is FAT12 or dirty |
+| `{error, enotsup}` | read-only, as a FAT12 volume and a dirty one are mounted: every write answers `erofs`, the mount's inspection record says `no flush: read-only`, and one log line says the same |
+| anything else: `{error, eio}`, which a failed SYNCHRONIZE CACHE and the transport's deadline both become, or the window's end before it answers | refused, with nothing written: the walk that asked answers `eio`, the mount's inspection record names the failure, and the next walk mounts again |
+
+A failure other than `enotsup` says only that this flush failed, not
+that the medium cannot flush, and a medium whose flush fails with no
+write outstanding is failing or gone. A read-only mount would stand for
+the window's whole life on what may be a passing failure, and would show
+a broken medium as a working one; a refusal is tried again at the next
+walk by the mounting on access the server already does, and adds no
+state. FAT keeps no
 journal and orders its batches by flushes alone, so on a medium that
 cannot flush nothing keeps one batch's steps from reaching the medium
 out of order, and an `fsync` could answer only a false success or an error most programs
@@ -2339,8 +2462,11 @@ differences that are changes to the storage design:
   reset recovery `{error, {device, reset}}`; a short transfer
   `{error, {device, short}}`; a request of an ended medium
   `{error, {device, gone}}`;
-* `flush/0` on a medium that cannot flush answers `{error, no_flush}`, a
-  new member of the closed set.
+* `flush/0` on a medium that cannot flush answers `{error, no_flush}`,
+  the member of the closed set that the transport contract keeps for
+  such a medium and a window answers as `enotsup`
+  ([design-storage.md](design-storage.md#data-model)); no virtio or SD
+  transport answers it.
 
 **The write path.** The trial rule (U4) holds for USB media as for any
 medium: every medium-writing act goes through `erx_blk_write`. For USB
@@ -2480,25 +2606,36 @@ mailbox's third referrer in [design.md](design.md#chokepoint-checks),
 [design-kernel.md](design-kernel.md#chokepoint-checks),
 [design-arch-aarch64.md](design-arch-aarch64.md#chokepoints) and
 [design-platforms.md](design-platforms.md#device-secrets); the VL805's
-handover under the microSD-only boot order in the bus masters row of
-[design-platforms.md](design-platforms.md#dma); and the read-only mount
-of a medium that cannot flush in
+handover, unknown until its evidence is recorded, in the bus masters row
+of [design-platforms.md](design-platforms.md#dma); the Pi 4's PCIe
+domain and the VL805's placement in property 3 of
+[design-system.md](design-system.md#the-manifest), in the Phase 1
+manifest check's property 3 of
+[design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check), and
+in the platform table, the DMA facts and the placement table of
+[design-platforms.md](design-platforms.md#what-the-manifest-says); the
+stopgap's `ERX_IRQ_MSI` over the lines of an MSI frame in
+[design-stopgap.md](design-stopgap.md#the-call-table); `no_flush` as
+`enotsup` in the transport and window contracts of
+[design-storage.md](design-storage.md#data-model); and the mount's
+admission by its flush, read-only for a medium that cannot flush, in
 [design-storage.md](design-storage.md#removable-media-fat). The rest are
 large enough to be each owning document's own revision, and are listed
 here so that none is lost:
 
 | Document | Change |
 | --- | --- |
-| [design-system.md](design-system.md) and `abi/manifest.txt` | a `usb` device role; a `drive` field in `erx_mf_window`, set exactly when the window's device has the `usb` role; the manifest check proves at most `usb_drives_max` drives a controller, each (device, drive, partition) once, and a USB domain in a release build holding its controller's unit alone and serving no file system (property 9); property 3 names the Pi 4 among the platforms with a PCIe domain |
+| [design-system.md](design-system.md) and `abi/manifest.txt` | a `usb` device role; a `drive` field in `erx_mf_window`, set exactly when the window's device has the `usb` role; the manifest check proves at most `usb_drives_max` drives a controller, each (device, drive, partition) once, and a USB domain in a release build holding its controller's unit alone and serving no file system (property 9) |
+| [design-system.md](design-system.md), "PCIe" | the bridge driver's request for the VL805's firmware notification on the enumerator's connection to the device service, which makes `erx_firmware_notify` with the bridge's resource and answers its result ([The VL805's firmware](#the-vl805s-firmware)) |
 | [design-system.md](design-system.md), "Units" and "PCIe" | a USB device is a sub-device of its controller's unit and enters no catalogue |
-| [design-stopgap.md](design-stopgap.md) | property 3 of the Phase 1 manifest check as [The Phase 1 part](#the-phase-1-part) says; `ERX_IRQ_MSI` over the lines of an MSI frame; the give of a PCIe function on a configured row; the VL805's notification in the root; the residuals of [On the stopgap](#on-the-stopgap) in its deferred table, Fiasco's ignored SError among them |
-| [design-platforms.md](design-platforms.md) | the BCM2711 among the PCIe bridges, with the facts of [The BCM2711 bridge](#the-bcm2711-bridge): its bring-up, its link check, its bus-0 and bus-1 rules, its inbound limit and its INTA to INTD on SPIs 143 to 146; the Pi 4's INTx; the USB row of the platform table: `qemu-xhci` on QEMU `virt`, the VL805 through the PCIe domain on the Pi 4; the EEPROM's boot order of the microSD card alone among what the board's installation writes |
-| [design-kernel.md](design-kernel.md) | the VL805's notification operation: its call, the capability the system manifest gives the PCIe domain alone, its one tag and value from the platform, and its answer of the mailbox's status alone |
+| [design-stopgap.md](design-stopgap.md) | the give of a PCIe function on a configured row; `erx_firmware_notify` in the root, with its page, deadline and results as [The VL805's firmware](#the-vl805s-firmware) says; the residuals of [On the stopgap](#on-the-stopgap) in its deferred table, Fiasco's ignored SError among them |
+| [design-platforms.md](design-platforms.md) | the BCM2711 among the PCIe bridges, with the facts of [The BCM2711 bridge](#the-bcm2711-bridge): its bring-up, its link check, its bus-0 and bus-1 rules, its inbound limit and its INTA to INTD on SPIs 143 to 146; the Pi 4's INTx; the trial request's wait for a notification in flight; the EEPROM's boot order of the microSD card alone among what the board's installation writes |
+| [design-kernel.md](design-kernel.md) | `erx_firmware_notify(resource (CARVE))` in the call table's machine family and its own section: the resource carved with `ERX_CARVE_DEVICE` from the one device entry the platform record names with a notification, held only by the root task since resources never pass; its one tag and value from the platform; its poll of at most 1 s with preemption points between reads, `ERX_EWOULDBLOCK` from an executor; its results, `ERX_OK`, `ERX_ENOTSUP` for a firmware answer other than success and for a resource or platform without a notification, `ERX_ETIMEDOUT` for no answer and for every call after one, `ERX_EBUSY` while another mailbox request is in flight; its buffer, a page of the kernel's own that nothing else uses and that a timed-out request leaves to the firmware for the boot; the one mailbox routine that serves one request at a time and takes as an answer only the word naming the request's own buffer; and the trial request's wait for a notification in flight ([The VL805's firmware](#the-vl805s-firmware)) |
 | [design-device-tree.md](design-device-tree.md) | the line a closed bus's `interrupt-map` routes for a position, in the platform facts and the device-tree fuzz target |
 | `include/erx/device_kinds.h` | rows for `qemu-xhci` and the VL805 by PCI identity and position, each with role `usb` and its SVD peripheral |
 | [design-runtime.md](design-runtime.md#the-device-nif) | the TRB ring form's requests to `post/4` and answers of `complete/2`; register clusters whose base the controller reports, and the extended-capability list followed once at open |
-| [design-device-dma.md](design-device-dma.md) | the fourth descriptor form: its regions and writers, its queue states and the commands each accepts, its contexts built from bounded parameters, its two-step publication, its padded rings and an enqueue position never on a link, its stage-aware completion and each queue's stop span, its event ring's bound, its address width read from `AC64`, its nonblocking install that opens or closes both interrupt gates, and its rows in the failure table |
-| [design-storage.md](design-storage.md) | the transport as a pid, not the name `erx_blk`; the `usb_bot` transport started per medium; drive grants and their one request, `window`, in the block service's interface; the FAT server taking a drive, mounting on access and unmounting when its window ends; `flush` in `info/0`, `{error, no_flush}` in the closed set and `enotsup` at a window; `{device, no_sense}` among the transport's device errors; `erx_blk_write`'s BOT functions and the `device-posters` rule over `erx_usb_pipe:bulk_out/3` |
+| [design-device-dma.md](design-device-dma.md) | the fourth descriptor form: its regions and writers, its queue states and the commands each accepts, its contexts built from bounded parameters, its two-step publication, its padded rings and an enqueue position never on a link, its stage-aware completion and each queue's stop span, its event ring's bound, its address width read from `AC64`, its nonblocking install that opens both interrupt gates, and its rows in the failure table |
+| [design-storage.md](design-storage.md) | the transport as a pid, not the name `erx_blk`; the `usb_bot` transport started per medium; drive grants and their one request, `window`, in the block service's interface; the FAT server taking a drive, mounting on access and unmounting when its window ends; `flush` in `info/0`; `{device, no_sense}` among the transport's device errors; `erx_blk_write`'s BOT functions and the `device-posters` rule over `erx_usb_pipe:bulk_out/3` |
 | `abi/formats/` | `usb.txt` (chapter 9, hub, BOT and SCSI constants, the stack's bounds), `hid.txt` (HID constants and the usage map), `xhci.txt` (TRB, context, segment-table and event layouts and completion codes), new `evdev.txt` codes, and the binary record form of `input.txt` that the display design already names |
 | `hw/svd/` | `xhci/xhci.svd`, written from FreeBSD's `xhcireg.h` and the xHCI specification's register chapters, with the owned registers above, and the BCM2711 bridge's registers from the facts record's register map and `bcm2838_pci.c` |
 | `abi/inspection.txt` | the USB paths of [Failure handling](#failure-handling) |
@@ -2607,6 +2744,9 @@ sink shows it.
 | the bridge's bring-up | fails, with `link down`, `endpoint mode` or `dma-ranges` in the bridge's inspection record, and no function reported | no link 200 ms after PERST#'s release; the block is not a root complex; the tree's inbound range breaks the window's rules |
 | the VL805's report | withheld, with `vl805 firmware not loaded` | `0x50` reads 0 or all ones after the notification, or the notification's kernel call failed |
 | a write to a FAT volume on a medium that cannot flush | `erofs` | the FAT server mounted it read-only, its window having answered the mount's flush `enotsup` |
+| a walk of a drive's tree whose mount the server refused | `eio`, the mount's inspection record naming the failure | the mount's flush answered other than `ok` or `enotsup`, or the window ended before it answered; the next walk mounts again |
+| `erx_firmware_notify` | `ERX_ENOTSUP`; `ERX_ERIGHTS`; `ERX_ETIMEDOUT`; `ERX_EBUSY`; `ERX_EWOULDBLOCK` | a resource of another device or a platform without a notification, or a firmware answer other than success; a resource without `CARVE`; no answer within 1 s, and every call after one in the boot; another mailbox request in flight; a call from an executor |
+| the Pi 4's PCIe unit at boot | given to no domain, with the device service's diagnostic | the tree the firmware hands over routes the VL805's position to one of the bridge's lines, so one unit spans the PCIe domain and the USB domain |
 | a function | not started, with `no input number`, `no drive`, `no usable report`, `not direct access`, `block length`, `max lun` | its place, its layout, its unit |
 | the manifest check | the build fails | a window on a `usb` device with no drive, or a drive on another device; a drive named twice for one partition; more drives than `usb_drives_max`; a release manifest whose USB domain holds another unit or a file server; a second holder of a bridge's unit, or a `pcie` domain holding another unit; the Pi 4's INTx line given apart from its function |
 
@@ -2628,7 +2768,7 @@ targeted traces carry the longer sequences.
 | `erx_device_trb`, in C on the host, explored to a fixed point over rings of six TRBs and a link, two slots, two queues each, one buffer a queue, events of every code and kind, stops, resets, dequeue moves, drops and disables, so ring wrap and slot reuse are reachable; then traces of 100,000 transfers with random completions and 1,000 slot reuses; then under AddressSanitizer | a buffer returns only by the event that completes its transfer or by a command after which the controller holds nothing of its ring; a short data stage leaves its transfer posted until the status event; a stop's event at every place of Table 4-2 is accepted and completes nothing: after the completion of the TD it names, at a link inside a TD and between two, inside a control transfer's data stage, at the enqueue position of an idle ring and across the ring's wrap; a second event for one stop breaks the form; the enqueue position is never a link TRB; every ring has its pad; every address a plan writes lies in the record; every decision passes `erx_device_dma_check`; every built context has no streams | a short data-stage event treated as completing, so the status event names no transfer and breaks the form; the stop span narrowed to the oldest transfer's first TRB and the enqueue position, so a completion followed by its forced event breaks the form; the enqueue position left on the link after a post that ends before it; Disable Slot accepted with a queue running; the TRB pointer's range check removed |
 | the publication, in C on the host, against a model controller that takes a TRB the moment its cycle bit matches | the model never sees a chain whose later TRBs or buffer bytes are not yet written | the first TRB's cycle word written with the other TRBs |
 | the event ring's bound | the table's sum, recomputed from the form's constants, is below the ring's capacity, and the explored model never holds more events than that sum | the forced stop event left out of the model's sources |
-| the install, in C on the host, against a model controller that interrupts only with both gates open and closes `INTE` at every reset | after the first install and after a reset and install again, an event raises the model's interrupt on a record with an interrupt, and never on a polled one | the `INTE` write dropped, so the model raises nothing after install |
+| the install, in C on the host, against a model controller that interrupts only with both gates open and closes `INTE` at every reset | after the first install and after a reset and install again, an event raises the model's interrupt | the `INTE` write dropped, so the model raises nothing after install |
 | `erx_usb_desc` on the boot devices of HID 1.11 Appendix B and E, and on the descriptors QEMU's `usb-kbd`, `usb-tablet`, `usb-storage` and `usb-hub` return, captured once into small fixtures | each decodes to the expected interfaces and endpoints | the walk run over the bytes received instead of `wTotalLength`, with an interface descriptor in the trailing bytes, which is then claimed |
 | claiming and admission, a property test over fuzzed configurations through `erx_usb_desc`, `erx_usb_claim` and the endpoint parameters, with a fixture of a SuperSpeed interrupt endpoint of packet size 64, burst 0 and `wBytesPerInterval` 8 | no endpoint belongs to two functions; no configuration with two definitions of one interface setting, a missing selected setting or an endpoint 0 descriptor is admitted; every admitted endpoint's packet size is one FreeBSD's filter gives for its speed and type, its burst follows its speed and type, and its payload, packet size times burst plus one below SuperSpeed and on bulk endpoints, the companion's `wBytesPerInterval` on a SuperSpeed interrupt endpoint, fits its block's buffer; the fixture's payload parameter and the context the NIF builds from it both say 8, and the same companion with `wBytesPerInterval` 0 or 65 is refused; every parameter handed to the NIF is in range, and the NIF answers `badarg` to a payload of 0, one above packet size times burst plus one, and one that differs from that product on a slot below SuperSpeed | the duplicate-address rule removed; the payload computed as packet size times burst, so a high-speed interrupt endpoint of 1024 bytes and one extra transaction is admitted to a 1 KiB buffer; the payload computed as the product at SuperSpeed, so the fixture's context says 64; the second definition of an interface setting kept over the first |
 | `erx_hid_desc` against FreeBSD's `hid.c` compiled on the host as the oracle, over the fuzz corpus, comparing each input field's offset, size, count and usage | every descriptor within erXos's bounds that FreeBSD parses whole gives the same fields in both; where the host build of `hid.c` records that it stopped at a fourth push, erXos refuses; past erXos's own bounds, erXos refuses whatever FreeBSD does | the push-depth bound removed: a descriptor of four nested pushes is accepted |
@@ -2640,7 +2780,8 @@ targeted traces carry the longer sequences.
 | the places, a property test over attach, detach, crash, a halted interrupt pipe and restart sequences | each input number carries `release` between occupants, a function that ended on a halted pipe with a key held among them; no window pid serves two media; a drive answers `no_medium` exactly while no medium is ready | `release` skipped on a crash; the window process kept across media |
 | the BCM2711 bridge driver, against a model of its registers whose link can fall at any step and whose VL805 loses its firmware at every PERST# | bring-up writes the facts record's sequence in its order, with 100 ms between PERST#'s release and the first configuration request; every access below the root port is bracketed by two link reads, and a value read while the link fell is never used; the enumerator reads bus 0 only at device 0, function 0, and bus 1 only at device 0; the decision table holds for every start: a link up with firmware present is kept and nothing is reset, any other state is turned off when up, brought up and notified; every PERST# release is followed by the notification | the bus-0 rule removed; the link read after the access removed, so a value read across a fall is reported; the reset run on a link up with firmware present; the notification skipped after a reset; the 100 ms wait dropped |
 | the stack's own bounds, on the host, and in the QEMU suite on both phases for the cases QEMU can drive | a connection storm, a hub reporting changes without pause, a keyboard reporting as fast as its interval allows with the display not reading, and a stick answering every command with a failure each stay within R6's constants: one bitmap per hub, the enumeration throttle, a stream's one read, the queue and block capacities, one process per function and medium, the NIF's work per call | the enumeration throttle removed, so the storm's attempts exceed 3 in 60 s |
-| the FAT server's mount over a raw window whose flush answers `enotsup`, landing with the FAT server | the volume mounts read-only, a write answers `erofs`, and the mount's inspection record says `no flush: read-only`; over a window whose flush answers `ok` the same volume mounts writable | the mount's flush skipped, so the first write is accepted |
+| the FAT server's mount over a raw window whose flush answers in turn `ok`, `enotsup`, `eio`, and nothing before the window ends, landing with the FAT server | over `ok` the volume mounts writable; over `enotsup` it mounts read-only, a write answers `erofs`, and the mount's inspection record says `no flush: read-only`; over `eio` and over the window's end the mount is refused, the walk answers `eio`, the record names the failure, the window has received no write, and a walk over a window that then answers `ok` mounts writable | the mount's flush skipped, so the first write is accepted on the `enotsup` window and the dirty flag is written on the `eio` one; every answer but `ok` taken as `enotsup`, so the `eio` window mounts read-only |
+| the mailbox core behind `erx_firmware_notify`, C17 built for the host, which the stopgap's root and erXos's kernel both use, against a model mailbox that answers a request at once, late or never, and can hold an answer to another buffer | an answer naming another buffer is discarded and the request takes only its own; no answer within the deadline gives `ERX_ETIMEDOUT`, and every later call gives it at once with no write to the mailbox or the buffer; a call with another request in flight gives `ERX_EBUSY` and writes nothing; a success answer with the tag's response bit clear gives `ERX_ENOTSUP`; a resource of another device gives `ERX_ENOTSUP` before the mailbox is touched | the buffer's address match removed, so a late answer to a timed-out request completes the next one; the rule after a timeout removed, so a second call rewrites the buffer the firmware may still answer into |
 
 The chokepoint rules carry their own seeded violations: a module of
 `erx_usb` other than `erx_xhci` calling `erx_device:post/4`, and a module
@@ -2745,7 +2886,13 @@ domain, which it must report as running, and the reference clock if
 no link comes up (B3); the VL805's header type, functions and interrupt pin
 (B4); DMA above 960 MiB (B5); whether a narrowed inbound window blocks
 the VL805 outside it (B6); the VL805's capability registers (B7); and
-what a configuration access with the link down raises (B8).
+what a configuration access with the link down raises (B8). Beside
+them, for each firmware release the port supports, the reading at entry
+by a debug probe of [What establishes the handover](#the-bcm2711-bridge),
+whose seeded fault is the same probe's reading with the cores halted
+after erXos's own bring-up has released PERST#, which must show the
+bridge out of reset and the link up, so a probe that reads nothing live
+cannot pass; and the mailbox's answer time for the notification (B1).
 
 ## Performance
 
@@ -2758,10 +2905,6 @@ Unmeasured costs, each on [the watch list](todo-performance.md):
   reader;
 * mass-storage throughput at 64 sectors a request against FreeBSD's on
   the same QEMU device.
-
-If probe B2 leaves the VL805 without an interrupt, its controller
-process polls the event ring on a timer; that cost joins the watch list
-then, with a key's latency on the Pi 4 as its measure.
 
 ## Outside this design
 
@@ -2855,7 +2998,9 @@ then settles three rules this design records:
 * **No interrupt for the VL805, its event ring polled**, so that MSI
   stays the only PCIe interrupt everywhere: it costs latency and CPU on
   the board that needs the keyboard, while the Pi 4's closed bus lets the
-  unit rule hold its line unchanged.
+  unit rule hold its line unchanged. Nor does polling rescue a board whose
+  VL805 shares a line with the bridge: the shared line still makes the
+  two one unit, so that topology is refused instead.
 * **INTx on QEMU `virt` on the stopgap**: it would need the closed-bus
   rule on a bus the harness can extend, and a path above `liberx` that
   erXos's kernel does not use; MSI over the frame is the same

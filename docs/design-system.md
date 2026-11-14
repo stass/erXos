@@ -401,9 +401,11 @@ violation fails the build with the property, the record and the field:
 3. **Exactly one domain holds PCIe configuration space, and that domain
    holds nothing else,** on every platform where erXos drives a PCIe
    bridge in a full boot: the PCIe domain, `pcie`, which runs the PCIe enumerator and
-   nothing beside it. On a platform that drives no bridge, as the
-   Raspberry Pi 4, no domain holds configuration space and there is no
-   PCIe domain.
+   nothing beside it. QEMU `virt`, the Raspberry Pi 4, whose BCM2711
+   bridge leads to the VL805 USB controller
+   ([design-usb.md](design-usb.md#the-bcm2711-bridge)), and the
+   Raspberry Pi 5 each drive one; on a platform that drives no bridge, no
+   domain holds configuration space and there is no PCIe domain.
 4. **Budgets and grants sum within the root's.** The principals' budgets,
    the system domain's baseline and its reservation for `max_domains`
    admitted domains ([Resource policy](#resource-policy)), the unconfined
