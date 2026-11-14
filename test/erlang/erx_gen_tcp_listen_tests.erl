@@ -19,8 +19,9 @@ another process, a dead process and the new owner's messages, which move with it
 owner's exit closing the socket; a listening socket moved to another owner; an accept
 waiting when its listening socket closes, and the calls after the close; and the
 listen-time answers of a port another listener holds, a local address, a bad port and the
-defaults; and what `listen` and `connect` raise for an option stock does not know and for
-a value it does not take.
+defaults; what `listen` and `connect` raise for an option stock does not know and for
+a value it does not take; and an acceptor that is not the listening socket's owner
+echoing a passive connection until the peer's FIN, then closing.
 
 A port held only by a loopback connection in TIME-WAIT is a case of its own, against
 FreeBSD's rule: free 20 ms after the close, where macOS holds it for the full 2MSL, so
@@ -111,8 +112,49 @@ scenario(#{listen := Listen, connect := Connect}) ->
          {connect_unknown_pair_option, raised(fun() -> Connect(Port4, [{no_such_option, true}]) end)},
          {connect_bad_option_value, raised(fun() -> Connect(Port4, [{nodelay, 2}]) end)},
          {default_opts, (fun() -> {ok, L3} = Listen(0, []), inet:getopts(L3, [active, mode]) end)()}],
-    _ = [gen_tcp:close(S) || S <- [C, L, L4]],
-    lists:append([Listening, Accepted, Moved, MovedListener, Closed, ListenTime]).
+    %% An acceptor that is not the listener's owner echoes a passive connection until the
+    %% peer's FIN, then closes: the peer reads its bytes back and then the end.
+    {ok, L5} = Listen(0, [binary, {active, false}]),
+    {ok, {_, Port5}} = inet:sockname(L5),
+    spawn(fun() -> Test ! {echoed, echo(L5)} end),
+    {ok, C5} = Connect(Port5, [binary, {active, false}]),
+    ok = gen_tcp:send(C5, <<"echo me">>),
+    ok = gen_tcp:shutdown(C5, write),
+    HalfClosed =
+        [{echo_after_the_peers_fin, read_to_end(C5, <<>>)},
+         {acceptor_after_the_peers_fin, receive {echoed, Echoed} -> Echoed after ?WAIT -> none end}],
+    _ = [gen_tcp:close(S) || S <- [C, L, L4, C5, L5]],
+    lists:append([Listening, Accepted, Moved, MovedListener, Closed, ListenTime, HalfClosed]).
+
+%% Accepts one connection on L and sends back what each recv takes until the peer's end;
+%% answers the bytes echoed and the close's answer, or the first call that failed.
+echo(L) ->
+    maybe
+        {ok, A} ?= tagged(accept, gen_tcp:accept(L, ?WAIT)),
+        {ok, N} ?= echo(A, 0),
+        {ok, N, gen_tcp:close(A)}
+    end.
+
+echo(A, N) ->
+    case gen_tcp:recv(A, 0, ?WAIT) of
+        {ok, B} ->
+            maybe
+                ok ?= tagged(send, gen_tcp:send(A, B)),
+                echo(A, N + byte_size(B))
+            end;
+        {error, closed} -> {ok, N};
+        Error -> {recv, Error}
+    end.
+
+tagged(_Step, ok) -> ok;
+tagged(_Step, {ok, _} = Ok) -> Ok;
+tagged(Step, Error) -> {Step, Error}.
+
+read_to_end(S, Acc) ->
+    case gen_tcp:recv(S, 0, ?WAIT) of
+        {ok, B} -> read_to_end(S, <<Acc/binary, B/binary>>);
+        End -> {Acc, End}
+    end.
 
 %% A port that only a connection in TIME-WAIT holds, its peer one of the machine's own
 %% addresses, is free once 2 * TCPTV_MSL_LOCAL, 20 ms, has passed (tcp_eff_msl and

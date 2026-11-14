@@ -97,8 +97,9 @@ it; git history is the record of completed work.
      * [Medium] the bulk and request-reply benchmarks under HVF: no TCP peer on QEMU's
        medium yet (the Linux oracle guest is not built; the harness's virtio-net hub carries
        raw frames to a Ruby harness, and slirp's guest forward carries the `net_device`
-       suite's TCP to a Ruby echo server over one host stream, which checks the guest's TCP
-       but is no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
+       suite's TCP to a Ruby echo server over one host stream, and its host forward one
+       connection from the harness to the guest's listener, which check the guest's TCP
+       but are no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
        `BenchGuest` loads its module. The Linux-guest baseline stays unsupported until then.
      * [Medium] `erx_net_if_core` counters: the map keeps only counters that were
        incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-freebsd`.
@@ -1924,6 +1925,16 @@ it; git history is the record of completed work.
   domain restarts, but a connection can end while both domains live (`malformed`,
   `no_memory`, `disconnect`). State whether the two domains are introduced and granted
   again then, or the client keeps a dead `net` facet until a restart.
+* [High] network, accept across domains (`erx_gen_tcp`, `erx_tcp_listen`): on erXos a
+  connection the host makes through slirp's host forward to a listener in root's session
+  is reset, and the acceptor's `gen_tcp:accept(L, 10000)` answers `{error, closed}` at once
+  (the `net_device` suite's `tcp-accepted` checkpoint, which fails until this is fixed).
+  The same steps pass on the host's loopback (`erx_gen_tcp_listen_tests`, the half-close
+  echo). `closed` is the answer of a listener core that has closed: the listener's exit,
+  or its accept reply refused by `erx_sock_admit` (a `{count, Check}` warning). The
+  network domain's log does not reach the console, so which one is unknown; a likely
+  suspect is the accepted connection's link to an accept's socket process, which holds
+  only `send` on it (no `expose/2`, below).
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:

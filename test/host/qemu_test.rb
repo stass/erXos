@@ -215,6 +215,17 @@ class QemuTest < Minitest::Test
     refute(argv.any? { |argument| argument.include?('hostfwd') })
   end
 
+  # A plan with a forward port adds the one host forward, from that loopback port to the
+  # guest's listening port, beside the guest forward.
+  def test_a_forward_port_adds_one_host_forward_from_loopback_to_the_guests_listening_port
+    nic = Erx::QemuPlan::Nic.new(frames_port: 5001, peer_port: 5002, echo_port: 5003, forward_port: 5004)
+    argv = Erx::QemuPlan.argv(platform: PLATFORM, accel: 'hvf', image: 'image', serial: 'serial', nic: nic)
+    users = argv.each_cons(2).select { |flag, value| flag == '-netdev' && value.start_with?('user,') }.map(&:last)
+    assert_equal ['user,id=nic_user,restrict=on,domainname=erxos.test,guestfwd=tcp:10.0.2.4:7-tcp:127.0.0.1:5003,' \
+                  'hostfwd=tcp:127.0.0.1:5004-:7007'], users
+    assert_raises(Erx::Error) { Erx::QemuPlan::Nic.new(frames_port: 5001, peer_port: 5002, echo_port: 5003, forward_port: 0) }
+  end
+
   def test_a_disk_path_that_could_change_what_qemu_opens_is_refused
     ['relative.img', 'nbd:host:1', '/a,b', "/a\0b", '', nil, 5].each do |path|
       assert_raises(Erx::Error, path.inspect) { DISK.new(path: path) }
