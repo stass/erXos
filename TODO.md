@@ -668,8 +668,10 @@ it; git history is the record of completed work.
   settings changed, the comparison `erx_starter:kept/1` serves, and the failed read's retry with backoff all go;
   the records process holds each row's applied record instead; the display rule judges a row against the rows kept
   (a live row supervisor) rather than the rows the file enables, so `merge/3` takes the rows kept as `merge/4`; a
-  failed read counts as a file with no settings; a publication applies the file to the rows it adds; a restarted
-  table reads `rc.conf` only for a row it holds no record for; the keeper, not the table, waits on
+  failed read counts as a file with no settings at boot and at a publication, while at a command `start`, `restart`,
+  `onestart` and `onerestart` answer `eio` and `stop` and `onestop` are judged on the row as last applied; a
+  publication applies the file to the rows it adds; a restarted table reads `rc.conf` only for a row it holds no
+  record for; the keeper, not the table, waits on
   `erx_domain:display_settled/1`, before each start of its session; and a row runs while its kept or its `onestart`
   session stands, so a `start` after `onestart` and `enable` answers `ealready` rather than leaving a
   `{once, Name}` keeper beside the row's supervisor (the A5c residual); `erx_cmd_service`'s `enable` and `disable` edit

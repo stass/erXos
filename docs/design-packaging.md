@@ -750,8 +750,9 @@ its data on macOS and deleting a package keeps a user's files on
 FreeBSD, so a package of the same name and signer copied in again finds
 its data where it was. An administrator removes the data on purpose with
 a purge, `service NAME purge`, which the start service's `ctl` takes as
-`purge NAME` and hands to the package process
-([design-apps.md](design-apps.md#interfaces)). The package process
+`purge NAME`; that file's owner hands it to the package process and
+awaits the answer itself, outside the start table
+([design-apps.md](design-apps.md#concurrency)). The package process
 carries it out with the storage service's `remove_app` request on the
 durability facet, which only the system domain holds and which reaches
 nothing outside `apps/`
@@ -1383,6 +1384,12 @@ start table. The `apps` tree's file owner for a copy waits for the
 package process's answer before it answers the close, as any tree's
 owner runs a file's requests in turn
 ([design-files.md](design-files.md#serving-the-erx_fs-behaviour)).
+The package process waits for the start table at each publication, and
+the table never waits for the package process, so the two never wait
+on each other: a purge is awaited by the start service's `ctl` file
+owner, not by the table, and the package process takes it in turn with
+its closes and removals, after the publication of the one it is
+carrying out ([design-apps.md](design-apps.md#concurrency)).
 
 A lifetime's effects are taken only while it is alive, by `erx_pkg_io`
 and the start service, each one at a time
@@ -1394,8 +1401,11 @@ without an app and its deletion, or the rename of its update, leaves the
 app stopped only until the recovery's publication, which brings it back
 on whichever package its name then holds.
 A crash of the start service's table process loses nothing the package
-process holds: on its restart it asks the package process for the set,
-and applies `rc.conf` only to a row of it that it holds no record for.
+process holds: on its restart it asks the package process for the set
+with a message and waits for no answer; the package process answers by
+publishing its set, in turn with its closes, removals and purges, and
+the table applies `rc.conf` only to a row of it that it holds no record
+for.
 The registry of app principals belongs to the
 principal service and only grows within a boot, and the package process
 writes a record only for a committed package, so a crash leaves no
