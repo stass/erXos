@@ -3815,8 +3815,13 @@ listener.
 The entry follows the listener's options. A `setopts` on the listening
 socket that changes one of them is stepped by the listener, which
 rewrites its own entry with `erx_net_bind:update/2` before it answers;
-`update/2` replaces the entry of a key its caller holds, keeping its
-pid, credit and grant, so it changes nothing an explicit bind reads.
+`update/2` replaces the entry of a key only while its caller holds it,
+keeping its pid, credit and grant, so it changes nothing an explicit
+bind reads and never touches a key that has since passed to another
+socket (**Ports and the demultiplexing table**, below). It returns
+`gone` when it replaced nothing, which for a running listener means its
+grant has ended, and the listener then ends as at its grant's exit,
+which follows.
 The interface reads the entry at a SYN for the SYN-ACK's part and at the
 completing ACK for the rest, so a connection whose handshake completes
 after a successful `setopts` has the new values and one spawned before
@@ -3884,8 +3889,11 @@ answered:
 
 * `{queued, Conn}`: `Conn` is appended to the queue. `Conn` linked to
   the listener before it sent the notice, and signals between two
-  processes arrive in the order they were sent, so the exit of a queued
-  connection always comes after its notice.
+  processes arrive in the order they were sent, and the listener takes
+  them in that order, paused or not (**Pausing**, in
+  [Sockets act for one domain](#sockets-act-for-one-domain)), so the
+  exit of a queued connection always comes after its notice, and a
+  connection's `{bound, Conn}` before its exit.
 * `{call, N, {accept, SockProc, Timeout}}` from its socket process: it
   links to `SockProc`, the acceptor's socket process, and keeps the call
   waiting, with its deadline on the stack's clock, behind any that wait.
@@ -4533,13 +4541,22 @@ facet's.
   done.
 * **Pausing.** Before it takes its next message, a socket compares the
   account with the share. While the share is spent, the socket sends its
-  grant `{paused, self()}` and then takes only the grant's
-  `{resume, Period}` and the `'EXIT'` messages of its links, by a
-  selective receive that names only those, so everything else stays in
-  its mailbox unread. Meanwhile its packet credit fills, its interface
-  drops further segments for it, and the peer's congestion control
-  slows; its deadlines wait too, so a retransmission or keepalive runs at
-  most one period late.
+  grant `{paused, self()}` and then takes only its grant's messages, the
+  grant's `{resume, Period}` and the grant's `'EXIT'`, by a selective
+  receive that names the grant alone. Everything else, the exits of its
+  other links included, stays in its mailbox in the order it arrived and
+  is taken after the resume in that order, so pausing reorders nothing
+  the socket steps: what one process sent it, an exit included, it steps
+  in the order sent, which a lane's bytes before its FIN
+  (**Ordering**, in [The socket process](#the-socket-process)) and a
+  listener's notice before its connection's exit
+  ([The listener](#the-listener)) rest on. The grant's exit ends the
+  socket without a step, wherever it stands in the mailbox, so taking it
+  first loses nothing, and a paused socket whose grant has ended still
+  ends. Meanwhile its packet credit fills, its interface drops further
+  segments for it, and the peer's congestion control slows; its
+  deadlines and the exits of its other links wait too, so a
+  retransmission, a keepalive or a close runs at most one period late.
 * **The period's turn.** The grant arms the period's one timer. At each
   turn it subtracts the share from the spent count, never below zero, so
   an overrun is carried into the next period as a debt and an unspent
@@ -4607,11 +4624,19 @@ construction and a race between two binders of one key is decided by
 ERTS; an explicit bind also runs its conflict check in the same step
 (**Explicit binds**, below). The one rewrite is
 `erx_net_bind:update/2`, by which a listener rewrites its own entry when
-its options change; it replaces the entry of a key its caller holds,
-keeping the pid, credit and grant, so it never changes who holds a key
-or what a bind checks, and it writes with `ets:update_element/3`, which
-changes nothing once the key is gone, so it never brings back a key
-that its grant's end has deleted. A chokepoint check fails the build on any other
+its options change, keeping the pid, credit and grant, so it never
+changes who holds a key or what a bind checks. It writes with one
+`ets:select_replace/2` whose match specification matches the key's
+object only while the entry's pid is the caller's
+(`map_get(pid, Entry) =:= self()` in its guard) and whose body is the
+key with the caller's new entry, and ETS makes each object's match and replacement
+one atomic step (`ets.erl:1864-1870`). The holder is the one fact that
+changes when a key changes hands, and no other process has the caller's
+pid while the caller runs, so a key its grant's end has deleted is not
+brought back and a key deleted and then claimed by another grant's
+socket is left as that socket holds it. The condition and the write
+being one step of ETS, `update/2` needs no call to `erx_net_tables` and
+no ordering against deletions and explicit binds there. A chokepoint check fails the build on any other
 insertion into the table or rewrite of an entry.
 
 `erx_net_bind` translates FreeBSD's port rules: ephemeral ports from
@@ -6755,8 +6780,9 @@ that a handshake refused at the limit is reached:
   ended; sending `{queued, C}`; taking `bind`; linking to `SockProc`,
   answered `noproc` once `SockProc` has ended; sending `{bound, C}`;
   and its own end, or a kill, between any two of these;
-* the listener: each message, exit and deadline of its step, and its
-  end;
+* the listener: each message, exit and deadline of its step; pausing
+  before any step, taking while paused only what **Pausing** lets it
+  take, its grant's resume and exit, and resuming; and its end;
 * an acceptor: its `accept` call, and its socket process's end at any
   point;
 * the listener's socket process: its calls in flight, each retired by
@@ -6790,7 +6816,12 @@ it and its acceptor has ended while the adoption is pending; a unit
 also taken back at `{bound, C}`, the second; a listener that drops the
 call of an ended acceptor without a reply, the third; and a call paired
 again after its connection's end, under which a call whose acceptor
-ended while it was handing waits for ever, the third again.
+ended while it was handing waits for ever, the third again; and a pause
+that takes the exits of every link, under which a connection that sends
+its notice and ends while the listener is paused has its exit taken
+first and is queued dead: paired with an `accept`, it leaves the call
+unanswered, the third property, and unpaired, its unit never comes
+back, the second.
 
 **The backlog and the hand-over, on a development host.** With the
 stack under virtual time ([The stack on a development host](#the-stack-on-a-development-host)),
@@ -6830,6 +6861,12 @@ proves the case ran:
   next connection accepted on it `nodelay`, as `inet:getopts/2` on the
   accepted socket shows; seeded: a listener that applies the option
   without rewriting its entry;
+* `erx_net_bind:update/2` from a process that no longer holds a key,
+  run on the host against a table in which the key was deleted and then
+  bound by a socket of another grant, returns `gone` and leaves that
+  socket's entry unchanged; seeded: `update/2` written
+  with `ets:update_element/3`, under which the key's entry becomes
+  the caller's and the other socket loses its key;
 * a wildcard listener reached through two interfaces of MTU 1,500 and
   9,000 offers MSS 1,460 in one SYN-ACK and 8,960 in the other; seeded:
   the MSS taken from the listener's entry.
@@ -7225,7 +7262,8 @@ requests; bytes past the credit, and bytes after `shutdown` of the
 write side, each end the connection with a RST and
 `{error, econnaborted}`, counted; a stand-in that exits ends the
 connection through their link as `close/1` does, with a FIN after the
-bytes it sent; and bytes sent to a connection that a RST has just ended
+bytes it sent, also when it sends them and exits while the connection
+is paused with its grant's share spent; and bytes sent to a connection that a RST has just ended
 are dropped without a crash. The grant rule, a pure function, is also
 checked over every high watermark, buffer, credit, acknowledgement and
 window state up to 8 bytes: it never grants past the high watermark,
@@ -7241,9 +7279,10 @@ acknowledged must leave the stand-in without the 16 KiB behind the
 probe; one whose second clause ignores the credit outstanding must cost
 a credit message per request-reply exchange; one that lowers its
 reservation to the new `sndbuf` at once must let the grant's total fall
-below the bytes the connection holds; and one that takes bytes past its
+below the bytes the connection holds; one that takes bytes past its
 credit into the buffer must let the stand-in grow the buffer past its
-size.
+size; and a pause that takes the exits of every link must send the
+paused case's FIN without the bytes that waited in its mailbox.
 
 **What the bench must show.** The network bench
 (`bench/erx_net_bench.erl`) runs the package against master: rr-64 at
