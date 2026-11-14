@@ -253,9 +253,14 @@ Error in process <0.150.0> with exit value:
   TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs the
   deterministic-mode transcript and a boot smoke, and at the landing gate
   `tools/erx check-qemu --remote DEST` may move the multi-CPU cells of
-  long suites to a second host under TCG while this one is busy.
+  long suites to a second host under TCG while this one is busy. The
+  development machine has 512 MiB of RAM.
 * **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
-  backend. OTP 29.1.2 and musl live in the tree, modified.
+  backend. OTP 29.1.2 and musl live in the tree, modified. musl's start
+  gives a program `AT_RANDOM`, 16 bytes of the entropy source, and
+  `AT_HWCAP` and `AT_HWCAP2`, whose words hold 0. OpenSSL 3.5.9 lives in
+  the tree too and builds `libcrypto.a` for `erxos-aarch64`
+  (`tools/erx build openssl`); no runtime links it yet.
 * **The serial console's driver** (PL011) is an Erlang process.
 * **Files work.** The file protocol, per-domain namespaces and `/tmp` all
   run, `/tmp` on a RAM file system written in Erlang. `prim_file` reaches
@@ -303,7 +308,10 @@ Error in process <0.150.0> with exit value:
   FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
   the kernel log from `/proc/kernel/log`, which reads the log without taking
   it from the console and marks the records it cannot show, overwritten or
-  unreadable, as `[missing N]`. `top` shows
+  unreadable, as `[missing N]`. The system log's core, which renders a
+  domain's record as one escaped line and holds each domain to a rate of
+  stored bytes, and the decoder of its write interface are built and
+  tested on the host; the service is not. `top` shows
   the process table under a header of uptime, memory and run queue, read
   from the one tree of system values that `/proc` also serves. Every
   runtime's `/proc`, `top` and `dmesg` read through the inspect facet, and
@@ -409,7 +417,7 @@ Error in process <0.150.0> with exit value:
   neighbour table shared with IPv6 neighbour discovery and its duplicate
   address detection, IPv4 and IPv6 with fragment reassembly, ICMP and
   ICMPv6 with their rate limits, the loopback interface `lo0` with
-  127.0.0.1/8, UDP, and for TCP its wire format, RTT,
+  127.0.0.1/8, which always runs over the loop interface, UDP, and for TCP its wire format, RTT,
   MSS, initial sequence numbers, ECN, SACK blocks and the RFC 6675
   scoreboard with duplicate-ACK loss detection. TCP's connection now runs
   as a pure step from SYN to TIME-WAIT, with its timers, the syncache,
@@ -449,14 +457,18 @@ Error in process <0.150.0> with exit value:
   picture. The window server (`erx_winfs`) serves each window as files and
   takes its display's name from its domain's environment. The virtio-input
   driver's event parser is a pure, fuzzed core; input is not yet routed to
-  windows. Host-built parts around it: the screen's composition
+  windows. Evdev's key and button codes have one home,
+  `abi/formats/evdev.txt`, and the US keymap is generated from
+  `abi/keymaps/us.txt`. Host-built parts around it: the screen's composition
   (`erx_screen_core`), the single-window policy with its reserved chord
   and `wctl`, the widget model's deltas, `ui.txt` with its generated
   schema and binary form in Erlang, C and TypeScript, presentation types
   generated from the inspection schema, LVGL built on the host, and the
   web client's protocol and connection core. A connection can carry a pixel
   area that its reader maps and `erx_memdraw` draws into, the manifest has a
-  display record for the windows service, `erx-lvgl` draws into its
+  display record for the windows service, the development manifest runs a
+  display domain over virtio-gpu (no development boot attaches a gpu, so it
+  shows its empty layout's background), `erx-lvgl` draws into its
   window's buffer in LVGL's direct mode, and the virtio-gpu driver's
   decisions are written; the QEMU harness can add a virtio-gpu, keyboard
   and tablet and compare screenshots.
