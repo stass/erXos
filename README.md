@@ -324,11 +324,15 @@ Error in process <0.150.0> with exit value:
   plan9port's rc, built on the host as the oracle. Job control works for
   Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
   programs is not on master yet.
-* **Programs have pipes, but nothing runs them yet.** A program has a
-  descriptor table and pipe ends set up from its startup message, and a
-  read or write on a pipe end waits until the other side is ready. The
-  musl seam that lets a C program use them is not built, so no C program
-  uses pipes yet.
+* **Programs have pipes, and a session process can start one.** A
+  program has a descriptor table and pipe ends set up from its startup
+  message, and a read or write on a pipe end waits until the other side
+  is ready. A session process starts a native program through the
+  program's handler, `erx_prog_handler`, handing it pipe ends it holds
+  and a window buffer; it is told how the program ended, and the program
+  stops when the session process exits. The shell does not start
+  programs yet, and the musl seam that lets a C program use pipes is not
+  built, so no C program uses them yet.
 * **The start table runs.** The start service merges the manifest's
   `start` rows with `/apps/rc.conf` and keeps each enabled row's session
   under a supervisor of its own. `service` enables, disables, starts and
