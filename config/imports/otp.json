@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/erlang/otp",
   "revision": "OTP-29.1.2",
-  "applications": ["compiler", "kernel", "runtime_tools", "sasl", "stdlib", "tools"],
+  "applications": ["asn1", "compiler", "crypto", "kernel", "runtime_tools", "sasl", "stdlib", "tools"],
   "default_license": "Apache-2.0",
   "default_evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
   "rules": [
