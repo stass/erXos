@@ -3152,10 +3152,16 @@ brief record a release build writes carries no text, and only stops its
 space ([design-system.md](design-system.md#the-crash-record)). The
 kernel treats the root task's stop outside an ordered shutdown as a fault
 and ends the machine by `erx.panic`
-([design-kernel.md](design-kernel.md#the-root-task)). An ordered shutdown
-is `erlang:halt/0,1` in the system domain, which the system release turns
-into the machine's shutdown. There is nothing to recover: every domain is
-a child of the system domain's space and ends with it.
+([design-kernel.md](design-kernel.md#the-root-task)). In the system
+domain, `init:stop/0`, `init:reboot/0` and every deliberate
+`erlang:halt/0,1` with a non-negative number, `halt(0)` and `halt(3)`
+alike, ask for an ordered shutdown: the system release passes a numeric
+halt to the coordinator's one entry as a request for `off`
+([design-system.md](design-system.md#shutting-down)). A halt with a
+string or `abort` and ERTS's exit on a fatal error take the crash path
+above, as OTP tells a numeric halt from the others
+(`erts/emulator/beam/bif.c`, `halt_2`). There is nothing to recover:
+every domain is a child of the system domain's space and ends with it.
 
 ### The C library seam
 
@@ -3694,8 +3700,8 @@ Everything not listed behaves as stock OTP 29.1.2.
 | `erlang:system_flag(schedulers_online, N)` | sets the limit and returns the previous value online; the value online is then the lower of the limit and the capacity |
 | `erlang:system_info(logical_processors_available)` | the CPU count of the group's cpuset |
 | `erlang:system_flag(scheduler_bind_type, _)` | raises `notsup`, as ERTS does where binding is unsupported; executors are pinned by the adapter, or unpinned with `+sbt u` |
-| `erlang:halt/0,1` | the domain stops itself with the status; in the system domain, the machine shuts down ([Crash handling](#crash-handling)) |
-| `erlang:halt/1` with a string | a crash dump with that slogan, then the domain stops ([Crash handling](#crash-handling)) |
+| `erlang:halt/0,1` with a number | the domain stops itself with the status; in the system domain, the machine shuts down by an ordered end, whatever the status ([Crash handling](#crash-handling)) |
+| `erlang:halt/1` with a string or `abort` | a crash dump with that slogan, then the domain stops; in the system domain, the crash path ([Crash handling](#crash-handling)) |
 | `erlang:load_nif/2`, `erl_ddll` | only NIFs linked into the domain's runtime image; any other load is refused by `erl_erxos_sys_ddll.c`, which reaches no dynamic linker, with `{error, {load_failed, Text}}` and `{error, no_ddll_available}` |
 | `code:load_binary/3`, `erlang:load_module/2` in the system domain | `{error, not_installed}` unless the module is installed storage ([Code in the system domain](#code-in-the-system-domain)) |
 | `file`, `prim_file` | the release file system read-only at `/`, EROFS images read-only where a release mounts them, a RAM file system at `/tmp` ([Files](#files)) |

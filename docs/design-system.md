@@ -1890,8 +1890,9 @@ one destroy and nothing anyone still uses goes with it (A5):
 ### Shutting down
 
 Every end of the machine that the system domain asks for is an **ordered
-end**: `off`, which `init:stop/0` and `erlang:halt/0,1` in the system
-domain ask for, `reset`, which `init:reboot/0` asks for, `trial` or
+end**: `off`, which `init:stop/0` and every deliberate `erlang:halt/0,1`
+with a non-negative number in the system domain ask for, `halt(0)` and
+`halt(3)` alike, `reset`, which `init:reboot/0` asks for, `trial` or
 `reset`, which the update service asks for
 ([design-storage.md](design-storage.md#system-updates)), and `off` or
 `reset`, which a session that holds the `machine` grant asks for ([A
@@ -1966,11 +1967,14 @@ reached only after successful preparation. The pure end decision takes the
 requested end, the boot value and the complete set of preparation
 outcomes; an outcome still pending is a failure at the deadline.
 
-A halt of the system domain outside an ordered end, such as
-`erlang:halt/1` with a nonzero status from a system process that bypassed
-`init:stop/0`, is not ordered: the runtime stops its space, and the kernel
-writes the crash record and ends the machine by `erx.panic`, as for a
-fault ([The crash record](#the-crash-record)).
+A numeric halt's status chooses no end: `halt(3)` asks for `off` as
+`halt(0)` does. What stops the system domain without the coordinator is
+not ordered: ERTS's exit on a fatal error, `erlang:halt/1` with a string
+or with `abort`, which OTP takes as a crash rather than a halt
+(`erts/emulator/beam/bif.c`, `halt_2`), and a stop of the system domain's
+space that does not go through the coordinator. The runtime stops its
+space, and the kernel writes the crash record and ends the machine by
+`erx.panic`, as for a fault ([The crash record](#the-crash-record)).
 
 #### A session's request
 
@@ -2013,8 +2017,9 @@ templates hold it. For each session of such a template, the domain
 service asks the tree's grant supervisor in the session's ready answer
 for one `erx_fs` grant bound to the session's domain and ending with it
 ([Facets a configured domain serves](#facets-a-configured-domain-serves),
-"Facets of the system domain's services"). Both development manifests
-grant it to root's template alone (`@session.system`). A release manifest
+"Facets of the system domain's services"). The records every
+development manifest takes grant it to root's template alone
+(`@session.system`). A release manifest
 grants it to root's template and to any administrator's template its
 author lists, as it does `apps`. There is no administrator flag, group or
 list beside the facet rows, and the tree does not check who a writer is:
@@ -2025,10 +2030,20 @@ command the start table. It follows that:
   console line, through the web front end or over SSH, or from a line's
   menu, since each starts from the template alone
   ([design-domains.md](design-domains.md#principals-sessions-and-quotas));
-* a program inherits `/machine` with its session's namespace, so a
-  program root runs may end the machine, as on UNIX; a command that
-  `within` narrows, or a program whose namespace leaves `/machine` out,
-  cannot ([design-files.md](design-files.md#narrowing-for-a-program));
+* ending the machine needs a writable route to the grant: the session's
+  mount of `/machine`, a mount that names the same facet elsewhere, or a
+  descriptor of `ctl` opened for writing, which a program receives
+  whatever its namespace holds
+  ([design-programs.md](design-programs.md#descriptors-and-files),
+  "Files passed on"). A program inherits `/machine` with its session's
+  namespace, so a program root runs may end the machine, as on UNIX.
+  Narrowing a command with `within`, or leaving `/machine` out of a
+  program's namespace
+  ([design-files.md](design-files.md#narrowing-for-a-program)), takes
+  the right away only when no route remains: `within` names no `machine`
+  grant, no `ctl` descriptor is passed, and the namespace keeps no other
+  mount of the facet. Ordinary capability inheritance decides this, with
+  no rule of its own for the machine tree;
 * a grant ends with its session, so no grant outlives the session it was
   made for.
 
@@ -2039,20 +2054,28 @@ serves](#facets-a-configured-domain-serves)), and starts each grant with
 that principal as the grant's own argument (`erx_fs_grants:grant/4`, as
 `erx_winfs` serves each client its own directory). The `ctl` line carries
 the end and nothing else, so the log can only ever name the principal of
-the grant the write came through. The principal's name stays the domain
-service's: no interface hands it to a session, and neither command learns,
-prints or sends its user's name. The system side fills it in, from the
-grant for a session's request and as the system principal for its own.
+the grant the write came through. The request carries no principal; the
+coordinator takes it from the server-side grant. A session may know its
+own principal's name from its `/etc/passwd`
+([design-programs.md](design-programs.md#the-posix-lite-personality)),
+and that gains it nothing, since no request names anyone. The system
+side fills the principal in, from the grant for a session's request and
+as the system principal for its own.
 
 **One entry for every request.** The coordinator takes every request for
 an end through one call, with the end and the principal. The `ctl`
 handler passes its grant's principal, and the system domain's own
-callers, `init:stop/0`, `init:reboot/0`, the update service and the
-system shell's commands, pass the system principal. For each request the
-coordinator calls `erx_dom_end_begin(how)`. When the begin succeeds, the
-coordinator writes one log record at `critical`, `rebooted by P` for
-`reset` or `powered off by P` for `off`, where `P` is the principal's
-name and `root` for the system principal. It then answers `ok`, and
+callers, `init:stop/0`, `init:reboot/0`, a numeric `erlang:halt/0,1`,
+the update service and the system shell's commands, pass the system
+principal. For each request the coordinator calls
+`erx_dom_end_begin(how)`. When the begin succeeds, the coordinator writes
+one log record at `critical`, which records the request it accepted:
+`rebooted by P` for `reset`, `powered off by P` for `off`, and
+`trial boot requested by P` for `trial`, where `P` is the principal's
+name and `root` for the system principal. The record names what was asked, not
+how the machine ended: an `off` accepted during a trial ends by a reset
+(K19), and a `trial` whose preparation failed ends by a reset, which the
+coordinator's preparation lines report. It then answers `ok`, and
 prepares and commits as above. When an ending record is already
 installed, it answers `busy` and logs nothing. This gives one log line
 per end, written by the system domain whoever asked, and one refusal for
@@ -2067,7 +2090,10 @@ ordered end stops no service and runs no stop scripts. Its two
 preparation steps, the vault's quiesce and the storage freeze, are that
 flush, so `-q` has nothing to skip. Its 10 s deadline already bounds an
 end that a hung service would delay. `-q` is accepted and asks for the
-same end (see Open questions). `halt` asks for `off`:
+same ordered end. A second word that commits without preparation would
+give any holder of the grant a way to drop the freeze's guarantee for
+every principal's acknowledged writes, to save at most the 7 s of the two
+preparation deadlines, and no consumer needs that. `halt` asks for `off`:
 `erx_machine_end` has no end that stops the machine without turning it
 off, so FreeBSD's `halt` and `halt -p` are the same end here.
 
@@ -2091,8 +2117,14 @@ command's `machine` entry:
   ([design-shell.md](design-shell.md#interfaces)), and the command calls
   the coordinator's entry with the system principal.
 
-A session without the grant refuses either command with `no_facet`
-before it starts, as for any command whose facet is absent.
+A session without the grant refuses either command with the shell's
+standard `no_facet` before it starts, as for any command whose facet is
+absent, and the commands' help names `machine` as their need
+([design-shell.md](design-shell.md#commands)). FreeBSD prints
+`reboot: Operation not permitted` instead; matching that text would need
+the two commands to run without `-erx_needs` and make the check
+themselves, a second refusal path for two commands, so erXos keeps the
+one refusal every absent facet gets.
 
 **Why a file tree.** Of the three homes a new need may take, an end is a
 one-shot command, so it is a `ctl` file of a tree its owner serves:
@@ -2118,9 +2150,14 @@ no domain is created or restarted, so a session that asks for a new
 domain after its `reboot` is refused, and it ends with the machine.
 
 **Failure.** The tree's grants are temporary children of their
-supervisor. A grant that crashes ends that session's grant alone, and
-the session finds `/machine` gone until the domain service grants it
-again. The coordinator is a process of the domain service, whose end
+supervisor. A grant that crashes ends that session's grant alone. The
+session's mount of `/machine` stays, and its paths and every descriptor
+opened on the grant answer `eio`, as any facet's mount does once its
+grant has ended ([design-files.md](design-files.md#building-binding-and-mounting)).
+The domain service mints a system domain service's grant for a session
+only in its ready answer and does not mint it again, so that session can
+no longer end the machine; a fresh session, from a new login, gets a new
+grant. The coordinator is a process of the domain service, whose end
 ends the machine ([System services](#system-services)). So `eio` is the
 answer to a write whose coordinator ended during the call, and the
 machine then ends by the crash path anyway.
@@ -2144,9 +2181,9 @@ holder cannot weaken the end. Its request makes the same ordered end the
 system domain's own does, with the same preparation and deadline, and
 the log names the holder's principal.
 
-**Manifest rows.** Each development manifest
-(`config/manifest/qemu-virt-development.txt` and
-`config/manifest/raspi4b-development.txt`) adds, beside `apps`:
+**Manifest rows.** The records every development manifest takes
+(`config/manifest/development.txt`, which both boards' manifests
+follow with their own parts) add, beside `apps`:
 
 ```text
 service machine
@@ -2165,11 +2202,16 @@ facet machine
 
 `max_request` is `files_max_frame_min`, as for every `files` grant
 (property 16). One write in flight is enough for a file that takes one
-word. The grant holds only its fids, so `max_heap_size` is 512 KiB. The
+word. The grant holds only its fids, so `max_heap_size` is 512 KiB.
+`reductions` and `period_ns` are the values every facet row carries,
+the `apps` row's. They bind no `erx_fs` grant (`erx_fs_grants`), so no
+CPU limit holds a writer back: what bounds repeated requests is the
+first begin, after which every write is answered `ebusy` and logs
+nothing, and the grant's one write in flight. The
 grant travels on the session's system connection, so `max_connections`
 does not change. No `abi/services` file is added: `abi/services/files.txt`
 declares the interface, and the facet table check (FacetNames) takes the
-row from these two manifest rows, whose comment cites this section. The
+row from these two manifest records, whose comment cites this section. The
 name `machine` appears in code in three places, each a name the table
 then holds: the commands' `-erx_needs`, the session's mount of `{facet,
 machine}`, and the tree's `erx_facet:serve(machine, Pid)`.
@@ -2184,15 +2226,21 @@ its seeded fault:
   fails `reset\n\n`. The parse has a fuzz target, landing with it.
 * **The coordinator's entry.** A first request begins the end and logs
   `rebooted by clock` for a grant made for principal `clock`. A second
-  request gets `busy` and logs nothing. Seeds: a coordinator that answers
+  request gets `busy` and logs nothing. The update service's `trial`
+  logs `trial boot requested by root`. Seeds: a coordinator that answers
   `ok` to the second request fails the `busy` case, and a log line that
   names the system principal instead of the request's fails the `clock`
   case.
-* **The mint.** `erx_domain_mints`, over a manifest whose root template
-  holds `machine` and whose second template does not: root's session's
-  ready answer holds one `machine` grant with principal `root`, and the
-  other session's holds none. Seed: a mint that gives the system domain's
-  services to every template fails the second case.
+* **The mint**, in `erx_domain_srv`, which builds the ready answer's
+  grants of the system domain's services (`erx_domain_mints` leaves those
+  out), over `erx_domain_fake_lib` (`test/erlang/erx_domain_tests.erl`).
+  The manifest's `machine` row grants `clock`'s template and not root's:
+  a session of `clock` has a ready answer that holds one `machine` grant
+  started with the principal argument `clock`, and root's session's
+  holds none. Seeds: a mint that passes the system principal instead of
+  the one it computed for the grantee fails the `clock` case, and one
+  that gives the system domain's services to every template fails
+  root's.
 * **The commands' decision.** With a grant, `reboot` and `reboot -q`
   write `reset\n`, and `halt` and `halt -p` write `off\n`, to
   `/machine/ctl`; with `local` they call the entry. An unknown option is
@@ -4337,8 +4385,9 @@ under test ran.
   the login prompt and to the system shell; kill the system domain under
   load, with domains, sessions and programs running, and find the crash
   record on the console, every domain stopped, and the machine ended as
-  `erx.panic` says; the same for `erlang:halt/1` from a system process and
-  for a stopped watchdog pet, whose crash record names the watchdog; on
+  `erx.panic` says; the same for `erlang:halt/1` with a string from a
+  system process and for a stopped watchdog pet, whose crash record names
+  the watchdog; on
   each board, a system domain killed during a trial, which boots the
   committed slot; a configured domain killed repeatedly, restarted within
   its intensity, and beyond it the machine ended when it is `required` and
@@ -4474,9 +4523,15 @@ under test ran.
   times out, and a refusal after preparation, both end by a normal reset
   with incomplete durability reported; the vault's `stop/0` called once
   per ordered end under each sealing row, and a hook that skips it under
-  `tpm`, after which the next start counts a failure in swtpm. A
-  session's request through the `machine` tree has its own tests and
-  QEMU suite ([A session's request](#a-sessions-request)).
+  `tpm`, after which the next start counts a failure in swtpm.
+  `erlang:halt(0)`, `erlang:halt(3)` and `erlang:halt("bye")` from a
+  system process, each in a boot of its own: the first two log `powered
+  off by root` and the preparation's lines before QEMU exits, and the
+  third writes the crash record with the slogan `bye` and logs no
+  `powered off` line. Seed: a system release that passes only status 0
+  to the coordinator turns `halt(3)` into a crash record, and that case
+  fails. A session's request through the `machine` tree has its own
+  tests and QEMU suite ([A session's request](#a-sessions-request)).
 * **Authority:** a domain's attempts to pass capabilities into another
   domain's space, carve the root resource, allocate from the root budget
   or pet the watchdog fail with `ERX_ERIGHTS`; the kernel refuses
@@ -4896,22 +4951,6 @@ Open questions, with recommended answers:
   one-time enrolment code the packer prints for each principal, which the
   UART's login asks for. Recommended: the UART, with the enrolment code if
   machines are installed unattended.
-* **Does `reboot -q` need an end of its own?** ([A session's
-  request](#a-sessions-request)). Options: (a) `-q` asks for the same
-  ordered end as `reboot`, so the request carries the end alone; (b) a
-  second word, `reset now` or `off now`, which commits without the
-  vault's quiesce and the storage freeze. (b) gives any holder of the
-  grant a way to drop the freeze's guarantee for every principal's
-  acknowledged writes, and saves at most the 7 s of the two preparation
-  deadlines, which already bound a hung service. Recommended: (a), since
-  FreeBSD's `-q` keeps the cache flush, which is all the ordered end does.
-* **What does a session without the grant see from `reboot`?** Options:
-  (a) the shell's `no_facet` refusal, the same for every command whose
-  facet is absent, with the help naming `machine`; (b) FreeBSD's
-  `reboot: Operation not permitted`, which needs the commands to run
-  without `-erx_needs` and to make the check themselves. Recommended:
-  (a), one refusal for every absent facet, rather than a second path
-  for two commands.
 
 ## References
 
