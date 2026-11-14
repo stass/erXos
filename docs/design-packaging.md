@@ -1207,7 +1207,8 @@ listing of `packages/` and acts on it:
    boot is the boot's package set, whose rows the start service's boot
    applies `rc.conf` to as it applies it to the manifest's rows; a later
    recovery's set, after a crash or a failed change, adds the rows it
-   adds installed, and ends the sessions of each row it drops.
+   adds with no record, so they show `installed`, and ends the sessions
+   of each row it drops.
 
 The recovery's publication is its lifetime's first, and the package
 process takes no close, removal or purge until it is answered, so the
@@ -1222,10 +1223,14 @@ this one path.
 
 ### The start table's rows
 
-The start table's rows are the manifest's `start` rows, in its order,
-then the start rows of the admitted packages, in name order: an image
-package's with its `package` row's `enable` as its default, an installed
-package's with `NO`. `rc.conf` sets them as it sets any row
+The start table's rows are in three groups, each after the one before:
+the manifest's `start` rows, in its order; then the start rows of the
+admitted image packages, in name order, each with its `package` row's
+`enable` as its default; then those of the admitted installed packages,
+in name order, each with `NO`. The order is the merge's, so where two
+enabled rows name one display, the row of the earlier group takes it
+whatever the names, and an installed app named `aaa` never takes a
+display from an image app named `kiosk`. `rc.conf` sets them as it sets any row
 ([design-apps.md](design-apps.md#the-start-table)). The merge's `Grants`
 argument gives, for each row's principal, the `windows` services its
 sessions will hold: a manifest principal's template's, and for an app
@@ -1240,9 +1245,10 @@ applied with the boot: `rc.conf` sets its rows as it sets the
 manifest's, and the rows the file enables start
 ([design-apps.md](design-apps.md#the-start-table)). Any later
 publication changes only the rows it adds and drops, and applies
-nothing of `rc.conf`: it adds each row installed, as its package
-declares it, starting nothing, and ends the sessions of each row it
-drops; every other row stays as it was applied. An installed row takes
+nothing of `rc.conf`: it adds each row with no record, starting
+nothing, so the row shows `installed`, with its package's declared
+settings; and it ends the sessions of each row it drops and drops the
+row's record; every other row stays as it was applied. An installed row takes
 its settings from the file at its own `service NAME start`, `restart`
 or `one` command, or at the next boot.
 
@@ -1462,14 +1468,15 @@ process ends no session: the next lifetime's recovery rebuilds the set
 from the manifest and the directory and publishes it, and until then the
 start service keeps the last set it took. A crash between a publication
 without an app and its deletion, or the rename of its update, leaves the
-app stopped; the recovery's publication brings its row back installed,
-on whichever package its name then holds, and its own `start` runs it.
-A crash of the start service's table process loses nothing the package
-process holds: on its restart it asks the package process for the set
-with a message and waits for no answer; the package process answers by
-publishing its set, in turn with its closes, removals and purges, and
-the table applies `rc.conf` only to a row of the boot's package set that
-it holds no record for, and records any other such row installed
+app stopped; the recovery's publication brings its row back with no
+record, `installed`, on whichever package its name then holds, and its
+own `start` runs it. A crash of the start service's table process loses
+nothing the package process holds: on its restart it asks the package
+process for the set with a message and waits for no answer; the package
+process answers by publishing its set, in turn with its closes, removals
+and purges, and the table applies `rc.conf` to the rows it holds no
+record for only when the boot mark says the boot is not done, and
+otherwise leaves them with no record, `installed`
 ([design-apps.md](design-apps.md#concurrency)).
 The registry of app principals belongs to the
 principal service and only grows within a boot, and the package process
@@ -1658,6 +1665,7 @@ it guards.
 | the recovery's bounds | a listing of `pkg_scan_max` + 1 entries gives `overflow` and no admission | the bound check removed, which reads the whole listing |
 | a publication that drops an app | the app's keeper and `onestart` session end before `packages/2` answers; `service NAME start` is refused until a set with the app arrives; a publication from an ended lifetime is refused | a publication answered before the sessions end, which the test catches with a session still alive |
 | the start table's grants for an app | an `rc.conf` line naming a display of the row the app did not need is refused `{no_grant, D}` | the merge given the app template's whole grant set, which accepts it |
+| the start table's order | a boot's package set with an image app `kiosk` and an installed app `aaa`, the file enabling both on one display: `kiosk` takes it and `aaa` is `refused` with `{display_held, kiosk}`; a manifest row enabled on that display takes it from both | the package rows sorted by name alone, which gives the display to `aaa` |
 | the app session's plan in `erx_domain_core` | the session's rows are `packages` and the rows its needs name; every minted scope names the app's principal; the session's memory is the declared one; one header admitted as an image package and as an installed one gives the same plan (PK10) | a plan that grants every row of the template; a scope computed from the template's key; a plan that grants an image package the template's whole row set, which the comparison catches |
 | the storage mint's root for an app | one name under two signers and as an image package gives three roots, `apps/N/<hex>`, `apps/N/<hex2>` and `apps/N/image` | a root of the name alone, which gives one |
 | the `apps` tree's header reads | a header read answers the authenticated bytes; the same header changed on the simulated medium after the check answers `eio` | the hash check removed, which serves the changed header |

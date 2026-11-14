@@ -309,7 +309,8 @@ its admission kept, never every row the `apps` row offers.
 The judgement is applied by two pure functions. **The merge**,
 `erx_start_table:merge(Rows, Local, Grants, Kept)`, folds it over the
 rows the boot applies, against the rows kept: over the manifest's rows
-in its order and then the rows of the boot's package set
+in its order and then the rows of the boot's package set, the image
+packages' and then the installed packages', each group in name order
 ([design-packaging.md](design-packaging.md#the-start-tables-rows)), in
 one fold when the set has arrived by then, with none kept before them,
 and otherwise over the set's rows when it arrives, against the rows the
@@ -371,10 +372,10 @@ system domain's namespace is in place, together with the set's rows if
 the set has arrived, and otherwise reads it again for the set's rows
 when the set arrives. So an installed app the file enables starts at
 every boot, and no manifest row waits for the package process. A row that a later
-publication adds, an install's or an update's, enters the table
-**installed**: recorded as its package declares it, with no setting of
-the file applied and nothing started, until its own command or the
-next boot applies the file to it
+publication adds, an install's or an update's, enters the table with
+no record, and shows **installed**, with its package's declared
+settings, no setting of the file applied and nothing started, until
+its own command or the next boot applies the file to it and records it
 ([design-packaging.md](design-packaging.md#the-start-tables-rows)).
 FreeBSD's `pkg` likewise starts no service at an install or an upgrade
 ([design-packaging.md](design-packaging.md#what-other-systems-teach)).
@@ -426,7 +427,8 @@ start` is what starts the row now. Until the row's own command or the
 next boot applies the file to it, `service -e`, which reads the file
 itself, shows the configured state, and `/proc/apps` the applied one:
 each row as the boot or its own last command applied it, or as its
-package declares it while it is installed, and what runs. The edit is one pure function of the text,
+package declares it while it is installed, and what runs. The edit is
+one pure function of the text,
 `erx_start_table:set/3`, which keeps every other byte as it was.
 
 **Concurrent edits.** Nothing locks the file, as nothing locks it on
@@ -677,10 +679,10 @@ while the row's keeper waits for its display or for its session's
 answer, `running` once the session stands, `down` once the row's
 supervisor has ended at its intensity; and for a row no supervisor
 keeps, its record: `stopped` for a row applied enabled, kept no longer
-since a `stop`, `disabled`, `refused` with its refusal as the
-reason, or `installed` for a row a publication added after the boot's
-package set, to which no boot or command of its own has applied the
-file yet. A session `onestart` started belongs to no row and is not
+since a `stop`, `disabled`, or `refused` with its refusal as the
+reason; and `installed` for a row of an admitted package that has no
+record, one a publication added after the boot's package set, to
+which no boot or command of its own has applied the file yet. A session `onestart` started belongs to no row and is not
 shown. An app's sessions are domains like any other at
 `[domains, Id]`.
 
@@ -710,8 +712,9 @@ is done, so a slow storage domain delays the commands waiting for it,
 not the table's answers. The table takes commands and publications of
 the package set one at a time. A command, and the boot's application
 of the file to its rows, are judged when their read answers; a later
-publication reads nothing and judges nothing: it records each row it
-adds as installed and ends the sessions of each row it drops. So no two
+publication reads nothing and judges nothing: it adds each row with no
+record, so the row shows `installed`, and ends the sessions of each
+row it drops and drops its record. So no two
 admissions overlap and the rows kept are the same from a judgement to
 its act. Reads of `/proc/apps` are answered from the
 table's own state. The start service writes no file: the file is the
@@ -748,14 +751,32 @@ row's session is kept with, and its missing pid is a row that is down.
 The rest is held by one plain process in the branch, the records
 process (`erx_starter_records`): each row's record, the row as the
 boot or its own last command applied it, with its refusal if it was
-refused, or as its package declares it while it is installed, each
-replaced in one step; and the **boot mark**, set in the same step as the
-records of the boot's package set, which says that the boot has applied
-the file to every row of its table. It is the
-branch's significant child, and the branch shuts down when it ends, so
-the records and the sessions they describe are only ever lost together.
-The records and the branch's children are the only store of the rows'
-state; the table's process keeps none of its own.
+refused, each replaced in one step; and the **boot mark**, set in the
+same step as the records of the boot's package set, which says that the
+boot has applied the file to every row of its table. A row a
+publication adds gets no record: `installed` is what a row of an
+admitted package shows while it has none, a label derived from that
+absence, with its package's declared settings, so no flag or copy of
+the defaults is kept for it, and a publication that drops a row drops
+its record with it. The records and the branch's children are the only
+store of the rows' state; the table's process keeps none of its own.
+
+**Losing that store resets the machine.** The records process is a
+temporary significant child of the keepers' branch, and the branch a
+temporary significant child of the start service's application's top
+supervisor; each supervisor shuts itself down when such a child ends,
+for any reason (`auto_shutdown => any_significant`,
+`lib/stdlib/src/supervisor.erl:140-143`). So an end of the records
+process, or of the branch at its own intensity, ends the application,
+which the system release holds permanent, and with it the system
+domain, which resets the machine, as an end of `erx_pkg_io` does
+([design-packaging.md](design-packaging.md#the-package-lifetime)). The
+boot that follows applies the file to every row of its table. Nothing
+restarts with the store lost: a table that applied the file again
+would start every enabled row that an install or update had left
+`installed`, or a `stop` stopped, with no command of its own. An end
+of the store is a bug of the system domain like any other: the records
+process parses nothing.
 
 Nothing compares the table with the file. A row changes only when it
 enters the table and at its own command, so no record has to hold a
@@ -775,18 +796,16 @@ a record.
 A restarted table takes its rows from the records process and their
 states from the keepers' branch, and asks the package process for its
 set, which arrives as a publication. A row of the set it holds no
-record for is one the boot or a publication was adding when the table
-ended, and the boot mark tells which. Without the mark the boot is not
-done: no publication can have followed the boot's package set, so the
-set the restarted table is sent is that set, and the table finishes the
-boot, reading `rc.conf` and applying it as the boot does to every row
-of the manifest and of the set that has no record, and sets the mark
-with the set's records. With the mark, it records the row installed,
-as the publication would have. So a restart starts and stops no row that was applied, and starts
-a row of an install or an update only by its own command. A crash of the keepers' branch or of its records process ends
-every session the branch kept and drops every record, so the table
-applies every row again from the file, as at boot, unless a call of the
-table meets the branch ending its rows (TODO.md).
+record for is either one the boot had yet to apply when the table
+ended, or one a publication added, and the boot mark tells which.
+Without the mark the boot is not done: no publication can have followed
+the boot's package set, so the set the restarted table is sent is that
+set, and the table finishes the boot, reading `rc.conf` and applying it
+as the boot does to every row of the manifest and of the set that has
+no record, and sets the mark with the set's records. With the mark, it
+does nothing to such a row, which shows `installed` as it did before
+the restart. So a restart starts and stops no row that was applied,
+and starts a row of an install or an update only by its own command.
 
 ## Compatibility and migration
 
@@ -809,7 +828,8 @@ reported.
 | a purge arrives while the package process carries out an install, update or removal | nothing: it is the order the package process takes them in | `ctl`'s file owner waits for the purge's answer while the table takes the operation's publication; the purge is carried out after it, and a later `ctl` write waits for the purge |
 | an edit is lost to a concurrent one | nothing: the last writer wins | the next read takes the last writer's text whole; `/proc/apps` shows which of each row's settings came from the file when it was applied |
 | the display domain restarts under a display's session | the domain service's grant record | the grant is minted again on the new incarnation, with the session mark |
-| the start service crashes | its supervisor | it restarts with the rows the keepers' branch recorded, asks the package process for its set without waiting and takes it as a publication; it reads `rc.conf` only to finish a boot the boot mark says is not done, and records any other row with no record installed; kept sessions go on, and stopped, down and installed rows stay so |
+| the start service crashes | its supervisor | it restarts with the rows the keepers' branch recorded, asks the package process for its set without waiting and takes it as a publication; it reads `rc.conf` only to finish a boot the boot mark says is not done, and leaves any other row with no record `installed`; kept sessions go on, and stopped, down and installed rows stay so |
+| the records process ends, or the keepers' branch passes its intensity | the keepers' branch and the application's top supervisor, each shutting down at its significant child's end | the start service's application ends, and with it the system domain: the machine resets, and the next boot applies `rc.conf` to every row |
 
 Every state above, and every reason the boot finds,
 is an attribute at `/proc/apps`; a command's refusal is its errno; and
@@ -895,6 +915,7 @@ it guards.
 | a purge while an update approaches its publication, through the real start service and package process, with a stub `erx_pkg_io` that holds the update's rename of `clock.app` | `service other purge` written to `ctl` while the rename is held: once it is released, the update's publication is answered, its `cp` closes with status 0, and then the purge answers `ok`, with `remove_app other` sent after the publication; meanwhile `/proc/apps` answers at once | a table that takes `purge` among its commands and calls the package process, which leaves the publication and the purge each waiting for the other, and the test sees neither answer by its deadline |
 | a restart of the table's process, the same way | `clock` stopped by `service clock stop`, `kiosk` running, and the file then edited to enable `clock` and disable `kiosk`; the table's process killed: on its restart `clock` is still stopped, `kiosk`'s session runs on, the same domain, and `erx_starter_rc` has made no read; and the table's process killed again while a stub `erx_pkg_io` holds an install's rename: the restarted table answers `/proc/apps` at once, and once the rename is released it takes the install's publication and then the set, and shows the installed app `installed`, its session not started though the file enables it; and the table's process killed once more, after the boot has applied the manifest's rows and before the boot's package set arrives: the restarted table applies the file to the set's rows when the set arrives, so an installed app the file enables starts | a restarted table that applies the file as a boot does, which starts `clock` and ends `kiosk`; a restarted table that calls the package process for its set, which waits behind the held install while the install's publication waits for the table, so the restart never ends; a restarted table that ignores the boot mark and applies the file to every row it holds no record for, which starts the app of the held install |
 | publications, through the real start service and package process over a fixture `etc` tree whose file enables `clock` and `dash` | the boot's package set, arriving after the manifest's rows are applied, starts the installed `dash`; a copy of `clock.app` into `/apps` closes with status 0 and leaves `clock` `installed` with no session; `service clock start` starts it; a newer `clock.app` copied over the running `clock` ends its session before the rename and leaves the row `installed`, and `service clock restart` runs the new package; `dash` runs on throughout | a publication that applies the file to the rows it adds, which starts `clock` at its install and again at its update; the boot's set taken as a later publication, which leaves `dash` `installed` after the boot |
+| losing the store, through the real start service's application over a fixture `etc` tree whose file enables `clock` | `clock` `installed` by a copy into `/apps`; `erx_starter_records` killed: the start service's application ends, which in the host test stands for the machine's reset, and no session of `clock` was started first; the same with the keepers' branch killed | a keepers' branch its top supervisor restarts, which applies the file again and starts `clock` |
 | a manual edit to `YES`, through the real start service over a fixture `etc` tree | `clock` declared `enable NO`, the file edited to `clock_enable="YES"` with no command since: `/proc/apps` shows `clock` disabled, and `service clock start` starts it as a kept row, which the supervisor starts again when its session is killed | the shell's check of `/proc/apps` before writing `ctl`, which answers "Cannot 'start'" and writes nothing |
 | a manual edit to `NO`, the same way | `clock` enabled and running, the file edited to `clock_enable="NO"`: `/proc/apps` still shows it running; `service clock start` prints rc.subr's "Cannot 'start' clock ... use 'onestart'" with status 0, and `clock` runs on, started again by its supervisor when its session is killed; `service clock stop` then ends it, and `/proc/apps` shows it disabled | a start service that ends the kept session of a row its read finds disabled, as applying the whole file would, which leaves no session of `clock` after the `start`; the shell's check of `/proc/apps`, which sends `start` from its cached `running` and answers `already running?` |
 
@@ -1017,8 +1038,9 @@ Decisions:
 4. **A start row for a person's principal is the image builder's**,
    until the login design says what an automatic login at a display is.
 5. **`rc.conf` is an ordinary file, `/etc/rc.conf`**, which the start
-   service reads when a row enters the table and at each command, and
-   never writes;
+   service reads at boot, for the rows of the boot's table, and at each
+   command, for that command's row, and never writes; a row a later
+   publication adds enters the table with no read;
    `service NAME enable` and `disable` edit it as `sysrc` does, and the
    start service's `ctl` takes only actions: `start`, `stop`,
    `restart`, their `one` forms, and `purge`.
@@ -1061,8 +1083,14 @@ Decisions:
     sessions before its package's name changes, an updated app stays
     stopped until one of those runs it; the boot mark tells a restarted
     table whether a row with no record is the boot's to apply or a
-    publication's to record installed ([Packaging](#packaging),
-    [Concurrency](#concurrency)).
+    publication's, `installed` until its own command
+    ([Packaging](#packaging), [Concurrency](#concurrency)).
+13. **`installed` is derived**: a row of an admitted package with no
+    record shows it, and nothing keeps it as a state of its own.
+14. **An end of the records process or of the keepers' branch resets
+    the machine**, as an end of `erx_pkg_io` does, since a table that
+    applied the file again could start an installed or stopped row
+    without its command ([Concurrency](#concurrency)).
 
 ## References
 

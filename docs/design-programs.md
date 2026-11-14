@@ -686,27 +686,47 @@ and a spec names at most one of them: one that names both is refused
 with `EINVAL`. A domain without the display's client side, and a
 display the session holds no `windows` grant on, refuse a window with
 `ENODEV`; a window the display refuses refuses the start with the
-display's errno, `EDQUOT` for a pixel area with no room for its buffer.
+display's errno, as `erx_win:open/2` answers it
+([design-display.md](design-display.md#the-window-tree)): `EDQUOT`
+for a session at its `windows` quota, and `ENOMEM` for a pixel area
+with no run long enough for the window's buffer.
 
 `start/1` answers `{ok, Handler, Monitor, Offsets}`: `Monitor` is a
 monitor of the handler that `start/1` made in the caller before the
 handler could end, and `Offsets` the buffer's `{N, Offset}`, or `[]`.
 The monitor's `'DOWN'` is the starter's one report of the program's end.
-Once its program has ended, and its buffer's range and its window are
-gone with it, the handler exits with `{shutdown, {program_exit,
-Status}}`, `Status` the end as a parent's wait reads it (`{exited, N}`
-or `{signaled, Signal}`); a `shutdown` reason keeps that ordinary end out
-of OTP's crash reports (`lib/stdlib/src/proc_lib.erl:951`). Any other
-reason is the handler's own end, a crash or a port the driver closed
-with no status to read, and the program ended with it, since a port
-closes with its owner. So a starter handles one message for every end,
-none ordered against another, and names the buffer's offset in no
-present after it. The handler monitors its starter, and the starter's
-exit stops the program, as a parent's end stops its children ([A
-program's end](#a-programs-end)), so no program outlives the session
-process that started it and nothing is orphaned; the starter may stop it
-sooner with `erx_prog_handler:stop/1`, after which the `'DOWN'` reads
-`{signaled, sigkill}`.
+Once its program has ended, the handler exits with `{shutdown,
+{program_exit, Status}}`, `Status` the end as a parent's wait reads it
+(`{exited, N}` or `{signaled, Signal}`); a `shutdown` reason keeps that
+ordinary end out of OTP's crash reports
+(`lib/stdlib/src/proc_lib.erl:951`). Any other reason is the handler's
+own end, a crash or a port the driver closed with no status to read, and
+the program ended with it, since a port closes with its owner. So a
+starter handles one message for every end, none ordered against
+another, and names the buffer's offset in no present after it.
+
+What the start reserved is reclaimed by ownership, not by the handler
+before it exits: the buffer's range is the handler's, and the pixel
+allocator frees it at its owner's exit once the lease is back
+([design-display.md](design-display.md#the-pixel-area)); the window's
+holder is the handler, and the display ends the window when its holder
+ends. Each owner sees the handler's end on its own, in no order with the
+`'DOWN'`, so a starter that starts another program at once may find the
+range or the window still held, and its start is then refused with the
+display's errno as any start that does not fit is. Nothing waits for
+them: no consumer of `start/1` starts a second program in the same
+session process the moment the first ends.
+
+The handler monitors its starter, and the starter's exit stops the
+program, as a parent's end stops its children ([A program's
+end](#a-programs-end)), so no program outlives the session process that
+started it and nothing is orphaned. The starter may stop it sooner with
+`erx_prog_handler:stop/1`. A program that has not ended is killed, and
+the `'DOWN'` reads `{shutdown, {program_exit, {signaled, sigkill}}}`; a
+program that ended before the stop reached its handler keeps the end it
+recorded, so the `'DOWN'` reads that end, `{shutdown, {program_exit,
+{exited, 3}}}` for a program that exited 3, and the stop does
+nothing.
 The handler's decisions are a pure state machine,
 `erx_prog_handler_core`, which the handler process steps with each
 event and whose actions it performs in order.
@@ -3269,15 +3289,22 @@ terminal cases.
   display tree and a test program. With `window`, the program finds
   `/dev/draw`, `/dev/ctl`, `/dev/kbd` and `/dev/mouse`, its draw messages
   reach the window, a key the fixture sends reads back from `/dev/kbd`,
-  and the window is gone once the program has ended; a spec naming a
-  window and a buffer answers `EINVAL`, and a display the session holds
-  no grant on `ENODEV`, each with no window, hand-off or lease left
-  behind. A program that exits 3 gives its starter one message, the
-  `'DOWN'` of the returned monitor with `{shutdown, {program_exit,
-  {exited, 3}}}`; `stop/1` gives `{signaled, sigkill}`; a killed handler
-  gives `killed`, with the program ended. Seeded: a window opened with
-  the starter as its holder, which leaves it open after the program's
-  end; a start whose failure after the window's open skips closing it;
+  and the fixture tree ends the window once the handler has exited; a
+  spec naming a window and a buffer answers `EINVAL`, a display the
+  session holds no grant on `ENODEV`, a fixture tree with the session at
+  its `windows` quota `EDQUOT`, and one whose pixel area is full
+  `ENOMEM`, each with no window, hand-off or lease left behind. A
+  program that exits 3 gives its starter one message, the `'DOWN'` of
+  the returned monitor with `{shutdown, {program_exit, {exited, 3}}}`;
+  `stop/1` of a running program gives `{shutdown, {program_exit,
+  {signaled, sigkill}}}`, and `stop/1` sent after the program exited 3,
+  before its handler has reported, still gives `{exited, 3}`; a killed
+  handler gives `killed`, with the program ended. Seeded: a window
+  opened with the starter as its holder, which leaves it open after the
+  handler's end; a handler that answers every refusal of the display
+  with one errno, which answers the full area `EDQUOT`; a handler that
+  reports `sigkill` for every stop, which loses the exit 3; a start
+  whose failure after the window's open skips closing it;
   a handler that exits `normal`, which the test reads as a lost status.
 * **Build checks.** The entry macro on every exported function of
   `liberx`'s program layer, with a seeded function without it; the event
