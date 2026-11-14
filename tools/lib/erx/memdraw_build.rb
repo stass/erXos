@@ -28,7 +28,7 @@ module Erx
     # The files of 9front's libmemdraw and libdraw that erXos imported (display/libmemdraw/ORIGIN.md).
     IMPORTED = %w[alloc arc arith badrect bytesperline chan cload cmap draw drawrepl ellipse fillpoly icossin icossin2 line
                   load poly rectclip unload].freeze
-    OURS = %w[erx_draw_clip erx_memdraw].freeze
+    OURS = %w[erx_draw_clip erx_memdraw erx_fb_store].freeze
     # The imported files keep Plan 9's pragmas and USED(a, b).
     WARNINGS = %w[-Wall -Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function -Werror].freeze
     NIF_FLAGS = [*HostOs::NIF_LINK_FLAGS, '-DERX_MEMDRAW_LOADABLE'].freeze

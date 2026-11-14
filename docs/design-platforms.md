@@ -1354,6 +1354,18 @@ Put the card in the Pi, start logging on the adapter, then power the Pi.
    shell's `(root_1@erxos)1>` prompt comes up. Type `1 + 2.` and
    Enter: it answers `3`. Type `q().` to return to the command shell,
    then `dmesg`, which prints the kernel's and the system's log.
+5. With a screen on the micro-HDMI port the board labels HDMI0, plugged
+   in before power-on: the firmware's rainbow square and boot text give
+   way, after the shell's prompt, to the display's empty layout, one
+   colour over the whole screen, and the picture stays put. `dmesg`
+   holds the root's line `erx: device tree: /chosen: framebuffer
+   WIDTHxHEIGHT STRIDE FORMAT` and the display domain's `erx_fb:
+   framebuffer WIDTHxHEIGHT stride STRIDE FORMAT`, with the same numbers,
+   and no `configured domain display ... ended` line. `framebuffer absent
+   outside BASE SIZE` instead names where the firmware put the
+   framebuffer, outside the window of
+   [the framebuffer's unit](#raspberry-pi-4-model-b); `erx_fb: the
+   framebuffer is not driven:` names why the driver refused it.
 
 **What the pass settles.** Typing works, so the mini UART raises its
 receive interrupt with bits 3:2 of its interrupt-enable register set, as

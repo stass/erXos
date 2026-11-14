@@ -624,6 +624,21 @@ it; git history is the record of completed work.
   keyboard and tablet only once the give is per unit and the unit is the transport page (security residuals,
   `boot_devices`); QEMU virt's four transport pages are the spare's, the display's, the network device's and
   the disks'.
+* [Medium] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+  [design-display.md](docs/design-display.md#the-display-device)): the display domain holds the `framebuffer`
+  unit and drives it with `erx_firmware_fb`, on QEMU virt's figures, the `display` share's 100 mcpu and
+  24 MiB, which are measured on neither board; on the Pi the screen image lives in the domain's own memory
+  (8 MiB at 1920x1080 and 32 bits, about 33 MiB at 4K, where `alloc` answers `enomem` and the driver
+  `ignore`s); size both from a measurement of the domain driving a screen on
+  the Pi. QEMU's raspi4b model has no firmware to set up a framebuffer, so the `raspi4b` suite checks only that
+  the domain starts once without a screen; the driver's stores into a framebuffer are checked on the board by
+  hand (design-platforms.md, "Trying a card on a board", step 5). No session is granted the display, as on
+  QEMU virt.
+* [Medium] `tools/lib/erx/display_domain.rb`, `DisplayDomain::ROW`: the `display_domain` suite's display row is
+  a hand-kept copy of the development manifest's (its runtime limits and 24 MiB budget), with the service named
+  `screen`, and no test holds the two equal, so the suite can pass on a row the development image does not
+  ship. Build the suite's manifest from the development manifest's display records (`ManifestText`), changing
+  only what its client needs: the outer budget's pixel area and lane, a connection, and `restarts 0`.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
   platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
   local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
@@ -5752,7 +5767,17 @@ to the corpus and follow rc
   no boot of its image attaches a display yet; one that attaches `QemuPlan::Display` with its defaults gives
   the display domain both input devices. Make the record's unit on QEMU virt the transport
   page, with every transport the board's tree has on it, so what a window reaches is what the unit lists by
-  construction.
+  construction. The display domain holds its keyboard and tablet only once the give is per unit and the unit
+  is the transport page; QEMU virt's four transport pages are the spare's, the display's, the network
+  device's and the disks'.
+* [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a device spec's `window` and
+  `memory` are `{object, Handle, ...}` terms Erlang supplies, and the NIF maps whatever handle they name. The
+  framebuffer's window handle is readable from Erlang (`erx_device_record:framebuffers/0`), so display-domain
+  code can open it as a device's memory, make a region and `erx_memdraw:wrap/4` an image over device memory,
+  whose unaligned accesses fault the domain, or open it as a register window. `erx_device:framebuffer/0`
+  already reads its record from the boot page; make every record (`given` too) come from the boot page the
+  same way, so `open/1` never maps a handle Erlang names and "only `framebuffer/0` maps a framebuffer" holds
+  by construction, with a chokepoint row for it.
 * [Medium] [The pixel area](docs/design-display.md#the-pixel-area), zero before reuse: an `erx_memdraw:wrap/4` image
   over a range is not tied to the range, so an image handed to a process that outlives the range's owner writes the
   range after its zero and after it is handed out again. The design takes same-client overlap as the client's own

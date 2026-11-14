@@ -9,15 +9,17 @@
 %% (auto_shutdown any_significant), which ends the domain. The service is the one the
 %% domain's environment variable display names, which the domain service sets from the
 %% display's manifest entry (docs/design-display.md, "A display's session"); with the
-%% variable unset, empty or no service name, no window system starts. Then the virtio-gpu
-%% driver erx_virtio_gpu over the domain's `gpu virtio_mmio` device record, registered
-%% as erx_fb, then erx_screen over it. A driver's end restarts both, so the screen's
-%% start, which repaints, follows each new bring-up of the device. Without a record
-%% there is no driver or screen, and a driver whose start finds no device, or fails one
-%% step, starts no process, after which erx_screen starts none either: a failure during
-%% the bring-up leaves the domain without a screen. A record is the root's, from the
-%% unit the manifest gives the domain, and a manifest gives a domain at most one, so
-%% more than one record starts nothing, as no record does.
+%% variable unset, empty or no service name, no window system starts. Then the display
+%% driver, registered as erx_fb, then erx_screen over it: erx_virtio_gpu over the domain's
+%% `gpu virtio_mmio` device record (QEMU virt), or erx_firmware_fb over its framebuffer
+%% record, the framebuffer a board's firmware set up (the Raspberry Pi). A driver's end
+%% restarts both, so the screen's start, which repaints, follows each new bring-up of the
+%% device. Without a record there is no driver or screen, with one line in the kernel log,
+%% and a driver whose start finds no device, or fails one step, starts no process, after
+%% which erx_screen starts none either: a failure during the bring-up leaves the domain
+%% without a screen. A record is the root's, from the unit the manifest gives the domain,
+%% and a manifest gives a domain at most one display device, so more than one record, or a
+%% malformed one, starts nothing, as no record does.
 %%
 %% erx_screen is a module of erx_display, a library application that starts no process,
 %% so the driver's supervisor starts it behind the driver, and no screen runs before a
@@ -42,16 +44,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Display = case erx_device_record:find(gpu, virtio_mmio) of
-                   {ok, [Spec]} -> [driver(Spec), screen()];
-                   {ok, [_, _ | _]} ->
-                       _ = erx_log:debug(["erx_fb: more than one display device record"]),
-                       [];
-                   {ok, []} -> [];
-                   {error, {bad_device_record, _Text}} ->
-                       _ = erx_log:debug(["erx_fb: the display device record is malformed"]),
-                       []
-               end,
+    Display = display(erx_device_record:find(gpu, virtio_mmio), erx_device_record:framebuffers()),
     {ok, {#{strategy => rest_for_one, intensity => ?INTENSITY, period => ?PERIOD_S,
             auto_shutdown => any_significant}, winfs(os:getenv(binary_to_list(?ERX_DISPLAY_KEY_BYTES))) ++ Display}}.
 
@@ -74,17 +67,33 @@ winfs(_Display) ->
     _ = erx_log:debug(["erx_fb: no display variable names the display's service; no window system"]),
     [].
 
-driver(Spec) ->
+%% The driver and screen of the domain's display record, the virtio-gpu's or the firmware
+%% framebuffer's, or none, with a line saying why.
+display({ok, [Spec]}, {ok, []}) ->
+    [driver(erx_virtio_gpu, Spec, [erx_virtio_gpu, erx_virtio_gpu_core]), screen(erx_virtio_gpu)];
+display({ok, []}, {ok, [Record]}) ->
+    [driver(erx_firmware_fb, Record, [erx_firmware_fb, erx_firmware_fb_core]), screen(erx_firmware_fb)];
+display({ok, []}, {ok, []}) ->
+    _ = erx_log:debug(["erx_fb: no display device record; no screen"]),
+    [];
+display({ok, _Gpus}, {ok, _Framebuffers}) ->
+    _ = erx_log:debug(["erx_fb: more than one display device record"]),
+    [];
+display(_Gpus, _Framebuffers) ->
+    _ = erx_log:debug(["erx_fb: the display device record is malformed"]),
+    [].
+
+driver(Module, Record, Modules) ->
     #{id => erx_fb,
-      start => {erx_virtio_gpu, start_link, [Spec]},
+      start => {Module, start_link, [Record]},
       restart => permanent,
       shutdown => 2000,
       type => worker,
-      modules => [erx_virtio_gpu, erx_virtio_gpu_core]}.
+      modules => Modules}.
 
-screen() ->
+screen(Driver) ->
     #{id => erx_screen,
-      start => {erx_screen, start_link, [{erx_virtio_gpu, erx_fb}]},
+      start => {erx_screen, start_link, [{Driver, erx_fb}]},
       restart => permanent,
       shutdown => 2000,
       type => worker,

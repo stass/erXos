@@ -243,6 +243,31 @@ int	erx_device_region(const erx_device_t *device, uint32_t index, uint64_t bytes
  */
 bool	erx_device_region_memory(uint32_t region, uint8_t **base, uint64_t *bytes);
 
+/* A domain holds at most one framebuffer row. */
+#define ERX_DEVICE_FRAMEBUFFERS_MAX	1u
+
+/*
+ * The framebuffer (docs/design-runtime.md, "The framebuffer"): the pages of a framebuffer
+ * record's window object, the memory the board's firmware set up and its display hardware
+ * scans out, mapped read and write as the object's device memory, kept for the boot.
+ *
+ * erx_device_framebuffer maps the object `window` from its first page through the page that
+ * holds the framebuffer's last byte, `offset` and `bytes` placing the framebuffer in it, and
+ * returns ERX_OK with `*framebuffer`, the name erx_memdraw's store takes. The same window,
+ * offset and bytes again is that framebuffer again, and anything else ERX_EBUSY, since a
+ * domain holds one framebuffer row. Errors: ERX_EINVAL for no bytes, an offset past the first
+ * page, or a length that wraps; the kernel's status for a mapping it refuses, the hosted
+ * backend's ERX_ENOTSUP among them.
+ */
+int	erx_device_framebuffer(uint64_t window, uint64_t offset, uint64_t bytes, uint32_t *framebuffer);
+
+/*
+ * The framebuffer's bytes as this domain maps them, from its first byte, for erx_memdraw's
+ * store: false for a name no framebuffer has. Like a region's, the mapping stays for the boot
+ * and is published whole before its name exists, so the call takes no serialisation.
+ */
+bool	erx_device_framebuffer_memory(uint32_t framebuffer, volatile uint8_t **base, uint64_t *bytes);
+
 /*
  * Virtio's initialisation, whole, and the reset rule with it: the NIF resets the device,
  * reads the features it offers, accepts the ones erx_device_queue_features allows of those

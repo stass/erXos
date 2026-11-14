@@ -16,9 +16,9 @@ process unions into its dirty list. An image is freed when no process holds
 it, and is used by one process at a time.
 """.
 
--export([alloc/5, wrap/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
+-export([alloc/5, wrap/4, store/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
          cload/3, test_area/2]).
--nifs([alloc/5, wrap/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
+-nifs([alloc/5, wrap/4, store/4, clip/3, draw/8, line/9, poly/8, fill_poly/6, ellipse/8, arc/10, load/3, read/2,
          cload/3, test_area/2]).
 -on_load(load_nif/0).
 
@@ -60,6 +60,19 @@ never written: an operation that would write it fails with `badarg`.
 -spec wrap(erx_area:area() | term(),non_neg_integer(), rect(), 0..16#ffffffff) ->
           {ok, image()} | {error, einval | enomem}.
 wrap(_Backing, _Offset, _R, _Chan) -> ?NIF.
+
+-doc """
+Each rectangle of Image, a firmware framebuffer driver's screen image, stored
+into Fb, a framebuffer from the device NIF's framebuffer call, whose rows are
+Stride bytes apart, with aligned 32-bit stores alone, since the framebuffer is
+device memory. Image's rectangle starts at (0, 0) and the framebuffer has its
+width, height and depth; each row of a rectangle is widened to whole 32-bit
+words. `einval`, writing nothing, for a layout that does not fit the
+framebuffer (a stride or base off a 4-byte boundary, a stride shorter than a
+row, rows past its end) or a rectangle that is empty or leaves the image.
+""".
+-spec store(image(), term(), pos_integer(), [rect()]) -> ok | {error, einval}.
+store(_Image, _Fb, _Stride, _Rects) -> ?NIF.
 
 -doc "`c`: the image's replicate bit and clip rectangle as they stand after it.".
 -spec clip(image(), boolean(), rect()) -> ok.

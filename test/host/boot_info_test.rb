@@ -37,6 +37,8 @@ class BootInfoTest < Minitest::Test
     'online taken from the cpuset' => [INFO, '(capacity_cpus > schedulers ? schedulers : (uint32_t)capacity_cpus)', 'schedulers', 'erts flags: the words'],
     'a raised process table admitted' => [INFO, 'if (settings->processes > limits->processes)', 'if (false)', 'admit'],
     'the given record without its memory size' => [MANIFEST, 'number_put(words, capacity, &used, given->memory_size)', 'true', 'holder'],
+    'a second framebuffer record let through' => [INFO, "\t\tif (found)\n\t\t\treturn (false);\n", '', 'second record'],
+    'a framebuffer record read before --' => [INFO, "\tdo\n\t\tword = next_word(words, length, &used);\n\twhile (word != NULL && strcmp(word, \"--\") != 0);\n", '', 'emulator flag'],
     'the page marked before the checks' => [INFO, "\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", "\tmemset(page, 0, size);\n\tif (status != ERX_BOOT_INFO_OK)\n\t\treturn (status);\n\tif (size < fixed", 'untouched']
   }.freeze
 

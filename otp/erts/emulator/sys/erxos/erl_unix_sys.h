@@ -209,6 +209,12 @@ const struct erx_boot_info *erx_runtime_boot(void);
 const char *erx_runtime_system_node(size_t *length);
 const struct erx_runtime_limits *erx_runtime_limits(void);
 int erx_runtime_is_system(void);
+/*
+ * The window of the domain's framebuffer record on the boot page (erx_boot_framebuffer):
+ * true with *out for exactly one well-formed record, false otherwise.
+ */
+struct erx_boot_framebuffer;
+int erx_runtime_framebuffer(struct erx_boot_framebuffer *out);
 /* Ends the start if an argument raised a table or scheduler count past the page's flags. */
 void erx_runtime_settings_check(int processes, int atoms, int schedulers, int online);
 

@@ -629,9 +629,47 @@ test_erts_limits(void)
 	CHECK(erx_boot_erts_admit(&plan.limits, &settings) != NULL, "admit: online above the capacity accepted");
 }
 
+/* Whether a page whose args are the NUL-ended words of literal has one framebuffer record, and its window. */
+static bool
+framebuffer_of(const char *words, size_t length, erx_boot_framebuffer_t *out)
+{
+	const erx_boot_words_t args[] = { { words, length } };
+	erx_boot_inputs_t inputs = good_inputs();
+	erx_boot_view_t view;
+
+	inputs.args = args;
+	inputs.nargs = COUNT(args);
+	CHECK(erx_boot_info_build(&inputs, page, sizeof(page)) == ERX_BOOT_INFO_OK, "framebuffer record: page refused");
+	CHECK(erx_boot_info_read(page, sizeof(page), &view) == ERX_BOOT_INFO_OK, "framebuffer record: page unread");
+	return (erx_boot_framebuffer(&view, out));
+}
+#define FRAMEBUFFER_OF(literal, out)	framebuffer_of((literal), sizeof(literal) - 1, (out))
+
+static void
+test_framebuffer_record(void)
+{
+	erx_boot_framebuffer_t fb;
+
+	CHECK(FRAMEBUFFER_OF("-S\0" "2:2\0" "--\0" "-erx\0" "given\0" "x\0" "-erx\0" "framebuffer\0" "7\0" "64\0" "8294400\0"
+	    "1920\0" "1080\0" "7680\0" "x8r8g8b8\0", &fb), "framebuffer record: a good record refused");
+	CHECK(fb.window == 7 && fb.offset == 64 && fb.size == 8294400, "framebuffer record: the window misread");
+	CHECK(FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "18446744073709551615\0" "0\0" "1\0", &fb) &&
+	    fb.window == UINT64_MAX, "framebuffer record: the largest handle refused");
+	CHECK(!FRAMEBUFFER_OF("-S\0" "2:2\0" "--\0" "-boot\0" "/bin/start\0", &fb), "framebuffer record: found in none");
+	CHECK(!FRAMEBUFFER_OF("-erx\0" "framebuffer\0" "7\0" "64\0" "4096\0" "--\0" "-boot\0" "x\0", &fb),
+	    "framebuffer record: an emulator flag taken for init's record");
+	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7\0" "0\0" "4096\0" "-erx\0" "framebuffer\0" "8\0" "0\0" "4096\0", &fb),
+	    "framebuffer record: a second record let through");
+	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7x\0" "0\0" "4096\0", &fb), "framebuffer record: a non-number taken");
+	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "18446744073709551616\0" "0\0" "1\0", &fb),
+	    "framebuffer record: a wrapping number taken");
+	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7\0" "64\0", &fb), "framebuffer record: a short record taken");
+}
+
 int
 main(void)
 {
+	test_framebuffer_record();
 	test_round_trip();
 	test_domain_pid();
 	test_strings_limit();

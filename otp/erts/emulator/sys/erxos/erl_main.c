@@ -66,6 +66,12 @@ erx_runtime_system_node(size_t *length)
     return boot_view.system_node;
 }
 
+int
+erx_runtime_framebuffer(struct erx_boot_framebuffer *out)
+{
+    return erx_boot_framebuffer(&boot_view, out);
+}
+
 const struct erx_runtime_limits *
 erx_runtime_limits(void)
 {

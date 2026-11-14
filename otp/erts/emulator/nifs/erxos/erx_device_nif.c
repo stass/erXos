@@ -21,12 +21,15 @@
 #endif
 
 #include "erl_nif.h"
+#include "sys.h"
 #include "erx_event.h"
 
 #include "erx_device.h"
 #include "erx_device_genet.h"
+#include "erx_framebuffer.h"
 #include "erx_region.h"
 #include "liberx/backend/api.h"
+#include "liberx/backend/core/boot_info.h"
 
 #define ATOM_TEXT_MAX	64u
 
@@ -455,6 +458,43 @@ region_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint(env, region)));
 }
 
+/*
+ * framebuffer(): the domain's own framebuffer, the window of its framebuffer record that the
+ * boot page carries (erx_runtime_framebuffer), so no handle from Erlang is mapped; {error,
+ * enoent} for a domain the page gives no single well-formed record.
+ */
+static ERL_NIF_TERM
+framebuffer_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_boot_framebuffer_t record;
+	uint32_t framebuffer;
+	int status;
+
+	(void)argc;
+	(void)argv;
+	if (!erx_runtime_framebuffer(&record))
+		return (enif_make_tuple2(env, enif_make_atom(env, "error"), enif_make_atom(env, "enoent")));
+	enif_mutex_lock(device_lock);
+	status = erx_device_framebuffer(record.window, record.offset, record.size, &framebuffer);
+	enif_mutex_unlock(device_lock);
+	if (status != ERX_OK)
+		return (status_error(env, status));
+	return (enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_uint(env, framebuffer)));
+}
+
+/* A framebuffer's mapping for erx_memdraw (erx_framebuffer.h): the term is its name. */
+bool
+erx_framebuffer_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_framebuffer_view_t *out)
+{
+	unsigned framebuffer;
+	uint64_t bytes;
+
+	if (!enif_get_uint(env, term, &framebuffer) || !erx_device_framebuffer_memory(framebuffer, &out->base, &bytes))
+		return (false);
+	out->bytes = (size_t)bytes;
+	return (true);
+}
+
 /* A region's mapping for erx_memdraw (erx_region.h): the term is the region's name. */
 bool
 erx_region_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_region_view_t *out)
@@ -731,6 +771,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "irq_holder", 2, irq_holder_nif, 0 },
 	{ "queue_create", 4, queue_create_nif, 0 },
 	{ "region", 3, region_nif, 0 },
+	{ "framebuffer", 0, framebuffer_nif, 0 },
 	{ "negotiate", 2, negotiate_nif, 0 },
 	{ "post", 4, post_nif, 0 },
 	{ "complete", 2, complete_nif, 0 },

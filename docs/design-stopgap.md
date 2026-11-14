@@ -1599,9 +1599,10 @@ device memory, the framebuffer's offset in the first page and its bytes, and its
 format's name from the `simple-framebuffer` node. The system domain holds it as any other
 domain does, the root making the object in its own table, and a framebuffer the root did not
 place has no record, its holder finding none, and only the root's line. The development
-manifest of the Pi places the unit with the system domain, so the board's console shows the
-root's line for it; no runtime there drives the framebuffer. `erx_device_record:framebuffers/0`
-reads the record.
+manifest of the Pi places the unit with the display domain, whose driver `erx_firmware_fb`
+reads the record with `erx_device_record:framebuffers/0` and maps the object with
+`erx_device:framebuffer/0` ([design-runtime.md](design-runtime.md#the-device-nif)); the board's
+console shows the root's line for it.
 
 The development manifest of QEMU `virt` places the block and network devices, in the storage and
 network domains, and the gpu, in the display domain, which holds the platform record's `display`

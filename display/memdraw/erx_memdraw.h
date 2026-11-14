@@ -98,6 +98,15 @@ size_t erx_memdraw_draw_bytes(const erx_mdimage_t *dst, erx_rect_t r, const erx_
 size_t erx_memdraw_rect_bytes(const erx_mdimage_t *image, erx_rect_t r);
 
 /*
+ * The pixels of an image whose rectangle starts at (0, 0), for a firmware
+ * framebuffer's copy (erx_fb_store.h): the first row's first byte, the
+ * bytes of a row, the bytes of every row, the width, height and depth.
+ * false for an image whose rectangle starts elsewhere.
+ */
+bool erx_memdraw_pixels(const erx_mdimage_t *image, uint8_t **base, size_t *stride, size_t *bytes,
+    uint32_t *width, uint32_t *height, uint32_t *depth);
+
+/*
  * The shapes, libmemdraw's algorithms over src's pixels with sp aligned
  * as draw(3) aligns it, composed onto dst with operation op: L, p and P
  * (end0 and end1 are draw(3)'s line ends, thick its thickness, wind its

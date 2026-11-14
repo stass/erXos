@@ -5,7 +5,8 @@
 
 /*
  * erx_boot_info_read over raw bytes, in a buffer of exactly their size. A page it
- * accepts must keep each string inside the buffer, and a page the plan takes must make a
+ * accepts must keep each string inside the buffer, its framebuffer record must be read
+ * from within its args, and a page the plan takes must make a
  * vector of the flags of its ERTS limits and then its words, each in the memory the plan
  * asked for, and must admit the settings of those flags.
  */
@@ -24,6 +25,7 @@ int
 LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 {
 	erx_boot_view_t view;
+	erx_boot_framebuffer_t framebuffer;
 	erx_boot_argv_plan_t plan;
 	char **argv;
 	char *strings;
@@ -45,6 +47,9 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 	if (view.info.args_len != 0 && view.args[view.info.args_len - 1] != '\0')
 		abort();
 	if (view.info.env_len != 0 && view.env[view.info.env_len - 1] != '\0')
+		abort();
+	/* The framebuffer record's reader stays inside the args whatever words they hold. */
+	if (erx_boot_framebuffer(&view, &framebuffer) && view.info.args_len == 0)
 		abort();
 
 	if (erx_boot_argv_plan(&view, &plan) != NULL)

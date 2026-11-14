@@ -145,4 +145,25 @@ void			 erx_boot_argv_fill(const erx_boot_view_t *view, const erx_boot_argv_plan
 /* NULL when no setting is above limits, or the first one that is. */
 const char		*erx_boot_erts_admit(const erx_boot_erts_limits_t *limits, const erx_boot_erts_settings_t *settings);
 
+/*
+ * The window of a domain's framebuffer record, `-erx framebuffer WINDOW_H OFFSET SIZE ...`
+ * among init's arguments, the words after the first `--` (include/erx/boot_words.h): the
+ * object the root made over the framebuffer's pages, and the framebuffer's offset and bytes
+ * in it. The device NIF maps the framebuffer from this alone (docs/design-runtime.md, "The
+ * framebuffer"), so no handle Erlang names is ever mapped as one.
+ */
+typedef struct erx_boot_framebuffer {
+	uint64_t	window;		/* the object's handle */
+	uint64_t	offset;		/* the framebuffer's first byte in the object */
+	uint64_t	size;		/* the framebuffer's bytes */
+} erx_boot_framebuffer_t;
+
+/*
+ * The framebuffer record of a page erx_boot_info_read accepted: true with *out for exactly one
+ * record whose three numbers are decimal u64s, false for none, a malformed one or more than
+ * one. Pure.
+ */
+bool			 erx_boot_framebuffer(const erx_boot_view_t *view, erx_boot_framebuffer_t *out)
+			    ERX_WARN_UNUSED_RESULT;
+
 #endif /* ERX_BACKEND_BOOT_INFO_H */

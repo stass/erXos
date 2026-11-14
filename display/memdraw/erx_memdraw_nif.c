@@ -27,6 +27,8 @@
 
 #include "erx_area.h"
 #include "erx_memdraw.h"
+#include "erx_fb_store.h"
+#include "erx_framebuffer.h"
 #include "erx_region.h"
 
 /* draw(3)'s colour meaning "do not fill". */
@@ -262,6 +264,52 @@ wrap_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	ERL_NIF_TERM term = enif_make_resource(env, res);
 	enif_release_resource(res);
 	return status == ERX_MEMDRAW_DONE ? enif_make_tuple2(env, atom_ok, term) : error(env, status);
+}
+
+/*
+ * store(Image, Fb, Stride, Rects) -> ok | {error, einval}: each rectangle of
+ * Image, the screen image of a firmware framebuffer's driver, stored into Fb,
+ * erx_device:framebuffer/0's name, whose rows are Stride bytes apart
+ * (erx_fb_store.h). Image and the framebuffer share the width, height and
+ * depth. The layout and every rectangle are checked before the first store,
+ * so a refusal writes nothing. It runs on a dirty scheduler, since a full
+ * screen is megabytes.
+ */
+static ERL_NIF_TERM
+store_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	erx_mdimage_t *image;
+	erx_framebuffer_view_t fb;
+	erx_fb_side_t src, dst;
+	erx_fb_geometry_t geometry;
+	ERL_NIF_TERM list, head;
+	erx_rect_t r;
+	uint8_t *base;
+	ErlNifUInt64 stride;
+
+	(void)argc;
+	if (!get_image(env, argv[0], &image) || !erx_framebuffer_view(env, argv[1], &fb) ||
+	    !enif_get_uint64(env, argv[2], &stride) || stride > SIZE_MAX || !enif_is_list(env, argv[3]))
+		return enif_make_badarg(env);
+	if (!erx_memdraw_pixels(image, &base, &src.stride, &src.bytes, &geometry.width, &geometry.height,
+	    &geometry.depth))
+		return error(env, ERX_MEMDRAW_EINVAL);
+	src.base = base;
+	dst = (erx_fb_side_t){ .base = fb.base, .bytes = fb.bytes, .stride = (size_t)stride };
+	if (!erx_fb_store_layout_ok(&src, &dst, &geometry))
+		return error(env, ERX_MEMDRAW_EINVAL);
+	for (list = argv[3]; enif_get_list_cell(env, list, &head, &list);)
+		if (!get_rect(env, head, &r) ||
+		    !erx_fb_store_rect_ok(&geometry, (erx_fb_rect_t){ r.x0, r.y0, r.x1, r.y1 }))
+			return error(env, ERX_MEMDRAW_EINVAL);
+	if (!enif_is_empty_list(env, list))
+		return enif_make_badarg(env);
+	/* Every rectangle passed above, so each store below writes. */
+	for (list = argv[3]; enif_get_list_cell(env, list, &head, &list);) {
+		(void)get_rect(env, head, &r);
+		(void)erx_fb_store(&src, &dst, &geometry, &(erx_fb_rect_t){ r.x0, r.y0, r.x1, r.y1 }, 1);
+	}
+	return atom_ok;
 }
 
 /* clip(Image, Repl, Clipr) -> ok */
@@ -561,6 +609,7 @@ load(ErlNifEnv *env, void **priv, ERL_NIF_TERM info)
 static ErlNifFunc functions[] = {
 	{ "alloc", 5, alloc_nif, 0 },
 	{ "wrap", 4, wrap_nif, 0 },
+	{ "store", 4, store_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "clip", 3, clip_nif, 0 },
 	{ "draw", 8, draw_nif, 0 },
 	{ "load", 3, load_nif, 0 },

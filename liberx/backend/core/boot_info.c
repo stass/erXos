@@ -521,3 +521,67 @@ erx_boot_argv_fill(const erx_boot_view_t *view, const erx_boot_argv_plan_t *plan
 	(void)string_copy(out, view->node, view->info.node_len);
 	argv[argc] = NULL;
 }
+
+/* A word of decimal digits, without a sign, as a u64; false for anything else or a wrap. */
+static bool
+decimal_word(const char *word, uint64_t *value)
+{
+	uint64_t n = 0;
+
+	if (*word == '\0')
+		return (false);
+	for (; *word != '\0'; word++) {
+		if (*word < '0' || *word > '9' || __builtin_mul_overflow(n, 10, &n) ||
+		    __builtin_add_overflow(n, (uint64_t)(*word - '0'), &n))
+			return (false);
+	}
+	*value = n;
+	return (true);
+}
+
+/*
+ * The word at *used of a list erx_boot_info_read accepted, *used moved past it, or NULL at
+ * the list's end. The list ends in a NUL, so strlen stops inside it.
+ */
+static const char *
+next_word(const char *words, size_t length, size_t *used)
+{
+	const char *word;
+
+	if (*used >= length)
+		return (NULL);
+	word = words + *used;
+	*used += strlen(word) + 1;
+	return (word);
+}
+
+bool
+erx_boot_framebuffer(const erx_boot_view_t *view, erx_boot_framebuffer_t *out)
+{
+	const char *const words = view->args;
+	const size_t length = view->info.args_len;
+	uint64_t *const numbers[] = { &out->window, &out->offset, &out->size };
+	const char *word, *name;
+	size_t used = 0, after;
+	bool found = false;
+
+	do
+		word = next_word(words, length, &used);
+	while (word != NULL && strcmp(word, "--") != 0);
+	while ((word = next_word(words, length, &used)) != NULL) {
+		after = used;
+		name = next_word(words, length, &after);
+		if (strcmp(word, "-erx") != 0 || name == NULL || strcmp(name, "framebuffer") != 0)
+			continue;
+		if (found)
+			return (false);
+		used = after;
+		for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); i++) {
+			word = next_word(words, length, &used);
+			if (word == NULL || !decimal_word(word, numbers[i]))
+				return (false);
+		}
+		found = true;
+	}
+	return (found);
+}

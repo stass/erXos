@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "erx_area.h"
+#include "erx_framebuffer.h"
 #include "erx_region.h"
 
 bool erx_area_stand_in_load(ErlNifEnv *env);
@@ -94,6 +95,16 @@ erx_area_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_area_view_t *out)
  */
 bool
 erx_region_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_region_view_t *out)
+{
+	(void)env;
+	(void)term;
+	(void)out;
+	return false;
+}
+
+/* Nor a firmware framebuffer: erx_fb_store's own host test covers the copy. */
+bool
+erx_framebuffer_view(ErlNifEnv *env, ERL_NIF_TERM term, erx_framebuffer_view_t *out)
 {
 	(void)env;
 	(void)term;

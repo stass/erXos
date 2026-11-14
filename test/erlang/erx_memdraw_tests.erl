@@ -410,6 +410,7 @@ shape_limits() ->
 
 x32() -> erx_draw_ref:chan([{ignore, 8}, {red, 8}, {green, 8}, {blue, 8}]).
 rgb24() -> erx_draw_ref:chan([{red, 8}, {green, 8}, {blue, 8}]).
+rgb16() -> erx_draw_ref:chan([{red, 5}, {green, 6}, {blue, 5}]).
 
 wrap_refusals() ->
     {ok, Area, Page} = erx_memdraw:test_area(?AREA_BYTES, write),
@@ -423,6 +424,10 @@ wrap_refusals() ->
     {error, einval} = erx_memdraw:wrap(Area, 0, {0, 0, 16, 1024}, x32()),
     {error, einval} = erx_memdraw:wrap(Area, Page, {0, 0, 16, 1023}, x32()),
     {ok, _} = erx_memdraw:wrap(Area, Page, {0, 0, 16, (?AREA_BYTES - Page) div 64 - 1}, x32()),
+    %% libmemdraw steps rows by whole words: 15 RGB16 pixels are 30 bytes but a 32-byte
+    %% row, so 2047 rows and the spare word fit and 2048 do not.
+    {ok, _} = erx_memdraw:wrap(Area, 0, {0, 0, 15, 2047}, rgb16()),
+    {error, einval} = erx_memdraw:wrap(Area, 0, {0, 0, 15, 2048}, rgb16()),
     ok = try erx_memdraw:wrap(make_ref(), 0, R, x32()) catch error:badarg -> ok end.
 
 %% Images that end a word short of the area's end are written and read whole, and a

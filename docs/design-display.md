@@ -1594,8 +1594,8 @@ with a refusal, so no process that reaches it ends it.
 display's size and channel over memory the driver chose: the backing of
 a virtio-gpu resource, which is a region of memory the device's record
 holds in the NIF ([design-runtime.md](design-runtime.md#the-device-nif),
-Regions); the framebuffer a board's firmware set up; or, for a panel on a
-serial bus, memory of the driver's own. `erx_screen` composes into it,
+Regions); or, for a firmware framebuffer or a panel on a serial bus,
+memory of the driver's own. `erx_screen` composes into it,
 and nothing else writes it.
 
 `erx_display:flush_request/3` sends the driver one frame, the rectangles that
@@ -1608,8 +1608,9 @@ driver is driven alike, and `erx_screen` alone calls it. A driver
 answers it in its own way: a virtio-gpu driver posts a
 transfer and a flush for each rectangle on its control queue and parses
 the device's responses in Erlang with binary matching; a firmware
-framebuffer driver has nothing to post, since the device scans the
-memory out; a panel driver on a serial bus sends a window-set command
+framebuffer driver stores the rectangles' rows from the screen image into
+the framebuffer, which is device memory, with aligned 32-bit stores
+(`erx_memdraw:store/4`), at the firmware's stride; a panel driver on a serial bus sends a window-set command
 and the rectangle's bytes, read from the image and converted to the
 panel's channel by `erx_memdraw` in the copy. It answers when the device
 has taken the rectangles, and that answer is the one thing the driver
@@ -1618,8 +1619,8 @@ the image again until the next flush: a virtio-gpu driver sends the
 frame's last command with `VIRTIO_GPU_FLAG_FENCE` and answers at its
 response, which the device sends only once it has processed every
 command before it; a panel driver answers at the last byte on the bus;
-a firmware framebuffer driver answers at once, since its device has
-scanned the screen image all along. The answer is also what paces a
+a firmware framebuffer driver answers once the rows are stored, since
+its device scans the framebuffer all along. The answer is also what paces a
 client, so a client is paced to the device where the device has a
 completion, and to the copy where it has none: on a firmware
 framebuffer a client that presents as fast as it is answered presents
@@ -1642,6 +1643,30 @@ fails its check, a broken queue or a frame that the device does not
 finish within its deadline ends the process, and its restart resets
 the device. A failure during the bring-up leaves no process, so the
 domain runs without a screen.
+
+The firmware framebuffer's driver is the process `erx_firmware_fb`,
+registered as `erx_fb`, over its pure core `erx_firmware_fb_core`. Its
+start takes the domain's framebuffer record
+([design-device-tree.md](design-device-tree.md#facts-into-records)),
+whose format names its channel as Plan 9 names one, highest bits
+first; refuses a record whose format `erx_chan` does not take, whose
+depth is not 16, 24 or 32 bits, or whose first byte or stride is off a
+4-byte boundary or whose stride is shorter than a row rounded up to
+4 bytes; maps the framebuffer with `erx_device:framebuffer/0`
+([design-runtime.md](design-runtime.md#the-device-nif), The
+framebuffer); and allocates the screen image in its own memory. A
+frame's rectangles, clipped to the screen, are stored into the
+framebuffer by `erx_memdraw:store/4`, which checks the layout and every
+rectangle before its first store and widens each row to whole 32-bit
+words. The framebuffer is device memory, which takes no unaligned
+access, so nothing composes into it: the screen image is the copy's
+source, and the copy costs one pass over the changed rectangles
+beside the composition. A restart maps the same framebuffer and
+allocates a new screen image, which `erx_screen` repaints. Since its
+frames are stores the CPU makes, a refused record or a failed step is
+one line and no process, as for the virtio-gpu driver, and the domain
+runs without a screen. With no display record at all the supervisor
+starts no driver and logs one line.
 
 The image is the screen image, or, for a driver whose `info/1` reports
 `direct`, a client's buffer that covers the screen ([The screen and its
@@ -3591,7 +3616,7 @@ written.
 | --- | --- | --- | --- | --- | --- |
 | virtio-gpu, 2D (QEMU `virt`) | a scanout on the host fed from resources backed by guest memory | none added: ordinary memory | copy, into the resource's backing, then a transfer and a flush of each rectangle; direct on a confined device, a resource backed by the client's buffer | none | nothing: this is the display driver of this design |
 | virtio-gpu with virgl or venus | the host's GPU, reached by command streams submitted in a context; resources may live on the host alone | resources of the device that no guest memory backs, which the CPU cannot copy from | the device composes: the display holds a context of its own that draws each shown window's resource, or sets the scanout to one resource | the display domain, which holds the one device, relays each client's command buffers in a context of that client's; the host validates them | how a `present` names a device resource in place of a range of memory; a client's Mesa driver over the relay |
-| a board's firmware framebuffer (Raspberry Pi) | memory the firmware set up, scanned out by hardware the display domain does not hold | none added | copy, into the framebuffer, which is the screen image | none | nothing: a display driver of this design |
+| a board's firmware framebuffer (Raspberry Pi) | memory the firmware set up, scanned out by hardware the display domain does not hold, and mapped as device memory | none added | copy, into the screen image in the driver's memory, then each changed rectangle copied from the screen image into the framebuffer with aligned 32-bit stores | none | nothing: a display driver of this design |
 | the Raspberry Pi's HVS (VideoCore VI on the Pi 4, VII on the Pi 5) | a plane compositor: a display list of planes, each a pointer to pixels, a pitch, a format, a position, scaling and alpha, applied at vertical blanking | memory the HVS can address: physically contiguous, at a bus address, so the pixel area is made a contiguous object of the device's memory | planes: the plan gives the topmost shown windows a plane each while the device's planes last and copies the rest into the screen image, the bottom plane; a present of a window on a plane changes that plane's pointer or nothing, and is answered after the next blanking | none | the HVS reads and, through its writeback path, writes memory by bus address, so on a board with no IOMMU before it its holder is in the trusted base: the board's DMA contract decides whether a release drives it ([design-platforms.md](design-platforms.md#dma)); the plane limit; formats and scaling a window may ask for |
 | the Raspberry Pi's V3D (4.2 on the Pi 4, 7.1 on the Pi 5) | a tile-based 3D renderer with an MMU of its own, driven by binning and rendering command lists that Mesa's `v3d` and `v3dv` build in the client | the HVS's source, when the result is scanned out: the render target is a buffer of the client's pixel area that V3D's page table also maps | whatever the display has: a buffer V3D filled is a buffer | a GPU domain holds V3D's registers and interrupt, owns its page table and job queue, maps into the table only buffers of the client it serves, and takes jobs from the client's Mesa driver | whether clients share one page table, as Linux's driver arranges, or the service switches tables between clients; how the system domain installs a pixel area in a third domain; which domain holds V3D |
 | a 2D engine: TES D/AVE 2D (Renesas RA and RZ), and others of its kind | a bus master that executes display lists of blits, fills and anti-aliased primitives into memory at a bus address; LVGL has a draw unit over it | memory at a bus address, as for the HVS | copy, with the engine doing the blit: the plan's copies are a list of clipped blits between images the display already maps | the domain that holds the engine builds its display lists itself, from requests that name buffers and coordinates and never addresses; LVGL's draw unit in `erx-lvgl` sends its draw tasks there | the engine has no MMU, so its lists must be built by its holder; whether the gain over the CPU on a small panel pays for a service |
@@ -4673,6 +4698,7 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
 | Only `erx_memdraw_draw` and `memdraw`, the shapes' one way to draw, call `memimagedraw`, and only `erx_draw_clip` makes the `erx_clip_t` it walks | `memdraw-clip` (tools/lib/erx/chokepoint_rules/memdraw.rb), over erXos's sources and its copy of `libmemdraw`: `memimagedraw` and `erx_clip_t` appear only in `draw.c`, `memdraw.h`, `erx_draw_clip.c` and `erx_memdraw.c` |
 | Only the functions that walk a checked rectangle touch pixel memory: `libmemdraw`'s draw, load, unload, cload and allocation, and `erx_memdraw`'s snapshot; and `erx_area:zero/3`, over a checked range of whole pages, stores zero | `memdraw-pixels`: `bdata`, `byteaddr` and `wordaddr` appear only in their files, so a shape, the NIF or new code that writes pixels itself fails the build |
 | Only an image resource's destructor frees an image a term can reach or lets go of the memory it lies over | `memdraw-free`: `erx_memdraw_free` is called only from the NIF, by `image_dtor` and by the test-only `cload` for the image it made itself |
+| Only `erx_memdraw:store/4` writes a firmware framebuffer, through `erx_fb_store`'s aligned 32-bit stores after the layout and every rectangle are checked, and only `erx_device:framebuffer/0` maps one, from the domain's own record | `memdraw-framebuffer`: `erx_fb_store`, `erx_framebuffer.h`, `erx_framebuffer_view` and `erx_device_framebuffer_memory` appear only in the store's files, the NIF's, the device NIF's and the store's host test |
 | A pixel area is mapped in two places, into the runtime by the connection agent, `erx_connections`, and into a program's sub-space from a lease, and a lease is a whole range of one owner, made by `erx_pixels`. So every mapping is one the agent waits for before it answers that the connection is unmapped, the display's mapping is the read-only one the agent asked for, and a program maps only its handler's buffer | `area-mappers` (tools/lib/erx/area_mappers.rb). Over the Erlang sources of `otp/` and `erlang/`: outside `erx_area` and `erx_connections`, the atom `erx_area` appears only as the module of `open/1` and of the type `area()`, and in `erx_pixels` as the module of `lend/5`, `unlend/1` and `zero/3` too, so `map/4` anywhere, or `lend/5`, `unlend/1` or `zero/3` outside `erx_pixels`, as a call, a fun, an apply's arguments, an import, a macro, a literal or a string fails the build. Over the C of `otp/erts/emulator`: `erx_area_lease_take`, `erx_area_lease_map` and `erx_area_lease_return` are called only from `erx_program_drv.c`, and a seeded call of each from another file fails it |
 | Only `erx_memdraw:wrap/4` makes an image over memory `erx_memdraw` did not allocate, and only after checking the range | a source check over the NIF: the one site that sets an image's data pointer from an area or a device's region ([design-runtime.md](design-runtime.md#the-device-nif), Regions) |
 | Only `erx_screen` writes the screen image, makes images over clients' pixel areas, and calls `erx_display:flush_request/3` and `erx_display:power_request/2` | the writes and the images: an xref check over the display release; the calls: `display-driver-callers` (tools/lib/erx/chokepoint_rules/display.rb), over the Erlang sources of `otp/` and `erlang/`: outside `erx_screen`, neither function is named as a call target, as a remote call, a fun, an apply, a module and function pair, a call through a module in a variable or a macro, an import from `erx_display` or a macro defined as it |

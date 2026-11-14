@@ -1042,12 +1042,12 @@ MEMDRAW_LIB = alloc arc arith badrect bytesperline chan cmap draw drawrepl ellip
 	line load poly rectclip unload
 MEMDRAW_CFLAGS = -I$(ERX_TREE)/display/libmemdraw -I$(ERX_TREE)/display/memdraw -Inifs/erxos \
 	-Wno-unknown-pragmas -Wno-unused-value -Wno-unused-function
-MEMDRAW_OBJS = $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o) $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o
+MEMDRAW_OBJS = $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o) $(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o $(OBJDIR)/erx_fb_store.o
 
 $(MEMDRAW_LIB:%=$(OBJDIR)/memdraw_%.o): $(OBJDIR)/memdraw_%.o: $(ERX_TREE)/display/libmemdraw/%.c
 	$(V_CC) $(CFLAGS) $(MEMDRAW_CFLAGS) -c $< -o $@
 
-$(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o $(OBJDIR)/erx_memdraw_nif.o: $(OBJDIR)/%.o: $(ERX_TREE)/display/memdraw/%.c
+$(OBJDIR)/erx_draw_clip.o $(OBJDIR)/erx_memdraw.o $(OBJDIR)/erx_fb_store.o $(OBJDIR)/erx_memdraw_nif.o: $(OBJDIR)/%.o: $(ERX_TREE)/display/memdraw/%.c
 	$(V_CC) $(CFLAGS) $(MEMDRAW_CFLAGS) $(INCLUDES) -c $< -o $@
 
 # FreeBSD SHA-256 as erXos imported it, the core of erx_bytes:sha256/1 (docs/design-runtime.md,

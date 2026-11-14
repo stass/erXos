@@ -60,6 +60,26 @@ module Erx
           sites: [*%w[display/memdraw/erx_memdraw_nif.c display/memdraw/erx_memdraw.h display/memdraw/erx_memdraw.c]
                    .map { |path| Chokepoints::Site.new(glob: path) }, MEMDRAW_HARNESSES],
           seed: { 'display/memdraw/erx_draw_clip.c' => "erx_memdraw_free(image);\n" }
+        ),
+        # A firmware framebuffer is device memory, which takes only aligned
+        # accesses, so erx_memdraw's store/4 (erx_memdraw_nif.c) writes it
+        # alone, through erx_fb_store's aligned 32-bit stores after its
+        # layout and rectangles are checked whole. The device NIF maps it and
+        # hands out its view (erx_framebuffer.h); nothing else names the view,
+        # the mapping or the store.
+        Chokepoints::Forbidden.new(
+          name: 'memdraw-framebuffer',
+          rule: 'only erx_memdraw\'s store (display/memdraw/erx_memdraw_nif.c, through erx_fb_store) ' \
+                'writes a firmware framebuffer',
+          design: 'docs/design-display.md#chokepoints',
+          scope: MEMDRAW_SCOPE,
+          pattern: /\b(?:erx_framebuffer|erx_framebuffer_view|erx_device_framebuffer_memory|erx_fb_store)\b/,
+          sites: [*%w[display/memdraw/erx_fb_store.c display/memdraw/erx_fb_store.h display/memdraw/erx_memdraw_nif.c
+                      otp/erts/emulator/nifs/erxos/erx_framebuffer.h otp/erts/emulator/nifs/erxos/erx_device_nif.c
+                      otp/erts/emulator/nifs/erxos/erx_device.c otp/erts/emulator/nifs/erxos/erx_device.h
+                      test/fixtures/fb_store_driver.c].map { |path| Chokepoints::Site.new(glob: path) },
+                  MEMDRAW_HARNESSES],
+          seed: { 'display/memdraw/erx_draw_clip.c' => "(void)erx_fb_store(&src, &dst, &geometry, &r, 1);\n" }
         )
       ]
     )

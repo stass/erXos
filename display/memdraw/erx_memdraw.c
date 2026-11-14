@@ -122,8 +122,15 @@ erx_memdraw_wrap(erx_mdimage_t **out, uint32_t chan, erx_rect_t r, uint8_t *data
 	if (!erx_memdraw_chan_supported(chan) || badrect(rect(r)) || (int64_t)r.x1 - r.x0 > ERX_MEMDRAW_MAX_WIDTH ||
 	    (uintptr_t)data % sizeof(ulong) != 0)
 		return ERX_MEMDRAW_EINVAL;
-	/* badrect bounds Dx and Dy below 2^26 and the width below 2^16, so this cannot overflow. */
-	size_t rows = (size_t)bytesperline(rect(r), chantodepth(chan)) * (size_t)Dy(rect(r));
+	/*
+	 * libmemdraw steps rows by whole words, an image's width in words being
+	 * wordsperline (display/libmemdraw/alloc.c:34, used by byteaddr at :136), so the rows
+	 * take wordsperline words each, and allocmemimage keeps one word past them
+	 * (alloc.c:67 and :84), which readbyte may load for a 24-bit pixel: an image over the
+	 * caller's memory needs the same. badrect bounds Dy below 2^26 and the width is below
+	 * 2^16, so this cannot overflow.
+	 */
+	size_t rows = (size_t)wordsperline(rect(r), chantodepth(chan)) * sizeof(ulong) * (size_t)Dy(rect(r));
 	if (rows > n || n - rows < sizeof(ulong))
 		return ERX_MEMDRAW_EINVAL;
 	Memdata *md = malloc(sizeof *md);
@@ -299,6 +306,24 @@ erx_memdraw_draw_bytes(const erx_mdimage_t *dst, erx_rect_t r, const erx_mdimage
 	if (!clip_draw(&clip, cmem(dst), r, cmem(src), sp, mask != NULL ? cmem(mask) : memopaque, mp, clipr))
 		return 0;
 	return rows_of(cmem(dst), erect(clip.r), &n) ? n : 0;
+}
+
+bool
+erx_memdraw_pixels(const erx_mdimage_t *image, uint8_t **base, size_t *stride, size_t *bytes,
+    uint32_t *width, uint32_t *height, uint32_t *depth)
+{
+	Memimage *m = (Memimage *)(uintptr_t)cmem(image);
+
+	if (m->r.min.x != 0 || m->r.min.y != 0)
+		return false;
+	*base = byteaddr(m, m->r.min);
+	*stride = (size_t)m->width * sizeof(ulong);
+	/* badrect bounds Dy below 2^26 and the width in words below 2^16, so this cannot overflow. */
+	*bytes = *stride * (size_t)Dy(m->r);
+	*width = (uint32_t)Dx(m->r);
+	*height = (uint32_t)Dy(m->r);
+	*depth = (uint32_t)m->depth;
+	return true;
 }
 
 size_t

@@ -2641,6 +2641,34 @@ Erlang writes a region only through `erx_memdraw:wrap/4`, which makes an
 image over it, and no address or offset of it reaches Erlang; a request
 names it by the `out` segment `{region, R}` (Posting, below).
 
+**The framebuffer.** `erx_device:framebuffer()` maps the domain's own
+framebuffer. The NIF takes no argument: it reads the window of the
+domain's framebuffer record, `-erx framebuffer WINDOW_H OFFSET SIZE ...`,
+from the boot information page itself (`erx_boot_framebuffer` in
+`liberx/backend/core/boot_info.c`, over the words after the first
+`--`), the root's object over the pages of the memory a board's
+firmware set up, which its display hardware scans out
+([design-device-tree.md](design-device-tree.md#facts-into-records)).
+So no handle Erlang names is ever mapped as a framebuffer: the only
+object the call maps is the one the root wrote into the domain's
+record. `erx_device_record:framebuffers/0` reads the same record for
+the geometry and format the driver checks. The NIF maps the object from
+its first page through the page holding the framebuffer's last byte,
+read and write, as the object's device memory, and returns `{ok, Fb}`,
+the framebuffer's name. A domain holds at most one framebuffer row, so
+a second call is that framebuffer again, the mapping kept for the boot,
+and a restarted driver gets it back. A page with no record, a malformed
+one or more than one answers `{error, enoent}`, an `OFFSET` past the
+first page or a `SIZE` of zero `{error, einval}`. A hosted runtime's
+page has no record, so it answers `{error, enoent}`, and the hosted
+backend, which has no devices, `{error, enotsup}` for a page given one.
+Erlang writes the framebuffer only through
+`erx_memdraw:store/4`, which copies rectangles of an image in ordinary
+memory into it with aligned 32-bit stores, the one access device
+memory takes from every copy alike; no image is made over it, so no
+drawing operation reaches device memory, and no address of it reaches
+Erlang ([design-display.md](design-display.md#the-display-device)).
+
 **Posting.** `erx_device:post(Dev, Q, Tag, Segments)`, where `Segments`
 is a list of one to four `{out, Binary}`, `{out, {region, R}}` and `{in, Length}`, every `out`
 before every `in`, makes one request in one call: the NIF lays the

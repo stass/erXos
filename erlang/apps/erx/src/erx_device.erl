@@ -7,7 +7,7 @@
 %% lacks is badarg, as is anything the table does not allow. read/2, write/3,
 %% read_field/3, write_field/4, field/4, irq_ack/2 and command/2 are BIFs in ERTS (beam/bif.tab), since a
 %% driver makes them one at a time; the clauses below stand for them only in xref and
-%% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2, the queue calls and region/3 are NIFs.
+%% documentation. open/1, irq_bind/2, irq_bind_owner/2, irq_holder/2, the queue calls, region/3 and framebuffer/0 are NIFs.
 %%
 %% A read or a write is one volatile access and never waits. write_field/4 on an ordinary
 %% field reads the word and writes it back, so a field's update is not atomic against
@@ -37,10 +37,10 @@
 -export([open/1]).
 -export([read/2, write/3, read_field/3, write_field/4, field/4, command/2]).
 -export([irq_bind/2, irq_bind_owner/2, irq_holder/2, irq_ack/2]).
--export([queue_create/4, negotiate/2, post/4, complete/2, region/3]).
+-export([queue_create/4, negotiate/2, post/4, complete/2, region/3, framebuffer/0]).
 -export([stand_in_fire/2, stand_in_used/3, stand_in_transmitted/1, stand_in_receive/2]).
 
--export_type([device/0, register_name/0, spec/0, queue/0, region/0, segment/0]).
+-export_type([device/0, register_name/0, spec/0, queue/0, region/0, framebuffer/0, segment/0]).
 
 -on_load(init/0).
 
@@ -56,6 +56,7 @@
                   clock => Hertz :: non_neg_integer(), coherent => boolean()}.
 -opaque queue() :: non_neg_integer().
 -opaque region() :: non_neg_integer().
+-opaque framebuffer() :: non_neg_integer().
 -type segment() :: {out, binary()} | {out, {region, region()}} | {in, pos_integer()}.
 
 init() ->
@@ -179,6 +180,19 @@ negotiate(_Dev, _Wanted) ->
 %% the whole runtime, so post/4 checks that it is the posting device's.
 -spec region(device(), non_neg_integer(), pos_integer()) -> {ok, region()} | {error, atom() | {status, integer()}}.
 region(_Dev, _Index, _Bytes) ->
+    erlang:nif_error(undef).
+
+%% The domain's own framebuffer: the NIF reads the window of the domain's framebuffer record
+%% from the boot page itself (erx_device_record:framebuffers/0 reads the same record), so no
+%% handle Erlang names is ever mapped. That window is the pages of the object the root made
+%% over the memory the board's firmware set up, mapped as device memory and kept for the boot
+%% (docs/design-runtime.md, "The framebuffer"). Fb names it for erx_memdraw:store/4, the one
+%% way Erlang writes it, with aligned 32-bit stores; no image is ever made over it and no
+%% address reaches Erlang. A second call is that framebuffer again, so a restarted driver gets
+%% the same mapping. `{error, enoent}` for a domain without exactly one well-formed record,
+%% a hosted runtime's among them; `{error, enotsup}` from a hosted runtime given a record.
+-spec framebuffer() -> {ok, framebuffer()} | {error, atom() | {status, integer()}}.
+framebuffer() ->
     erlang:nif_error(undef).
 
 %% Posts one request of 1 to 4 segments, every `out` before every `in`, laid end to end in

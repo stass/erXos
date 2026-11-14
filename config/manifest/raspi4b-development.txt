@@ -15,26 +15,25 @@
 # "The unit rule"). erx_blk drives EMMC2's sdhci record with its SD device process
 # (erx_blk_sd), which logs that the SD card is not driven when no card answers. The domain
 # holds the card's data window and serves /data, littlefs on that partition, as the data
-# facet, with the rows below. The network domain is described with its rows below. The
-# display domain comes with stage (d).
+# facet, with the rows below. The network and display domains are described with their
+# rows below.
 #
-# The system domain holds three units (docs/design-platforms.md, "Raspberry Pi 4 Model B"):
-# two of one register page of the board each, the console's, the mini UART's page, which
-# it shares with the auxiliary SPI controllers that no driver here drives, and the host
-# link's, the PL011s' page, of which the host link uses UART3; and the framebuffer's, so
-# the root reads the framebuffer the firmware set up and prints its line
-# (docs/design-device-tree.md, "The lines") and the system domain finds its record. No
-# runtime here drives the framebuffer. The console's driver is erx_mini_uart, which keeps
-# the divisor the firmware set.
+# The system domain holds two units (docs/design-platforms.md, "Raspberry Pi 4 Model B"),
+# of one register page of the board each: the console's, the mini UART's page, which it
+# shares with the auxiliary SPI controllers that no driver here drives, and the host
+# link's, the PL011s' page, of which the host link uses UART3. The console's driver is
+# erx_mini_uart, which keeps the divisor the firmware set. The display domain holds the
+# framebuffer's unit: the root reads the framebuffer the firmware set up, prints its line
+# (docs/design-device-tree.md, "The lines") and writes the display domain its record.
 #
 # The shares, runtime limits and the session's limits are QEMU virt's development
 # manifest's (config/manifest/qemu-virt-development.txt), whose comment gives their
 # measurements. The system principal holds root's one session, 36 MiB and outer 1 MiB,
 # and 1 MiB for the outer budget of a domain that has ended while another still holds a
 # connection to it, as QEMU virt's comment explains; the storage domain, 30 MiB and outer
-# 1 MiB; and the network domain, 36 MiB and outer 1 MiB: 106 MiB in all. The system
-# baseline is QEMU virt's 46 MiB. root_memory, 160 MiB, admits the baseline, the
-# principal's 106 MiB, the SD controller's 1 MiB of DMA memory and GENET's 1 MiB of device
+# 1 MiB; the network domain, 36 MiB and outer 1 MiB; and the display domain, 24 MiB and
+# outer 1 MiB: 131 MiB in all. The system baseline is QEMU virt's 46 MiB. root_memory,
+# 185 MiB, admits the baseline, the principal's 131 MiB, the SD controller's 1 MiB of DMA memory and GENET's 1 MiB of device
 # memory with 6 MiB no one is promised, and lies well below what the smallest Pi 4 the
 # record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
 manifest 1
@@ -65,6 +64,17 @@ share session
   period_ns 10000000
   cpuset 1
   capacity_mcpu 1000
+  capacity_first 0
+  slice_us 1000
+  grace_us 5
+  base 16
+  ceiling 31
+  flags none
+share display
+  quota_ns 1000000
+  period_ns 10000000
+  cpuset 1
+  capacity_mcpu 100
   capacity_first 0
   slice_us 1000
   grace_us 5
@@ -102,6 +112,16 @@ runtime_limits session
   foreign_atoms 1024
   processes 2048
 runtime_limits storage
+  max_frame 131072
+  max_message_heap 131072
+  funnel_depth 64
+  exports 256
+  tmp 0
+  overlay 0
+  atoms 16384
+  foreign_atoms 1024
+  processes 1024
+runtime_limits display
   max_frame 131072
   max_message_heap 131072
   funnel_depth 64
@@ -159,10 +179,22 @@ limits storage
   runtime_limits @runtime_limits.storage
   peer_held 4096
   peer_held_total 4096
+limits display
+  memory 25165824
+  outer 1048576
+  grant @share.display
+  spaces none
+  lane 4096
+  connections 0
+  crash 0
+  flags none
+  runtime_limits @runtime_limits.display
+  peer_held 4096
+  peer_held_total 4096
 principal system
-  memory 111149056
+  memory 137363456
   grant @share.users
-  domains 4
+  domains 5
   names 64
   default_limits @limits.native
   ceiling_limits @limits.native
@@ -177,12 +209,12 @@ machine
   console "/soc/serial@7e215040"
   hostlink "/soc/serial@7e201600"
   platform "raspi4b"
-  root_memory 167772160
+  root_memory 193986560
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 4
+  max_domains 5
   max_connections 11
   system_lane 4096
   system_queue 16384
@@ -203,7 +235,7 @@ unit hostlink
   holder system
 unit framebuffer
   placement "framebuffer"
-  holder system
+  holder @domain.display
 unit block
   placement "sd"
   holder @domain.storage
@@ -307,9 +339,11 @@ facet inspect
 #
 # Its quota of two connections holds root's session and one more while a session is
 # replaced; its system connection counts against no quota (life_connections,
-# liberx/system/dom_life.c). At rest the machine holds five of its 11: the system
-# connections of root's session and of the storage and network domains, and the
-# session's data and net.
+# liberx/system/dom_life.c). At rest the machine holds six of its 11: the system
+# connections of root's session and of the storage, network and display domains, and the
+# session's data and net; the other five are the three a replacement session makes beside
+# its predecessor's closing rows and the two a restarted configured domain makes, as on
+# QEMU virt.
 domain network
   principal @principal.system
   limits @limits.network
@@ -364,3 +398,32 @@ facet apps
   period_ns 1000000000
   max_heap_size 131072
 shell_principal @principal.system
+# The display domain is QEMU virt's row (config/manifest/qemu-virt-development.txt, whose
+# comment gives its share, limits and connections): an interpreter service domain that holds
+# the platform record's framebuffer unit and runs the firmware framebuffer's driver,
+# erx_firmware_fb, and the window system's screen (docs/design-display.md, "The display
+# device"). It serves display, its window tree, which no facet grants, so a screen on
+# HDMI 0 shows the empty layout's background. A boot whose firmware set up no framebuffer,
+# QEMU's raspi4b model among them, gives the domain no framebuffer record, and the domain
+# runs without a screen. Its 24 MiB and the display share's 100 mcpu are QEMU virt's
+# figures, measured on neither board (TODO.md).
+domain display
+  principal @principal.system
+  limits @limits.display
+  kind service
+  flags none
+  runtime @artifact.emu
+  release @artifact.display
+  restarts 5
+  restart_period_s 600
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
+# display: the display domain's window tree (docs/design-display.md, "A display's
+# session"), of the windows interface, and its display record, as on QEMU virt: no facet
+# grants it and no start row names it; the policy is single and the idle times 0.
+service display
+  server @domain.display
+  interface windows
+display display
+  policy single
+  idle_dim_s 0
+  idle_off_s 0

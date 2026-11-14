@@ -88,14 +88,20 @@ static void	stand_in_stored(const erx_device_t *device, const erx_device_registe
 	    uint64_t value);
 #endif
 
-/* `size` bytes of the object from `offset`, mapped read and write where the kernel reserves room. */
+/*
+ * `size` bytes of the object from `offset`, mapped read and write where the kernel reserves
+ * room; a map the kernel refuses gives the reservation back.
+ */
 static int
 map_object(uint64_t mem, uint64_t offset, uint64_t size, uint64_t *addr)
 {
 	int status = erx_vm_reserve(ERX_CAP_SELF, 0, size, 0, addr);
 
-	if (status == ERX_OK)
+	if (status == ERX_OK) {
 		status = erx_vm_map(ERX_CAP_SELF, *addr, size, mem, offset, ERX_PROT_RW);
+		if (status != ERX_OK)
+			(void)erx_vm_release(ERX_CAP_SELF, *addr, size);
+	}
 	return (status);
 }
 
@@ -1246,6 +1252,58 @@ erx_device_region(const erx_device_t *device, uint32_t index, uint64_t bytes, ui
 	atomic_store_explicit(&regions_open, open + 1, memory_order_release);
 	*region = open;
 	return (ERX_OK);
+}
+
+/* The framebuffer record's window as mapped here: the boot page's record and where it lies. */
+typedef struct framebuffer_record {
+	uint64_t		window;		/* the record's window object */
+	uint64_t		offset;		/* the framebuffer's first byte in the object */
+	uint64_t		bytes;		/* the framebuffer's length */
+	volatile uint8_t	*mapping;	/* this domain's mapping of the object's first page */
+} framebuffer_record_t;
+
+static framebuffer_record_t framebuffers[ERX_DEVICE_FRAMEBUFFERS_MAX];
+static _Atomic uint32_t framebuffers_open;
+
+int
+erx_device_framebuffer(uint64_t window, uint64_t offset, uint64_t bytes, uint32_t *framebuffer)
+{
+	const uint32_t open = atomic_load_explicit(&framebuffers_open, memory_order_relaxed);
+	uint64_t end, pages, addr;
+	int status;
+
+	if (bytes == 0 || offset >= ERX_PAGE_SIZE || __builtin_add_overflow(offset, bytes, &end) ||
+	    __builtin_add_overflow(end, ERX_PAGE_SIZE - 1, &pages))
+		return (ERX_EINVAL);
+	pages &= ~(uint64_t)(ERX_PAGE_SIZE - 1);
+	for (uint32_t name = 0; name < open; name++) {
+		const framebuffer_record_t *const record = &framebuffers[name];
+
+		if (record->window == window && record->offset == offset && record->bytes == bytes) {
+			*framebuffer = name;
+			return (ERX_OK);
+		}
+	}
+	if (open == ERX_DEVICE_FRAMEBUFFERS_MAX)
+		return (ERX_EBUSY);
+	status = map_object(window, 0, pages, &addr);
+	if (status != ERX_OK)
+		return (status);
+	framebuffers[open] = (framebuffer_record_t){ .window = window, .offset = offset, .bytes = bytes,
+	    .mapping = (volatile uint8_t *)(uintptr_t)addr };
+	atomic_store_explicit(&framebuffers_open, open + 1, memory_order_release);
+	*framebuffer = open;
+	return (ERX_OK);
+}
+
+bool
+erx_device_framebuffer_memory(uint32_t framebuffer, volatile uint8_t **base, uint64_t *bytes)
+{
+	if (framebuffer >= atomic_load_explicit(&framebuffers_open, memory_order_acquire))
+		return (false);
+	*base = framebuffers[framebuffer].mapping + framebuffers[framebuffer].offset;
+	*bytes = framebuffers[framebuffer].bytes;
+	return (true);
 }
 
 bool

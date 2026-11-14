@@ -28,7 +28,10 @@ module Erx
   # a debug log record whose tab and escape the console writes as text; then Ctrl-G's menu
   # gives the system's command shell, whose Erlang shell halts the machine, and BL31's reset
   # ends QEMU under -no-reboot. Its serial log must then hold each configured domain's line
-  # (CONFIGURED_LINES).
+  # (CONFIGURED_LINES), and the display domain's exactly once with no restart of that domain:
+  # the model has no firmware to set up a framebuffer, so the domain holds no framebuffer
+  # record and runs without a screen (erx_fb_sup), and a driver that ended the domain at each
+  # start would log its line again at each restart.
   #
   # tcg-cpu-removed, a seeded fault: the same image on the model's tree with one CPU's node
   # removed reaches the release with three schedulers, so the four of tcg-4cpu are the
@@ -139,8 +142,11 @@ module Erx
       'storage' => /#{NativeRoot::DOMAIN_RECORD.source}erx_blk: the SD card is not driven: /n,
       'network' => /\d+\.\d{6}\ notice\ domain\ \d+\ principal\ \S+(?:\ dropped\ \d+)?\ system:
                     \ erx_domain:\ configured\ domain\ network\ \(domain\ \d+\)\ ended,
-                    \ \{fault,#{ABI::Generated::CODEC.member('fault_kind', 'memory')}\};\ restarting\ it\r*$/nx
+                    \ \{fault,#{ABI::Generated::CODEC.member('fault_kind', 'memory')}\};\ restarting\ it\r*$/nx,
+      'display' => /#{NativeRoot::DOMAIN_RECORD.source}erx_fb: no display device record; no screen\r*$/n
     }.freeze
+    # The configured domains whose line a boot logs once, since they start once and never end.
+    STARTED_ONCE = %w[display].freeze
 
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                    compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64')
@@ -219,11 +225,17 @@ module Erx
 
     # Raises unless the serial log holds CONFIGURED_LINES' line for each configured domain
     # the Pi's manifest names, so a domain that never started, or a manifest row without
-    # its expected line here, fails the run.
+    # its expected line here, fails the run; and unless each domain of STARTED_ONCE logged
+    # its line once and never ended, so one that restarts fails it too.
     def check_configured(serial)
       configured_domains.each do |name|
         pattern = CONFIGURED_LINES.fetch(name) { raise Error, "raspi4b: configured domain #{name} has no expected line" }
         raise Error, "raspi4b: configured domain #{name} left no line matching #{pattern.source}" unless serial.match?(pattern)
+        next unless STARTED_ONCE.include?(name)
+
+        count = serial.scan(pattern).size
+        raise Error, "raspi4b: configured domain #{name} logged its line #{count} times" unless count == 1
+        raise Error, "raspi4b: configured domain #{name} ended" if serial.match?(/configured domain #{name} \(domain \d+\) ended/n)
       end
     end
 
