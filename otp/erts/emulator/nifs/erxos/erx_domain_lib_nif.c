@@ -7,8 +7,9 @@
  * erx_domain_lib: the domain service's way into the system domain's domain
  * library (docs/design-system.md, "The domain library"; include/erx/dom_lib.h).
  * Each entry is a dirty CPU NIF, since none waits on anything but a call to
- * the backend or the lock, and runs under lib_lock, the library's one lock,
- * which the fault thread takes too while it handles a record.
+ * the backend or the lock, and every entry but end_commit runs under
+ * lib_lock, the library's one lock, which the fault thread takes too while
+ * it handles a record.
  *
  * The fault thread is an ERTS thread (enif_thread_create) this module starts
  * at load, bound to the library's fault gate. It waits at the gate outside
@@ -631,6 +632,25 @@ devices_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /*
+ * end_commit(How): the machine's end, How ERX_END_OFF or ERX_END_RESET
+ * (erx_dom_lib_end_commit), which answers only a refusal. It asks no
+ * registration and takes no lock: ending the machine changes no domain, every
+ * process of the system domain can end it already with erlang:halt/0, and
+ * init asks it once its shutdown has stopped the domain service.
+ */
+static ERL_NIF_TERM
+end_commit_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	unsigned int how;
+
+	if (argc != 1 || !enif_get_uint(env, argv[0], &how))
+		return (enif_make_badarg(env));
+	if (lib == NULL)
+		return (status_error(env, ERX_ENOTSUP));
+	return (status_error(env, erx_dom_lib_end_commit(lib, how)));
+}
+
+/*
  * The manifest's session templates (property 14 of docs/design-system.md):
  * {ok, Templates} in principal order, one per principal, each
  * #{template, principal}, template its index among them. The boot creates
@@ -1140,6 +1160,7 @@ static ErlNifFunc nif_funcs[] = {
 	{ "disconnect_nif", 1, disconnect_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_nif", 0, configured_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "templates_nif", 0, templates_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
+	{ "end_commit_nif", 1, end_commit_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "devices_nif", 0, devices_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "configured_create_nif", 3, configured_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },
 	{ "session_create_nif", 4, session_create_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND },

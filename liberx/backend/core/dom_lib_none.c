@@ -101,6 +101,13 @@ erx_dom_lib_take(uint64_t wait_by, uint64_t *label, erx_fault_t *record)
 	return (ERX_ENOTSUP);
 }
 
+erx_status_t
+erx_dom_lib_end_commit(erx_dom_lib_t *lib, uint32_t how)
+{
+	(void)lib, (void)how;
+	return (ERX_ENOTSUP);
+}
+
 bool
 erx_dom_lib_record(erx_dom_lib_t *lib, uint64_t label, const erx_fault_t *record, erx_dom_report_t *report)
 {

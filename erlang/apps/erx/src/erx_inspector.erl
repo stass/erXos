@@ -55,7 +55,7 @@ that has no collector here is
 """.
 
 -export([inspect/1, inspect/2, entries/1, overview/0]).
--export([inspect/3, entries/2, route/3, proc_id/1, runtime_domain/0]).
+-export([inspect/3, entries/2, route/3, proc_id/1, runtime_domain/0, is_system_runtime/0]).
 -export([scoped/3, declared_reachable/3, listing/2, collects_domain/2]).
 -export([page/0, page_add/2, page_full/1, page_entries/2, view/1]).
 -export_type([scope/0, query_scope/0, answer/0, entries/0, page/0]).
@@ -379,9 +379,13 @@ proc_id(Pid) ->
 runtime_domain() ->
     element(1, boot()).
 
-%% Whether this runtime is the system domain's: the one whose boot page names the system
-%% domain's id and no system connection, so a runtime with only one of the two, a misread
-%% boot page, is another domain and asks its inspect facet rather than its own worker.
+-doc """
+Whether this runtime is the system domain's: the one whose boot page names the system
+domain's id and no system connection, so a runtime with only one of the two, a misread
+boot page, is another domain and asks its inspect facet rather than its own worker. A
+runtime that is not erXos's, as on a development host, stands for the system domain.
+""".
+-spec is_system_runtime() -> boolean().
 is_system_runtime() ->
     boot() =:= {erx_kernel_records:system_domain(), none}.
 

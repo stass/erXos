@@ -49,7 +49,8 @@ module Erx
        { name: 'task-cpus', pattern: /\Aerx: task: cpus [1-9]/n, seconds: 30 }.freeze,
        case_point('yield', seconds: YIELD_SECONDS), case_point('service', seconds: 30), case_point('write_rx', seconds: 30), case_point('run_rw', seconds: 30),
        case_point('no_jit', seconds: 30), case_point('irq_refused', seconds: 30),
-       case_point('device_refused', seconds: 30), case_point('log', seconds: 30),
+       case_point('device_refused', seconds: 30), case_point('machine_end_refused', seconds: 30),
+       case_point('log', seconds: 30),
        case_point('write', seconds: 30), case_point('spin_stop', seconds: 60), case_point('root_stops', seconds: 30),
        case_point('request_against_exit', seconds: RACE_SECONDS),
        { name: 'task-done', pattern: /\Aerx: task: done/n, seconds: 30 }.freeze].freeze

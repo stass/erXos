@@ -466,6 +466,8 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 		return (mode_device_refused());
 	case MODE_YIELD:
 		return (mode_yield());
+	case MODE_MACHINE_END:
+		return (erx_machine_end(0, ERX_END_RESET) == ERX_ENOTSUP ? 0 : 130);
 	default:
 		return (90);
 	}

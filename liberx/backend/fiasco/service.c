@@ -456,6 +456,9 @@ service_run(const erx_fiasco_wire_decoded_t *decoded, erx_fiasco_reply_t *reply)
 	case ERX_FIASCO_CALL_MACHINE_END: {
 		const uint64_t how = ((const erx_fiasco_machine_end_request_t *)words)->how;
 
+		/* The root's alone, as only the root resource carries POWER on erXos's kernel. */
+		if (decoded->task != ERX_FIASCO_TASK_ROOT)
+			return (ERX_ENOTSUP);
 		if (how != ERX_END_OFF && how != ERX_END_RESET)
 			return (ERX_EINVAL);
 		erx_fiasco_end(NULL, (uint32_t)how);

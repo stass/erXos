@@ -1032,6 +1032,16 @@ erx_dom_lib_stop(erx_dom_lib_t *lib, uint32_t id, int64_t status)
 	return (lib_stop(lib, &action));
 }
 
+/* Off or reset alone: a trial and a panic are no end the library commits. */
+erx_status_t
+erx_dom_lib_end_commit(erx_dom_lib_t *lib, uint32_t how)
+{
+	(void)lib;
+	if (how != ERX_END_OFF && how != ERX_END_RESET)
+		return (ERX_EINVAL);
+	return (erx_machine_end(0, how));
+}
+
 /* The made object whose handle is cap, or ERX_DOM_OBJ_COUNT for none. */
 static erx_dom_obj_t
 set_find(const handle_set_t *set, uint64_t cap)

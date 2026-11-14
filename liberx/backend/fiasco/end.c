@@ -8,7 +8,8 @@
  * codec asks of it. Best effort, with no lock. No thread is stopped first. Every end the
  * service takes, the root's fault, its stop and erx_machine_end, first writes the debug log's
  * records that wait for a reader to the console, so none is lost; the crash writer is handed
- * no log ring. The watchdog's end runs off the service and writes only its frame.
+ * no log ring. The watchdog's end runs off the service and writes only its frame. Every end
+ * then writes its last line, erx: end off or erx: end reset (erx_fiasco_machine_end).
  */
 
 #include <stdatomic.h>

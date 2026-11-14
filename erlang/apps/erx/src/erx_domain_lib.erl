@@ -32,11 +32,14 @@ so does crash/1, which reads a domain's crash dump.
 """.
 
 -export([register/0, create/1, start/1, stop/2, retire/1, crash/1, connect/6, disconnect/1,
-         configured/0, configured/3, templates/0, devices/0, session/4, code_object/2, code_drop/2]).
+         configured/0, configured/3, templates/0, devices/0, session/4, code_object/2, code_drop/2,
+         end_commit/1]).
 -nifs([register_nif/0, create_nif/1, start_nif/1, stop_nif/2, retire_nif/1, crash_nif/1, connect_nif/6,
        disconnect_nif/1, configured_nif/0, configured_create_nif/3, templates_nif/0, devices_nif/0,
-       session_create_nif/4]).
+       session_create_nif/4, end_commit_nif/1]).
 -on_load(on_load/0).
+
+-include("generated/erx_abi.hrl").
 
 -export_type([spec/0, created/0, error/0, configured/0, template/0, device/0]).
 
@@ -228,6 +231,20 @@ templates() ->
     templates_nif().
 
 -doc """
+Ends the machine, off or reset, as the last step of its ordered end
+(docs/design-system.md, "Shutting down"); it returns only a refusal, and
+{error, enotsup} where there is no library, in a domain's runtime and a
+hosted one. Any process may ask it, as any process of the system domain may
+end the machine with erlang:halt/0: init asks it once its shutdown has
+stopped the domain service.
+""".
+-spec end_commit(off | reset) -> error().
+end_commit(off) ->
+    end_commit_nif(?ERX_END_OFF);
+end_commit(reset) ->
+    end_commit_nif(?ERX_END_RESET).
+
+-doc """
 The device catalogue, in the manifest's device order, with each device's holder.
 """.
 -spec devices() -> {ok, [device()]} | error().
@@ -303,4 +320,7 @@ devices_nif() ->
     erlang:nif_error(undef).
 
 session_create_nif(_Id, _Template, _Name, _DomainPid) ->
+    erlang:nif_error(undef).
+
+end_commit_nif(_How) ->
     erlang:nif_error(undef).

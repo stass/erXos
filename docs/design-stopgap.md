@@ -1589,6 +1589,9 @@ crash record rather than in the harness's kill: the deadline counts from QEMU's 
 ### The end path
 
 A root fault, the root's own stop and `erx_machine_end` reach it on the service, a missed pet on the watchdog. It is best effort and takes no lock.
+The service answers `erx_machine_end` for the root task alone and refuses it from any other task with `ERX_ENOTSUP`, as it refuses
+`erx_log_take`, since on erXos's kernel only the root resource carries the `POWER` the call needs
+([design-kernel.md](design-kernel.md#kernel-calls), K31).
 
 1. **One caller.** An atomic exchange of the `ending` word; the loser sleeps forever.
 2. **The log.** On the service, which alone writes the log ring, lines the log service has not taken go out through `l4_vcon_write`; lines it has taken and the console has not yet
@@ -1596,7 +1599,9 @@ A root fault, the root's own stop and `erx_machine_end` reach it on the service,
    ring is skipped.
 3. **The record.** After a fault or missed pet, the crash frame that [design-kernel.md](design-kernel.md) defines and
    `tools/lib/erx/crash_frame.rb` reads, through `l4_vcon_write`. No thread is stopped first.
-4. **The end.** `l4_platform_ctl_system_shutdown(L4_BASE_ICU_CAP, reboot)`, with `reboot` 0 for `ERX_END_OFF` and 1 otherwise
+4. **The end.** A last line through `l4_vcon_write`, `erx: end off` for `ERX_END_OFF` and `erx: end reset` otherwise, as erXos's
+   kernel's last line names its end ([design-kernel.md](design-kernel.md#console-log-and-panic)), so a test reads which end was taken.
+   Then `l4_platform_ctl_system_shutdown(L4_BASE_ICU_CAP, reboot)`, with `reboot` 0 for `ERX_END_OFF` and 1 otherwise
    (`platform_control_object.cpp:88`). Under `-no-reboot` this ends QEMU. If the call returns, the thread sleeps until the harness's
    deadline.
 

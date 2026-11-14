@@ -197,6 +197,16 @@ erx_status_t	erx_dom_lib_connect(erx_dom_lib_t *, uint32_t a, uint32_t b,
 		    uint32_t area_reader, erx_dom_linked_t *linked)
 		    ERX_WARN_UNUSED_RESULT;
 
+/*
+ * erx_dom_end_commit, the last step of the machine's ordered end
+ * (docs/design-system.md, "Shutting down"): ends the machine as how says,
+ * ERX_END_OFF or ERX_END_RESET, with erx_machine_end, and returns only its
+ * refusal. It changes no domain of the view, since the end stops every thread
+ * at once. Its erx_dom_end_begin, ending record and deadline are not built
+ * (TODO.md), so it is committed with no record.
+ */
+erx_status_t	erx_dom_lib_end_commit(erx_dom_lib_t *, uint32_t how) ERX_WARN_UNUSED_RESULT;
+
 /* erx_dom_disconnect and erx_dom_retire: their plans' answers. */
 erx_status_t	erx_dom_lib_disconnect(erx_dom_lib_t *, uint32_t number) ERX_WARN_UNUSED_RESULT;
 erx_status_t	erx_dom_lib_retire(erx_dom_lib_t *, uint32_t id) ERX_WARN_UNUSED_RESULT;

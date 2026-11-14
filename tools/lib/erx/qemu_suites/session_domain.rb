@@ -12,7 +12,10 @@ require_relative '../session_domain'
 # the system shell exit(DomainPid, kill) ends that one the same way; at one CPU the host
 # then opens the web facet and a browser's open of the machine's path is answered with
 # its record through root's line (HostlinkGuest.machine), and again through
-# tools/erx web as a browser opens it (WebGuest). Run raises on the
+# tools/erx web as a browser opens it (WebGuest). At one CPU two more boots end the
+# machine: in each, root_1's shell refuses `reboot`, and the system shell's `reboot`
+# resets the machine and its `halt` powers it off, as the end's console line says. Run
+# raises on the
 # first disagreement, which the gate reports as this suite failing. check_qemu builds the
 # kernel before any suite runs, so this suite does not.
 # Every cell boots with a disk, which a remote boot does not take (Qemu#run), so its

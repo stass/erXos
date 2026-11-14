@@ -3161,6 +3161,23 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   timeout once `erx_dom_end_begin` keeps a deadline. The thread also ends without a
   diagnostic on a take refused for any reason but a message that is not a record, after which
   no domain's end is handled; report that to the registered process or the log.
+* [Medium] ordered end, `liberx/system/dom_apply.c` (`erx_dom_lib_end_commit`),
+  `otp/erts/preloaded/src/init.erl` (edit 68) and `erlang/apps/erx_shell/src/erx_cmd_reboot.erl`:
+  the machine's end is only its last step. design-system.md "Shutting down" also has
+  `erx_dom_end_begin` with its ending record and absolute deadline, which the fault thread
+  enforces; no domain created or restarted once the end has begun; the vault's quiesce and
+  the storage freeze, with the end chosen from their outcomes; and the coordinator's one
+  entry, which takes every request with its principal, answers a second one `busy` and
+  writes the one log line. Until then `init:reboot/0` and `init:stop/0` run stock OTP's
+  application stop before `erx_dom_lib_end_commit`, `reboot` and `halt` write the log line
+  themselves with the principal fixed as `root`, where the coordinator will name the grant's
+  principal, and a session's `reboot` is refused by `may_end/1` until the session's request
+  of design-system.md "A session's request" is built. Meanwhile `erx_domain_lib:end_commit/1`
+  commits with no begin for any process of the system domain; once the record exists the
+  library refuses a commit without one. The command's log line goes to `erx_syslog` as an
+  ordinary record, which the application stop may outrun, so it can be lost before the end;
+  `reboot` then `halt` from two lines log two lines and init keeps the first end; and
+  `erlang:halt/0,1` in the system domain does not ask for the ordered `off`.
 * [Medium] domain library NIFs, `erlang/apps/erx` and `test/guest/native_domain`: no test
   reaches the module's paths with a library present: a real create's decoding refusals (an
   unknown key, a u32 overflow, strings beyond the boot page), the lock, the fault thread's

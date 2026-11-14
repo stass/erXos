@@ -340,6 +340,20 @@ shell and for `erx:` functions that run commands:
    the boot image, each of which the session's export also lists in
    `/bin` ([design-programs.md](design-programs.md#what-a-program-can-start)).
 
+`reboot` and `halt` are one module under two names, as FreeBSD's halt is
+a link to reboot, and the name picks the end: `reboot` resets the
+machine and `halt` powers it off, since erXos has no end that halts
+without turning the machine off. `reboot -p` powers off too. `-q` and
+`-l` are accepted and ask for the same end: the ordered end stops no
+service, so there is nothing for `-q` to skip, and its log line,
+`rebooted by P` or `powered off by P` at `critical`, is the system's,
+one per end whoever asked. Every other flag of FreeBSD's command is a
+usage error. Either command asks for the ordered end of
+[design-system.md](design-system.md#shutting-down), which says who may
+ask for it; a command whose request is refused prints `reboot: ` (or
+`halt: `) and the error's text, as FreeBSD's `err(1, NULL)` does, and
+fails.
+
 A name that contains `/` is a path, not a name, and is not looked up:
 the shell resolves it through the session's namespace and starts the
 file it names as a program, through an `rx` grant, as `posix_spawn`

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative 'crash_frame'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'hostlink_guest'
@@ -272,6 +273,25 @@ module Erx
       true
     end
 
+    # The machine's end from the system's command shell, after root_1's own shell refuses
+    # `reboot` as FreeBSD's refuses a user who is not root: command is `reboot` or `halt`,
+    # and the end's line (docs/design-stopgap.md, "The end path") names the kind that
+    # command asks of init, a reset or a power-off, after the one log line that names the
+    # end and the system principal, root. points must end at the command shell.
+    MACHINE_ENDS = { 'reboot' => 'reset', 'halt' => 'off' }.freeze
+    MACHINE_END_LOG = { 'reboot' => /rebooted by root/n, 'halt' => /powered off by root/n }.freeze
+
+    def machine_end_checkpoints(points, command:)
+      [*points,
+       session_shell('end-session-shell', "reboot\r"),
+       { name: 'end-session-refused', pattern: line('reboot: Operation not permitted'), seconds: 60,
+         type: CTRL_G }.freeze,
+       { name: 'end-menu', pattern: CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
+       { name: 'end-system-shell', pattern: MENU_LEFT, seconds: 30, type: "#{command}\r" }.freeze,
+       { name: "end-#{command}", pattern: line("erx: end #{MACHINE_ENDS.fetch(command)}"),
+         seconds: 120 }.freeze]
+    end
+
     # The production checkpoints to the system's command shell, then the cell. points must
     # end at the command shell.
     def root_session_checkpoints(points)
@@ -372,7 +392,10 @@ module Erx
                                              fiasco: fiasco)
                                         .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
         placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
-          ["#{accel}-#{count}cpu", root_session(accel, count, remote, built, written)]
+          root_session(accel, count, remote, built, written)
+          ends = count == 1 ? MACHINE_ENDS.keys : []
+          ends.each { |command| machine_end(accel, count, remote, built, written, command: command) }
+          ["#{accel}-#{count}cpu", 'passed']
         end
       end
 
@@ -391,7 +414,26 @@ module Erx
                           checkpoints: SessionDomain.root_session_checkpoints(points),
                           **web_check(accel, count, built, directory: File.join(directory, 'boot')))
         SessionDomain.burst_whole!(File.binread(report.fetch('serial_log')))
-        'passed'
+      end
+
+      # A boot of its own that `command` ends, which QEMU's exit under -no-reboot shows,
+      # with the command's log line on the console before the end's and no crash frame, so
+      # a watchdog's end does not pass for it. The stopgap's end of the root's own halt
+      # also says `erx: end off`, so the halt boot cannot tell init's commit from init's
+      # halt after a refused one; the reboot boot can.
+      def machine_end(accel, count, remote, built, written, command:)
+        run = "#{accel}-#{count}cpu-#{command}-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"
+        directory = OutputDirectory.prepare(root: @root, mode: 0o700, path: File.join(@root, 'build/session-domain', run))
+        medium = ReleaseMedium.medium(written.slot, directory: directory, data_sectors: written.data_sectors, volume: written.volume)
+        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
+                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
+        report = Qemu.new(root: @root, runner: @runner, program: @qemu)
+                     .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
+                          memory_mib: @machine.memory_mib, disks: [QemuPlan::Disk.new(path: medium)],
+                          checkpoints: SessionDomain.machine_end_checkpoints(points, command: command), machine_end: true)
+        log = File.binread(report.fetch('serial_log'))
+        raise Error, "#{command} logged no line before the end" unless log.match?(MACHINE_END_LOG.fetch(command))
+        raise Error, "#{command} ended through a crash" unless CrashFrame.read(log).status == :absent
       end
 
       # At one CPU, once the transcript is whole, the host opens the web facet and a

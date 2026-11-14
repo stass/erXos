@@ -938,8 +938,11 @@ stop(Reason,State) ->
     do_stop(Reason,State1).
 
 %% There is no need to unload code if the system is shutting down
+%% erXos edit 68: a reboot shuts the system down too, and machine_end/1 calls
+%% erx_domain_lib after the shutdown, so its code stays loaded.
 should_unload(stop) -> false;
 should_unload({stop, _}) -> false;
+should_unload(reboot) -> false;
 should_unload(_) -> true.
 
 do_stop({restart,Mode},#state{start=Start, flags=Flags0, args=Args}) ->
@@ -948,13 +951,26 @@ do_stop({restart,Mode},#state{start=Start, flags=Flags0, args=Args}) ->
 do_stop(restart,#state{start=Start, flags=Flags, args=Args}) ->
     do_restart(Start,Flags,Args);
 do_stop(reboot,_) ->
-    halt();
+    machine_end(reset);
 do_stop(stop,State) ->
     stop_heart(State),
-    halt();
+    machine_end(off);
 do_stop({stop,Status},State) ->
     stop_heart(State),
     halt(Status).
+
+%% erXos edit 68 (docs/design-system.md, "Shutting down"): in the system domain's
+%% runtime the node's end is the machine's, a reset for reboot and a power-off for
+%% stop, which erx_domain_lib:end_commit/1 asks of the domain library and which does
+%% not return. Everywhere else it answers a refusal, {error, enotsup} in a domain's
+%% runtime, and the node halts as stock OTP's does. A runtime without the module,
+%% stock OTP's included, halts too.
+machine_end(How) ->
+    case erlang:function_exported(erx_domain_lib, end_commit, 1) of
+        true -> _ = erx_domain_lib:end_commit(How);
+        false -> ok
+    end,
+    halt().
 
 do_restart(Start,Flags,Args) ->
     flush(),

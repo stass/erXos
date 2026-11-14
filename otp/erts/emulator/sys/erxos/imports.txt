@@ -106,7 +106,7 @@ erx_watchdog_pet
 # area is copied into, with its reader. Every runtime links it; where no library was
 # built (a domain's runtime, a hosted one) it calls none of them but erx_dom_lib_system.
 [only_erx_domain_lib_nif]
-erx_dom_lib_configured erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_disconnect erx_dom_lib_record erx_dom_lib_retire erx_dom_lib_session
+erx_dom_lib_configured erx_dom_lib_connect erx_dom_lib_create erx_dom_lib_disconnect erx_dom_lib_end_commit erx_dom_lib_record erx_dom_lib_retire erx_dom_lib_session
 erx_dom_lib_start erx_dom_lib_stop erx_dom_lib_system erx_dom_lib_take erx_gate_bind
 erx_dom_lib_crash_copy erx_dom_dump_read erx_mem_create erx_cap_close
 

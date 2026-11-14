@@ -21,6 +21,7 @@
 #define MODE_WRITE	10	/* writes every byte value through a task's standard output: ends with 0 */
 #define MODE_DEVICE_REFUSED	11	/* device memory from a task: a physical or contiguous create refused */
 #define MODE_YIELD	12	/* two threads on one CPU hand a count back and forth by yielding: ends with 0 */
+#define MODE_MACHINE_END	13	/* erx_machine_end from a task, refused with ERX_ENOTSUP: ends with 0 */
 
 /* The line the log case tries to forge, which must appear only inside a record. */
 #define LOG_FORGED_LINE	"erx: task: forged ok"
