@@ -1218,6 +1218,49 @@ the mini UART only when GPIO14 is in ALT5. The model logs the mini
 UART's line control and control registers as unsupported, which does not
 stop it printing.
 
+**The firmware's framebuffer under QEMU.** On the board the firmware asks
+the VideoCore for the HDMI framebuffer and describes it in the device
+tree as a `simple-framebuffer` node under `/chosen`, which the root reads
+into [the framebuffer's unit](#raspberry-pi-4-model-b). The model runs no
+firmware, but emulates the mailbox property interface (QEMU's
+`docs/system/arm/raspi.rst`: "Frame Buffer", "MailBox controller
+(MBOX)", "VideoCore firmware (property)"), so the `raspi4b` suite's
+shell cell plays the firmware's part with a stand-in that is test
+harness alone (`Raspi4bFirmwareFb`, `test/raspi4b/firmware_fb.c`).
+erXos's own code never talks to the mailbox
+([design-device-tree.md](design-device-tree.md#alternatives-considered)),
+nothing of erXos links or packs the stand-in, and no card holds it.
+
+* On the host, the harness copies the model's tree, adds the node with
+  placeholder cells for its base, size, width, height and stride, and
+  its format, and builds the stand-in with the address of each
+  placeholder cell in the tree as the loader places it.
+* QEMU's generic loader starts CPU 0 at the stand-in's ELF entry
+  (`cpu-num=0`; QEMU's `docs/system/generic-loader.rst`) instead of in
+  BL31. The stand-in sends one property request on mailbox channel 8
+  (the firmware's "Mailbox property interface" page): set the physical
+  and virtual size to 640x480, the depth to 32 and the pixel order to
+  BGR, then allocate the buffer and get the pitch. It writes the answer
+  into the placeholder cells and enters BL31 at address 0 with `x0` to
+  `x3` zero, as reset leaves them. An answer that is not the screen
+  asked for leaves the placeholders, which name a framebuffer outside
+  every window, so the root refuses it, the display domain runs without
+  a screen and the suite's screen check fails.
+* QEMU 11.1.3 answers with the base `0x3c100000`, `0x12c000` bytes, 640
+  by 480 and a pitch of 2560, inside the unit's window and above the
+  RAM the tree reports. Under BGR the model shows a 32-bit word's bits
+  23:16 as red, 15:8 as green and 7:0 as blue, so the node's format is
+  `x8r8g8b8`; under RGB a probe's `0x00ff0000` shows blue.
+* The suite then checks the root's `framebuffer 640x480 2560 x8r8g8b8`
+  line, the driver's `erx_fb: framebuffer 640x480 stride 2560
+  x8r8g8b8` line once, and the screen read through QMP: every pixel
+  the empty layout's background, the colour `erx_screen` defines,
+  which the harness reads from that source.
+
+The stand-in proves erXos's side of the contract, from the node to the
+pixels; that the firmware writes the node the root reads is what the
+board pass settles.
+
 **What the model never checks.** The Pi firmware runs on the VideoCore,
 which QEMU does not emulate, so nothing on the model reads `config.txt`,
 makes the firmware's edits to the device tree (the memory node as the

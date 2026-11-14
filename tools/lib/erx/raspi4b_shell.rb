@@ -11,7 +11,10 @@ require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'production_image'
+require_relative 'ppm'
 require_relative 'qemu'
+require_relative 'qmp'
+require_relative 'raspi4b_firmware_fb'
 require_relative 'runner'
 require_relative 'session_domain'
 
@@ -27,11 +30,19 @@ module Erx
   # (eio, since no card is on the bus to serve it), an output longer than the mini UART's FIFOs, and
   # a debug log record whose tab and escape the console writes as text; then Ctrl-G's menu
   # gives the system's command shell, whose Erlang shell halts the machine, and BL31's reset
-  # ends QEMU under -no-reboot. Its serial log must then hold each configured domain's line
-  # (CONFIGURED_LINES), and the display domain's exactly once with no restart of that domain:
-  # the model has no firmware to set up a framebuffer, so the domain holds no framebuffer
-  # record and runs without a screen (erx_fb_sup), and a driver that ended the domain at each
-  # start would log its line again at each restart.
+  # ends QEMU under -no-reboot. The model runs no firmware, so this boot's CPU 0 first runs the
+  # harness's stand-in for the firmware's framebuffer setup (Raspi4bFirmwareFb), which asks the
+  # model's mailbox for a 640x480 screen and writes the answer into the tree's
+  # simple-framebuffer node. Once the system's command shell is up, the screen read through QMP
+  # must be the empty layout's background, every pixel erx_screen's BACKGROUND
+  # (await_background). The serial log must then hold the root's framebuffer line (ROOT_LINE)
+  # and each configured domain's line (CONFIGURED_LINES), the display domain's being its
+  # driver's framebuffer line, exactly once with no restart of that domain: a driver that
+  # ended the domain at each start would log its line again at each restart.
+  #
+  # Seeded by hand: the stand-in's node naming x8b8g8r8 while the model shows x8r8g8b8 keeps
+  # both lines (they name the format the tree gives) but swaps the screen's red and blue, and
+  # the run fails at system-shell.
   #
   # tcg-cpu-removed, a seeded fault: the same image on the model's tree with one CPU's node
   # removed reaches the release with three schedulers, so the four of tcg-4cpu are the
@@ -129,6 +140,21 @@ module Erx
     PARTITIONS = 'erx_blk_service: partition table admitted'
     PARTITIONS_ADMITTED = kernel_log_line("#{Regexp.escape(PARTITIONS)}; [0-9]+ windows")
     MOUNTED = 'erx_lfs: volume mounted'
+    # The framebuffer tcg-4cpu's stand-in for the firmware asks the model for, as the root reads
+    # it from the tree (erx_boot_framebuffer_line) and as the display domain's driver logs it
+    # (erx_firmware_fb). The model answers a pitch of four bytes a pixel, no padding.
+    FB = Raspi4bFirmwareFb
+    FB_STRIDE = FB::WIDTH * 4
+    ROOT_LINE = "erx: device tree: #{FB::PARENT}: framebuffer #{FB::WIDTH}x#{FB::HEIGHT} #{FB_STRIDE} #{FB::FORMAT}".freeze
+    DRIVER_LINE = "erx_fb: framebuffer #{FB::WIDTH}x#{FB::HEIGHT} stride #{FB_STRIDE} #{FB::FORMAT}".freeze
+    # The empty layout's background, the one colour the screen shows with no window: erx_screen's
+    # BACKGROUND, read from its source as 0xRRGGBBAA.
+    SCREEN_SOURCE = 'erlang/apps/erx_display/src/erx_screen.erl'
+    BACKGROUND_DEFINE = /^-define\(BACKGROUND, 16#(?<rgb>[0-9a-f]{6})[0-9a-f]{2}\)\.$/
+    # How long the screen may take to show the background once the release's shell is up, and
+    # how often it is read until then.
+    SCREEN_SECONDS = 120
+    SCREEN_POLL_SECONDS = 2
     # The line each configured domain of the Pi's manifest leaves on the model by the time
     # tcg-4cpu halts. tcg-4cpu boots with no card on EMMC2's bus, so the storage domain's SD
     # device process finds no card and logs a record of its space saying so. The model has
@@ -143,7 +169,7 @@ module Erx
       'network' => /\d+\.\d{6}\ notice\ domain\ \d+\ principal\ \S+(?:\ dropped\ \d+)?\ system:
                     \ erx_domain:\ configured\ domain\ network\ \(domain\ \d+\)\ ended,
                     \ \{fault,#{ABI::Generated::CODEC.member('fault_kind', 'memory')}\};\ restarting\ it\r*$/nx,
-      'display' => /#{NativeRoot::DOMAIN_RECORD.source}erx_fb: no display device record; no screen\r*$/n
+      'display' => /#{NativeRoot::DOMAIN_RECORD.source}#{Regexp.escape(DRIVER_LINE)}\r*$/n
     }.freeze
     # The configured domains whose line a boot logs once, since they start once and never end.
     STARTED_ONCE = %w[display].freeze
@@ -162,9 +188,7 @@ module Erx
     # Each cell by name to its report; raises on the first disagreement.
     def call(jobs: 4, build: true)
       inputs = build ? build_inputs(jobs: jobs) : located_inputs
-      shell = boot(inputs, dtb: inputs.fetch(:dtb), points: shell_checkpoints, machine_end: true)
-      check_configured(File.binread(shell.fetch(:serial)))
-      { 'tcg-4cpu' => shell,
+      { 'tcg-4cpu' => screen_boot(inputs),
         'tcg-cpu-removed' => boot(inputs, dtb: removed_cpu_tree(inputs.fetch(:dtb)), points: release_checkpoints(CPUS - 1),
                                           machine_end: false),
         'tcg-sd-card' => card_boot(inputs) }
@@ -241,6 +265,75 @@ module Erx
 
     def configured_domains = @platform.manifest_source(@root).scan(/^domain (\S+)$/n).flatten
 
+    # tcg-4cpu: the shell's boot with the stand-in for the firmware's framebuffer setup
+    # (Raspi4bFirmwareFb) and QMP on a socket in the boot's own owner-only directory. Once the
+    # system's command shell is up the screen must show the empty layout's background; after
+    # the run the serial log must hold the root's framebuffer line and each configured
+    # domain's line, the display domain's being its driver's framebuffer line.
+    def screen_boot(inputs)
+      path = ProductionImage.clear_directory(root: @root, path: File.join(@root, STUB_DIRECTORY, 'tcg-4cpu'))
+      directory = OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
+      built = FB.build(root: @root, runner: @runner, compiler: @compiler, linker: @linker, model: inputs.fetch(:dtb),
+                       directory: directory)
+      socket = File.join(directory, 'qmp.sock')
+      report = boot(inputs, dtb: built.tree, points: screen_checkpoints(socket), machine_end: true, firmware: built.program,
+                            display: QemuPlan::Display.new(qmp_socket: socket), directory: directory)
+      serial = File.binread(report.fetch(:serial))
+      raise Error, "raspi4b: the serial log holds no root line #{ROOT_LINE.inspect}" unless serial.match?(/(?:^|: )#{Regexp.escape(ROOT_LINE)}\r*$/n)
+
+      check_configured(serial)
+      report
+    end
+
+    # shell_checkpoints with the screen's check when the system's command shell is up; the
+    # next row's time grows by the check's, which its verify spends before that row starts.
+    def screen_checkpoints(socket)
+      shell_checkpoints.map do |point|
+        case point.fetch(:name)
+        when 'system-shell' then point.merge(verify: ->(_text) { await_background(socket) }).freeze
+        when 'system-erlang-shell' then point.merge(seconds: point.fetch(:seconds) + SCREEN_SECONDS).freeze
+        else point
+        end
+      end.freeze
+    end
+
+    # The display domain of a boot whose tree has no framebuffer node: the root gives it no
+    # record, and it logs that it runs without a screen once and never ends.
+    NO_SCREEN = /#{NativeRoot::DOMAIN_RECORD.source}erx_fb: no display device record; no screen\r*$/n
+    def check_no_screen(serial)
+      count = serial.scan(NO_SCREEN).size
+      raise Error, "raspi4b: the display domain logged its no-screen line #{count} times, not once" unless count == 1
+      raise Error, 'raspi4b: the display domain ended' if serial.match?(/configured domain display \(domain \d+\) ended/n)
+    end
+
+    # The screen as erx_screen fills it with no window: every pixel the background.
+    def background_screen
+      source = File.read(File.join(@root, SCREEN_SOURCE))
+      rgb = source[BACKGROUND_DEFINE, :rgb] or raise Error, "raspi4b: #{SCREEN_SOURCE} defines no BACKGROUND as 16#RRGGBBAA"
+      Ppm::Image.new(width: FB::WIDTH, height: FB::HEIGHT, pixels: [rgb].pack('H6') * (FB::WIDTH * FB::HEIGHT))
+    end
+
+    # Reads the screen through QMP until it is background_screen, or raises the last mismatch
+    # once SCREEN_SECONDS have passed.
+    def await_background(socket)
+      expected = background_screen
+      deadline = Qmp.monotonic + SCREEN_SECONDS
+      client = Qmp.connect(socket)
+      loop do
+        image = client.screendump_image(File.join(File.dirname(socket), 'screen.ppm'))
+        return if image == expected
+        if Qmp.monotonic > deadline
+          colours = image.pixels.unpack('C*').each_slice(3).tally.max_by(4) { |_, count| count }
+          raise Error, "raspi4b: the screen is #{image.width}x#{image.height}, not #{FB::WIDTH}x#{FB::HEIGHT} of the " \
+                       "background #{expected.pixels.byteslice(0, 3).unpack1('H6')}; its commonest colours: #{colours.inspect}"
+        end
+
+        sleep SCREEN_POLL_SECONDS
+      end
+    ensure
+      client&.close
+    end
+
     def point(name, pattern, type: nil, verify: nil, seconds: STEP_SECONDS)
       { name: name, pattern: pattern, seconds: seconds, **{ type: type, verify: verify }.compact }.freeze
     end
@@ -305,6 +398,7 @@ module Erx
       card = File.join(OutputDirectory.prepare(root: @root, path: File.join(@root, STUB_DIRECTORY)), BootPartition::IMAGE)
       FileUtils.cp(inputs.fetch(:card), card)
       report = boot(inputs, dtb: inputs.fetch(:dtb), points: card_checkpoints(card), machine_end: true, disks: [QemuPlan::Disk.new(path: card)])
+      check_no_screen(File.binread(report.fetch(:serial)))
       check_card_data!(card)
       check_card_write!(card)
       report
@@ -329,12 +423,12 @@ module Erx
       raise Error, "raspi4b: the card's sector #{PROBE_SECTOR} does not hold the probe's bytes after the run" unless found == PROBE_BYTES
     end
 
-    def boot(inputs, dtb:, points:, machine_end:, disks: [])
+    def boot(inputs, dtb:, points:, machine_end:, disks: [], firmware: nil, display: nil, directory: nil)
       check_loads(inputs)
       report = Qemu.new(root: @root, runner: @runner, program: @qemu)
                    .run(platform: @platform, accel: 'tcg', cpus: CPUS, image: inputs.fetch(:image), stub: inputs.fetch(:stub), dtb: dtb,
                         memory_mib: @machine.memory_mib, hostlink: QemuPlan::NO_HOSTLINK, checkpoints: points, machine_end: machine_end,
-                        disks: disks)
+                        disks: disks, firmware: firmware, display: display, directory: directory)
       { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds') }.freeze
     end
   end

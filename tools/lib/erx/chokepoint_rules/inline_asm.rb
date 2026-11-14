@@ -28,7 +28,7 @@ module Erx
                 "system-register reads, the barrier, counter and cache-maintenance helpers of liberx's " \
                 'backends and the DMA architecture layer, ' \
                 "musl's cancellation-point labels, erx_net's checksum fence, and the test programs and " \
-                'fixtures that plant instructions',
+                "fixtures that plant instructions, and the raspi4b suite's firmware stand-in",
           design: "#{KERNEL}#chokepoint-checks",
           scope: INLINE_ASM_SCOPE,
           pattern: ASM_KEYWORD,
@@ -56,7 +56,10 @@ module Erx
             Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),
             # The stack proof's host fixtures, which plant the instructions its extractor must
             # refuse; no build links them.
-            Chokepoints::Site.new(glob: 'test/fixtures/stack_graph/*.c')
+            Chokepoints::Site.new(glob: 'test/fixtures/stack_graph/*.c'),
+            # The raspi4b suite's stand-in for the firmware's framebuffer setup: its entry sets the
+            # stack and enters BL31 with the registers as reset leaves them; no image holds it.
+            Chokepoints::Site.new(glob: 'test/raspi4b/firmware_fb.c')
           ],
           seed: { 'liberx/seeded.c' => "void f(void) { __asm__ volatile(\"dmb sy\" ::: \"memory\"); }\n",
                   'otp/erts/emulator/nifs/erxos/erx_device.c' => "void f(void) { __asm volatile(\"dsb sy\"); }\n",

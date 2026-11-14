@@ -404,9 +404,10 @@ shell_principal @principal.system
 # erx_firmware_fb, and the window system's screen (docs/design-display.md, "The display
 # device"). It serves display, its window tree, which no facet grants, so a screen on
 # HDMI 0 shows the empty layout's background. A boot whose firmware set up no framebuffer,
-# QEMU's raspi4b model among them, gives the domain no framebuffer record, and the domain
-# runs without a screen. Its 24 MiB and the display share's 100 mcpu are QEMU virt's
-# figures, measured on neither board (TODO.md).
+# QEMU's raspi4b model without the raspi4b suite's stand-in for the firmware among them,
+# gives the domain no framebuffer record, and the domain runs without a screen. Its
+# 24 MiB and the display share's 100 mcpu are QEMU virt's figures, measured on neither
+# board (TODO.md).
 domain display
   principal @principal.system
   limits @limits.display

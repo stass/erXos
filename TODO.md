@@ -630,10 +630,10 @@ it; git history is the record of completed work.
   24 MiB, which are measured on neither board; on the Pi the screen image lives in the domain's own memory
   (8 MiB at 1920x1080 and 32 bits, about 33 MiB at 4K, where `alloc` answers `enomem` and the driver
   `ignore`s); size both from a measurement of the domain driving a screen on
-  the Pi. QEMU's raspi4b model has no firmware to set up a framebuffer, so the `raspi4b` suite checks only that
-  the domain starts once without a screen; the driver's stores into a framebuffer are checked on the board by
-  hand (design-platforms.md, "Trying a card on a board", step 5). No session is granted the display, as on
-  QEMU virt.
+  the Pi. The `raspi4b` suite's shell cell checks the driver's stores at 640x480 on QEMU's model, whose
+  framebuffer the harness's stand-in for the firmware sets up (design-platforms.md, "The firmware's framebuffer
+  under QEMU"); the firmware's own node and a full-size screen are checked on the board by hand
+  (design-platforms.md, "Trying a card on a board", step 5). No session is granted the display, as on QEMU virt.
 * [Medium] `tools/lib/erx/display_domain.rb`, `DisplayDomain::ROW`: the `display_domain` suite's display row is
   a hand-kept copy of the development manifest's (its runtime limits and 24 MiB budget), with the service named
   `screen`, and no test holds the two equal, so the suite can pass on a row the development image does not

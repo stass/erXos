@@ -63,6 +63,24 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', stub: '/b/bl31.bin') }
   end
 
+  # The raspi4b suite's stand-in for the firmware (Raspi4bFirmwareFb) is where CPU 0 starts, an
+  # ELF at its own addresses, and the stub then carries no cpu-num; a display is QMP alone,
+  # the board's own framebuffer being the screen. A board without loads takes no firmware.
+  def test_the_raspberry_pi_4_runs_a_firmware_stand_in_first
+    pi = Erx::Platform.load(root: File.expand_path('../..', __dir__), name: 'raspi4b')
+    Dir.mktmpdir do |directory|
+      socket = File.join(directory, 'qmp.sock')
+      argv = Erx::QemuPlan.argv(platform: pi, accel: 'tcg', image: '/b/image.boot', stub: '/b/bl31.bin', dtb: '/b/fb.dtb',
+                                serial: 'serial', cpus: 4, hostlink: Erx::QemuPlan::NO_HOSTLINK, firmware: '/b/fb.elf',
+                                display: Erx::QemuPlan::Display.new(qmp_socket: socket))
+      assert_equal ['loader,file=/b/fb.elf,cpu-num=0', 'loader,file=/b/bl31.bin,addr=0x0', 'loader,file=/b/image.boot,addr=0x200000',
+                    'loader,file=/b/fb.dtb,addr=0x8000000'],
+                   argv.each_cons(2).select { |flag, _| flag == '-device' }.map(&:last)
+      assert_equal ["unix:#{socket},server=on,wait=off"], argv.each_cons(2).select { |flag, _| flag == '-qmp' }.map(&:last)
+    end
+    assert_raises(Erx::Error) { Erx::QemuPlan.argv(platform: PLATFORM, accel: 'tcg', image: 'image', serial: 'serial', firmware: '/b/fb.elf') }
+  end
+
   # The Raspberry Pi 4 takes its one disk as the card on EMMC2's SD bus, never as sd0,
   # the model's own card; a second disk raises, as a disk on a board with no SD bus would.
   def test_the_raspberry_pi_4_takes_its_disk_as_its_sd_card
