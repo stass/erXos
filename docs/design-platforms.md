@@ -150,6 +150,7 @@ belong to the driver table of
 | Crash record | the early console, whose log the harness keeps | the early console, and the crash region in RAM | the early console, and the crash region in RAM |
 | Unconfined DMA devices, each in a domain of its own in a release build | the virtio-mmio devices | the SD controller, Ethernet, the VL805 | the SD controllers, RP1, a function on the external connector |
 | USB | `qemu-xhci`, a PCIe function on the root bus ([design-usb.md](design-usb.md)) | the VL805, behind the BCM2711 bridge, through the PCIe domain ([design-usb.md](design-usb.md)) | RP1's two USB hosts |
+| Bluetooth | none: QEMU has no Bluetooth; hosted mode runs against Bumble's controllers | a CYW43455 on UART0, whose line tree the system domain serves to the Bluetooth domain ([design-bluetooth.md](design-bluetooth.md)) | none designed |
 | PSCI from | QEMU | TF-A's BL31, from the boot partition | TF-A's BL31, in the firmware |
 | Trial request | the harness | the firmware's mailbox | the firmware's mailbox |
 | Device secret | none | the OTP key, when provisioned | the OTP key, when provisioned |
@@ -283,10 +284,20 @@ its page and its line with the auxiliary SPI controllers and the
 auxiliary block's enable and interrupt-status registers, so each group is
 one unit ([design-shared-devices.md](design-shared-devices.md#context)).
 The manifest gives each unit whole to the domain of the UART it carries:
-the system domain, for the console and for the host link. There each
-unit has one driver, the mini UART's and UART3's, each on a line no other
-driver of the domain names, and the system domain runs no driver for the
-auxiliary SPI controllers or the other PL011s. The VideoCore's message interface shares the
+the system domain, for the console, for the host link and for the
+Bluetooth controller's line. There the mini UART's unit has one driver,
+and the PL011s' has UART3's and, where the manifest has the Bluetooth
+line, UART0's, which share line 153 through its one owner
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
+the system domain runs no driver for the auxiliary SPI controllers or the
+other PL011s. UART0 carries the board's CYW43455 on GPIO 30 to 33 in
+function ALT3, as CTS0, RTS0, TXD0 and RXD0, with hardware flow control;
+whether the firmware leaves those pins in ALT3 is probe B-P1, and if it
+does not, `config.txt` gains `gpio=` lines for them as it has for UART3's.
+The controller's power line is a pin of the firmware's GPIO expander,
+which the platform record lists as two notifications of UART0's entry,
+off and on, and its patch, `BCM4345C0.hcd`, ships in the boot image
+([design-bluetooth.md](design-bluetooth.md#the-hardware)). The VideoCore's message interface shares the
 mailbox's page, which the kernel keeps, so it goes to no driver (PL2,
 [research](research-boards-storage.md#checks-against-local-copies)). The
 devices erXos drives use wired interrupts. No IOMMU is described, so its

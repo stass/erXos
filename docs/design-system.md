@@ -437,12 +437,14 @@ violation fails the build with the property, the record and the field:
 8. **Partitions, devices and the console reach only their holders:** only
    the slot writer holds the windows on the slots, the boot-selection
    record and the reset count; only storage domains hold windows on data,
-   FAT and vault's partitions; the units of the UARTs that `console` and
-   `hostlink` name are the system domain's, the two paths differ, and the
-   two UARTs do not share an interrupt line, since the console and the
-   host link each start their own UART's driver, and the owner of its
-   line when the line is shared, and a line has one binder
+   FAT and vault's partitions; the units of the UARTs that `console`,
+   `hostlink` and `lines` name are the system domain's and their paths
+   all differ, and the system domain starts the one owner of each shared
+   interrupt line of those UARTs before the services that drive them
    ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
+   only a grant of the `line` interface reaches a `lines` row's UART,
+   and no row has two
+   ([design-bluetooth.md](design-bluetooth.md#the-controllers-line));
    a unit whose registers set the function of a pin that the platform
    record's header map gives to `console` or `hostlink` is held by no
    domain, by the system domain, or by a domain that holds only such
@@ -3516,6 +3518,7 @@ manifest lists: the vault.
 | inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included; the `inspect` service, whose facets the domain service mints with the scope `erx_domain_core:inspect_scope/3` gives, and the questions to each domain's inspection agent | [design-live.md](design-live.md#inspection), [design-live.md](design-live.md#the-inspect-service) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
+| line service, `erx_line` | one line tree, `data` and `ctl`, for each row of the manifest's `lines` field, over that UART's driver; it moves the bytes and parses none, and its `ctl` takes one word, `reset`, which power-cycles the line's device through its platform record's notifications and restarts the driver | [design-bluetooth.md](design-bluetooth.md#the-controllers-line) |
 | code service, `erx_code` | the code store, code facets, overlays, the install facet | [design-live.md](design-live.md#the-code-store) |
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
 | start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `rc.conf` over them, and the supervisor and keeper of each row; its tree, `start`; the package process and its `apps` tree ([design-packaging.md](design-packaging.md#apps)) | [design-apps.md](design-apps.md) |

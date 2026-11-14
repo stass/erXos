@@ -60,7 +60,9 @@ the boards' device trees:
 
 The Raspberry Pi 4's console is its mini UART and its host link is UART3,
 so the console's unit is the auxiliary block's and the host link's is the
-PL011s'; both go to the system domain, which runs one driver in each
+PL011s'; both go to the system domain, which runs one driver in each,
+and a second in the PL011s' for UART0, the Bluetooth controller's line,
+where the manifest has it
 ([design-platforms.md](design-platforms.md#raspberry-pi-4-model-b)). On
 QEMU `virt` the disks and the network device are given to different
 domains, so they sit on transports of different pages: the harness puts
@@ -365,18 +367,24 @@ any driver joins it. The driver-control facet's `stop`, `start` and
 ([design-system.md](design-system.md#the-holders-driver-control-facet)).
 
 **The system domain.** The system domain's UART drivers are started by
-the services they serve, the console and the host link, not by a unit
-supervisor. Each service starts the owner of its UART's line before the
-driver when the record marks the line shared, as any starter of a driver
-does; on the Raspberry Pi 4 both lines are shared, and each owner has one
-member. The console learns its driver's record from the driver module's
-`console_records/0`, starts the owners linked to itself as the driver is,
-and takes an owner's end as the driver's, which ends the runtime; the
-host link's owner is linked to the host link as its driver is. The manifest check refuses a manifest whose `console` and
-`hostlink` UARTs share a line (property 8 of
-[design-system.md](design-system.md#the-manifest)): the two services
-would each start an owner of the one line, and the second owner's bind
-would fail. Neither supported board has such a pair.
+the services they serve, the console, the host link and the line service
+of the Bluetooth design
+([design-bluetooth.md](design-bluetooth.md#the-controllers-line)), not
+by a unit supervisor, and the owners of their shared lines are started
+before those services, as the supervision rule above has it: a
+`rest_for_one` supervisor with the owners first, which
+`erx_irq_line:owners/1` computes from the records of every UART the
+manifest's `console`, `hostlink` and `lines` fields name, each record
+from its driver module's `console_records/0`, and then the services,
+each starting its own driver, which joins its line's owner. So the
+system domain's UARTs may share a line with each other, and a line has
+one binder whichever services drive it (property 8 of
+[design-system.md](design-system.md#the-manifest)). On the Raspberry
+Pi 4 both lines are shared: the mini UART's owner has the console's
+driver as its one member, and line 153's owner has the host link's
+driver and, where the manifest has the Bluetooth line, the line
+service's. The console takes its line's owner's end as its driver's,
+which ends the runtime.
 
 ## The console
 

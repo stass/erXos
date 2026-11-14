@@ -2855,6 +2855,89 @@ failures and the peak memory of the session's objects, not just touched
 pages. These measurements decide whether the fill and the write-back
 points of the shared mappings meet the named application corpus.
 
+## Track B: Bluetooth (proposed)
+
+**Status.** Proposed, not scheduled: no milestone depends on it, and
+where it goes in the order is undecided.
+
+**Goal.** A phone app finds an erXos machine, connects to it and talks
+to it over Bluetooth Low Energy, along
+[design-bluetooth.md](design-bluetooth.md): the machine advertises its
+name and its services' UUIDs, serves the GATT services apps declare in
+`abi/gatt`, with Erlang processes handling them through the `ble`
+facet, carries a serial line, and pairs and bonds with LE Secure
+Connections so that characteristics can require an encrypted or an
+authenticated link.
+
+**Demo.** On the Raspberry Pi 4, a phone's scanner shows the machine's
+name; a GATT browser on the phone lists the declared table, writes a
+characteristic that an Erlang handler answers, and receives its
+notifications; a terminal app for Nordic's UART service echoes through
+an app; the phone pairs by typing the passkey the `pair` file shows,
+the machine reboots, and the phone reads an `authenticated` value again
+without pairing.
+
+**Parts.** Each is a proposal; (a) needs nothing new below it.
+
+* **(a) The cores, on the host.** `erx_h4`, the HCI codec and the
+  bring-up core, the patch reader, L2CAP and the link core, `erx_att`,
+  the table builder, the gate and the ATT server, `erx_smp` with its
+  core and its cryptography against SMP's sample data, the state codec,
+  `tools/gen_gatt.rb` and `abi/formats/bluetooth.txt`, with their fuzz
+  targets, explored tests and seeded faults, and the codecs compared with
+  Bumble's decoders on one corpus
+  ([design-bluetooth.md](design-bluetooth.md#verification)).
+* **(b) Stages 1 to 3 in hosted mode.** The line service over
+  `erx_stdio` on a descriptor to a Bumble controller, the Bluetooth
+  domain, `abi/services/ble.txt` and `abi/services/line.txt`, the `ble`
+  facet, `erx_gatt_serial`, the `lines` field of the manifest, and the
+  Ruby harness with the peer scripts of stages 1 to 3. It needs the
+  domains and facets of [1b-A](#m5-a-wall-around-some-processes) and the
+  multi-process form of [track H](#track-h-hosted-mode).
+* **(c) Stage 4 in hosted mode.** The Security Manager as responder,
+  the pairing window and the control tree, the store with its
+  development backend, reconnection with bonds and Service Changed, and
+  the stage 4 peers. The phone console joins it once the one login
+  design ([design-display.md](design-display.md#risks-and-decisions),
+  14) gives the console its login facet.
+* **(d) The Raspberry Pi 4, on the stopgap.** Board probes B-P1 to B-P5,
+  `erx_pl011`'s hardware flow control, the system domain's owners of its
+  UARTs' shared lines ahead of its UART services, the Pi 4's `lines` row,
+  the controller's power notifications in the platform record over the
+  firmware notification of [design-usb.md](design-usb.md), with the
+  index the Bluetooth design adds, which whichever of this track and
+  track U reaches the Pi 4 first brings, and the patch fetched and packed;
+  after [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap) and
+  [M6](#m6-immutable-code-lasting-data)'s data partition, on which the
+  development store keeps bonds.
+* **(e) Release.** The store's release backend, which waits for
+  [M11](#m11-security-closure)'s vault and the decision on where bonds
+  live ([design-bluetooth.md](design-bluetooth.md#open-decisions), 1),
+  and the Pi 4 on erXos's kernel at
+  [M12](#m12-storage-networking-boards), where the firmware notification
+  is a kernel operation.
+
+Wi-Fi provisioning, HID over GATT and classic Bluetooth are not parts
+of the track ([Beyond the plan](#beyond-the-plan)).
+
+**Testing.** `make check` runs (a)'s host tests. The hosted suite
+against Bumble runs at the landing gate when a change touches the
+Bluetooth stack, the line service or `erx_stdio`, and at the milestone
+gate; (a)'s fuzz targets run at the milestone gate's budgets. The Pi 4
+runs by hand, under its checklist, once per batch.
+
+**Exit criteria, each part.** Its cores' explored tests and fuzz
+targets pass their budgets, each with its seeded fault failing them; its
+hosted suite against Bumble passes, each case with its seeded fault
+failing it, or, for (d), the board's checklist passes; a malformed
+packet or PDU ends at most its link, and a framing error restarts the
+controller from `reset` to advertising; every refusal of
+[design-bluetooth.md](design-bluetooth.md#refusals-and-error-results)
+that the part brings has a test. For (c), a pairing outside a window, a
+legacy pairing, a key shorter than 16 octets, a public key off the curve
+and a pairing that claims a kept bond's identity each fail, and a bond
+encrypts again after the Bluetooth domain restarts.
+
 ## M11: Security closure
 
 **Goal.** A release build that may run untrusted code.
@@ -3433,4 +3516,5 @@ Each is small, adds its tests, and leaves `make check` green.
 | The release process: who keeps the release signing key and how it is replaced; whether release builds offer a host link | erXos is a prototype and makes no releases | when erXos makes releases |
 | Graphics, audio | not needed for the thesis | not planned |
 | USB | not needed for the thesis; wanted for keyboards, pointers and USB sticks on QEMU and the Raspberry Pi 4 | proposed as [Track U](#track-u-usb-proposed), not scheduled |
+| Bluetooth's later stages: Wi-Fi provisioning from a phone, HID over GATT, classic Bluetooth | track B's first consumer is a phone talking to a peripheral; provisioning needs a Wi-Fi driver no design has, and HID over GATT the central role and the USB design's HID cores ([design-bluetooth.md](design-bluetooth.md#later-stages)) | in that order, each when its consumer is named |
 | x86-64 | out of scope | not planned |
