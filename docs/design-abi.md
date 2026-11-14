@@ -1778,9 +1778,9 @@ PL011 row without one; every other device's clock is 0. Selector 2 is a PCIe fun
 names its host bridge by device-tree path, `path` is empty, bus is at
 most 255, device at most 31 and function at most 7; its `base` and
 `size` are zero, since configuration space gives them, and so is its
-`line`, except behind a bridge its platform record closes, where it is
-the INTx line the bridge's `interrupt-map` routes for the function's pin
-([design-pcie.md](design-pcie.md#the-closed-bus)). Role values are
+`line`, except at a place a closed bridge's platform record lists,
+where it is the INTx line the bridge's `interrupt-map` routes for that
+place's pin ([design-pcie.md](design-pcie.md#the-closed-bus)). Role values are
 ordinary 1, UART 2, configuration space 3, network 4, block 5, TPM 6 and
 framebuffer 7.
 These classification values are platform-declared facts for manifest

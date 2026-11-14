@@ -645,7 +645,7 @@ Raspberry Pi has one.
 
 | | QEMU `virt` | Raspberry Pi 4 | Raspberry Pi 5 |
 | --- | --- | --- | --- |
-| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which no domain holds, so the loader's quiescing leaves it idle and the PCIe domain keeps it off, and the firmware, which stays resident with access to all memory ([Firmware](#firmware)) | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
+| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which no domain holds and the PCIe domain keeps off, and whose handover is unknown until the firmware's documented behaviour and a reading at the kernel's entry are recorded, so it counts as possibly running at entry ([design-usb.md](design-usb.md#the-bcm2711-bridge)), and the firmware, which stays resident with access to all memory ([Firmware](#firmware)) | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
 | Translation | the SMMUv3, stage 1, for functions on the root bus, which the harness creates with `iommu=smmuv3`; nothing for virtio-mmio | none described ([research](research-boards-storage.md#raspberry-pi-4-model-b-bcm2711)) | none for Ethernet, USB, the SD controllers or the external connector; each BCM2712 IOMMU serves media blocks or RP1's camera and display paths, with one address space for all its devices |
 | Bypass | none: the driver sets the global bypass to abort before anything else, and a stream without a window aborts | every master | the BCM2712 IOMMUs pass addresses below their windows through untranslated |
 | Requester identity | fixed on the ECAM root bus: `smmu_get_sid` builds the id from the model's bus and `devfn`; `pcibus_num` fixes the root bus at zero, whereas a subordinate bus takes its number from writable bridge configuration. Each root-bus function is its own isolation group. This is source-checked in QEMU v11.1.2; the supported binary must pass the same contract tests before its confined profile is admitted ([audit](research-hardware-contracts.md)) | none used | none per device |
@@ -681,8 +681,11 @@ QEMU `virt`'s bridge is ECAM (`pci-host-ecam-generic`). The BCM2711's
 (`brcm,bcm2711-pcie`) reaches an endpoint's configuration space through
 an index and a data register, locks up its memory controller on an
 access at a root-bus position other than the root port's, and aborts an
-access while its link is down; its platform record marks it closed, with
-the VL805 at bus 1, device 0, and limits its functions' DMA to 960 MiB
+access while its link is down; its platform record marks it closed and
+lists its one place, the VL805 at bus 1, device 0, function 0, with the
+pin INTA, which the USB design's probe B4 confirms, and limits its
+functions' DMA to device addresses below
+960 MiB
 ([research-brcmstb-pcie.md](research-brcmstb-pcie.md), sections 2 and
 3; [design-pcie.md](design-pcie.md#the-bridge-seam)).
 The BCM2712's root

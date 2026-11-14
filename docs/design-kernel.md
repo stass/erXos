@@ -5270,7 +5270,10 @@ allows:
   function, at the I/O address at which every DMA window maps the frame
   ([DMA and the IOMMU](#dma-and-the-iommu)); for an unconfined one, at the
   device address the bridge's `dma-ranges` give the frame. The PCIe
-  enumerator programs them into the function. A function has at most
+  enumerator writes them into the function's MSI capability, or, for a
+  function routed by MSI-X, the holder's device NIF into the table its
+  register window maps
+  ([design-pcie.md](design-pcie.md#who-programs-what-and-when)). A function has at most
   `ERX_MSI_MAX` (32) MSIs, beyond which the call fails with `ERX_ELIMIT`.
 
 **Binding and triggering.** `erx_irq_bind(irq, target, label)`, with
@@ -7113,9 +7116,13 @@ other than the CPU's, where a physical address would be wrong
   addresses, in the node's own `#address-cells`, to its parent bus's
   addresses, in the parent's `#address-cells`, over a length in the
   node's own `#size-cells` (section 2.3.5, p. 14, for the cells and
-  their defaults of 2 and 1); a count other than 1 or 2, a PCI bus's
-  three among them, whose meaning the specification leaves to the PCI
-  bus binding (section 2.4.4, p. 22), gives the device no windows. The
+  their defaults of 2 and 1); a count other than 1 or 2 gives the device
+  no windows, except a PCI host bridge's three, whose meaning the
+  specification leaves to the PCI bus binding (section 2.4.4, p. 22):
+  there the first cell carries the space code at bits 24 and 25 and the
+  other two the PCI address, as FreeBSD reads a host bridge's `ranges`
+  (`pci_host_generic_fdt.c:66-68`, `:179-230`), and an entry of I/O space
+  is skipped ([design-pcie.md](design-pcie.md#dma)). The
   walk goes up from the device's bus, the parent of its node or, for a
   PCIe function, its host bridge's node, whose own `dma-ranges` is the
   first level, to the root, and carries the device's windows through

@@ -405,8 +405,8 @@ violation fails the build with the property, the record and the field:
    bridge is closed, and the Raspberry Pi 5 drive bridges; on a
    platform that drives none, no domain holds configuration space and
    there is no PCIe domain. A `pci` row names an interrupt line only
-   behind a bridge its platform record closes, and then the line its
-   pin routes ([design-pcie.md](design-pcie.md#the-closed-bus)).
+   at a place a closed bridge's platform record lists, and then the line
+   its place's pin routes ([design-pcie.md](design-pcie.md#the-closed-bus)).
 4. **Budgets and grants sum within the root's.** The principals' budgets,
    the system domain's baseline and its reservation for `max_domains`
    admitted domains ([Resource policy](#resource-policy)), the unconfined
@@ -2876,9 +2876,11 @@ Through the NIF:
   data, bulk data included, travels in frames on that connection.
 * **Resets.** Every driver resets its device as it starts, the way its
   device's specification says (a virtio device by writing zero to its
-  status register and reading it back as zero; a PCIe function by turning
-  its bus mastering and memory space off and, where it offers one, a
-  function-level reset through the PCIe enumerator; an SD host
+  status register and reading it back as zero; a PCIe function by its
+  own controller's reset once its `pci` facet's `open` has turned bus
+  mastering off and memory space on, or, when its registers cannot
+  reset it, by the facet's `reset`, a function-level reset through the
+  PCIe enumerator where the function offers one; an SD host
   controller by its software reset), and the NIF installs the device's
   queues only after that reset; a virtio device's reset is the NIF's
   own, the first step of `negotiate/2`, and the NIF posts nothing to a
@@ -2947,15 +2949,17 @@ the function's driver asks the device service, through its `pci` facet,
 to have the enumerator enable memory space and program the route as it
 starts, and bus mastering once it has reset its device, and at the
 holder's end the device service has the function turned off, so a
-function masters only for a living holder that asked (Resets, above;
+function's bus mastering is raised only for a living holder that asked
+(Resets, above;
 [design-pcie.md](design-pcie.md#who-programs-what-and-when)). A
 confined function cannot reach memory before its binding: the
 kernel sets the IOMMU to abort DMA from every stream not bound to a DMA
 window ([design-kernel.md](design-kernel.md#dma-and-the-iommu)). The
 PCIe domain restarts like any configured domain; a restart takes the
-targets from the domain library, re-reads configuration space and
-writes only what differs from each target, so it changes no running
-function. The kernel keeps the
+targets from the domain library, re-reads configuration space, keeps
+every function that reads as its setting and turns every other one off
+with its layout written, so it changes no running function and raises
+none ([design-pcie.md](design-pcie.md#the-plan)). The kernel keeps the
 register pages of the devices of `hw/kernel_devices.txt` and no page of
 the console's UART, which it writes by polling, at the address its
 platform build fixes, at boot and at a panic or an end.

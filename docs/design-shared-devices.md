@@ -37,9 +37,10 @@ Decisions every reader needs:
   bridge's INTx lines, which the functions behind it share, go to no
   domain, since which functions share a line is known only after
   enumeration. A bus whose platform record closes it, the Raspberry Pi
-  4's, is the one exception: the manifest's rows name every function
-  that can raise its line, so the line is a line of their unit
-  ([design-pcie.md](design-pcie.md#the-closed-bus)).
+  4's, is the one exception: the record lists every place on the bus
+  with the pin its function raises, and its bridge driver reaches no
+  other place, so each line the bus routes is a line of its place's
+  unit ([design-pcie.md](design-pcie.md#the-closed-bus)).
 
 ## Context
 
@@ -172,12 +173,15 @@ interrupt, so its driver polls or the manifest leaves it out
 ([design-pcie.md](design-pcie.md#interrupts)).
 
 A **closed bus** is the one exception, because the fan-out cannot arise
-there: its platform record marks the bridge closed, its root bus holds
-one root port, and the walk reads below it only the devices the
-manifest's rows name, so every function that can raise a line its tree
-routes is a row the manifest places when it is written. Such a row names
-the line its pin routes, the line joins the construction's line
-relation, and the unit is given whole as any other. The Raspberry Pi 4's
+there: its platform record marks the bridge closed and lists every place
+below its one root port with the pin its function raises, and its
+bridge driver reaches no other place, so every function that can raise
+a line its tree routes sits at a place known when the manifest is
+written, whatever the manifest selects. A row at such a place names the
+line its place's pin routes, the line joins the construction's line
+relation, and the unit is given whole as any other; a tree that routes a
+place's pin to one of the bridge's own lines makes the bridge and the
+place one unit across two domains, which the boot view refuses. The Raspberry Pi 4's
 bus is the only closed one; every other PCIe function interrupts by MSI
 ([design-pcie.md](design-pcie.md#the-closed-bus)).
 
