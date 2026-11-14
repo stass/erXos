@@ -7,9 +7,10 @@ starts it again. It adds one thing, the start table, because the system
 already has every other part: an app is a principal, its code is the
 release of that principal's session template, its authority is the
 facet rows granted to that template, and its code runs in a session of
-that principal. How an app reaches a machine after the image is built,
-as a package someone installs, is a later design's
-([Packaging](#packaging)); this one keeps the seam it plugs into open.
+that principal. How an app built outside erXos's tree reaches an image
+or a running machine, as a package, is
+[design-packaging.md](design-packaging.md)'s; this document is the seam
+it plugs into ([Packaging](#packaging)).
 The architecture is in [design.md](design.md); the manifest, the boot
 and the system services in [design-system.md](design-system.md);
 principals, sessions and facets in [design-domains.md](design-domains.md);
@@ -35,9 +36,8 @@ Decisions every reader of this document needs:
   `/etc/rc.conf` does. A kiosk is an enabled row that names an app and a
   display.
 * **The table keys on a principal, and on nothing about where the
-  principal came from.** The manifest is the only source of principals
-  today; principals added at run time, by packaging, start the same way
-  ([Packaging](#packaging)).
+  principal came from.** A principal of the manifest and the principal
+  of a package's app start the same way ([Packaging](#packaging)).
 * **Nothing starts because it exists.** A principal's session starts
   without a person only from an enabled row, or once by a command;
   `service NAME enable` starts it at boot, as on FreeBSD.
@@ -48,10 +48,14 @@ start the system's services, in the order the build computes, and the
 start table, the manifest's `start` rows with `/apps/rc.conf` over them,
 starts everything else. `service -e` prints both.
 
-**Where do I add my kiosk app?** In the board's manifest: a principal
-for the app, its session template naming the app's release, a facet row
-granting the template the display, and a `start` row that names the app
-and the display. On a running machine whose manifest declares the row,
+**Where do I add my kiosk app?** In a package of its own, which
+`tools/erx pack --app` adds to an image and `pkg add` installs on a
+running machine, into a class the board's manifest declares
+([design-packaging.md](design-packaging.md)). An app that is part of the
+board itself may instead be rows of the board's manifest: a principal, its
+session template naming the app's release, a facet row granting the
+template the display, and a `start` row that names the app and the
+display. On a running machine whose start table holds the row,
 `service thermostat enable display=display` enables it.
 
 ## Context
@@ -165,7 +169,7 @@ supervisor starts the keeper again within the row's intensity.
 | --- | --- | --- | --- |
 | **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display and an intensity, and no limit, grant, device, service or code; the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter` reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:system_namespace/0` (the wait before its first read of `rc.conf`) and `erx_domain:display_settled/1` (the wait before it starts a row that names a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
 | **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_starter` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for an enabled row or one `start` command on a row | another boot-time starter | a source check that only `erx_console`, the web login and `erx_starter_keeper` call `erx_domain:start_session/2`, with a seeded call from another module; the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
-| **AP3.** The table names only principals the manifest declares startable | a row exists only for a manifest `start` row; an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition and the `apps` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
+| **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition and the `apps` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
 | **AP4.** A display's session is the session its enabled row keeps, and no other, across a restart of either domain | the merged table holds at most one enabled row for each display; only a row's keeper names a display with `display`; the domain service fixes the session mark in the record of that session's grant on the display and every mint of the record carries it ([design-system.md](design-system.md#facets-a-configured-domain-serves)) | two enabled rows on one display; a mark set by whichever session opens a window first; a re-mint that drops the mark | the table's host test with two enabled rows on one display, the second refused; the kiosk tests of [Verification and testing](#verification-and-testing), the display domain's restart among them |
 | **AP5.** A row whose display its principal cannot draw on never starts | the merge refuses a row whose display is not a `windows` service granted to its principal's template, with `{no_grant, Display}` at `/proc/apps`; the manifest check refuses such a manifest row (property 17) and `service enable` such a command | a reserved display that stays blank because its session holds no grant there | the merge's host test; the QEMU test of a local line naming such a display |
 
@@ -267,13 +271,14 @@ A variable's name is a row's principal, `_`, and one of `enable`,
 `display`, `restarts` and `period`, split at its last `_`. A setting
 replaces the manifest's default for that field of that row, and
 `NAME_display=""` clears the row's display. A line for a principal that
-has no manifest `start` row, or that does not parse, is skipped and
+has no row, or that does not parse, is skipped and
 reported, and the rest of the file stands, so the file sets what the
 manifest declared and adds nothing.
 
 **The merge** is one pure function, `erx_start_table:merge(Rows, Local,
-Grants)`, over the manifest's rows, the parsed `rc.conf` and each
-template's `windows` grants. It applies the settings and then takes the
+Grants)`, over the manifest's rows and the admitted packages'
+([design-packaging.md](design-packaging.md#the-start-tables-rows)), the
+parsed `rc.conf` and each template's `windows` grants. It applies the settings and then takes the
 enabled rows in the manifest's order:
 
 1. a row whose display is not a `windows` service granted to its
@@ -284,8 +289,9 @@ enabled rows in the manifest's order:
 
 Each refused row keeps its reason, which `/proc/apps` shows, so a
 setting that cannot take effect is visible rather than a blank screen.
-The manifest's own rows pass both checks at build (property 17), so
-only a local setting is ever refused.
+The manifest's own rows and those of the image's packages pass both
+checks at build (properties 17 and 19), so only a local setting or an
+installed package's row is ever refused.
 
 **Where the file is.** `rc.conf` is `start/rc.conf` in the system
 domain's own directory of the data partition, the root of the system
@@ -383,10 +389,12 @@ fall into the rescue configuration at its fifth boot.
 
 ### Developers
 
-* **Build.** An app is its principal, its template, its facet rows and
-  its `start` row in the manifest, and its applications in the boot
-  image's domain release with a boot script of their own, which the
-  build packs as it packs every release's.
+* **Build.** An app built outside the tree is a package, made with the
+  SDK and added to an image or installed
+  ([design-packaging.md](design-packaging.md#building-and-packing)). An
+  app of the board itself is its principal, its template, its facet rows
+  and its `start` row in the manifest, and its applications in the boot
+  image's domain release with a boot script of their own.
 * **Iterate.** With the app running, `tools/erx watch DIR --domain
   clock_1` loads each changed module into the session through its code
   facet, as for any domain ([design-live.md](design-live.md#the-code-store)).
@@ -397,16 +405,14 @@ fall into the rescue configuration at its fifth boot.
 ### Packaging
 
 The start table keys on a principal with a session template and a
-`start` row, and on nothing else. The manifest is the only source of
-these today. An app added to a running machine, as a file a person or a
-developer installs, becomes a principal with a template and a `start`
-row the same way, so the table, its keepers, the domain service and the
-display treat it as they treat an app of the manifest, and nothing in
-this design changes for it. How a package declares those rows, which
-grants it may take within what the build proved, how it is signed,
-installed, updated and removed, and what it does to an app's data, is
-the packaging design's, written when track A reaches it
-([plan.md](plan.md#track-a-apps)). Its inputs are recorded in `TODO.md`.
+`start` row, and on nothing else. A package's app is a principal
+registered in a place of a class the manifest declares, its template is
+the class's, and its start row comes from its declaration, so the table,
+its keepers, the domain service and the display treat it as they treat
+an app of the manifest. How a package declares those, which of its
+class's grants it may take, how it is authenticated, added to an image,
+installed, updated and removed, and what that does to its data, is
+[design-packaging.md](design-packaging.md).
 
 ## Interfaces
 
@@ -689,7 +695,7 @@ compiler, flags, workload and baseline.
 
 | Alternative | Why not |
 | --- | --- |
-| **App classes**: a template and a principal shared by many apps as their pool, each app a principal of its own with a subset of the class's grants, admitted by a check on the machine | It is what apps installed at run time need, so it belongs to the packaging design, which has those apps in view. For apps of the manifest a principal and a template of their own give per-app identity, authority and accounting with no mechanism beyond what principals already have; its earlier design is an input of the packaging design in `TODO.md` |
+| **App classes** for the manifest's own apps | Classes are what packages need, and [design-packaging.md](design-packaging.md#a-class) takes them up, each place of a class a principal of its own. For apps of the manifest a principal and a template of their own give per-app identity, authority and accounting with no mechanism beyond what principals already have |
 | **Local rows for any principal with a template** | A crafted data partition could then start a person's session at a display without a login, or start any app. Declaring the rows in the manifest, as FreeBSD declares its services in `rc.d`, leaves the data partition able only to set what the builder declared |
 | **Apps run in the session of whoever starts them**, as programs do | The app holds the person's whole authority; see [Security](#security). Programs keep that model, deliberately: a tool a person runs acts for that person |
 | **An app is a configured domain** | A configured domain is part of the system: it sits in the boot order, its group is a child of `system`, it may hold devices, and its restarts are the domain service's. An app is a principal's code, charged to that principal under `users` |
@@ -701,7 +707,7 @@ compiler, flags, workload and baseline.
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
 | an app's ready report comes before its applications have done any work, so a system fault soon after that point does not count toward rescue | medium | a machine that faults soon after every boot never reaches the rescue configuration | recorded in `TODO.md`; a later ready point is the change |
-| every app in the manifest makes the board's manifest long | medium | adding an app is a manifest edit and a rebuild until packaging | the packaging design, which adds apps without either |
+| every app in the manifest makes the board's manifest long | medium | adding an app of the manifest is a manifest edit and a rebuild | packages ([design-packaging.md](design-packaging.md)), which add apps without either |
 
 Decisions:
 

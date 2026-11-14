@@ -8,52 +8,12 @@ it; git history is the record of completed work.
 
 ## Major initiatives
 
-* [High] apps, [design-apps.md](docs/design-apps.md#packaging): design app packaging when Track A starts
-  ([plan.md](docs/plan.md#track-a-apps), part 2): how an app reaches a machine after its image is built, as one
-  file a person or developer adds, through the seam design-apps.md keeps (the start table keys on a principal with a
-  session template and a `start` row, so a package adds those and nothing below changes). Its inputs:
-  * an earlier design of **app classes**, cut from design-apps.md as premature, which this design may take up: the
-    manifest declares classes (a session template, its principal and the facet rows granted to it); an app joins a
-    class with a declaration (`class`, `needs` naming services of the class's rows, an EROFS `image` mounted at
-    `/app` by an `erx_app` application of an `app` release, `applications` or `program`, `env`); one pure admission
-    function, `erx_app_admit`, written in Erlang for the machine and in Ruby for the packer and tested on one corpus,
-    answers the grants as set inclusion, so the build's proof over the classes covers every app and no checker runs on
-    the machine; the principal service registers each admitted app with `register_app/1` and `unregister_app/1`;
-    a session of an app is a session of its class's template, filtered to the declared grants in the domain service's
-    one facet funnel;
-  * the **pool**, part of that design: a domain record names the principal it acts for (the app's) and its pool (the
-    class's principal), which pays; the domain library and the resource policy read the pool, and every scope by
-    principal (mint, inspect scope, storage root, death record) reads the principal. Its review found that the
-    inspect scope (design-live.md, "The inspect service") is computed from the grantee template's principal, so
-    every app of a class saw the others' domains, and that the domain service added a grant record for every
-    template row, not only the declared ones: both must read the app's principal and its declared grants;
-  * **per-app identity**: two apps sharing a pool must still see nothing of each other: neither reads the other's
-    directory, and neither's `/proc` shows the other's processes; test with two apps of one pool as the two
-    principals;
-  * **the atom bound**: an app's session name, `<app>_<n>`, is an atom in the system domain; with apps from
-    packages, names come from untrusted declarations, so their count needs a bound that survives install and removal
-    (a quota on the pool, or names recycled from a fixed set), not only the manifest-summed `names` quotas;
-  * an earlier draft of packaging itself, whose external review found HIGH and MEDIUM gaps:
-  * a code overlay persisted for an app's principal lets a storage domain that a crafted partition took over run
-    unsigned code under the app; overlays of apps stay in memory, or are authenticated;
-  * signer continuity: if an app's identity is its name alone, a storage domain can remove every package of signer A
-    and put back one of the same name signed by B, which a scan then admits as the same principal with A's data;
-    bind persistent identity to name and signer (for example a data directory keyed by both), or keep a record of
-    signers where storage cannot rewrite it;
-  * removal is several deletions (versions, start row, data directory); a crash between them resurrects an older
-    version or leaves half an app; mark the removal durably first, finish it at the next boot, and keep the name
-    reserved until every owner of the app's state is done;
-  * an install must make the package file's data durable before the rename that publishes it, then sync the
-    directories, so a crash never leaves a valid header over an incomplete image;
-  * an app needs a grant of its own package to read it; make that grant implicit or required in every declaration,
-    and fix the example and the admission tests to match;
-  * fuzz the whole verification entry point (locating the header, key and signature in attacker-controlled bytes,
-    truncations, bad lengths and bad signatures), not only the header's decoder;
-  * a version floor holds only for an ordinary install, not for rollback or a scan's fallback, against a storage
-    domain that puts back an older signed package; state it so.
-  The decisions on that draft that apply here: `pkg delete` removes an app's data; the administrator
-  approves an app's grants by installing it, within what the build proved, with no prompt; no fetch by name (a fetcher
-  is a command in a person's session that holds `net` and hands the file to the installer).
+* [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits its outside review and
+  the answers to its questions for the owner (its "Risks and decisions"); then Track A's parts 2 and 3 build it
+  ([plan.md](docs/plan.md#track-a-apps)). It covers the app-class draft's review findings: places of a class
+  instead of a pool, overlays of an app in memory only, signer continuity, removal marked first and finished at
+  boot, install by sync and rename, the package's own read grant (`packages`, required on every class), and the
+  whole verification entry fuzzed.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
@@ -829,7 +789,7 @@ it; git history is the record of completed work.
     every mint of its grant from the session mark the domain service alone sets. A window's buffer at the screen's
     size, allocated once by `erx_win:open/2`, with
     `resized/1` allocating nothing; the grant defaults of 8 windows, 64 MiB and `snarf` off at the server.
-  * **The reserved chord** ([The reserved chord](docs/design-display.md#the-reserved-chord)): its field in the
+  * **The reserved chord** ([The reserved chord](docs/design-display.md#windows-and-the-window-system)): its field in the
     `display` record, its source spelling and its key encoding, which land with the login design's choice of what
     the chord brings up ([Risks and decisions](docs/design-display.md#risks-and-decisions), 14). Until then no
     display has a chord, so every key reaches a window.

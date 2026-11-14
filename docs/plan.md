@@ -108,9 +108,9 @@ programs (1b-F),
 networking on QEMU (1b-G), M13 on QEMU (1b-H) and the Raspberry Pi 4
 (1b-I), each with the backend
 rows it needs and its guarantees deferred; track A comes with them: its
-first part, the start table, for track D's window stack, and its second
-part, the packaging, which brings `erx-lvgl` and input routed to
-windows, for track D's kiosk.
+first part, the start table, for track D's window stack, its second,
+apps packaged outside the tree and added to an image, for track D's
+kiosk, and its third, installing packages at run time.
 Phase 2, track K, M7, M2, the
 kernel parts of M5 and M9, the rest of track P, M8, M10, track Q, M11,
 M12 with its boards and track D's last parts, builds erXos's kernel,
@@ -134,10 +134,11 @@ names; the table's order is the order.
 | 1b-A M5 on the stopgap | spawn into a sandbox domain with a link, crash it, get `{domain_down, D, crash}`; kill a domain mid-burst and watch its end arrive after its last messages; kill the system domain and read its crash record after the reset; every guarantee deferred | 9,000 lines of C17, 6,000 of Erlang for M5, its kernel interface carried as backend rows in the Fiasco backend, and in the hosted backend where cheap (2,000 to 4,000 lines of C17, a guess until the first rows land) | Phase 1 | G5, provisionally |
 | 1b-B Track S, programs | `find /tmp/logs -type f \| xargs tail -n 1` through toybox's applets as ports of the session, and `within` confining a program to one grant, on the stopgap | in track S's figure | 1b-A | |
 | Track A Apps, part 1 | a QEMU image boots into an app's session with no login, holding exactly its template's grants, and `service -e` prints everything that starts | estimated before it starts | 1b-A, 1b-B's session domain, and M6's data partition for `rc.conf` | |
-| 1b-C Track D, parts 1 to 4 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser; a QEMU `virt` display showing the window of a session that starts at boot with no login, drawn by that session into a buffer the display domain composes; and the same interface on a QEMU `virt` kiosk, drawn by LVGL as a program of the kiosk's session | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and track A's first part; part 4 also 1b-B's sub-space ports and pipes, 1b-D's first slice and track A's second part (after 1b-E) | GW |
+| 1b-C Track D, parts 1 to 4 | `tools/erx web` shows a QEMU guest's records, kernel log and the traces of `root`'s session domain in a browser over the host link, with no network or display device; one application's user interface in the browser; a QEMU `virt` display showing the window of a session that starts at boot with no login, drawn by that session into a buffer the display domain composes; and the same interface on a QEMU `virt` kiosk, drawn by LVGL as a program of the kiosk's session | estimated per part before it starts; the designs give no figure | 1b-A and the session domain, 1b-B's first slice; part 3 also 1b-E and track A's first part; part 4 also 1b-B's sub-space ports and pipes, 1b-D's first slice and track A's second part | GW |
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage and network domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
-| Track A, part 2 | an app added to a running machine as one file starts from the start table as an app of the manifest does; `erx-lvgl`, LVGL as a native program, runs on erXos as an app of the image, and input reaches the program of the window it is routed to | designed when the part starts | part 1, M6's data partition and 1b-E | |
+| Track A, part 2 | an app built outside the tree with the SDK alone, added to an image with `tools/erx pack --app`, boots into its session from its class with exactly the rows its declaration names, its code read from its package at `/app` | estimated before it starts | part 1 | |
+| Track A, part 3 | the same package installed on a running machine with `pkg add` starts from the start table once enabled, survives a reboot, updates in place and is removed with its data | estimated before it starts | part 2, M6's data partition and 1b-E | |
 | 1b-F Track D, parts 6 to 8 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-C's part 3; part 8 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
@@ -1378,9 +1379,9 @@ land after M11 repeat M11's closure over what they add.
    [design-display.md](design-display.md#a-displays-session)).
 4. **A kiosk on QEMU `virt`**, in 1b-C, after parts 2 and 3, 1b-B's
    sub-space ports and pipes, the first slice of 1b-D and track A's second
-   part, because it needs input routed to the program and LVGL running on
-   erXos as an app of the image, which the start table of track A's first
-   part alone does not ship: a native
+   part, because it needs the kiosk's app as a package added to the image
+   and LVGL running on erXos beside the widget toolkit, which the start
+   table of track A's first part alone does not ship: a native
    program with inherited pipe descriptors and `read`, `write` and `poll`
    on them. `erx_ui_lvgl` in the application's session, and `erx-lvgl`,
    LVGL as a native program of that session behind `erx_ui_renderer`: the
@@ -1388,10 +1389,11 @@ land after M11 repeat M11's closure over what they add.
    window's buffer into the program; LVGL's direct mode into that buffer;
    the generated C reader of `ui.txt`'s binary form, with its `screen`,
    `input`, `repaint` and `presented` records and its `damage` reports.
-   The kiosk's session: an app of the development manifest, a
-   principal with a template whose environment sets `ui_renderer` and
-   whose start row names the display, from track A's second part, which
-   ships `erx-lvgl` as an app of the image; the application's restart by its supervisor
+   The kiosk's session: `examples/dashboard`, a package added to the
+   image in the development manifest's `kiosk` class, whose declaration
+   sets `ui_renderer` and whose start row names the display, from track
+   A's second part, with `erx-lvgl` in the domain release beside `erx_ui`
+   ([design-packaging.md](design-packaging.md#the-sdk)); the application's restart by its supervisor
    and the session's by the row's keeper. The LVGL program holds its
    pipes and its buffer's pages and nothing else
    ([design-display.md](design-display.md#kiosks-and-glasses)).
@@ -1633,19 +1635,23 @@ Erlang renderer improves
 an app: a principal with a session template, whose release is its code
 and whose facet rows are its authority, started and kept by the start
 table, the one place that says what starts without a person
-([design-apps.md](design-apps.md)).
+([design-apps.md](design-apps.md)); an app built outside the tree is a
+package, added to an image or installed at run time
+([design-packaging.md](design-packaging.md)).
 
 **Demo.** A QEMU image boots into an app's session with no login, the
 app holding exactly its template's grants; `service -e` prints the
 configured domains and the start table; `service clock disable` and a
 reboot leave the app stopped; a kiosk's app killed past its row's
-intensity shows its row `down` at `/proc/apps`.
+intensity shows its row `down` at `/proc/apps`; `examples/dashboard`,
+built with the SDK alone and added with `tools/erx pack --app`, is the
+kiosk's screen; `pkg add` installs it on a running machine.
 
-**Scope.** Two parts. Both are in Phase 1b, on the stopgap. The first
-is the start table, which track D's window stack needs; the second is the
-packaging design and its implementation, which adds apps at run time,
-brings `erx-lvgl` (LVGL as an app of the image on erXos) and routes
-input to windows, so track D's kiosk waits for it.
+**Scope.** Three parts, all in Phase 1b, on the stopgap. The first is
+the start table, which track D's window stack needs; the second packages
+apps built outside the tree and adds them to an image, which track D's
+kiosk needs; the third installs, updates and removes packages at run
+time.
 
 1. **The start table**, in 1b, after 1b-A, 1b-B's session domain and
    M6's data partition, on which `rc.conf` lies. `start` rows in
@@ -1659,16 +1665,30 @@ input to windows, so track D's kiosk waits for it.
    enabled row holds; the `apps` tree with `ctl` and its fuzz target;
    `service`; `/proc/apps`. An app is a principal of the manifest with its own template
    and release.
-2. **Packaging**, designed when this part starts and built after M6's
-   data partition and 1b-E's storage domain: how an app reaches a
-   machine after its image is built, as a principal with a template and
-   a start row, through the seam of
-   [design-apps.md](design-apps.md#packaging). Its design takes as
-   inputs the earlier design of app classes and the review findings and
-   decisions recorded in `TODO.md` ("Design app packaging when Track A
-   starts"). It also brings `erx-lvgl`, LVGL as a native program shipped
-   as an app of the image, and the routing of input to the program of the
-   window it is for, which track D's kiosk needs.
+2. **Packages added to an image**, after part 1
+   ([design-packaging.md](design-packaging.md)). The `class`, `package`
+   and `signer` rows in `abi/manifest.txt` and property 19; the domain
+   library's places and `erx_dom_plan_session` taking a place as
+   principal; `erx_principal:register_app/1`; the package format in
+   `abi/formats/package.txt`, `erx_pkg_header:verify/2` with its fuzz
+   target, `erx_app_admit` with its corpus, run on the host by the
+   packer; `erx_verity` reading an image from a file; the app's session
+   with its kept rows, `/app` and its record in the ready answer;
+   `erx_app`; the package process with the image's packages; the start
+   table's package rows; `/proc/packages`. The SDK: `tools/erx sdk
+   export`, `erx-app build`, `pack` and `test`, the declaration's parser
+   with its fuzz target, `erx_ui_host`; `tools/erx pack --app` and
+   `tools/erx app run`; `erx-lvgl` beside `erx_ui` in every image's
+   domain release; `examples/dashboard` built through the SDK alone, and
+   `examples/doom` as a submodule built only on request. On the stopgap
+   the image's packages lie in the boot image's domain release.
+3. **Installing at run time**, after part 2, M6's data partition and
+   1b-E's storage domain. The `packages` tree of the storage service;
+   the `apps` tree's `pkg/` and its `install`, `discard` and `remove`
+   commands with their fuzz target; `erx_pkg_plan` with its crash-point
+   tests, `erx_pkg_io` and the recovery; signature checks with the small
+   verifier once it is in the build; removing a principal's directory;
+   `pkg add`, `pkg delete` and `pkg info`.
 
 **Exit criteria, the start table.** The merge's host tests and their
 seeded faults (a row added for an undeclared principal, the display
@@ -1691,6 +1711,29 @@ kept session wait for M12, which builds the reset count and the rescue
 configuration. That a session holding `data` cannot rewrite `rc.conf` is
 not an exit criterion: until `data` grants are rooted by principal it
 can, a residual recorded in `TODO.md`.
+
+**Exit criteria, packages added to an image.** `examples/dashboard`
+builds, packs and passes its host test with nothing but the exported
+SDK on its paths, and the boundary check refuses its seeded call of a
+private module; a kiosk image made with `tools/erx pack --app
+examples/dashboard --enable dashboard` boots to the dashboard on the
+display, with the board's manifest source unchanged, its session holding
+exactly the rows its declaration names; two apps of one class see none
+of each other's domains at `/proc`; a packaged test program with a window
+draws through `/dev/draw` and answers a key; each seeded fault of
+design-packaging.md's host tests and each seeded violation of property
+19 fails as designed; the header's and the declaration's fuzz targets
+run their budgets clean; no build list names `examples/`, and `make
+check` needs no `examples/doom`.
+
+**Exit criteria, installing at run time.** `pkg add` of a signed package
+shows it `admitted` at `/proc/packages`, `service NAME enable` starts it,
+and a reboot keeps it; a higher version replaces it with its files kept;
+`pkg delete` leaves no package, row or directory; a machine reset
+inside a removal finishes it at the next boot; a flipped image byte gives
+`eio` and the row `down`, a flipped header byte `refused`, an untrusted
+signer `eacces`; installing and removing more distinct names than a
+class's places in one boot refuses the last with `class_full`.
 
 ## M6: Immutable code, lasting data
 
@@ -3113,7 +3156,9 @@ Phase 1:   M0 --> M1 --> M3 --> M4 --> M6 --> track S (shell)
 Phase 1b, in order of its demos (backend rows, hosted backend too; BeamAsm beside 1b-A):
            1b-A domains on the stopgap
              --> session domain (1b-B's first slice) --> 1b-C track D part 1 (GW) --> part 2
-             --> 1b-E M9 on the stopgap --> track A part 2 (on 1b-E's storage domain)
+             --> 1b-E M9 on the stopgap --> track A part 3, installing at run time (on 1b-E's storage domain)
+           track A part 1, the start table (on the session domain and M6's data partition)
+             --> track A part 2, packages added to an image (the SDK, classes, erx_app, examples/)
              --> 1b-G network domain, GN-QEMU, M14 on QEMU
            1b-G's driver and stack in the system domain (from Phase 1, beside 1b-A)
              --> 1b-C track D part 3, the window stack on QEMU
