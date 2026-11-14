@@ -9,14 +9,15 @@ it; git history is the record of completed work.
 ## Major initiatives
 
 * [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits an outside
-  review and the answers to its questions for the owner (its "Risks and decisions"), the first of which
-  decides how an app shown as a directory is removed and updated, the second where the start table's `ctl`
-  and `rc.conf` go; then Track A's parts 2 and 3 build it ([plan.md](docs/plan.md#track-a-apps)). An app
-  names its needs, memory and code, and one `apps` row bounds every app; installing is `cp NAME.app /apps/`,
-  whose close checks, admits and publishes the package by one rename, every app shows as a read-only
-  directory at `/apps/NAME.app` or `/apps/system/NAME.app` through the session's own `erx_appsfs`, and
-  `rm -r` removes it, keeping its data, which is named by app and signer; each app is a principal of its
-  own, its budget elastic under the `apps` budget, as design-kernel.md and design-system.md record.
+  review of its update path, its `mount` and its `/etc/rc.conf`, and the answers to its remaining questions
+  for the owner (its "Risks and decisions", and design-apps.md's); then Track A's parts 2 and 3 build it
+  ([plan.md](docs/plan.md#track-a-apps)). An app names its needs, memory and code, and one `apps` row bounds
+  every app; each app is a plain file, `/apps/NAME.app` or `/apps/system/NAME.app`; installing is `cp
+  NAME.app /apps/`, whose close checks, admits and publishes the package by one rename, a copy over an
+  installed app updates it the same way, the old one running until the new one passes, `rm` removes it,
+  keeping its data, which is named by app and signer, and `mount /apps/NAME.app DIR` shows its image
+  read-only; each app is a principal of its own, its budget elastic under the `apps` budget, as
+  design-kernel.md and design-system.md record.
 * [Medium] runtime, `docs/design-shared-code.md`: build shared loaded code, one prepared copy of the
   preloaded modules and the applications every domain boots, mapped read-only into every domain that runs
   the interpreter. It is wanted long term. Its trigger, three adopting domains at once, is met: the
@@ -654,12 +655,19 @@ it; git history is the record of completed work.
   Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
   hands to nothing; the reset count cleared by the first kept session.
-* [Medium] apps, the start service's tree at `/etc/start` ([design-apps.md](docs/design-apps.md#interfaces)):
-  `/apps` holds apps alone, so the tree that `erx_starter_fs` serves at `/apps` with `ctl` and `rc.conf`
-  becomes the service `start`, mounted at `/etc/start`. Built code that names the old place: the development
-  manifests' `service apps` and `facet apps` rows, `erx_cmd_service` (`/apps/ctl`, `-erx_needs([apps])`), the
-  session's mount of the facet, and the QEMU checkpoints that read `/apps/rc.conf` or write `/apps/ctl`.
-  Depends on the packaging design's second question for the owner.
+* [Medium] apps, `/etc/start/ctl` and `/etc/rc.conf` ([design-apps.md](docs/design-apps.md#the-start-table)):
+  `/apps` holds apps alone, so the tree that `erx_starter_fs` serves at `/apps` becomes the service `start`,
+  mounted at `/etc/start`, holding only `ctl`, whose `enable` and `disable` go and which gains `restart`; and
+  `rc.conf` becomes an ordinary file of the data partition's `etc` tree, a service directory with a facet
+  `etc` (read-only to the system domain, read-write to the templates that hold `start`, rows the build
+  derives, and an entry of the facet table), mounted at `/etc`. Code to change: `erx_starter_fs` loses its
+  read-only `rc.conf` node; `erx_starter_rc` only reads, from the `etc` grant, and its write path and the
+  `superseded` rule go; `erx_starter` reads `rc.conf` before every `ctl` command and writes nothing;
+  `erx_cmd_service`'s `enable` and `disable` edit `/etc/rc.conf` with `erx_start_table:set/3` (moved where a
+  session can call it), by a new file and a rename, then write `start` or `stop`; the development manifests'
+  `service apps` and `facet apps` rows, the session's mount of the facet, the chokepoint that the start
+  service writes no file on `etc`, and the QEMU checkpoints that read `/apps/rc.conf` or write `/apps/ctl`.
+  This removes the A5c residual of an `enable` interrupted during its write.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
   deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before
@@ -5979,10 +5987,10 @@ to the corpus and follow rc
   work, so a system fault that follows every boot by a little never reaches the rescue configuration. Move the
   clearing to a point after the app has started, or after it has run a while, and test resets on both sides of it.
 * [Medium] apps, `rc.conf` on the stopgap ([design-apps.md](docs/design-apps.md#phase-1)): `data` grants are not
-  yet rooted by principal, so every domain holding `data` reaches the system domain's directory and can rewrite
-  `start/rc.conf`, enabling or disabling declared rows and moving a display among rows whose templates are granted
-  it. It cannot add a row or widen a grant. Closed by rooting each `data` grant at its principal's or service's
-  directory, with the test that a session holding `data` finds no `start/rc.conf`.
+  yet rooted by principal, so every domain holding `data` reaches the `etc` tree and can rewrite `etc/rc.conf`,
+  enabling or disabling declared rows and moving a display among rows whose templates are granted it. It cannot
+  add a row or widen a grant. Closed by rooting each `data` grant at its principal's or service's directory,
+  with the test that a session holding `data` finds no `etc/` under its `/data`.
 * [Medium] system log on the stopgap ([design-log.md](docs/design-log.md#the-store)): a development build's `data`
   grant to `root`'s sessions covers the whole of `/data`, read-write, so those sessions reach the log's store at
   `/data/log` past `erx_logfs`: they can rewrite, truncate or forge either family, the kernel's included, so the

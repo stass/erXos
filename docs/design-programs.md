@@ -990,8 +990,9 @@ for its grant's domain alone
 `/dev/tty`, in every program's namespace that holds the export's `/dev`.
 These, `/bin`, `/etc/passwd` and `/etc/group` form one tree of the
 export, apart from the tree of each of the session's local providers,
-named by its mount, and take their qid paths from the session's counter,
-so no two files of one tree share a qid path
+which is named for its mount when it is mounted, so that a provider
+mounted again is another tree; they take their qid paths from the
+session's counter, so no two files of one tree share a qid path
 ([design-files.md](design-files.md#narrowing-for-a-program)).
 `/dev/tty` is the session's tty, which its terminal relay owns, and a
 program's standard streams that go to the terminal are opens on it too,

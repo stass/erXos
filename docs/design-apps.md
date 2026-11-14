@@ -32,9 +32,11 @@ Decisions every reader of this document needs:
   optionally a display, and a restart intensity. The manifest's `start`
   rows declare what may start and give each row's defaults, as
   FreeBSD's `rc.d` scripts and `/etc/defaults/rc.conf` do;
-  `/etc/start/rc.conf` holds the machine's own settings of those rows, as
-  `/etc/rc.conf` does. A kiosk is an enabled row that names an app and a
-  display.
+  `/etc/rc.conf`, an ordinary file the administrator edits, holds the
+  machine's own settings of those rows, as it does on FreeBSD. The start
+  service reads it at boot and at each `service` action, and an edit
+  alone changes nothing until then. A kiosk is an enabled row that names
+  an app and a display.
 * **The table keys on a principal, and on nothing about where the
   principal came from.** A principal of the manifest and the principal
   of a package's app start the same way ([Packaging](#packaging)).
@@ -45,7 +47,7 @@ Decisions every reader of this document needs:
 **Is there one place that says when and where everything starts?** Yes,
 in two parts of one manifest and one file. The manifest's `domain` rows
 start the system's services, in the order the build computes, and the
-start table, the manifest's `start` rows with `/etc/start/rc.conf` over them,
+start table, the manifest's `start` rows with `/etc/rc.conf` over them,
 starts everything else. `service -e` prints both.
 
 **Where do I add my kiosk app?** In a package of its own, which
@@ -116,8 +118,9 @@ person, and starts it again.
 * **AP-R5.** Nothing in this design assumes the board's manifest is the
   only source of principals: apps added at run time join later,
   through the seam of [Packaging](#packaging).
-* **AP-R6.** `rc.conf` and everything else read back from the data
-  partition are untrusted input.
+* **AP-R6.** `rc.conf`, which administrators edit by hand, and
+  everything else read back from the data partition are untrusted
+  input.
 * **AP-R7.** The interface feels like FreeBSD's `service`.
 
 Outside this design: packages, their format, signatures, installing,
@@ -138,7 +141,7 @@ device ([design-system.md](design-system.md#devices)).
  manifest: principal clock, its           system domain
    session template (release               erx_starter merges the `start` rows with rc.conf,
    @artifact.clock), facet rows                |       one supervisor and keeper per enabled
-   granting the template, `start` rows         |       row; serves /etc/start (ctl, rc.conf)
+   granting the template, `start` rows         |       row; reads /etc/rc.conf, serves /etc/start/ctl
  the boot image's domain release:              |  erx_domain:start_session(clock, Start)
    clock's applications and its                v
    boot script bin/clock.boot             domain service: a session of clock's template,
@@ -170,7 +173,7 @@ supervisor starts the keeper again within the row's intensity.
 | --- | --- | --- | --- |
 | **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display and an intensity, and no limit, grant, device, service or code; the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter` reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:system_namespace/0` (the wait before its first read of `rc.conf`) and `erx_domain:display_settled/1` (the wait before it starts a row that names a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
 | **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_starter` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for an enabled row or one `start` command on a row | another boot-time starter | a source check that only `erx_console`, the web login and `erx_starter_keeper` call `erx_domain:start_session/2`, with a seeded call from another module; the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
-| **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition and the `apps` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
+| **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition, the `etc` grant and the `start` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
 | **AP4.** A display's session is the session its enabled row keeps, and no other, across a restart of either domain | the merged table holds at most one enabled row for each display; only a row's keeper names a display with `display`; the domain service fixes the session mark in the record of that session's grant on the display and every mint of the record carries it ([design-system.md](design-system.md#facets-a-configured-domain-serves)) | two enabled rows on one display; a mark set by whichever session opens a window first; a re-mint that drops the mark | the table's host test with two enabled rows on one display, the second refused; the kiosk tests of [Verification and testing](#verification-and-testing), the display domain's restart among them |
 | **AP5.** A row whose display its principal cannot draw on never starts | the merge refuses a row whose display is not a `windows` service granted to its principal's template, with `{no_grant, Display}` at `/proc/apps`; the manifest check refuses such a manifest row (property 17) and `service enable` such a command | a reserved display that stays blank because its session holds no grant there | the merge's host test; the QEMU test of a local line naming such a display |
 
@@ -258,7 +261,7 @@ start clock
   restart_period_s 600
 ```
 
-`/etc/start/rc.conf` holds the machine's own settings of those rows, in
+`/etc/rc.conf` holds the machine's own settings of those rows, in
 rc.conf(5)'s form, one variable per line:
 
 ```text
@@ -297,13 +300,74 @@ The manifest's own rows and those of the image's packages pass both
 checks at build (properties 17 and 19), so only a local setting or an
 installed package's row is ever refused.
 
-**Where the file is.** `rc.conf` is `start/rc.conf` in the system
-domain's own directory of the data partition, the root of the system
-domain's `data` grant, which the start service reads and writes. Every
-other grant of `data` is rooted at its own principal's or service's
-directory ([design-storage.md](design-storage.md#interfaces)), none of
-which is the system domain's, so no other domain reaches the file. The start service's tree shows it read-only at `/etc/start/rc.conf`. The file is
-at most 64 KiB, and the table at most `start_rows_max`, 256 rows.
+**Where the file is.** `rc.conf` is `/etc/rc.conf`, an ordinary file.
+It lies in the data partition's `etc` tree, a service directory of the
+data partition's storage service, as the `packages` tree is
+([design-storage.md](design-storage.md#interfaces)), which holds the
+machine's own settings files and nothing of any principal. Its facet,
+`etc`, is granted read-only to the system domain, whose start service
+reads the file, and read-write to every session template the manifest
+grants the start service's tree, `start`: the build derives both rows
+from the manifest's `start` grants, as it derives the `apps` rows
+([design-packaging.md](design-packaging.md#the-apps-row)), so whoever
+may command the start table may edit its settings, and no one else. A
+session holding the facet mounts it at `/etc`, read-write, and the
+start service's tree at `/etc/start` within it. The file is at most
+64 KiB; a longer one is reported at `/proc/apps` and read as holding no
+settings, so the manifest's defaults stand. The table is at most
+`start_rows_max`, 256 rows.
+
+A program of such a session reaches `/etc` as it reaches `/dev`, which
+an administrator's session also mounts from a grant
+([design-files.md](design-files.md#building-binding-and-mounting)):
+how a program's namespace joins the session's grant at those places to
+the files the session's export serves there, `/etc/passwd`,
+`/etc/group`, `/dev/null` and `/dev/tty`
+([design-programs.md](design-programs.md#descriptors-and-files)), is
+the first question of [Risks and decisions](#risks-and-decisions).
+
+**When the file is read.** The start service reads `rc.conf` at boot,
+before it starts any row, and at each command written to its `ctl`,
+before it acts on the command. Each read makes the whole table from
+the file as it then is, and the table reconciles with it
+([Concurrency](#concurrency)); then the command acts on its row. So an
+edit changes nothing until the next command or the next boot, as on
+FreeBSD, where `rc.conf` is read by each `rc.d` script as it runs
+(`load_rc_config`, `libexec/rc/rc.subr:1960-2000`), and after every
+command the rows that run are the rows a boot would start from the
+file, less those stopped or down. A restart of the start service reads
+it as a boot does. A read that fails after the boot's first leaves the
+table as it was last made, and the command acts on that, with the
+failure in the log.
+
+**Who writes it.** The start service never writes it. An administrator
+edits it with any editor, and `service NAME enable` and `disable` edit
+it as FreeBSD's `rc.subr` and `sysrc` do. The command reads the file,
+replaces every line that sets one of the row's variables it was given,
+or appends the line where none does, as `rc.subr`'s `write_rcvar`
+does (`libexec/rc/rc.subr:2782-2810`); it writes the whole new text
+to a new file in `/etc`, created exclusively under a name of its own,
+syncs it and renames it over `rc.conf`, so a reader finds the old text
+or the new one whole, as `sysrc` writes a temporary file and moves it
+over the file (`f_sysrc_set`,
+`usr.sbin/bsdconfig/share/sysrc.subr:524-650`). `enable` then writes
+`start NAME` to `ctl`, and `disable` writes `stop NAME`, so the start
+service reads the new text and acts on it. The edit is one pure
+function of the text, `erx_start_table:set/3`, which keeps every other
+byte as it was.
+
+**Concurrent edits.** Nothing locks the file, as nothing locks it on
+FreeBSD, where `sysrc` takes no lock: the last writer wins. A `service`
+command that edits while an editor has the file open, or while another
+`service` command edits it, renames over it the text it read with its
+own change, so a change written between its read and its rename is
+lost, and the next read takes whole the text of whichever wrote last.
+An editor that writes the file in place, rather than by a rename, can
+be read part-written by a command run meanwhile: its lines parse as
+they stand, a cut line is skipped and reported, a row whose enabling
+line is not yet written stops, and the next command after the editor's
+write makes the table from the whole text. The parser's bounds and its
+skipping hold whatever the file holds (AP-R6).
 
 The configured domains are not rows of the table: they are the system
 itself, their order is computed, and their place is the manifest alone.
@@ -416,7 +480,7 @@ so the table, its keepers, the domain service and the display treat it
 as they treat an app of the manifest. Before a package is removed, the
 package process publishes a package set without it, and
 the start service answers only once that app's sessions have ended
-([design-packaging.md](design-packaging.md#installing-and-removing)).
+([design-packaging.md](design-packaging.md#installing-updating-and-removing)).
 How a package declares what it needs, which of the `apps` row's
 services it may take, how it is authenticated, added to an image,
 installed and removed, and what that does to its data, is
@@ -430,9 +494,9 @@ installed and removed, and what that does to its data, is
 
 | Command | Does |
 | --- | --- |
-| `service NAME enable [display=D] [restarts=N] [period=S]` | sets the row's settings in `rc.conf`, enables it and starts it; refused for a name with no row, a display another enabled row holds (with that row's name), a display not among the principal's `windows` services (for a package's app, those its admission kept) |
-| `service NAME disable` | stops the row and sets it disabled |
-| `service NAME start`, `stop`, `restart`, `status` | acts on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing |
+| `service NAME enable [display=D] [restarts=N] [period=S]` | sets `NAME_enable="YES"` and the settings given in `/etc/rc.conf`, as [Who writes it](#the-start-table) says, answers `NAME enabled in /etc/rc.conf` as FreeBSD's does (`rc.subr:1451-1454`), and starts the row with `start NAME`; refused before the edit for a name `/proc/apps` lists no row for. A setting the merge refuses, a display another enabled row holds or one not among the principal's `windows` services (for a package's app, those its admission kept), leaves the line in the file and the row `refused` with its reason, and the command answers the refusal, naming the row that holds the display |
+| `service NAME disable` | sets `NAME_enable="NO"` in `/etc/rc.conf`, answers `NAME disabled in /etc/rc.conf`, and stops the row with `stop NAME` |
+| `service NAME start`, `stop`, `restart`, `status` | `start`, `stop` and `restart` write their line to `ctl`, and act on an enabled row; on a row that is not enabled each answers as rc.subr(8) does, names its `one` form and does nothing; `status` reads `/proc/apps` |
 | `service NAME onestart [display=D]`, `onestop`, `onerestart`, `onestatus` | as above on any row: `onestart` starts the row's principal once, with no supervisor, and `onestop` stops it |
 | `service -e` | prints the configured domains in boot order, then the enabled rows that are not refused |
 | `service NAME purge` | removes the data of a package's app that is not installed, every signer's ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)) |
@@ -443,19 +507,20 @@ configured in the system manifest; its state is at `[domains, Id]`.
 **The start service's tree**, the service `start` of the system domain
 and an instance of `files`, which `erx_starter` serves with `erx_fs` and a
 session mounts at `/etc/start`, so that `/apps` holds apps alone
-([design-packaging.md](design-packaging.md#apps)):
+([design-packaging.md](design-packaging.md#apps)). It holds one file,
+for the actions that are not settings; the settings are `/etc/rc.conf`:
 
 | File | Read | Write |
 | --- | --- | --- |
-| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `enable NAME [display=D] [restarts=N] [period=S]`, `disable NAME`, `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps, `stop NAME`, and `purge NAME`, which the package process carries out ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)). The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no manifest row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` is unread, and `eio` for a failed write of `rc.conf` or start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
-| `rc.conf` | the machine's settings | nothing |
+| `ctl` | nothing | one command a write, a line of at most 4,096 bytes: `start NAME [display=D]`, which starts a row that is stopped or down, or, for a row that is not enabled, one session that no supervisor keeps; `stop NAME`; `restart NAME`, which stops a running row and starts it again; and `purge NAME`, which the package process carries out ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)). The start service reads `rc.conf` before it acts. The write succeeds when the command does; a 9P write carries no text back, so a refusal answers an errno: `einval` for a line that does not parse, a name with no row or any other refused command, `ebusy` for a display another enabled row holds, `eperm` for a display the template is not granted, `eagain` while `rc.conf` has not yet been read in this boot, and `eio` for a failed start, or a start service that ended during the command. The reason goes to the log, and a row's own reason is shown at `/proc/apps` |
 
 Which templates hold the `start` grant is the manifest's: `root`'s in a
 development build, an administrator's in a release build; the build
-gives each of them the `apps` grant too when the manifest has an `apps`
-row ([design-packaging.md](design-packaging.md#the-apps-row)). A session
-whose template holds no `start` grant has no `/etc/start` and no
-`/apps` at all.
+gives each of them the `etc` grant too, and the `apps` grant when the
+manifest has an `apps` row
+([design-packaging.md](design-packaging.md#the-apps-row)). A session
+whose template holds no `start` grant has no `/etc/start`, no
+`/etc/rc.conf` and no `/apps` at all.
 
 **Inspection**, in `abi/inspection.txt`, reported by the start service
 and shown at `/proc/apps`, to an inspect facet of scope `all`: `[apps]`,
@@ -486,33 +551,21 @@ name a display.
 | Subsystem | Interaction |
 | --- | --- |
 | the domain service | makes a row's session from its principal's template; fixes the session mark in the record of the grant on the display a keeper's start names, and carries it in every mint of that record |
-| the storage service | holds `rc.conf` in the system domain's directory; roots every other `data` grant at its principal's directory |
+| the storage service | serves the `etc` tree, which holds `rc.conf`, read-only to the system domain and read-write to the templates that hold `start`; roots every `data` grant at its principal's directory |
 | the display | serves every session that holds its grant, and under the single policy shows the windows of the display's session alone ([design-display.md](design-display.md#a-displays-session)) |
 
 ## Concurrency
 
 The start service is one process that owns the merged table. It does no
-file operation itself: every read and write of `rc.conf` runs, one at a
-time, in a process of its own, `erx_starter_rc`, which answers each
-request when it is done, and the table commits a write's text only once
-it succeeded, so a slow storage domain delays the commands waiting
-for it, not the table's answers. A write that fails makes the table
-read `rc.conf` again, since its rename may have landed. Reads of `/proc/apps` and `rc.conf` are answered from the
-table's own state.
-
-The `rc.conf` process is the table's elder sibling in the start
-service's `rest_for_one` tree, so a crash of the table leaves it
-running, with the write the table asked for in progress or queued. It
-carries out the writes only of the process whose read came last, and
-refuses any other's, and a restarted table reads `rc.conf` before it
-writes: every write of a table that ended either lands before its
-successor's read, which then finds its text, or is refused. So the text
-a table is made from is the file's until the table itself writes it,
-and no write made from an older text undoes a newer one. The process
-traps exits, so a restart of the tree before it waits for the operation
-in progress to end: a rename already sent to the storage domain lands
-whatever became of the process that sent it, and cutting the process
-short would let it land after the next read.
+file operation itself: every read of `rc.conf` runs, one at a time, in
+a process of its own, `erx_starter_rc`, which answers each read when it
+is done, so a slow storage domain delays the commands waiting for it,
+not the table's answers. Reads of `/proc/apps` are answered from the
+table's own state. The start service writes no file: the file is the
+one record of the settings and every writer of it is outside the start
+service, so nothing orders writes of its own against its reads, its
+marks and its restarts, and a crash of the table or of the `rc.conf`
+process loses nothing that the next read does not take again.
 
 The keepers are a separate branch of the application's supervision
 tree, so a crash of the table's process restarts it and no session ends.
@@ -541,12 +594,9 @@ so the row is then simply not enabled.
 `stop` and `start` write their record before the act it records, so a
 table that ends between the two leaves the intent behind: `stop` marks
 the row before it ends it, and `start` clears the mark before it starts
-it. `enable` writes `rc.conf` first, then clears the mark and the record
-of a row that is down, and only then makes the table from the new text,
-which starts the row: a table that ends after the clear finds the row
-enabled, unmarked and not held, and starts it once its own read answers;
-one that ends while the write is in progress leaves the mark, so the row
-stays stopped and the command answers an error (TODO.md).
+it. `service NAME enable` is an edit of the file and then a `start`,
+and `disable` an edit and then a `stop`, so no command of the table both
+writes the file and changes a mark.
 
 A restarted table makes its table from the recorded text and changes no
 keeper until its own read of `rc.conf` answers, so a row `rc.conf`
@@ -572,6 +622,9 @@ reported.
 | a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` or `enable` |
 | a local setting names a display the template is not granted, or one another enabled row holds | the merge | the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps`, and starts nothing |
 | `rc.conf` is damaged, or names a row the manifest does not declare | the table's parser | bad lines are skipped and reported; the manifest's rows stand |
+| `rc.conf` is longer than 64 KiB | the table's reader | reported at `/proc/apps` and read as holding no settings, so the manifest's defaults stand until a command reads a file within the bound |
+| a read of `rc.conf` fails at a command | `erx_starter_rc`'s answer | the command acts on the table as it was last made; the failure is logged |
+| an edit is lost to a concurrent one | nothing: the last writer wins | the next read takes the last writer's text whole; `/proc/apps` shows which settings came from the file |
 | the display domain restarts under a display's session | the domain service's grant record | the grant is minted again on the new incarnation, with the session mark |
 | the start service crashes | its supervisor | it restarts with the table the keepers' branch recorded and reads `rc.conf` again; kept sessions go on, and stopped and down rows stay so |
 
@@ -605,8 +658,13 @@ and no more; the data partition, and so `rc.conf`; the storage domain.
   each grant within that grant's limits; and end. It binds names of its
   own `names` quota only. It cannot change the start table, since it
   holds no `start` grant unless its template was deliberately granted
-  one, and it cannot reach `rc.conf`, which lies outside every grant but
-  the system domain's.
+  one, and it cannot reach `rc.conf`, which only the `etc` grant
+  reaches, held read-only by the system domain and read-write by the
+  templates that hold `start`.
+* **Who may edit `rc.conf`** is who may command the start table: the
+  `etc` grant goes with `start`, so an edit gives no authority `ctl`
+  does not, and the file still only sets rows the manifest declares
+  (AP3).
 * **A crafted data partition, or a storage domain it has taken over,**
   can rewrite `rc.conf` to enable or disable rows the manifest declares,
   and to move a display between rows whose templates are granted it,
@@ -629,7 +687,7 @@ later, and reports each as it is:
 
 | Deferred | Until | Meanwhile |
 | --- | --- | --- |
-| rooting `data` grants by principal | facet parameters and principals' directories | each grant covers the whole tree, so every domain holding `data` can rewrite `rc.conf` and reach every app's directory: a security residual in `TODO.md` |
+| rooting `data` grants by principal | facet parameters and principals' directories | each grant covers the whole tree, so every domain holding `data` reaches the `etc` tree, can rewrite `rc.conf`, and reaches every app's directory: a security residual in `TODO.md` |
 | budgets and quotas as limits | erXos's kernel | they are records the build checked |
 
 ## Verification and testing
@@ -643,6 +701,8 @@ it guards.
 | --- | --- | --- |
 | the merge | settings replace defaults; `NO` disables; a bad line and a line for an undeclared name are skipped and reported; a second enabled row on one display is refused with the first's name; a row whose display its template is not granted is refused with `{no_grant, D}` | a merge that adds a row for an undeclared principal; the display rule dropped; the grant check dropped |
 | `rc.conf`'s names | `a_b_enable` sets `enable` of the row `a_b` | a split at the first `_` |
+| the edit, `erx_start_table:set/3` | a file with comments, a variable set on two lines and one set nowhere: both lines are replaced, the missing one appended, and every other byte kept | an edit that replaces only the first line that sets the variable, which leaves the later one standing |
+| reading at a command | an edit of the file that disables a running row changes nothing until a `start` of another row, at which the row stops; an edit alone starts and stops nothing | a command that acts without reading the file, after which the row runs on |
 | a row's supervisor | with a stub domain service: an ended session is started again; one end more than the intensity leaves the row down and the other rows up | a keeper that does not link to its session |
 
 **The manifest check.** One seeded manifest for each clause of property
@@ -665,14 +725,17 @@ the configured domains.
   returns on the screenshot, while the second session's window stays
   hidden; seeded: a domain service whose re-mint drops the session
   mark, which leaves the background;
-* `service enable` and `disable` change `rc.conf` and survive a reboot;
-  an enable on a display another row holds, and one on a display the
-  template is not granted, are refused; an `rc.conf` line written
-  directly that names such a display leaves the row `refused` with its
-  reason at `/proc/apps` and starts nothing; seeded: the merge's grant
-  check removed, which starts a session that shows nothing;
-* a session whose template holds no `start` grant finds no `/etc/start`
-  and no `/apps`, and its `erx:cap(start)` is undefined;
+* `service enable` and `disable` change `/etc/rc.conf` and survive a
+  reboot; an enable on a display another row holds, and one on a
+  display the template is not granted, are refused; a line written
+  into `/etc/rc.conf` with an editor changes nothing until the next
+  `service` command, and one that names such a display then leaves the
+  row `refused` with its reason at `/proc/apps` and starts nothing;
+  seeded: the merge's grant check removed, which starts a session that
+  shows nothing;
+* a session whose template holds no `start` grant finds no
+  `/etc/start`, no `/etc/rc.conf` and no `/apps`, and its
+  `erx:cap(start)` is undefined;
 * the rescue configuration starts no row;
 * a kiosk booted five times without an ordered end, its app reaching
   ready each time, never reaches the rescue configuration; seeded: a
@@ -681,7 +744,7 @@ the configured domains.
   `refused` with its reason, `down`, and `disabled`.
 
 Once `data` grants are rooted by principal, a session holding `data`
-finds no `start/rc.conf` under its `/data`; until then the gap is the
+finds no `etc/` under its `/data`; until then the gap is the
 Phase 1 residual above, and no test claims it.
 
 **Fuzz targets**, each landing with its parser: the `ctl` line grammar
@@ -694,7 +757,9 @@ and `rc.conf`'s grammar.
 * only `erx_starter` passes `display` or `default_display` to
   `start_session/2`;
 * only `erx_console`, the web login and `erx_starter_keeper` call
-  `start_session/2` (AP2).
+  `start_session/2` (AP2);
+* no module of `erx_starter` writes, creates or renames a file on the
+  `etc` grant: the start service only reads `rc.conf`.
 
 ## Performance
 
@@ -714,6 +779,10 @@ compiler, flags, workload and baseline.
 | **An app is a configured domain** | A configured domain is part of the system: it sits in the boot order, its group is a child of `system`, it may hold devices, and its restarts are the domain service's. An app is a principal's code, charged to that principal under `users` |
 | **A starter of its own**, with unit files, dependencies and socket activation | The domain service orders the system's services, OTP supervisors restart, and a session is already how a principal's code starts. A row and a keeper are what was missing |
 | **Restarts by the domain service** | It would give sessions a second owner. The keeper is to its session what the console is to a login's |
+| **`rc.conf` shown read-only and written only through `ctl`** | An administrator could not edit it as on FreeBSD, and the table had to order its own writes against its stopped marks and its restarts. A plain file the start service only reads needs neither |
+| **`rc.conf` read for one row at a time, as each `rc.d` script reads it on FreeBSD** | The display rule judges all enabled rows together. A table made whole from the file at each read keeps that rule one function, and what runs after a command is what a boot would start |
+| **A lock around `rc.conf`'s edits** | FreeBSD's `sysrc` takes none; two administrators editing at once is rare, and a lost change shows at `/proc/apps` after the next command |
+| **The start service watching `rc.conf` for changes** | It would act on an editor's half-written file, and FreeBSD reads the file only when a service acts |
 
 ## Risks and decisions
 
@@ -736,11 +805,44 @@ Decisions:
    automatic login does ([Keeping a session](#keeping-a-session)).
 4. **A start row for a person's principal is the image builder's**,
    until the login design says what an automatic login at a display is.
+5. **`rc.conf` is an ordinary file, `/etc/rc.conf`**, which the start
+   service reads at boot and at each command and never writes;
+   `service NAME enable` and `disable` edit it as `sysrc` does, and the
+   start service's `ctl` takes only actions: `start`, `stop`, `restart`
+   and `purge`.
+
+Questions for the owner, each with a recommendation:
+
+1. **A program's `/etc` and `/dev` in a session that mounts a grant
+   there.** A session that holds `start` mounts the `etc` tree at
+   `/etc`, as an administrator's session mounts the device service's
+   tree at `/dev`, while the session's export serves `/etc/passwd`,
+   `/etc/group`, `/dev/null` and `/dev/tty` for its programs, and
+   namespaces have no union of two servers at one place
+   ([design-files.md](design-files.md#requirements)). Recommended: the
+   export answers its own names at those two places and passes every
+   other name there to the session's grant, one rule in the one server
+   that already builds a program's namespace, so `vi /etc/rc.conf` and
+   `ls -l` both work. The alternative gives a program the session's
+   grant alone at those places, and its owner names show as numbers and
+   `/dev/null` is missing in an administrator's programs.
+2. **Whether `service NAME enable` starts the row.** FreeBSD's
+   `enable` only edits `rc.conf` (`rc.subr:1451-1454`), and its
+   `service -e` reads the file itself. Here `enable` edits and starts,
+   and `service -e` reads the table. Recommended: keep starting, since
+   the start service reads the file only at a command and an enable
+   without one would leave `/proc/apps` and `service -e` showing the
+   old setting. The alternative follows FreeBSD exactly, with `service
+   NAME start` after `enable`.
 
 ## References
 
 * Fuchsia: components and the session framework. <https://fuchsia.dev/fuchsia-src/concepts/components/v2>
 * Android: application sandbox. <https://source.android.com/docs/security/app-sandbox>
 * Apple: `launchd.plist(5)`.
-* FreeBSD: `rc(8)`, `rc.conf(5)`, `service(8)`, `sysrc(8)`.
+* FreeBSD: `rc(8)`, `rc.conf(5)`, `service(8)`, `sysrc(8)`. Read for
+  this design at `release/15.1.0`: `libexec/rc/rc.subr` (SHA-256
+  `f934e89957223f4816821a3ccf2e8f476d28d906358cdf06cfd6db65ab44cbb1`)
+  and `usr.sbin/bsdconfig/share/sysrc.subr` (SHA-256
+  `c1bdbc1b665f938a6aa1439e1793287df32210fb386993136e9b0e0867f64e48`).
 * QNX Neutrino: `mkifs` buildfiles and the System Launch and Monitor.

@@ -5074,9 +5074,9 @@ Decisions:
     enable display=D` answers with the row that holds `D` until that row
     is disabled, and refuses a display the app's template is not
     granted. Enabling a row starts its session at once, and disabling
-    it stops the session; a change to `rc.conf` made by other means
-    takes effect at the next boot, where a setting the merge refuses
-    leaves its row `refused` at `/proc/apps`. A board's manifest closes
+    it stops the session; an edit of `/etc/rc.conf` made by other means
+    takes effect at the next `service` command or the next boot, where a
+    setting the merge refuses leaves its row `refused` at `/proc/apps`. A board's manifest closes
     a display to apps by granting it to no app's template, and decides
     which rows exist; the machine's `rc.conf` only sets them
     ([design-apps.md](design-apps.md#the-start-table)).

@@ -1411,8 +1411,12 @@ starter's fid on the same grant, with rights within the starter's:
   own;
 * a local entry of a session becomes a fid on the session's **export**,
   an `erx_fs` server in the session's domain that serves the session's
-  local providers, each as a tree of its own named by its mount, so a
-  provider's qid paths stay unique within their tree; one more tree
+  local providers, each as a tree of its own named by its mount: a name
+  the export draws from the session's counter when the provider is
+  mounted, so a provider's qid paths stay unique within their tree, and
+  a provider unmounted and mounted again, at the same point or another,
+  is another tree, whose files never share an identity with the old
+  one's ([Identity and version](#identity-and-version)); one more tree
   serves `/bin`, an `rx` directory of the session's program commands;
   `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/tty`; and
   `/etc/passwd` and `/etc/group`, with qid paths from the session's

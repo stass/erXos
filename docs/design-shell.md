@@ -986,7 +986,7 @@ load field.
   error, the percent three columns wide; it reports a failed close of the
   target as it reports a failed write, since a server may refuse at the close what it took write
   by write, as `/apps` refuses a package that fails its check
-  ([design-packaging.md](design-packaging.md#installing-and-removing)). `rm` writes the path it removed last to its standard output. `wc`
+  ([design-packaging.md](design-packaging.md#installing-updating-and-removing)). `rm` writes the path it removed last to its standard output. `wc`
   writes its counts so far to its standard error, as FreeBSD's does
   (`usr.bin/wc/wc.c:142`, `:176-186`). `cat`, `mv`, `ls`, `grep` and
   `sort` do not opt in, as FreeBSD's do not catch `SIGINFO`.
@@ -1103,6 +1103,10 @@ inspector and the code store are reached through Erlang commands with the
 facets in their context ([design-live.md](design-live.md)); and `bind`,
 `mount` and `unmount` change the session domain's namespace
 ([design-files.md](design-files.md#building-binding-and-mounting)).
+`mount FILE DIR` mounts the EROFS image of a package file read-only at
+`DIR`, with the layout its own header gives, read through the same open
+as the image, and `unmount DIR` ends it
+([design-packaging.md](design-packaging.md#apps)).
 
 ## Compatibility and migration
 

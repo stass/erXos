@@ -1656,17 +1656,18 @@ kiosk needs; the third installs, updates and removes packages at run
 time.
 
 1. **The start table**, in 1b, after 1b-A, 1b-B's session domain and
-   M6's data partition, on which `rc.conf` lies. `start` rows in
+   M6's data partition, whose `etc` tree holds `rc.conf`. `start` rows in
    `abi/manifest.txt` and its reader; property 17; `erx_starter` with
    one supervisor and keeper per enabled row, boot step 5; `erx_domain:start_session/2` with its
    two forms of display, which this part lands as data, with host tests of
    the mark and the merge and no display domain; the session mark in the domain service's grant
-   records, carried by every mint; `rc.conf`'s parser with its fuzz
-   target and the merge, which sets only rows the manifest declares and
+   records, carried by every mint; `rc.conf` at `/etc/rc.conf`, read at
+   boot and at each command, with its parser and its fuzz target, and
+   the merge, which sets only rows the manifest declares and
    refuses a display the row's template is not granted or another
    enabled row holds; the start service's tree, `start`, at `/etc/start`
    with `ctl` and its fuzz target;
-   `service`; `/proc/apps`. An app is a principal of the manifest with its own template
+   `service`, whose `enable` and `disable` edit `/etc/rc.conf`; `/proc/apps`. An app is a principal of the manifest with its own template
    and release.
 2. **Packages added to an image**, after part 1
    ([design-packaging.md](design-packaging.md)). The `apps`, `package`
@@ -1680,8 +1681,9 @@ time.
    packer; `erx_verity` reading an image from a file; the app's session
    with its kept rows, `/app` and its record in the ready answer;
    `erx_app`; the package process with the image's packages; the `apps`
-   tree's `system/` and the session's view, `erx_appsfs`, at `/apps`; the
-   start table's package rows; `/proc/packages`. The SDK: `tools/erx sdk
+   tree's `system/`, mounted at `/apps`, and the shell's `mount` of a
+   package file; the session's export naming each mount's tree when it is
+   mounted; the start table's package rows; `/proc/packages`. The SDK: `tools/erx sdk
    export`, `erx-app pack` and `test`, the declaration's parser
    with its fuzz target, `erx_ui_host`; `tools/erx pack --app` and
    `tools/erx app run`; `erx-lvgl` beside `erx_ui` in every image's
@@ -1690,8 +1692,9 @@ time.
    the image's packages lie in the boot image's domain release.
 3. **Installing at run time**, after part 2, M6's data partition and
    1b-E's storage domain. The `packages` tree of the storage service;
-   the `apps` tree's installed packages, whose close installs and whose
-   `remove` removes, with the fuzz target of its names; a tree's `clunk`
+   the `apps` tree's installed packages, whose close installs or
+   updates and whose `unlinkat` removes, each package with a qid path of
+   its own, with the fuzz target of its names; a tree's `clunk`
    that answers an errno, and `cp` reporting a failed close; publication
    by `erx_starter:packages/2` that answers once a dropped app's sessions
    have ended; the package lifetime, `erx_pkg_io` and the bounded
@@ -1711,9 +1714,10 @@ with an enabled start row boots to that row's session with no login,
 holding exactly its template's grants, and one with none to the
 console's alone; a session killed is started again, and past the row's
 intensity the row is `down` at `/proc/apps`;
-`service enable` and `disable` survive a reboot; a
-session whose template holds no `start` grant cannot reach `/etc/start`
-or `/apps`;
+`service enable` and `disable` edit `/etc/rc.conf` and survive a
+reboot, and an edit of the file changes nothing until the next
+`service` command; a session whose template holds no `start` grant
+cannot reach `/etc/start`, `/etc/rc.conf` or `/apps`;
 `rc.conf`'s and `ctl`'s fuzz targets run their budgets clean; each seeded violation of property
 17 fails the manifest check; each chokepoint check catches its seeded
 violation. The kiosk tests, the display domain restarted giving the
@@ -1742,12 +1746,13 @@ check` needs no `examples/doom`.
 
 **Exit criteria, installing at run time.** In a development build,
 `cp` of a package into `/apps` shows it `admitted` at
-`/proc/packages`, with its signer `unchecked`, and browsable under
-`/apps/NAME.app`; `service NAME enable` starts it, and a reboot keeps
-it; `rm -r` of it leaves no package or row, no session of it once the
-publication has answered, and the app's directory, and a newer build
-copied in then runs with the app's files kept; a copy cut short fails
-its `cp` and publishes no name; the planners' crash and failure tests
+`/proc/packages`, with its signer `unchecked`, and its image readable
+through `mount /apps/NAME.app DIR`; `service NAME enable` starts it, and
+a reboot keeps it; a newer build copied over it runs with the app's files
+kept, and one cut short fails its `cp` and leaves the old one running;
+`rm` of it leaves no package or row, no session of it once the
+publication has answered, and the app's directory; a copy cut short
+fails its `cp` and publishes no name; the planners' crash and failure tests
 over reordered writes, the package lifetime's test with a crash among
 concurrent copies and a queued close, and the recovery's fuzz target
 pass, with their seeded faults; installing and removing more distinct

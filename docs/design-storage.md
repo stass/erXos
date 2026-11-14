@@ -1657,7 +1657,12 @@ reported as a durable checkpoint.
   `packages` tree, a service directory of its own holding installed app
   packages, with the slot's package image read-only under `image/`:
   read-write to the system domain's grant and read-only to the app
-  template's ([design-packaging.md](design-packaging.md#where-a-package-lies)).
+  template's ([design-packaging.md](design-packaging.md#where-a-package-lies)),
+  and the `etc` tree, a service directory of its own holding the
+  machine's own settings files, `rc.conf` among them: read-only to the
+  system domain's grant and read-write to the grants of the session
+  templates that hold `start`
+  ([design-apps.md](design-apps.md#the-start-table)).
 * **The EROFS reader**, `erx_erofs`, serves `prim_file`'s operations on an
   EROFS mount in the calling process
   ([design-runtime.md](design-runtime.md#files)); it reads through
