@@ -80,9 +80,10 @@ class QemuDisplayTest < Minitest::Test
     end
     assert_raises(Erx::Error) { plan(display: '/a.sock') }
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
+    # A loaded board takes a display as QMP alone; one with a virtio transport is refused.
     assert_raises(Erx::Error) do
       Erx::QemuPlan.argv(platform: pi, accel: 'tcg', image: '/b/i', stub: '/b/s', dtb: '/b/d', serial: 'serial',
-                         hostlink: Erx::QemuPlan::NO_HOSTLINK, display: DISPLAY.new(qmp_socket: @socket))
+                         hostlink: Erx::QemuPlan::NO_HOSTLINK, display: DISPLAY.new(qmp_socket: @socket, gpu: 24))
     end
   end
 
