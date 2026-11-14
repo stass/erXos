@@ -644,7 +644,7 @@ it; git history is the record of completed work.
   from a bound that does not change between restarts and show any mode that fits it. The driver also acknowledges a
   configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
   so a change of display size is not followed.
-* [High] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+* [High] the Raspberry Pi 4's display domain row (`config/manifest/development.txt` and `raspi4b-development.txt`;
   [design-stopgap.md](docs/design-stopgap.md#device-records)): the Pi's platform record carries the
   `framebuffer` unit, which the board's development manifest gives the system domain, and no display domain
   drives it, since no driver of the firmware's framebuffer exists. QEMU virt's development manifest has the
@@ -655,7 +655,7 @@ it; git history is the record of completed work.
   keyboard and tablet only once the unit is the transport page (security residuals,
   `boot_devices`); QEMU virt's four transport pages are the spare's, the display's, the network device's and
   the disks'.
-* [Medium] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+* [Medium] the Raspberry Pi 4's display domain row (`config/manifest/development.txt` and `raspi4b-development.txt`;
   [design-display.md](docs/design-display.md#the-display-device)): the display domain holds the `framebuffer`
   unit and drives it with `erx_firmware_fb`, on QEMU virt's figures, the `display` share's 100 mcpu and
   24 MiB, which are measured on neither board; on the Pi the screen image lives in the domain's own memory
@@ -1656,6 +1656,12 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] development manifests (`tools/lib/erx/platform.rb` `manifest_source`, `config/manifest/`): a reader error in
+  a board's composed manifest names the line of the joined text (`config/manifest:403`), not the file and line of
+  `development.txt` or the board's part; pass the parts to `ABI::Syntax.parse` with their paths. The network
+  domain's row is still written in each board's part because its `-erx_net interfaces` driver differs, a fact the
+  platform record's net unit already states; deriving the driver would move the row to the common part. The
+  measurements behind the common part's figures are in QEMU virt's part's comment, beside records it no longer holds.
 * [Low] native_domain suite, the connection case (`test/guest/native_domain/guest.c`): its eval sits a few bytes under
   the boot page's 2,048-byte string limit (`boot_strings_max`), because every record's room is reserved at its
   longest; the `-erx_record` flag and the PATH word took it to the edge, and its names were shortened to fit. The next
@@ -3955,8 +3961,8 @@ handing call's socket process exit and its connection's, is not yet looked for. 
 * [Medium] session, how the console learns a session's tty (`docs/design-live.md`, "Between domains"): the design has the console learn the tty from a `tty` agent in the session domain's ready report, but the relay needs `erx:cap(console)`, which init sets only after that report, so a relay started by the boot script has no master and one started after the report is not in it. Edit 65's `tty` agent, the domain pid's check that every agent is a pid of the domain's node, and a way for the session's creator to read the agents are not built; `erx_console:add_session/2` takes the tty from whoever creates the session. Settle the order when root's session starts at boot.
 * [Low] tests, `test/integration/runtime_console_test.rb` (`make check-runtime-hosted`): the cases that start the Erlang shell wait for `1> ` at the start of a line, but the hosted system domain is a named node and its shell prompts `(system@erxos)1> `, so every `with_erxos` case times out before it begins. Match the prompt with its node name, or make the patterns node-agnostic as the `Ctrl-G` case is.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names quota is the constant `NAMES_QUOTA`, 64, for every principal; the manifest's per-principal `names` is read by no one. Take each principal's from its row, as the domain quota is.
-* [Low] session memory, `config/manifest/qemu-virt-development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
-* [Medium] CPU grants, `config/manifest/qemu-virt-development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), and the web and display domains the other 250, 150 and 100, none of them measured, so no further configured domain has room. Size each service domain's grant from its measured use, or grow the reserve's bound, before another configured domain is added.
+* [Low] session memory, `config/manifest/development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
+* [Medium] CPU grants, `config/manifest/development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), and the web and display domains the other 250, 150 and 100, none of them measured, so no further configured domain has room. Size each service domain's grant from its measured use, or grow the reserve's bound, before another configured domain is added.
 * [Medium] tooling, configured-domain ids in the QEMU harnesses: `MediumBoot` (`NETWORK_ID`, `STORAGE_ID`, `DOMAIN_IDS`, `FREE_ID` and the catalogue rows of `DlControl` and `DlDevices`), `SystemDomain`, `SessionDomain::FIRST_SESSION`, `Regrant` and `DeviceGive::RESTART_ID` each re-derive by hand that configured domains boot in name order and that each later create spends an id, so adding a configured domain edits six files. Derive every id and row from one helper that sorts the manifest's configured domain names with the cell's added rows.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: a domain whose pid died and whose stop the library refused never ends, so `ending/2` counts it for good and every later create and session start of its principal waits the full `release_wait` (10 s); record the refused stop and leave such a domain out of the hold.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a login's session that has had the line and keeps ending (a shell that dies at its first input) is started again without limit, a domain build each round; throttle it as FreeBSD's init throttles a getty that keeps failing, and say so on the line.

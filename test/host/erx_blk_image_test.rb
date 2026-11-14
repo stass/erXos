@@ -6,6 +6,7 @@ require 'json'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
 require_relative '../fixtures/erlang_build'
@@ -29,7 +30,7 @@ class ErxBlkImageTest < Minitest::Test
     # erx_blk_image places the windows the system domain holds; the development manifest
     # gives the release window to the storage domain, which does not place it, so the
     # cases start from the manifest with the system domain holding it.
-    @source = ManifestContextFixture.domainless(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')))
+    @source = ManifestContextFixture.domainless(Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT))
     @platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
   end
 

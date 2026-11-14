@@ -82,7 +82,7 @@ class InteractiveBootTest < Minitest::Test
     refute Erx::InteractiveBoot.request([]).without_web
     assert Erx::InteractiveBoot.request(%w[--without-web]).without_web
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--without-web --hostlink]) }
-    assert_equal File.binread(File.join(root, PLATFORM.manifest_path)),
+    assert_equal PLATFORM.manifest_source(root),
                  Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: false)
     assert_equal PLATFORM.site_manifest_source(root),
                  Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: true)

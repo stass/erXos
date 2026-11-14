@@ -7,6 +7,7 @@ require 'json'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../fixtures/manifest_context'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/manifest'
@@ -16,7 +17,7 @@ require_relative '../fixtures/generated_tree'
 
 # What the boot information page takes from the system manifest, the same on both entries
 # (docs/design-stopgap.md, "Boot information"): liberx/backend/core/boot_manifest.c over a
-# manifest Manifest.admit wrote from config/manifest/qemu-virt-development.txt, driven by
+# manifest Manifest.admit wrote from QEMU virt's development manifest, driven by
 # test/fixtures/boot_manifest_driver.c.
 class BootManifestTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
@@ -28,7 +29,7 @@ class BootManifestTest < Minitest::Test
   def setup
     @directory = Dir.mktmpdir('erx-boot-manifest-')
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
-    @source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    @source = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
     @driver = build
   end
 
@@ -288,7 +289,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "console_page 150994944\n"
-    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     assert_includes output, "console_uart #{0xfe215040} 64 "
@@ -298,7 +299,7 @@ class BootManifestTest < Minitest::Test
   # The Raspberry Pi 4's development manifest with its framebuffer unit moved from the
   # display domain to the system domain, so a framebuffer row sits on the system domain's page.
   def pi_framebuffer_held_by_system
-    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     row = "unit framebuffer\n  placement \"framebuffer\"\n  holder @domain.display\n"
     assert_includes pi, row
     pi.sub(row, row.sub('holder @domain.display', 'holder system'))
@@ -316,7 +317,7 @@ class BootManifestTest < Minitest::Test
   # The shipped Pi manifest gives the framebuffer unit to the display domain, so the system
   # domain's page has no framebuffer row.
   def test_the_shipped_pi_manifest_gives_the_system_domain_no_framebuffer_row
-    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     refute_match(/^framebuffer /, output)
@@ -413,7 +414,7 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
     assert_includes output, "console_words-erx_record console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
     assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx_record device hostlink pl011 \/pl011@9040000 \d+ \d+ 40 direct \d+ exact 1/, output)
-    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b').manifest_source(ROOT)
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     assert_match(/^console_uart #{0xfe215040} 64 125 shared \d+\n/, output)

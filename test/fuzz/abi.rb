@@ -5,6 +5,7 @@
 
 require 'json'
 require 'optparse'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/manifest'
@@ -47,7 +48,7 @@ module AbiFuzz
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
     count = 0
     top = File.expand_path('../..', __dir__)
-    system_seed = File.binread(File.join(top, 'config/manifest/qemu-virt-development.txt'))
+    system_seed = Erx::Platform.load(root: top, name: 'qemu-virt').manifest_source(top)
     system_platform = JSON.parse(File.read(File.join(top, 'config/platforms/qemu-virt.json')))
     system_context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(codec).merge(platform: system_platform))
     domain_seed = ManifestContextFixture.domain_source(system_seed)

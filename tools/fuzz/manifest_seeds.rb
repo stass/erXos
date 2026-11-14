@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative '../lib/erx/platform'
 require_relative '../../test/fixtures/manifest_context'
 require_relative '../lib/erx/abi'
 require_relative '../lib/erx/json_input'
@@ -28,13 +29,13 @@ module Erx
       codec = ABI::Codec.new(ABI::Generator.plan(root: repository).schema)
       fixture = ManifestContextFixture.arguments(codec)
       platform = platform_of(repository, 'qemu-virt')
-      source = File.binread(File.join(repository, 'config/manifest/qemu-virt-development.txt'))
+      source = Platform.load(root: repository, name: 'qemu-virt').manifest_source(repository)
       context = Manifest::Context.new(**fixture, platform: platform)
       development = Manifest.admit(source: source, codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
       # A terminal escape in an argument, which the boot page's reader refuses.
       escape = Manifest.admit(source: source.sub(/^\s*system_args .*$/, '  system_args hex:2d5a1b5d323b7265766965770700'),
                               codec: codec, context: context, planner: ManifestContextFixture.accepting_planner)
-      pi = Manifest.admit(source: File.binread(File.join(repository, 'config/manifest/raspi4b-development.txt')),
+      pi = Manifest.admit(source: Platform.load(root: repository, name: 'raspi4b').manifest_source(repository),
                           codec: codec, context: Manifest::Context.new(**fixture, platform: platform_of(repository, 'raspi4b')),
                           planner: ManifestContextFixture.accepting_planner)
       empty = Manifest.structural_fixture(source: File.binread(File.join(repository, 'test/fixtures/manifest_empty.txt')),

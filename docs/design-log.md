@@ -224,7 +224,7 @@ rotation early. The size and the count are constants of
 The `/data` pair is FreeBSD's for `messages`, without the yearly turn and
 the compression. The `/tmp` pair keeps the store to half of the system
 domain's 4 MiB `/tmp` in the default manifests
-(`config/manifest/qemu-virt-development.txt`, `runtime_limits system`,
+(`config/manifest/development.txt`, `runtime_limits system`,
 `tmp 4194304`), its chunks charged at 4 KiB each
 ([design-tmp.md](design-tmp.md)), so other users of `/tmp` keep the rest.
 A store batch is at most 64 KiB, less than either size, so rotating

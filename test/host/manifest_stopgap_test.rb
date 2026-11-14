@@ -19,7 +19,7 @@ class ManifestStopgapTest < Minitest::Test
   def setup
     root = File.expand_path('../..', __dir__)
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)))
-    @source = File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt'))
+    @source = Erx::Platform.load(root: root, name: 'qemu-virt').manifest_source(root)
     @platform = JSON.parse(File.read(File.join(root, 'config/platforms/qemu-virt.json')))
     @context = context
   end

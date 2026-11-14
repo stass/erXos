@@ -5,6 +5,7 @@
 require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/display_domain'
 require_relative '../../tools/lib/erx/dom_planner'
 require_relative '../../tools/lib/erx/manifest'
@@ -38,7 +39,7 @@ class DomPlannerTest < Minitest::Test
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
-    @plain = ManifestContextFixture.sessionless(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')))
+    @plain = ManifestContextFixture.sessionless(Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT))
     @source = with_domains('alpha')
     @directory = Dir.mktmpdir('dom-planner-')
     @runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
@@ -64,7 +65,7 @@ class DomPlannerTest < Minitest::Test
   end
 
   def development_manifest
-    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    source = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner).bytes
   end
@@ -108,7 +109,7 @@ class DomPlannerTest < Minitest::Test
   # unit, web, and display, which holds the display unit: the library plans all four, and
   # the system domain's arguments start no stack.
   def test_the_library_plans_the_development_manifests_domains
-    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    source = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
     assert_equal 4, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
                                  .report.fetch('child_plan_instances')
@@ -157,7 +158,7 @@ class DomPlannerTest < Minitest::Test
   # the network row on BeamAsm and the storage row still on the interpreter: the library
   # plans it on the development machine the suite boots, and only the network row changed.
   def test_the_library_plans_the_net_device_suites_beamasm_network_row
-    source = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt'))
+    source = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
     edited = Erx::NetDevice.manifest(source)
     assert_equal '@artifact.jit', edited[/^domain network\n(?:  .*\n)*?  runtime (\S+)$/, 1]
     assert_equal '@artifact.emu', edited[/^domain storage\n(?:  .*\n)*?  runtime (\S+)$/, 1]
@@ -420,14 +421,13 @@ class DomPlannerTest < Minitest::Test
   # and every unit the records list is closed under both, the Raspberry Pi 4's five
   # PL011s on one page and line, and its mini UART and auxiliary SPI controllers, included.
   def test_every_checked_in_manifest_keeps_its_units_whole
-    manifests = Dir[File.join(ROOT, 'config/manifest/*.txt')]
-    assert_operator manifests.size, :>=, 2
-    manifests.each do |path|
-      board = File.basename(path, '.txt').delete_suffix('-development')
-      platform = JSON.parse(File.read(File.join(ROOT, Erx::Platform.record_path(board))))
-      context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform))
-      admitted = Erx::Manifest.admit(source: File.binread(path), codec: @codec, context: context, planner: @planner)
-      refute_empty admitted.bytes, path
+    boards = Dir[File.join(ROOT, 'config/manifest/*-development.txt')].map { |path| File.basename(path, '-development.txt') }
+    assert_operator boards.size, :>=, 2
+    boards.each do |board|
+      platform = Erx::Platform.load(root: ROOT, name: board)
+      context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform.record))
+      admitted = Erx::Manifest.admit(source: platform.manifest_source(ROOT), codec: @codec, context: context, planner: @planner)
+      refute_empty admitted.bytes, board
     end
   end
 

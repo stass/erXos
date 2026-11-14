@@ -5,6 +5,7 @@
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/apps'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/erlang_build'
@@ -171,7 +172,7 @@ class ErxStarterTest < Minitest::Test
       codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
       platform = Erx::MediumBoot.machine(Erx::Platform.development(ROOT)).record
       arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[app clock display network session storage web])
-      source = Erx::Apps.manifest(File.binread(File.join(ROOT, 'config/manifest/qemu-virt-development.txt')),
+      source = Erx::Apps.manifest(Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT),
                                   boot: :kept) + SCREEN
       Erx::Manifest.admit(source: source, codec: codec,
                           context: Erx::Manifest::Context.new(**arguments, platform: platform),

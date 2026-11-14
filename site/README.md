@@ -57,6 +57,7 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   from the website's own system manifest and boots it once on the terminal
   (quit QEMU with Ctrl-A then X). That manifest is made from the
   development manifest,
+  [`config/manifest/development.txt`](../config/manifest/development.txt) followed by
   [`config/manifest/qemu-virt-development.txt`](../config/manifest/qemu-virt-development.txt),
   at each build: it leaves out the domains that
   [`config/platforms/qemu-virt.json`](../config/platforms/qemu-virt.json)'s

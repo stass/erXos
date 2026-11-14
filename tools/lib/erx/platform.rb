@@ -5,7 +5,8 @@ require_relative 'json_input'
 require_relative 'manifest_edit'
 
 module Erx
-  # A board's platform record (config/platforms/NAME.json) and the development manifest beside it
+  # A board's platform record (config/platforms/NAME.json) and its development manifest, the
+  # common part (config/manifest/development.txt) followed by the board's
   # (config/manifest/NAME-development.txt), with the website's made from it: what every tool that builds or
   # boots an image takes as a parameter in place of one board's constants
   # (docs/design-stopgap.md, "The Raspberry Pi 4"). The record states the board's RAM, its
@@ -65,9 +66,19 @@ module Erx
       super
     end
 
+    # The records every board's development manifest takes.
+    COMMON_MANIFEST_PATH = 'config/manifest/development.txt'
+
     def record_path = self.class.record_path(name)
+    # The board's part of its development manifest: what it does not share with the
+    # other boards (its machine record, its system principal's memory, its own devices'
+    # units and windows and the domains whose rows name them), which is no manifest alone.
     def manifest_path = "config/manifest/#{name}-development.txt"
-    def manifest_source(root) = File.binread(File.join(root, manifest_path))
+    # The board's development manifest, the one text the packer admits and the board
+    # boots: the common part, then the board's (docs/design-stopgap.md, "The Phase 1
+    # manifest check"). The encoder sorts every table, so the order of the two parts
+    # does not reach the image.
+    def manifest_source(root) = [COMMON_MANIFEST_PATH, manifest_path].map { |path| File.binread(File.join(root, path)) }.join
     # The website's manifest, which only a board the website boots has: the development
     # manifest without the domains the record's site_leaves_out names, each taken out
     # with the room it took (Manifest::Edit.without_domain), which `tools/erx boot

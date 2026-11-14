@@ -430,8 +430,11 @@ archive is packed, since the archive's manifest records it; the image does not
 hold the manifest. Phase 1's EROFS windows pass blocks through unchecked; the
 hash check is a stopgap residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
-manifest
-[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt);
+development manifest is the records every board takes,
+[config/manifest/development.txt](../config/manifest/development.txt),
+followed by its own part,
+[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt)
+(`Platform#manifest_source`), and the packer admits the two as one text;
 the website's image has a manifest of its own, made from the development one
 whenever it is needed and never checked in (`Platform#site_manifest_source`): the
 development manifest without the configured domains the platform record's
