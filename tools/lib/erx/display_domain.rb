@@ -5,7 +5,7 @@
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'medium_boot'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'ppm'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -101,14 +101,14 @@ module Erx
     # sessions: the principals' domains quotas sum within max_domains, and each session
     # has its connection to the display.
     def manifest(source)
-      grown = ManifestText.grow(ProductionImage.without_sessions(source),
+      grown = Manifest::Edit.grow(ProductionImage.without_sessions(source),
                                 { ["limits #{DOMAIN}", 'outer'] => CLIENT_AREAS,
                                   ["limits #{DOMAIN}", 'connections'] => CLIENT_SESSIONS,
                                   ['principal system', 'memory'] => CLIENT_AREAS,
                                   %w[machine root_memory] => CLIENT_AREAS + CLIENT_MEMORY,
                                   %w[machine max_domains] => CLIENT_SESSIONS,
                                   %w[machine max_connections] => CLIENT_SESSIONS })
-      ManifestText.set(grown, { ["domain #{DOMAIN}", 'restarts'] => 0 }) + CLIENT
+      Manifest::Edit.set(grown, { ["domain #{DOMAIN}", 'restarts'] => 0 }) + CLIENT
     end
 
     # The screen read through the QMP socket until it equals the reference called name in

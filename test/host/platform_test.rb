@@ -39,7 +39,7 @@ class PlatformTest < Minitest::Test
   # leave out.
   def test_the_site_manifest_is_made_from_the_development_manifest
     development = VIRT.manifest_source(ROOT)
-    without = ->(source, domain) { Erx::ManifestText.without_domain(source, domain, units: VIRT.record.fetch('units')) }
+    without = ->(source, domain) { Erx::Manifest::Edit.without_domain(source, domain, units: VIRT.record.fetch('units')) }
     assert_equal without.(without.(development, 'web'), 'display'), VIRT.site_manifest_source(ROOT)
     assert_equal without.(development, 'web'), VIRT.site_manifest_source(ROOT, keep: %w[display])
     assert_raises(Erx::Error) { VIRT.site_manifest_source(ROOT, keep: %w[storage]) }

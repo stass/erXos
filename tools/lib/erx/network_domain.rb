@@ -4,7 +4,7 @@
 
 require_relative 'error'
 require_relative 'fiasco'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'medium_boot'
 require_relative 'net_device'
 require_relative 'net_device_echo_server'
@@ -85,7 +85,7 @@ module Erx
     module_function
 
     # The development manifest source with EDIT.
-    def manifest(source) = ManifestText.set(source, EDIT)
+    def manifest(source) = Manifest::Edit.set(source, EDIT)
 
     def answer(source) = /\A#{PROMPT}#{source}\r*\n\z/n
 

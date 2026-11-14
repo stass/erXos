@@ -494,11 +494,13 @@ class ProductionImageTest < Minitest::Test
   end
 
   # A larger machine grows root_memory and system_baseline by the same amount and /tmp's
-  # cap by its own, and leaves every other line alone, so the manifest check proves the
-  # same properties.
+  # cap by its own, and leaves every other field alone, so the manifest check proves the
+  # same properties. The machine's edit prints the manifest again (Manifest::Edit), so
+  # it is compared line by line with the sessionless manifest as printed.
   def test_a_larger_machine_grows_the_root_the_system_baseline_and_tmp_alone
     plain = PLATFORM.manifest_source(ROOT)
-    source = Erx::ProductionImage.without_sessions(plain)
+    frontend = Erx::Manifest::Frontend
+    source = frontend.render(frontend.read(Erx::ProductionImage.without_sessions(plain)))
     refute_equal plain, source, 'the development manifest has a session template'
     refute_match(/^session /, source)
     machine = DEVELOPMENT.with(memory_mib: 2048, fiasco_reserve_mib: 160, system_growth_mib: 1024, tmp_growth_mib: 64, root_mib: 64)
@@ -507,7 +509,7 @@ class ProductionImageTest < Minitest::Test
       assert_equal manifest_number(source, field) + (growth << 20), manifest_number(grown, field)
     end
     changed = source.lines.zip(grown.lines).reject { |old, new| old == new }.map { |old, _| old[/\A *[a-z_]+/].strip }
-    assert_equal %w[tmp root_memory system_baseline], changed
+    assert_equal %w[root_memory system_baseline tmp], changed.sort
     assert_equal source, DEVELOPMENT.manifest(plain)
     assert_equal PLATFORM.record, DEVELOPMENT.record, 'the development machine is the record'
     assert_equal(PLATFORM.record.merge('ram_bytes' => 2048 << 20, 'fiasco_reserve' => 160 << 20),

@@ -439,7 +439,7 @@ development manifest without the configured domains the platform record's
 the web domain, since the website's page has no host link and the web facet is
 all that domain serves, and the display domain, since the page has no gpu for it
 to drive; each would only cost boot time on the emulator's one core.
-`ManifestText.without_domain` takes a domain out as if it had never been written
+`Manifest::Edit.without_domain` takes a domain out as if it had never been written
 in: its record, the units it holds, the services it serves with their display
 records and the system domain's facets of them, and the limits, share and
 runtime limits only it names; it gives the room back where the manifest reckons

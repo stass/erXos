@@ -2,7 +2,7 @@
 
 require_relative 'error'
 require_relative 'json_input'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 
 module Erx
   # A board's platform record (config/platforms/NAME.json) and the development manifest beside it
@@ -70,7 +70,7 @@ module Erx
     def manifest_source(root) = File.binread(File.join(root, manifest_path))
     # The website's manifest, which only a board the website boots has: the development
     # manifest without the domains the record's site_leaves_out names, each taken out
-    # with the room it took (ManifestText.without_domain), which `tools/erx boot
+    # with the room it took (Manifest::Edit.without_domain), which `tools/erx boot
     # --without-web` builds the site's image from (InteractiveBoot) and the medium boots
     # start from (MediumBoot). It is made from the development manifest each time it is
     # read, so it never differs from it in anything but those domains. keep names domains
@@ -84,7 +84,7 @@ module Erx
       raise Error, "the site manifest leaves out no #{(keep - leaves_out).join(', ')} to keep" unless (keep - leaves_out).empty?
 
       (leaves_out - keep).reduce(manifest_source(root)) do |source, domain|
-        ManifestText.without_domain(source, domain, units: record.fetch('units'))
+        Manifest::Edit.without_domain(source, domain, units: record.fetch('units'))
       end
     end
 

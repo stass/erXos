@@ -25,7 +25,7 @@ require_relative 'reload_guest'
 require_relative 'code_watch'
 require_relative 'json_input'
 require_relative 'manifest'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'native_root'
 require_relative 'native_jit_runtime'
 require_relative 'native_runtime'
@@ -231,11 +231,11 @@ module Erx
       # template (ProductionImage.without_sessions), so the console's login at boot starts
       # no session and the UART stays with the system shell, and with root_memory and
       # system_baseline each grown by system_growth_mib and the system domain's /tmp cap,
-      # its runtime limits' tmp, by tmp_growth_mib; any other line is unchanged.
+      # its runtime limits' tmp, by tmp_growth_mib; every other record is unchanged (Manifest::Edit).
       def manifest(source)
         raise Error, "/tmp's growth is more than the system's" if tmp_growth_mib > system_growth_mib
 
-        ManifestText.grow(ProductionImage.without_sessions(source),
+        Manifest::Edit.grow(ProductionImage.without_sessions(source),
                           { %w[machine root_memory] => system_growth_mib << 20,
                             %w[machine system_baseline] => system_growth_mib << 20,
                             ['runtime_limits system', 'tmp'] => tmp_growth_mib << 20 })
