@@ -632,15 +632,7 @@ it; git history is the record of completed work.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
   platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
   local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
-  (`board_tree.rb`) would make the window's isolation hold by construction. `dom_boot_view.c` reads a framebuffer
-  row's line 0 as a line, which only matters once another row records line 0.
-* [High] the root's framebuffer record (`liberx/backend/fiasco/runtime_entry.c`, `liberx/backend/core/boot_manifest.c`,
-  `liberx/system/dom_boot_view.c`; [design-device-tree.md](docs/design-device-tree.md#facts-into-records)): a
-  `framebuffer` row is in no row of `erx_device_kinds`, so the root asks the tree nothing for it, prints no
-  `framebuffer` line and writes no `-erx framebuffer` record. A configured domain that holds one would get no record
-  and an IRQ object for line 0, which the view reads as a line (the `check_framebuffer_windows` item). The reader, `erx_dt_framebuffer`, is built and tested;
-  what remains is the row's ask and line, the physical object over the framebuffer's pages, the record and its
-  size in `include/erx/boot_words.h`, and its reader in `erx_device_record`.
+  (`board_tree.rb`) would make the window's isolation hold by construction.
 * [Medium] `erlang/apps/erx_display/src/erx_screen.erl`: the overlay and the idle policy, whose times are the display
   domain's `display_idle_dim_s` and `display_idle_off_s` variables, are not built; the screen receives the input notice
   from `erx_winfs` and ignores it, so no idle clock runs
@@ -1444,9 +1436,6 @@ it; git history is the record of completed work.
 * [Low] `liberx/backend/core/boot_manifest.h`, `erx_boot_device_t`: `given` and `framebuffer` are two bools for
   one closed kind (physical, given, framebuffer), so `given && framebuffer` is representable and a consumer that
   forgets the framebuffer case reads a NULL `role`. One enum switched on exhaustively.
-* [Low] `liberx/backend/core/boot_manifest.c`, `line_shared`: a framebuffer row is a device-tree row whose line
-  field is 0 though it has no line, so a device of another row whose line is 0 is marked shared. Skip framebuffer
-  rows.
 * [Low] `erlang/apps/erx/src/erx_device_record.erl`, the `-erx framebuffer` reader: it accepts an OFFSET of a
   page or more, which the root never writes; refuse it, and teach the fuzz reference
   (`test/erlang/erx_device_record_fuzz.erl`) the same bound.

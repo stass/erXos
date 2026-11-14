@@ -82,7 +82,12 @@ class DtTest < Minitest::Test
                      "#{FRAMEBUFFER.call.sub('framebuffer@0', 'framebuffer@1')} };"),
     'fb-region' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call(extra: 'memory-region = <1>;')} };"),
     'fb-format' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call(format: '"y8"')} };"),
-    'fb-short-stride' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call(stride: 7679)} };")
+    'fb-short-stride' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call(stride: 7679)} };"),
+    'fb-no-stride' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call.sub('stride = <7680>; ', '')} };"),
+    'fb-no-reg' => tree("chosen { #address-cells = <2>; #size-cells = <1>; #{FRAMEBUFFER.call.sub(/reg = <[^>]*>; /, '')} };"),
+    # A reg one cell short of #address-cells plus #size-cells, whose size read on past the
+    # property would be above 4 GiB, so only the length test refuses it.
+    'fb-short-reg' => tree("chosen { #address-cells = <2>; #size-cells = <2>; #{FRAMEBUFFER.call(reg: '0x0 0x7e000000 0x1')} };")
   }.freeze
 
   # The framebuffer row's window in the fixtures, above their RAM; one whose end is not
@@ -123,6 +128,12 @@ class DtTest < Minitest::Test
     'the stride test removed' =>
       ['(uint64_t)width * (dt_formats[format].bits / 8) > stride || ', '', 'fb-short-stride',
        "fb /chosen simple-framebuffer #{WINDOW}", 'fb malformed 0x0 0x0 0x0 0 - 0'],
+    "the reg's length test removed" =>
+      ['if (reg == NULL || len != (ac + sc) * DT_CELL)', 'if (reg == NULL)', 'fb-short-reg',
+       "fb /chosen simple-framebuffer #{WINDOW}", 'fb malformed 0x0 0x0 0x0 0 - 0'],
+    "the framebuffer's RAM test removed" =>
+      ['last_page > window_last || memory_meets(tree, first_page, last_page)', 'last_page > window_last', 'fb-in-ram',
+       "fb /chosen simple-framebuffer #{RAM_WINDOW}", 'fb outside 0x3ff00000 0x400000 0x0 0 - 0'],
     'the window test made over the unrounded reg' =>
       ['first_page < window.base || last_page > window_last', 'base < window.base || last > window_last', 'fb-crossing',
        "fb /chosen simple-framebuffer #{CROSSING_WINDOW}", 'fb outside 0x7e000000 0x3ff801 0x0 0 - 0']
@@ -273,7 +284,10 @@ end
       'fb-two' => 'fb ambiguous 0x0 0x0 0x0 0 - 0',
       'fb-region' => 'fb unsupported 0x0 0x0 0x0 0 - 0',
       'fb-format' => 'fb malformed 0x0 0x0 0x0 0 - 0',
-      'fb-short-stride' => 'fb malformed 0x0 0x0 0x0 0 - 0'
+      'fb-short-stride' => 'fb malformed 0x0 0x0 0x0 0 - 0',
+      'fb-no-stride' => 'fb malformed 0x0 0x0 0x0 0 - 0',
+      'fb-no-reg' => 'fb malformed 0x0 0x0 0x0 0 - 0',
+      'fb-short-reg' => 'fb malformed 0x0 0x0 0x0 0 - 0'
     }.each { |name, expected| assert_equal expected, fixture_answers(name, query)[1], name }
     assert_equal 'fb ok 0x7e000000 0x3ff801 1920x480 7680 x8r8g8b8 32', fixture_answers('fb-crossing', query)[1]
     assert_equal 'fb outside 0x7e000000 0x3ff801 0x0 0 - 0',

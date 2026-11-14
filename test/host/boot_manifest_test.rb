@@ -46,11 +46,13 @@ class BootManifestTest < Minitest::Test
     output
   end
 
-  def admitted(source = @source, platform: 'qemu-virt')
-    platform = JSON.parse(File.read(File.join(ROOT, "config/platforms/#{platform}.json")))
-    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform, build_kind: 'development'))
+  # record: the platform record, by default the named platform's own.
+  def admitted(source = @source, platform: 'qemu-virt', record: platform_record(platform))
+    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: record, build_kind: 'development'))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: ManifestContextFixture.accepting_planner).bytes
   end
+
+  def platform_record(platform) = JSON.parse(File.read(File.join(ROOT, "config/platforms/#{platform}.json")))
 
   # hostlink: whether the boot carries erx.hostlink=1, which the driver passes on as its third argument.
   def read(bytes, stdout_path: '/pl011@9000000', hostlink: true)
@@ -357,6 +359,19 @@ class BootManifestTest < Minitest::Test
     assert_match(/^console_words-erx console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
     assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \d+ \d+ 153 shared \d+ exact 1/,
                  output)
+  end
+
+  # A framebuffer row names no line, though its line field is 0 (erx/dom.h, the view gives
+  # it none), so a device on line 0 beside the Pi's framebuffer row has its line to itself.
+  # The Pi's mini UART is moved to line 0 off the auxiliary SPI controllers' 125.
+  def test_a_framebuffer_row_shares_no_line
+    record = platform_record('raspi4b')
+    record.fetch('units').find { |unit| unit.fetch('key') == 'console-uart' }.fetch('devices')
+          .find { |device| device.fetch('path') == '/soc/serial@7e215040' }['line'] = 0
+    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    output, status = read(admitted(pi, platform: 'raspi4b', record: record), stdout_path: '/soc/serial@7e215040')
+    assert status.success?, output
+    assert_match(/^console_uart #{0xfe215040} 64 0 direct \d+\n/, output)
   end
 
   # window: the row's window, by default every page but the last.
