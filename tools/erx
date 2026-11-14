@@ -395,6 +395,8 @@ module Erx
                    name: 'fuzz-erx-procfs', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_inspect_query.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-inspect-query', deadline: 300, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_log_facet.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-log-facet', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_devfs.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-devfs', deadline: 300, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_rc_conf.rb'), '--seed', options.fetch(:seed).to_s],

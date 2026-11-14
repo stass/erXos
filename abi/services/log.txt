@@ -1,0 +1,17 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The log interface (docs/design-log.md, "The log facet"): a domain's records for the
+# system log, served by the system domain. write takes a list of at most log_write_max
+# records {Level, Text}, each level one of the logger's eight and each text a binary of
+# at most log_write_text_max bytes, and answers ok once the service has taken the batch.
+# erx_log_facet:decode/1 refuses anything else with {error, badarg}; the facet answers
+# {error, busy} past its limit in flight, {error, unavailable} with no service and
+# {error, failed} when the service ends before it answers, and drops a request past its
+# max_request unanswered (erx_facet). The grantee, its principal and its name are the
+# service's, from the facet, never the request's, so a domain can lie only in its own
+# text. log_write_text_max is the service's bound on one record's text, distinct from
+# and larger than the kernel ring's log_text_max (2112 bytes).
+service log 9
+  operation write 1
+limit log_write_max u32 16
+limit log_write_text_max u32 4096

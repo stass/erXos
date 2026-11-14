@@ -51,6 +51,7 @@
              erx_irq_line_core,
              erx_kernel_records,
              erx_log,
+             erx_log_facet,
              erx_log_h,
              erx_log_records,
              erx_manifest,

@@ -30,8 +30,11 @@ The module is pure: accept/4 takes the arrival time and returns the next state.
 -export([new/0, accept/4]).
 -export_type([source/0, state/0]).
 
--define(TEXT_MAX, 4096).
--define(RATE_BYTES, 16384).
+-include("generated/erx_abi.hrl").
+
+%% The longest text of a record, in bytes: the log interface's log_write_text_max.
+-define(TEXT_MAX, ?ERX_LOG_WRITE_TEXT_MAX).
+-define(RATE_BYTES, ?ERX_LOG_RATE_BYTES).
 -define(NS_PER_S, 1000000000).
 -define(NS_PER_US, 1000).
 -define(LEVELS, [emergency, alert, critical, error, warning, notice, info, debug]).

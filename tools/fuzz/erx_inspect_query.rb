@@ -21,7 +21,7 @@ module ErxInspectQueryFuzz
   GENERATED = [Erx::Generated.path('erlang/apps/erx/src/generated/erx_schema.erl', root: ROOT)].freeze
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   TARGET = 'test/erlang/erx_inspect_query_fuzz.erl'
-  LENGTH_BOUND = 'path([Segment | Rest], Count, Literals) when Count < ?MAX_SEGMENTS ->'
+  LENGTH_BOUND = 'path([Segment | Rest], Count, Literals) when Count < ?ERX_INSPECT_PATH_MAX ->'
   NO_LENGTH_BOUND = 'path([Segment | Rest], Count, Literals) when is_integer(Count) ->'
   DEADLINE_SECONDS = '120'
 

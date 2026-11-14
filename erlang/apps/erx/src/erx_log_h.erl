@@ -34,8 +34,10 @@
 -export([adding_handler/1, removing_handler/1, log/2]).
 -export([sync/0, record/2]).
 
-%% The longest text of a record, in bytes, as the console accepts it.
--define(TEXT_MAX, 4096).
+-include("generated/erx_abi.hrl").
+
+%% The longest text of a record, in bytes: the log interface's log_write_text_max.
+-define(TEXT_MAX, ?ERX_LOG_WRITE_TEXT_MAX).
 %% What ends a cut text, so a reader sees that the record holds less than the event.
 -define(CUT_MARK, <<"...">>).
 %% The proxy's registered name.
