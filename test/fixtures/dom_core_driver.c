@@ -55,20 +55,20 @@ static const erx_dom_file_t files[] = {
 	{ ERX_ENTRY_IMAGE, 0, false, 0, 8 * ERX_PAGE_SIZE, 100 },
 };
 
+/* Eight names of a device object kind, one per device, window or line. */
+#define EIGHT(kind)	kind "0", kind "1", kind "2", kind "3", kind "4", kind "5", kind "6", kind "7"
 static const char *const obj_names[] = {
 	"NONE", "BUDGET", "OUTER", "SPACE", "GROUP", "SPACES_GROUP", "BOOTINFO",
 	"CRASH", "SYS_BUDGET", "SYS_SIDE", "DOM_SIDE", "SYS_BELL", "DOM_BELL",
 	"SLICE", "THREAD", "LINK_BUDGET_A", "LINK_BUDGET_B", "SIDE_A", "SIDE_B",
-	"BELL_A", "BELL_B", "AREA_A", "AREA_B", "DEV_RESOURCE",
-	"DEV_WINDOW0", "DEV_WINDOW1", "DEV_WINDOW2", "DEV_WINDOW3",
-	"DEV_WINDOW4", "DEV_WINDOW5", "DEV_WINDOW6", "DEV_WINDOW7",
-	"DEV_IRQ0", "DEV_IRQ1", "DEV_IRQ2", "DEV_IRQ3",
-	"DEV_IRQ4", "DEV_IRQ5", "DEV_IRQ6", "DEV_IRQ7",
-	"DEV_DMA", "DEV_MEMORY", "PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
+	"BELL_A", "BELL_B", "AREA_A", "AREA_B", EIGHT("DEV_RESOURCE"),
+	EIGHT("DEV_WINDOW"), EIGHT("DEV_IRQ"), EIGHT("DEV_DMA"), EIGHT("DEV_MEMORY"),
+	"PRINCIPAL_BUDGET", "PARENT_GROUP", "SYSTEM_SPACE",
 	"SYSTEM_GROUP", "FAULT_GATE", "TIME_PAGE", "OUTER_A", "OUTER_B",
 	"GROUP_A", "GROUP_B", "SPACE_A", "SPACE_B", "ROOT_RESOURCE",
-	"SYSTEM_BUDGET", "HOLDER_BUDGET", "HOLDER_SPACE", "DEV_KEPT"
+	"SYSTEM_BUDGET", "HOLDER_BUDGET", "HOLDER_SPACE", EIGHT("DEV_KEPT")
 };
+#undef EIGHT
 _Static_assert(sizeof(obj_names) / sizeof(obj_names[0]) == ERX_DOM_OBJ_COUNT,
     "obj_names names every object");
 
@@ -1044,13 +1044,28 @@ gives_shared_view(void)
 
 /* How many IRQ objects a give makes. */
 static uint32_t
-irq_steps(const erx_dom_device_plan_t *give)
+irq_steps(const erx_dom_unit_plan_t *give)
 {
 	uint32_t count = 0;
 
 	for (uint32_t step = 0; step < give->nsteps; step++)
 		count += give->steps[step].kind == ERX_DOM_STEP_IRQ ? 1 : 0;
 	return (count);
+}
+
+/* Adds give as plan's second give, its GIVE step right after the first's. */
+static void
+second_give(erx_dom_plan_t *plan, const erx_dom_unit_plan_t *give)
+{
+	uint32_t at = 0;
+
+	while (at < plan->nsteps && plan->steps[at].kind != ERX_DOM_STEP_GIVE)
+		at++;
+	memmove(&plan->steps[at + 2], &plan->steps[at + 1], (plan->nsteps - at - 1) * sizeof(plan->steps[0]));
+	plan->steps[at + 1] = (erx_dom_step_t){ .kind = ERX_DOM_STEP_GIVE, .index = 1 };
+	plan->nsteps++;
+	plan->gives[1] = *give;
+	plan->ngives = 2;
 }
 
 /* The index of the step of kind in plan, or nsteps for none. */
@@ -1076,7 +1091,7 @@ gives(void)
 	give = step_of(&plan, ERX_DOM_STEP_GIVE);
 	boot = step_of(&plan, ERX_DOM_STEP_BOOTINFO);
 	printf("gives first %d ngives=%u index=%u before_boot=%d holder=%d last=%s\n", (int)status, plan.ngives,
-	    plan.gives[0].index, give + 1 == boot, plan.gives[0].holder == 6 && plan.gives[0].slot == plan.slot,
+	    plan.gives[0].devices[0].index, give + 1 == boot, plan.gives[0].holder == 6 && plan.gives[0].slot == plan.slot,
 	    obj_names[plan.gives[0].steps[plan.gives[0].nsteps - 1].obj]);
 
 #define SEED(name, edit) do {						\
@@ -1091,27 +1106,35 @@ gives(void)
 	SEED("other_holder", seeded.gives[0].holder = 7);
 	SEED("other_slot", seeded.gives[0].slot = plan.slot + 1);
 	SEED("window_phys", seeded.gives[0].steps[4].rights |= ERX_HR_PHYS);
-	printf("gives direct shared=%d own=%d\n", plan.gives[0].lines[0].shared,
-	    plan.gives[0].lines[0].give == ERX_DOM_GIVE_OWN);
+	printf("gives direct shared=%d line=%u\n", plan.gives[0].devices[0].shared, plan.gives[0].devices[0].line);
 
 	/*
-	 * Devices 0 and 2 share a line: device 0's give makes its one IRQ
-	 * object, and device 2's makes none and names that one, so the holder
-	 * takes it once. Both records mark the line shared.
+	 * Devices 0 and 2, of unit 0, share a line: the unit's one give makes
+	 * its one IRQ object, which both records name, and marks it shared in
+	 * both, and makes a window for each device's page.
 	 */
 	gives_shared_view();
 	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
-	printf("gives shared %d ngives=%u irqs=%u,%u source=%u.%u marks=%d,%d\n", (int)status, plan.ngives,
-	    irq_steps(&plan.gives[0]), irq_steps(&plan.gives[1]), plan.gives[1].lines[0].give,
-	    plan.gives[1].lines[0].index, plan.gives[0].lines[0].shared, plan.gives[1].lines[0].shared);
+	printf("gives shared %d ngives=%u devices=%u irqs=%u lines=%u,%u marks=%d,%d\n", (int)status, plan.ngives,
+	    plan.gives[0].ndevices, irq_steps(&plan.gives[0]), plan.gives[0].devices[0].line,
+	    plan.gives[0].devices[1].line, plan.gives[0].devices[0].shared, plan.gives[0].devices[1].shared);
 	SEED("shared_valid", (void)0);
-	SEED("shared_from_itself", seeded.gives[1].lines[0].give = 1);
-	SEED("shared_from_unmade", seeded.gives[1].lines[0].index = 1);
-	SEED("shared_direct", seeded.gives[1].lines[0].shared = false);
-	SEED("shared_from_later", {
-		seeded.gives[0] = plan.gives[1];
-		seeded.gives[1] = plan.gives[0];
-		seeded.gives[0].lines[0].give = 1;
+	/* A device in two gives of the creation, each of its own unit. */
+	SEED("device_twice", {
+		second_give(&seeded, &plan.gives[0]);
+		seeded.gives[1].unit = 1;
+	});
+	/* A unit in two gives, each of devices of its own. */
+	SEED("unit_twice", {
+		second_give(&seeded, &plan.gives[0]);
+		seeded.gives[1].devices[0].index = seeded.gives[1].steps[0].index = 1;
+		seeded.gives[1].devices[1].index = seeded.gives[1].steps[1].index = 3;
+	});
+	SEED("units_apart", {
+		second_give(&seeded, &plan.gives[0]);
+		seeded.gives[1].unit = 1;
+		seeded.gives[1].devices[0].index = seeded.gives[1].steps[0].index = 1;
+		seeded.gives[1].devices[1].index = seeded.gives[1].steps[1].index = 3;
 	});
 #undef SEED
 

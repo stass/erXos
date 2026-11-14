@@ -125,15 +125,17 @@ Each requirement follows from that one closure:
 * **A device of no kind is held, not driven.** A device whose role and
   compatible string are in no row of `include/erx/device_kinds.h` gets
   no `-erx_record given` record, so no driver opens it, and no register window
-  of its own, DMA window or memory, so its holder holds no window onto
-  its registers that any of its processes could open; the planner's
-  overlap check (`life_overlaps`) keeps a driven device's window off its
-  pages. Since no give makes its memory, the boot view refuses a row of
+  of its own, DMA window or memory. Its registers on a page that a
+  driven device of its unit shares lie in that device's window, as the
+  auxiliary SPI controllers lie in the mini UART's on every row: sharing
+  inside a domain is the domain's business, so the planner's overlap
+  check (`life_overlaps`) refuses only a range that meets another unit's.
+  Since no give makes its memory, the boot view refuses a row of
   no kind that asks for DMA memory. Its holder still holds
-  it with its unit, and a configured domain's creation gives it only the
-  IRQ object of each line that a device of a kind in its unit also
-  names, when it is the first device of the unit on that line, so that the
-  line has its one object as the line rule above requires. A line that
+  it with its unit, and a configured domain's creation gives it only its
+  resource: the unit's give makes the IRQ object of each line a device of
+  a kind in the unit names, from the first such device, so that the line
+  has its one object as the line rule above requires. A line that
   only devices of no kind name has no reader, so no give makes its object. The Raspberry
   Pi 4's legacy SD controller, in the storage domain's `sd` unit, is such
   a device, and the system domain's SPI controllers get no objects of

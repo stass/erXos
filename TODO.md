@@ -660,7 +660,7 @@ it; git history is the record of completed work.
   share, with 24 MiB, the `display_domain` suite's unmeasured figure; size both from a measurement of the
   domain driving a screen. No boot of the development image attaches a gpu (`tools/erx boot` included), so the
   domain runs there without a screen, and no session is granted the display. The display domain holds its
-  keyboard and tablet only once the give is per unit and the unit is the transport page (security residuals,
+  keyboard and tablet only once the unit is the transport page (security residuals,
   `boot_devices`); QEMU virt's four transport pages are the spare's, the display's, the network device's and
   the disks'.
 * [Medium] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
@@ -1490,18 +1490,21 @@ it; git history is the record of completed work.
   `Changed device tree` line, or `x0` at bootstrap's entry) and check it lies past the image's end; if it does
   not, pin it in `config.txt` to the harness's address, after checking in Raspberry Pi's `config.txt`
   documentation which setting does that.
-* [Medium] domain library, a device of no kind (`liberx/system/dom_life.c`, `erx_dom_plan_device_give`;
-  docs/design-shared-devices.md, "The unit rule"): that such a device gets no window, DMA window or memory rests
-  on `driven` guards in the planner, and `erx_dom_device_check` cannot tell an unrecorded give from a driven one,
-  so a new object kind that forgets the guard is installed. Carry the device's kind in `erx_dom_device_plan_t` and
-  have the check refuse window, DMA, memory and kept installs on a give of no kind, so the plan validator enforces
-  it; `apply_args` would then read the same flag. Simpler still: make a line's IRQ object in the first driven
-  give that names it (`life_line_source` searching driven gives only), so a give of no kind makes only its
-  resource, `life_line_driven` goes away and the check's rule is one line. Today a kindless give first on a line
-  makes the object, which rests on `life_line_driven` answering alike for every device on a (unit, line) and only
-  `dom_give_lines_ok` catches a disagreement; the change moves the native_domain `case_given` assertion that the
-  kindless device 0 holds the line's object, and needs checking that an IRQ object made from the driven device's
-  resource serves the line on Fiasco.
+* [Low] domain library, windows from the root's resource (`liberx/system/dom_life.c`, `erx_dom_plan_unit_give`;
+  `liberx/system/dom_apply.c`, `give_object`): each WINDOW step makes its window from the root's resource, since
+  a page run may span several devices, and `give_object` passes the root's resource as a placeholder handle,
+  `APPLY_NO_HANDLE`, because no backend has a resource object and each create ignores the argument. For erXos's
+  kernel, make each window from a resource carved over its run (`ERX_CARVE_RANGE`) and give `give_object` a real
+  root-resource case.
+* [Low] domain library, a unit's lines against other units (`liberx/system/dom_life.c`, `life_overlaps`,
+  `life_unit_lines`): the planner refuses a range that meets another unit's but not a line another unit names;
+  only the boot view refuses two units on one line, at build and again at boot. A view built some other way
+  would let two holders each make an IRQ object on the line, which the kernel refuses for the second. Have the
+  planner refuse it with the boot view's own predicate if a second builder of views appears.
+* [Low] domain library fuzzing, the give's reach (`tools/fuzz/dom_core_fuzz.c`, the give section and
+  `fuzz_window_covered`): the fuzzed view holds two device entries, so a give of three or more devices, runs
+  joining several ranges, and a line shared by more than two devices are reached only by the host drivers. Widen the
+  view to `ERX_DOM_DEVICES_MAX` entries.
 * [Low] domain library, PCIe functions on a configured row (`liberx/system/dom_boot_view.c`, `boot_devices`): only
   device-tree selectors get a role word and peripheral, so a PCIe function placed on a configured row would be of
   no kind and get no record, window or memory. No manifest places one; give the kind test a PCIe arm first.
@@ -3242,26 +3245,12 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   layout for domain releases (IM1) that service domains never run the
   system release's ERTS entry.
 * [Low] domain library, `liberx/system/dom_life.c`
-  `erx_dom_plan_device_give`: it plans a device-tree entry (its resource,
-  a window per range, an IRQ object per line, a DMA window or contiguous
+  `erx_dom_plan_unit_give`: it plans the device-tree entries of a unit (their resources,
+  a window per page run, an IRQ object per line, a DMA window or contiguous
   memory); a PCIe function's give, with its BARs carved inside the
   bridge's windows, its MSIs and its requester id's stream
   ([design-system.md](docs/design-system.md#devices)), lands with the PCIe
   enumerator.
-* [Low] domain library, `liberx/system/dom_boot_view.c` and
-  `erx_dom_plan_device_give`: the catalogue has an entry per device, so a
-  unit of several devices that share a register page (the Raspberry Pi 4's
-  mini UART and auxiliary SPI controllers, two of QEMU `virt`'s virtio-mmio
-  transports, 0x200 apart) cannot be given to a configured domain: each
-  entry's window covers the shared page and the give refuses overlapping
-  entries, so the boot view, and with it the build, refuses such a unit on a
-  configured row. A shared line is one IRQ object per creation, made in the
-  first give that names it, which later gives of the unit name through
-  `erx_dom_give_line_t`. Make the give the unit's, with one window per page
-  run and one IRQ object per distinct line, as
-  [design-shared-devices.md](docs/design-shared-devices.md#the-unit-rule)
-  has it, before a board places such a unit outside the system domain; that
-  deletes `erx_dom_give_line_t` and its cross-give checks.
 * [Medium] drivers, `erlang/apps/erx_blk` (and `erx_net`, `erx_fb`): no
   configured domain's driver starter calls `erx_irq_line:start_owners/1`, so a
   driver on a line its unit shares, which the domain library now marks
@@ -3271,11 +3260,6 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   [design-storage.md](docs/design-storage.md) "The SD controller's line"
   has it; land it with the Raspberry Pi 4's SD transport, the first driver
   on such a line.
-* [Low] fuzzing, `tools/fuzz/dom_core_fuzz.c`: `erx_dom_plan_device_give` is
-  fuzzed with an empty holder, so `life_line_source`'s walk of the earlier
-  gives never runs. Seed the holder's gives from the input and check every
-  plan the planner returns against `erx_dom_device_check` and the
-  creation's line rules (`dom_give_lines_ok`).
 * [Medium] domain library, `liberx/system/dom_boot_view.c`, `boot_devices`:
   the refusal of a split unit says which relation met (a register page or an
   interrupt line) but not which two devices or which line, where
@@ -5943,7 +5927,7 @@ to the corpus and follow rc
   no boot of its image attaches a display yet; one that attaches `QemuPlan::Display` with its defaults gives
   the display domain both input devices. Make the record's unit on QEMU virt the transport
   page, with every transport the board's tree has on it, so what a window reaches is what the unit lists by
-  construction. The display domain holds its keyboard and tablet only once the give is per unit and the unit
+  construction. The display domain holds its keyboard and tablet only once the unit
   is the transport page; QEMU virt's four transport pages are the spare's, the display's, the network
   device's and the disks'.
 * [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a device spec's `window` and

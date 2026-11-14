@@ -46,9 +46,19 @@ static bool	life_range_ok(const erx_dom_range_t *);
 static bool	life_entry_ok(const erx_dom_device_entry_t *);
 static uint64_t	life_range_end(const erx_dom_range_t *);
 static bool	life_overlaps(const erx_dom_view_t *, uint32_t);
+
+/*
+ * A give's windows (life_unit_layout): its page runs, and for each of its
+ * devices the run its first range lies in, ERX_DOM_UNIT_NONE for none,
+ * and its registers' offset into it.
+ */
+typedef struct life_layout {
+	uint32_t	nruns;
+	erx_dom_range_t	runs[ERX_DOM_UNIT_WINDOWS_MAX];
+	uint32_t	window[ERX_DOM_DEVICES_MAX];
+	uint64_t	offset[ERX_DOM_DEVICES_MAX];
+} life_layout_t;
 static erx_dom_obj_t life_grant_key(erx_dom_obj_t);
-static void	life_device_install(erx_dom_device_plan_t *, erx_dom_obj_t);
-static bool	life_device_step_ok(const erx_dom_step_t *, const bool *);
 
 static bool
 life_add(uint64_t a, uint64_t b, uint64_t *sum)
@@ -678,10 +688,13 @@ life_range_end(const erx_dom_range_t *range)
 }
 
 /*
- * Some range of entry index meets a range of another entry, so its windows
- * would reach another device's registers. Entry index's ranges are well
- * formed; another entry's are read within the ABI's limit whatever their
- * count says.
+ * Some range of entry index meets a range of an entry of another unit, so
+ * its window would reach registers another holder may have. Inside the
+ * unit pages may be shared, by driven devices and devices of no kind
+ * alike: the unit's one window covers them, and sharing inside a domain
+ * is the domain's business (docs/design-shared-devices.md, "The unit
+ * rule"). Entry index's ranges are well formed; another entry's are read
+ * within the ABI's limit whatever their count says.
  */
 static bool
 life_overlaps(const erx_dom_view_t *view, uint32_t index)
@@ -691,9 +704,9 @@ life_overlaps(const erx_dom_view_t *view, uint32_t index)
 	uint32_t count;
 
 	for (uint32_t each = 0; each < view->ndevices; each++) {
-		if (each == index)
-			continue;
 		other = &view->devices[each];
+		if (other->unit == mine->unit)
+			continue;
 		count = other->nranges < ERX_DEVICE_RANGES_MAX ?
 		    other->nranges : ERX_DEVICE_RANGES_MAX;
 		for (uint32_t i = 0; i < mine->nranges; i++) {
@@ -710,96 +723,264 @@ life_overlaps(const erx_dom_view_t *view, uint32_t index)
 }
 
 /*
- * Whether entry names interrupt line number, and at which of its line
- * indices first. The entry's lines are read within the ABI's limit
- * whatever its count says, as another entry's ranges are.
+ * Whether entry names interrupt line number. The entry's lines are read
+ * within the ABI's limit whatever its count says, as another entry's
+ * ranges are.
  */
 static bool
-life_names_line(const erx_dom_device_entry_t *entry, uint32_t number,
-    uint32_t *at)
+life_names_line(const erx_dom_device_entry_t *entry, uint32_t number)
 {
 	const uint32_t count = entry->nlines < ERX_DEVICE_IRQS_MAX ?
 	    entry->nlines : ERX_DEVICE_IRQS_MAX;
 
-	for (uint32_t line = 0; line < count; line++) {
-		if (entry->lines[line] == number) {
-			*at = line;
+	for (uint32_t line = 0; line < count; line++)
+		if (entry->lines[line] == number)
 			return (true);
+	return (false);
+}
+
+/*
+ * The give's devices: every entry of the unit, in catalogue order, each
+ * placed on holder's row, well formed, meeting no entry of another unit,
+ * and held by no living domain, with the facts its windows come from.
+ */
+static erx_status_t
+life_unit_devices(const erx_dom_view_t *view, const erx_dom_plan_t *holder,
+    erx_dom_unit_plan_t *draft)
+{
+	const erx_dom_device_entry_t *entry;
+	const erx_dom_device_t *record;
+	erx_dom_unit_device_t *device;
+	uint32_t held;
+
+	for (uint32_t index = 0; index < view->ndevices; index++) {
+		entry = &view->devices[index];
+		record = &view->device_records[index];
+		if (entry->unit != draft->unit)
+			continue;
+		if (draft->ndevices == ERX_DOM_DEVICES_MAX)
+			return (ERX_ELIMIT);
+		/*
+		 * Only to a domain of the configured row the manifest places the
+		 * unit on: not a requested or session domain, nor one of another
+		 * row.
+		 */
+		if (!erx_dom_from_row(&holder->spec.origin, entry->row))
+			return (ERX_EINVAL);
+		if (record->index != index || !life_entry_ok(entry) ||
+		    life_overlaps(view, index))
+			return (ERX_EINVAL);
+		/* A holder that has ended held objects its own budget took with it. */
+		held = life_slot(view, record->holder);
+		if (held != view->max_domains && life_alive(&view->domains[held]))
+			return (ERX_EBUSY);
+		device = &draft->devices[draft->ndevices++];
+		*device = (erx_dom_unit_device_t){ .index = index,
+		    .driven = erx_dom_entry_driven(entry),
+		    .nranges = entry->nranges, .reg_offset = entry->offset,
+		    .reg_size = entry->size, .window = ERX_DOM_UNIT_NONE,
+		    .line = ERX_DOM_UNIT_NONE };
+		for (uint32_t range = 0; range < entry->nranges; range++)
+			device->ranges[range] = entry->ranges[range];
+	}
+	return (draft->ndevices == 0 ? ERX_EINVAL : ERX_OK);
+}
+
+/*
+ * Adds a well-formed range to the page runs: it joins every run it meets
+ * or abuts, which may join runs that were apart, so the scan starts again
+ * after each join. ERX_ELIMIT past ERX_DOM_UNIT_WINDOWS_MAX runs.
+ */
+static erx_status_t
+life_add_run(erx_dom_range_t *runs, uint32_t *nruns, const erx_dom_range_t *range)
+{
+	uint64_t base = range->base, end = life_range_end(range), run_end;
+	uint32_t at = 0;
+
+	while (at < *nruns) {
+		run_end = life_range_end(&runs[at]);
+		if (runs[at].base > end || base > run_end) {
+			at++;
+			continue;
+		}
+		base = runs[at].base < base ? runs[at].base : base;
+		end = run_end > end ? run_end : end;
+		runs[at] = runs[--*nruns];
+		at = 0;
+	}
+	if (*nruns == ERX_DOM_UNIT_WINDOWS_MAX)
+		return (ERX_ELIMIT);
+	runs[(*nruns)++] = (erx_dom_range_t){ base, end - base };
+	return (ERX_OK);
+}
+
+/*
+ * The windows of a give, from the facts its devices carry alone: its page
+ * runs, lowest first, one over each run of consecutive pages its driven
+ * devices' ranges cover, so each is a union of the unit's driven ranges
+ * and a page they share is in one; and for each driven device with a
+ * range, the window its first range lies in and its registers' offset
+ * into it. The planner makes the give's windows from it and the plan
+ * check derives them again (erx_dom_unit_check). Only driven devices'
+ * facts are read. ERX_EINVAL for more than ERX_DOM_DEVICES_MAX devices, a
+ * driven device with more ranges than the ABI allows, a range that is
+ * empty, unaligned or wraps, or registers that do not lie whole inside
+ * their window; ERX_ELIMIT past ERX_DOM_UNIT_WINDOWS_MAX runs.
+ */
+static erx_status_t
+life_unit_layout(const erx_dom_unit_plan_t *plan, life_layout_t *layout)
+{
+	const erx_dom_unit_device_t *device;
+	const erx_dom_range_t *first, *run;
+	erx_dom_range_t swap;
+	erx_status_t status;
+	uint64_t offset, end;
+
+	*layout = (life_layout_t){ .nruns = 0 };
+	if (plan->ndevices > ERX_DOM_DEVICES_MAX)
+		return (ERX_EINVAL);
+	for (uint32_t d = 0; d < plan->ndevices; d++) {
+		device = &plan->devices[d];
+		layout->window[d] = ERX_DOM_UNIT_NONE;
+		if (!device->driven)
+			continue;
+		if (device->nranges > ERX_DEVICE_RANGES_MAX)
+			return (ERX_EINVAL);
+		for (uint32_t range = 0; range < device->nranges; range++) {
+			if (!life_range_ok(&device->ranges[range]))
+				return (ERX_EINVAL);
+			if ((status = life_add_run(layout->runs, &layout->nruns,
+			    &device->ranges[range])) != ERX_OK)
+				return (status);
 		}
 	}
-	return (false);
-}
-
-/*
- * Where line `line` of entry index finds its IRQ object in holder's
- * creation (erx_dom_give_line_t): the object of the first earlier give
- * whose device, of the same unit, names the same line, or one of its own
- * for a line no earlier give names. The line is shared when any other
- * device of the unit names it, given before this one or after.
- */
-static erx_dom_give_line_t
-life_line_source(const erx_dom_view_t *view, const erx_dom_plan_t *holder,
-    uint32_t index, uint32_t line)
-{
-	const erx_dom_device_entry_t *entry = &view->devices[index], *other;
-	const uint32_t number = entry->lines[line];
-	const uint32_t gives = holder->ngives < ERX_DOM_GIVES_MAX ?
-	    holder->ngives : ERX_DOM_GIVES_MAX;
-	erx_dom_give_line_t source = { .give = ERX_DOM_GIVE_OWN };
-	uint32_t at;
-
-	for (uint32_t each = 0; each < view->ndevices && !source.shared;
-	    each++) {
-		other = &view->devices[each];
-		source.shared = each != index && other->unit == entry->unit &&
-		    life_names_line(other, number, &at);
-	}
-	for (uint32_t give = 0; give < gives; give++) {
-		if (holder->gives[give].index >= view->ndevices)
+	for (uint32_t at = 1; at < layout->nruns; at++)
+		for (uint32_t j = at; j > 0 &&
+		    layout->runs[j - 1].base > layout->runs[j].base; j--) {
+			swap = layout->runs[j];
+			layout->runs[j] = layout->runs[j - 1];
+			layout->runs[j - 1] = swap;
+		}
+	for (uint32_t d = 0; d < plan->ndevices; d++) {
+		device = &plan->devices[d];
+		if (!device->driven || device->nranges == 0)
 			continue;
-		other = &view->devices[holder->gives[give].index];
-		if (other->unit == entry->unit &&
-		    life_names_line(other, number, &at))
-			return ((erx_dom_give_line_t){ .give = give, .index = at,
-			    .shared = true });
+		first = &device->ranges[0];
+		for (uint32_t w = 0; w < layout->nruns; w++) {
+			run = &layout->runs[w];
+			if (first->base < run->base || first->base >= life_range_end(run))
+				continue;
+			if (!life_add(first->base - run->base, device->reg_offset,
+			    &offset) || !life_add(offset, device->reg_size, &end) ||
+			    offset >= run->size || end > run->size)
+				return (ERX_EINVAL);
+			layout->window[d] = w;
+			layout->offset[d] = offset;
+			break;		/* the runs are apart, so no other holds it */
+		}
 	}
-	return (source);
+	return (ERX_OK);
 }
 
 /*
- * Whether a driven device of entry index's unit (erx_dom_entry_driven),
- * index itself included, names its line `line`: only then does a record
- * read the line's IRQ object, so only then does a give make it.
+ * Which of the give's first nlines lines is line number, or nlines for
+ * none: line l is line at[l] of the entry of the give's device sources[l].
+ */
+static uint32_t
+life_line_find(const erx_dom_view_t *view, const erx_dom_unit_plan_t *draft,
+    const uint32_t *sources, const uint32_t *at, uint32_t nlines,
+    uint32_t number)
+{
+	const erx_dom_device_entry_t *source;
+	uint32_t l;
+
+	for (l = 0; l < nlines; l++) {
+		source = &view->devices[draft->devices[sources[l]].index];
+		if (source->lines[at[l]] == number)
+			break;
+	}
+	return (l);
+}
+
+/*
+ * Whether a device of the give other than device d, of a kind or not,
+ * names line number.
  */
 static bool
-life_line_driven(const erx_dom_view_t *view, uint32_t index, uint32_t line)
+life_line_shared(const erx_dom_view_t *view, const erx_dom_unit_plan_t *draft,
+    uint32_t d, uint32_t number)
 {
-	const erx_dom_device_entry_t *entry = &view->devices[index], *other;
-	uint32_t at;
-
-	for (uint32_t each = 0; each < view->ndevices; each++) {
-		other = &view->devices[each];
-		if (other->unit == entry->unit && erx_dom_entry_driven(other) &&
-		    life_names_line(other, entry->lines[line], &at))
+	for (uint32_t other = 0; other < draft->ndevices; other++)
+		if (other != d &&
+		    life_names_line(&view->devices[draft->devices[other].index], number))
 			return (true);
-	}
 	return (false);
 }
 
-/* The grants row of a device object: every window shares one, every line one. */
+/*
+ * The unit's lines, in the order its driven devices first name them, one
+ * IRQ object each, made from the resource of the first driven device that
+ * names it: sources[l] is that device's index in the give and at[l] the
+ * line's index in its entry. A line only devices of no kind name has no
+ * reader, so no object. Each driven device with a line gets its first
+ * line's object, shared when another device of the unit names it.
+ * ERX_ELIMIT past ERX_DOM_UNIT_LINES_MAX lines.
+ */
+static erx_status_t
+life_unit_lines(const erx_dom_view_t *view, erx_dom_unit_plan_t *draft,
+    uint32_t *sources, uint32_t *at, uint32_t *nlines)
+{
+	const erx_dom_device_entry_t *entry;
+	erx_dom_unit_device_t *device;
+	uint32_t found;
+
+	*nlines = 0;
+	for (uint32_t d = 0; d < draft->ndevices; d++) {
+		device = &draft->devices[d];
+		entry = &view->devices[device->index];
+		if (!device->driven)
+			continue;
+		for (uint32_t line = 0; line < entry->nlines; line++) {
+			found = life_line_find(view, draft, sources, at, *nlines,
+			    entry->lines[line]);
+			if (found == *nlines) {
+				if (*nlines == ERX_DOM_UNIT_LINES_MAX)
+					return (ERX_ELIMIT);
+				sources[*nlines] = d;
+				at[(*nlines)++] = line;
+			}
+			if (line == 0) {
+				device->line = found;
+				device->shared = life_line_shared(view, draft, d,
+				    entry->lines[0]);
+			}
+		}
+	}
+	return (ERX_OK);
+}
+
+/* The grants row of a device object: each kind's objects share one. */
 static erx_dom_obj_t
 life_grant_key(erx_dom_obj_t obj)
 {
+	if (obj >= ERX_DOM_OBJ_DEV_RESOURCE && obj < ERX_DOM_OBJ_DEV_WINDOW)
+		return (ERX_DOM_OBJ_DEV_RESOURCE);
 	if (obj >= ERX_DOM_OBJ_DEV_WINDOW && obj < ERX_DOM_OBJ_DEV_IRQ)
 		return (ERX_DOM_OBJ_DEV_WINDOW);
 	if (obj >= ERX_DOM_OBJ_DEV_IRQ && obj < ERX_DOM_OBJ_DEV_DMA)
 		return (ERX_DOM_OBJ_DEV_IRQ);
+	if (obj >= ERX_DOM_OBJ_DEV_DMA && obj < ERX_DOM_OBJ_DEV_MEMORY)
+		return (ERX_DOM_OBJ_DEV_DMA);
+	if (obj >= ERX_DOM_OBJ_DEV_MEMORY && obj < ERX_DOM_OBJ_MADE_COUNT)
+		return (ERX_DOM_OBJ_DEV_MEMORY);
+	if (obj >= ERX_DOM_OBJ_DEV_KEPT && obj < ERX_DOM_OBJ_COUNT)
+		return (ERX_DOM_OBJ_DEV_KEPT);
 	return (obj);
 }
 
 /* An install into the holder of obj, with its row's rights. */
 static void
-life_device_install(erx_dom_device_plan_t *plan, erx_dom_obj_t obj)
+life_unit_install(erx_dom_unit_plan_t *plan, erx_dom_obj_t obj)
 {
 	const erx_dom_grant_row_t *row;
 
@@ -816,139 +997,159 @@ life_device_install(erx_dom_device_plan_t *plan, erx_dom_obj_t obj)
 	}
 }
 
-erx_status_t
-erx_dom_plan_device_give(const erx_dom_view_t *view,
-    const erx_dom_plan_t *holder, uint32_t index, erx_dom_device_plan_t *plan)
+/* A step of the give that makes obj from device d's resource. */
+static void
+life_unit_make(erx_dom_unit_plan_t *plan, erx_dom_step_kind_t kind,
+    erx_dom_obj_t obj, uint32_t d, uint32_t index)
 {
-	erx_dom_device_plan_t draft = { .index = index, .holder = holder->spec.id,
+	plan->steps[plan->nsteps++] = (erx_dom_step_t){ .kind = kind,
+	    .obj = obj, .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+	    .target = ERX_DOM_OBJ_DEV_RESOURCE + d, .index = index };
+}
+
+erx_status_t
+erx_dom_plan_unit_give(const erx_dom_view_t *view,
+    const erx_dom_plan_t *holder, uint32_t unit, erx_dom_unit_plan_t *plan)
+{
+	erx_dom_unit_plan_t draft = { .unit = unit, .holder = holder->spec.id,
 	    .slot = holder->slot };
+	life_layout_t layout;
+	uint32_t sources[ERX_DOM_UNIT_LINES_MAX], at[ERX_DOM_UNIT_LINES_MAX];
+	uint32_t nlines, made;
 	const erx_dom_device_entry_t *entry;
-	const erx_dom_device_t *record;
-	uint32_t held, made;
-	bool driven, kept;
+	bool kept[ERX_DOM_DEVICES_MAX] = { false };
+	erx_status_t status;
 
 	/* The holder is being created, into a free record. */
-	if (draft.slot >= view->max_domains || view->domains[draft.slot].id != 0 ||
-	    index >= view->ndevices)
+	if (draft.slot >= view->max_domains || view->domains[draft.slot].id != 0)
 		return (ERX_EINVAL);
-	entry = &view->devices[index];
-	record = &view->device_records[index];
-	/*
-	 * Only to a domain of the configured row the manifest places the
-	 * device's unit on: not a requested or session domain, nor one of
-	 * another row.
-	 */
-	if (!erx_dom_from_row(&holder->spec.origin, entry->row))
-		return (ERX_EINVAL);
-	if (record->index != index || !life_entry_ok(entry) ||
-	    life_overlaps(view, index))
-		return (ERX_EINVAL);
-	/* A holder that has ended held objects its own budget took with it. */
-	held = life_slot(view, record->holder);
-	if (held != view->max_domains && life_alive(&view->domains[held]))
-		return (ERX_EBUSY);
+	if ((status = life_unit_devices(view, holder, &draft)) != ERX_OK ||
+	    (status = life_unit_layout(&draft, &layout)) != ERX_OK ||
+	    (status = life_unit_lines(view, &draft, sources, at, &nlines)) != ERX_OK)
+		return (status);
+	for (uint32_t d = 0; d < draft.ndevices; d++) {
+		draft.devices[d].window = layout.window[d];
+		draft.devices[d].offset = layout.offset[d];
+	}
 
+	for (uint32_t d = 0; d < draft.ndevices; d++)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_RESOURCE, .obj = ERX_DOM_OBJ_DEV_RESOURCE + d,
+		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+		    .target = ERX_DOM_OBJ_ROOT_RESOURCE,
+		    .index = draft.devices[d].index };
+	for (uint32_t w = 0; w < layout.nruns; w++)
+		draft.steps[draft.nsteps++] = (erx_dom_step_t){
+		    .kind = ERX_DOM_STEP_WINDOW, .obj = ERX_DOM_OBJ_DEV_WINDOW + w,
+		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
+		    .target = ERX_DOM_OBJ_ROOT_RESOURCE,
+		    .base = layout.runs[w].base, .size = layout.runs[w].size };
+	for (uint32_t l = 0; l < nlines; l++)
+		life_unit_make(&draft, ERX_DOM_STEP_IRQ, ERX_DOM_OBJ_DEV_IRQ + l,
+		    sources[l], at[l]);
 	/*
 	 * A device of no kind is held, not driven (docs/design-shared-devices.md,
-	 * "The unit rule"): no window, DMA window or memory, and an IRQ object
-	 * only for a line that a driven device of its unit names and no earlier
-	 * give serves, so that the driven device's give finds the line's object.
+	 * "The unit rule"): no DMA window or memory, as no window or line.
 	 */
-	driven = erx_dom_entry_driven(entry);
-	draft.steps[draft.nsteps++] = (erx_dom_step_t){
-	    .kind = ERX_DOM_STEP_RESOURCE, .obj = ERX_DOM_OBJ_DEV_RESOURCE,
-	    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
-	    .target = ERX_DOM_OBJ_ROOT_RESOURCE, .index = index };
-	if (driven)
-		for (uint32_t range = 0; range < entry->nranges; range++)
+	for (uint32_t d = 0; d < draft.ndevices; d++) {
+		entry = &view->devices[draft.devices[d].index];
+		if (!draft.devices[d].driven)
+			continue;
+		kept[d] = !entry->confined && entry->memory != 0 &&
+		    view->device_records[draft.devices[d].index].memory.raw !=
+		    ERX_CAP_NULL;
+		if (entry->confined)
+			life_unit_make(&draft, ERX_DOM_STEP_DMA,
+			    ERX_DOM_OBJ_DEV_DMA + d, d, 0);
+		else if (entry->memory != 0 && !kept[d]) {
 			draft.steps[draft.nsteps++] = (erx_dom_step_t){
-			    .kind = ERX_DOM_STEP_WINDOW,
-			    .obj = ERX_DOM_OBJ_DEV_WINDOW + range,
-			    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
-			    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = range,
-			    .size = entry->ranges[range].size };
-	for (uint32_t line = 0; line < ERX_DEVICE_IRQS_MAX; line++)
-		draft.lines[line] = (erx_dom_give_line_t){
-		    .give = ERX_DOM_GIVE_OWN };
-	for (uint32_t line = 0; line < entry->nlines; line++) {
-		if (!life_line_driven(view, index, line))
-			continue;
-		draft.lines[line] = life_line_source(view, holder, index, line);
-		if (draft.lines[line].give != ERX_DOM_GIVE_OWN)
-			continue;
-		draft.steps[draft.nsteps++] = (erx_dom_step_t){
-		    .kind = ERX_DOM_STEP_IRQ, .obj = ERX_DOM_OBJ_DEV_IRQ + line,
-		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
-		    .target = ERX_DOM_OBJ_DEV_RESOURCE, .index = line };
+			    .kind = ERX_DOM_STEP_CONTIGUOUS,
+			    .obj = ERX_DOM_OBJ_DEV_MEMORY + d,
+			    .budget = ERX_DOM_OBJ_SYSTEM_BUDGET,
+			    .target = ERX_DOM_OBJ_DEV_RESOURCE + d,
+			    .size = entry->memory };
+		}
 	}
-	kept = driven && !entry->confined && entry->memory != 0 &&
-	    record->memory.raw != ERX_CAP_NULL;
-	if (driven && entry->confined)
-		draft.steps[draft.nsteps++] = (erx_dom_step_t){
-		    .kind = ERX_DOM_STEP_DMA, .obj = ERX_DOM_OBJ_DEV_DMA,
-		    .budget = ERX_DOM_OBJ_HOLDER_BUDGET,
-		    .target = ERX_DOM_OBJ_DEV_RESOURCE };
-	else if (driven && entry->memory != 0 && !kept)
-		draft.steps[draft.nsteps++] = (erx_dom_step_t){
-		    .kind = ERX_DOM_STEP_CONTIGUOUS,
-		    .obj = ERX_DOM_OBJ_DEV_MEMORY,
-		    .budget = ERX_DOM_OBJ_SYSTEM_BUDGET, .size = entry->memory };
-	/* The holder gets everything made but the resource (A7). */
+	/* The holder gets everything made but the resources (A7). */
 	made = draft.nsteps;
 	for (uint32_t step = 0; step < made; step++)
 		if (draft.steps[step].kind != ERX_DOM_STEP_RESOURCE)
-			life_device_install(&draft, draft.steps[step].obj);
+			life_unit_install(&draft, draft.steps[step].obj);
 	/* Last, so no failing step follows an install undo cannot clear. */
-	if (kept)
-		life_device_install(&draft, ERX_DOM_OBJ_DEV_KEPT);
-	if (erx_dom_device_check(&draft) != ERX_OK)
+	for (uint32_t d = 0; d < draft.ndevices; d++)
+		if (kept[d])
+			life_unit_install(&draft, ERX_DOM_OBJ_DEV_KEPT + d);
+	if (erx_dom_unit_check(&draft) != ERX_OK)
 		return (ERX_EINVAL);
 	*plan = draft;
 	return (ERX_OK);
 }
 
 /*
- * One step of a device's give against what the steps before it made: the
- * resource from the root's, each window, line and DMA window from the
- * resource on the holder's budget, the contiguous memory on the system
+ * Whether obj is of the kind whose objects start at first, one per
+ * device of the give, and so device *d's.
+ */
+static bool
+life_device_obj(const erx_dom_unit_plan_t *plan, erx_dom_obj_t obj,
+    erx_dom_obj_t first, uint32_t *d)
+{
+	*d = (uint32_t)(obj - first);
+	return (obj >= first && *d < plan->ndevices);
+}
+
+/*
+ * One step of a unit's give against the steps before it and what they
+ * made: each device's resource from the root's, each window from the
+ * root's resource, which life_unit_windows_ok holds to the page runs,
+ * each line, DMA window and contiguous memory from a driven device's
+ * resource, on the holder's budget but the memory, on the system
  * domain's, and installs into the holder by their rows.
  */
 static bool
-life_device_step_ok(const erx_dom_step_t *step, const bool *made)
+life_unit_step_ok(const erx_dom_unit_plan_t *plan, uint32_t at,
+    const bool *made)
 {
-	erx_dom_obj_t obj = step->obj;
-	bool fresh = obj < ERX_DOM_OBJ_MADE_COUNT && obj != ERX_DOM_OBJ_NONE &&
-	    !made[obj];
-	bool from_resource = step->target == ERX_DOM_OBJ_DEV_RESOURCE &&
-	    made[ERX_DOM_OBJ_DEV_RESOURCE] &&
-	    step->budget == ERX_DOM_OBJ_HOLDER_BUDGET;
+	const erx_dom_step_t *step = &plan->steps[at];
+	const erx_dom_obj_t obj = step->obj;
+	const bool fresh = obj < ERX_DOM_OBJ_MADE_COUNT &&
+	    obj != ERX_DOM_OBJ_NONE && !made[obj];
+	const bool holder_pays = step->budget == ERX_DOM_OBJ_HOLDER_BUDGET;
+	uint32_t d, mine;
+	/* The driven device whose resource the step names, made before it. */
+	const bool from_device = life_device_obj(plan, step->target,
+	    ERX_DOM_OBJ_DEV_RESOURCE, &d) && made[step->target] &&
+	    plan->devices[d].driven;
 
 	switch (step->kind) {
 	case ERX_DOM_STEP_RESOURCE:
-		return (fresh && obj == ERX_DOM_OBJ_DEV_RESOURCE &&
-		    step->budget == ERX_DOM_OBJ_HOLDER_BUDGET &&
-		    step->target == ERX_DOM_OBJ_ROOT_RESOURCE);
+		return (fresh && life_device_obj(plan, obj,
+		    ERX_DOM_OBJ_DEV_RESOURCE, &mine) && holder_pays &&
+		    step->target == ERX_DOM_OBJ_ROOT_RESOURCE &&
+		    step->index == plan->devices[mine].index);
 	case ERX_DOM_STEP_WINDOW:
-		return (fresh && from_resource && step->size != 0 &&
-		    life_grant_key(obj) == ERX_DOM_OBJ_DEV_WINDOW &&
-		    step->index == obj - ERX_DOM_OBJ_DEV_WINDOW);
+		return (fresh && life_grant_key(obj) == ERX_DOM_OBJ_DEV_WINDOW &&
+		    holder_pays && step->target == ERX_DOM_OBJ_ROOT_RESOURCE);
 	case ERX_DOM_STEP_IRQ:
-		return (fresh && from_resource &&
+		return (fresh && from_device && holder_pays &&
 		    life_grant_key(obj) == ERX_DOM_OBJ_DEV_IRQ &&
-		    step->index == obj - ERX_DOM_OBJ_DEV_IRQ);
+		    step->index < ERX_DEVICE_IRQS_MAX);
 	case ERX_DOM_STEP_DMA:
-		return (fresh && from_resource && obj == ERX_DOM_OBJ_DEV_DMA &&
-		    !made[ERX_DOM_OBJ_DEV_MEMORY]);
+		return (fresh && from_device && holder_pays &&
+		    obj == ERX_DOM_OBJ_DEV_DMA + d &&
+		    !made[ERX_DOM_OBJ_DEV_MEMORY + d]);
 	case ERX_DOM_STEP_CONTIGUOUS:
-		return (fresh && obj == ERX_DOM_OBJ_DEV_MEMORY &&
+		return (fresh && from_device &&
+		    obj == ERX_DOM_OBJ_DEV_MEMORY + d &&
 		    step->budget == ERX_DOM_OBJ_SYSTEM_BUDGET &&
-		    step->size != 0 && !made[ERX_DOM_OBJ_DEV_DMA]);
+		    step->size != 0 && !made[ERX_DOM_OBJ_DEV_DMA + d]);
 	case ERX_DOM_STEP_INSTALL:
 		return (step->target == ERX_DOM_OBJ_HOLDER_SPACE &&
-		    (obj == ERX_DOM_OBJ_DEV_KEPT ||
+		    ((life_device_obj(plan, obj, ERX_DOM_OBJ_DEV_KEPT, &mine) &&
+		    obj < ERX_DOM_OBJ_COUNT && plan->devices[mine].driven &&
+		    !made[ERX_DOM_OBJ_DEV_MEMORY + mine]) ||
 		    (obj < ERX_DOM_OBJ_MADE_COUNT &&
-		    obj != ERX_DOM_OBJ_DEV_RESOURCE && made[obj])) &&
-		    life_granted(step));
+		    life_grant_key(obj) != ERX_DOM_OBJ_DEV_RESOURCE &&
+		    made[obj])) && life_granted(step));
 	case ERX_DOM_STEP_CARVE:
 	case ERX_DOM_STEP_SPACE:
 	case ERX_DOM_STEP_GROUP:
@@ -965,39 +1166,114 @@ life_device_step_ok(const erx_dom_step_t *step, const bool *made)
 	return (false);
 }
 
+/*
+ * The give's windows are the ones its devices' facts give
+ * (life_unit_layout): its WINDOW steps make windows 0 to n - 1, in order,
+ * each over its page run, and each device names its window and its
+ * registers' offset there. So no window of the give reaches a page no
+ * driven range of the unit names, whatever base and size a step carries.
+ * That the runs are apart, lowest first, so no page is in two windows, is
+ * checked here too, apart from the code that joins them.
+ */
+static bool
+life_unit_windows_ok(const erx_dom_unit_plan_t *plan)
+{
+	const erx_dom_step_t *step;
+	life_layout_t layout;
+	uint32_t w = 0;
+
+	if (life_unit_layout(plan, &layout) != ERX_OK)
+		return (false);
+	for (uint32_t at = 0; at < plan->nsteps; at++) {
+		step = &plan->steps[at];
+		if (step->kind != ERX_DOM_STEP_WINDOW)
+			continue;
+		if (w == layout.nruns || step->obj != ERX_DOM_OBJ_DEV_WINDOW + w ||
+		    step->base != layout.runs[w].base ||
+		    step->size != layout.runs[w].size)
+			return (false);
+		w++;
+	}
+	if (w != layout.nruns)
+		return (false);
+	for (w = 1; w < layout.nruns; w++)
+		if (life_range_end(&layout.runs[w - 1]) >= layout.runs[w].base)
+			return (false);
+	for (uint32_t d = 0; d < plan->ndevices; d++)
+		if (plan->devices[d].window != layout.window[d] ||
+		    plan->devices[d].offset != layout.offset[d])
+			return (false);
+	return (true);
+}
+
+/*
+ * Each device of a checked give: its own entry, once, its resource made,
+ * and its line, which only a driven device has, an object the give made.
+ */
+static bool
+life_unit_devices_ok(const erx_dom_unit_plan_t *plan, const bool *made)
+{
+	const erx_dom_unit_device_t *device;
+
+	for (uint32_t d = 0; d < plan->ndevices; d++) {
+		device = &plan->devices[d];
+		for (uint32_t other = 0; other < d; other++)
+			if (plan->devices[other].index == device->index)
+				return (false);
+		if (!made[ERX_DOM_OBJ_DEV_RESOURCE + d])
+			return (false);
+		/* Only a device with a line can share it. */
+		if (device->line == ERX_DOM_UNIT_NONE) {
+			if (device->shared)
+				return (false);
+			continue;
+		}
+		/* Only a driven device reads a line, an object the give made. */
+		if (!device->driven || device->line >= ERX_DOM_UNIT_LINES_MAX ||
+		    !made[ERX_DOM_OBJ_DEV_IRQ + device->line])
+			return (false);
+	}
+	return (true);
+}
+
 erx_status_t
-erx_dom_device_check(const erx_dom_device_plan_t *plan)
+erx_dom_unit_check(const erx_dom_unit_plan_t *plan)
 {
 	bool made[ERX_DOM_OBJ_MADE_COUNT] = { false };
+	bool installed[ERX_DOM_OBJ_COUNT] = { false };
 	const erx_dom_step_t *step;
+	bool keeping = false;
 
-	if (plan->nsteps > ERX_DOM_DEVICE_STEPS ||
-	    plan->holder <= ERX_DOM_SYSTEM_ID)
+	if (plan->nsteps > ERX_DOM_UNIT_STEPS ||
+	    plan->holder <= ERX_DOM_SYSTEM_ID || plan->ndevices == 0 ||
+	    plan->ndevices > ERX_DOM_DEVICES_MAX)
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < plan->nsteps; index++) {
 		step = &plan->steps[index];
-		/* The kept memory outlives an undo, so its install is last. */
-		if (step->kind == ERX_DOM_STEP_INSTALL &&
-		    step->obj == ERX_DOM_OBJ_DEV_KEPT &&
-		    index + 1 != plan->nsteps)
+		/* Kept memory outlives an undo, so its installs are last. */
+		if (keeping && (step->kind != ERX_DOM_STEP_INSTALL ||
+		    life_grant_key(step->obj) != ERX_DOM_OBJ_DEV_KEPT))
 			return (ERX_EINVAL);
+		keeping = step->kind == ERX_DOM_STEP_INSTALL &&
+		    life_grant_key(step->obj) == ERX_DOM_OBJ_DEV_KEPT;
 		if (step->budget >= ERX_DOM_OBJ_COUNT ||
 		    step->target >= ERX_DOM_OBJ_COUNT ||
 		    step->aux != ERX_DOM_OBJ_NONE ||
-		    !life_device_step_ok(step, made))
-			return (ERX_EINVAL);
-		/* An IRQ object only for a line no earlier give serves. */
-		if (step->kind == ERX_DOM_STEP_IRQ &&
-		    plan->lines[step->index].give != ERX_DOM_GIVE_OWN)
+		    !life_unit_step_ok(plan, index, made))
 			return (ERX_EINVAL);
 		if (step->kind != ERX_DOM_STEP_INSTALL)
 			made[step->obj] = true;
+		else if (installed[step->obj])
+			return (ERX_EINVAL);
+		else
+			installed[step->obj] = true;
 	}
-	return (ERX_OK);
+	return (life_unit_windows_ok(plan) && life_unit_devices_ok(plan, made) ?
+	    ERX_OK : ERX_EINVAL);
 }
 
 uint32_t
-erx_dom_device_undo(const erx_dom_device_plan_t *plan, uint32_t applied,
+erx_dom_unit_undo(const erx_dom_unit_plan_t *plan, uint32_t applied,
     erx_dom_obj_t *undo)
 {
 	return (erx_dom_steps_undo(plan->steps, plan->nsteps, applied, undo));

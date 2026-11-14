@@ -2230,24 +2230,27 @@ case_undo(uint32_t program)
 
 /*
  * A configured domain's unit (docs/design-system.md, "Devices"): one device
- * of no kind and two block devices, each on a spare page of virtio-mmio
- * transports, which no QEMU device of this test sits behind, and all on
- * transport 0's line, so the line is shared and the row's creation makes
- * one IRQ object for it, in the first give, device 0's
- * (docs/design-shared-devices.md, "The unit rule"). Device 0, of no kind,
- * as the Raspberry Pi 4's legacy SD controller is beside EMMC2, gets that
- * object and nothing else: no window, no memory and no record. The unit is
- * placed on configured row 0, whose domain waits to be stopped. The
- * library gives it as part of the row's creation, from these catalogue
- * entries, the manifest's device rows 0 to 2: device 1 with contiguous
- * memory, devices 0 and 2 with none.
+ * of no kind and two block devices, on two consecutive spare pages of
+ * virtio-mmio transports, which no QEMU device of this test sits behind,
+ * and all on transport 0's line. The row's creation makes the unit's one
+ * give (docs/design-shared-devices.md, "The unit rule"): one window over
+ * the run of the two pages, which devices 1 and 2 name at their offsets,
+ * and one IRQ object for the shared line, made from device 1's resource,
+ * the first driven device on it, both kept in the record of the unit's
+ * first device, device 0. Device 0, of no kind, as the Raspberry Pi 4's
+ * auxiliary SPI controllers are beside the mini UART, sits on device 1's
+ * page, so the window holds its registers too, and gets nothing of its
+ * own: no window, no memory and no record. The unit is placed on
+ * configured row 0, whose domain waits to be stopped. The library gives it
+ * as part of the row's creation, from these catalogue entries, the
+ * manifest's device rows 0 to 2: device 1 with contiguous memory, devices
+ * 0 and 2 with none.
  */
 #define GIVEN_DEVICES	3u
-#define GIVEN_KINDLESS	0u			/* the device of no kind, first on the line */
+#define GIVEN_KINDLESS	0u			/* the device of no kind, the unit's first */
 #define GIVEN_KEPT	1u			/* the device with contiguous memory */
 #define GIVEN_RECORDS	2u			/* devices 1 and 2, of a kind */
-#define GIVEN_BASE	UINT64_C(0x0a000000)	/* transports 0 to 7, device 0's */
-#define GIVEN_PAGE_1	UINT64_C(0x0a001000)	/* transports 8 to 15, device 1's */
+#define GIVEN_PAGE_1	UINT64_C(0x0a001000)	/* transports 8 to 15, devices 0's and 1's */
 #define GIVEN_PAGE_2	UINT64_C(0x0a002000)	/* transports 16 to 23, device 2's */
 #define GIVEN_LINE	48u			/* transport 0's line, every device's */
 #define GIVEN_SIZE	UINT64_C(0x200)		/* one transport */
@@ -2267,7 +2270,8 @@ static const char holder_args[] = "wait";
 
 /*
  * Configured row 0 runs program, and holds catalogue entries 0 to 2, one
- * unit on one line. Entry 0 is of no kind a runtime drives.
+ * unit on one line. Entry 0 is of no kind a runtime drives, on entry 1's
+ * page.
  */
 static void
 given_view(uint32_t program)
@@ -2294,7 +2298,8 @@ given_view(uint32_t program)
 	catalogue[2].ranges[0].base = GIVEN_PAGE_2;
 	catalogue[2].memory = 0;
 	catalogue[GIVEN_KINDLESS] = catalogue[2];
-	catalogue[GIVEN_KINDLESS].ranges[0].base = GIVEN_BASE;
+	catalogue[GIVEN_KINDLESS].ranges[0].base = GIVEN_PAGE_1;
+	catalogue[GIVEN_KINDLESS].offset = 2 * GIVEN_SIZE;
 	catalogue[GIVEN_KINDLESS].role = ERX_MF_DEVICE_ROLE_ORDINARY;
 	catalogue[GIVEN_KINDLESS].role_word = NULL;
 	catalogue[GIVEN_KINDLESS].peripheral = NULL;
@@ -2396,27 +2401,28 @@ given_read(uint32_t id, uint64_t numbers[GIVEN_RECORDS][GIVEN_NUMBERS], bool *pa
 
 /*
  * One device's record in a holder's boot page: values in the holder's own
- * table for its window and line, the registers' place, memory of `memory`
+ * table for its window and line, the registers at `offset` into the
+ * window, memory of `memory`
  * bytes, named by a value of its own, or none for 0, a clock of 0 (a
  * transport's driver reads none) and a hardware address of 0 (a block
  * device has none).
  */
 static bool
-given_numbers(const uint64_t *numbers, uint64_t memory)
+given_numbers(const uint64_t *numbers, uint64_t offset, uint64_t memory)
 {
-	return (numbers[0] != ERX_CAP_NULL && numbers[1] == 0 && numbers[2] == GIVEN_SIZE &&
+	return (numbers[0] != ERX_CAP_NULL && numbers[1] == offset && numbers[2] == GIVEN_SIZE &&
 	    numbers[3] != ERX_CAP_NULL && (numbers[4] != ERX_CAP_NULL) == (memory != 0) &&
 	    numbers[5] == memory && numbers[6] == 0 && numbers[8] == 0);
 }
 
 /*
- * Domain id holds the unit: each record names it; device 0's, of no kind,
- * names the line's one IRQ object and nothing else, so the object has one
- * record that destroys it and the holder no window onto device 0; devices
- * 1 and 2 name their windows and no IRQ object, and device 1's its memory;
- * and its boot page has a record of each device of a kind, devices 1 and
- * 2, with windows of their own and the line under one value, both marked
- * shared, then the boot's pair.
+ * Domain id holds the unit: each record names it; device 0's, the unit's
+ * first, names the unit's one window and the line's one IRQ object, so
+ * each object has one record that destroys it; devices 1 and 2 name no
+ * window or IRQ object, and device 1's its memory; and its boot page has a
+ * record of each device of a kind, devices 1 and 2, with the window under
+ * one value at their pages' offsets into it and the line under one value,
+ * both marked shared, then the boot's pair.
  */
 static bool
 given_held(uint32_t id)
@@ -2428,15 +2434,16 @@ given_held(uint32_t id)
 	const bool read = given_read(id, numbers, &pair);
 	const bool one_line = read && numbers[0][3] == numbers[1][3];
 	const bool records = first->holder == id && second->holder == id &&
-	    first->windows[0].raw != ERX_CAP_NULL && second->windows[0].raw != ERX_CAP_NULL &&
+	    first->windows[0].raw == ERX_CAP_NULL && second->windows[0].raw == ERX_CAP_NULL &&
 	    first->irqs[0].raw == ERX_CAP_NULL && second->irqs[0].raw == ERX_CAP_NULL &&
 	    first->memory.raw != ERX_CAP_NULL && second->memory.raw == ERX_CAP_NULL &&
 	    first->resource.raw == ERX_CAP_NULL && second->resource.raw == ERX_CAP_NULL &&
-	    kindless->holder == id && kindless->windows[0].raw == ERX_CAP_NULL &&
-	    kindless->irqs[0].raw != ERX_CAP_NULL &&
+	    kindless->holder == id && kindless->windows[0].raw != ERX_CAP_NULL &&
+	    kindless->windows[1].raw == ERX_CAP_NULL &&
+	    kindless->irqs[0].raw != ERX_CAP_NULL && kindless->irqs[1].raw == ERX_CAP_NULL &&
 	    kindless->memory.raw == ERX_CAP_NULL && kindless->resource.raw == ERX_CAP_NULL;
-	const bool words = read && given_numbers(numbers[0], GIVEN_MEMORY) && given_numbers(numbers[1], 0) &&
-	    numbers[0][0] != numbers[1][0];
+	const bool words = read && given_numbers(numbers[0], 0, GIVEN_MEMORY) &&
+	    given_numbers(numbers[1], ERX_PAGE_SIZE, 0) && numbers[0][0] == numbers[1][0];
 
 	say_count("given_read", read);
 	say_count("given_pair", pair);
@@ -2524,7 +2531,7 @@ case_given(uint32_t program)
 	given_view(program);
 	id = next_id++;
 	passed = erx_dom_plan_configured(&lib.view, id, 0, (erx_dom_pid_t){ 0 }, &plan) == ERX_OK &&
-	    plan.ngives == GIVEN_DEVICES;
+	    plan.ngives == 1;
 	for (uint32_t step = 0; passed && step < plan.nsteps; step++)
 		if (plan.steps[step].kind == ERX_DOM_STEP_GIVE)
 			give = step;

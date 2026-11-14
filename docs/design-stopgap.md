@@ -339,8 +339,8 @@ the row's own: `-erx_record build ID` with the boot image's build identifier, as
 every domain names the same build; one record per device it was given that has one, `-erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
 MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx_record framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
 block device, `-erx_record boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
-windows](#image-windows)). A device of no kind has no record and no window, only the IRQ object of a line that a
-device of a kind in its unit also names, when it is first on that line
+windows](#image-windows)). A device of no kind has no record and no window of its own: its registers on a page that a device of a kind in
+its unit shares lie in that device's window, and a line it shares with one is that device's IRQ object
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). PATH is the device-tree path of its manifest row, the name its driver gives it (`erx_device_record` returns it as `path`), a node path of at most `device_path_max` bytes (`abi/erx_abi.txt`), which the manifest grammar holds `devices[].path` to; the record writers, the root's reader and the domain library's view refuse any other path (`erx_boot_device_path_valid`), and `erx_device_record` any other PATH word, so a name a driver shows holds no control or escape, and reaches a display only through that sink's escaping function; WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
 table, OFFSET and SIZE place the registers in the window page, MEM_H and MEM_SIZE are 0 for a device with no
 memory, CLOCK is the device's clock in hertz from its manifest row, 0 for a device whose driver reads none, and
@@ -1695,7 +1695,7 @@ the domain library deletes the register window's object and the line's IRQ objec
 device's for the boot, as [design-system.md](design-system.md#devices) says; the row's next creation gives the device with
 a window and a line's object made again and installs the same contiguous memory instead of making new. A register range stays in the root's device
 window for the boot once `sigma0` gave it, so a create over it maps from the window again and asks `sigma0` for nothing;
-two devices whose ranges overlap are refused above this backend, by `erx_dom_plan_device_give`. The new driver's
+two devices whose ranges overlap are refused above this backend, by `erx_dom_plan_unit_give`. The new driver's
 `negotiate/2` resets the device before it posts anything and before it installs a ring, and nothing reads the kept memory
 before then, so what the old holder left in the device or its memory is not trusted
 ([design-runtime.md](design-runtime.md#the-device-nif), "The reset rule").
@@ -1744,7 +1744,7 @@ its own records shared when another device-tree device of the manifest names the
 devices that share a line in one unit), and the domain library marks a holder's record
 shared when another device of its unit names the line: the holder's creation makes one IRQ
 object for such a line, in the first give whose device names it, and installs it once, so
-every record of the line names it under one handle (`erx_dom_plan_device_give`).
+every record of the line names it under one handle (`erx_dom_plan_unit_give`).
 On the Raspberry Pi 4 the console's and the host link's lines are shared; on QEMU `virt`
 every line is direct. A reader refuses a record whose MARK is any other word.
 

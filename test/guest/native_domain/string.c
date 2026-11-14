@@ -47,12 +47,12 @@ strlen(const char *text)
 int
 strcmp(const char *left, const char *right)
 {
-	const unsigned char *a = (const unsigned char *)left, *b = (const unsigned char *)right;
-	size_t index = 0;
+	const unsigned char *a = (const unsigned char *)left;
+	const unsigned char *b = (const unsigned char *)right;
 
-	while (a[index] != '\0' && a[index] == b[index])
-		index++;
-	if (a[index] == b[index])
-		return (0);
-	return (a[index] < b[index] ? -1 : 1);
+	while (*a != '\0' && *a == *b) {
+		a++;
+		b++;
+	}
+	return (*a == *b ? 0 : *a < *b ? -1 : 1);
 }

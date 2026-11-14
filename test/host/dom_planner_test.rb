@@ -498,6 +498,23 @@ class DomPlannerTest < Minitest::Test
     assert_equal 1, admit(held).report.fetch('child_plan_instances')
   end
 
+  # The Raspberry Pi 4's auxiliary block: the mini UART and, on its register page and
+  # its line, the two auxiliary SPI controllers, of no kind a runtime drives. The give
+  # windows the driven device's page, so the window covers its kindless siblings'
+  # registers too, as the root's window does for the system domain: sharing inside a
+  # domain is the domain's business (docs/design-shared-devices.md, "The unit rule").
+  # A configured row holds it, and its creation plans.
+  def test_a_configured_row_holds_a_driven_device_sharing_a_page_with_one_of_no_kind
+    platform = JSON.parse(JSON.generate(@context.platform))
+    net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
+    net << net.first.merge('path' => '/soc/spi@a003080', 'base' => net.first.fetch('base') + 0x80, 'size' => 64,
+                           'role' => 'ordinary', 'compatible' => 'brcm,bcm2835-aux-spi', 'dma' => 'none',
+                           'dma_memory' => 0, 'placement_key' => 'net-second')
+    @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
+    held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
+    assert_equal 1, admit(held).report.fetch('child_plan_instances')
+  end
+
   # A device of no kind is held, not driven, so no give makes DMA memory for it: a row
   # that asks for some would be memory the platform reserves and nothing uses. The view
   # refuses it on whichever domain holds it, the system domain included.
@@ -513,12 +530,10 @@ class DomPlannerTest < Minitest::Test
   end
 
   # A unit of two devices that share a register page, as QEMU virt's virtio-mmio
-  # transports 0x200 apart do: the root makes the system domain's windows itself, so
-  # the system domain may hold it, but a give windows one device and the library
-  # refuses a window over a page another entry's window meets, so every creation of
-  # a configured row holding it would fail. The view refuses that placement, and so
-  # the build does.
-  def test_a_configured_row_holding_a_unit_whose_devices_share_a_page_fails_the_build
+  # transports 0x200 apart do: a give is the unit's, one register window over the page
+  # and one IRQ object per line (docs/design-shared-devices.md, "The unit rule"), so a
+  # configured row holds it as the system domain does, and its creation plans.
+  def test_a_configured_row_holds_a_unit_whose_devices_share_a_page
     platform = JSON.parse(JSON.generate(@context.platform))
     net = platform.fetch('units').find { |unit| unit.fetch('key') == 'net' }.fetch('devices')
     net << net.first.merge('path' => '/virtio_mmio@a002c00', 'base' => net.first.fetch('base') - 0x200,
@@ -526,7 +541,7 @@ class DomPlannerTest < Minitest::Test
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: platform))
     assert_equal 1, admit(@source).report.fetch('child_plan_instances')
     held = ManifestContextFixture.substitute(@source, /^(unit net\n  placement "net"\n  holder )system$/, '\1@domain.alpha')
-    refused(held, 'view', /a configured domain holds share a register page/)
+    assert_equal 1, admit(held).report.fetch('child_plan_instances')
   end
 
   # A framebuffer row (docs/design-device-tree.md, "Facts into records"): /chosen and

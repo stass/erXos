@@ -132,10 +132,10 @@ typedef struct fuzz_input {
 	uint32_t		area_reader;
 	uint64_t		label;
 	erx_fault_t		record;
-	/* A device's give over the input's catalogue, and a principal's check. */
+	/* A unit's give over the input's two-entry catalogue, and a principal's check. */
 	erx_dom_device_entry_t	devs[2];
 	erx_dom_device_t	dev_records[2];
-	uint32_t		dev_index;
+	uint32_t		dev_index;	/* the unit row given */
 	erx_dom_principal_t	principal;
 	/* The session template, planned at row and named by req's name. */
 	erx_dom_template_t	template;
@@ -146,9 +146,11 @@ typedef struct fuzz_input {
  * (connect true), or disconnect, retire, stop and the record step. Each
  * result names only records and rows the view holds, a connection's plan
  * passes its check with each object on its reader's child, and its undo
- * is its two carves, last first. A device's give names a living holder
- * and a device no living domain holds, passes its check, sizes each window
- * by its range, and undoes every object it made; a principal's record
+ * is its two carves, last first. A unit's give goes to a domain being
+ * created into a free record, holds every entry of the unit and none that
+ * a living domain holds, passes its check, keeps each window inside the
+ * unit's driven ranges and each device's registers whole in its window,
+ * and undoes every object it made; a principal's record
  * starts with no counts. A retire destroys the outer budget only when no
  * row names the domain and otherwise lists a free remains row, and a
  * disconnect destroys remains only with the last row naming their id.
@@ -162,6 +164,42 @@ typedef struct fuzz_input {
  * them. The session template's arguments and environment are held the
  * same way, as boot_templates holds them.
  */
+static void fuzz_row_strings(fuzz_input_t *in);
+
+/*
+ * Whether every byte of window step lies in a range of a driven device of
+ * the give, so that a window reaches no page outside the unit's driven
+ * devices. The walk moves to the furthest end of a range holding its
+ * position, so it takes at most one pass per range; the give's ranges are
+ * well formed (erx_dom_plan_unit_give) and its window unwrapped
+ * (erx_dom_unit_check).
+ */
+static bool
+fuzz_window_covered(const erx_dom_device_entry_t *devs, const erx_dom_unit_plan_t *give,
+    const erx_dom_step_t *window)
+{
+	const erx_dom_device_entry_t *entry;
+	const erx_dom_range_t *range;
+	uint64_t at = window->base, next;
+
+	while (at - window->base < window->size) {
+		next = at;
+		for (uint32_t d = 0; d < give->ndevices; d++) {
+			entry = &devs[give->devices[d].index];
+			for (uint32_t r = 0; erx_dom_entry_driven(entry) && r < entry->nranges; r++) {
+				range = &entry->ranges[r];
+				if (at >= range->base && at - range->base < range->size &&
+				    range->base + range->size > next)
+					next = range->base + range->size;
+			}
+		}
+		if (next == at)
+			return (false);
+		at = next;
+	}
+	return (true);
+}
+
 static void
 fuzz_row_strings(fuzz_input_t *in)
 {
@@ -213,10 +251,10 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	    .devices = devs, .device_records = in->dev_records,
 	    .ndevices = 2, .principals = &held, .nprincipals = 1 };
 	erx_dom_link_plan_t link, again;
-	erx_dom_device_plan_t give;
+	erx_dom_unit_plan_t give;
 	/* A creation plan holds a specification with its strings: too large for a stack. */
 	static erx_dom_plan_t holder;
-	erx_dom_obj_t made[ERX_DOM_DEVICE_STEPS];
+	erx_dom_obj_t made[ERX_DOM_UNIT_STEPS];
 	erx_dom_principal_t principal;
 	uint32_t nmade;
 	erx_dom_teardown_t teardown;
@@ -327,29 +365,69 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 	holder.spec.id = in->a;
 	holder.spec.origin = (erx_dom_origin_t){ ERX_DOM_CONFIGURED, (uint32_t)(in->label & 1) };
 	holder.slot = in->b % 3;
-	if (erx_dom_plan_device_give(&view, &holder, in->dev_index, &give) ==
+	if (erx_dom_plan_unit_give(&view, &holder, in->dev_index, &give) ==
 	    ERX_OK) {
 		nmade = 0;
 		for (uint32_t index = 0; index < give.nsteps; index++)
 			nmade += give.steps[index].kind != ERX_DOM_STEP_INSTALL &&
 			    give.steps[index].kind != ERX_DOM_STEP_CONTIGUOUS;
-		if (erx_dom_device_check(&give) != ERX_OK || give.index >= 2 ||
+		if (erx_dom_unit_check(&give) != ERX_OK || give.ndevices > 2 ||
 		    give.slot != holder.slot || doms[give.slot].id != 0 || give.holder != in->a ||
-		    !erx_dom_from_row(&holder.spec.origin, devs[give.index].row) ||
-		    erx_dom_device_undo(&give, give.nsteps, made) != nmade)
+		    erx_dom_unit_undo(&give, give.nsteps, made) != nmade)
 			abort();
-		for (uint32_t index = 0; index < 3; index++)
-			if (doms[index].id != 0 &&
-			    doms[index].id == in->dev_records[give.index].holder &&
-			    (doms[index].state == ERX_DOM_BUILT ||
-			    doms[index].state == ERX_DOM_RUNNING))
+		/* Every device of the unit, each on the holder's row and held by no living domain. */
+		for (uint32_t d = 0; d < give.ndevices; d++) {
+			if (give.devices[d].index >= 2 || devs[give.devices[d].index].unit != in->dev_index ||
+			    !erx_dom_from_row(&holder.spec.origin, devs[give.devices[d].index].row))
 				abort();
-		for (uint32_t index = 0; index < give.nsteps; index++)
-			if (give.steps[index].kind == ERX_DOM_STEP_WINDOW &&
-			    (give.steps[index].index >= ERX_DEVICE_RANGES_MAX ||
-			    give.steps[index].size !=
-			    devs[give.index].ranges[give.steps[index].index].size))
+			for (uint32_t index = 0; index < 3; index++)
+				if (doms[index].id != 0 &&
+				    doms[index].id == in->dev_records[give.devices[d].index].holder &&
+				    (doms[index].state == ERX_DOM_BUILT ||
+				    doms[index].state == ERX_DOM_RUNNING))
+					abort();
+		}
+		/* Distinct devices (erx_dom_unit_check), each of the unit, as many as the unit has. */
+		if (give.ndevices != (devs[0].unit == in->dev_index) + (devs[1].unit == in->dev_index))
+			abort();
+		/*
+		 * Each window covers only pages of the unit's driven devices' ranges,
+		 * and is apart from every other: no page in two windows.
+		 */
+		for (uint32_t index = 0; index < give.nsteps; index++) {
+			const erx_dom_step_t *window = &give.steps[index];
+
+			if (window->kind != ERX_DOM_STEP_WINDOW)
+				continue;
+			if (!fuzz_window_covered(devs, &give, window))
 				abort();
+			for (uint32_t other = 0; other < index; other++)
+				if (give.steps[other].kind == ERX_DOM_STEP_WINDOW &&
+				    window->base < give.steps[other].base + give.steps[other].size &&
+				    give.steps[other].base < window->base + window->size)
+					abort();
+		}
+		/* Each device's facts are its entry's, and its registers lie whole in its window. */
+		for (uint32_t d = 0; d < give.ndevices; d++) {
+			const erx_dom_unit_device_t *device = &give.devices[d];
+			const erx_dom_device_entry_t *entry = &devs[device->index];
+
+			if (device->driven != erx_dom_entry_driven(entry) ||
+			    device->nranges != entry->nranges || device->reg_offset != entry->offset ||
+			    device->reg_size != entry->size)
+				abort();
+			for (uint32_t range = 0; range < device->nranges; range++)
+				if (device->ranges[range].base != entry->ranges[range].base ||
+				    device->ranges[range].size != entry->ranges[range].size)
+					abort();
+			for (uint32_t index = 0; index < give.nsteps; index++)
+				if (device->window != ERX_DOM_UNIT_NONE &&
+				    give.steps[index].kind == ERX_DOM_STEP_WINDOW &&
+				    give.steps[index].obj == ERX_DOM_OBJ_DEV_WINDOW + device->window &&
+				    (device->offset >= give.steps[index].size ||
+				    entry->size > give.steps[index].size - device->offset))
+					abort();
+		}
 	}
 	if (erx_dom_principal_check(&view, &in->principal, &principal) ==
 	    ERX_OK && (principal.carved != 0 || principal.domains != 0 ||

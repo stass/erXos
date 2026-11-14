@@ -99,11 +99,18 @@ class DomLifeTest < Minitest::Test
     'exit_crash_first' => '0 kind=2 slot=1 status=0 end=2,0 teardown=2,1,601'
   }.freeze
 
-# A device's give: the unconfined transport 0 and the confined device 1,
-# each kept, busy, refused or full; and device 2 given after device 0, which
-# names device 0's IRQ object for a line of their unit and makes its own
-# otherwise (docs/design-shared-devices.md, "The unit rule").
+# A unit's give: the unconfined transport 0's unit and the confined device 1's,
+# each kept, busy, refused or full; and device 2 in device 0's unit, whose give
+# makes one window per page run and one IRQ object per line of the two
+# (docs/design-shared-devices.md, "The unit rule").
 UNCONFINED_FIRST = 'RESOURCE,WINDOW,IRQ,CONTIGUOUS,INSTALL,INSTALL,INSTALL'
+# Devices 0 and 2, both driven: two resources, the windows and lines, device 0's
+# memory, and an install of each but the resources.
+TWO_DRIVEN = lambda do |windows:, lines:|
+  ['RESOURCE', 'RESOURCE', *['WINDOW'] * windows, *['IRQ'] * lines, 'CONTIGUOUS',
+   *['INSTALL'] * (windows + lines + 1)].join(',')
+end
+KINDLESS_SECOND = 'RESOURCE,RESOURCE,WINDOW,IRQ,CONTIGUOUS,INSTALL,INSTALL,INSTALL'
 UNCONFINED_KEPT = 'RESOURCE,WINDOW,IRQ,INSTALL,INSTALL,INSTALL'
 FULL = ['RESOURCE', *['WINDOW'] * 8, *['IRQ'] * 8, 'DMA', *['INSTALL'] * 17].join(',')
 DEVICES = {
@@ -115,22 +122,28 @@ DEVICES = {
   'dev_adjacent' => "0 slot=4 steps=#{UNCONFINED_FIRST} undo=3",
   'dev_no_memory' => '0 slot=4 steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL undo=3',
   'dev_full' => "0 slot=4 steps=#{FULL} undo=18",
-  'dev_shared_second' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE,WINDOW,INSTALL source=0.0 marks=1,1",
-  'dev_shared_other_unit' =>
-    "0 first=#{UNCONFINED_FIRST} steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL source=own marks=0,0",
-  'dev_shared_other_line' =>
-    "0 first=#{UNCONFINED_FIRST} steps=RESOURCE,WINDOW,IRQ,INSTALL,INSTALL source=own marks=0,0",
-  'dev_kindless_second' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE source=0.0 marks=1,1",
-  'dev_kindless_first' =>
-    '0 first=RESOURCE,IRQ,INSTALL steps=RESOURCE,WINDOW,CONTIGUOUS,INSTALL,INSTALL source=0.0 marks=1,1',
-  'dev_kindless_alone' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE source=own marks=0,0",
-  'dev_kindless_memory' => "0 first=#{UNCONFINED_FIRST} steps=RESOURCE source=own marks=0,0",
-  'dev_kindless_unit' => '0 first=RESOURCE steps=RESOURCE source=own marks=0,0',
+  'dev_unit_shared_line' => "0 steps=#{TWO_DRIVEN.call(windows: 2, lines: 1)} " \
+                            'windows=0xa003000+0x1000,0xa005000+0x1000 devices=0:0@0:0:1,2:1@0:0:1',
+  'dev_unit_other_line' => "0 steps=#{TWO_DRIVEN.call(windows: 2, lines: 2)} " \
+                           'windows=0xa003000+0x1000,0xa005000+0x1000 devices=0:0@0:0:0,2:1@0:1:0',
+  'dev_unit_shared_page' => "0 steps=#{TWO_DRIVEN.call(windows: 1, lines: 2)} " \
+                            'windows=0xa003000+0x1000 devices=0:0@0:0:0,2:0@0x200:1:0',
+  'dev_unit_run' => "0 steps=#{TWO_DRIVEN.call(windows: 1, lines: 2)} " \
+                    'windows=0xa003000+0x2000 devices=0:0@0:0:0,2:0@0x1000:1:0',
+  'dev_unit_overlap' => "0 steps=#{TWO_DRIVEN.call(windows: 1, lines: 2)} " \
+                        'windows=0xa002000+0x2000 devices=0:0@0x1000:0:0,2:0@0:1:0',
+  'dev_unit_other_unit' => "0 steps=#{UNCONFINED_FIRST} windows=0xa003000+0x1000 devices=0:0@0:0:0",
+  'dev_unit_lines_over' => ELIMIT,
+  'dev_kindless_second' => "0 steps=#{KINDLESS_SECOND} windows=0xa003000+0x1000 devices=0:0@0:0:1,2:-@0:-:0",
+  'dev_kindless_alone' => "0 steps=#{KINDLESS_SECOND} windows=0xa003000+0x1000 devices=0:0@0:0:0,2:-@0:-:0",
+  'dev_kindless_memory' => "0 steps=#{KINDLESS_SECOND} windows=0xa003000+0x1000 devices=0:0@0:0:0,2:-@0:-:0",
+  'dev_kindless_page' => "0 steps=#{KINDLESS_SECOND} windows=0xa003000+0x1000 devices=0:0@0:0:0,2:-@0:-:0",
+  'dev_kindless_unit' => '0 steps=RESOURCE,RESOURCE windows= devices=0:-@0:-:0,2:-@0:-:0',
   'dev_framebuffer_placed' => '0 slot=4 steps=RESOURCE,WINDOW,INSTALL undo=2',
   'dev_busy' => EBUSY, 'dev_busy_self' => EBUSY,
   'dev_unknown_domain' => EINVAL, 'dev_ended_domain' => EINVAL, 'dev_building_domain' => EINVAL,
   'dev_index_past' => EINVAL, 'dev_overlap' => EINVAL, 'dev_overlap_wrapping' => EINVAL,
-  'dev_ranges_over' => EINVAL, 'dev_lines_over' => EINVAL, 'dev_range_unaligned' => EINVAL,
+  'dev_ranges_over' => EINVAL, 'dev_lines_over' => EINVAL, 'dev_registers_past_window' => EINVAL, 'dev_range_unaligned' => EINVAL,
   'dev_range_empty' => EINVAL, 'dev_range_wraps' => EINVAL, 'dev_confined_memory' => EINVAL,
   'dev_memory_unaligned' => EINVAL,
   'dev_wrong_holder' => EINVAL, 'dev_system_device' => EINVAL, 'dev_requested_domain' => EINVAL,
@@ -142,29 +155,40 @@ DEVICES = {
               out_of_order made_twice too_many obj_range same_party number_zero
               area_writer_pays area_reader_unset area_reader_writer area_reader_writable area_twice area_unaligned
               dev_gate dev_install_resource dev_install_unmade dev_window_phys dev_foreign_space
-              dev_resource_not_root dev_window_system_pays dev_memory_holder_pays dev_window_index
-              dev_out_of_order dev_dma_and_memory dev_system_holder dev_too_many dev_kept_not_last
-              dev_record_index dev_irq_served].freeze
+              dev_resource_not_root dev_window_system_pays dev_memory_holder_pays dev_window_unaligned
+              dev_window_meets dev_out_of_order dev_dma_and_memory dev_system_holder dev_too_many
+              dev_kept_not_last dev_record_index dev_line_unmade dev_offset_outside
+              dev_resource_unmade dev_window_elsewhere dev_install_twice dev_kindless_dma].freeze
 
   # One-line edits of the core, each with the driver line it must change.
   MUTANTS = {
     'a shared line made twice' =>
-      ["\t\tif (draft.lines[line].give != ERX_DOM_GIVE_OWN)\n\t\t\tcontinue;\n", '', 'dev dev_shared_second '],
+      ['if (found == *nlines) {', 'if (true) {', 'dev dev_unit_shared_line '],
+    'abutting pages windowed apart' =>
+      ['if (runs[at].base > end || base > run_end) {', 'if (runs[at].base >= end || base >= run_end) {',
+       'dev dev_unit_run '],
+    'a shared page refused within a unit' =>
+      ['if (other->unit == mine->unit)', 'if (each == index)', 'dev dev_unit_shared_page '],
+    'a driven window kept off the page of a device of no kind' =>
+      ['if (other->unit == mine->unit)', 'if (other->unit == mine->unit && erx_dom_entry_driven(other))',
+       'dev dev_kindless_page '],
     'a window given to a device of no kind' =>
-      ["\tif (driven)\n\t\tfor (uint32_t range", "\tif (true)\n\t\tfor (uint32_t range", 'dev dev_kindless_second '],
-    'a device of no kind first on a shared line makes no line object' =>
-      ['if (!life_line_driven(view, index, line))', 'if (!driven || !life_line_driven(view, index, line))', 'dev dev_kindless_first '],
+      ["if (!device->driven)\n\t\t\tcontinue;\n\t\tif (device->nranges",
+       "if (false)\n\t\t\tcontinue;\n\t\tif (device->nranges", 'dev dev_kindless_second '],
     'a line object no driven device reads' =>
-      ['other->unit == entry->unit && erx_dom_entry_driven(other) &&', 'other->unit == entry->unit &&',
-       'dev dev_kindless_unit '],
+      ["if (!device->driven)\n\t\t\tcontinue;\n\t\tfor (uint32_t line",
+       "if (false)\n\t\t\tcontinue;\n\t\tfor (uint32_t line", 'dev dev_kindless_unit '],
     'memory given to a device of no kind' =>
-      ["\telse if (driven && entry->memory != 0 && !kept)", "\telse if (entry->memory != 0 && !kept)", 'dev dev_kindless_memory '],
-    'a line shared across units' =>
-      ["if (other->unit == entry->unit &&\n\t\t    life_names_line(other, number, &at))",
-       'if (life_names_line(other, number, &at))', 'dev dev_shared_other_unit '],
-    'a give makes the object of a line another give serves' =>
-      ["if (step->kind == ERX_DOM_STEP_IRQ &&\n\t\t    plan->lines[step->index].give != ERX_DOM_GIVE_OWN)",
-       'if (false)', 'seeded dev_irq_served '],
+      ["if (!draft.devices[d].driven)\n\t\t\tcontinue;\n\t\tkept[d]", "if (false)\n\t\t\tcontinue;\n\t\tkept[d]",
+       'dev dev_kindless_memory '],
+    'registers past their window' =>
+      ['offset >= run->size || end > run->size)', 'offset >= run->size)', 'dev dev_registers_past_window '],
+    'the check takes a window step\'s base on trust' =>
+      ['step->base != layout.runs[w].base ||', '', 'seeded dev_window_elsewhere '],
+    'the check lets an object be installed twice' =>
+      ['else if (installed[step->obj])', 'else if (false)', 'seeded dev_install_twice '],
+    'the check makes objects from a device of no kind' =>
+      ["made[step->target] &&\n\t    plan->devices[d].driven;", 'made[step->target];', 'seeded dev_kindless_dma '],
     'an area charged to its writer' =>
       [".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_B :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_A",
        ".budget = area_reader == b ? ERX_DOM_OBJ_LINK_BUDGET_A :\n\t\t    ERX_DOM_OBJ_LINK_BUDGET_B",
@@ -217,18 +241,20 @@ DEVICES = {
        'if (row->obj == life_grant_key(step->obj) &&',
        'seeded creation_space '],
     'contiguous memory charged to the holder' =>
-      ['.budget = ERX_DOM_OBJ_SYSTEM_BUDGET, .size = entry->memory };',
-       '.budget = ERX_DOM_OBJ_HOLDER_BUDGET, .size = entry->memory };', 'dev dev_unconfined_first '],
+      [".budget = ERX_DOM_OBJ_SYSTEM_BUDGET,\n\t\t\t    .target = ERX_DOM_OBJ_DEV_RESOURCE + d,",
+       ".budget = ERX_DOM_OBJ_HOLDER_BUDGET,\n\t\t\t    .target = ERX_DOM_OBJ_DEV_RESOURCE + d,",
+       'dev dev_unconfined_first '],
     'a living holder does not keep its device' =>
       ['if (held != view->max_domains && life_alive(&view->domains[held]))',
        'if (held != view->max_domains && false)', 'dev dev_busy '],
     'overlapping devices given' =>
-      ["!life_entry_ok(entry) ||\n\t    life_overlaps(view, index))", "!life_entry_ok(entry) ||\n\t    (life_overlaps(view, index) && false))", 'dev dev_overlap '],
-    'kept memory made again' => ['record->memory.raw != ERX_CAP_NULL;', 'record->memory.raw == ERX_CAP_NULL;',
+      ["!life_entry_ok(entry) ||\n\t\t    life_overlaps(view, index))",
+       "!life_entry_ok(entry) ||\n\t\t    (life_overlaps(view, index) && false))", 'dev dev_overlap '],
+    'kept memory made again' => ["memory.raw !=\n\t\t    ERX_CAP_NULL;", "memory.raw ==\n\t\t    ERX_CAP_NULL;",
                                  'dev dev_unconfined_kept '],
     'a give skips the assigned holder' =>
       ['if (!erx_dom_from_row(&holder->spec.origin, entry->row))',
-       'if (false)', 'dev dev_wrong_holder '],
+       'if (!erx_dom_from_row(&holder->spec.origin, entry->row) && false)', 'dev dev_wrong_holder '],
     'a device install ignores its row' =>
       ["life_granted(step));\n\tcase ERX_DOM_STEP_CARVE:", "true);\n\tcase ERX_DOM_STEP_CARVE:", 'seeded dev_window_phys ']
   }.freeze

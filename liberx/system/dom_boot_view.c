@@ -351,17 +351,13 @@ boot_units(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries)
  * whose pages meet or that name one line are one unit, so the manifest
  * must have them in one unit row, which has one holder. A unit split
  * across two rows, two holders on one page or one line included, refuses
- * the view. So does a unit on a configured row whose own devices share a
- * page: a give windows one device, and the library refuses a window over a
- * page another entry's window meets, so every creation of that row would
- * fail; only the system domain, whose windows the root makes, may hold
- * such a unit (TODO.md).
- * So does a device marked confined: the stopgap's catalogue lists no IOMMU
- * stream, and a confined device is given only on one; and DMA memory that is
- * not whole pages, or of a device-tree row of no kind, which no give makes. Devices of a configured row's
- * unit may share a line: the row's creation makes one IRQ object for it, in
- * the first device's give, and the others' records name that object
- * (erx_dom_plan_device_give).
+ * the view. So does a device marked confined: the stopgap's catalogue
+ * lists no IOMMU stream, and a confined device is given only on one; and
+ * DMA memory that is not whole pages, or of a device-tree row of no kind,
+ * which no give makes. Devices of one unit may share pages and lines on
+ * any row: a configured row's creation gives the unit whole, one window
+ * over each page run and one IRQ object for each line, which every record
+ * of the run or the line names (erx_dom_plan_unit_give).
  */
 static const char *
 boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries,
@@ -423,9 +419,9 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 		}
 		records[index] = (erx_dom_device_t){ .index = index, .resource = { ERX_CAP_NULL },
 		    .dma = { ERX_CAP_NULL }, .memory = { ERX_CAP_NULL } };
-		for (uint32_t at = 0; at < ERX_DEVICE_RANGES_MAX; at++)
+		for (uint32_t at = 0; at < ERX_DOM_UNIT_WINDOWS_MAX; at++)
 			records[index].windows[at] = (erx_cap_t){ ERX_CAP_NULL };
-		for (uint32_t at = 0; at < ERX_DEVICE_IRQS_MAX; at++)
+		for (uint32_t at = 0; at < ERX_DOM_UNIT_LINES_MAX; at++)
 			records[index].irqs[at] = (erx_cap_t){ ERX_CAP_NULL };
 	}
 	for (uint32_t a = 0; a < count; a++) {
@@ -434,12 +430,11 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 
 			if (!page && !boot_lines_meet(&entries[a], &entries[b]))
 				continue;
+			/* Within a unit a give makes one window per page run and one
+			 * IRQ object per line (erx_dom_plan_unit_give). */
 			if (entries[a].unit != entries[b].unit)
 				return (page ? "manifest: devices that share a register page are in two units" :
 				    "manifest: devices that share an interrupt line are in two units");
-			/* One unit has one holder (boot_units), so a's row is b's. */
-			if (page && entries[a].row != ERX_MF_NONE)
-				return ("manifest: devices of a unit a configured domain holds share a register page");
 		}
 	}
 	view->ndevices = count;
@@ -609,7 +604,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 			records++;
 			block = block || view->devices[device].role == ERX_MF_DEVICE_ROLE_BLOCK;
 		}
-		if (held > ERX_DOM_GIVES_MAX)
+		if (held > ERX_DOM_DEVICES_MAX)
 			return ("manifest: a configured domain holds more devices than its creation gives");
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
 		strings = (const char *)manifest->bytes + manifest->header.strings.offset;

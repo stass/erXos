@@ -1087,25 +1087,38 @@ dom_plan_in(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 
 /*
  * A configured domain's gives (docs/design-system.md, "Devices"): one per
- * catalogue entry whose unit is placed on its row, each planned by
- * erx_dom_plan_device_give, the one planner of a device's objects, for the
- * domain the plan makes. ERX_ELIMIT past ERX_DOM_GIVES_MAX, which the boot
- * view keeps every row within; otherwise the first give's refusal.
+ * unit the manifest places on its row, in the order of each unit's first
+ * catalogue entry, each planned by erx_dom_plan_unit_give, the one planner
+ * of a unit's objects, for the domain the plan makes. ERX_ELIMIT past
+ * ERX_DOM_DEVICES_MAX devices in all, which the boot view keeps every row
+ * within; otherwise the first give's refusal.
  */
 static erx_status_t
 dom_plan_gives(const erx_dom_view_t *view, erx_dom_plan_t *plan)
 {
+	const erx_dom_device_entry_t *entry;
 	erx_status_t status;
+	uint32_t devices = 0;
+	bool given;
 
 	for (uint32_t index = 0; index < view->ndevices; index++) {
-		if (!erx_dom_from_row(&plan->spec.origin, view->devices[index].row))
+		entry = &view->devices[index];
+		if (!erx_dom_from_row(&plan->spec.origin, entry->row))
+			continue;
+		given = false;
+		for (uint32_t at = 0; at < plan->ngives; at++)
+			given = given || plan->gives[at].unit == entry->unit;
+		if (given)
 			continue;
 		if (plan->ngives == ERX_DOM_GIVES_MAX)
 			return (ERX_ELIMIT);
-		status = erx_dom_plan_device_give(view, plan, index, &plan->gives[plan->ngives]);
+		status = erx_dom_plan_unit_give(view, plan, entry->unit,
+		    &plan->gives[plan->ngives]);
 		if (status != ERX_OK)
 			return (status);
-		plan->ngives++;
+		devices += plan->gives[plan->ngives++].ndevices;
+		if (devices > ERX_DOM_DEVICES_MAX)
+			return (ERX_ELIMIT);
 	}
 	return (ERX_OK);
 }
@@ -1208,42 +1221,6 @@ dom_granted(const erx_dom_spec_t *spec, const erx_dom_step_t *step)
 	return (false);
 }
 
-/* Whether a give makes line index's IRQ object with a step of its own. */
-static bool
-dom_give_makes_line(const erx_dom_device_plan_t *give, uint32_t index)
-{
-	for (uint32_t step = 0; step < give->nsteps && step < ERX_DOM_DEVICE_STEPS;
-	    step++)
-		if (give->steps[step].kind == ERX_DOM_STEP_IRQ &&
-		    give->steps[step].index == index)
-			return (true);
-	return (false);
-}
-
-/*
- * Each line of give `at` that another give's IRQ object serves
- * (erx_dom_give_line_t) is shared and names an earlier give of the
- * creation that makes an IRQ object at that line index, so the object is
- * applied, and installed into the holder, before the give that names it.
- * The plan holds no line numbers, so that the two devices name the same
- * line is the planner's to decide (erx_dom_plan_device_give).
- */
-static bool
-dom_give_lines_ok(const erx_dom_plan_t *plan, uint32_t at)
-{
-	const erx_dom_give_line_t *line;
-
-	for (uint32_t index = 0; index < ERX_DEVICE_IRQS_MAX; index++) {
-		line = &plan->gives[at].lines[index];
-		if (line->give != ERX_DOM_GIVE_OWN &&
-		    (line->give >= at || !line->shared ||
-		    line->index >= ERX_DEVICE_IRQS_MAX ||
-		    !dom_give_makes_line(&plan->gives[line->give], line->index)))
-			return (false);
-	}
-	return (true);
-}
-
 /*
  * One step against what the steps before it made: what it makes is new,
  * what it uses exists, and what it charges is a budget the plan carved.
@@ -1323,8 +1300,7 @@ dom_step_ok(const erx_dom_plan_t *plan, const erx_dom_step_t *step,
 		    made[ERX_DOM_OBJ_BUDGET] && made[ERX_DOM_OBJ_SPACE] &&
 		    plan->gives[step->index].holder == plan->spec.id &&
 		    plan->gives[step->index].slot == plan->slot &&
-		    erx_dom_device_check(&plan->gives[step->index]) == ERX_OK &&
-		    dom_give_lines_ok(plan, step->index));
+		    erx_dom_unit_check(&plan->gives[step->index]) == ERX_OK);
 	}
 	return (false);
 }
@@ -1353,6 +1329,35 @@ erx_dom_principal_check(const erx_dom_view_t *view,
 	return (ERX_OK);
 }
 
+/*
+ * The creation's gives hold ERX_DOM_DEVICES_MAX devices at most in all,
+ * each in one give alone, and one give per unit, so no object of a device
+ * is planned twice. Each give's own count is read within its array.
+ */
+static bool
+dom_gives_apart(const erx_dom_plan_t *plan)
+{
+	const erx_dom_unit_plan_t *give, *other;
+	uint32_t devices = 0;
+
+	for (uint32_t at = 0; at < plan->ngives; at++) {
+		give = &plan->gives[at];
+		if (give->ndevices > ERX_DOM_DEVICES_MAX ||
+		    (devices += give->ndevices) > ERX_DOM_DEVICES_MAX)
+			return (false);
+		for (uint32_t before = 0; before < at; before++) {
+			other = &plan->gives[before];
+			if (other->unit == give->unit)
+				return (false);
+			for (uint32_t d = 0; d < give->ndevices; d++)
+				for (uint32_t e = 0; e < other->ndevices; e++)
+					if (give->devices[d].index == other->devices[e].index)
+						return (false);
+		}
+	}
+	return (true);
+}
+
 erx_status_t
 erx_dom_plan_check(const erx_dom_plan_t *plan)
 {
@@ -1360,7 +1365,8 @@ erx_dom_plan_check(const erx_dom_plan_t *plan)
 	const erx_dom_step_t *step;
 	uint32_t gives = 0;
 
-	if (plan->nsteps > ERX_DOM_PLAN_STEPS_MAX || plan->ngives > ERX_DOM_GIVES_MAX)
+	if (plan->nsteps > ERX_DOM_PLAN_STEPS_MAX || plan->ngives > ERX_DOM_GIVES_MAX ||
+	    !dom_gives_apart(plan))
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < plan->nsteps; index++) {
 		step = &plan->steps[index];
@@ -1406,7 +1412,7 @@ erx_dom_step_undo(erx_dom_step_kind_t kind)
 		/*
 		 * Its objects die with the holder's budget, but the apply
 		 * phase closes their handles and keeps a fresh memory by
-		 * the give's own steps' undo, erx_dom_device_undo.
+		 * the give's own steps' undo, erx_dom_unit_undo.
 		 */
 		return (ERX_DOM_UNDO_BY_BUDGET);
 	}

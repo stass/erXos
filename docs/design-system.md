@@ -2648,7 +2648,7 @@ register ranges, interrupt lines, and whether a device is confined
 Each device goes to the one domain the manifest names for it, as part of
 that domain's creation: for each unit the manifest places on the
 configured row, `erx_dom_plan_configured` adds a **give**, planned by
-`erx_dom_plan_device_give` and applied whole by one step of the
+`erx_dom_plan_unit_give` and applied whole by one step of the
 creation's plan. A give carves the resources of the unit's devices and
 creates, all from the holder's own budget, the unit's register windows
 as physical memory objects with device attributes, one over each run of
@@ -2658,8 +2658,8 @@ DMA window; devices that share a page or a line share that window or
 that IRQ object, which the domain library installs under one handle
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). For
 an unconfined device it gives the device's contiguous memory instead
-(below). A device of no kind gets no window, DMA window or memory, and
-its line only when a device of a kind in the unit names it too
+(below). A device of no kind gets only its resource: no window, DMA
+window, memory or IRQ object of its own
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)); and it gives the holder its capabilities
 ([Authority](#authority)). A give is its own plan, not steps in the
 creation's, because every unit's objects use the same object numbers and so cannot share the creation's object namespace; a
@@ -2915,7 +2915,7 @@ configuration snapshots, since every parser of untrusted input has one,
 and reports each function, with its BARs, capabilities and requester id,
 to the device service, which adds it to the catalogue. To give a function
 to the domain the manifest names for it, the library plans the give with
-`erx_dom_plan_device_give`, whose plan carves the function's BARs as register
+`erx_dom_plan_unit_give`, whose plan carves the function's BARs as register
 windows after checking that each lies inside the bridge's windows from
 the device tree and overlaps no other device, creates its MSIs as IRQ
 objects on the MSI frame, whose doorbell address and data the result
@@ -2964,7 +2964,7 @@ with a diagnostic; a manifest whose own units split a page or a line never gets 
 since the domain library's boot view, which the manifest check runs too,
 refuses it whole. A unit goes to one
 domain, whose drivers reset its devices together. The domain library
-holds the placement as well: a give, `erx_dom_plan_device_give`, gives a
+holds the placement as well: a give, `erx_dom_plan_unit_give`, gives a
 device only to a domain of the configured row the manifest places its unit on, never to
 a requested or session domain or to another row's.
 
@@ -4169,7 +4169,7 @@ under test ran.
   enumerator enables before its DMA window exists, whose DMA aborts at the
   IOMMU; the enumerator's process killed while drivers run, whose restart
   leaves every function running; a BAR outside the bridge's windows or
-  overlapping another device, which `erx_dom_plan_device_give` refuses with
+  overlapping another device, which `erx_dom_plan_unit_give` refuses with
   `ERX_EINVAL`; a native shim in a sub-space port that faults, whose
   driver domain runs on and restarts it; a register access that aborts on
   the bus, which ends the devices domain, which the domain service
