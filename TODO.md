@@ -2711,6 +2711,10 @@ handing call's socket process exit and its connection's, is not yet looked for. 
 * [Low] hosted backend, `liberx/backend/hosted/refused.c`: a hosted runtime runs no programs; the
   channel's first memory object is refused, so `erx_program:start/1` answers `{error, enotsup}`.
   Programs in hosted mode need the hosted backend to make spaces and pass handles.
+* [Low] hosted backend, `liberx/backend/hosted/`: it defines no wall-clock setter, `erx_time_set_wall` in the
+  tree and `erx_time_set_offset` in [design-time.md](docs/design-time.md#phase-1), which says the hosted setter
+  answers `ERX_ENOTSUP`, and declares it only in the Fiasco backend's `time.h`, so `erx_clock_nif` has nothing to
+  call in a hosted build. Add the refusal beside the others in `refused.c`.
 * [Low] erx_program driver, `otp/erts/emulator/sys/erxos/erx_program_drv.c`: the session makes and
   installs the program's data area, but the session's own mapping of it waits for the handler's
   copier, its NIF, which copies the bytes of reads and writes (docs/design-programs.md, "Descriptors
@@ -3178,6 +3182,9 @@ handing call's socket process exit and its connection's, is not yet looked for. 
 * [Low] docs, `docs/design-domains.md` ("connections" quota): it counts the system
   connection in a domain's `connections` quota; the library (`life_connections`) and
   design-system.md do not, and property 12 enforces the library's reading.
+* [Low] docs, `docs/design-stopgap.md` (boot step 4, "take device entries, wall offset, seed ..."): the root
+  takes no wall offset from the system manifest; `abi/manifest.txt` has no such field and the time page starts
+  zeroed (`liberx/backend/fiasco/time_page.c`). Drop "wall offset" from the step, or name the field it reads.
 * [Medium] packer, `tools/lib/erx/production_image.rb` (`build_test_image`): a test
   image's `domains:` is checked against no manifest row, since the test manifest is the
   development one grown. Build test images' domain boot scripts from their manifest's
@@ -5935,6 +5942,15 @@ to the corpus and follow rc
   logs in as root, and the host key is a file of the SSH domain's directory
   on the data partition. Stage 4 closes both, with the system domain's
   Ed25519 verifier and the vault's host key.
+* [Medium] network time, unauthenticated ([design-time.md](docs/design-time.md#security)): the NTP server
+  ntpd uses, or anyone on the path to it, sets the wall clock to any time after the release's floor date at a
+  cold start and then walks it by up to 1000 s every two polls, and can forge `DENY`; certificate validity
+  checks follow the clock. Network Time Security (RFC 8633 section 4.3) is the remedy, with a design of its own.
+* [Low] stopgap, `liberx/backend/fiasco/service.c` (the `ERX_FIASCO_CALL_TIME_SET_WALL` case, lines 385-386):
+  the dispatch passes the body the request's `wall_ns` alone, never its `caller`, and checks no right, so any
+  task sets the wall clock. [design-time.md](docs/design-time.md#phase-1) holds the one setter by the
+  `[only_erx_clock_nif]` imports section and the facet for trusted code; erXos's kernel checks `WRITE` on the
+  time page. A Phase 1 residual, not fixed in the stopgap.
 * [Low] SSH, unauthenticated floods
   ([design-ssh.md](docs/design-ssh.md#limits-and-who-pays)): OTP has no
   counterpart of FreeBSD's `MaxStartups`, so a flood of unauthenticated

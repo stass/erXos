@@ -1117,7 +1117,7 @@ A memory object is created with rights that depend on its kind, and
 | a copy-on-write child | `READ`, `WRITE`, `MAP`, `INSPECT`, `DUP`, `GIVE`, `DESTROY` |
 | the boot image | `READ`, `EXEC`, `MAP`, `CHILD`, `CARVE`, `SYSTEM`, `INSPECT`, `DUP`, `GIVE`, never `WRITE` and never `DESTROY`: every right a slice is created with, `DESTROY` aside, which the carve adds, so a slice's rights, the intersection, are the next row's; its empty ceiling keeps `MAP` and `EXEC` from ever mapping it, and it parents no child ([Copy-on-write children and copies of spaces](#copy-on-write-children-and-copies-of-spaces)) |
 | a slice of the boot image | `READ`, `EXEC`, `MAP`, `CHILD`, `INSPECT`, `DUP`, `GIVE`, `DESTROY` |
-| the time page | `READ`, `WRITE`, `MAP`, `INSPECT`, `DUP`, `GIVE`; its read-only ceiling keeps `WRITE` from ever mapping it writable, and `WRITE` only lets `erx_time_set_wall` update it |
+| the time page | `READ`, `WRITE`, `MAP`, `INSPECT`, `DUP`, `GIVE`; its read-only ceiling keeps `WRITE` from ever mapping it writable, and `WRITE` only lets `erx_time_set_offset` update it |
 | the machine page | `READ`, `MAP`, `INSPECT`, `DUP`, `GIVE`, with a read-only ceiling; the kernel alone writes it, and the system domain gives read-only views of it |
 | the previous crash record | as the machine page, plus `DESTROY`, so the system domain can free its pages once the inspector has shown it |
 | the device-secret page | `READ`, `MAP`, `INSPECT`, without `WRITE`, `CHILD`, `DUP`, `GIVE` and `DESTROY`, so it has one capability, the root task's, which no copy, pass or fork can reach, since rights only shrink (K2) |
@@ -6858,8 +6858,11 @@ product taken in 128 bits so it never overflows. The binding lets user mode
 read the counter and keeps every other user-mode timer access trapped
 ([design-arch-aarch64.md](design-arch-aarch64.md#timer)). Wall-clock time is
 the real-time clock's reading at boot plus monotonic time since; the system
-domain corrects it with `erx_time_set_wall`, which needs the `WRITE` right
-on the time page. The **time page** is one read-only page mapped into every
+domain corrects it with `erx_time_set_offset(time_page, offset_ns)`, which
+needs the `WRITE` right on the time page and stores `offset_ns` as the
+page's `wall_offset_ns` as given, so no time between the caller's
+measurement and the store changes the result
+([design-time.md](design-time.md#the-construction)). The **time page** is one read-only page mapped into every
 domain that asks for it:
 
 ```c
@@ -6882,6 +6885,19 @@ On sequence exhaustion wall-clock updates return `ERX_ELIMIT`, and readers
 report the wall-clock conversion unavailable rather than retrying a
 terminal count forever; monotonic time remains available from the fixed
 counter conversion. The page's sequence is never reset during a boot.
+
+**The wall clock's range.** Every offset the page holds lies in
+`0..time_offset_max`, `2^62 - 1` ns, a limit of `abi/erx_abi.txt`:
+`erx_time_set_offset` refuses any other with `ERX_EINVAL`, and the kernel
+stores the real-time clock's boot reading only when its offset lies in
+that range, leaving zero otherwise. Monotonic time stays below `2^62` ns
+for 146 years of uptime, so every wall time a reader computes lies in
+`[0, 2^63)`, the range of a signed 64-bit count of nanoseconds, which
+ERTS's system time is. The boot reading is stored before the page is
+published, so `seq` is zero until the first change of the page and
+nonzero from then to the next boot: a reader learns from `seq` alone
+whether the clock is still as the boot set it, which the clock service
+takes as a cold start ([design-time.md](design-time.md#steps)).
 
 **Entropy.** One ChaCha20 generator (RFC 8439), under a leaf lock:
 
@@ -8091,7 +8107,7 @@ errors). Calls that may wait are marked with the executor rule.
 | umtx | `erx_umtx_wait(addr, expected, deadline)` (executor: allow on private memory), `erx_umtx_wake(addr, count)` | [Umtx](#umtx) |
 | resources and DMA | `erx_resource_carve(budget (ALLOC), resource (CARVE), kind, selector)`, `erx_dma_create(resource (CARVE), budget (ALLOC))`, `erx_dma_map(window (MAP), iova, size, mem (MAP), offset, prot)`, `erx_dma_unmap(window (MAP), iova, size)`, `erx_dma_bind(window (BIND), irq (TRIGGER))` | none waits |
 | log and trace | `erx_debug_log(len)`, its text in the caller's UTCB, `erx_log_read(res (TRACE), cursor, window)`, `erx_log_take(res (TRACE), window)`, `erx_trace_read(res (TRACE), cpu, cursor, window)` | none waits; each reader writes whole records into its window and returns the next cursor and the count of records lost ([Console, log and panic](#console-log-and-panic), [Trace ring](#trace-ring)) |
-| time and entropy | `erx_time_set_wall(time_page (WRITE), wall_ns)`, `erx_entropy_read(len)`, `erx_entropy_add(res (CARVE), len, flags)`, their bytes in the caller's UTCB | crediting needs `ENTROPY` |
+| time and entropy | `erx_time_set_offset(time_page (WRITE), offset_ns)`, `erx_entropy_read(len)`, `erx_entropy_add(res (CARVE), len, flags)`, their bytes in the caller's UTCB | crediting needs `ENTROPY` |
 | machine | `erx_machine_end(res (POWER), how)`, `erx_watchdog_pet(res (POWER))` | `how` is `ERX_END_OFF`, `ERX_END_RESET`, `ERX_END_PANIC` or `ERX_END_TRIAL`; the end returns only to fail `ERX_END_TRIAL` with `ERX_ENOTSUP`; a pet never waits and moves the deadline `D` seconds ahead ([The watchdog](#the-watchdog)) |
 
 ### The ABI file

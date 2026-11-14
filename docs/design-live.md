@@ -1932,7 +1932,7 @@ the system domain `erx_tracer`, adds their difference to every timestamp
 of a batch, taking the pair again for each batch. While the wall clock
 is not set the difference is constant, since the time supervisor finds
 nothing to correct (the same file's header comment); after
-`erx_time_set_wall` ERTS's correction may slew it, by at most 1 % in
+`erx_time_set_offset` ERTS's correction may slew it, by at most 1 % in
 stock OTP, so an event's time is off by at most 1 % of its distance from
 its batch's pair.
 
