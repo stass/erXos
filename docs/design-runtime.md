@@ -457,7 +457,7 @@ of behaviour, however many lines it touches:
 | `beam/bif.c` | 42. while another process holds `erx_tty_owner`, `halt_2` with `{flush, true}` traps to `erx_output:halt/2`, which drains the tty before it halts ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display_log/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
 | `lib/stdlib/src/shell.erl` | 44. `prompt_width/1` asks no group when `erx_console` calls it, as when `user_drv` does |
-| `lib/kernel/src/user_sup.erl` | 45. `get_user/1` answers `{erx_console, start, []}` when the flags hold `-user erx_console`, whatever `-noshell`, `-noinput` and their kin say, since `erx_console` reads those itself and no flag reaches `user_drv`, whose NIF is gone |
+| `lib/kernel/src/user_sup.erl` | 45. `get_user/1` answers `{supervisor, erx_console_sup}` when the flags hold `-user erx_console`, whatever `-noshell`, `-noinput` and their kin say, since `erx_console` reads those itself and no flag reaches `user_drv`, whose NIF is gone; `init/1` starts that supervisor, which starts the console again whenever it ends, as the bridge's child in place of `user`, since each start of the console registers a new `user` |
 | `lib/kernel/src/user_drv.erl` | 46. `whereis_group/0` reads the group from `erx_console`'s process when `user_drv` is not running: the current group when it runs the Erlang shell, and `undefined` while a command shell has the input |
 | `beam/break.c` | 47. the break menu prints no clear-screen sequence, so it asks no terminal whether to |
 | `lib/stdlib/src/erl_parse.erl` | 48. the generated parser has no `-file` line naming the machine that generated it, since `stdlib` would not rebuild after a source edit with one |
@@ -479,8 +479,9 @@ of behaviour, however many lines it touches:
 | `erts/preloaded/src/erlang.erl`, `lib/stdlib/src/gen.erl`, `lib/kernel/src/erpc.erl` | 64. the library calls that stock gives a node-level result when a connection's `noconnection` reaches them give the same result for edit 56's `{domain_down, D, Info}`: `spawn/4`, `spawn_link/4`, `spawn_opt/5` and `spawn_monitor/4`, and the forms that route to them, whose spawn gets it as its error reply, return a pid that exits with `noconnection`, as stock's documentation promises; `gen:call`, and so `gen_server:call` and its kin, exits `{nodedown, Node}`; and `erpc`'s calls and requests raise `{erpc, noconnection}` for it as the `DOWN` of the request's process or as its spawn's error reply, so `rpc:call/4,5`, which maps that error, returns `{badrpc, nodedown}`, `rpc:block_call` through `gen_server:call` the same, and `rpc:multicall` counts the node among its bad nodes. Raw links, monitors and `spawn_request` replies keep the reason. Each matches the shape alone: a spawn's error reply of that shape comes only from this node's ERTS, but any process can make a monitored process exit with it, as it can with `noconnection`, so the result tells a caller no more than stock's does ([Connections in ERTS](#connections-in-erts)) |
 | `erts/preloaded/src/init.erl` | 65. once the boot script has started every application, and before any `-s`, `-run` or `-eval`, a domain's runtime sends `{erx_ready, #{connections => Agent, inspect => InspectAgent, provides => Provides}}` to the domain pid that `erx_dist:boot/0` names, `Agent` being its connection agent, `erx_connections`, and `InspectAgent` its inspection agent, `erx_inspect_agent` ([design-live.md](design-live.md#the-runtime-agent)), a key left out when no agent is registered, both of which edit 8 hands out to the system domain with `send` as the frame is encoded, and `Provides` the mints its services named with `erx_facet:provide/2` ([design-system.md](design-system.md#facets-a-configured-domain-serves)), whose persistent term init then leaves as `reported`, so `provide/2` refuses a later mint: init's ready report, on which `erx_domain:create/1` returns ([design-domains.md](design-domains.md#messages-between-the-domain-service-and-a-runtime)). Further agents join the map as they come to exist. Coming before `-eval`, it is sent by a domain whose `-eval` halts it too. Init then waits, at most five seconds, for the domain service's answer, the domain's facets by name, which the connection agent keeps as the persistent term `{erx, facets}`, which `erx:cap/1` reads, and then hands it as `{erx_facets, Facets}`, so `-eval`, `-s` and `-run` find them. The agent is that term's one writer, for this answer and for every later installation, so no installation is lost to the answer; a domain whose answer does not come in time boots on without waiting for it. The system domain, whose boot page names no domain pid, and a runtime that is no node report nothing and wait for nothing |
 | `beam/jit/arm/ops.tab`, `beam/jit/x86/ops.tab` | 66. a `select_val` whose failure falls through to the next instruction, the small-integer half that `split_values` makes of a select that also matches bignums, takes a search and never a jump table, whose gaps need a failure label, as in the interpreter |
+| `lib/kernel/src/application_controller.erl` | 67. the controller keeps `init` as its group leader once `kernel` has started, rather than taking `user`'s pid, so every application master's group leader is `init` and finds `user` by name for each request (`application_master.erl:246-257`), and a restarted console's `user` serves every application |
 
-Sixty-six edits outside `sys/erxos`, in seventy named files outside
+Sixty-seven edits outside `sys/erxos`, in seventy-one named files outside
 the JIT's directory, in the JIT's directory and in asmjit's `VirtMem`;
 the interpreter build, and so the system and interpreter images, is
 built without the last two. Nothing in `erl_ptab.c`: processes take their pids as stock
@@ -2278,8 +2279,9 @@ connection: input bytes go to the group as `{self(), {data, Chars}}`, and each
 request from the group goes through `prim_tty:handle_request/2` to become bytes
 for the driver. A session in another domain does the same beside its own
 tty ([design-live.md](design-live.md#the-tty)). `-user erx_console`
-([Configuration](#configuration)) makes `user_sup` call `erx_console:start/0`,
-which starts the driver and two groups, as `user_drv` does: the shell's,
+([Configuration](#configuration)) makes `user_sup` start `erx_console_sup`, which
+starts the console (`erx_console:start_link/0`) and starts it again whenever it
+ends. The console starts the driver and two groups, as `user_drv` does: the shell's,
 which runs the command shell (`{erx_shell, console, []}`) and gets the input, and
 a group with no shell registered as `user`, since `shell:prompt_width/1` calls
 `io:getopts(user)` from inside the shell's group and a group cannot answer itself.
@@ -3730,7 +3732,8 @@ The system release's arguments are:
 `init` exits without `-bindir` (`init.erl:1235`), though nothing is read from it.
 `-home` answers `filename:basedir` and `c`, as no `HOME` exists. `-user` replaces
 `user_drv`, which loads the removed NIF (`user_drv.erl:182`), with `erx_console`,
-and `user_sup` waits ten seconds for it to register `user` (`user_sup.erl:105-119`).
+and `user_sup` starts its supervisor, whose start returns once the console has
+registered `user`.
 `-no_epmd -proto_dist erx` makes the runtime a node over the `erx` carrier with
 no port mapper, as every domain's release does, so the system domain is
 `system@<host>` from `kernel`'s start

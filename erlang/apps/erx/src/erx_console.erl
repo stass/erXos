@@ -17,6 +17,14 @@
 %% shell does at the end of its input. With -noshell or -noinput there is no shell, and
 %% `user` is the first group.
 %%
+%% Its supervisor, erx_console_sup, starts the system console again whenever it ends
+%% (docs/design-live.md, "Failure handling, diagnostics and debuggability"). Its groups,
+%% its driver, the owners of its lines and its facet endpoint end with it, and with them
+%% every shell on the line and every session's console facet; the restarted console
+%% writes the slogan and starts its driver, a new `user` and its command shell, as at
+%% boot. It logs no principal in: the sessions its predecessor knew run on, unreachable
+%% from the line (TODO.md).
+%%
 %% A shell typed at the shell takes the input on a group of its own (run_shell/1), as
 %% user_drv's `s` and `c` start a shell and connect to it, and gives it back to the group
 %% below when it ends; the groups below are not shown, so their output is acknowledged
@@ -98,7 +106,7 @@
 -module(erx_console).
 -behaviour(gen_server).
 
--export([start/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
+-export([start_link/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
 -export([facet/0, add_session/2, login/0, login_session/0, connect/1, detach/0, first_group/0]).
 -export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -207,10 +215,14 @@
 %% (erx_domain:pid/1). Its tty names itself, through its console facet.
 -type session_spec() :: #{name := binary(), principal := pos_integer(), domain_pid := pid()}.
 
-%% user_sup calls this, and waits for the `user` group to register.
--spec start() -> {ok, pid()} | {error, term()}.
-start() ->
-    gen_server:start({local, ?MODULE}, ?MODULE,
+-doc """
+Starts the system console, linked to the caller and registered as erx_console: its
+supervisor (erx_console_sup) starts it this way at boot and again whenever it ends.
+Returns once the console's `user` group is registered.
+""".
+-spec start_link() -> {ok, pid()} | {error, term()}.
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE,
                      #{role => system, name => ?MODULE,
                        driver => fun(Console) -> (driver_module()):start_link(Console) end,
                        line_owners => fun() -> line_owners(driver_module()) end,
@@ -351,7 +363,7 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
     TTY = banner(Role, prim_tty:init_ssh(tty_options(Terminal), ?DEFAULT_SIZE, utf8), DriverPid),
-    User = start_user(),
+    User = start_user(Role),
     Group = case FirstShell of
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
@@ -441,12 +453,30 @@ The first group never runs the Erlang shell (first_shell/1).
 erlang_shell_group([{Group, _Caller, {shell, start, _Args}} | _]) -> Group;
 erlang_shell_group(_Shells) -> undefined.
 
-%% The `user` group, started and registered as user_drv's start_user/0 does, unless a
-%% `user` already exists.
-start_user() ->
+%% The `user` group, started and registered as user_drv's start_user/0 does. The system
+%% console's `user` ends with it, as a group ends at its driver's exit, so a `user` still
+%% registered as the system console starts is its predecessor's, which may not have taken
+%% that exit yet: it is killed and its end awaited, which frees the name. Under
+%% `-user erx_console` nothing else registers `user` (user_sup starts no user_drv and no
+%% relay). A session's console takes the `user` its domain already has, if any.
+start_user(system) ->
+    case whereis(user) of
+        undefined -> ok;
+        Old -> ok = await_kill(Old)
+    end,
+    group:start(self(), noshell, [{name, user}]);
+start_user(session) ->
     case whereis(user) of
         undefined -> group:start(self(), noshell, [{name, user}]);
         User -> User
+    end.
+
+%% Kills Pid and returns once it has ended; its registered name is free by then.
+await_kill(Pid) ->
+    Monitor = monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Monitor, process, Pid, _Reason} -> ok
     end.
 
 %% Starts Shell on a new group with the options every shell but the Erlang shell
@@ -586,7 +616,8 @@ info({erx_console_written, {Group, Reply}}, State) ->
     Group ! {reply, Reply, ok},
     {noreply, State};
 info({'EXIT', User, Reason}, State = #state{user = User}) ->
-    %% `user` ends only as the runtime stops (user_sup kills the system console's).
+    %% `user` ends only with its console or as the runtime stops (user_sup kills the
+    %% system console's supervisor, and the console with it).
     {stop, Reason, State};
 info({'EXIT', Pid, Reason},
             State = #state{role = Role, driver = Driver, line_owners = LineOwners, base = Base, shells = Shells,

@@ -940,6 +940,13 @@ module Erx
       # reports partial, with the pool's scope below the tables, and the same statuses in
       # /proc: ls and cat through the command shell's evaluator, then file:read_file/1 of a
       # process's status file, which is size 0 and read to its end as stock reads one.
+      # Last the person kills the console from its Erlang shell (CONSOLE_KILL): its
+      # supervisor starts it again, which writes the slogan and starts the command shell on
+      # the line, the shell a person meets at boot, and the Erlang shell started
+      # there answers a sum and writes a line through the master of an application started
+      # after kernel (APP_IO), the group leader of that application's processes, which reaches the
+      # restarted console's `user` (docs/design-live.md, "Failure handling, diagnostics and
+      # debuggability").
       def self.console_checkpoints(machine:)
         boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|
           point.fetch(:name) == 'development-warning' ? point.merge(type: ERL_LINE).freeze : point
@@ -1002,7 +1009,15 @@ module Erx
          console_point('top-states', /\A[1-9][0-9]* processes: /n),
          console_point('top-memory', /\AMem \(root pool\): [1-9][0-9]{0,3}[KMG] Total, [0-9]{1,4}[KMG] Free\r*\n\z/n),
          console_point('top-budget',
-                       /\ADomain 4 budget \(root pool\): [1-9][0-9]{0,3}[KMG] Used, - Guarantee \[unsupported\], - Cap \[unsupported\]\r*\n\z/n)].freeze
+                       /\ADomain 4 budget \(root pool\): [1-9][0-9]{0,3}[KMG] Used, - Guarantee \[unsupported\], - Cap \[unsupported\]\r*\n\z/n,
+                       type: CONSOLE_KILL),
+         SLOGAN.merge(name: 'restarted-slogan').freeze,
+         console_point('restarted-shell', RELEASE_SHELL.fetch(:pattern), type: ERL_LINE),
+         console_point('restarted-erlang-shell', ERLANG_SHELL.fetch(:pattern), type: "1+2.\r"),
+         console_point('restarted-sum-echo', /1\+2\.\r*\n\z/n),
+         console_point('restarted-sum-answer', /\A3\r*\n\z/n, type: APP_IO),
+         # The echo of the line holds app-io-~s, so only the output matches.
+         console_point('restarted-app-io', /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?app-io-ok\r*\n\z/n)].freeze
       end
 
       # A line of the console's transcript, what the person types once it is seen, and the
@@ -1251,6 +1266,13 @@ module Erx
                         '"/status /proc/status /proc/domains/4/budget/status"]).' "\r"
       # One display of top, its process table cut to one row.
       TOP_EXPRESSION = 'erx_shell_script:run("top -b 1").' "\r"
+      # Typed at the console's Erlang shell: the console killed, as a crash would end it.
+      CONSOLE_KILL = "exit(whereis(erx_console), kill).\r"
+      # Typed at the restarted console's Erlang shell: a line written as the processes of
+      # the last application started write theirs, through its master. Every application
+      # but kernel starts after `user` is first registered.
+      APP_IO = 'io:format(application_controller:get_master(element(1,hd(application:which_applications()))),' \
+               '"app-io-~s~n",[ok]).' "\r"
       # The same status file through file:read_file/1: every line of it is a field escape's
       # name, value and reporter, and the console's line says so. B is LOAD_ONLY_EXPRESSION's.
       PROC_READ_EXPRESSION = '{ok,PB}=file:read_file(["/proc/processes/",P,"/status"]),' \

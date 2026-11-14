@@ -17,7 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: -user erx_console holds against -noshell and its kin.
+%% Modified by erXos: -user erx_console holds against -noshell and its kin, and
+%% starts the console's supervisor, which restarts it.
 %%
 %% %CopyrightEnd%
 %%
@@ -43,7 +44,7 @@
 start() ->
     supervisor_bridge:start_link(user_sup, []).
 
--spec init([]) -> 'ignore' | {'error', 'nouser'} | {'ok', pid(), pid()}.
+-spec init([]) -> 'ignore' | {'error', term()} | {'ok', pid(), pid()}.
 
 init([]) ->
     init(init:get_arguments());
@@ -54,6 +55,16 @@ init(Flags) ->
 	{master, Master} ->
 	    Pid = start_relay(Master),
 	    {ok, Pid, Pid};
+	{supervisor, Sup} ->
+	    %% erXos: the console's supervisor starts the console again whenever it
+	    %% ends, and each start registers a new `user`, so the supervisor, not
+	    %% `user`, is this bridge's child.
+	    case Sup:start_link() of
+		{ok, Pid} ->
+		    {ok, Pid, Pid};
+		Error ->
+		    Error
+	    end;
 	{M, F, A} ->
 	    case start_user(M, F, A) of
 		{ok, Pid} ->
@@ -123,7 +134,7 @@ wait_for_user_p(N) ->
 get_user(Flags) ->
     case lists:member({user, ["erx_console"]}, Flags) of
         %% erXos: no flag reaches user_drv, whose NIF is gone; erx_console reads them.
-        true -> {erx_console, start, []};
+        true -> {supervisor, erx_console_sup};
         false -> get_stock_user(Flags)
     end.
 

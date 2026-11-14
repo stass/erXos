@@ -17,6 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
+%% Modified by erXos: the controller keeps init as its group leader, so
+%% application masters find `user` by name.
+%%
 %% %CopyrightEnd%
 %%
 -module(application_controller).
@@ -997,10 +1000,11 @@ handle_application_started(AppName, Res, S) ->
     {AppName, RestartType, _Type, _From} = lists:keyfind(AppName, 1, Starting),
     case Res of
 	{ok, Id} ->
-	    case AppName of
-		kernel -> check_user();
-		_ -> ok
-	    end,
+	    %% erXos: once kernel runs, the controller keeps init as its group
+	    %% leader rather than taking `user`'s pid, so each application master
+	    %% it starts finds `user` by name for every request
+	    %% (application_master:relay_to_group_leader/2), and the `user` of a
+	    %% console its supervisor restarted serves every application.
 	    info_started(AppName, nd(Id)),
 	    notify_cntrl_started(AppName, Id, S, ok),
 	    NRunning = keyreplaceadd(AppName, 1, Running,{AppName,Id}),
@@ -1769,12 +1773,6 @@ add_env(Name, Env) ->
 
 del_env(Name) ->
     ets:match_delete(ac_tab, {{env, Name, '_'}, '_'}).
-
-check_user() ->
-    case whereis(user) of
-	User when is_pid(User) -> group_leader(User, self());
-	_ -> ok
-    end.
 
 
 %%-----------------------------------------------------------------

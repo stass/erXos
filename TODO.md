@@ -3851,6 +3851,35 @@ it; git history is the record of completed work.
   while [design-live.md](docs/design-live.md#failure-handling-diagnostics-and-debuggability) has the console restarted by its supervisor
   with every line showing a login. Give the console a supervisor that restarts it, with a test that kills it and
   finds a login prompt on the line.
+* [Medium] runtime, `erlang/apps/erx/src/erx_console.erl` `init/1`: the console starts its driver (line 349) before its
+  first `erx_log:take/0`, which waits for the first `erx_log_poll`, `LOG_POLL_MS` later (line 358), so for that time
+  the root still writes records on the UART while the driver writes it too, and their bytes can interleave on the
+  line. [design-stopgap.md](docs/design-stopgap.md#the-console) puts the first take before the driver's first touch
+  of a register, and [design-log.md](docs/design-log.md#the-kernels-records) has the log service make it in its
+  `init`, before `user_sup` starts the console. Until then, take once before `Start(self())`, with a test that the
+  stopgap's `l4_vcon_write` counter stays still once the driver has started.
+* [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a restarted system console reaches none of the sessions
+  its predecessor knew. Each session's tty holds a console facet minted in front of the old console's facet endpoint,
+  which ends with that console, as do its table of sessions and their masters, so the sessions run on unreachable,
+  the login's session keeps its principal's domain quota, and the restarted console logs no one in: the line shows
+  the system's command shell, and `erx_console:login_session/0` answers `none`, so `erx_hostlink_web` finds no root
+  line. [design-live.md](docs/design-live.md#failure-handling-diagnostics-and-debuggability) has the line show a
+  login after a restart and the sessions reachable by it. Give the endpoint and the session table a life beyond one
+  console, or have the domain service hand a restarted console the live sessions and their ttys name themselves
+  again, which meets the master reset of a restarted relay ("Console and a restarted relay").
+* [Medium] runtime, `user` across a console restart (`otp/erts/preloaded/src/init.erl`, `erx_console_sup.erl`): an
+  io request that reaches `user` while none is registered (between the old console's end and the new one's
+  `start_user/1`, or for good once `erx_console_sup` gives up) goes to init, which drops it with a log line holding
+  its text, and one sent to the old `user` after its driver ended is never answered; either way the caller, which
+  monitors only its group leader (an application master, alive), waits for ever. Processes that still hold the old
+  `user`'s pid as their group leader (those `-s`, `-run` and `-eval` start, which `init:start_em/1` gives it, and
+  `error_logger_tty_h`) get `{error, terminated}`. Have init answer an io request it cannot forward with an error,
+  as an io server that has ended would.
+* [Low] hosted, `erlang/apps/erx/src/erx_stdio.erl`: the hosted console's driver cannot start twice: `init/1` loads
+  its NIF on every start, the second load is refused, `start_nif` refuses a second start, and the reader thread
+  signals the first driver's pid. So `erx_console_sup`'s restarts of a hosted console all fail at once and it gives
+  up, leaving the hosted runtime without a console. Load the NIF once (`-on_load`) and let a start move the input to
+  the new driver.
 * [Medium] runtime, `liberx/backend/fiasco`: the native root does not read the release's manifest: its page takes
   `erx.arg=WORD` alone, with `system_args`, `limits`, `pack_flags` and `release_addr` empty, and no archive holds
   a native root with these release files. `liberx/backend/core/boot_manifest.c` is the reader to link, and
