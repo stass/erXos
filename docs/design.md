@@ -1731,8 +1731,7 @@ docs/             design, plan, research records, style
 sdk/              the SDK's own sources: erx_ui_host and sdk.mk; tools/erx
                   sdk export writes the SDK from a built tree
 examples/         example apps that no list of the build names, each built
-                  only through the SDK; a third party's (Doom) as a git
-                  submodule with an ORIGIN.md beside it
+                  only through the SDK
 ```
 
 ## Build and toolchain

@@ -1680,16 +1680,17 @@ time.
    target, `erx_app_admit` with its corpus, run on the host by the
    packer; `erx_verity` reading an image from a file; the app's session
    with its kept rows, `/app` and its record in the ready answer;
-   `erx_app`; the package process with the image's packages; the `apps`
+   `erx_app`, with `erx_prog_handler`'s `window` option and the monitor
+   its start returns; the `apps` row of both development manifests, left
+   out of the site manifest; the package process with the image's packages; the `apps`
    tree's `system/`, mounted at `/apps`, and the shell's `mount` of a
    package file; the session's export naming each mount's tree when it is
    mounted; the start table's package rows; `/proc/packages`. The SDK: `tools/erx sdk
    export`, `erx-app pack` and `test`, the declaration's parser
    with its fuzz target, `erx_ui_host`; `tools/erx pack --app` and
    `tools/erx app run`; `erx-lvgl` beside `erx_ui` in every image's
-   domain release; `examples/dashboard` built through the SDK alone, and
-   `examples/doom` as a submodule built only on request. On the stopgap
-   the image's packages lie in the boot image's domain release.
+   domain release; `examples/dashboard` built through the SDK alone. On
+   the stopgap the image's packages lie in the boot image's domain release.
 3. **Installing at run time**, after part 2, M6's data partition and
    1b-E's storage domain. The `packages` tree of the storage service;
    the `apps` tree's installed packages, whose close installs or
@@ -1742,16 +1743,16 @@ two apps see none of each other's domains at `/proc`; a packaged test program wi
 draws through `/dev/draw` and answers a key; each seeded fault of
 design-packaging.md's host tests and each seeded violation of property
 19 fails as designed; the header's and the declaration's fuzz targets
-run their budgets clean; no build list names `examples/`, and `make
-check` needs no `examples/doom`.
+run their budgets clean; no build list names `examples/`.
 
 **Exit criteria, installing at run time.** In a development build,
 `cp` of a package into `/apps` shows it `admitted` at
 `/proc/packages`, with its signer `unchecked`, and its image readable
 through `mount /apps/NAME.app DIR`; `service NAME enable` starts
 nothing and `service NAME start` then starts it, and a reboot keeps it;
-a newer build copied over it runs with the app's files
-kept, and one cut short fails its `cp` and leaves the old one running;
+a newer build copied over it stops it and starts nothing, whatever
+`rc.conf` says, and `service NAME restart` runs the new build with the
+app's files kept, and one cut short fails its `cp` and leaves the old one running;
 `rm` of it leaves no package or row, no session of it once the
 publication has answered, and the app's directory; a copy cut short
 fails its `cp` and publishes no name; the planners' crash and failure tests

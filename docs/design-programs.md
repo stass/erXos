@@ -664,19 +664,49 @@ starter as the end's holder
 pixel area it shares with the display domain `Peer`, at most one. The
 handler allocates that buffer's range and lends it to the program
 itself, so the range is the handler's, as the buffer of every program is
-([design-display.md](design-display.md#the-pixel-area)), and `start/1`
-answers `{ok, Handler, Offsets}`, `Offsets` the buffer's `{N, Offset}`,
-which the starter names in the window's presents. A domain without the
-display client's pixel allocator refuses a buffer with `ENODEV`. The
-starter is told of the program's end as `{erx_prog_exit, Handler,
-Status}`, `Status` the end as a parent's wait reads it (`{exited, N}` or
-`{signaled, Signal}`), and the handler exits after it; the buffer's
-range goes with the handler, so the starter names its offset in no
-present after that message. The handler
-monitors its starter, and the starter's exit stops the program, as a
-parent's end stops its children ([A program's end](#a-programs-end)), so
-no program outlives the session process that started it and nothing is
-orphaned; the starter may stop it sooner with `erx_prog_handler:stop/1`.
+([design-display.md](design-display.md#the-pixel-area)), and the starter,
+which holds the window, names the range's offset in the window's
+presents. A domain without the display client's pixel allocator refuses
+a buffer with `ENODEV`.
+
+The spec's `window => Display` starts the program with a window of its
+own on `Display`, a display whose `windows` grant the session holds, for
+a program that draws through Plan 9's draw files rather than into a
+buffer its starter presents. When it reserves the program's grants
+(step 5 of [Starting a program](#starting-a-program)) the handler opens
+the window with `erx_win`, as its holder, so the window ends with the
+handler, starts a draw connection on it, and binds the connection's
+`draw` and `ctl` and the window's `kbd`, `mouse`, `wctl` and `label` at
+`/dev/draw`, `/dev/ctl`, `/dev/kbd` and the rest of the program's
+namespace, beside the session's own `/dev`, as
+[design-display.md](design-display.md#the-window-tree) ("A program's
+`/dev`") says; a later step's failure closes the window with the rest of
+what the start reserved. The window and a buffer are two ways to draw,
+and a spec names at most one of them: one that names both is refused
+with `EINVAL`. A domain without the display's client side, and a
+display the session holds no `windows` grant on, refuse a window with
+`ENODEV`; a window the display refuses refuses the start with the
+display's errno, `EDQUOT` for a pixel area with no room for its buffer.
+
+`start/1` answers `{ok, Handler, Monitor, Offsets}`: `Monitor` is a
+monitor of the handler that `start/1` made in the caller before the
+handler could end, and `Offsets` the buffer's `{N, Offset}`, or `[]`.
+The monitor's `'DOWN'` is the starter's one report of the program's end.
+Once its program has ended, and its buffer's range and its window are
+gone with it, the handler exits with `{shutdown, {program_exit,
+Status}}`, `Status` the end as a parent's wait reads it (`{exited, N}`
+or `{signaled, Signal}`); a `shutdown` reason keeps that ordinary end out
+of OTP's crash reports (`lib/stdlib/src/proc_lib.erl:951`). Any other
+reason is the handler's own end, a crash or a port the driver closed
+with no status to read, and the program ended with it, since a port
+closes with its owner. So a starter handles one message for every end,
+none ordered against another, and names the buffer's offset in no
+present after it. The handler monitors its starter, and the starter's
+exit stops the program, as a parent's end stops its children ([A
+program's end](#a-programs-end)), so no program outlives the session
+process that started it and nothing is orphaned; the starter may stop it
+sooner with `erx_prog_handler:stop/1`, after which the `'DOWN'` reads
+`{signaled, sigkill}`.
 The handler's decisions are a pure state machine,
 `erx_prog_handler_core`, which the handler process steps with each
 event and whose actions it performs in order.
@@ -3235,6 +3265,20 @@ terminal cases.
   with P13's properties, and with a seeded executor that applies a frame
   before its last byte is read and a seeded switch that drops the signal
   reports the handler still owed.
+* **A session process's program**, `erx_prog_handler` over a fixture
+  display tree and a test program. With `window`, the program finds
+  `/dev/draw`, `/dev/ctl`, `/dev/kbd` and `/dev/mouse`, its draw messages
+  reach the window, a key the fixture sends reads back from `/dev/kbd`,
+  and the window is gone once the program has ended; a spec naming a
+  window and a buffer answers `EINVAL`, and a display the session holds
+  no grant on `ENODEV`, each with no window, hand-off or lease left
+  behind. A program that exits 3 gives its starter one message, the
+  `'DOWN'` of the returned monitor with `{shutdown, {program_exit,
+  {exited, 3}}}`; `stop/1` gives `{signaled, sigkill}`; a killed handler
+  gives `killed`, with the program ended. Seeded: a window opened with
+  the starter as its holder, which leaves it open after the program's
+  end; a start whose failure after the window's open skips closing it;
+  a handler that exits `normal`, which the test reads as a lost status.
 * **Build checks.** The entry macro on every exported function of
   `liberx`'s program layer, with a seeded function without it; the event
   executor's call graph free of kept locks, with a seeded call to

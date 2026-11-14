@@ -9,12 +9,12 @@ it; git history is the record of completed work.
 ## Major initiatives
 
 * [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits an outside
-  review of its update path, its `mount` and its `/etc/rc.conf`, and the answers to its remaining questions
-  (its "Risks and decisions"); then Track A's parts 2 and 3 build it
+  review of its update path, its `mount` and its `/etc/rc.conf`; then Track A's parts 2 and 3 build it
   ([plan.md](docs/plan.md#track-a-apps)). An app names its needs, memory and code, and one `apps` row bounds
   every app; each app is a plain file, `/apps/NAME.app` or `/apps/system/NAME.app`; installing is `cp
   NAME.app /apps/`, whose close checks, admits and publishes the package by one rename, a copy over an
-  installed app updates it the same way, the old one running until the new one passes, `rm` removes it,
+  installed app updates it the same way, the old one running until the new one passes and then stopped until
+  its own `service NAME start` or `restart` or the next boot, since no publication applies `rc.conf`, `rm` removes it,
   keeping its data, which is named by app and signer, and `mount /apps/NAME.app DIR` shows its image
   read-only; each app is a principal of its own, its budget elastic under the `apps` budget, as
   design-kernel.md and design-system.md record.
@@ -668,10 +668,13 @@ it; git history is the record of completed work.
   settings changed, the comparison `erx_starter:kept/1` serves, and the failed read's retry with backoff all go;
   the records process holds each row's applied record instead; the display rule judges a row against the rows kept
   (a live row supervisor) rather than the rows the file enables, so `merge/3` takes the rows kept as `merge/4`; a
-  failed read counts as a file with no settings at boot and at a publication, while at a command `start`, `restart`,
-  `onestart` and `onerestart` answer `eio` and `stop` and `onestop` are judged on the row as last applied; a
-  publication applies the file to the rows it adds; a restarted table reads `rc.conf` only for a row it holds no
-  record for; the keeper, not the table, waits on
+  failed read counts as a file with no settings at boot, while at a command `start`, `restart`,
+  `onestart` and `onerestart` answer `eio` and `stop` and `onestop` are judged on the row as last applied; the
+  boot applies the file to the rows of the boot's package set, the first set of the boot, when it arrives, and a
+  later publication applies nothing: it records the rows it adds `installed` and starts nothing, so an install or
+  an update starts its app only at its own `start` or `restart` or the next boot; the records process holds the
+  boot mark beside the records, and a restarted table reads `rc.conf` only to finish a boot the mark says is not
+  done, recording any other row with no record `installed`; the keeper, not the table, waits on
   `erx_domain:display_settled/1`, before each start of its session; and a row runs while its kept or its `onestart`
   session stands, so a `start` after `onestart` and `enable` answers `ealready` rather than leaving a
   `{once, Name}` keeper beside the row's supervisor (the A5c residual); `erx_cmd_service`'s `enable` and `disable` edit

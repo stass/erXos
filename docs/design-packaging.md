@@ -39,7 +39,9 @@ ls /apps                         dashboard.app  system
 ls /apps/system                  the image's apps, read-only
 service dashboard enable         start it at every boot
 service dashboard start          start it now
-cp dashboard.app /apps/          update it: the old one runs until the new one passes its checks
+cp dashboard.app /apps/          update it: the old one runs until the new one passes its checks,
+                                 then stops
+service dashboard restart        run the new version now
 mount /apps/dashboard.app /mnt   look inside it, read-only, at /mnt; unmount /mnt to end
 rm /apps/dashboard.app           remove it; its data stays
 service dashboard purge          remove its data as well
@@ -124,11 +126,14 @@ Decisions every reader of this document needs:
   replaced, the package process publishes a package set without the app,
   and the start service answers that publication only once the app's
   sessions have ended; an update then publishes the set with the new
-  package, and the app's row starts again. Nothing starts because it was
-  installed: the image builder enables a row of the image's packages,
-  and the administrator an installed one with `service NAME enable`,
-  which starts it at the next boot, and `service NAME start`, which
-  starts it now, as on FreeBSD.
+  package, and the app's row is back in the table, installed and not
+  running. A
+  publication applies nothing of `/etc/rc.conf`, so nothing starts
+  because it was installed or updated: the image builder enables a row
+  of the image's packages, and the administrator an installed one with
+  `service NAME enable`, which starts it at every boot, and `service
+  NAME start` or `restart`, which runs the version installed now, as
+  FreeBSD's `pkg upgrade` leaves services alone.
 * **An app's data belongs to its name and its signer.** An app's
   directory is named for both, so two signers' apps of one name never
   share data, and removing a package keeps the directory for the next
@@ -158,7 +163,8 @@ the shell of a session that holds the `start` grant, then `service
 dashboard enable` if it should start at boot and `service dashboard
 start` to start it now. Copying a newer
 `dashboard.app` over it updates it, with its data and its `/etc/rc.conf`
-settings as they were. `rm /apps/dashboard.app` removes it and keeps
+settings as they were, and stops it; `service dashboard restart`, or
+the next boot, runs the new version. `rm /apps/dashboard.app` removes it and keeps
 its data. `ls /apps` lists the installed apps, `mount
 /apps/dashboard.app DIR` shows what one holds, and `/proc/packages`
 shows each one's state.
@@ -264,7 +270,7 @@ for this design.
 | macOS | an app installed by copying it into `/Applications` and removed by deleting it, the system's apps apart in `/System/Applications`, each app named `NAME.app`; the app's data kept when the app is deleted | the app bundle as a directory, its layout and its signing format; the disk image (DMG) as the container ([Alternatives considered](#alternatives-considered)) |
 | Android | a user id per app, so the separation between users is the separation between apps; a package signed by its author, whose data belongs to that signer | permissions granted one by one at run time; apps that grant each other services |
 | Android APEX and Fuchsia packages | code as a read-only image checked block by block against a hash a signed header names | their package managers and resolvers |
-| FreeBSD `pkg` | signature checks against keys the system trusts; a user's files kept when a package is deleted; an installed service starts only once `rc.conf` enables it | `pkg add`, `pkg delete` and `pkg info` as commands of their own; repositories and fetching by name |
+| FreeBSD `pkg` | signature checks against keys the system trusts; a user's files kept when a package is deleted; an install or an upgrade starts no service, which starts at boot once `rc.conf` enables it or at its own `service` command | `pkg add`, `pkg delete` and `pkg info` as commands of their own; repositories and fetching by name |
 | Flatpak | an app built against a published runtime and SDK, with the runtime shipped by the system, not the app | runtimes as packages of their own |
 
 ## Requirements
@@ -302,7 +308,10 @@ for this design.
   copying over it, removing is removing it, and an installed app is
   seen where it was copied.
 
-Outside this design: fetching packages by name (a fetcher is a command
+Outside this design: a policy per signer, which would offer the apps
+of one signer other services than the `apps` row offers every app (the
+builder's lever is which signer keys the image trusts); fetching
+packages by name (a fetcher is a command
 in a person's session that holds `net` and copies the file into
 `/apps`); prompts that ask a person to approve a grant; apps that serve
 facets to other apps; keys at the vault for an app; packages of system
@@ -362,7 +371,9 @@ copied the same way over `clock.app`, lands in a temporary file too, and
 `clock` runs on unchanged while it is checked; once it passes, the
 package process publishes the set without `clock`, so the start service
 ends its session, renames the new file over the old, and publishes the
-set with it, and `clock`'s row starts again on the new package. `rm
+set with it. `clock`'s row is back in the table, installed and not
+running, and `service
+clock restart` starts it on the new package. `rm
 /apps/clock.app` has the package process publish the set without
 `clock` and then delete the file; the app's data stays for the next
 `clock.app` of the same signer.
@@ -422,6 +433,40 @@ board's source does not hold and the build record lists:
   template the manifest grants the start service's tree, `start`
   ([design-apps.md](design-apps.md#interfaces)), so whoever may run the
   start table may install, and no one else.
+
+**The shipped manifests.** Both development manifests,
+`config/manifest/qemu-virt-development.txt` and
+`config/manifest/raspi4b-development.txt`, carry an `apps` row, so a
+development build takes packages with no edit. The website's image
+carries none: `Platform#site_manifest_source` leaves the row out of the
+site manifest it makes from the development one, with the room it took,
+as it leaves out the domains `site_leaves_out` names
+([design-stopgap.md](design-stopgap.md#the-phase-1-manifest-check)), since the site manifest has
+no display domain for `services` to name and the site machine's 256 MiB
+no room for the row's memory. The row's size follows from how the build counts it:
+
+* `max` is reserved in full: property 19 counts the app template as
+  `max` principals, each holding every service of `services`, in the
+  display's pixel areas and connections, the domain and principal
+  tables, the session-name atoms and every server's connections, whether
+  or not an app ever arrives. So `max` is the number of apps a developer
+  keeps installed in one boot, not a bound to be generous with. The
+  development manifests take the default, 8, and lower it only if the
+  board's own sums then fail.
+* `services` is `display data net`: the services both boards serve that
+  the examples and a developer's apps need.
+* `memory` is not multiplied by `max`: it is one wall, carved from
+  `root_memory` and counted by property 4, that the apps running at
+  once share, and the kernel refuses a start that does not fit. So it is
+  sized for the apps that run together, not for every app the row can
+  hold: two at the default 64 MiB, each with its session's outer budget
+  of 1 MiB, and the outer budget of one that has ended and not yet
+  retired, which clause 4 needs beside a running app, 131 MiB
+  (137,363,456 bytes), which the two-app tests of
+  [Verification and testing](#verification-and-testing) need.
+  `root_memory` grows by it, and the packer's check of each board's
+  development machine proves that the RAM left beside it still holds
+  the archive.
 
 An app principal's group is a child of the apps group, whose share of
 `users` is what the principals' shares leave of it, each app an equal
@@ -943,13 +988,17 @@ ready answer brings the app's record. Then it:
    `application:ensure_all_started(App, permanent)`, its dependencies on
    the release's applications resolved from the release;
 3. for a native app, starts its program with `erx_prog_handler:start/1`:
-   with a window on the session's default display when the app needs a
-   `windows` service, whose `/dev/draw`, `/dev/kbd`, `/dev/mouse` and
-   `/dev/wctl` the handler binds
-   ([design-display.md](design-display.md#the-window-tree)); without,
+   with the spec's `window` option naming the session's default display
+   when the app needs a `windows` service, so the handler opens the
+   window and binds its `/dev/draw`, `/dev/kbd`, `/dev/mouse` and
+   `/dev/wctl` ([design-programs.md](design-programs.md#the-handler),
+   [design-display.md](design-display.md#the-window-tree)); without,
    with standard input null and its output to the session's log. Its
-   namespace is the session's. Its end ends `erx_app` with
-   `{program_exit, Status}`.
+   namespace is the session's. The start answers `{ok, Handler, Monitor,
+   []}`, and the monitor's `'DOWN'` is the program's end:
+   `{shutdown, {program_exit, Status}}` ends `erx_app` with
+   `{program_exit, Status}`, and any other reason, the handler's own
+   end, ends it with that reason.
 
 The app's paths come after the release's, so a module the app ships
 under a name the release already uses is never the one the code server
@@ -1066,7 +1115,7 @@ or not `/apps` holds `clock.app`:
 | 7. when the name holds an admitted package, it publishes the package set without the app, which answers once the app's sessions have ended | no session runs while its package's name changes (PK7); the old package ran until the new one had passed every check |
 | 8. it renames `tmp.K` to `clock.app`, over the old package if there is one, visible at once, and makes the directory durable | the one commit point: the name holds the old package or the new, whole; the close answers only after it is durable |
 | 9. it registers the app's principal with its record, in the entry admission found | the record changes only with a committed package; the principal must exist before its row |
-| 10. it publishes the package set with the app, and the close answers `ok`; a row `rc.conf` enables starts, on the new package and with the app's directory as it was | the start service learns of the app, or of its new package |
+| 10. it publishes the package set with the app, and the close answers `ok`; the app's row enters the start table installed, with nothing of `rc.conf` applied and nothing started ([design-apps.md](design-apps.md#the-start-table)) | the start service learns of the app, or of its new package |
 
 A refusal at steps 1 to 6 deletes the temporary file, frees the slot,
 and the close answers the refusal's errno ([Interfaces](#interfaces)),
@@ -1076,8 +1125,8 @@ step 7, 8 or 10, the publication, the rename or its checkpoint, answers
 the close `eio` and ends the lifetime: the recovery then admits whichever
 package `clock.app` holds, the new one if the rename reached the
 directory and the old one or none if it did not, deletes the temporary
-file, and publishes, so the app's row starts again on the package the
-name holds, and `cp`'s `EIO` means the outcome is the one `ls -l /apps`
+file, and publishes, so the app's row is installed again on the package the
+name holds, stopped until its own `start`, and `cp`'s `EIO` means the outcome is the one `ls -l /apps`
 and `/proc/packages` show. A power cut before the rename leaves what the
 name held before, the old package or nothing, and a temporary file,
 which the next recovery deletes; after the rename and before its
@@ -1091,11 +1140,12 @@ and never replaces one.
 
 Two copies of one name are two slots, and the package process decides
 their closes in turn: each that passes replaces the package before it,
-so the name holds the package of the last close decided. An update is
-the app's restart on its new package: its sessions end at step 7 and its
-row starts again at step 10, and a session `onestart` started is not
-started again, as after any end. Its data and its `rc.conf` settings
-stay as they were.
+so the name holds the package of the last close decided. An update
+stops the app: its sessions, the row's and a `onestart` one alike, end
+at step 7, and at step 10 its row is installed on the new package and
+starts nothing, whatever `rc.conf` says, until `service NAME start` or
+`restart` runs it, or the next boot does. Its data and its `rc.conf`
+settings stay as they were.
 
 **Removing**, `rm /apps/clock.app`, reaches the `apps` tree as the
 protocol's `unlinkat` of `clock.app`:
@@ -1153,9 +1203,16 @@ listing of `packages/` and acts on it:
    left as it is, with a log line. No entry's name becomes an atom:
    names stay binaries until a registration, which takes one of the
    `max` entries;
-5. the package process publishes the package set; the start service
-   applies `rc.conf` to each row the set adds, as the boot applies it,
-   and ends the sessions of each row it drops.
+5. the package process publishes the package set. The first set of a
+   boot is the boot's package set, whose rows the start service's boot
+   applies `rc.conf` to as it applies it to the manifest's rows; a later
+   recovery's set, after a crash or a failed change, adds the rows it
+   adds installed, and ends the sessions of each row it drops.
+
+The recovery's publication is its lifetime's first, and the package
+process takes no close, removal or purge until it is answered, so the
+first set of a boot holds what the image and the data partition held at
+boot and nothing an install of that boot added.
 
 The recovery reads at most `pkg_scan_max` names and headers of at most
 64 KiB each, one at a time, and keeps one record for each entry it
@@ -1178,12 +1235,16 @@ row. So the merge refuses a display an app did not name with
 came from `service NAME enable display=D` or from an edit of
 `/etc/rc.conf`; at boot an installed app never takes a display from a
 row of the manifest or of the image, whose rows come first, and at run
-time it takes none that a kept row holds. A publication changes only
-the rows it adds and drops: it applies `rc.conf` to each row it adds, as
-the boot applies it to every row
-([design-apps.md](design-apps.md#the-start-table)), and ends the
-sessions of each row it drops; every other row stays as it was
-applied.
+time it takes none that a kept row holds. The boot's package set is
+applied with the boot: `rc.conf` sets its rows as it sets the
+manifest's, and the rows the file enables start
+([design-apps.md](design-apps.md#the-start-table)). Any later
+publication changes only the rows it adds and drops, and applies
+nothing of `rc.conf`: it adds each row installed, as its package
+declares it, starting nothing, and ends the sessions of each row it
+drops; every other row stays as it was applied. An installed row takes
+its settings from the file at its own `service NAME start`, `restart`
+or `one` command, or at the next boot.
 
 ## The SDK
 
@@ -1261,23 +1322,19 @@ only as a third party would build it, through the SDK.
   its license: `app.txt`, `lib/erx_dashboard/` and its host test, which
   checks a frame through `erx_ui_host` against
   `test/display/reference/dashboard`.
-* **`examples/doom/`** holds `ORIGIN.md` beside `doom/`, a git submodule
-  pinned by its gitlink, as `display/lvgl/lvgl` is
-  ([design.md](design.md#dependencies)). Its repository holds
-  doomgeneric, under GPL-2.0, the erXos glue, its `app.txt` and a
-  `Makefile` over the SDK's `sdk.mk`, and a list of pinned downloads in
-  `deps.lock`'s form, for Freedoom's WAD. erXos's tree holds no file of
-  it: a submodule is a commit id. `git clone` does not check it out and
-  `tools/erx fetch` fetches it, and its downloads against their SHA-256,
-  only with `--example doom`; no part of `make check`, the landing gate
-  or the milestone gate builds it; `tools/erx app run examples/doom/doom`
-  runs it on request. Its license keeps it out of every image erXos
-  distributes (step 4 of [Adding an app to an image](#adding-an-app-to-an-image)).
-  No erXos code includes or links it, so working on erXos never needs
-  reading it.
+Doom is not an example and not a dependency. It is a demo outside the
+tree, in a repository of its own (`erxos-doom`) that holds doomgeneric,
+under GPL-2.0, its glue, its `app.txt` and a `Makefile` over the SDK's
+`sdk.mk`, and builds against an exported SDK as any third party's app
+does. No file, submodule or list of erXos names it, nothing erXos
+builds, tests or distributes uses it, so the dependency table has no
+row for it, and it never ships: its license keeps it out of every image
+erXos distributes (step 4 of [Adding an app to an image](#adding-an-app-to-an-image)).
+No erXos code includes or links it, so working on erXos never needs
+reading it.
 
-To the packer both are app directories with an `app.txt`, as is a
-third party's anywhere on disk. The landing gate exports the SDK, packs
+To the packer the dashboard is an app directory with an `app.txt`, as
+is a third party's anywhere on disk, the Doom demo's included. The landing gate exports the SDK, packs
 and host-tests `examples/dashboard` with nothing but the SDK on its
 paths, and checks that every call the example makes into erXos's
 modules is one of `public.txt`'s functions, so a change that breaks the
@@ -1398,14 +1455,15 @@ process ends no session: the next lifetime's recovery rebuilds the set
 from the manifest and the directory and publishes it, and until then the
 start service keeps the last set it took. A crash between a publication
 without an app and its deletion, or the rename of its update, leaves the
-app stopped only until the recovery's publication, which brings it back
-on whichever package its name then holds.
+app stopped; the recovery's publication brings its row back installed,
+on whichever package its name then holds, and its own `start` runs it.
 A crash of the start service's table process loses nothing the package
 process holds: on its restart it asks the package process for the set
 with a message and waits for no answer; the package process answers by
 publishing its set, in turn with its closes, removals and purges, and
-the table applies `rc.conf` only to a row of it that it holds no record
-for.
+the table applies `rc.conf` only to a row of the boot's package set that
+it holds no record for, and records any other such row installed
+([design-apps.md](design-apps.md#concurrency)).
 The registry of app principals belongs to the
 principal service and only grows within a boot, and the package process
 writes a record only for a committed package, so a crash leaves no
@@ -1445,7 +1503,7 @@ with `{not_offered, S}`, and its data stays.
 | a package removed or replaced under an open or a mount | the `apps` tree, by the open's recorded package | reads answer `eio` until the file is closed or the mount ended; a new open or mount reaches the new package |
 | a missing application or a refused program | `erx_app` | `erx_app` ends with the application's start error or `{program, Reason}`, and the session with it |
 | the storage domain is down at boot | the package process's read through `packages` | the image's packages wait for it, as do the installed ones; their rows are absent until the recovery runs; on the stopgap the image's packages, in the release, do not wait |
-| a failed publication, rename, deletion or checkpoint | `erx_pkg_io`'s or the start service's answer | the request answers `eio`, the lifetime ends, and the recovery reconciles the directory, the registry and the set; an app stopped for an update starts again on the package its name holds |
+| a failed publication, rename, deletion or checkpoint | `erx_pkg_io`'s or the start service's answer | the request answers `eio`, the lifetime ends, and the recovery reconciles the directory, the registry and the set; an app stopped for an update is installed again on the package its name holds, stopped until its own `start` |
 | a crash of the package process | its supervisor | open copies answer `eio` at their next write or close and publish nothing; the recovery deletes their temporary files and publishes the set; past the supervisor's intensity the package process stays down and `/apps` answers `eio` |
 | an end of `erx_pkg_io` | the start service's application | the system domain ends and the machine resets; the boot's recovery follows |
 | a power cut inside an install, an update or a removal | the recovery | temporary files are deleted; each name holds one package whole, the old or the new, or none |
@@ -1588,7 +1646,7 @@ it guards.
 | the install, update, removal and recovery planners | a simulated directory records every write, cuts power after each and reorders the writes between checkpoints, as [design-storage.md](design-storage.md#read-write-storage)'s harness does, and separately answers `eio` to each publication, rename, deletion, checkpoint, read and write in turn; every resulting state recovers with each name holding one package whole, the old or the new, or none, no temporary file, a package set that matches the directory, and no session of a dropped app started between the failure and the recovery's publication | an install that renames before the temporary file is durable, after which a reordered cut leaves a published name with missing bytes; an update that deletes the old package before its rename, after which a cut between the two leaves no package; a removal whose failed deletion answers `eio` without ending the lifetime, after which the set and the directory disagree |
 | the package lifetime | two copies writing and a third closed and waiting on a simulated storage that delays each request; the package process killed: both writers and the waiting close answer `eio`, the simulated storage's log holds no request of the ended lifetime after the recovery's listing, the recovery deletes the three temporary files before the first slot of the new lifetime is handed out, and a copy after the recovery installs | an `erx_pkg_io` that takes a request without checking its lifetime, after which the waiting close's rename lands after the listing; a slot freed at the crash, before the recovery's deletion, after which a fourth copy takes a slot whose file is still on the medium |
 | the principal's record | an install refused at its file check, at admission and at its checkpoint, after an earlier install and removal of the name in the boot with another `memory`, and an update over a running app refused at the same three points: the record keeps the earlier memory | a registration before the rename is durable, which writes the refused memory |
-| an update of a running app | a copy over an installed, running app refused at its file check: the old package stays published and its session never ends; a copy that passes: the session ends before the rename, the row starts again after the publication with the new layout in its record, and no session of the app runs between the two | an update that renames before it publishes the set without the app, which the test catches with the old session alive across the rename |
+| an update of a running app | a copy over an installed, running app refused at its file check: the old package stays published and its session never ends; a copy that passes, with `rc.conf` enabling the app: the session ends before the rename, the row is `installed` after the publication with the new layout in its record and no session, and `service NAME restart` starts one with the new layout | an update that renames before it publishes the set without the app, which the test catches with the old session alive across the rename; a publication that applies `rc.conf` to the row it adds, which starts the new session at the update |
 | purge targets | `purge` of `root`, a configured domain, a manifest principal, an image package's name and an installed app refused, with no `remove_app` | the app-name rule skipped, which sends `remove_app root` |
 | the recovery's bounds | a listing of `pkg_scan_max` + 1 entries gives `overflow` and no admission | the bound check removed, which reads the whole listing |
 | a publication that drops an app | the app's keeper and `onestart` session end before `packages/2` answers; `service NAME start` is refused until a set with the app arrives; a publication from an ended lifetime is refused | a publication answered before the sessions end, which the test catches with a session still alive |
@@ -1628,9 +1686,10 @@ it guards.
   one byte short fails its `cp` with `EINVAL` and publishes nothing;
 * update: with the app running, a copy of a newer build over it, by the
   shell's `cp` and by a native test program that overwrites as FreeBSD's
-  `cp` does, `O_WRONLY | O_TRUNC` without `O_CREAT`, runs the new code
-  with the app's files kept and `/proc/packages` showing the new
-  version; a newer build one byte short fails either copy and leaves the
+  `cp` does, `O_WRONLY | O_TRUNC` without `O_CREAT`, stops it, with
+  `/proc/packages` showing the new version and `/proc/apps` the row
+  `installed`, and `service dashboard restart` then runs the new code
+  with the app's files kept; a newer build one byte short fails either copy and leaves the
   old one running, its session never ended; reads at `/mnt` answer `EIO`
   after the update; seeded: the update without the publication, after
   which the old session runs across the rename; a tree whose `lopen`
@@ -1709,7 +1768,8 @@ this is not on the list.
 | **A recorded signer beside each app's directory, with a different signer refused until a purge** | It needs a record the system domain writes among the app directories, read at every admission and removed with the data, with its own crash ordering. Naming the directory for the signer gives the same separation with no record and no refusal |
 | **An app principal's cap sized from its declared memory** | A package installed again with another `memory` would need a resize of a budget whose ended session may not have retired. Each session is a wall at the declared memory already, so a cap of the whole `apps` budget bounds nothing less and is never resized |
 | **An update as `rm` and then `cp`** | It leaves no app while the new copy is checked, and none if it is refused. A copy over the installed one keeps the old package until the new one has passed, at the cost of one more publication than an install |
-| **Renaming the new package over the old while the app runs, and restarting it after** | The running session reads its package through an open at the storage service, and whether an open file outlives a rename over its name there is the storage format's to say; a keeper that restarted the session between the rename and the publication would start it with the old layout over the new bytes. Ending the sessions before the rename makes neither matter, and the app is down for one restart either way |
+| **Renaming the new package over the old while the app runs, and restarting it after** | The running session reads its package through an open at the storage service, and whether an open file outlives a rename over its name there is the storage format's to say; a keeper that restarted the session between the rename and the publication would start it with the old layout over the new bytes. Ending the sessions before the rename makes neither matter |
+| **An update that starts its app again when `rc.conf` enables it** | One rule would then apply the file at every row's entry into the table, boot or publication, and an updated app would be down for one restart only. But an install would start an app whose lines an earlier install left in the file, an update would start a row the administrator had stopped, and a recovery after a crash would start whatever its set added, so what runs would follow the package process's history instead of the administrator's commands. Applying the file only at boot and at a row's own command, as FreeBSD's `pkg` starts no service, keeps one source of what runs |
 | **Opens of a replaced package kept readable, as on FreeBSD** | The `apps` tree would have to keep a package file without its name until its last open closed, and recovery would have to find and delete such files. `eio` to an open whose package is gone costs a reopen |
 | **`pkg add`, `pkg delete` and `pkg info` commands** | Each is a command, a grammar and an errno table for what a copy, a removal and a listing already say. A tree the system domain serves keeps the one writer and makes the close the commit, as copying an app into `/Applications` is on macOS |
 | **An app chooses its facet parameters within the row's bounds**, or the builder overrides the derived rows | The build counts every row at its own parameters whatever the app picks, so a lower value saves the machine nothing and adds a rule per parameter to admission and to the mint. A builder who wants other values for every app sets them where the service's defaults live; one who wants them per app makes the app part of the manifest |
@@ -1741,7 +1801,7 @@ this is not on the list.
 | --- | --- | --- | --- |
 | the build counts `max` apps each holding every service, so a large `max` with a display in `services` reserves the display's memory for pixel areas few apps use | medium | a display domain sized larger than its use | the builder sizes `max` to what the machine expects |
 | installed apps together want more than the `apps` budget | medium | the last one started is refused `no_memory` and its row goes down | the builder sizes `memory`; `room` at `/proc/packages` and the row's reason at `/proc/apps` show it |
-| a full-window frame through `/dev/draw` is too slow for a game | medium | Doom runs below its frame rate | the watch-list measurement; a faster path is a design change of the display's, if needed |
+| a full-window frame through `/dev/draw` is too slow for a game | medium | a game such as the Doom demo runs below its frame rate | the watch-list measurement; a faster path is a design change of the display's, if needed |
 | the app's code reads slowly through the file protocol and the hash check | medium | slow app starts | `tools/erx bench app-start`; the shared code design maps prepared code later ([design-shared-code.md](design-shared-code.md)) |
 | a mount of a package of `/apps` reads each block through the `apps` tree and the storage domain | medium | a slow `ls -R` or `cat` of a large package | the watch-list measurement; looking inside a package is rare and reads no app's hot path |
 | a restart while the `apps` budget is full waits for the ended session's outer budget to retire | low | one refused restart, counted against the row's intensity | property 19 makes the `apps` budget hold a session beside one outer budget not yet retired |
@@ -1778,27 +1838,23 @@ Decisions:
 9. **An app's data belongs to its name and signer**; removing a package
    keeps it; `service NAME purge` removes it; no prompt asks a person to
    approve grants; no fetch by name.
-
-Questions for the owner, each with a recommendation:
-
-1. **The shipped manifests' `apps` rows.** Recommended: the development
-   manifests declare one `apps` row with `max 8`, `services display data
-   net`, and a `memory` that holds eight apps at the default 64 MiB; a
-   kiosk board's manifest `max 1` and `services display data`.
-2. **The program launcher's needs of `erx_prog_handler`.** The handler
-   being built takes pipe ends and a window's buffer; a native app with a
-   display need needs it to start a program with a window as
-   [design-display.md](design-display.md#the-window-tree) says.
-   Recommended: that option lands with the handler, so no second launcher
-   exists.
-3. **The Doom submodule's row in the dependency table.** Doom and
-   Freedoom are fetched only on request and enter no distributed image.
-   Recommended: a row marked `example`, neither `permanent` nor
-   `stopgap`, naming GPL-2.0 and the rule that keeps it out of
-   distributed images.
-4. **A policy per signer.** The `apps` row offers its services to every
-   app. Recommended: no per-signer policy until a machine needs one; the
-   builder's lever is which keys it trusts.
+10. **Publishing an app applies nothing of `/etc/rc.conf`**: an install
+    or an update only replaces the app's files, and the new version runs
+    at the next boot or at `service NAME start` or `restart`, as
+    FreeBSD's `pkg upgrade` leaves services alone; an update therefore
+    leaves its app stopped ([The start table's rows](#the-start-tables-rows),
+    [design-apps.md](design-apps.md#the-start-table)).
+11. **Both development manifests carry an `apps` row**, sized as
+    [The shipped manifests](#the-apps-row) says; the website's image
+    carries none.
+12. **A native app starts through `erx_prog_handler`'s `window`
+    option**, and the handler's start returns a monitor whose `'DOWN'`
+    is the program's one end report, so no second launcher and no second
+    end message exist ([design-programs.md](design-programs.md#the-handler)).
+13. **Doom is a demo outside the tree** that never ships, with no
+    submodule and no row in the dependency table ([Examples](#examples)).
+14. **No policy per signer**: the `apps` row offers its services to every
+    app, and the builder's lever is which signer keys the image trusts.
 
 ## References
 

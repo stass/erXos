@@ -438,7 +438,9 @@ followed by its own part,
 the website's image has a manifest of its own, made from the development one
 whenever it is needed and never checked in (`Platform#site_manifest_source`): the
 development manifest without the configured domains the platform record's
-`site_leaves_out` names, which the same check admits. On QEMU `virt` those are
+`site_leaves_out` names and without its `apps` row
+([design-packaging.md](design-packaging.md#the-apps-row)), each taken out with
+the room it took, which the same check admits. On QEMU `virt` those domains are
 the web domain, since the website's page has no host link and the web facet is
 all that domain serves, and the display domain, since the page has no gpu for it
 to drive; each would only cost boot time on the emulator's one core.
