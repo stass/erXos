@@ -20,18 +20,25 @@ Kept: every file of the release's `openssl-3.5.9/` directory outside the
 exclusions, so that OpenSSL's `Configure`, the top-level `build.info` and
 every `build.info` beneath it run unedited under erXos's configuration.
 Left out: `test/`, `demos/`, `engines/`, `os-dep/`, `VMS/` and `ms/`, which
-that configuration never reads, and the release's seven empty
-directories; the inventory's `exclusions` give each reason.
+that configuration never reads, the release's seven empty directories, and
+`external/perl/Text-Template-1.56/`, which the build fetches instead (below);
+the inventory's `exclusions` give each reason.
 
 License: Apache-2.0, whose text is `LICENSE.txt`. The release's sources
 carry the OpenSSL Project's Apache-2.0 notice; the few that
 also carry a co-author's BSD, CC0 or public-domain grant keep it in their
-header. `external/perl/Text-Template-1.56/` is under the terms of Perl 5
-(Artistic-1.0-Perl or GPL-1.0-or-later); it is a Perl module `Configure`
-runs on the build host and is never compiled into `libcrypto`. erXos's
-changes are under Apache-2.0.
+header. erXos's changes are under Apache-2.0.
 
-Each file erXos changes says so in a `Modified by erXos` notice at its
+The release bundles `Text::Template` 1.56, a Perl module `Configure` and
+make's generators load on the build host, under the terms of Perl 5
+(Artistic-1.0-Perl or GPL-1.0-or-later) and never compiled into `libcrypto`.
+It is not imported: `deps.lock` pins the CPAN tarball (`text-template`), the
+fetch step verifies it, and the build finds it through `PERL5LIB`
+(`tools/lib/erx/libcrypto.rb`). So that `OpenSSL::fallback` does not refuse
+the absent directory, `external/perl/MODULES.txt`, which in the release lists
+it, is empty; the inventory's `changes` records that.
+
+Each source file erXos changes says so in a `Modified by erXos` notice at its
 top, which lists the changes. Two are changed, each taking FreeBSD's
 branch under `__erxos__`, which erXos's target defines
 ([design-crypto.md](../docs/design-crypto.md#building-openssl)):
@@ -80,6 +87,10 @@ Third-party notices remain in their original files.
     {
       "path": "ms",
       "reason": "read only by the Windows configurations"
+    },
+    {
+      "path": "external/perl/Text-Template-1.56",
+      "reason": "Text::Template, the template engine Configure and make's generators load on the build host: fetched out of tree at a pinned SHA-256 (deps.lock, text-template) and found through PERL5LIB (docs/design-crypto.md, Building OpenSSL)"
     },
     {
       "path": "cloudflare-quiche",
@@ -20651,272 +20662,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "external/perl/Text-Template-1.56/Changes": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "72069c3d66671f504bcc6f6b6ebd98d10459e41dd9a89be8fbdd02287ee2d15b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/INSTALL": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "d2f84dc3b27915516d16694b00ec29d20d1b427b2c54a85e7691f4caeae0ca67",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/LICENSE": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/MANIFEST": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "4548b68859311df590eaaa02e907047e9f27f9586a08a7c03c00929aedb4d1d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/META.json": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "2efa87bf9ae20e916cdc51be34caa1d614da3be820458f7fbf9c0f734c74771b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/META.yml": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "305a5c7aa58db210af71281313c3b87c7309a5077f598013d5050cd5d3de77f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/Makefile.PL": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "ed69a72a05c6ba6f87aff9564a50d29b6779209b221629e18ed3408f25a0f7ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/README": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "9fb7baab71ba1f8274006b3a5f25c9e59c7100cf1ff89616b5ec2c3f599fc824",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/SIGNATURE": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "add6414b6d676d44369d317c9dcbd557f4a2e94841d9e3dbca74454df261b51d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/lib/Text/Template.pm": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "41815a23764f0ec4cb610718c0b2b012d9f0c91db75a6784d409b30a7c1a4b98",
-      "kind": "file",
-      "non_ascii_lines": [
-        "c77bfa89ca440c912fc6fd5418f64761f51ff057a0657fa85b70fd10ce7cfd73"
-      ]
-    },
-    "external/perl/Text-Template-1.56/lib/Text/Template/Preprocess.pm": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "e938c2d3c966f02682b767b535a884ee3870c4e9c596e1ae45c90ee463f9ee49",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/author-pod-syntax.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "305c657c6b73f10767a0ea286b8a73d693940f4cbb8b6a0a4d34e2b5a1c04635",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/author-signature.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "9a339818bc8fe7f23595b06538321f26436cb3318c81446d88cd8af2d2ff4806",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/basic.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "c302204f5c09b2e9f798697467ae8b9818fc7028b959cbe07b5af23e78ebdaed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/broken.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "79fea773c07a6681d099070f84244a3c4fa9fdb07da00cccefe2ad60f20db795",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/delimiters.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "4bc6d4eddfb48c243f0146abc7852e5935df311fa4b98eddccfc192ad7230ab0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/error.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "4ee95edf1d7278602868efb33d9598ed17afb559f394033b59ee485272b79914",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/exported.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "0c72d0a97d3296c5503eaef57fa961854733726738d0ed4663ae153a4d31746d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/hash.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "91b7f88546ecddc890895d215458bf283a735f0e13d84c960eaf7f6cdbe87178",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/inline-comment.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "82dc2b462a185aa3de984e1350253d6c4785616fbccd370902079d7fb28dcb91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/nested-tags.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "30ea2c0d0af06bdd3fbb854cc5b6883bb192b1bc7889f304562407fcbb9f26c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/ofh.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "a747e2d2b1c2e8222aa8fa1ac31574448c56907f92018199aa6d6f3454298b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/out.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "58383ffbac8df0f1f0d90c27d2c986409455a6b1b8cc37436317cd7589e4558a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/prepend.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "cbfc19a11ac74b507a6ca3b3f4f6981f924d95ebea7770eba25e78bb662b85db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/preprocess.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "2f6a33cea30f96e068f4f0a7b991aca92d6ac9da7afa3ae270e7704a6a39a2c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/rt29928.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "934a5e75fff7d291ea97db2833078163347b5d24deb37bedd0ccd8b309be5387",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/safe.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "b57903db047af9d9b8a4a511930452b7e9a387d14557b7646fe4a0231ce6be49",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/safe2.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "a3e7890c951d33603d944f957d3b5a85a878ec65a6bdddad4c337ae8cb6b2ca1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/safe3.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "1272f1b660e3aa605b5311c1f640f9c0ce3626c14dc7f5dac15c9a87fb5dd1fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/strict.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "4d663ae09996dce3418dc14e9991befe315ecae001089c89411ff7136160bf8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/taint.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "ed852007731232508271b579ae422a8e5af0e7fe475cfce82ad80d2db562a6ea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/template-encoding.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "6411c52d2eb815a3f7c1b943cd87c1d1b79d6341a5815dfa590534c0287bbe7e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "external/perl/Text-Template-1.56/t/warnings.t": {
-      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
-      "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto",
-      "reviewed": true,
-      "sha256": "827b5420bd8d49d68d718f74b203e5e4ab65f9a299381f8bf05a8f5aa75a7549",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "funding.json": {
       "license": "Apache-2.0",
       "evidence": "reviewed LICENSE.txt and the source headers: the release is under Apache-2.0 and its sources carry the OpenSSL Project's Apache-2.0 notice; the few that also carry a co-author's BSD, CC0 or public-domain grant offer Apache-2.0 as well and keep that grant in their header",
@@ -28672,6 +28417,12 @@ Third-party notices remain in their original files.
       "non_ascii_lines": []
     }
   },
-  "changes": {}
+  "changes": {
+    "external/perl/MODULES.txt": {
+      "license": "Apache-2.0",
+      "evidence": "empty: in the release it lists the directory of Text::Template, which the build fetches instead, and OpenSSL::fallback refuses a listed directory that is absent",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
 }
 ```

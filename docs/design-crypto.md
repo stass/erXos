@@ -93,7 +93,8 @@ What the sources say, read at the pins of [Sources](#sources):
   directory only for a disabled feature's subdirectory of `crypto/`, or
   `engines/` under `no-engine` (`Configure:1947-1949`, `:2064-2068`), and
   opens the `build.info` of every other (`:2208-2213`). It reads its Perl
-  modules from `util/perl` and `external/perl` (`:16`, `:20`) and its
+  modules from `util/perl` and `external/perl` (`:16`, `:20`; the
+  template engine `Text::Template` comes from `PERL5LIB`, below) and its
   version from `VERSION.dat` (`:345`). `demos` is off by default
   (`:601`).
 
@@ -212,16 +213,27 @@ its `LICENSE.txt`. It is changed (below), so it enters the tree rather than
 being fetched and built unchanged
 ([design.md](design.md#dependencies)). The import keeps whole every
 directory and file that `Configure` reads under the configuration below,
-so OpenSSL's build machinery runs unedited: `Configure`, the
+but one module, so OpenSSL's build machinery runs unedited but for one list:
+`Configure`, the
 top-level `build.info`, `VERSION.dat`, `configdata.pm.in`, `Configurations/`,
 `apps/`, `crypto/`, `doc/`, `exporters/`, `external/`, `fuzz/`,
 `include/`, `providers/`, `ssl/`, `tools/` and `util/`. It leaves out only
 what that configuration never reads: `test/` (`no-tests`), `demos/` (off
 by default), `engines/` (`no-engine`), `os-dep/`, `VMS/` and `ms/`, which
-other systems' configurations name, and the seven empty directories the
+other systems' configurations name, the seven empty directories the
 release carries (`cloudflare-quiche/`, `oqs-provider/`,
 `pkcs11-provider/`, `python-ecdsa/`, `tlsfuzzer/`, `tlslite-ng/` and
-`wycheproof/`). `make check-openssl`'s integration test
+`wycheproof/`), and the Perl module `Text::Template` that the release
+bundles under `external/perl/`. That module is a build tool OpenSSL
+uses as released: `Configure` and make's generators (`util/dofile.pl`) load
+it on the build host. It is fetched, not imported: `deps.lock` pins
+Text-Template 1.56's CPAN tarball (`text-template`) by SHA-256, the fetch
+step verifies it and unpacks it out of tree, and the build sets `PERL5LIB`
+to its `lib/` for `Configure` and make, which see none of the caller's
+`PERL5LIB` or `PERL5OPT`. `external/perl/MODULES.txt`, the list of
+directories that `OpenSSL::fallback` appends to Perl's search path, is
+empty, since that module refuses a listed directory that is absent.
+`make check-openssl`'s integration test
 (`test/integration/libcrypto_build_test.rb`) proves the set: it runs
 `Configure` with erXos's options on the imported tree and builds
 `libcrypto.a`, and on a copy without `ssl/build.info` sees `Configure`

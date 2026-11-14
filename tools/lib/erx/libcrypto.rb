@@ -7,6 +7,7 @@ require 'fileutils'
 require 'pathname'
 require_relative 'bounded_file'
 require_relative 'build_memo'
+require_relative 'dependencies'
 require_relative 'error'
 require_relative 'musl'
 require_relative 'runner'
@@ -19,7 +20,8 @@ module Erx
   #
   # Configure and make see only the environment ENVIRONMENT names, so nothing of the
   # caller's (CFLAGS, CPPDEFINES, OPENSSL_LOCAL_CONFIG_DIR, PERL5OPT, MAKEFLAGS) changes
-  # what is built. The archive holds no path of the build host: the compiler is named
+  # what is built, except that PERL5LIB names the fetched Text::Template, the one Perl
+  # module OpenSSL's tree does not carry. The archive holds no path of the build host: the compiler is named
   # without its directory, the sysroot relative to the build directory, and the build
   # date is SOURCE_DATE_EPOCH's, as the tree's other builds pin it.
   #
@@ -37,11 +39,18 @@ module Erx
     PASSED = %w[HOME TMPDIR].freeze
     FIXED = { 'LC_ALL' => 'C', 'SOURCE_DATE_EPOCH' => '0' }.freeze
     # What Configure reads besides the target file and its options: the tree's own
-    # configurations, every build.info, and the Perl it loads (util/perl's modules, the
-    # template engine under external/perl and util/dofile.pl), whose change leaves the
+    # configurations, every build.info, and the Perl it loads (util/perl's modules,
+    # util/dofile.pl and external/perl's module list), whose change leaves the
     # configuration stale.
     CONFIGURE_INPUTS = %w[Configure VERSION.dat configdata.pm.in Configurations/**/* **/build.info
                           util/perl/**/* util/dofile.pl external/perl/**/*].freeze
+    # The deps.lock source that holds Text::Template, the template engine Configure and
+    # make's generators load. OpenSSL's tree does not carry it: Configure appends the
+    # directories of external/perl/MODULES.txt (empty) to Perl's search path, and the
+    # engine is found through PERL5LIB, in the fetched tree's lib/.
+    SOURCE_ID = 'text-template'
+    # What of the fetched tree Configure loads, read by the configuration's key.
+    TEMPLATE_INPUTS = %w[lib/**/*].freeze
     # The file in a configured directory that holds its configuration's key.
     CONFIGURATION_KEY_FILE = '.erx-configuration-key'
     DEADLINES = { configure: 300, make: 1_800, nm: 120 }.freeze
@@ -121,14 +130,17 @@ module Erx
 
     # compiler is the clang every erXos build uses (ERX_CLANG); llvm-ar, llvm-ranlib and
     # llvm-nm are found beside it. source is the tree Configure reads, which a test may
-    # replace with a copy holding a seeded fault.
-    def initialize(root:, runner:, compiler:, source: File.join(root, 'openssl'))
+    # replace with a copy holding a seeded fault. template is the fetched SOURCE_ID tree,
+    # which a unit test may replace with a small one.
+    def initialize(root:, runner:, compiler:, source: File.join(root, 'openssl'),
+                   template: Dependencies.new(root: root, runner: runner).fetched_tree(SOURCE_ID))
       raise Error, 'set ERX_CLANG to the installed LLVM clang' if compiler.to_s.empty?
 
       @root = File.expand_path(root)
       @runner = runner
       @compiler = compiler
       @source = File.expand_path(source)
+      @template = File.expand_path(template)
       @tools = File.dirname(compiler)
     end
 
@@ -190,25 +202,33 @@ module Erx
     # What a configuration follows from, as a BuildMemo key: Configure's command (the
     # source tree, the target, the target file's path and the options), the variables it
     # sees, the target file's bytes, the compiler by identity (a new clang rebuilds every
-    # object, which make alone would not do) and the bytes of every input CONFIGURE_INPUTS
-    # names. perl, gmake and LLVM's archivers are named only by the PATH they are found on.
+    # object, which make alone would not do) and the bytes of every file CONFIGURE_INPUTS
+    # names in the source tree and TEMPLATE_INPUTS in the fetched Text::Template. perl, gmake and LLVM's archivers are named only by the PATH they are found on.
     def configuration_key(command, environment)
-      inputs = Dir.glob(CONFIGURE_INPUTS, base: @source).sort.select { |path| File.file?(File.join(@source, path)) }
       BuildMemo.key('command' => command, 'environment' => environment.compact, 'target' => digest(target_file),
                     'compiler' => BuildMemo.program_identity(@compiler),
-                    'inputs' => inputs.to_h { |path| [path, digest(File.join(@source, path))] })
+                    'inputs' => digests(CONFIGURE_INPUTS, base: @source),
+                    'template' => digests(TEMPLATE_INPUTS, base: @template))
+    end
+
+    # The files of base the glob patterns match, as { path => SHA-256 }, in path order.
+    def digests(patterns, base:)
+      Dir.glob(patterns, base: base).sort.select { |path| File.file?(File.join(base, path)) }
+         .to_h { |path| [path, digest(File.join(base, path))] }
     end
 
     def digest(path) = Digest::SHA256.file(path).hexdigest
 
     # The whole environment of Configure and make: the caller's variables unset but for
-    # PASSED, FIXED's, PATH with the compiler's directory first, and what the target file
-    # reads. The sysroot is named relative to directory, where Configure and make run.
+    # PASSED, FIXED's, PATH with the compiler's directory first, PERL5LIB naming the
+    # template engine, and what the target file reads. The sysroot is named relative to
+    # directory, where Configure and make run.
     def environment(directory:, sysroot:)
       relative = Pathname.new(File.expand_path(sysroot)).relative_path_from(Pathname.new(File.expand_path(directory)))
       ENV.keys.to_h { |name| [name, nil] }
          .merge(ENV.to_h.slice(*PASSED), FIXED)
          .merge('PATH' => [@tools, ENV.fetch('PATH', '')].join(File::PATH_SEPARATOR),
+                'PERL5LIB' => File.join(@template, 'lib'),
                 'ERX_CC' => File.basename(@compiler), 'ERX_SYSROOT' => relative.to_s)
     end
   end

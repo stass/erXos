@@ -32,6 +32,16 @@
       "status": "permanent"
     },
     {
+      "id": "text-template",
+      "kind": "tar",
+      "version": "1.56",
+      "url": "https://cpan.metacpan.org/authors/id/M/MS/MSCHOUT/Text-Template-1.56.tar.gz",
+      "sha256": "09aaa095c562d22824daf849378a58632446093f397d8c7acb37c25a7f37e646",
+      "directory": "Text-Template-1.56",
+      "license": "Artistic-1.0-Perl OR GPL-1.0-or-later",
+      "status": "permanent"
+    },
+    {
       "id": "libc-test",
       "kind": "git",
       "version": "63e36e934e8f2bedf645303a90b64098e2af6c8f",

@@ -3,9 +3,7 @@
   "revision": "openssl-3.5.9",
   "default_license": "Apache-2.0",
   "default_evidence": "reviewed LICENSE.txt and the source headers: the release is under Apache-2.0 and its sources carry the OpenSSL Project's Apache-2.0 notice; the few that also carry a co-author's BSD, CC0 or public-domain grant offer Apache-2.0 as well and keep that grant in their header",
-  "rules": [
-    {"pattern": "external/perl/Text-Template-1.56/**/*", "license": "Artistic-1.0-Perl OR GPL-1.0-or-later", "evidence": "reviewed external/perl/Text-Template-1.56/LICENSE: the same terms as Perl 5; a Perl module Configure runs on the build host, never compiled into libcrypto"}
-  ],
+  "rules": [],
   "exclusions": [
     {"path": "test", "reason": "OpenSSL's own test suite; erXos configures no-tests, and OTP's suites test what crypto calls (docs/design-crypto.md, Verification)"},
     {"path": "demos", "reason": "example programs, off by default in Configure"},
@@ -13,6 +11,7 @@
     {"path": "os-dep", "reason": "read only by other systems' configurations"},
     {"path": "VMS", "reason": "read only by the OpenVMS configurations"},
     {"path": "ms", "reason": "read only by the Windows configurations"},
+    {"path": "external/perl/Text-Template-1.56", "reason": "Text::Template, the template engine Configure and make's generators load on the build host: fetched out of tree at a pinned SHA-256 (deps.lock, text-template) and found through PERL5LIB (docs/design-crypto.md, Building OpenSSL)"},
     {"path": "cloudflare-quiche", "reason": "an empty directory the release carries, which nothing reads"},
     {"path": "oqs-provider", "reason": "an empty directory the release carries, which nothing reads"},
     {"path": "pkcs11-provider", "reason": "an empty directory the release carries, which nothing reads"},
