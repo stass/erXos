@@ -217,7 +217,7 @@ holds the pseudo-header's sum, not complemented. The transport's copy finishes i
 -include("erx_tcp_wire.hrl").
 -include("erx_udp_wire.hrl").
 
--export([snapshot/3, addresses/1, is_own/2, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1,
+-export([snapshot/3, addresses/1, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1,
          run_tail/2, frames/1, units/1, udp/5, ip/4, address/3, link/3, finish/1,
          finishable/2]).
 
@@ -287,12 +287,16 @@ the next hop's neighbour row gives it. `mtu` is the interface's MTU for IPv4 and
 link MTU for IPv6; `hlim` is the TTL or hop limit; `tos` the type of service or traffic
 class, whose low two bits a TCP segment's ECN field replaces. `broadcast` says the
 destination is an IPv4 broadcast address of the interface, which is never fragmented.
+`loopback` says it is one of the stack's own addresses, compared with its zone, which the
+path reaches through the loopback interface, as `in_localip` and `in6_localip` decide it
+(`in.c:154-166`, `in6.c:1844-1859`); a destination the routes merely send out through the
+loopback interface is not.
 """.
 -type path() :: #{family := inet | inet6, iface := iface(),
                   src := erx_net_addr:addr(), dst := erx_net_addr:addr(),
                   next_hop := erx_net_addr:addr(), link := {fixed, term()} | neighbour,
                   mtu := pos_integer(), hlim := 0..255, tos := 0..255, flow := 0..16#fffff,
-                  broadcast := boolean()}.
+                  broadcast := boolean(), loopback := boolean()}.
 
 -doc """
 An IP packet, as `erx_ip4:output/4` and `erx_ip6:output/4` build it, or a TCP segment's
@@ -352,18 +356,6 @@ model of `ip_input` accepts a packet to on any interface (`ip_input.c:696-720`, 
 -spec addresses(snapshot()) -> [erx_net_addr:addr()].
 addresses(#{addrs := Addrs}) ->
     [Addr || #{addr := Addr} <- Addrs].
-
--doc """
-Whether Addr, zoned as a key holds it, is one of the stack's addresses in the snapshot,
-compared with its zone, as `in_localip` and `in6_localip` decide it (`in.c:154-166`,
-`in6.c:1844-1859`): the addresses a path reaches through the loopback interface.
-""".
--spec is_own(zoned(), snapshot()) -> boolean().
-is_own(Addr, #{addrs := Addrs} = Snap) ->
-    case destination(Addr, #{}, Snap) of
-        {ok, Dst, Zone} -> own(Dst, Zone, Addrs) =/= none;
-        {error, _} -> false
-    end.
 
 %% --- Paths --------------------------------------------------------------------
 
@@ -560,7 +552,8 @@ source(<<_:32>>, #{out := Out, next_hop := Hop}, _Opts, #{addrs := Addrs}) ->
         [] -> {error, eaddrnotavail}
     end.
 
-header(Dst, Src, #{iface := If, next_hop := Hop, link := Link, broadcast := Broadcast}, Opts) ->
+header(Dst, Src, #{iface := If, next_hop := Hop, link := Link, broadcast := Broadcast,
+                   loopback := Loopback}, Opts) ->
     Multicast = erx_net_addr:is_multicast(Dst),
     {Family, Mtu, HlimKey, TosKey, Default} =
         case byte_size(Dst) of
@@ -574,7 +567,7 @@ header(Dst, Src, #{iface := If, next_hop := Hop, link := Link, broadcast := Broa
            end,
     #{family => Family, iface => If, src => Src, dst => Dst, next_hop => Hop, link => Link,
       mtu => Mtu, hlim => Hlim, tos => maps:get(TosKey, Opts, 0), flow => maps:get(flow, Opts, 0),
-      broadcast => Broadcast}.
+      broadcast => Broadcast, loopback => Loopback}.
 
 ok_or({ok, _} = Ok, _Reason) -> Ok;
 ok_or(error, Reason) -> {error, Reason}.

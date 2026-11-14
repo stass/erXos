@@ -21,7 +21,7 @@
 -define(OFFSET, 7).
 
 ctx() -> ctx(?T0).
-ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500}.
+ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500, loopback = false}.
 
 new() ->
     erx_tcp_user:new(#{family => inet, local => {<<10, 0, 0, 1>>, 4000},

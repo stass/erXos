@@ -17,7 +17,7 @@
 -define(UNA, (?ISS + 1)).
 -define(FLIGHT, 4000).
 
-ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500}.
+ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500, loopback = false}.
 
 new(Family, Iss) ->
     Addrs = case Family of

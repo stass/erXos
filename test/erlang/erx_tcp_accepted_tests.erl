@@ -16,7 +16,7 @@
 -define(TCPTV_KEEP_INIT_US, (75000 * 1000)).
 -define(TCPTV_KEEP_IDLE_US, (120 * 60 * 1000 * 1000)).
 
-ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500}.
+ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500, loopback = false}.
 
 init() ->
     #{family => inet, local => {<<10, 0, 0, 1>>, 80}, remote => {<<10, 0, 0, 2>>, 4000},

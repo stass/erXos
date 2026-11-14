@@ -14,7 +14,7 @@
 -define(S(Ms), ((Ms) * 1000)).
 -define(FROM, {self(), tag}).
 
-ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500}.
+ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500, loopback = false}.
 
 new() ->
     erx_tcp_user:new(#{family => inet, local => {<<10, 0, 0, 1>>, 4000},

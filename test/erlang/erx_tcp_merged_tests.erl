@@ -24,7 +24,7 @@
 -define(OUT, 60000).
 -define(WND, 55000).
 
-ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500}.
+ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500, loopback = false}.
 
 %% An established connection with ?OUT bytes outstanding, a send window of ?WND bytes and
 %% room to receive 64 KiB, in slow start.

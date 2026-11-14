@@ -44,9 +44,6 @@
     family :: inet | inet6,
     local :: {Addr :: binary(), Port :: 0..16#ffff},
     remote :: {Addr :: binary(), Port :: 0..16#ffff},
-    %% The peer is one of the machine's own addresses (in_localip of the foreign address),
-    %% which shortens TIME-WAIT (tcp_eff_msl); set by whoever makes the control block.
-    local_peer = false :: boolean(),
 
     %% Sequence space (tcp_var.h), unwrapped.
     iss = 0 :: integer(),
@@ -198,4 +195,8 @@
                   credit :: non_neg_integer(),
                   mtu :: pos_integer(),
                   %% The path's route: `ok`, or ip_output's EHOSTUNREACH when it has none.
-                  route = ok :: ok | {error, ehostunreach}}).
+                  route = ok :: ok | {error, ehostunreach},
+                  %% The path leads to one of the machine's own addresses (its `loopback`,
+                  %% in_localip of the foreign address), which shortens TIME-WAIT
+                  %% (tcp_eff_msl). erx_tcp_conn:ctx/2, the one maker, takes it from the path.
+                  loopback :: boolean()}).

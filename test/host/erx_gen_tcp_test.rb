@@ -18,11 +18,11 @@ class ErxGenTcpTest < Minitest::Test
     assert_erx_net_eunit(:erx_gen_tcp_listen_tests)
   end
 
-  # Every control block made with a remote peer's TIME-WAIT lifetime: a loopback
-  # connection's port stays held for 60 s instead of 20 ms.
+  # Every path built as one to a remote peer, so every step's context has a remote peer's
+  # TIME-WAIT lifetime: a loopback connection's port stays held for 60 s instead of 20 ms.
   def test_seeded_full_time_wait_on_loopback_is_caught
-    fault = ['local_peer = maps:get(local_peer, Init, false),', 'local_peer = false,']
-    output = refute_erx_net_eunit(:erx_gen_tcp_listen_tests, fault: { 'erx_tcp_user' => fault })
+    fault = ['broadcast => Broadcast, loopback => Loopback}.', 'broadcast => Broadcast, loopback => Loopback andalso false}.']
+    output = refute_erx_net_eunit(:erx_gen_tcp_listen_tests, fault: { 'erx_net_frame' => fault })
     assert_match(/time_wait_test_/, output)
   end
 

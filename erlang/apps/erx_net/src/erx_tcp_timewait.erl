@@ -78,7 +78,7 @@ owed.
 -spec start(#tcb{}, #tcp_ctx{}) -> #tcb{}.
 start(#tcb{deadlines = D} = Tcb, Ctx) ->
     Tcb#tcb{state = time_wait, send_timer = none,
-            deadlines = D#deadlines{keep = infinity, msl2 = msl2(Tcb, Ctx)}}.
+            deadlines = D#deadlines{keep = infinity, msl2 = msl2(Ctx)}}.
 
 -doc """
 `tcp_twcheck` (tcp_timewait.c:197-354): one segment reaching the connection in TIME-WAIT
@@ -137,16 +137,18 @@ restart_on_fin(#tcp{flags = Flags, seq = Seq}, Tlen, #tcb{rcv_nxt = RcvNxt, dead
               _ -> 1
           end,
     case erx_tcp_seq:lift(Seq, RcvNxt) + Tlen + Syn + 1 =:= RcvNxt of
-        true -> Tcb#tcb{deadlines = D#deadlines{msl2 = msl2(Tcb, Ctx)}};
+        true -> Tcb#tcb{deadlines = D#deadlines{msl2 = msl2(Ctx)}};
         false -> Tcb
     end;
 restart_on_fin(_, _, Tcb, _) ->
     Tcb.
 
 %% The 2MSL deadline from now, with tcp_eff_msl's lifetime: TCPTV_MSL_LOCAL for a peer on
-%% one of the machine's own addresses, TCPTV_MSL otherwise.
-msl2(#tcb{local_peer = Local}, #tcp_ctx{now = Now}) ->
-    Msl = case Local of
+%% one of the machine's own addresses, the step's path being `loopback`, TCPTV_MSL
+%% otherwise. FreeBSD asks in_localip at tcp_twstart and at a FIN's restart (:184, :332),
+%% and the step's path is built over the configuration of the step.
+msl2(#tcp_ctx{now = Now, loopback = Loopback}) ->
+    Msl = case Loopback of
               true -> ?TCPTV_MSL_LOCAL;
               false -> ?TCPTV_MSL
           end,

@@ -1204,7 +1204,7 @@ new(Iss, Conn) ->
                        snd_hiwat => maps:get(snd_hiwat, Conn, ?HIWAT), rcv_hiwat => ?HIWAT,
                        gen => erx_net_rand:new(<<0:128>>), now => ?T0}).
 
-ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500}.
+ctx(Now) -> #tcp_ctx{now = Now, credit = 64, mtu = 1500, loopback = false}.
 
 %% The caller of a connect, send or shutdown; the step only hands it back in replies.
 from() -> {self(), explore}.

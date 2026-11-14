@@ -16,7 +16,9 @@
 -define(RCV, 5001).
 -define(SND, (?ISS + 2)).
 
-ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500}.
+ctx() -> #tcp_ctx{now = ?T0, credit = 64, mtu = 1500, loopback = false}.
+%% A step over a path through the loopback interface, to one of the machine's own addresses.
+local() -> (ctx())#tcp_ctx{loopback = true}.
 
 new() ->
     erx_tcp_user:new(#{family => inet, local => {<<10, 0, 0, 1>>, 4000},
@@ -53,14 +55,13 @@ start_arms_2msl_test_() ->
     [?_assertEqual(?T0 + ?S(60000), ((tw())#tcb.deadlines)#deadlines.msl2),
      ?_assertEqual(none, (tw())#tcb.send_timer),
      ?_assertEqual(?T0 + ?S(20),
-                   ((erx_tcp_timewait:start((tw())#tcb{local_peer = true}, ctx()))
+                   ((erx_tcp_timewait:start(tw(), local()))
                         #tcb.deadlines)#deadlines.msl2)].
 
 %% FIN in FIN-WAIT-2 enters TIME-WAIT through start/2.
 fin_enters_time_wait_test() ->
-    T0 = (tw())#tcb{state = fin_wait_2, rcv_nxt = ?RCV - 1, local_peer = true,
-                    deadlines = #deadlines{}},
-    {T, _} = input([wire(?RCV - 1, ?SND, ?TH_FIN bor ?TH_ACK)], T0),
+    T0 = (tw())#tcb{state = fin_wait_2, rcv_nxt = ?RCV - 1, deadlines = #deadlines{}},
+    {T, _} = erx_tcp_input:segments([wire(?RCV - 1, ?SND, ?TH_FIN bor ?TH_ACK)], T0, local()),
     ?assertEqual(time_wait, T#tcb.state),
     ?assertEqual(?T0 + ?S(20), (T#tcb.deadlines)#deadlines.msl2).
 

@@ -2294,14 +2294,15 @@ state of the full control block (`tcp_twstart`, `tcp_timewait.c:148`).
 The process hibernates for the 2MSL period, 60 s, or 20 ms when the peer
 is one of the machine's own addresses (`tcp_eff_msl`'s `TCPTV_MSL_LOCAL`,
 `tcp_timewait.c:115-135`, `tcp_timer.h:77`), so it holds only its
-smallest heap. The control block's `local_peer` selects the lifetime: the
-connection's process sets it when it makes the block, at a connect or an
-adoption, from the configuration it reads then
-(`erx_net_frame:is_own/2`, the test of `in_localip` and `in6_localip`,
-`in.c:154-166`, `in6.c:1844-1859`), where FreeBSD asks at TIME-WAIT's
-start and again when a retransmitted FIN restarts it
-(`tcp_timewait.c:184`, `:332`); an address added or removed during the
-connection is not seen.
+smallest heap. The step's path selects the lifetime: a path to one of
+the stack's own addresses is `loopback` (`erx_net_frame:path/3`, the test
+of `in_localip` and `in6_localip`, `in.c:154-166`, `in6.c:1844-1859`),
+and the step's context, which the process builds from its path, carries
+that flag to TIME-WAIT. The process rebuilds its path whenever the
+configuration has changed before a step, so the lifetime is decided over
+the configuration of the step that starts TIME-WAIT, or of the step whose
+retransmitted FIN restarts it, as FreeBSD asks at both
+(`tcp_timewait.c:184`, `:332`).
 Until the period ends the connection's key holds its port against a
 listen without `reuseaddr` (rule 4 of **Explicit binds**, in
 [Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)),
@@ -7001,8 +7002,8 @@ FreeBSD host only, since on macOS stock OTP 29.1.2 is refused for
 longer than the test waits (its MSL, `net.inet.tcp.msl`, is 15 s, and it
 has no shorter local lifetime as a sysctl; its source is not read here).
 The case checks that the port comes free, not that it was held before:
-a refusal right after the close would race the 20 ms. *Seeded failure:* a control block
-made with `local_peer` false, under which the `listen` is refused for
+a refusal right after the close would race the 20 ms. *Seeded failure:* every path
+built with `loopback` false, under which the `listen` is refused for
 60 s.
 
 **Against FreeBSD.** A packet script for a listener of backlog 1 that

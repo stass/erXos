@@ -97,18 +97,20 @@ loopback_for_an_address_of_the_stack_test() ->
                  via(path({v6("fe80::5"), eth1}))),
     #{iface := #{mtu := 16384}} = path(v4("127.0.0.1")).
 
-%% The peer test of tcp_eff_msl: an address of the stack, compared with its zone.
-own_addresses_test() ->
-    Snap = config(),
-    ?assert(erx_net_frame:is_own(v4("127.0.0.1"), Snap)),
-    ?assert(erx_net_frame:is_own(v4("10.1.0.5"), Snap)),
-    ?assert(erx_net_frame:is_own({v6("fe80::5"), eth0}, Snap)),
-    ?assert(erx_net_frame:is_own(v6("2001:db8::5"), Snap)),
-    ?assertNot(erx_net_frame:is_own(v6("2001:db8::9"), Snap)),
-    ?assertNot(erx_net_frame:is_own(v4("127.0.0.2"), Snap)),
-    ?assertNot(erx_net_frame:is_own(v4("10.0.0.9"), Snap)),
-    ?assertNot(erx_net_frame:is_own({v6("fe80::5"), eth1}, Snap)),
-    ?assertNot(erx_net_frame:is_own(v6("fe80::5"), Snap)).
+%% The peer test of tcp_eff_msl, in_localip and in6_localip: a path is `loopback` exactly
+%% when it leads to an address of the stack, compared with its zone, not when it only
+%% leaves through the loopback interface.
+loopback_path_test() ->
+    Loopback = fun(Dst) -> maps:get(loopback, path(Dst)) end,
+    ?assert(Loopback(v4("127.0.0.1"))),
+    ?assert(Loopback(v4("10.1.0.5"))),
+    ?assert(Loopback({v6("fe80::5"), eth0})),
+    ?assert(Loopback(v6("2001:db8::5"))),
+    ?assertNot(Loopback(v6("2001:db8::9"))),
+    ?assertNot(Loopback(v4("127.0.0.2"))),
+    ?assertNot(Loopback(v4("10.0.0.9"))),
+    ?assertNot(Loopback({v6("fe80::5"), eth1})),
+    ?assertEqual({error, enetunreach}, erx_net_frame:path(v6("fe80::5"), #{}, config())).
 
 zoned_destinations_take_their_zone_test() ->
     ?assertEqual({eth1, v6("fe80::9"), neighbour, v6("fe80::15")}, via(path({v6("fe80::9"), eth1}))),
@@ -359,11 +361,11 @@ mtu_drop_mid_transfer_test() ->
                                    [{self(), route(eth0, v4("10.0.0.0"), 24, none)}]),
     {ok, Path} = erx_net_frame:path(v4("10.0.0.2"), #{}, Small),
     {T1, Out1} = erx_tcp_output:output(conn(inet, v4("10.0.0.5"), v4("10.0.0.2"), 2920),
-                                       #tcp_ctx{now = ?T0, credit = 4, mtu = 1500}),
+                                       #tcp_ctx{now = ?T0, credit = 4, mtu = 1500, loopback = false}),
     ?assertEqual([1460, 1460], [iolist_size(D) || {_, _, D} <- lists:flatmap(fun erx_tcp_output:segments/1, Out1)]),
     %% The interface's MTU drops to 1280: the next full segment is 1280 less the headers.
     More = T1#tcb{sndbuf = erx_tcp_sndbuf:append(T1#tcb.sndbuf, binary:copy(<<"y">>, 2480))},
-    {T2, Out2} = erx_tcp_output:output(More, #tcp_ctx{now = ?T0, credit = 4, mtu = 1280}),
+    {T2, Out2} = erx_tcp_output:output(More, #tcp_ctx{now = ?T0, credit = 4, mtu = 1280, loopback = false}),
     ?assertEqual([1240, 1240], [iolist_size(D) || {_, _, D} <- lists:flatmap(fun erx_tcp_output:segments/1, Out2)]),
     ?assertEqual(1240, T2#tcb.maxseg),
     {ok, Packets, _} = erx_net_frame:tcp(Path, Out2, gen()),
@@ -372,7 +374,7 @@ mtu_drop_mid_transfer_test() ->
 ipv6_segments_carry_no_dont_fragment_test() ->
     T = conn(inet6, v6("2001:db8::5"), v6("2001:db8::9"), 100),
     {_, [{_, #{df := false}, _}]} = erx_tcp_output:output(T, #tcp_ctx{now = ?T0, credit = 1,
-                                                                       mtu = 1500}).
+                                                                       mtu = 1500, loopback = false}).
 
 %% --- Frames classified by the interface that receives them -------------------
 

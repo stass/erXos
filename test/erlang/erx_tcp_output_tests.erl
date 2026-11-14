@@ -12,7 +12,7 @@
 -define(T0, 1000000000).
 -define(S(Ms), ((Ms) * 1000)).
 
-ctx(Credit) -> #tcp_ctx{now = ?T0, credit = Credit, mtu = 1500}.
+ctx(Credit) -> #tcp_ctx{now = ?T0, credit = Credit, mtu = 1500, loopback = false}.
 
 out(Tcb) -> erx_tcp_output:output(Tcb, ctx(64)).
 
@@ -389,7 +389,7 @@ random_state() ->
          end,
     Route = pick([ok, ok, ok, {error, ehostunreach}]),
     {T2#tcb{sndbuf = Buf}, #tcp_ctx{now = ?T0, credit = rand:uniform(70) - 1,
-                                    mtu = pick([1500, 9000]), route = Route}}.
+                                    mtu = pick([1500, 9000]), route = Route, loopback = false}}.
 
 %% Bytes of "x" as binaries of random sizes up to Max.
 pieces(0, _Max) -> [];

@@ -2062,15 +2062,6 @@ it; git history is the record of completed work.
   pending frames, on `lo0` local traffic, reach the log; `erx_net_loop:transmit/2` raises on a
   zone whose bytes are not iodata where its doc says `malformed`. Mark the driver `sensitive` or
   keep the loop's queue in its state, and drop a bad list as `malformed`.
-* [Low] erx_net TCP connection process: TIME-WAIT's lifetime rests on every maker of a
-  control block passing `local_peer` (`erx_tcp_conn` `init/1` and `adopt/1`, through
-  `erx_net_frame:is_own/2`), and `erx_tcp_user:new/1` defaults a missing key to false, so a
-  new maker (the IPv6 connect) that forgets it holds loopback TIME-WAIT for 60 s without a
-  sign. Derive it instead: keep `way/4`'s `loopback` in `erx_net_frame:path()`, carry it into
-  `#tcp_ctx{}`, which `step_once/1` builds from the path that `configured/1` rebuilds at each
-  configuration change, have `erx_tcp_timewait:msl2/2` read it there, as `tcp_eff_msl` asks
-  `in_localip` at `tcp_twstart` and at a FIN's restart (`tcp_timewait.c:184`, `:332`), and
-  delete `#tcb.local_peer` and `is_own/2`.
 * [Low] erx_net TCP ICMP (`erx_tcp_icmp`, `erx_tcp_input:tcp_mss`): an MTU a too-big
   report gives in SYN-SENT lowers the MSS until the SYN-ACK, which recomputes it from the
   path, so the first full-size segment is lost again; FreeBSD keeps it in the host cache
@@ -6184,10 +6175,14 @@ to the corpus and follow rc
   datagrams from a socket another domain bound to `any` on the same port, since input tries the
   specific binding first and the bind asks nothing of who holds the wildcard one; FreeBSD's
   `in_pcbbind_setup` refuses such a bind with `EADDRINUSE` when the wildcard socket belongs to
-  another user. And a grant opens any number of sockets, since `erx_net_grant_core`'s limits are not
-  built, so one domain can hold every ephemeral port, or every ICMP echo identifier by repeated
-  `icmp_open`. Refuse a specific bind over another grant's wildcard one, as FreeBSD does across
-  users, and cap each grant's sockets with the grant's limits.
+  another user. And within its 1,024 sockets a grant can still hold a large share of the
+  ephemeral ports or of the ICMP echo identifiers. Refuse a specific bind over another grant's
+  wildcard one, as FreeBSD does across users.
+* [Low] network, TCP TIME-WAIT (`erx_tcp_conn`, configured/1): a configuration change that
+  leaves no path to the peer keeps the old path and its `loopback` flag, so a connection
+  between two of the machine's own addresses whose address is then deleted still takes the
+  20 ms TIME-WAIT, where FreeBSD's `in_localip` would now answer false and give 2MSL. Clear
+  the flag when the path cannot be rebuilt. No remote peer can cause it.
 * [Medium] tests, the system_domain suite's 4-CPU cell under TCG on the second host
   (`tools/lib/erx/system_domain.rb`): under that host's load (load average about 25) the
   service-kill boot failed at `echo-facet` with the system's Erlang shell ended at 31 s: `group` called

@@ -134,13 +134,11 @@ What a new control block is made from: the four-tuple and its family, the initia
 number and timestamp offset erx_tcp_isn computed for it (`isn/3`, `ts_offset/2`), which the
 connection receives from its claim through erx_net_bind, the congestion and loss modules
 the socket chose with their parameters, the buffer sizes the grant reserved, the
-generator split for the connection, the time, the socket options the step reads, and
-whether the remote address is one of the machine's own (`local_peer`, false if absent).
+generator split for the connection, the time and the socket options the step reads.
 """.
 -type init() :: #{family := inet | inet6,
                   local := {binary(), 0..16#ffff},
                   remote := {binary(), 0..16#ffff},
-                  local_peer => boolean(),
                   iss := erx_tcp_seq:wire(),
                   ts_offset := erx_tcp_seq:wire(),
                   cc := module(),
@@ -165,7 +163,6 @@ What accepted/3 makes a control block from besides the handshake: init()'s keys 
 -type listener_init() :: #{family := inet | inet6,
                            local := {binary(), 0..16#ffff},
                            remote := {binary(), 0..16#ffff},
-                           local_peer => boolean(),
                            cc := module(),
                            cc_params => erx_tcp_cc:params(),
                            loss := module(),
@@ -213,7 +210,6 @@ new(#{family := Family, local := Local, remote := Remote, iss := Iss, ts_offset 
                rxtshift = 0, srtt = 0, rtt_updated = 0, rexmit = false, now = Now,
                data = Cc:init(maps:get(cc_params, Init, #{}))},
     #tcb{state = closed, family = Family, local = Local, remote = Remote,
-         local_peer = maps:get(local_peer, Init, false),
          iss = Iss, snd_una = Iss, snd_nxt = Iss, snd_max = Iss, snd_up = Iss,
          snd_recover = Iss,
          ts = {requested, TsOffset}, wscale = requested, sack = requested,
