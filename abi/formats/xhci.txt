@@ -1,0 +1,349 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The xHCI memory structures the device NIF builds and reads (docs/design-usb.md, "The
+# TRB ring form"): the slot, endpoint and input control contexts, the event ring's
+# segment table entry, the TRBs by shape, and the values their fields take.
+#
+# Each field and value is the one FreeBSD gives, at releng/15.1 (commit 95719d8a895b),
+# in sys/dev/usb/controller/xhci.h and xhci.c at the lines cited. Where FreeBSD names
+# no field, it is from the xHCI specification, revision 1.2 (May 2019), by section
+# and table. Every structure is little-endian. A controller whose HCCPARAMS1.CSZ is
+# set spaces its contexts 64 bytes apart, each context's first 32 bytes the layouts
+# below and the rest reserved (xhci.h:113-116, :163-166, :182-185). The ring form's own
+# sizes, its rings' lengths, queue blocks and buffers, are its record's, not this file's
+# (design-usb.md, "The TRB ring form").
+
+# A device context holds the slot context and 31 endpoint contexts, indexed by the
+# device context index, EP0's 1 (XHCI_MAX_ENDPOINTS, xhci.h:33); an input context
+# holds the input control context before them.
+limit xhci_device_contexts u32 32
+
+# A route string names a hub port in four bits for each tier below the root, the first
+# tier lowest (xhci.c:2636-2644).
+limit xhci_route_tier_bits u32 4
+
+# Alignment and boundaries (xhci.h:48-61; xHCI 1.2, Table 6-1): no ring segment
+# spans a 64 KiB boundary, and no context, context array or DCBAA a page.
+limit xhci_page_size u32 4096
+limit xhci_segment_boundary u32 65536
+limit xhci_dcbaa_align u32 64
+limit xhci_device_context_align u32 64
+limit xhci_input_context_align u32 64
+limit xhci_transfer_ring_align u32 16
+limit xhci_command_ring_align u32 64
+limit xhci_event_ring_align u32 64
+limit xhci_segment_table_align u32 64
+limit xhci_scratchpad_array_align u32 64
+
+# The error count every endpoint context the NIF builds takes (xhci.c:2495-2501).
+limit xhci_endpoint_error_count u32 3
+
+# The slot context (xhci.h:74-111): the device's route, speed and hub fields, its
+# last valid context index, the root hub port it is reached through, its
+# transaction translator, its interrupter, and the address and state the
+# controller writes.
+layout erx_xhci_slot_context wire_le 4 32
+  field route u32 0
+    bits route_string 0 19
+    bits speed 20 23
+    bits multi_tt 25 25
+    bits hub 26 26
+    bits context_entries 27 31
+  field ports u32 4
+    bits exit_latency 0 15
+    bits root_port 16 23
+    bits port_count 24 31
+  field tt u32 8
+    bits tt_slot 0 7
+    bits tt_port 8 15
+    bits tt_think_time 16 17
+    bits interrupter 22 31
+  field state u32 12
+    bits address 0 7
+    bits slot_state 27 31
+  padding 16 16
+
+# The endpoint context (xhci.h:118-161). The dequeue pointer is 16-byte aligned and
+# shares its word with the dequeue cycle state. Mult (bits 9:8), MaxPStreams (14:10), LSA
+# (15) and HID (bit 7 of the second word) are not named: the NIF writes them 0 on every
+# context, since MaxPStreams above 0 makes the dequeue pointer a stream context array's
+# address (xHCI 1.2, 6.2.3).
+layout erx_xhci_endpoint_context wire_le 8 32
+  field info u32 0
+    bits endpoint_state 0 2
+    bits interval 16 23
+  field config u32 4
+    bits error_count 1 2
+    bits endpoint_type 3 5
+    bits max_burst 8 15
+    bits max_packet 16 31
+  field dequeue u64 8
+    bits dequeue_cycle 0 0
+    bits dequeue_pointer 4 63 shift 4
+  field payload u32 16
+    bits average_trb_length 0 15
+    bits max_esit_payload 16 31
+  padding 20 12
+
+# The input control context (xhci.h:168-180): bit n of each flag word drops or adds
+# the context of device context index n, bit 0 the slot's in the add word.
+layout erx_xhci_input_control_context wire_le 4 32
+  field drop u32 0
+  field add u32 4
+  padding 8 24
+
+# One entry of the event ring segment table (xhci.h:396-400); its size counts the
+# segment's TRBs in bits 15:0 (xHCI 1.2, 6.5, Table 6-95 of the body text).
+layout erx_xhci_segment_table_entry wire_le 8 16
+  field base u64 0
+  field size u32 8
+    bits trbs 0 15
+  padding 12 4
+
+# Every TRB is 16 bytes, 16-byte aligned (XHCI_TRB_ALIGN, xhci.h:59): a 64-bit
+# parameter, a status word and a control word whose cycle bit and type are in the
+# same place in every format (xhci.h:228-277). Each layout below is one format, with the
+# fields the NIF writes or reads; every bit it does not name the NIF leaves clear.
+limit xhci_trb_align u32 16
+
+# A normal TRB (xhci.h:235-277; xHCI 1.2, 6.4.1.1): a buffer's device address and
+# length, the TD size, and the flags.
+layout erx_xhci_trb_normal wire_le 8 16
+  field buffer u64 0
+  field status u32 8
+    bits length 0 16
+    bits td_size 17 21
+    bits interrupter 22 31
+  field control u32 12
+    bits cycle 0 0
+    bits interrupt_on_short 2 2
+    bits chain 4 4
+    bits interrupt_on_completion 5 5
+    bits type 10 15
+
+# A control transfer's data stage: a normal TRB's fields and the stage's direction
+# (xhci.h:267, xhci.c:1940-1960).
+layout erx_xhci_trb_data wire_le 8 16
+  field buffer u64 0
+  field status u32 8
+    bits length 0 16
+    bits td_size 17 21
+    bits interrupter 22 31
+  field control u32 12
+    bits cycle 0 0
+    bits interrupt_on_short 2 2
+    bits chain 4 4
+    bits interrupt_on_completion 5 5
+    bits type 10 15
+    bits direction_in 16 16
+
+# A control transfer's status stage: no buffer and no length, only its direction
+# (xHCI 1.2, 6.4.1.2.3).
+layout erx_xhci_trb_status wire_le 8 16
+  padding 0 8
+  field status u32 8
+    bits interrupter 22 31
+  field control u32 12
+    bits cycle 0 0
+    bits chain 4 4
+    bits interrupt_on_completion 5 5
+    bits type 10 15
+    bits direction_in 16 16
+
+# A control transfer's setup stage: the 8 setup bytes as immediate data, little-endian
+# in the parameter, and the transfer type of its data stage (xhci.h:230-277,
+# xhci.c:1850-1870).
+layout erx_xhci_trb_setup wire_le 8 16
+  field setup u64 0
+  field status u32 8
+    bits length 0 16
+    bits interrupter 22 31
+  field control u32 12
+    bits cycle 0 0
+    bits interrupt_on_completion 5 5
+    bits immediate_data 6 6
+    bits type 10 15
+    bits transfer_type 16 17
+
+# A link TRB: the segment it leads to, 16-byte aligned, and the toggle-cycle bit that
+# flips the ring's cycle state when the controller follows it (xhci.h:241-277).
+layout erx_xhci_trb_link wire_le 8 16
+  field segment u64 0
+    bits segment_pointer 4 63 shift 4
+  field status u32 8
+    bits interrupter 22 31
+  field control u32 12
+    bits cycle 0 0
+    bits toggle_cycle 1 1
+    bits chain 4 4
+    bits interrupt_on_completion 5 5
+    bits type 10 15
+
+# A command TRB (xhci.h:247-277): its parameter is the input context's address for
+# Address Device, Configure Endpoint and Evaluate Context, and 0 for the others; its
+# control word names the slot and, for Reset Endpoint and Stop Endpoint, the device
+# context index. Enable Slot's bits 20:16 are its slot type, which the NIF writes 0. Bit
+# 9, the block-set-address, deconfigure and transfer-state-preserve flag of the commands
+# that have one, and bit 23, Stop Endpoint's suspend flag, stay clear.
+layout erx_xhci_trb_command wire_le 8 16
+  field parameter u64 0
+    bits pointer 4 63 shift 4
+  field status u32 8
+  field control u32 12
+    bits cycle 0 0
+    bits type 10 15
+    bits endpoint 16 20
+    bits slot 24 31
+
+# Set TR Dequeue Pointer: the ring position, 16-byte aligned, with the cycle state the
+# endpoint resumes with (xhci.h:150-152; xHCI 1.2, 6.4.3.9); the stream type and stream
+# ID stay 0.
+layout erx_xhci_trb_set_dequeue wire_le 8 16
+  field parameter u64 0
+    bits dequeue_cycle 0 0
+    bits pointer 4 63 shift 4
+  field status u32 8
+  field control u32 12
+    bits cycle 0 0
+    bits type 10 15
+    bits endpoint 16 20
+    bits slot 24 31
+
+# A transfer event (xhci.h:233-277, xhci.c:951-960; the event-data flag from xHCI 1.2,
+# 6.4.2.1, Table 6-39 of the body text): the TRB it reports on, the residue, the
+# completion code, the slot and the device context index.
+layout erx_xhci_trb_transfer_event wire_le 8 16
+  field pointer u64 0
+  field status u32 8
+    bits residue 0 23
+    bits code 24 31
+  field control u32 12
+    bits cycle 0 0
+    bits event_data 2 2
+    bits type 10 15
+    bits endpoint 16 20
+    bits slot 24 31
+
+# A command completion event (xHCI 1.2, 6.4.2.2): the command TRB it completes, the
+# command's completion parameter, the code and the slot; bits 23:16 are the virtual
+# function's ID, which the NIF does not read.
+layout erx_xhci_trb_command_event wire_le 8 16
+  field pointer u64 0
+  field status u32 8
+    bits parameter 0 23
+    bits code 24 31
+  field control u32 12
+    bits cycle 0 0
+    bits type 10 15
+    bits slot 24 31
+
+# A port status change event: the root hub port in bits 31:24 of the parameter
+# (xHCI 1.2, 6.4.2.3, Figure 6-16 and Table 6-43; FreeBSD polls its ports and reads
+# none).
+layout erx_xhci_trb_port_event wire_le 8 16
+  field parameter u64 0
+    bits port 24 31
+  field status u32 8
+    bits code 24 31
+  field control u32 12
+    bits cycle 0 0
+    bits type 10 15
+
+# The TRB types (xhci.h:280-313).
+enum xhci_trb_type u8
+  value normal 0x01
+  value setup_stage 0x02
+  value data_stage 0x03
+  value status_stage 0x04
+  value isoch 0x05
+  value link 0x06
+  value event_data 0x07
+  value noop 0x08
+  value enable_slot 0x09
+  value disable_slot 0x0a
+  value address_device 0x0b
+  value configure_endpoint 0x0c
+  value evaluate_context 0x0d
+  value reset_endpoint 0x0e
+  value stop_endpoint 0x0f
+  value set_tr_dequeue 0x10
+  value reset_device 0x11
+  value force_event 0x12
+  value negotiate_bandwidth 0x13
+  value set_latency_tolerance 0x14
+  value get_port_bandwidth 0x15
+  value force_header 0x16
+  value noop_command 0x17
+  value transfer_event 0x20
+  value command_completion_event 0x21
+  value port_status_change_event 0x22
+  value bandwidth_request_event 0x23
+  value doorbell_event 0x24
+  value host_controller_event 0x25
+  value device_notification_event 0x26
+  value mfindex_wrap_event 0x27
+
+# The completion codes (xhci.h:316-350), and Stopped - Short Packet, which FreeBSD's list
+# skips (xHCI 1.2, 6.4.5, Table 6-90 of the body text: code 28).
+enum xhci_completion u8
+  value invalid 0x00
+  value success 0x01
+  value data_buffer_error 0x02
+  value babble 0x03
+  value transaction_error 0x04
+  value trb_error 0x05
+  value stall 0x06
+  value resource_error 0x07
+  value bandwidth_error 0x08
+  value no_slots 0x09
+  value invalid_stream_type 0x0a
+  value slot_not_enabled 0x0b
+  value endpoint_not_enabled 0x0c
+  value short_packet 0x0d
+  value ring_underrun 0x0e
+  value ring_overrun 0x0f
+  value vf_event_ring_full 0x10
+  value parameter_error 0x11
+  value bandwidth_overrun 0x12
+  value context_state_error 0x13
+  value no_ping_response 0x14
+  value event_ring_full 0x15
+  value incompatible_device 0x16
+  value missed_service 0x17
+  value command_ring_stopped 0x18
+  value command_aborted 0x19
+  value stopped 0x1a
+  value stopped_length_invalid 0x1b
+  value stopped_short_packet 0x1c
+  value max_exit_latency_too_large 0x1d
+  value isoch_buffer_overrun 0x1f
+  value event_lost 0x20
+  value undefined_error 0x21
+  value invalid_stream_id 0x22
+  value secondary_bandwidth_error 0x23
+  value split_transaction_error 0x24
+
+
+# An endpoint context's type: control, and each of isochronous, bulk and interrupt
+# out, then in four above (xhci.c:2503-2521).
+enum xhci_endpoint_type u8
+  value isoch_out 1
+  value bulk_out 2
+  value interrupt_out 3
+  value control 4
+  value isoch_in 5
+  value bulk_in 6
+  value interrupt_in 7
+
+# A slot context's speed, the default port speed IDs (xhci.c:2650-2683).
+enum xhci_speed u8
+  value full 1
+  value low 2
+  value high 3
+  value super 4
+
+# A setup stage's transfer type: no data stage, out or in (xhci.h:263-266).
+enum xhci_transfer_type u8
+  value none 0
+  value out 2
+  value in 3

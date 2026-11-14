@@ -18,6 +18,8 @@ include formats/evdev.txt
 include formats/hid.txt
 include formats/input.txt
 include formats/mbr.txt
+include formats/usb.txt
+include formats/xhci.txt
 include medium.txt
 include formats/erofs.txt
 include kernel.txt

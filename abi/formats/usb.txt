@@ -1,0 +1,271 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The USB constants the stack reads (docs/design-usb.md): the bounds a device meets,
+# chapter 9's requests, descriptors and features, the hub class's, and the Bulk-Only
+# transport's with the SCSI commands it carries. HID's class constants are in hid.txt,
+# the controller's memory structures in xhci.txt.
+#
+# Each value is the one FreeBSD gives, at releng/15.1 (commit 95719d8a895b), in the file
+# and line cited: sys/dev/usb/usb.h, usb_freebsd.h, usb_device.c, usb_transfer.c,
+# storage/umass.c and sys/cam/scsi/scsi_all.h. A value that is a choice of erXos's says
+# so. Every multi-byte field on the bus is little-endian; every one in a SCSI command or
+# its data is big-endian.
+
+# What a device can make the domain spend (design-usb.md): the bounds a device meets,
+# fixed before any device arrives; a device that offers more is refused. Each is erXos's
+# choice unless a source is cited.
+# The slots of one controller, those still being torn down included.
+limit usb_devices_max u32 16
+# Tiers of hubs below the root, FreeBSD's USB_HUB_MAX_DEPTH (usb_freebsd.h:90).
+limit usb_hub_depth_max u32 5
+# A hub's ports: the most one tier of the route string names (xhci.txt).
+limit usb_hub_ports_max u32 15
+# A configuration descriptor's wTotalLength: one control buffer.
+limit usb_config_max u32 4096
+# The endpoints a device may use, EP0 included.
+limit usb_endpoints_max u32 8
+# The input numbers the USB domain offers the display.
+limit usb_input_max u32 8
+# The drives the USB domain offers the file servers.
+limit usb_drives_max u32 4
+
+# A setup packet's bmRequestType: the direction in bit 7, the kind in bits 6:5 and the
+# recipient in bits 4:0 (usb.h:157-165).
+limit usb_request_dir_in u8 0x80
+limit usb_request_type_mask u8 0x60
+limit usb_request_recipient_mask u8 0x1f
+enum usb_request_type u8
+  value standard 0x00
+  value class 0x20
+  value vendor 0x40
+enum usb_recipient u8
+  value device 0
+  value interface 1
+  value endpoint 2
+  value other 3
+
+# The standard requests (usb.h:191-195, :218-223). The hub class sends GET_STATUS,
+# CLEAR_FEATURE, SET_FEATURE and GET_DESCRIPTOR by these same codes, and adds its
+# transaction translator's own (usb.h:229-232).
+enum usb_request u8
+  value get_status 0x00
+  value clear_feature 0x01
+  value set_feature 0x03
+  value set_address 0x05
+  value get_descriptor 0x06
+  value set_descriptor 0x07
+  value get_configuration 0x08
+  value set_configuration 0x09
+  value get_interface 0x0a
+  value set_interface 0x0b
+  value synch_frame 0x0c
+enum usb_hub_request u8
+  value clear_tt_buffer 0x08
+  value reset_tt 0x09
+  value get_tt_state 0x0a
+  value stop_tt 0x0b
+
+# The descriptor types the stack reads (usb.h:196-217); a configuration's walk skips
+# a descriptor of any other type.
+enum usb_descriptor_type u8
+  value device 0x01
+  value configuration 0x02
+  value string 0x03
+  value interface 0x04
+  value endpoint 0x05
+  value hub 0x29
+  value ss_endpoint_companion 0x30
+
+# The lengths the stack asks GET_DESCRIPTOR for: a device descriptor's first 8 bytes,
+# the packet size a full-speed EP0 starts at (USB_MAX_IPACKET, usb.h:70), then its
+# whole 18 (struct usb_device_descriptor, usb.h:289-309); a configuration's 9-byte
+# header (struct usb_config_descriptor, usb.h:386-400) before its wTotalLength; and a
+# hub descriptor's 7 bytes before its port bitmaps (struct usb_hub_descriptor,
+# usb.h:603-630).
+limit usb_device_descriptor_head u32 8
+limit usb_device_descriptor_size u32 18
+limit usb_configuration_descriptor_size u32 9
+limit usb_hub_descriptor_head u32 7
+
+# The least each descriptor a configuration's walk reads must hold: a header's length
+# and type (struct usb_descriptor, usb.h:282-286, less its subtype), an interface's 9
+# bytes (usb.h:403-413), an endpoint's 7 (usb.h:526-562) and a SuperSpeed endpoint
+# companion's 6 (usb.h:565-573).
+limit usb_descriptor_header_size u32 2
+limit usb_interface_descriptor_size u32 9
+limit usb_endpoint_descriptor_size u32 7
+limit usb_ss_endpoint_companion_size u32 6
+
+# String descriptor 0 is the language table (usb.h:199). FreeBSD takes the first
+# language whose low byte is 09h, English, under its mask 00ffh, and otherwise the
+# table's first (usb_device.c:256-257, :1717-1728).
+limit usb_language_table u8 0
+limit usb_language_english u16 0x0009
+limit usb_language_primary_mask u16 0x00ff
+
+# An endpoint descriptor's address and attributes (usb.h:532-545), and its
+# wMaxPacketSize: the packet size in bits 10:0, a high-speed periodic endpoint's
+# additional transactions in bits 12:11 (usb_transfer.c:398-410, :502-513).
+limit usb_endpoint_dir_in u8 0x80
+limit usb_endpoint_number_mask u8 0x0f
+limit usb_endpoint_type_mask u8 0x03
+enum usb_transfer_type u8
+  value control 0
+  value isochronous 1
+  value bulk 2
+  value interrupt 3
+limit usb_packet_size_mask u16 0x07ff
+limit usb_packet_extra_shift u32 11
+limit usb_packet_extra_mask u16 0x0003
+
+# The interface and device classes the claim table names (usb.h:374, :454, :468-480)
+# and a hub's device protocols (usb.h:376-379): a multi-TT hub selects its alternate
+# setting 1.
+enum usb_class u8
+  value hid 0x03
+  value mass_storage 0x08
+  value hub 0x09
+limit usb_subclass_scsi u8 0x06
+limit usb_protocol_bulk_only u8 0x50
+enum usb_hub_protocol u8
+  value full_speed 0
+  value single_tt 1
+  value multi_tt 2
+  value super_speed 3
+
+# The feature a pipe's reset clears (usb.h:239).
+enum usb_feature u16
+  value endpoint_halt 0
+
+# A hub's features, its own and its ports' (usb.h:247-264), USB 2.0's set: the link
+# state, L1 and the SuperSpeed port features are not used, since no SuperSpeed hub is
+# driven.
+enum usb_hub_feature u16
+  value c_local_power 0
+  value c_over_current 1
+enum usb_port_feature u16
+  value connection 0
+  value enable 1
+  value suspend 2
+  value over_current 3
+  value reset 4
+  value power 8
+  value low_speed 9
+  value c_connection 16
+  value c_enable 17
+  value c_suspend 18
+  value c_over_current 19
+  value c_reset 20
+  value test 21
+  value indicator 22
+
+# GET_STATUS's two words for a hub (usb.h:698-699) and for a port (usb.h:706-741),
+# USB 2.0's bits. A hub's change word has its status word's bits. A root port's PORTSC
+# fills the same words, but its speed is its PORTSC speed ID (xhci.txt, xhci_speed),
+# never low_speed and high_speed, which cannot name SuperSpeed.
+flags usb_hub_status u16
+  bit local_power 0
+  bit over_current 1
+flags usb_port_status u16
+  bit connection 0
+  bit enabled 1
+  bit suspend 2
+  bit over_current 3
+  bit reset 4
+  bit power 8
+  bit low_speed 9
+  bit high_speed 10
+  bit test 11
+  bit indicator 12
+flags usb_port_change u16
+  bit connection 0
+  bit enabled 1
+  bit suspend 2
+  bit over_current 3
+  bit reset 4
+
+# wHubCharacteristics' think time of a high-speed hub's transaction translator, 0 to 3
+# for 8 to 32 full-speed bit times (usb.h:617-621).
+limit usb_hub_tt_think_mask u16 0x0060
+limit usb_hub_tt_think_shift u32 5
+
+# The Bulk-Only transport (umass.c:236-270): its two class requests, the 31-byte
+# command block wrapper and the 13-byte command status wrapper with their signatures,
+# the wrapper's direction flag, the longest command block it carries and the status
+# a wrapper reports. Get Max LUN answers the highest unit's number; erXos refuses an
+# interface answering more than 15 (design-usb.md, "The BOT engine"). Unverified: that
+# 15 is the Bulk-Only specification's bound, which no source read here states; FreeBSD
+# takes the answer whole (umass.c:1692-1700).
+enum usb_bot_request u8
+  value get_max_lun 0xfe
+  value reset 0xff
+limit usb_bot_cbw_size u32 31
+limit usb_bot_cbw_signature u32 0x43425355
+limit usb_bot_cbw_flag_in u8 0x80
+limit usb_bot_cb_max u32 16
+limit usb_bot_csw_size u32 13
+limit usb_bot_csw_signature u32 0x53425355
+limit usb_bot_lun_max u8 15
+enum usb_bot_status u8
+  value good 0
+  value failed 1
+  value phase_error 2
+
+# The SCSI commands the transport sends and no others (design-usb.md, "The SCSI
+# subset"), by operation code (scsi_all.h:2080-2130); READ CAPACITY(16) is SERVICE
+# ACTION IN with its service action (scsi_all.h:2949).
+enum scsi_op u8
+  value test_unit_ready 0x00
+  value request_sense 0x03
+  value inquiry 0x12
+  value read_capacity_10 0x25
+  value read_10 0x28
+  value write_10 0x2a
+  value synchronize_cache_10 0x35
+  value read_16 0x88
+  value write_16 0x8a
+  value service_action_in 0x9e
+limit scsi_read_capacity_16_action u8 0x10
+
+# The data each command that reads data asks for: INQUIRY's standard 36 bytes
+# (SHORT_INQUIRY_LENGTH, scsi_all.h:2199), fixed-format sense's 18 (SSD_MIN_SIZE,
+# scsi_all.h:3282), and READ CAPACITY(10)'s 8 and (16)'s 32 bytes (struct
+# scsi_read_capacity_data and scsi_read_capacity_data_long, scsi_all.h:2958-2992).
+limit scsi_inquiry_length u32 36
+limit scsi_sense_length u32 18
+limit scsi_read_capacity_10_length u32 8
+limit scsi_read_capacity_16_length u32 32
+
+# INQUIRY data's first two bytes: the peripheral qualifier in bits 7:5 and device type
+# in bits 4:0 of byte 0, the removable bit in byte 1 (scsi_all.h:2168, :2204-2206,
+# :2242).
+limit scsi_peripheral_type_mask u8 0x1f
+limit scsi_peripheral_qualifier_shift u32 5
+limit scsi_peripheral_direct u8 0x00
+limit scsi_qualifier_connected u8 0x00
+limit scsi_removable u8 0x80
+
+# Fixed-format sense data: the response code in bits 6:0 of byte 0 and the sense key
+# in bits 3:0 of byte 2 (scsi_all.h:3295-3317).
+limit scsi_sense_response_mask u8 0x7f
+enum scsi_sense_response u8
+  value current 0x70
+  value deferred 0x71
+limit scsi_sense_key_mask u8 0x0f
+enum scsi_sense_key u8
+  value no_sense 0x00
+  value recovered_error 0x01
+  value not_ready 0x02
+  value medium_error 0x03
+  value hardware_error 0x04
+  value illegal_request 0x05
+  value unit_attention 0x06
+  value data_protect 0x07
+  value blank_check 0x08
+  value vendor_specific 0x09
+  value copy_aborted 0x0a
+  value aborted_command 0x0b
+  value equal 0x0c
+  value volume_overflow 0x0d
+  value miscompare 0x0e
+  value completed 0x0f
