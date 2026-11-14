@@ -16,11 +16,12 @@
 
 /*
  * What the plan holds apart: the first stage, the device tree, the loader's
- * reservations, the archive and the three images. The loader's list is bounded
- * here, since a longer one could not be held apart and is refused.
+ * reservations, the archive, the three images, then the loaded archive, the
+ * device tree's copy and the handoff page. The loader's list is bounded here,
+ * since a longer one could not be held apart and is refused.
  */
 #define ERX_BOOT_RESERVED_MAX	32
-#define ERX_BOOT_CLEAR_MAX	(ERX_BOOT_RESERVED_MAX + 6)
+#define ERX_BOOT_CLEAR_MAX	(ERX_BOOT_RESERVED_MAX + 9)
 #define ERX_BOOT_ROLES		3
 
 typedef struct erx_boot_clear erx_boot_clear_t;
@@ -40,13 +41,19 @@ struct erx_boot_clear {
 	size_t		 count;
 };
 
-/* The workspace's contents; only this file sees their layout. */
+/*
+ * The workspace's contents; only this file sees their layout. A placed role's
+ * extent is its page-rounded range where it runs, and offset what was added to
+ * its link addresses to get there.
+ */
 struct erx_boot_work {
 	erx_pack_scratch_t scratch;
 	erx_blake3_ctx_t hasher;
 	erx_elf_kernel_plan_t plans[ERX_BOOT_ROLES];
 	bool		 present[ERX_BOOT_ROLES];
 	uint64_t	 data_off[ERX_BOOT_ROLES];
+	erx_boot_range_t extent[ERX_BOOT_ROLES];
+	uint64_t	 offset[ERX_BOOT_ROLES];
 	erx_boot_clear_t clear;
 };
 
@@ -68,8 +75,9 @@ _Static_assert(ERX_BOOT_ARGS_MAX == ERX_BOOT_STRINGS_MAX,
     "the seam's command line bound is the ABI's");
 
 /*
- * In placing order: the image at fixed addresses goes first, so the others go
- * around it, then the kernel, then sigma0.
+ * The roles, in the order each of erx_boot_load_plan's two placement passes
+ * visits them: the pass over images at their link addresses, and the pass
+ * over images that relocate, which runs once the archive's place is decided.
  */
 enum { ERX_BOOT_ROLE_STAND_IN, ERX_BOOT_ROLE_KERNEL, ERX_BOOT_ROLE_SIGMA0 };
 
@@ -100,9 +108,20 @@ static bool erx_boot_choose(const erx_boot_load_request_t *,
 static bool erx_boot_inside_memory(const erx_boot_load_request_t *, uint64_t,
     uint64_t);
 static bool erx_boot_hold_apart(const erx_boot_load_request_t *,
-    erx_boot_range_t, erx_boot_clear_t *, erx_boot_error_t *);
-static bool erx_boot_place_role(const erx_boot_load_request_t *, size_t,
+    erx_boot_clear_t *, erx_boot_error_t *);
+static bool erx_boot_place_fixed(const erx_boot_load_request_t *, size_t,
     erx_boot_work_t *, erx_boot_load_plan_t *, erx_boot_error_t *);
+static bool erx_boot_place_relocatable(const erx_boot_load_request_t *,
+    size_t, uint64_t, erx_boot_work_t *, erx_boot_load_plan_t *,
+    erx_boot_error_t *);
+static bool erx_boot_record(size_t, uint64_t, uint64_t, uint64_t,
+    erx_boot_work_t *, erx_boot_load_plan_t *, erx_boot_error_t *);
+static bool erx_boot_place_archive(const erx_boot_load_request_t *,
+    erx_boot_work_t *, erx_boot_load_plan_t *, uint64_t *, erx_boot_error_t *);
+static bool erx_boot_place_handoff_pages(const erx_boot_load_request_t *,
+    erx_boot_work_t *, erx_boot_load_plan_t *, erx_boot_error_t *);
+static void erx_boot_plan_copies(const erx_boot_work_t *,
+    erx_boot_load_plan_t *);
 static bool erx_boot_cell(const void *, size_t, uint32_t *);
 
 static bool
@@ -224,8 +243,9 @@ erx_boot_extent(const erx_elf_kernel_plan_t *plan, uint64_t *start, uint64_t *en
 }
 
 /*
- * The lowest aligned address at or above floor where span bytes lie inside one
- * memory range and clear of everything held apart. Each conflict moves the
+ * The first fit, in the order of the memory ranges: the lowest aligned address
+ * at or above floor, in the first range that has one, where span bytes lie
+ * inside that range and clear of everything held apart. Each conflict moves the
  * candidate past that range, so the search ends within the list's length for
  * every memory range.
  */
@@ -277,20 +297,23 @@ erx_boot_inside_memory(const erx_boot_load_request_t *request, uint64_t start,
 	return (false);
 }
 
-/* What no placement may touch before any image is placed. */
+/*
+ * What no placement may touch, from the start: the first stage, which is
+ * running, the device tree and the loader's reservations. Each placed image
+ * joins the list as it is placed, and the archive once its place is decided
+ * (erx_boot_place_archive).
+ */
 static bool
 erx_boot_hold_apart(const erx_boot_load_request_t *request,
-    erx_boot_range_t archive, erx_boot_clear_t *clear, erx_boot_error_t *error)
+    erx_boot_clear_t *clear, erx_boot_error_t *error)
 {
-	uint64_t archive_end, tree_end, tree_start, stage_end;
+	uint64_t tree_end, tree_start, stage_end;
 
 	if (__builtin_add_overflow(request->load, request->linked_end, &stage_end) ||
 	    !erx_boot_round_up(stage_end, ERX_PAGE_SIZE, &stage_end) ||
 	    __builtin_add_overflow(request->device_tree.start,
 	    request->device_tree.size, &tree_end) ||
-	    !erx_boot_round_up(tree_end, ERX_PAGE_SIZE, &tree_end) ||
-	    !erx_boot_round_up(archive.start + archive.size, ERX_PAGE_SIZE,
-	    &archive_end))
+	    !erx_boot_round_up(tree_end, ERX_PAGE_SIZE, &tree_end))
 		return (erx_boot_fail(error, "reservation_range", NULL,
 		    ERX_BOOT_NO_ENTRY, 0, 0));
 	tree_start = request->device_tree.start & ~(uint64_t)(ERX_PAGE_SIZE - 1);
@@ -299,8 +322,6 @@ erx_boot_hold_apart(const erx_boot_load_request_t *request,
 	    .size = stage_end - request->load });
 	(void)erx_boot_clear_add(clear, (erx_boot_range_t){ .start = tree_start,
 	    .size = tree_end - tree_start });
-	(void)erx_boot_clear_add(clear, (erx_boot_range_t){ .start = archive.start,
-	    .size = archive_end - archive.start });
 	for (size_t index = 0; index < request->nreserved; index++) {
 		if (request->reserved[index].size >
 		    UINT64_MAX - request->reserved[index].start)
@@ -312,58 +333,83 @@ erx_boot_hold_apart(const erx_boot_load_request_t *request,
 }
 
 /*
- * Places one image and appends its copies. An image with a dynamic section goes
- * at the lowest free address of its alignment behind the archive's rounded
- * extent, so the kernel's region and the archive's never share a unit of its
- * free map; any other runs at its link addresses, which must be inside memory
- * and clear.
+ * Places an image without a dynamic section at its link addresses, which must
+ * be inside memory and clear of everything held apart. The loaded archive is
+ * not held apart from it: erx_boot_place_archive moves the archive off it.
  */
 static bool
-erx_boot_place_role(const erx_boot_load_request_t *request, size_t slot,
+erx_boot_place_fixed(const erx_boot_load_request_t *request, size_t slot,
     erx_boot_work_t *work, erx_boot_load_plan_t *plan, erx_boot_error_t *error)
 {
-	const erx_boot_role_t *role = &erx_boot_roles[slot];
+	const char *path = erx_boot_roles[slot].path;
+	uint64_t end, start;
+
+	if (!erx_boot_extent(&work->plans[slot], &start, &end))
+		return (erx_boot_fail(error, "place_extent", path, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	if (erx_boot_roles[slot].is_kernel)
+		return (erx_boot_fail(error, "kernel_not_relocatable", path,
+		    ERX_BOOT_NO_ENTRY, 0, 0));
+	if (!erx_boot_inside_memory(request, start, end))
+		return (erx_boot_fail(error, "place_outside_memory", path,
+		    ERX_BOOT_NO_ENTRY, 0, start));
+	if (erx_boot_conflict(&work->clear, start, end) != NULL)
+		return (erx_boot_fail(error, "place_overlap", path, ERX_BOOT_NO_ENTRY,
+		    0, start));
+	return (erx_boot_record(slot, start, end, 0, work, plan, error));
+}
+
+/*
+ * Places an image with a dynamic section at the lowest free address of its
+ * alignment at or above floor, which erx_boot_place_archive puts behind the
+ * archive's extent rounded to the kernel's unit, so the kernel's region and
+ * the archive's never share a unit of its free map. The fork's kernel
+ * relocates itself, so it always goes here.
+ */
+static bool
+erx_boot_place_relocatable(const erx_boot_load_request_t *request,
+    size_t slot, uint64_t floor, erx_boot_work_t *work,
+    erx_boot_load_plan_t *plan, erx_boot_error_t *error)
+{
 	const erx_elf_kernel_plan_t *image = &work->plans[slot];
-	erx_boot_placed_t placed;
-	uint64_t alignment, base, end, floor, offset, origin, span, start;
+	const char *path = erx_boot_roles[slot].path;
+	uint64_t alignment, base, end, offset, origin, start;
 
 	if (!erx_boot_extent(image, &start, &end))
-		return (erx_boot_fail(error, "place_extent", role->path,
-		    ERX_BOOT_NO_ENTRY, 0, 0));
-	/* The fork's kernel relocates itself; only then does the plan keep its
-	 * extent and the archive's apart once both are rounded to its unit. */
-	if (role->is_kernel && !image->relocatable)
-		return (erx_boot_fail(error, "kernel_not_relocatable", role->path,
-		    ERX_BOOT_NO_ENTRY, 0, 0));
-	if (image->relocatable) {
-		alignment = role->is_kernel ? ERX_BOOT_KERNEL_ALIGN : image->alignment;
-		origin = start & ~(alignment - 1);
-		span = end - origin;
-		if (!erx_boot_round_up(plan->archive.start + plan->archive.size,
-		    ERX_BOOT_KERNEL_ALIGN, &floor) ||
-		    !erx_boot_choose(request, &work->clear, floor, span, alignment,
-		    &base))
-			return (erx_boot_fail(error, "place_no_room", role->path,
-			    ERX_BOOT_NO_ENTRY, 0, span));
-		offset = base - origin;
-	} else {
-		offset = 0;
-		if (!erx_boot_inside_memory(request, start, end))
-			return (erx_boot_fail(error, "place_outside_memory", role->path,
-			    ERX_BOOT_NO_ENTRY, 0, start));
-		if (erx_boot_conflict(&work->clear, start, end) != NULL)
-			return (erx_boot_fail(error, "place_overlap", role->path,
-			    ERX_BOOT_NO_ENTRY, 0, start));
-	}
+		return (erx_boot_fail(error, "place_extent", path, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	alignment = erx_boot_roles[slot].is_kernel ? ERX_BOOT_KERNEL_ALIGN :
+	    image->alignment;
+	origin = start & ~(alignment - 1);
+	if (!erx_boot_choose(request, &work->clear, floor, end - origin,
+	    alignment, &base))
+		return (erx_boot_fail(error, "place_no_room", path, ERX_BOOT_NO_ENTRY,
+		    0, end - origin));
 	/*
 	 * offset may wrap when the image is linked above its place, and modular
 	 * addition still lands inside the range chosen above, which is in memory.
 	 */
-	start += offset;
-	end += offset;
-	if (!erx_boot_clear_add(&work->clear,
-	    (erx_boot_range_t){ .start = start, .size = end - start }))
-		return (erx_boot_fail(error, "place_list", role->path,
+	offset = base - origin;
+	return (erx_boot_record(slot, start + offset, end + offset, offset, work,
+	    plan, error));
+}
+
+/*
+ * Records a placed image: its extent [start, end), held apart from what is
+ * placed after it, and the offset added to its link addresses.
+ */
+static bool
+erx_boot_record(size_t slot, uint64_t start, uint64_t end, uint64_t offset,
+    erx_boot_work_t *work, erx_boot_load_plan_t *plan, erx_boot_error_t *error)
+{
+	const erx_elf_kernel_plan_t *image = &work->plans[slot];
+	erx_boot_placed_t placed;
+
+	work->extent[slot] = (erx_boot_range_t){ .start = start,
+	    .size = end - start };
+	work->offset[slot] = offset;
+	if (!erx_boot_clear_add(&work->clear, work->extent[slot]))
+		return (erx_boot_fail(error, "place_list", erx_boot_roles[slot].path,
 		    ERX_BOOT_NO_ENTRY, 0, 0));
 	placed = (erx_boot_placed_t){ .start = start, .size = end - start,
 	    .entry = image->entry + offset };
@@ -377,21 +423,144 @@ erx_boot_place_role(const erx_boot_load_request_t *request, size_t slot,
 		plan->koptions = (erx_boot_range_t){
 		    .start = image->koptions.address + offset,
 		    .size = image->koptions.size };
+		/*
+		 * The views lie inside the file, and the index checked the
+		 * file inside the archive, so neither sum wraps.
+		 */
+		plan->kip_loaded = plan->archive_loaded.start +
+		    work->data_off[slot] + image->kip.source_offset;
+		plan->koptions_loaded = plan->archive_loaded.start +
+		    work->data_off[slot] + image->koptions.source_offset;
 	} else {
 		plan->sigma0 = placed;
 	}
-	for (uint32_t index = 0; index < image->nloads; index++) {
-		const erx_elf_kernel_load_t *load = &image->loads[index];
-
-		plan->copies[plan->ncopies++] = (erx_boot_copy_t){
-			.source = plan->archive.start + work->data_off[slot] +
-			    load->source_offset,
-			.target = load->address + offset,
-			.file_size = load->file_size,
-			.mem_size = load->mem_size,
-		};
-	}
 	return (true);
+}
+
+/*
+ * Where the archive lies once the plan is applied: where the loader left it,
+ * unless an image placed at its link addresses lands on it. Then the archive
+ * moves, whole, to the lowest page behind every such image that is inside
+ * memory and clear of everything held apart, as stock Fiasco's bootstrap moves
+ * its modules behind the ELF images it loads (Boot_modules::move_modules). The
+ * new place may overlap the loaded range, never an image, the first stage, the
+ * device tree or a reservation. A move that cannot fit is refused, naming the
+ * image that forced it. *behind is where the relocatable images may start: the
+ * archive's end rounded up to the kernel's unit.
+ */
+static bool
+erx_boot_place_archive(const erx_boot_load_request_t *request,
+    erx_boot_work_t *work, erx_boot_load_plan_t *plan, uint64_t *behind,
+    erx_boot_error_t *error)
+{
+	const erx_boot_range_t loaded = plan->archive_loaded;
+	const char *forced = NULL;
+	uint64_t floor, image_end, loaded_end, start;
+
+	/* erx_boot_locate placed the loaded archive in memory, page-aligned. */
+	if (!erx_boot_round_up(loaded.start + loaded.size, ERX_PAGE_SIZE,
+	    &loaded_end))
+		return (erx_boot_fail(error, "archive_extent", NULL,
+		    ERX_BOOT_NO_ENTRY, 0, loaded.start));
+	floor = 0;
+	for (size_t slot = 0; slot < ERX_BOOT_ROLES; slot++) {
+		const erx_boot_range_t *image = &work->extent[slot];
+
+		if (!work->present[slot] || work->plans[slot].relocatable)
+			continue;
+		/* The extent is inside memory, so its end does not wrap. */
+		image_end = image->start + image->size;
+		if (image->start < loaded_end && loaded.start < image_end &&
+		    forced == NULL)
+			forced = erx_boot_roles[slot].path;
+		if (image_end > floor)
+			floor = image_end;
+	}
+	start = loaded.start;
+	if (forced != NULL && !erx_boot_choose(request, &work->clear, floor,
+	    loaded_end - loaded.start, ERX_PAGE_SIZE, &start))
+		return (erx_boot_fail(error, "archive_no_room", forced,
+		    ERX_BOOT_NO_ENTRY, 0, loaded_end - loaded.start));
+	plan->archive = (erx_boot_range_t){ .start = start, .size = loaded.size };
+	if (!erx_boot_clear_add(&work->clear, (erx_boot_range_t){ .start = start,
+	    .size = loaded_end - loaded.start }))
+		return (erx_boot_fail(error, "place_list", NULL, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	if (!erx_boot_round_up(start + loaded.size, ERX_BOOT_KERNEL_ALIGN, behind))
+		return (erx_boot_fail(error, "archive_extent", NULL,
+		    ERX_BOOT_NO_ENTRY, 0, start));
+	return (true);
+}
+
+/*
+ * The device tree's copy and the handoff page, the last places the plan
+ * chooses: the lowest free pages past the first, which bootstrap's own
+ * allocator never gives and a null pointer names, clear of everything placed
+ * so far and of the archive where the loader left it. bootstrap writes both
+ * before it moves the archive or copies an image, so the loaded archive is held
+ * apart here and not before: the images placed earlier may lie on it. The
+ * copy's room is the tree's declared size in whole pages, which the packed copy
+ * never exceeds.
+ */
+static bool
+erx_boot_place_handoff_pages(const erx_boot_load_request_t *request,
+    erx_boot_work_t *work, erx_boot_load_plan_t *plan, erx_boot_error_t *error)
+{
+	uint64_t page, room, start;
+
+	if (request->device_tree.size == 0 ||
+	    !erx_boot_round_up(request->device_tree.size, ERX_PAGE_SIZE, &room))
+		return (erx_boot_fail(error, "size", "device tree", ERX_BOOT_NO_ENTRY,
+		    request->device_tree.size, 0));
+	/* The archive's size is a whole number of pages (erx_pack_open). */
+	if (!erx_boot_clear_add(&work->clear, plan->archive_loaded))
+		return (erx_boot_fail(error, "place_list", NULL, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	if (!erx_boot_choose(request, &work->clear, ERX_PAGE_SIZE, room,
+	    ERX_PAGE_SIZE, &start))
+		return (erx_boot_fail(error, "no_free_ram", "device tree",
+		    ERX_BOOT_NO_ENTRY, 0, room));
+	plan->tree_copy = (erx_boot_range_t){ .start = start, .size = room };
+	if (!erx_boot_clear_add(&work->clear, plan->tree_copy))
+		return (erx_boot_fail(error, "place_list", NULL, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	if (!erx_boot_choose(request, &work->clear, ERX_PAGE_SIZE, ERX_PAGE_SIZE,
+	    ERX_PAGE_SIZE, &page))
+		return (erx_boot_fail(error, "no_free_page", "handoff page",
+		    ERX_BOOT_NO_ENTRY, 0, ERX_PAGE_SIZE));
+	plan->handoff_page = page;
+	if (!erx_boot_clear_add(&work->clear, (erx_boot_range_t){ .start = page,
+	    .size = ERX_PAGE_SIZE }))
+		return (erx_boot_fail(error, "place_list", NULL, ERX_BOOT_NO_ENTRY,
+		    0, 0));
+	return (true);
+}
+
+/*
+ * Every placed image's segments, read from the archive where the plan leaves
+ * it. The ELF plan checked each load inside its file and the index each file
+ * inside the archive, so no source sum wraps.
+ */
+static void
+erx_boot_plan_copies(const erx_boot_work_t *work, erx_boot_load_plan_t *plan)
+{
+	for (size_t slot = 0; slot < ERX_BOOT_ROLES; slot++) {
+		const erx_elf_kernel_plan_t *image = &work->plans[slot];
+
+		if (!work->present[slot])
+			continue;
+		for (uint32_t index = 0; index < image->nloads; index++) {
+			const erx_elf_kernel_load_t *load = &image->loads[index];
+
+			plan->copies[plan->ncopies++] = (erx_boot_copy_t){
+				.source = plan->archive.start +
+				    work->data_off[slot] + load->source_offset,
+				.target = load->address + work->offset[slot],
+				.file_size = load->file_size,
+				.mem_size = load->mem_size,
+			};
+		}
+	}
 }
 
 bool
@@ -405,6 +574,7 @@ erx_boot_load_plan(const erx_boot_load_request_t *request,
 	erx_boot_load_plan_t plan;
 	erx_pack_error_t pack_error;
 	erx_pack_view_t view;
+	uint64_t behind;
 
 	if (request == NULL || workspace == NULL || result == NULL)
 		return (erx_boot_fail(error, "request", NULL, ERX_BOOT_NO_ENTRY, 0, 0));
@@ -447,18 +617,35 @@ erx_boot_load_plan(const erx_boot_load_request_t *request,
 			return (false);
 	}
 	plan = (erx_boot_load_plan_t){ .archive = archive,
-	    .flags = view.header.flags, .root_entry = view.header.root_entry };
+	    .archive_loaded = archive, .flags = view.header.flags,
+	    .root_entry = view.header.root_entry };
 	for (size_t index = 0; index < ERX_BOOT_ID_SIZE; index++)
 		plan.build_id[index] = view.header.build_id[index];
 	for (size_t index = 0; index < ERX_BOOT_HASH_SIZE; index++)
 		plan.index_hash[index] = view.header.index_hash[index];
-	if (!erx_boot_hold_apart(request, archive, &work->clear, error))
+	if (!erx_boot_hold_apart(request, &work->clear, error))
 		return (false);
+	/*
+	 * Images at their link addresses first, then the archive around them,
+	 * then the images that move, behind the archive, then the tree's copy
+	 * and the handoff page; the copies last, once every address is final.
+	 */
 	for (size_t slot = 0; slot < ERX_BOOT_ROLES; slot++) {
-		if (work->present[slot] &&
-		    !erx_boot_place_role(request, slot, work, &plan, error))
+		if (work->present[slot] && !work->plans[slot].relocatable &&
+		    !erx_boot_place_fixed(request, slot, work, &plan, error))
 			return (false);
 	}
+	if (!erx_boot_place_archive(request, work, &plan, &behind, error))
+		return (false);
+	for (size_t slot = 0; slot < ERX_BOOT_ROLES; slot++) {
+		if (work->present[slot] && work->plans[slot].relocatable &&
+		    !erx_boot_place_relocatable(request, slot, behind, work, &plan,
+		    error))
+			return (false);
+	}
+	if (!erx_boot_place_handoff_pages(request, work, &plan, error))
+		return (false);
+	erx_boot_plan_copies(work, &plan);
 	*result = plan;
 	return (true);
 }

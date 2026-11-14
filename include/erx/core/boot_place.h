@@ -17,14 +17,18 @@
 /*
  * What bootstrap decides before it changes anything (docs/design-stopgap.md,
  * "Boot handoff"). erx_boot_load_plan finds the archive, validates its index,
- * checks and plans each executable bootstrap places, chooses where they go
- * and returns the whole plan; a refusal has changed nothing. It reads the
+ * checks and plans each executable bootstrap places, chooses where they go,
+ * and where the device tree's copy and the handoff page go, and returns the
+ * whole plan; a refusal has changed nothing. It reads the
  * image only through the window the caller names and writes only the caller's
  * workspace and result, so the same function runs in bootstrap over physical
  * memory and on the host over a buffer.
  *
- * Bootstrap then applies the plan: it reserves the ranges, runs the copies and
- * writes the record, and has nothing left to decide in between.
+ * Bootstrap then applies the plan: it reserves the ranges, checks the kernel's
+ * two views in the archive where the loader left it, writes the device tree's
+ * copy and the record, and only then moves the archive when the plan moves it
+ * and runs the copies, so every refusal comes before any of the archive's or
+ * an image's bytes move.
  */
 
 #ifdef __cplusplus
@@ -76,8 +80,9 @@ struct erx_boot_load_request {
 
 /*
  * A refusal: the check that failed. path is one of the constant role paths when
- * the check concerns a role; entry is the index when it concerns an entry; the
- * archive's own bytes are never quoted, so a diagnostic needs no escaping.
+ * the check concerns a role, or "device tree" or "handoff page" when it concerns
+ * that place; entry is the index when it concerns an entry; the archive's own
+ * bytes are never quoted, so a diagnostic needs no escaping.
  */
 struct erx_boot_error {
 	const char	*reason;
@@ -102,8 +107,24 @@ struct erx_boot_placed {
 	uint64_t	entry;
 };
 
+/*
+ * archive is where the archive lies once the plan is applied: every copy's
+ * source, the reservation and the record name it. archive_loaded is where the
+ * loader left it, the same range unless an image that runs at its link
+ * addresses lands on it (docs/design-stopgap.md, "Boot handoff"); bootstrap
+ * then moves the archive's bytes from archive_loaded.start to archive.start,
+ * as memmove does, since the two may overlap, before any copy.
+ *
+ * kip_loaded and koptions_loaded are where the kernel's two views lie before
+ * anything moves, in the archive at archive_loaded, so their contents can be
+ * checked before the plan is applied. tree_copy is the room for the device
+ * tree's copy, the tree's declared size in whole pages, and handoff_page the
+ * handoff page's address; both are clear of every other place, the loaded
+ * archive's included, so bootstrap writes them before it moves anything.
+ */
 struct erx_boot_load_plan {
 	erx_boot_range_t archive;
+	erx_boot_range_t archive_loaded;
 	uint32_t	 flags;
 	uint32_t	 root_entry;
 	uint8_t		 build_id[ERX_BOOT_ID_SIZE];
@@ -114,6 +135,10 @@ struct erx_boot_load_plan {
 	erx_boot_placed_t stand_in_root;
 	erx_boot_range_t kip;		/* placed, inside the kernel */
 	erx_boot_range_t koptions;	/* placed, inside the kernel */
+	uint64_t	 kip_loaded;
+	uint64_t	 koptions_loaded;
+	erx_boot_range_t tree_copy;
+	uint64_t	 handoff_page;
 	uint32_t	 ncopies;
 	erx_boot_copy_t	 copies[ERX_BOOT_PLACE_COPIES_MAX];
 };

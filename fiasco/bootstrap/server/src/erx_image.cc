@@ -4,11 +4,12 @@
 // The effects around erx_boot_load_plan: what the device tree and the first
 // stage's own image say goes in, and the plan that comes out is applied in the
 // order the design gives (docs/design-stopgap.md, "Boot handoff"). Where things
-// go is decided by the plan; what is left to refuse after the copy is what only
-// the copied kernel can show: the magic of its two views, the options block's
-// version, and a handoff record that does not fit; and no free page for the
-// record's copy, which the plan does not choose. The boot CPU runs alone with
-// translation off, so a physical address is a pointer.
+// go is decided by the plan, the device tree's copy and the handoff page
+// included. What the plan cannot decide is still checked before any of the
+// archive's or an image's bytes move: the magic of the kernel's two views and
+// the options block's version, read in the archive where the loader left it,
+// the device tree's copy, and a handoff record that does not fit. The boot CPU
+// runs alone with translation off, so a physical address is a pointer.
 
 #include <libfdt.h>
 #include <stdio.h>
@@ -40,10 +41,17 @@ static_assert(sizeof(L4_kernel_options::Options::erx_handoff)
               "the options block embeds the whole handoff record");
 static_assert(ERX_BOOT_HANDOFF_RECORD_SIZE <= L4_PAGESIZE,
               "the handoff page holds the whole handoff record");
+static_assert(sizeof(l4_kernel_info_t::magic) == sizeof(l4_uint32_t)
+              && sizeof(L4_kernel_options::Options::magic) == sizeof(l4_uint32_t)
+              && sizeof(L4_kernel_options::Options::version) == sizeof(l4_uint32_t),
+              "the views' checked fields are 32-bit words");
 
 // No stack holds these; each serves the one call this boot makes.
 static erx_boot_workspace_t workspace;
 static erx_boot_load_plan_t plan;
+// The handoff record, written whole before anything moves and copied into the
+// kernel's options block once the kernel is copied.
+alignas(8) static l4_uint8_t handoff_record[ERX_BOOT_HANDOFF_RECORD_SIZE];
 
 // The boot stops here, on the console, naming the check; the operator's harness
 // or the machine's watchdog ends it.
@@ -191,11 +199,59 @@ reserve(erx_boot_range_t range, char const *name, Region::Type type,
   mem_manager->regions->add(Region::start_size(range.start, range.size, name, type, rights));
 }
 
-// Reserve the archive first, never to be released, then the images, then copy. The
-// archive is the root's to read and execute and never to write: the root maps an
-// image entry's code from the archive's own pages into every task that runs it.
+// The archive's bytes to the place the plan leaves them, when an image that runs
+// at its link addresses lands where the loader left them. The two ranges may
+// overlap, so the bytes move as memmove moves them; nothing has read the archive
+// at its new place yet, and nothing reads it at the old one again.
 static void
-apply(void)
+move_archive(void)
+{
+  if (plan.archive.start == plan.archive_loaded.start)
+    return;
+  printf("erXos image: moving the archive from 0x%llx to 0x%llx\n",
+         static_cast<unsigned long long>(plan.archive_loaded.start),
+         static_cast<unsigned long long>(plan.archive.start));
+  memmove(reinterpret_cast<void *>(plan.archive.start),
+          reinterpret_cast<void const *>(plan.archive_loaded.start), plan.archive.size);
+  if (Cache::Data::enabled())
+    {
+      Cache::Data::clean(plan.archive.start, plan.archive.size);
+      Cache::Insn::inv();
+    }
+}
+
+// A 32-bit field of a kernel view, read in the archive where the loader left it,
+// whose alignment there the plan does not promise.
+static l4_uint32_t
+read_loaded_u32(l4_uint64_t address)
+{
+  l4_uint32_t value;
+  memcpy(&value, reinterpret_cast<void const *>(address), sizeof(value));
+  return value;
+}
+
+// What only the kernel's own bytes can show, read where the plan's copy will read
+// them, so a kernel whose views are not Fiasco's is refused before anything moves.
+static void
+check_views(void)
+{
+  if (read_loaded_u32(plan.kip_loaded + offsetof(l4_kernel_info_t, magic))
+      != L4_KERNEL_INFO_MAGIC)
+    refuse("kernel information page", "magic");
+  if (read_loaded_u32(plan.koptions_loaded + offsetof(L4_kernel_options::Options, magic))
+      != L4_kernel_options::Magic)
+    refuse("kernel options", "magic");
+  if (read_loaded_u32(plan.koptions_loaded + offsetof(L4_kernel_options::Options, version))
+      != L4_kernel_options::Version_current)
+    refuse("kernel options", "version");
+}
+
+// Reserve the archive first, where the plan leaves it, never to be released, then
+// the images. The archive is the root's to read and execute and never to write:
+// the root maps an image entry's code from the archive's own pages into every task
+// that runs it.
+static void
+reserve_plan(void)
 {
   reserve(plan.archive, ".erxpack", Region::Root, Region::Root_section_rx);
   reserve({plan.kernel.start, plan.kernel.size}, ".kernel", Region::Kernel);
@@ -206,7 +262,14 @@ apply(void)
   if (plan.has_stand_in_root)
     reserve({plan.stand_in_root.start, plan.stand_in_root.size}, ".root",
             Region::Root, Region::Root_section_rwx);
+}
 
+// Move the archive and only then copy, since every copy reads the archive at its
+// new place and may land on its old one. Nothing past this point refuses the boot.
+static void
+move_and_copy(void)
+{
+  move_archive();
   for (unsigned index = 0; index < plan.ncopies; index++)
     {
       erx_boot_copy_t const &copy = plan.copies[index];
@@ -226,14 +289,12 @@ apply(void)
 }
 
 // The options block is mapped into no task, so the root reads the record from
-// a page of its own, which sigma0 pages to it read-only. The kernel information
-// page's user_ptr names it (init_kip_infos).
+// a page of its own, at the plan's handoff page, which sigma0 pages to it
+// read-only. The kernel information page's user_ptr names it (init_kip_infos).
 static l4_addr_t
 write_handoff_page(l4_uint8_t const *record)
 {
-  l4_addr_t page = mem_manager->find_free_ram(L4_PAGESIZE);
-  if (!page)
-    refuse("handoff page", "no_free_page");
+  l4_addr_t page = plan.handoff_page;
   reserve({page, L4_PAGESIZE}, ".erxhandoff", Region::Root, Region::Root_section_ro);
 
   char *target = reinterpret_cast<char *>(page);
@@ -244,23 +305,43 @@ write_handoff_page(l4_uint8_t const *record)
   return page;
 }
 
+// The copy names no initrd. The loader's linux,initrd-start and linux,initrd-end
+// give where it left the two-file form's archive, which holds an image or free
+// RAM once the plan moves the archive; the root learns the archive's place from
+// the handoff record alone. False when libfdt fails other than by an absence.
+static bool
+drop_initrd(void *tree)
+{
+  static char const *const names[] = { "linux,initrd-start", "linux,initrd-end" };
+  for (char const *name : names)
+    {
+      // Deleting a property moves what follows it, so the node is found again.
+      int chosen = fdt_path_offset(tree, "/chosen");
+      if (chosen == -FDT_ERR_NOTFOUND)
+        return true;
+      if (chosen < 0)
+        return false;
+      int result = fdt_delprop(tree, chosen, name);
+      if (result != 0 && result != -FDT_ERR_NOTFOUND)
+        return false;
+    }
+  return true;
+}
+
 // The root's read-only copy of the firmware's device tree
-// (docs/design-device-tree.md, "On the stopgap"): opened into free RAM of the
-// tree's declared size, packed so it holds no free space, and its whole pages
-// reserved for the root to read and never write. The root, not bootstrap,
-// checks the copy's contents with erx_dt_accept; this only moves the bytes.
+// (docs/design-device-tree.md, "On the stopgap"): opened into the room the plan
+// chose, of the tree's declared size, without the initrd's properties, packed so
+// it holds no free space, and its whole pages reserved for the root to read and
+// never write. The root, not bootstrap, checks the copy's contents with
+// erx_dt_accept; this only moves the bytes.
 static erx_boot_range_t
 copy_device_tree(void const *fdt)
 {
-  unsigned long declared = fdt_totalsize(fdt);
-  if (declared == 0 || declared > 0x7fffffffUL - L4_PAGESIZE)
-    refuse("device tree", "size");
-  unsigned long room = l4_round_page(declared);
-  l4_addr_t copy = mem_manager->find_free_ram(room);
-  if (!copy)
-    refuse("device tree", "no_free_ram");
+  l4_addr_t copy = plan.tree_copy.start;
   void *target = reinterpret_cast<void *>(copy);
-  if (fdt_open_into(fdt, target, static_cast<int>(room)) != 0 || fdt_pack(target) != 0)
+  // erx_image_load bounded the declared size, and so the room, below 2 GiB.
+  if (fdt_open_into(fdt, target, static_cast<int>(plan.tree_copy.size)) != 0
+      || !drop_initrd(target) || fdt_pack(target) != 0)
     refuse("device tree", "copy");
   unsigned long size = fdt_totalsize(target);
   if (size == 0 || size > ERX_BOOT_TREE_COPY_MAX)
@@ -304,8 +385,11 @@ erx_image_load(Platform_base *plat)
   request.linked_end = reinterpret_cast<l4_addr_t>(_end) - request.load;
   request.declared_size = erx_boot_declared_size;
   request.has_initrd = chosen_initrd(fdt, &request.initrd);
-  request.device_tree = erx_boot_range_t{reinterpret_cast<l4_addr_t>(fdt),
-                                         fdt_totalsize(fdt)};
+  // fdt_open_into takes the copy's room as an int.
+  unsigned long declared = fdt_totalsize(fdt);
+  if (declared == 0 || declared > 0x7fffffffUL - L4_PAGESIZE)
+    refuse("device tree", "size");
+  request.device_tree = erx_boot_range_t{reinterpret_cast<l4_addr_t>(fdt), declared};
   request.memory = memory;
   request.nmemory = nmemory;
   request.reserved = reserved;
@@ -319,17 +403,7 @@ erx_image_load(Platform_base *plat)
   if (!erx_boot_load_plan(&request, &workspace, &plan, &error))
     refuse(error);
 
-  apply();
-  erx_boot_range_t tree = copy_device_tree(fdt);
-
-  auto *kip = reinterpret_cast<l4_kernel_info_t *>(plan.kip.start);
-  if (kip->magic != L4_KERNEL_INFO_MAGIC)
-    refuse("kernel information page", "magic");
-  auto *options = reinterpret_cast<L4_kernel_options::Options *>(plan.koptions.start);
-  if (options->magic != L4_kernel_options::Magic)
-    refuse("kernel options", "magic");
-  if (options->version != L4_kernel_options::Version_current)
-    refuse("kernel options", "version");
+  check_views();
 
   int chosen = fdt_path_offset(fdt, "/chosen");
   int args_size = 0;
@@ -343,10 +417,22 @@ erx_image_load(Platform_base *plat)
   // The boot CPU's identification registers, which only kernel mode reads.
   uint64_t cpu_id[ERX_BOOT_CPU_ID_COUNT];
   erx_boot_cpu_id_read(cpu_id);
+
+  // The last refusals, before anything moves: the tree's copy and the record go
+  // where the plan keeps them clear of the archive, at both its places, and of
+  // every image.
+  reserve_plan();
+  erx_boot_range_t tree = copy_device_tree(fdt);
   if (!erx_boot_handoff_write(&plan, args, args_length, stdout_path, stdout_length,
-                              chosen_boot_pair(fdt, chosen), tree, cpu_id, options->erx_handoff,
-                              sizeof(options->erx_handoff)))
+                              chosen_boot_pair(fdt, chosen), tree, cpu_id, handoff_record,
+                              sizeof(handoff_record)))
     refuse("handoff record", "write");
+  l4_addr_t handoff_page = write_handoff_page(handoff_record);
+
+  move_and_copy();
+  auto *kip = reinterpret_cast<l4_kernel_info_t *>(plan.kip.start);
+  auto *options = reinterpret_cast<L4_kernel_options::Options *>(plan.koptions.start);
+  memcpy(options->erx_handoff, handoff_record, sizeof(options->erx_handoff));
 
   printf("erXos image: index ");
   print_hex(plan.index_hash, sizeof(plan.index_hash));
@@ -354,7 +440,7 @@ erx_image_load(Platform_base *plat)
          static_cast<unsigned long long>(plan.archive.size));
 
   Erx_image_loaded loaded = {};
-  loaded.boot_info.handoff_page = write_handoff_page(options->erx_handoff);
+  loaded.boot_info.handoff_page = handoff_page;
   loaded.boot_info.kernel_start = plan.kernel.entry;
   loaded.boot_info.sigma0_start = plan.sigma0.entry;
   loaded.boot_info.roottask_start

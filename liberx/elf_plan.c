@@ -547,8 +547,9 @@ erx_elf_kernel_view(const erx_elf_kernel_plan_t *plan,
 		if (program->p_paddr - load->address !=
 		    program->p_offset - load->source_offset)
 			return (erx_elf_fail(error, "view_offset", program->p_offset));
-		*view = (erx_elf_kernel_view_t){ .address = program->p_paddr,
-		    .size = program->p_filesz };
+		*view = (erx_elf_kernel_view_t){
+		    .source_offset = program->p_offset,
+		    .address = program->p_paddr, .size = program->p_filesz };
 		return (true);
 	}
 	return (erx_elf_fail(error, "view_outside", program->p_offset));

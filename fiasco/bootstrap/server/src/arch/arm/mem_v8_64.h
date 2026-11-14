@@ -1,5 +1,9 @@
+// Modified by erXos: the range clean takes its lines from erx_cache_lines
+// (erx/core/cache_lines.h), at the address's full width and in a loop bounded
+// by the range's end.
 #pragma once
 
+#include "erx/core/cache_lines.h"
 #include "mem_v7plus.h"
 
 namespace Arm
@@ -135,11 +139,15 @@ void Cache::Data::clean(unsigned long addr)
 
 void Cache::Data::clean(unsigned long start, unsigned long size)
 {
-  unsigned cl_size = Arm::Internal::linesize_bytes();
-  unsigned long m = start & ~(cl_size - 1);
-  unsigned long e = (start + size + cl_size - 1) & ~(cl_size - 1);
+  unsigned long cl_size = Arm::Internal::linesize_bytes();
+  uint64_t m, e;
+  if (!erx_cache_lines(start, size, cl_size, &m, &e))
+    {
+      clean();
+      return;
+    }
   asm volatile("" : : : "memory");
-  for (; m != e; m += cl_size)
+  for (; m < e; m += cl_size)
     asm volatile("dc cvac, %0" : : "r"(m));
   Barrier::dsb_system();
 }

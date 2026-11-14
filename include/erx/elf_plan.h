@@ -75,8 +75,12 @@ struct erx_elf_kernel_load {
 	uint64_t	mem_size;
 };
 
-/* A view is a part of a segment by its physical address; no placement. */
+/*
+ * A view is a part of a segment by its physical address; no placement.
+ * source_offset is where its bytes lie in the file.
+ */
 struct erx_elf_kernel_view {
+	uint64_t	source_offset;
 	uint64_t	address;
 	uint64_t	size;
 };

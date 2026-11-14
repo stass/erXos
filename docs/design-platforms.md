@@ -441,17 +441,30 @@ file QEMU puts the device tree at the next 2 MiB boundary behind the file
 ([measured](research-baselines.md#boot-conventions)). The stand-in root
 is a fixed image, and its place belongs to the machine an image is built
 for (`ProductionImage::Machine`, through the one linker symbol
-`liberx/backend/fiasco/root.ld` takes from the link). The development
-machine, 512 MiB, links it 64 MiB into RAM, below the device tree at 128 MiB,
-which bounds the single file to about 62 MiB and keeps the root inside small machines; below 256 MiB
+`liberx/backend/fiasco/root.ld` takes from the link). The root's place
+does not bound the archive: when the root lands on the archive where the
+loader left it, bootstrap moves the archive, whole, behind the root and
+clear of the device tree, as stock Fiasco's bootstrap moves its modules
+behind the ELF images it loads
+([design-stopgap.md](design-stopgap.md#boot-handoff)). On QEMU `virt`,
+whose tree lies right behind the file, the moved archive goes behind the
+tree too, so a file that passes the root's place needs RAM for its archive
+twice, and is bounded by about half of RAM above the root's place; on a
+board whose loader puts the tree at a fixed address, the tree bounds the
+file. The development
+machine, 512 MiB, links the root 64 MiB into RAM, below the device tree at
+128 MiB, which keeps it inside small machines; a single file longer than
+about 62 MiB has its archive moved. Below 256 MiB
 the device tree sits at half of RAM, so on a machine of roughly 127 to
 137 MiB it lands on the root and bootstrap refuses the boot with
 `place_overlap`. The QEMU oracle's machine, 2 GiB, links it 192 MiB into
-RAM, which bounds the single file to about 188 MiB. In the two-file
+RAM, above its single file of about 188 MiB, which so stays in place. In the two-file
 form, for debugging, `-initrd` on the oracle's machine places the boot
-image at `0x48000000` with the device tree directly after it; the root
-must lie clear of both, as the oracle's does above them, which bounds
-that archive to about 63 MiB. Either way the
+image at `0x48000000` with the device tree directly after it. The root
+must lie clear of the tree, as the oracle's does above it: an archive
+that runs past the root moves behind the root and the tree, as in the
+single file, while one whose tree lands on the root is refused with
+`place_overlap`. Either way the
 kernel reads every address and assumes none. U-Boot's `booti`
 implements the same protocol. The Raspberry Pi firmware loads the single
 file by the same protocol (`kernel8.img` on the Pi 4, `kernel_2712.img`

@@ -1510,15 +1510,52 @@ it; git history is the record of completed work.
 * [Low] domain library, PCIe functions on a configured row (`liberx/system/dom_boot_view.c`, `boot_devices`): only
   device-tree selectors get a role word and peripheral, so a PCIe function placed on a configured row would be of
   no kind and get no record, window or memory. No manifest places one; give the kind test a PCIe arm first.
-* [Low] image build, the Pi's single file against the root's place (`ProductionImage::Machine#check_single_file`,
+* [Low] image build, the Pi's single file against the loader's device tree (`ProductionImage::Machine#check_single_file`,
   `Fiasco#first_stage_address`): the bound starts at the entry of users-raspi4b's `bootstrap.elf`, not checked
   against the address QEMU's raspi4b model and the firmware load it at (`QemuPlan::MACHINES` loads, 0x200000). If
   they differ the check is off by the difference; confirm they agree on a raspi4b build, or take the load address
   from the platform.
-* [Low] image build, the place check's reach (`ProductionImage#assemble`): only the production image's build checks
-  its single file against the root's place; `BootImage`'s images (native roots, `function_api`, `libc_test`) link
-  their roots at the same place and fail only at boot, in bootstrap's `place_overlap`. Move the check into
-  `BootFile.write`, the one writer, so every image gets it.
+* [Low] image build, the single-file check's reach (`ProductionImage#assemble`): only the production image's build
+  checks its single file against RAM and the loader's device tree; `BootImage`'s images (native roots,
+  `function_api`, `libc_test`) fail only at boot, at the loader or in bootstrap's `archive_no_room`. Move the check
+  into `BootFile.write`, the one writer, so every image gets it.
+* [Low] image build, one root place for every machine (`ProductionImage::Machine#root_mib`, `OracleQemu`,
+  `MediumBoot.machine`): the oracle's machine and the medium boot's link their roots 192 MiB into RAM only to keep
+  their archives below the root, which bootstrap's archive move (`kernel/core/boot_place.c`, `erx_boot_place_archive`)
+  makes unnecessary. Link every root at the development place and delete `root_mib`, once a boot of the oracle's
+  image with the archive moved has been measured.
+* [Low] boot, the archive move's overlapping case (`fiasco/bootstrap/server/src/erx_image.cc`, `move_archive`): no
+  target boot moves the archive onto part of its loaded range; only the host test and the fuzz seed plan one. On
+  QEMU `virt` a forced move always lands behind the device tree, which QEMU puts right behind the loaded file, so it
+  never overlaps its source. On `raspi4b`, whose tree is fixed 126 MiB past the file's start, a single file whose
+  archive ends within the root's length past the root's place (64 MiB) moves onto its own tail. Add a `raspi4b`
+  cell with an archive sized into that window of about 2 MiB.
+* [Medium] image build, the single file's bound on QEMU `virt` (`ProductionImage::Machine#check_single_file`): the
+  check accepts a file up to the end of RAM, but a moved archive goes behind the device tree QEMU puts right behind
+  the file, so a boot needs RAM for the archive twice and, on the 512 MiB development machine, one with an archive
+  over about 250 MiB passes the build and stops at boot with `archive_no_room`. Model the move in the check: when
+  the file passes the root's place on a loader that puts the tree behind the file, require the file, the tree's
+  slack, the archive again, the kernel and `sigma0`, and the tree's copy and the handoff page, which the plan keeps
+  clear of the loaded archive too, to fit in RAM.
+* [Medium] boot, the move's order is a rule bootstrap must remember (`fiasco/bootstrap/server/src/erx_image.cc`,
+  `move_and_copy`; `kernel/core/boot_place.c`): the plan gives the archive's old and new place, and the effect layer
+  must move it before any copy, since the copies read the new place. The host driver's `apply` runs the plan in that
+  order, but bootstrap's own order is checked only by the `boot_image` suite's moved cell. Likewise nothing past
+  `move_and_copy` may refuse the boot or reserve a region, which only a comment in `erx_image_load` guards. Have the
+  plan emit one ordered step list, the move first, that bootstrap runs in order, with a commit step that has no
+  path to `refuse`.
+* [Low] boot, the plan ignores bootstrap's `-sysalloc=` window (`erx_image.cc`, `erx_image_load`): the request's
+  memory is `mem_manager->ram` alone, so the images, the moved archive, the device tree's copy and the handoff page
+  may land outside a window given on bootstrap's command line, where `find_free_ram` kept its own allocations.
+  Without the option the window is all of memory. Pass RAM intersected with `sysalloc` as the request's memory.
+* [Low] boot, the cache line stride (`fiasco/bootstrap/server/src/arch/arm/mem_v8_64.h`, `linesize_bytes`): the
+  range clean steps by the first level's line size from `CCSIDR_EL1`, not by `CTR_EL0.DminLine`, which names the
+  smallest data cache line of any level (not yet checked against the Arm ARM), so an outer cache with shorter lines
+  would be cleaned in part. Confirm the field's meaning in the Arm ARM and read the stride from `CTR_EL0`.
+* [Low] boot, planner test gaps (`test/host/boot_place_test.rb`, `tools/fuzz/boot_place_fuzz.c`): no host test puts
+  the device tree in the move's way, as QEMU `virt` does (the fuzz target's layouts and a seed do), and the fuzz
+  target's plan check does not assert that a moved archive lies behind every image placed at its link addresses,
+  since the plan does not say which those were.
 * [Low] Pi package 5 (docs/plan.md, 1b-I (a) 5), the board pass: confirm on silicon that the mini
   UART's receive interrupt needs IER's `RX_ERRATA` bits (`hw/svd/mini_uart/mini_uart.svd`), which
   `erx_mini_uart` sets as the BCM2835 errata asks and QEMU's model ignores, and drop them if not.

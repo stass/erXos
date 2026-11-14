@@ -341,21 +341,14 @@ module Erx
         def to_h = super.transform_keys(&:to_s)
       end
 
-      # The line the image build prints for a pack's report: the archive; its room, the
-      # smaller of what root_memory leaves it on the machine (the report's ArchiveRoom)
-      # and what the root's place leaves it in the single file (place_bytes), naming
-      # which binds; root_memory and how much of it the manifest's budgets promise (the
-      # admission report's promised_memory); and what the boot keeps.
-      def room_line(report, place_bytes:)
+      # The line the image build prints for a pack's report: the archive; the room
+      # root_memory leaves it on the machine (the report's ArchiveRoom); root_memory and
+      # how much of it the manifest's budgets promise (the admission report's
+      # promised_memory); and what the boot keeps.
+      def room_line(report)
         room = report.fetch('archive_room')
         promised = report.fetch('manifest').fetch('promised_memory')
-        memory_bytes = room.fetch('archive_max_bytes')
-        bound = if place_bytes < memory_bytes
-                  "the root's place binds; root_memory leaves #{mib(memory_bytes)}"
-                else
-                  "root_memory binds; the root's place leaves #{mib(place_bytes)}"
-                end
-        "archive #{mib(room.fetch('archive_bytes'))}, room for #{mib([memory_bytes, place_bytes].min)} (#{bound}) " \
+        "archive #{mib(room.fetch('archive_bytes'))}, room for #{mib(room.fetch('archive_max_bytes'))} " \
           "beside root_memory #{mib(room.fetch('root_memory'))}, of which budgets promise #{mib(promised)}; " \
           "the boot keeps #{mib(room.fetch('kept_bytes'))}"
       end

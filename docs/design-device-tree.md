@@ -174,16 +174,20 @@ reach, not one it handles:
 
 ### On the stopgap
 
-`erx_image_load` makes the copy after it has applied the load plan and
-before it writes the handoff page (`erx_image.cc`, step 4 of
-[Boot handoff](design-stopgap.md#boot-handoff)):
+`erx_image_load` makes the copy after the load plan is made and before
+anything it places moves, then writes the handoff page (`erx_image.cc`,
+step 4 of [Boot handoff](design-stopgap.md#boot-handoff)):
 
-1. find free RAM of the tree's `totalsize`, page-aligned, with
-   `mem_manager->find_free_ram`;
-2. copy the tree there with `libfdt`'s `fdt_open_into` and shrink it with
-   `fdt_pack`, so the copy holds the memory reservation block, the
-   structure and the strings and no free space: a few pages on QEMU
-   `virt`, whose own tree declares 1 MiB;
+1. take the room the load plan chose for it: the tree's `totalsize` in
+   whole pages, clear of every place the plan gives and of the archive
+   where the loader left it;
+2. copy the tree there with `libfdt`'s `fdt_open_into`, delete `/chosen`'s
+   `linux,initrd-start` and `linux,initrd-end`, which name where the
+   loader left the two-file form's archive and so, once the archive
+   moves, an image or free RAM, and shrink it with `fdt_pack`, so the
+   copy holds the memory reservation block, the structure and the
+   strings and no free space: a few pages on QEMU `virt`, whose own tree
+   declares 1 MiB;
 3. reserve the copy's whole pages as a root region named `.erxtree` with
    the read-only sub-type, as the handoff page is reserved, and clean
    them to memory;

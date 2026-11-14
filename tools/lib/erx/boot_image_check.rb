@@ -6,6 +6,8 @@ require 'fileutils'
 require_relative 'bounded_file'
 require_relative 'boot_image'
 require_relative 'error'
+require_relative 'native_boot'
+require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'qemu'
 require_relative 'qemu_cells'
@@ -25,6 +27,13 @@ module Erx
     # of the writer under test, as test/fixtures/pack_fixture.rb does.
     HEADER_VERSION = 8
     LOCATOR = 64
+    # The large image's filler: with it the single file runs past the native root's
+    # place, 64 MiB into RAM (NativeRoot::DEVELOPMENT_ROOT_MIB), and bootstrap says it
+    # moves the archive before the kernel prints its banner.
+    FILLER_PATH = 'boot/filler'
+    FILLER_BYTES = 72 << 20
+    MOVE_CHECKPOINT = { name: 'archive-move', pattern: /\AerXos image: moving the archive from 0x\h+ to 0x\h+\r?\n\z/n,
+                        seconds: 60 }.freeze
     Case = Data.define(:name, :reason, :damage, :initrd, :strip_locator) do
       def self.of(name, reason, initrd: false, strip_locator: false, &damage)
         new(name: name, reason: reason, damage: damage, initrd: initrd, strip_locator: strip_locator)
@@ -167,10 +176,40 @@ module Erx
           ["#{accel}-#{count}cpu-single", boot(accel, count, built.single, built, remote: remote)]
         end
         two_file = accels.to_h { |accel| ["#{accel}-1cpu-two-file", boot(accel, 1, built.first_stage, built, initrd: built.archive)] }
-        { good: good.merge(two_file), refused: refused(accels.first, built) }.freeze
+        large = large_image(recipe)
+        moved = accels.to_h { |accel| ["#{accel}-1cpu-moved", boot_moved(accel, large)] }
+        { good: good.merge(two_file, moved), refused: refused(accels.first, built) }.freeze
       end
 
       private
+
+      # A single file past the native root's place, 64 MiB into RAM, so bootstrap moves the
+      # archive behind the root (docs/design-stopgap.md, "Boot handoff"); the root then
+      # reads the archive at its new place and reports its index, as in the native boot.
+      # It reuses the banner image's recipe: a second recipe would rebuild the pack tools
+      # under the first one's helpers, whose checked inputs then no longer match.
+      def large_image(recipe)
+        FileUtils.mkdir_p(@build)
+        filler = File.join(@build, 'filler')
+        File.open(filler, 'wb') { |file| file.truncate(FILLER_BYTES) }
+        root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform)
+                              .build_no_program(directory: File.join(@build, 'large-root'))
+        recipe.build(directory: File.join(@build, 'large'), stand_in_root: root_task, programs: { FILLER_PATH => filler })
+      end
+
+      def boot_moved(accel, built)
+        # The file starts past RAM's first address, so one longer than the root's offset reaches it.
+        size = File.size(built.single)
+        if size <= NativeRoot::DEVELOPMENT_ROOT_MIB << 20
+          raise Error, "the large image is #{size} bytes, short of the root's place, so its archive would not move"
+        end
+
+        points = NativeBoot.checkpoints(built).dup.insert(1, MOVE_CHECKPOINT)
+        report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: built.single, memory_mib: MEMORY_MIB,
+                                                            checkpoints: points, machine_end: true)
+        { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
+          checkpoints: report.fetch('checkpoints') }.freeze
+      end
 
       def boot(accel, count, image, built, initrd: nil, remote: nil)
         line = BootImageCheck.handoff_line(built)

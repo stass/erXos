@@ -17,8 +17,9 @@ require_relative '../../tools/lib/erx/toolchain_provenance'
 # never boot admission. The executable, source closure and full archive receive
 # their real checks; M1's root-startup and policy obligations remain unsupported.
 module StructuralPackFixture
-  # The native_domain image carries both ERTS images and a release.
-  BUDGET = 32 * 1_048_576
+  # The native_domain image carries both ERTS images and a release, and the boot_image
+  # suite's large image a filler that carries it past the native root's place.
+  BUDGET = 128 * 1_048_576
   module_function
 
   # extra_files are further entries, { path:, snapshot: }, which the wire format

@@ -2,9 +2,11 @@
  * Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * The root task's fixed place in QEMU virt's RAM: bootstrap's load plan runs it
- * at the addresses its headers give, clear of bootstrap and the archive, and
- * sigma0 maps each of its pages at the same address. The ELF headers lead the
+ * The root task's fixed place in its board's RAM: bootstrap's load plan runs it
+ * at the addresses its headers give, clear of bootstrap, the device tree and the
+ * reservations, and moves the archive behind it when it lands on the archive
+ * (kernel/core/boot_place.c, erx_boot_place_archive); sigma0 maps each of its
+ * pages at the same address. The ELF headers lead the
  * first page: a program linked with musl finds its TLS image through them. Each
  * segment starts on its own page, as the packer's ELF plan requires.
  *
@@ -13,8 +15,8 @@
  * undefined symbol. A system image takes it from the machine it is built for
  * (ProductionImage::Machine#root_address), which docs/design-platforms.md
  * explains: low, 64 MiB into RAM, for the development machine, so a small
- * machine holds it, and 192 MiB into RAM for the QEMU oracle's machine, so a
- * single file of about 188 MiB lies below it. Test roots take
+ * machine holds it, and 192 MiB into RAM for the QEMU oracle's machine, above
+ * its single file of about 188 MiB. Test roots take
  * NativeRoot.development_place, the low place. Each place counts from RAM's
  * first address in the board's platform record.
  */

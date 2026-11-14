@@ -9,7 +9,17 @@
  * plan FILE LOAD LINKED_END MEMORY_START MEMORY_SIZE [RESERVED_START RESERVED_SIZE]:
  * runs erx_boot_load_plan
  * over FILE as a single bootable file placed at LOAD, with the device tree at
- * the top of memory, and prints the plan or the refusal.
+ * the top of memory, and prints the plan or the refusal. A copy's source is
+ * printed as its offset in the archive at the place the plan leaves it, and the
+ * kernel's views where the loader left the archive as their offsets there.
+ *
+ * apply, with plan's arguments: plans over a buffer that stands for the whole
+ * of memory, with FILE at LOAD, prints the plan, then applies it as bootstrap
+ * does: first fills the device tree's copy and the handoff page, as bootstrap
+ * writes them before anything moves, then the archive's move as memmove and
+ * then the copies, and prints "applied" when the archive at its final place,
+ * every copy and both views hold the bytes the file gave them and the two
+ * places their fill; otherwise it aborts.
  *
  * handoff FILE: accepts FILE's bytes as a record and prints what it holds.
  * write VALUE SLOT: writes a record with that boot pair, then accepts it and
@@ -17,6 +27,8 @@
  * pair PARTITION TRYBOOT: derives the boot pair from the two properties' bytes,
  * each in hex, or - when absent, and prints it.
  * args LIMIT TEXT: prints TEXT's length cut at LIMIT.
+ * lines START SIZE LINE: prints the cache lines erx_cache_lines gives for the
+ * range, as their first address and end, or "wraps".
  */
 
 #include <inttypes.h>
@@ -26,6 +38,7 @@
 
 #include "erx/core/boot_handoff.h"
 #include "erx/core/boot_place.h"
+#include "erx/core/cache_lines.h"
 
 #define DEVICE_TREE_SIZE 0x2000
 
@@ -60,14 +73,74 @@ print_placed(const char *name, erx_boot_placed_t placed)
 	    placed.size, placed.entry);
 }
 
+#define VIEW_CHECKED 16
+#define PLACE_FILL 0x5a
+
+/* Whether size bytes at bytes all hold value. */
+static bool
+filled(const uint8_t *bytes, uint64_t size, uint8_t value)
+{
+	for (uint64_t at = 0; at < size; at++)
+		if (bytes[at] != value)
+			return (false);
+	return (true);
+}
+
+/*
+ * The plan applied to ram, which stands for memory from base, and checked
+ * against archive, the archive's bytes as the file gave them.
+ */
+static void
+apply_plan(uint8_t *ram, uint64_t base, const uint8_t *archive)
+{
+	uint8_t kip[VIEW_CHECKED], koptions[VIEW_CHECKED];
+
+	memcpy(kip, ram + (plan.kip_loaded - base), sizeof(kip));
+	memcpy(koptions, ram + (plan.koptions_loaded - base), sizeof(koptions));
+	memset(ram + (plan.tree_copy.start - base), PLACE_FILL, plan.tree_copy.size);
+	memset(ram + (plan.handoff_page - base), PLACE_FILL, 0x1000);
+	memmove(ram + (plan.archive.start - base),
+	    ram + (plan.archive_loaded.start - base), plan.archive.size);
+	for (uint32_t index = 0; index < plan.ncopies; index++) {
+		const erx_boot_copy_t *copy = &plan.copies[index];
+
+		memcpy(ram + (copy->target - base), ram + (copy->source - base),
+		    copy->file_size);
+		memset(ram + (copy->target - base) + copy->file_size, 0,
+		    copy->mem_size - copy->file_size);
+	}
+	if (memcmp(ram + (plan.archive.start - base), archive,
+	    plan.archive.size) != 0)
+		abort();
+	for (uint32_t index = 0; index < plan.ncopies; index++) {
+		const erx_boot_copy_t *copy = &plan.copies[index];
+		const uint8_t *target = ram + (copy->target - base);
+
+		if (memcmp(target, archive + (copy->source - plan.archive.start),
+		    copy->file_size) != 0)
+			abort();
+		if (!filled(target + copy->file_size, copy->mem_size - copy->file_size, 0))
+			abort();
+	}
+	if (!filled(ram + (plan.tree_copy.start - base), plan.tree_copy.size,
+	    PLACE_FILL) || !filled(ram + (plan.handoff_page - base), 0x1000, PLACE_FILL))
+		abort();
+	if (memcmp(ram + (plan.kip.start - base), kip, sizeof(kip)) != 0 ||
+	    memcmp(ram + (plan.koptions.start - base), koptions,
+	    sizeof(koptions)) != 0)
+		abort();
+	printf("applied\n");
+}
+
 static int
-run_plan(char **argv)
+run_plan(char **argv, bool apply)
 {
 	erx_boot_error_t error = {0};
 	erx_boot_load_request_t request = {0};
 	erx_boot_range_t memory, reserved = {0};
 	size_t length;
 	uint8_t *file = read_file(argv[0], &length);
+	uint8_t *ram = NULL;
 
 	memory = (erx_boot_range_t){ .start = strtoull(argv[3], NULL, 0),
 	    .size = strtoull(argv[4], NULL, 0) };
@@ -90,14 +163,27 @@ run_plan(char **argv)
 	request.window = file;
 	request.window_start = request.load;
 	request.window_size = length;
+	if (apply) {
+		if (request.load < memory.start || request.load - memory.start > memory.size ||
+		    length > memory.size - (request.load - memory.start) ||
+		    (ram = calloc(1, (size_t)memory.size)) == NULL)
+			exit(2);
+		memcpy(ram + (request.load - memory.start), file, length);
+		request.window = ram;
+		request.window_start = memory.start;
+		request.window_size = memory.size;
+	}
 	if (!erx_boot_load_plan(&request, &workspace, &plan, &error)) {
 		printf("refused %s %s\n", error.path == NULL ? "-" : error.path,
 		    error.reason);
+		free(ram);
 		free(file);
 		return (0);
 	}
 	printf("archive %" PRIx64 " %" PRIx64 "\n", plan.archive.start,
 	    plan.archive.size);
+	printf("loaded %" PRIx64 " %" PRIx64 "\n", plan.archive_loaded.start,
+	    plan.archive_loaded.size);
 	print_placed("kernel", plan.kernel);
 	print_placed("sigma0", plan.sigma0);
 	if (plan.has_stand_in_root)
@@ -105,15 +191,26 @@ run_plan(char **argv)
 	printf("kip %" PRIx64 " %" PRIx64 "\n", plan.kip.start, plan.kip.size);
 	printf("koptions %" PRIx64 " %" PRIx64 "\n", plan.koptions.start,
 	    plan.koptions.size);
+	printf("views %" PRIx64 " %" PRIx64 "\n",
+	    plan.kip_loaded - plan.archive_loaded.start,
+	    plan.koptions_loaded - plan.archive_loaded.start);
+	printf("tree %" PRIx64 " %" PRIx64 "\n", plan.tree_copy.start,
+	    plan.tree_copy.size);
+	printf("handoff %" PRIx64 " 1000\n", plan.handoff_page);
 	for (uint32_t index = 0; index < plan.ncopies; index++) {
 		const erx_boot_copy_t *copy = &plan.copies[index];
 
-		/* A copy reads only what the window holds. */
-		if (copy->source < request.window_start ||
-		    copy->source - request.window_start + copy->file_size > length)
+		/*
+		 * A copy reads the archive where the plan leaves it, moved or
+		 * not; its offset there is printed.
+		 */
+		if (copy->source < plan.archive.start ||
+		    copy->source - plan.archive.start > plan.archive.size ||
+		    copy->file_size > plan.archive.size -
+		    (copy->source - plan.archive.start))
 			abort();
 		printf("copy %" PRIx64 " %" PRIx64 " %" PRIx64 " %" PRIx64 "\n",
-		    copy->source - request.window_start, copy->target,
+		    copy->source - plan.archive.start, copy->target,
 		    copy->file_size, copy->mem_size);
 	}
 	if (!erx_boot_handoff_write(&plan, "erx.a=1", 7, "/pl011@9000000", 14,
@@ -122,6 +219,10 @@ run_plan(char **argv)
 		abort();
 	fwrite(record, 1, 48, stdout);
 	printf("\n");
+	if (apply)
+		apply_plan(ram, memory.start,
+		    file + (plan.archive_loaded.start - request.load));
+	free(ram);
 	free(file);
 	return (0);
 }
@@ -230,13 +331,25 @@ int
 main(int argc, char **argv)
 {
 	if ((argc == 7 || argc == 9) && strcmp(argv[1], "plan") == 0)
-		return (run_plan(argv + 2));
+		return (run_plan(argv + 2, false));
+	if ((argc == 7 || argc == 9) && strcmp(argv[1], "apply") == 0)
+		return (run_plan(argv + 2, true));
 	if (argc == 3 && strcmp(argv[1], "handoff") == 0)
 		return (run_handoff(argv + 2));
 	if (argc == 4 && strcmp(argv[1], "write") == 0)
 		return (run_write(argv + 2));
 	if (argc == 4 && strcmp(argv[1], "pair") == 0)
 		return (run_pair(argv + 2));
+	if (argc == 5 && strcmp(argv[1], "lines") == 0) {
+		uint64_t first, end;
+
+		if (!erx_cache_lines(strtoull(argv[2], NULL, 0), strtoull(argv[3], NULL, 0),
+		    strtoull(argv[4], NULL, 0), &first, &end))
+			printf("wraps\n");
+		else
+			printf("%" PRIx64 " %" PRIx64 "\n", first, end);
+		return (0);
+	}
 	if (argc == 4 && strcmp(argv[1], "args") == 0) {
 		printf("%zu\n", erx_boot_args_cut(argv[3], strlen(argv[3]),
 		    strtoull(argv[2], NULL, 0)));

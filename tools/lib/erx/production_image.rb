@@ -153,9 +153,9 @@ module Erx
     # and root_mib, the root task's place in MiB from the start of RAM (root_address),
     # counted from the record's ram_first, which the root's link takes
     # (liberx/backend/fiasco/root.ld). The root is a fixed
-    # image, so each machine names its place: low on a small machine, whose RAM must
-    # hold the root, and higher where a test image's archive, which lies below the
-    # root, is larger.
+    # image, so each machine names its place, low enough that a small machine's RAM
+    # holds it; an archive the root lands on moves behind it at boot
+    # (kernel/core/boot_place.c, erx_boot_place_archive).
     # What the system growth leaves of the added RAM widens the room bootstrap keeps
     # for the archive. The production image boots on the development machine
     # (Machine.development), the platform record's own; a test image whose suites need more memory or carry a
@@ -190,22 +190,35 @@ module Erx
       end
 
       # The single file of bytes, loaded at load_address (its first stage's link address,
-      # Fiasco#first_stage_address), must end at or before the root's place, or bootstrap
-      # refuses to place the root over its archive (kernel/core/boot_place.c,
-      # place_overlap). Answers how much the place leaves the file; refuses a file past it,
-      # and a load address outside RAM below the root's place, which would make the bound
-      # meaningless.
+      # Fiasco#first_stage_address), must lie in RAM and, on a board whose loader puts the
+      # device tree at a fixed address (QemuPlan::Machine#loads: raspi4b's, 126 MiB past
+      # the file's start), end before the tree. The root's place does not bound it:
+      # bootstrap moves an archive the root lands on behind the root
+      # (kernel/core/boot_place.c, erx_boot_place_archive), and refuses the boot with
+      # archive_no_room when RAM has no room for that. Answers the room the binding bound
+      # leaves the file; refuses a file past it and a load address outside RAM.
       def check_single_file(bytes, load_address:)
-        unless (platform.ram_first...root_address).cover?(load_address)
-          raise Error, "the first stage's load address #{format('%#x', load_address)} is not in RAM below the root's place " \
-                       "(#{format('%#x', platform.ram_first)} to #{format('%#x', root_address)})"
+        ram_end = platform.ram_first + (memory_mib << 20)
+        unless (platform.ram_first...ram_end).cover?(load_address)
+          raise Error, "the first stage's load address #{format('%#x', load_address)} is not in RAM " \
+                       "(#{format('%#x', platform.ram_first)} to #{format('%#x', ram_end)})"
         end
 
-        room = root_address - load_address
+        limit, bound = file_limit(load_address, ram_end)
+        room = limit - load_address
         return room if bytes <= room
 
         raise Error, "the single file is #{Manifest::RootStartup.mib(bytes)} from #{format('%#x', load_address)}, " \
-                     "but the root's place, #{root_mib} MiB into RAM, leaves it #{Manifest::RootStartup.mib([room, 0].max)}"
+                     "but #{bound} at #{format('%#x', limit)} leaves it #{Manifest::RootStartup.mib(room)}"
+      end
+
+      # Where the single file loaded at load_address must end, and what puts the end there:
+      # the loader's fixed device tree when it lies past the load address in RAM, else RAM's end.
+      def file_limit(load_address, ram_end)
+        tree = QemuPlan::MACHINES[platform.name]&.loads&.dtb
+        return [tree, "the loader's device tree"] if tree && tree > load_address && tree < ram_end
+
+        [ram_end, 'the end of RAM']
       end
 
       # The platform record as Pack's manifest check proves this machine's manifest against it.
@@ -396,10 +409,8 @@ module Erx
       FileUtils.rm_f(single)
       BootFile.write(codec: @codec, first_stage: @fiasco.first_stage_path(machine.platform), archive: archive, output: unchecked, output_root: @root)
       begin
-        # The single file is the first stage and its padding (head), then the archive whole.
-        head = File.size(unchecked) - File.size(archive)
-        room = machine.check_single_file(File.size(unchecked), load_address: @fiasco.first_stage_address(machine.platform))
-        warn "#{directory}: #{Manifest::RootStartup.room_line(report, place_bytes: room - head)}"
+        machine.check_single_file(File.size(unchecked), load_address: @fiasco.first_stage_address(machine.platform))
+        warn "#{directory}: #{Manifest::RootStartup.room_line(report)}"
         # image.boot holds every file of the image, the release's included, as packed, so
         # one look at it finds a file that names the tree (BuildPath). A test image, which
         # never leaves the build host, is not looked at.

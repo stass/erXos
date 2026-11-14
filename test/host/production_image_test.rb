@@ -550,20 +550,23 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # The single file loads at its first stage's link address and must end at the root's
-  # place, or bootstrap refuses the boot (place_overlap); the image build refuses it
-  # first, naming both figures, and a file that ends exactly at the place is accepted.
-  def test_a_single_file_that_reaches_the_roots_place_is_refused
+  # The root's place does not bound the single file, since bootstrap moves an archive
+  # the root lands on; RAM does, and on raspi4b the device tree its loader puts 126 MiB
+  # past the file's start. A file that ends exactly at the bound is accepted.
+  def test_a_single_file_is_bounded_by_ram_and_the_loaders_tree_not_the_root
     load = PLATFORM.ram_first + (2 << 20)
-    room = DEVELOPMENT.root_address - load
+    assert_operator DEVELOPMENT.check_single_file(DEVELOPMENT.root_address - load + (1 << 20), load_address: load), :>, 0
+    room = (DEVELOPMENT.memory_mib << 20) - (2 << 20)
     assert_equal room, DEVELOPMENT.check_single_file(room, load_address: load)
-    error = assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(room + 4096, load_address: load) }
-    assert_match(/62\.00 MiB.*64 MiB into RAM/, error.message)
-    assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(1, load_address: DEVELOPMENT.root_address) }
+    assert_match(/the end of RAM/, assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(room + 4096, load_address: load) }.message)
+    pi = Erx::ProductionImage::Machine.development(Erx::Platform.load(root: ROOT, name: 'raspi4b'))
+    assert_equal 126 << 20, pi.check_single_file(126 << 20, load_address: 0x20_0000)
+    error = assert_raises(Erx::Error) { pi.check_single_file((126 << 20) + 4096, load_address: 0x20_0000) }
+    assert_match(/126\.00 MiB.*device tree at 0x8000000/, error.message)
   end
 
   # A load address below RAM (an ELF entry of 0) would leave the file a room the size of
-  # everything below the root's place, so it is refused rather than measured against.
+  # everything below the end of RAM, so it is refused rather than measured against.
   def test_a_load_address_outside_ram_is_refused
     error = assert_raises(Erx::Error) { DEVELOPMENT.check_single_file(1, load_address: 0) }
     assert_match(/load address 0 is not in RAM/, error.message)
@@ -587,14 +590,13 @@ class ProductionImageTest < Minitest::Test
     assert_operator site.memory_mib, :<, DEVELOPMENT.memory_mib
   end
 
-  # The room line prints the smaller of the two bounds on the archive and names it.
-  def test_the_room_line_names_the_bound_that_binds
+  # The room line prints the room root_memory leaves the archive.
+  def test_the_room_line_prints_root_memorys_room
     report = { 'archive_room' => { 'archive_bytes' => 50 << 20, 'archive_max_bytes' => 280 << 20,
                                    'root_memory' => 186 << 20, 'kept_bytes' => 8 << 20 },
                'manifest' => { 'promised_memory' => 178 << 20 } }
-    line = ->(place) { Erx::Manifest::RootStartup.room_line(report, place_bytes: place << 20) }
-    assert_match(/room for 60\.00 MiB \(the root's place binds; root_memory leaves 280\.00 MiB\)/, line.call(60))
-    assert_match(/room for 280\.00 MiB \(root_memory binds; the root's place leaves 300\.00 MiB\)/, line.call(300))
+    assert_match(/archive 50\.00 MiB, room for 280\.00 MiB beside root_memory 186\.00 MiB/,
+                 Erx::Manifest::RootStartup.room_line(report))
   end
 
   # The refusal boot means something only on a machine that cannot give root_memory:
@@ -624,8 +626,8 @@ class ProductionImageTest < Minitest::Test
 
   # The refusal boot proves root_memory_fits, which the root reaches only once it holds the
   # contiguous pool: one run, aligned to its own size, of up to CONTIGUOUS_POOL_MAX_BYTES.
-  # The run is sought only above the root's room: below it lie the archive, which may grow
-  # to the root's place, and the device tree. Fiasco's kernel memory takes the top of RAM,
+  # The run is sought only above the root's room: below it lie the archive, which a refusal
+  # image keeps short of the root, and the device tree. Fiasco's kernel memory takes the top of RAM,
   # so the run must fit between the two. A machine without such a run refuses the boot at
   # the pool, and the root_memory refusal never shows.
   def test_the_refusal_machine_leaves_the_largest_contiguous_pool_its_run

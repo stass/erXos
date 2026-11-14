@@ -23,9 +23,10 @@ class BootPlaceTest < Minitest::Test
   MEMORY = 0x4000_0000
   MEMORY_SIZE = 0x2000_0000
   MIB2 = 0x20_0000
-  # The archive a root at the oracle machine's place must clear on a 256 MiB machine:
-  # that place promises about 187 MiB, and this leaves slack for the first stage and for
-  # the device tree QEMU puts behind a long file, on its 2 MiB boundary.
+  # An archive that stays below a root at the oracle machine's place on a 256 MiB machine,
+  # so bootstrap does not move it: that place leaves about 187 MiB, and this leaves slack
+  # for the first stage and for the device tree QEMU puts behind a long file, on its 2 MiB
+  # boundary.
   ARCHIVE_ROOM = 176 * 1024 * 1024
   ROOT_SCRIPT = File.expand_path('../../liberx/backend/fiasco/root.ld', __dir__)
   PLATFORM = Erx::Platform.development(File.expand_path('../..', __dir__))
@@ -95,8 +96,9 @@ class BootPlaceTest < Minitest::Test
   def standard = { 'boot/kernel' => kernel, 'boot/sigma0' => sigma0 }
 
   # The single file for an archive, from literal offsets: the first stage's size
-  # rounded up to a page, then the archive.
-  def plan(archive_bytes, memory_size: MEMORY_SIZE, reserved: nil)
+  # rounded up to a page, then the archive. command 'apply' also applies the plan
+  # over a buffer standing for memory and checks what lands where.
+  def plan(archive_bytes, memory_size: MEMORY_SIZE, reserved: nil, load: LOAD, memory: MEMORY, command: 'plan')
     single = FirstStageFixture.bytes
     single << "\0".b * (0x4000 - single.bytesize)
     single[16, 8] = [0x4000 + archive_bytes.bytesize].pack('Q<')
@@ -104,7 +106,8 @@ class BootPlaceTest < Minitest::Test
     single << archive_bytes
     path = File.join(@directory, 'single')
     File.binwrite(path, single)
-    record = @runner.run([@driver, 'plan', path, LOAD.to_s, FirstStageFixture::LINKED_END.to_s, MEMORY.to_s, memory_size.to_s, *reserved&.map(&:to_s)],
+    record = @runner.run([@driver, command, path, load.to_s, FirstStageFixture::LINKED_END.to_s, memory.to_s, memory_size.to_s,
+                          *reserved&.map(&:to_s)],
                          name: 'boot-place', deadline: 30)
     File.binread(record.fetch('log'))
   end
@@ -137,6 +140,122 @@ class BootPlaceTest < Minitest::Test
     output = plan(archive(standard.merge('boot/stopgap-root' => fixed_root)))
     assert_match(/^root 44000000 2000 44000000$/, output)
     assert_equal 3, output.scan(/^copy /).size
+    # Clear of the root, the archive stays where it was loaded.
+    assert_equal output[/^archive (\h+ \h+)$/, 1], output[/^loaded (\h+ \h+)$/, 1]
+  end
+
+  # A filler that carries the archive past the fixed root's place at 64 MiB into RAM.
+  def large_archive(**files)
+    archive(standard.merge('boot/stopgap-root' => fixed_root, 'system/filler' => "\0".b * (64 << 20), **files))
+  end
+
+  def ranges(output, name) = output[/^#{name} (\h+) (\h+)$/] && [$1.to_i(16), $2.to_i(16)]
+
+  # The root lands on the loaded archive, so the archive moves, whole, to the first page
+  # behind the root; the move's source and destination overlap, which bootstrap's
+  # memmove allows. The copies read the archive at its new place, at the same offsets as
+  # an archive that does not move, and the kernel goes behind the moved archive.
+  def test_a_fixed_root_on_a_large_archive_moves_the_archive_behind_it
+    output = plan(large_archive)
+    assert_match(/^root 44000000 2000 44000000$/, output)
+    start, size = ranges(output, 'archive')
+    loaded_start, loaded_size = ranges(output, 'loaded')
+    assert_equal [LOAD + 0x4000, size], [loaded_start, loaded_size]
+    assert_equal 0x4400_2000, start
+    assert_operator start, :<, loaded_start + loaded_size, 'the move overlaps its source'
+    floor = (start + size + MIB2 - 1) / MIB2 * MIB2
+    assert_match(/^kernel #{(floor + 0x1000).to_s(16)} 3000 /, output)
+    sources = ->(text) { text.scan(/^copy (\h+) /).flatten }
+    unmoved = plan(archive(standard.merge('boot/stopgap-root' => fixed_root(address: 0x5000_0000),
+                                          'system/filler' => "\0".b * (64 << 20))))
+    assert_equal ranges(unmoved, 'archive'), ranges(unmoved, 'loaded')
+    assert_equal sources.call(unmoved), sources.call(output)
+  end
+
+  # The same move applied: the archive's bytes reach their new place whole although the two ranges overlap, the
+  # copies then read them there, the root's onto the archive's old place, and the kernel's two views hold what
+  # the plan read where the loader left the archive.
+  def test_an_overlapping_move_applies_whole
+    output = plan(large_archive, command: 'apply')
+    start, = ranges(output, 'archive')
+    loaded_start, loaded_size = ranges(output, 'loaded')
+    assert_operator start, :<, loaded_start + loaded_size, 'the move overlaps its source'
+    assert_operator start, :>, loaded_start
+    assert_equal "applied\n", output.lines.last, output
+  end
+
+  def overlap?(first, second) = first[0] < second[0] + second[1] && second[0] < first[0] + first[1]
+
+  # The device tree's copy and the handoff page go to the lowest free pages, which, with the first stage at the
+  # base of memory, lie in the archive's old place; bootstrap writes both before the move, so the plan keeps them
+  # clear of that place as of every other.
+  def test_the_tree_copy_and_the_handoff_page_keep_clear_of_both_archive_places
+    output = plan(large_archive, load: MEMORY)
+    tree = ranges(output, 'tree')
+    handoff = ranges(output, 'handoff')
+    assert tree, output
+    assert_equal 0x2000, tree[1]
+    loaded = ranges(output, 'loaded')
+    loaded[1] = (loaded[1] + 0xfff) & ~0xfff
+    taken = [[MEMORY, 0x4000], loaded, ranges(output, 'archive'), *%w[root kernel sigma0].map { |name| output[/^#{name} (\h+) (\h+) /] && [$1.to_i(16), $2.to_i(16)] }]
+    [tree, handoff].each { |place| taken.each { |other| refute overlap?(place, other), "#{place} meets #{other}\n#{output}" } }
+    refute overlap?(tree, handoff)
+  end
+
+  # A kernel linked 0x10000 past its file offsets, whose two views hold bytes of their own, so the views' place
+  # in the archive (their file offsets) and their place in the kernel (their addresses) cannot be confused.
+  def marked_kernel
+    bytes = kernel(entry: 0x10000, headers: [
+                     Header.new(PT_LOAD, 0x1000, 0x10000, 0x2000, 0x3000, 0x1000),
+                     Header.new(PT_DYNAMIC, 0x1000, 0x10000, 0x10, 0x10, 8),
+                     Header.new(PT_KIP, 0x1000, 0x10000, 0x1000, 0x1000, 8),
+                     Header.new(PT_KOPTIONS, 0x2000, 0x11000, 0x100, 0x100, 8)
+                   ])
+    bytes[0x1000, 16] = 'kip view bytes..'
+    bytes[0x2000, 16] = 'koptions bytes..'
+    bytes
+  end
+
+  # On memory that starts at 0, as the Raspberry Pi's does, the tree's copy and the handoff page start at the
+  # first page past 0, as bootstrap's find_free_ram never gives 0: the root reads a zero handoff page as none, and
+  # a tree mapped at 0 would turn a null pointer into tree bytes.
+  def test_the_tree_copy_and_the_handoff_page_never_start_at_0
+    output = plan(archive(standard), memory: 0, load: 0x20_0000)
+    assert_equal [0x1000, 0x2000], ranges(output, 'tree'), output
+    assert_equal [0x3000, 0x1000], ranges(output, 'handoff')
+    reserved = plan(archive(standard), memory: 0, load: 0x20_0000, reserved: [0x1000, 0x1000])
+    assert_equal [[0x2000, 0x2000], [0x4000, 0x1000]], [ranges(reserved, 'tree'), ranges(reserved, 'handoff')], reserved
+  end
+
+  # Two images at their link addresses, the root on the loaded archive and sigma0 just below 4 GiB: the archive
+  # moves behind the higher of the two and so across 4 GiB, where its addresses need all 64 bits, and the kernel
+  # goes behind it on its unit. Applied, the views hold the bytes the plan read where the loader left them.
+  def test_a_move_across_4_gib_lies_behind_the_highest_fixed_image
+    high = 0xf000_0000
+    sigma0 = elf(entry: 0xffff_b000, headers: [Header.new(PT_LOAD, 0x1000, 0xffff_b000, 0x1000, 0x2000, 0x1000)])
+    bytes = archive('boot/kernel' => marked_kernel, 'boot/sigma0' => sigma0,
+                    'boot/stopgap-root' => fixed_root(address: high + 0x20_6000))
+    output = plan(bytes, memory: high, load: high + 0x20_0000, command: 'apply')
+    start, size = ranges(output, 'archive')
+    assert_equal 0xffff_d000, start, output
+    assert_operator start + size, :>, 0x1_0000_0000
+    assert_match(/^sigma0 ffffb000 2000 /, output)
+    assert_match(/^kernel 100210000 3000 /, output)
+    assert_match(/^kip 100210000 1000$/, output)
+    assert_equal "applied\n", output.lines.last, output
+  end
+
+  # The moved archive keeps clear of a reservation as every placement does: one past the
+  # loaded archive, inside the range the move would take, sends it behind the reservation.
+  def test_the_moved_archive_keeps_clear_of_a_reservation
+    output = plan(large_archive, reserved: [0x4500_0000, 0x1000])
+    assert_equal 0x4500_1000, ranges(output, 'archive')&.first, output
+  end
+
+  # No room behind the root for the whole archive: the boot stops naming the image that
+  # forced the move, and nothing has moved.
+  def test_a_move_that_cannot_fit_is_refused
+    assert_equal 'refused boot/stopgap-root archive_no_room', refused(large_archive, memory_size: 0x0500_0000)
   end
 
   # A program linked as a machine's system root is, through root.ld and the root's link
@@ -404,6 +523,22 @@ class BootPlaceTest < Minitest::Test
 
   def args(limit, text)
     File.binread(@runner.run([@driver, 'args', limit.to_s, text], name: 'args', deadline: 30).fetch('log')).to_i
+  end
+
+  def lines(start, size, line)
+    File.binread(@runner.run([@driver, 'lines', start.to_s, size.to_s, line.to_s], name: 'lines', deadline: 30)
+                      .fetch('log')).strip
+  end
+
+  # The lines bootstrap cleans over a range (Cache::Data::clean in arch/arm/mem_v8_64.h): whole lines from the
+  # start's line to the line past the end, at the address's full width, so a moved archive across 4 GiB cleans
+  # exactly its own lines; a range whose last line passes the top of the address space has no such end.
+  def test_cache_lines_cover_a_range_at_full_address_width
+    assert_equal '40000000 40001000', lines(0x4000_0000, 0x1000, 64)
+    assert_equal '40000fc0 40002040', lines(0x4000_0fe0, 0x1040, 64)
+    assert_equal 'ffffd000 10000a000', lines(0xffff_d000, 0xd000, 64)
+    assert_equal '1ffffffc0 200000040', lines(0x1_ffff_ffe0, 0x40, 64)
+    assert_equal 'wraps', lines(0xffff_ffff_ffff_ff00, 0x101, 64)
   end
 
   private

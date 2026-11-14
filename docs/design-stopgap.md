@@ -169,13 +169,34 @@ Inherited code reads no executable and no modules.
    initrd, opens it with `erx_pack_open`, and checks each role's file with `erx_pack_file_check`:
    the kernel at `boot_kernel_path`, `sigma0` at `boot_sigma0_path`, and the root at
    `boot_stand_in_root_path`, the path at which the packer stores the system release's root entry.
-2. It reads each with `erx_elf_plan_kernel` and chooses where it goes. An image that relocates
-   itself, as the fork's kernel and `sigma0` do, goes behind the archive, and a kernel that cannot
-   relocate fails the plan. The root, a static executable, runs at the physical addresses it is
-   linked at, which must clear the archive, `bootstrap`, the device tree and every reserved
-   region. A refusal prints `erXos image: <where>: <reason>` and stops, having copied nothing.
-3. `apply` reserves the whole archive first, unmoved and never released, then the images, then
-   copies. The archive so reaches `init_kip_md` whole. A `Region::Root` region's sub-type is what
+2. It reads each with `erx_elf_plan_kernel` and chooses where it goes, in three steps. The root,
+   a static executable, runs at the physical addresses it is linked at, which must lie in memory
+   and clear `bootstrap`, the device tree and every reserved region. The archive stays where the
+   loader left it unless such an image lands on it; it then moves, whole, to the lowest page
+   behind every image placed at its link addresses that is in memory and clear of `bootstrap`,
+   the device tree, the reservations and those images, as stock Fiasco's `bootstrap` moves its
+   modules behind the ELF images it loads (`Boot_modules::move_modules`, `boot_modules.cc:262`);
+   the new place may overlap the old one.
+   Last, an image that relocates itself, as the fork's kernel and `sigma0` do, goes behind the
+   archive where the plan leaves it, and a kernel that cannot relocate fails the plan. Every copy
+   reads the archive at that final place. The plan then chooses the room for the device tree's
+   copy, the tree's declared size in whole pages, and the handoff page, each at the lowest free
+   page in memory past the first, so neither is at address 0, clear of everything placed and of
+   the archive where the loader left it, and
+   gives where the kernel's two views lie in that loaded archive. A refusal prints
+   `erXos image: <where>: <reason>` and stops, having copied and moved nothing; a move with no
+   room is `archive_no_room`, named after the root, and no room for the copy or the page is
+   `device tree: no_free_ram` or `handoff page: no_free_page`.
+3. Before anything moves, `erx_image_load` checks the kernel information page's magic and the
+   options block's magic and version in the loaded archive, where the copy will read them, then
+   reserves the whole archive, at its final place and never released, then the images, then
+   writes the device tree's copy and the handoff record of step 4, so every refusal comes before
+   any of the archive's or an image's bytes move. Then it moves the archive when the plan moves
+   it, as `memmove` does, and prints `erXos image: moving the archive from <old> to <new>`, and
+   only then copies, since a copy reads the archive at its new place and the root's copy may land
+   on its old one; nothing past that point refuses. The archive so reaches `init_kip_md` whole.
+   Each range it writes is cleaned from the data cache by whole lines at the address's full
+   width (`erx_cache_lines`, `erx/core/cache_lines.h`). A `Region::Root` region's sub-type is what
    `sigma0` answers a page fault of the root with (`init_mem.cc:73`, `memmap.cc:170-176`):
    `Root_section_rwx` for the root's image, whose segments one range cannot tell apart, and
    `Root_section_rx` for the archive, read and execute and never write, so the root can map an image
@@ -188,16 +209,17 @@ Inherited code reads no executable and no modules.
    computes from `/chosen/bootloader`'s `partition` and `tryboot`
    ([design-platforms.md](design-platforms.md#data-model)), `unknown` with slot `none` when either is
    missing or malformed or the partition is not a slot; and the range of the copy of the device tree it
-   made: after `apply`, it packs the tree with `fdt_open_into` and `fdt_pack` into free RAM from
-   `mem_manager->find_free_ram`, reserves the copy's whole pages as `Region::Root` with `Root_section_ro`, named
+   made: it packs the tree with `fdt_open_into` and `fdt_pack` into the plan's room, without
+   `/chosen`'s `linux,initrd-start` and `linux,initrd-end`, which name where the loader left the
+   two-file form's archive, reserves the copy's whole pages as `Region::Root` with `Root_section_ro`, named
    `.erxtree`, and refuses the boot when the packed tree exceeds `ERX_BOOT_TREE_MAX` or a step fails
    ([design-device-tree.md](design-device-tree.md#on-the-stopgap)); and the boot CPU's
    identification registers, which `erx_boot_cpu_id_read` reads in kernel mode, since user mode
    cannot and the stopgap publishes no copy, into the record's `cpu_id` words)
-   into the options block for the kernel. That block is mapped into no task, so it also writes the
-   record, by `erx_image_load`, into the **handoff page**, a free page from
-   `mem_manager->find_free_ram`, reserved as `Region::Root` with `Root_section_ro`; no free page
-   refuses the boot, after the copy. The record's pool fields stay zero, with no reader.
+   into a buffer of its own, before anything moves, and copies it into the options block for the
+   kernel once the kernel is copied. That block is mapped into no task, so it also writes the
+   record, by `erx_image_load`, into the **handoff page** the plan chose, reserved as
+   `Region::Root` with `Root_section_ro`. The record's pool fields stay zero, with no reader.
 5. `init_kip_infos` assigns the page's address to the kernel information page's `user_ptr`
    (`init_kip.cc:30`), which `boot_info_t` carries there.
 
@@ -451,14 +473,15 @@ the same rule gives 16 MiB, and at QEMU `virt`'s development machine, 512 MiB, i
 `fiasco_reserve`, 32 MiB. The rule leaves the
 archive out: `bootstrap` reserves it whole and it is never released, so a
 manifest's `root_memory` must leave it room below RAM less the reserve. The root's place
-bounds it too: the single file loads at its first stage's link address and must end
-below the root, or `bootstrap` refuses to place the root over the archive
-(`place_overlap`), so the image build refuses a single file that reaches the root's place
-(`ProductionImage::Machine#check_single_file`). The image build prints the smaller of the
-two rooms with each image and names the one that binds. A manifest's `root_memory` is what its
+does not bound it: an archive the root lands on moves behind the root at boot
+([Boot handoff](#boot-handoff)). The single file must still lie in RAM and, where the
+board's loader puts the device tree at a fixed address, as QEMU's `raspi4b` model does
+126 MiB past the file's start, end before the tree; the image build refuses a file past
+either (`ProductionImage::Machine#check_single_file`), and prints root_memory's room with
+each image. A manifest's `root_memory` is what its
 budgets promise and a margin no one is promised, never a figure lowered to make room for
-the archive: an archive that outgrows root_memory's room asks for a larger machine, and
-one that outgrows the place's, for a higher place. If either is wrong, the pool fails at boot with a
+the archive: an archive that outgrows root_memory's room asks for a larger machine. If it
+is wrong, the pool fails at boot with a
 diagnostic. A platform record without these numbers is not admitted.
 
 The packer then holds the archive to that room (`RootStartup.check_archive`, once the archive is
@@ -540,10 +563,10 @@ its `fiasco_reserve`, which grows with RAM because Fiasco sizes its kernel memor
 as 6% of it, a growth added to both `root_memory` and `system_baseline` of the
 development manifest, a growth of `/tmp`'s cap, and the root's place, the one
 address `liberx/backend/fiasco/root.ld` takes from the root's link; the rest of the
-added RAM widens the archive's room below RAM, up to the root's place. The
+added RAM widens the archive's room below RAM. The
 development machine links the root 64 MiB into RAM, so it fits small machines, and the
-oracle's 2 GiB machine 192 MiB into RAM, which holds the archive to about 187 MiB
-([Boot](design-platforms.md#boot) gives the arithmetic).
+oracle's 2 GiB machine 192 MiB into RAM, above that machine's larger archive, which then
+stays where the loader left it ([Boot](design-platforms.md#boot)).
 No other line of the manifest changes, and the manifest check proves the
 grown manifest against the platform record with that RAM and reserve as it proves
 the development one. The production image boots on the development machine,
@@ -1973,8 +1996,9 @@ data, one `bootstrap` build, and the kernel's platform items, which this backend
   record and its `ProductionImage::Machine` as a parameter, never a constant of QEMU `virt`. The record's `ram_bytes`
   is the smallest RAM the port boots on; the manifest check proves the manifest against it, and a board with more RAM
   boots the same image with a larger pool. The root's place follows [Boot](design-platforms.md#boot)'s arithmetic
-  from RAM's first address, clear of BL31's reserved memory, the bootable file and the device tree, as the boot probe
-  finds them. Where the root maps the kernel information page is part of the backend's address layout, above all RAM
+  from RAM's first address, clear of BL31's reserved memory and the device tree, as the boot probe finds them; the
+  bootable file does not bound it, since bootstrap moves an archive the root lands on behind the root
+  ([Boot handoff](#boot-handoff)). Where the root maps the kernel information page is part of the backend's address layout, above all RAM
   beside the device window, so no platform record carries it.
 * **Devices.** The Pi's DMA devices are not coherent, so the device NIF cleans and invalidates as
   [design-device-dma.md](design-device-dma.md) orders for such a device; QEMU `virt`'s are coherent, and their
