@@ -18,6 +18,7 @@
 
 -module(erx_winfs_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -export([info/1, export/3]).
 
@@ -361,3 +362,8 @@ the_window_system_provides_the_configured_service_test() ->
     kill(Winfs),
     _ = persistent_term:erase({erx, provides}),
     ok.
+
+%% The window tree answers statfs with the block size the other file servers answer,
+%% the page size of the ABI file.
+statfs_answers_the_page_size_test() ->
+    ?assertMatch({ok, #{bsize := ?ERX_PAGE_SIZE}}, erx_winfs:statfs(undefined)).

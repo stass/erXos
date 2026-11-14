@@ -573,7 +573,7 @@ entries(All, Offset, Max) ->
 
 -doc false.
 statfs(_Fs) ->
-    {ok, #{type => 0, bsize => 4096, blocks => 0, bfree => 0, bavail => 0, files => 0,
+    {ok, #{type => 0, bsize => ?ERX_PAGE_SIZE, blocks => 0, bfree => 0, bavail => 0, files => 0,
            ffree => 0, fsid => 0, namelen => 255}}.
 
 -doc false.

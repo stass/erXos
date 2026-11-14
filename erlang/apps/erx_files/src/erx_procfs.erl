@@ -206,7 +206,7 @@ readdir({bytes, _}, _Offset, _Max, _Fs) ->
 
 -doc false.
 statfs(_Fs) ->
-    {ok, #{type => ?ERX_P9_MAGIC_PROC, bsize => ?ERX_PAGE_SIZE, blocks => 0, bfree => 0, bavail => 0,
+    {ok, #{type => ?ERX_P9_MAGIC_PROCFS, bsize => ?ERX_PAGE_SIZE, blocks => 0, bfree => 0, bavail => 0,
            files => 0, ffree => 0, fsid => 0, namelen => 255}}.
 
 -doc false.

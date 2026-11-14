@@ -15,9 +15,10 @@ layout (sbin/mount/mount.c, prmount): `SOURCE on POINT (TYPE, OPTIONS)`.
 * **Type.** The file system behind the entry, FreeBSD's `f_fstypename`:
   a local provider's own (`release`, `erofs`), and a grant's as its
   server answers statfs at the entry's root. 9P2000.L's statfs carries
-  the type as a number, the `p9_magic_` limits of abi/protocols/9p.txt,
-  which type_name/1 names; a number it does not know prints in hex, as
-  the server sent it, and a server that does not answer, or an ended
+  the type as a number, a member of the `p9_magic` enum of
+  abi/protocols/9p.txt, which type_name/1 prints by its member name; a
+  number the enum does not hold prints in hex, as the server sent it,
+  and a server that does not answer, or an ended
   grant, prints `-`, as a command prints a value it does not have
   (docs/design-shell.md, SH3).
 * **Options.** FreeBSD's words (MNTOPT_NAMES in sys/sys/mount.h), in
@@ -80,19 +81,20 @@ line(#{point := Point, provider := Provider, root := Root, rights := Rights}, Ty
      <<")\n">>].
 
 -doc """
-The name of a file system type: FreeBSD's where FreeBSD has the file system
-(`tmpfs`, `procfs`, `devfs`), else the name its own project gives it.
+The name of a file system type: a local provider's own, and for a number a
+server answered, its member's name in the `p9_magic` enum, which the ABI file
+gives as FreeBSD's name where FreeBSD has the file system (`tmpfs`, `procfs`,
+`devfs`), else the name its own project gives it, and `ramfs` for the start
+service's tree.
 """.
 -spec type_name(fs_type()) -> binary().
 type_name(release) -> <<"release">>;
 type_name(erofs) -> <<"erofs">>;
-type_name({magic, ?ERX_P9_MAGIC_LITTLEFS}) -> <<"littlefs">>;
-type_name({magic, ?ERX_P9_MAGIC_TMPFS}) -> <<"tmpfs">>;
-type_name({magic, ?ERX_P9_MAGIC_PROC}) -> <<"procfs">>;
-type_name({magic, ?ERX_P9_MAGIC_DEVFS}) -> <<"devfs">>;
-type_name({magic, ?ERX_P9_MAGIC_RAMFS}) -> <<"ramfs">>;
 type_name({magic, Magic}) ->
-    iolist_to_binary(["0x", string:lowercase(integer_to_list(Magic, 16))]);
+    case lists:keyfind(Magic, 2, ?ERX_P9_MAGIC_MEMBERS) of
+        {Name, Magic} -> atom_to_binary(Name);
+        false -> iolist_to_binary(["0x", string:lowercase(integer_to_list(Magic, 16))])
+    end;
 type_name(unknown) -> <<"-">>.
 
 %% FreeBSD's local for a provider the domain reads itself; a grant, like an NFS

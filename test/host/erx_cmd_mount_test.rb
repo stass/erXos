@@ -11,7 +11,7 @@ require_relative '../fixtures/erlang_build'
 # shell's `mount` (docs/design-files.md, "Building, binding and mounting"),
 # against the erx_shell application and the file servers whose statfs it
 # names, compiled from source with warnings as errors on stock's emulator
-# (ERX_ERL and ERX_ERLC, which make check supplies). The `p9_magic_` values
+# (ERX_ERL and ERX_ERLC, which make check supplies). The `p9_magic` values
 # come from the generated erx_abi.hrl in build/gen.
 class ErxCmdMountTest < Minitest::Test
   # The applications the command and the servers run in, compiled whole (ErlangBuild).

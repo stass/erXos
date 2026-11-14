@@ -1383,12 +1383,12 @@ pid and the tree a grant roots in, `PID:/TREE`, as NFS writes
 `host:/export`, or `ended`; a bind's root follows as a path. The type is
 FreeBSD's `f_fstypename`: a local provider's own, and a grant's from its
 server's statfs at the entry's root (`erx_file_remote:statfs/2`), whose
-`type` is the number the server chose, one of the `p9_magic_` limits of
-`abi/protocols/9p.txt` for erXos's servers. `mount` names each limit,
-FreeBSD's name where FreeBSD has the file system (`tmpfs`, `procfs`,
-`devfs`), the project's own otherwise (`littlefs`, `erofs`), and `ramfs`
-for the start service's tree, after the Linux number it answers; a
-number no limit names prints in hex,
+`type` is the number the server chose, a member of the `p9_magic` enum of
+`abi/protocols/9p.txt` for erXos's servers. `mount` prints a member's
+name, which the ABI file gives as FreeBSD's name where FreeBSD has the
+file system (`tmpfs`, `procfs`, `devfs`), the project's own otherwise
+(`littlefs`, `erofs`), and `ramfs` for the start service's tree, after
+the Linux number it answers; a number no member names prints in hex,
 and a server that does not answer, or an ended grant, prints `-`. The
 options are FreeBSD's words in their order (`MNTOPT_NAMES`,
 `sys/sys/mount.h`): `local` for a provider the domain reads itself and

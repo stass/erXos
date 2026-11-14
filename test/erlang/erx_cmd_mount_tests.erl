@@ -6,8 +6,8 @@
 EUnit cases of the command shell's `mount` (erx_cmd_mount,
 docs/design-files.md, "Building, binding and mounting"): FreeBSD's layout
 `SOURCE on POINT (TYPE, OPTIONS)` for each kind of provider and each right,
-a bind's root in the source, the type name of each `p9_magic_` limit of
-abi/protocols/9p.txt, a number no limit names in hex and a missing type as
+a bind's root in the source, the type name of each `p9_magic` member of
+abi/protocols/9p.txt, a number no member names in hex and a missing type as
 `-`, names with control characters through the field escape, the type each
 of erXos's file servers answers statfs with as `mount` names it, and, on
 stock's emulator, which has no namespace table, `enotsup`
@@ -62,10 +62,10 @@ ended_grant_has_no_type_test() ->
 each_magic_has_its_name_test() ->
     ?assertEqual([<<"littlefs">>, <<"tmpfs">>, <<"procfs">>, <<"devfs">>, <<"ramfs">>],
                  [erx_cmd_mount:type_name({magic, Magic})
-                  || Magic <- [?ERX_P9_MAGIC_LITTLEFS, ?ERX_P9_MAGIC_TMPFS, ?ERX_P9_MAGIC_PROC,
+                  || Magic <- [?ERX_P9_MAGIC_LITTLEFS, ?ERX_P9_MAGIC_TMPFS, ?ERX_P9_MAGIC_PROCFS,
                                ?ERX_P9_MAGIC_DEVFS, ?ERX_P9_MAGIC_RAMFS]]).
 
-%% A number no limit names prints as the server sent it, at most ten characters.
+%% A number no member names prints as the server sent it, at most ten characters.
 unknown_magic_prints_in_hex_test() ->
     ?assertEqual(<<"0x0">>, erx_cmd_mount:type_name({magic, 0})),
     ?assertEqual(<<"0xffffffff">>, erx_cmd_mount:type_name({magic, 16#ffffffff})),
