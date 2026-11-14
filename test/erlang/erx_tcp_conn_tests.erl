@@ -124,7 +124,7 @@ start_connect() ->
 
 start_connect(Opts) ->
     {ok, SockProc} = gen_statem:start(erx_gen_tcp, self(), []),
-    Req = gen_statem:send_request(SockProc, {connect, {10, 0, 2, 2}, ?PEER_PORT, Opts, 10000}),
+    Req = gen_statem:send_request(SockProc, connect_request(Opts)),
     [{#tcp{flags = ?TH_SYN} = Syn, <<>>}] = segments(),
     put(sock_proc, SockProc),
     {Req, Syn}.
@@ -495,10 +495,15 @@ closed_into_time_wait() ->
 %% The answer to a connect the grant cannot start.
 refused_connect() ->
     {ok, SockProc} = gen_statem:start(erx_gen_tcp, self(), []),
-    Req = gen_statem:send_request(SockProc, {connect, {10, 0, 2, 2}, ?PEER_PORT,
-                                             [binary, {active, false}], 10000}),
+    Req = gen_statem:send_request(SockProc, connect_request([binary, {active, false}])),
     {reply, Reply} = gen_statem:receive_response(Req, ?WAIT),
     Reply.
+
+%% The socket process's open call for a connect to the peer with gen_tcp's options Opts,
+%% as erx_gen_tcp:connect/4 makes it.
+connect_request(Opts) ->
+    {ok, Own, Fwd} = erx_gen_tcp_core:options(Opts, #{mode => list, active => true}),
+    {open, {tcp_connect, inet, {10, 0, 2, 2}, ?PEER_PORT, Fwd, 10000}, Own}.
 
 %% A connection that dies before it answers still leaves no connect caller waiting: its
 %% grant, which the death reaches by the link, answers in its place.

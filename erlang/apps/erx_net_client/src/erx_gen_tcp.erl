@@ -18,10 +18,12 @@ before anything is sent; one that has ended answers as a closed socket, `{error,
 closed}`, and closing it again is `ok`.
 
 **The socket process.** The one party that talks to the socket, and the one that talks
-to the owner about it. `connect/4` and `listen/2` start it, owned by the caller; in
-`opening` it asks the grant for the connection or the listener through erx_inet:open/1,
-which checks the answer, and keeps the origin the grant was found with. From then on,
-in `open` for a connection and `listening` for a listener, it talks to its socket only
+to the owner about it. `connect/4` and `listen/2` check their options, start it, owned
+by the caller, and make its one open call with the grant's request for the connection
+or the listener. In `opening` it asks the grant through erx_inet:open/1, which checks
+the answer, and takes the socket and the grant's origin exactly as it takes an accepted
+connection (**Accepting**). From then on, in `open` for a connection and `listening`
+for a listener, it talks to its socket only
 in the socket protocol, `{erx_net, Sender, Body}`: it sends requests and credit, and
 takes the socket's replies and pushes through erx_sock_admit:push/4, which leaves out
 (`unknown`, dropped and counted) what is not its socket's from the socket's domain.
@@ -107,14 +109,13 @@ connect_each([Address | Rest], Port, Opts, Timer, _Last) ->
 connect_each([], _Port, _Opts, _Timer, Last) ->
     Last.
 
-%% A socket process for one address, owned by the caller; it ends by itself when the
-%% connect fails.
+%% A connection to one address, owned by the caller; options it does not take start no
+%% socket process.
 connect_one(Address, Port, Opts, Timeout) ->
     ok = stock_takes(connect, Opts),
-    {ok, Pid} = gen_statem:start(?MODULE, self(), []),
-    case call(Pid, {connect, Address, Port, Opts, Timeout}) of
-        ok -> {ok, {'$inet', ?MODULE, Pid}};
-        {error, _} = Error -> Error
+    maybe
+        {ok, Own, Fwd} ?= erx_gen_tcp_core:options(Opts, #{mode => list, active => true}),
+        open({tcp_connect, inet, Address, Port, Fwd, Timeout}, Own)
     end.
 
 -doc "Not offered by this backend, which answers `enotsup`: a socket-address map, `gen_tcp:connect/3`'s first form.".
@@ -132,12 +133,20 @@ listen(Port, Opts) when is_integer(Port), Port >= 0, Port =< 16#ffff, is_list(Op
     maybe
         {ok, Local, Rest} ?= erx_gen_tcp_core:local(Opts),
         {ok, Own, Listener} ?= erx_gen_tcp_core:listen_options(Rest),
-        {ok, Pid} = gen_statem:start(?MODULE, self(), []),
-        ok ?= call(Pid, {listen, Local, Port, Own, Listener}),
-        {ok, {'$inet', ?MODULE, Pid}}
+        open({tcp_listen, inet, Local, Port, Listener}, Own)
     end;
 listen(_Port, _Opts) ->
     exit(badarg).
+
+%% A socket process owned by the caller, which opens its socket with the grant's
+%% `Request`, a connection's or a listener's, and presents with `Own`; it ends by itself
+%% when the open fails.
+open(Request, Own) ->
+    {ok, Pid} = gen_statem:start(?MODULE, self(), []),
+    case call(Pid, {open, Request, Own}) of
+        ok -> {ok, {'$inet', ?MODULE, Pid}};
+        {error, _} = Error -> Error
+    end.
 
 %% `ok` when stock's gen_tcp takes every option of Opts for a connect or a listen; else
 %% the exit stock's own backend raises for it (inet_tcp:connect/4 and listen/2), badarg.
@@ -282,17 +291,16 @@ init(Owner) when is_pid(Owner) ->
 %% other call waits; an accept, which starts its caller's socket process; and the rest,
 %% which the core steps. Every other event is taken in a transfer as in the state it holds.
 -doc false.
-handle_event({call, From}, {connect, Address, Port, Opts, Timeout}, opening, #data{} = D) ->
-    case erx_gen_tcp_core:options(Opts, #{mode => list, active => true}) of
-        {ok, Own, Fwd} -> connected(erx_inet:open({tcp_connect, inet, Address, Port, Fwd, Timeout}), From, Own, D);
+handle_event({call, From}, {open, Request, Own}, opening, #data{starter_ref = none} = D) ->
+    Becomes = becomes(Request),
+    case erx_inet:open(Request) of
+        {ok, Sock, Origin} -> take(Sock, Origin, Becomes, Own, From, D);
         {error, _} = Error -> {stop_and_reply, normal, [{reply, From, Error}]}
     end;
-handle_event({call, From}, {listen, Local, Port, Own, Listener}, opening, #data{} = D) ->
-    listening(erx_inet:open({tcp_listen, inet, Local, Port, Listener}), From, Own, Listener, D);
 handle_event({call, From}, {hand_over, Conn, Origin, Own}, opening, #data{starter_ref = Ref} = D)
   when is_reference(Ref) ->
     true = erlang:demonitor(Ref, [flush]),
-    connected({ok, Conn, Origin}, From, Own, D#data{starter_ref = none});
+    take(Conn, Origin, connection, Own, From, D#data{starter_ref = none});
 handle_event({call, From}, _Request, opening, _D) ->
     {keep_state_and_data, [{reply, From, {error, einval}}]};
 handle_event({call, From}, {controlling_process, NewOwner}, State, D) when State =:= open; State =:= listening ->
@@ -362,28 +370,32 @@ format_status(Status) ->
                 (_, Value) -> Value
              end, Status).
 
-%% A connection, the grant's answer to the connect, already checked by erx_inet, or handed
-%% over by the listening socket's process: the socket process monitors it from now on, and
-%% keeps its domain's origin.
-connected({ok, Conn, Origin}, From, Own, D) ->
-    %% The opener, or the listening socket's process that hands the connection over, is
-    %% answered before the monitor, so it never waits on the lane the monitor crosses.
-    gen_statem:reply(From, ok),
-    {Core, Actions} = erx_gen_tcp_core:new({'$inet', ?MODULE, self()}, Own),
-    D1 = D#data{sock = Conn, sock_ref = erlang:monitor(process, Conn), origin = Origin, core = Core},
-    enter(open, perform(Actions, D1, []));
-connected({error, _} = Error, From, _Own, _D) ->
-    {stop_and_reply, normal, [{reply, From, Error}]}.
+%% What an open's request makes of its socket process: a connection, or a listener whose
+%% accepted connections start with its `nodelay`.
+becomes({tcp_connect, _Family, _Address, _Port, _Opts, _Timeout}) -> connection;
+becomes({tcp_listen, _Family, _Local, _Port, Opts}) -> {listener, proplists:get_value(nodelay, Opts, false)}.
 
-%% The grant's answer to the listen, already checked by erx_inet: the listener, whose node
-%% every connection it answers an accept with must be of.
-listening({ok, Listener, Origin}, From, Own, Opts, D) ->
-    Core = erx_gen_tcp_core:listener({'$inet', ?MODULE, self()}, Own,
-                                     #{nodelay => proplists:get_value(nodelay, Opts, false), node => node(Listener)}),
-    D1 = D#data{sock = Listener, sock_ref = erlang:monitor(process, Listener), origin = Origin, core = Core},
-    {next_state, listening, D1, [{reply, From, ok}]};
-listening({error, _} = Error, From, _Own, _Opts, _D) ->
-    {stop_and_reply, normal, [{reply, From, Error}]}.
+%% The one way a socket process takes its socket, the grant's answer to its open (already
+%% checked by erx_inet) or a connection the listening socket's process hands over, and
+%% becomes `open` or `listening`. It monitors the socket and keeps its domain's origin.
+%%
+%% The caller is answered after the core is built and before the monitor, so a listening
+%% socket's process that hands a connection over never waits on the lane the monitor
+%% crosses.
+take(Sock, Origin, Becomes, Own, From, D) ->
+    Self = {'$inet', ?MODULE, self()},
+    {State, Core, Actions} =
+        case Becomes of
+            connection ->
+                {C, As} = erx_gen_tcp_core:new(Self, Own),
+                {open, C, As};
+            {listener, Nodelay} ->
+                %% Every connection the listener answers an accept with must be of its node.
+                {listening, erx_gen_tcp_core:listener(Self, Own, #{nodelay => Nodelay, node => node(Sock)}), []}
+        end,
+    gen_statem:reply(From, ok),
+    D1 = D#data{sock = Sock, sock_ref = erlang:monitor(process, Sock), origin = Origin, core = Core},
+    enter(State, perform(Actions, D1, [])).
 
 %% controlling_process/2's first call, answered as stock's inet answers it: `ok` when the
 %% new owner is the owner, `not_owner` for a caller that is not, `badarg` for a new owner
