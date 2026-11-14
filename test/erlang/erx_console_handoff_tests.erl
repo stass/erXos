@@ -23,13 +23,13 @@ handoff_test_() ->
 setup() ->
     process_flag(trap_exit, true),
     persistent_term:erase({erx_syslog, started}),
-    Recorder = spawn(fun() -> register(erx_log_standin, self()), recorder([], []) end),
-    wait_registered(erx_log_standin),
-    Recorder.
+    start_recorder().
 
 cleanup(Recorder) ->
-    [stop(Name) || Name <- [erx_console, erx_syslog_sup]],
-    exit(Recorder, kill),
+    %% The supervisor dies before the service, so it cannot restart it; the service dies
+    %% before the recorder, so it cannot take from the next case's.
+    [stop(whereis(Name)) || Name <- [erx_console, erx_syslog_sup, erx_syslog]],
+    stop(Recorder),
     persistent_term:erase({erx_syslog, started}),
     flush().
 
@@ -100,6 +100,12 @@ driver(Console) ->
                      end),
     {ok, Pid, false}.
 
+%% The name is held when this returns, and a name still held fails here, not later.
+start_recorder() ->
+    Recorder = spawn(fun() -> recorder([], []) end),
+    true = register(erx_log_standin, Recorder),
+    Recorder.
+
 %% The recorder: each take and write in order, and the takes' programmed answers.
 recorder(Events, Answers) ->
     receive
@@ -128,22 +134,15 @@ events() ->
     erx_log_standin ! {events, self(), Ref},
     receive {Ref, Events} -> Events after 2000 -> error(no_recorder) end.
 
-wait_registered(Name) ->
-    case whereis(Name) of
-        undefined -> timer:sleep(5), wait_registered(Name);
-        _Pid -> ok
-    end.
-
-stop(Name) ->
-    case whereis(Name) of
-        undefined ->
-            ok;
-        Pid ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, kill),
-            receive {'DOWN', Ref, process, Pid, _} -> ok end
-    end.
+%% Kill a process (none when undefined) and return once it is dead, so the name it held
+%% is free for the next case.
+stop(undefined) ->
+    ok;
+stop(Pid) ->
+    Ref = monitor(process, Pid),
+    unlink(Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, _} -> ok end.
 
 flush() ->
     receive _ -> flush() after 0 -> ok end.
