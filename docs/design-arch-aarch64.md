@@ -200,9 +200,16 @@ requires the loader to quiesce every DMA-capable device before entry
 platform contract additionally requires that quiescence drain outstanding
 DMA through the platform's documented completion or reset mechanism
 before memory is reclaimed. Setting an SMMU to abort future traffic does
-not drain requests already beyond it. An unknown or failed drain stops
-boot before allocator handoff; the platform's loader evidence is a
-security gate ([DMA](design-platforms.md#dma), [IOMMU](#iommu)).
+not drain requests already beyond it. A failed drain stops boot before
+allocator handoff in every build. A drain that is unknown, because the
+platform's DMA contract lists a bus master's handover as unknown, is a
+question of the platform's admission, since the kernel cannot observe
+the time before its entry: development builds boot on such a platform,
+because they run trusted code only, say so in their banner and never
+ship, and the gap stays an open security residual; release builds refuse
+the platform until the loader evidence its DMA contract names is
+recorded for each loader release the port supports
+([DMA](design-platforms.md#dma), [IOMMU](#iommu)).
 
 At entry (`boot.S`), with the MMU off, the kernel saves `x0` and checks
 the device tree's header. If `CurrentEL` is EL2, it installs an EL2 vector

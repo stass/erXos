@@ -71,9 +71,11 @@ Decisions every reader needs:
   The order is a proposal of [plan.md](plan.md#track-u-usb-proposed).
 * **The Pi 4 boots from its microSD card alone.** The board's EEPROM
   boot order names no USB device and no network boot, so the boot
-  firmware never starts the VL805 and leaves erXos no running USB
-  controller to stop; this rests on a board setting not yet verified on
-  a board ([The boot firmware's handover](#the-bcm2711-bridge)).
+  firmware has no reason to start the VL805. Whether it leaves the
+  controller stopped is unknown until the firmware's documentation and a
+  reading at kernel entry are recorded: development builds boot on the
+  board meanwhile, with the gap an open security residual, and release
+  builds refuse it ([The boot firmware's handover](#the-bcm2711-bridge)).
 
 ## Contents
 
@@ -887,8 +889,9 @@ the same table, so a link the boot firmware left up with the VL805's
 firmware loaded is kept (probes B1 and B3). That keep is safe only
 under the boot contract's requirement: the loader leaves every
 bus master stopped, its outstanding DMA drained, before the kernel
-reclaims any memory, and an unknown or failed drain stops the boot
-before allocator handoff
+reclaims any memory; a failed drain stops the boot before allocator
+handoff, and a platform whose DMA contract leaves a drain unknown boots
+only in development builds
 ([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)). The
 VL805 is one of the Pi 4's bus masters
 ([design-platforms.md](design-platforms.md#dma)). The PCIe domain
@@ -922,22 +925,31 @@ evidence that it meets the boot contract. No source read for this
 design says what the boot firmware does with the VL805 under any boot
 order, whether loading the VL805's firmware on a board without its
 EEPROM starts the controller, or whether a firmware update changes
-either. The contract's rule therefore stands as written: quiescence
-that is unknown stops the boot before memory is reclaimed. The kernel
-reads nothing behind the bridge and cannot observe the VL805 before it
-reclaims memory, so on the Pi 4 the rule acts through the platform's
-admission rather than at run time: the Pi 4's DMA contract lists the
-VL805's handover as unknown, beside its other bus masters'
-([design-platforms.md](design-platforms.md#dma)), and the board meets
-the boot contract only once the evidence below is recorded for the
-firmware release and configuration the board port supports, as
-`TODO.md`'s DMA platform-evidence item requires of every platform.
+either. The kernel reads nothing behind the bridge and cannot observe
+the VL805 before it reclaims memory, so on the Pi 4 the contract's rule
+acts through the platform's admission rather than at run time: the Pi
+4's DMA contract lists the VL805's handover as unknown, beside its
+other bus masters' ([design-platforms.md](design-platforms.md#dma)),
+and the board meets the boot contract only once the evidence below is
+recorded for the firmware release and configuration the board port
+supports, as `TODO.md`'s DMA platform-evidence item requires of every
+platform. What an unknown handover admits differs by build
+([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)):
+
+* **Development builds boot on the Pi 4.** They run trusted code only
+  and say so in their banner, and nothing ships before a release, so the
+  worst a VL805 left running can do is corrupt the memory of a
+  development machine. The gap is an open security residual in
+  `TODO.md`, and the inspector shows the handover as unknown.
+* **Release builds refuse the Pi 4** until both pieces of evidence below
+  are recorded for each firmware release the board port supports.
+
 Until then this design claims nothing for the handover, and the
 bridge's reset path is no remedy, since it runs after the kernel has
 reclaimed memory a running VL805 may have written. The same question
 for the Pi 4's other bus masters, the SD controller among them, which
 the boot firmware does use under this boot order, belongs to
-[design-platforms.md](design-platforms.md#dma).
+[design-platforms.md](design-platforms.md#dma), under the same rule.
 
 **What establishes the handover** is evidence for the time before the
 kernel's first instruction, which nothing erXos runs after it can
@@ -971,9 +983,10 @@ observe. Two pieces, for each firmware release the board port supports:
 (1) speaks for the time before entry and (2) shows that the board in
 hand matches it; with both recorded, the Pi 4's DMA contract lists the
 VL805's handover as stopped for that release. Without (1), or with (2)
-refuting it, the handover stays unknown, and the Pi 4 then needs a stop
-before kernel entry, a first stage that resets the VL805 and waits out
-its drain, which this design does not define.
+refuting it, the handover stays unknown: development builds still boot,
+release builds still refuse the board, and a release for the Pi 4 then
+needs a stop before kernel entry, a first stage that resets the VL805
+and waits out its drain, which this design does not define.
 
 Probe B3 repeats the reading of (2) later, at the PCIe domain's first
 start in a test build, before the bridge driver writes anything, with

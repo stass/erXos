@@ -2495,8 +2495,11 @@ implements the same protocol, so no step is specific to one loader
    register transition to close future requests. For every bus master,
    confined or unconfined, the platform contract also establishes a
    completed drain or reset of outstanding DMA, including the IOMMU's own
-   accesses; unknown or failed completion stops boot before allocator
-   handoff ([design-platforms.md](design-platforms.md#dma)). Then seed the
+   accesses; a failed completion stops boot before allocator handoff,
+   and a platform whose contract leaves a completion unknown boots in
+   development builds only, release builds refusing the platform
+   ([design-platforms.md](design-platforms.md#dma),
+   [design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)). Then seed the
    physical page allocator with RAM less the image, its tables, the device
    tree, the boot image, the reservation block and the reserved-memory
    nodes; then carve, before any budget exists, the per-CPU areas, each

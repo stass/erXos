@@ -616,7 +616,14 @@ abort holds, and enables translation only after a completed sync. A
 device whose reset fails is not given to another driver. A protocol
 requirement is not evidence that a particular firmware meets it: source
 evidence and pending loader and hardware tests are distinguished in [the
-hardware-contract audit](research-hardware-contracts.md).
+hardware-contract audit](research-hardware-contracts.md). A bus master
+whose handover the recorded evidence does not establish is listed as
+unknown, and a platform with one is admitted by build: development
+builds boot on it, since they run trusted code only, say so in their
+banner and never ship, and the gap is an open security residual in
+`TODO.md`; release builds refuse the platform until the evidence its
+contract names is recorded for each loader release the port supports
+([design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)).
 
 **The SMMUv3 is QEMU's.** The kernel's SMMUv3 driver covers what QEMU
 `virt`'s model needs: one SMMU, stage 1, 4 KiB pages and 16-bit ASIDs,
@@ -629,7 +636,7 @@ Raspberry Pi has one.
 
 | | QEMU `virt` | Raspberry Pi 4 | Raspberry Pi 5 |
 | --- | --- | --- | --- |
-| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which the USB domain drives and whose handover is unknown: the EEPROM's boot order names the microSD card alone, so that the boot firmware has no reason to start it, but until the firmware's documented behaviour for that order and a reading at the kernel's entry are recorded for the supported firmware release, the VL805 counts as possibly running at entry ([design-usb.md](design-usb.md#the-bcm2711-bridge)), and the firmware, which stays resident with access to all memory ([Firmware](#firmware)) | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
+| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which the USB domain drives and whose handover is unknown: the EEPROM's boot order names the microSD card alone, so that the boot firmware has no reason to start it, but until the firmware's documented behaviour for that order and a reading at the kernel's entry are recorded for the supported firmware release, the VL805 counts as possibly running at entry ([design-usb.md](design-usb.md#the-bcm2711-bridge)), and the firmware, which stays resident with access to all memory ([Firmware](#firmware)); every master's handover is unknown until its evidence is recorded, so development builds boot on the board, the gap an open security residual, and release builds refuse it | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
 | Translation | the SMMUv3, stage 1, for functions on the root bus, which the harness creates with `iommu=smmuv3`; nothing for virtio-mmio | none described ([research](research-boards-storage.md#raspberry-pi-4-model-b-bcm2711)) | none for Ethernet, USB, the SD controllers or the external connector; each BCM2712 IOMMU serves media blocks or RP1's camera and display paths, with one address space for all its devices |
 | Bypass | none: the driver sets the global bypass to abort before anything else, and a stream without a window aborts | every master | the BCM2712 IOMMUs pass addresses below their windows through untranslated |
 | Requester identity | fixed on the ECAM root bus: `smmu_get_sid` builds the id from the model's bus and `devfn`; `pcibus_num` fixes the root bus at zero, whereas a subordinate bus takes its number from writable bridge configuration. Each root-bus function is its own isolation group. This is source-checked in QEMU v11.1.2; the supported binary must pass the same contract tests before its confined profile is admitted ([audit](research-hardware-contracts.md)) | none used | none per device |
