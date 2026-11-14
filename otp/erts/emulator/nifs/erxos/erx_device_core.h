@@ -153,6 +153,8 @@ typedef struct erx_device_field_plan {
 
 /* The peripheral with this name in the generated table, or NULL. */
 const erx_device_peripheral_t *erx_device_peripheral_find(const char *name, size_t length);
+/* Whether the peripheral is the named one or a kind whose registers begin with that one's. */
+bool	erx_device_peripheral_is(const erx_device_peripheral_t *peripheral, const char *name);
 /* The register's or the field's index by its text, or `count` for none: for callers with no atoms. */
 uint32_t	erx_device_register_named(const erx_device_peripheral_t *peripheral, const char *name);
 uint32_t	erx_device_field_named(const erx_device_peripheral_t *peripheral, const erx_device_register_t *reg,

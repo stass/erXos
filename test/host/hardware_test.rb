@@ -50,7 +50,7 @@ class HardwareTest < Minitest::Test
   def test_xml_and_semantic_rejections
     malformed = [@source + '<device/>', @source.sub('<device schemaVersion="1.3">',
                  '<!DOCTYPE device [<!ENTITY x "boom">]><device schemaVersion="1.3">'),
-                 @source.sub('<width>32</width>', '<width>16</width>'),
+                 @source.sub('<width>32</width>', '<width>24</width>'),
                  @source.sub('<addressOffset>0x18</addressOffset>', '<addressOffset>2</addressOffset>'),
                  @source.sub('<bitWidth>8</bitWidth>', '<bitWidth>33</bitWidth>'),
                  @source.sub('<name>PL011</name>', '<name derivedFrom="other">PL011</name>'),
@@ -174,6 +174,125 @@ class HardwareTest < Minitest::Test
                           '</enumeratedValue></enumeratedValues>')
     refute_equal @source, collide
     assert_raises(Erx::Error) { Erx::Hardware.parse_svd(collide) }
+  end
+
+  # A transport, as one cluster, and a kind that copies it and adds its own narrow registers:
+  # the shape of hw/svd/virtio_mmio/virtio_mmio.svd, small enough to break one rule at a time.
+  KINDS = <<~SVD
+    <?xml version="1.0" encoding="UTF-8"?>
+    <device schemaVersion="1.3">
+      <name>T</name><version>1</version><description>t</description>
+      <addressUnitBits>8</addressUnitBits><width>32</width>
+      <peripherals>
+        <peripheral>
+          <name>BASE</name><baseAddress>0</baseAddress>
+          <addressBlock><offset>0</offset><size>0x20</size><usage>registers</usage></addressBlock>
+          <registers>
+            <cluster><name>TRANSPORT</name><description>shared</description><addressOffset>0</addressOffset>
+              <register><name>MAGIC</name><ownedByNif>false</ownedByNif><addressOffset>0</addressOffset><access>read-only</access>
+                <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields></register>
+              <register><name>STATUS</name><ownedByNif>true</ownedByNif><addressOffset>4</addressOffset><access>read-write</access>
+                <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields></register>
+            </cluster>
+          </registers>
+        </peripheral>
+        <peripheral>
+          <name>KIND</name><baseAddress>0</baseAddress>
+          <addressBlock><offset>0</offset><size>0x20</size><usage>registers</usage></addressBlock>
+          <registers>
+            <cluster derivedFrom="BASE.TRANSPORT"><name>TRANSPORT</name><description>shared</description><addressOffset>0</addressOffset></cluster>
+            <register><name>SELECT</name><ownedByNif>false</ownedByNif><size>8</size><addressOffset>0x10</addressOffset><access>read-write</access>
+              <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields></register>
+            <register><name>SIZE</name><ownedByNif>false</ownedByNif><size>8</size><addressOffset>0x11</addressOffset><access>read-only</access>
+              <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields></register>
+            <register><name>STEP</name><ownedByNif>false</ownedByNif><size>16</size><addressOffset>0x12</addressOffset><access>read-write</access>
+              <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field></fields></register>
+            <register><name>LIMIT</name><ownedByNif>false</ownedByNif><addressOffset>0x14</addressOffset><access>read-only</access>
+              <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields></register>
+          </registers>
+        </peripheral>
+      </peripherals>
+    </device>
+  SVD
+
+  def test_a_kind_copies_the_transport_cluster_and_adds_registers_of_their_own_width
+    base, kind = Erx::Hardware.parse_peripherals(KINDS)
+    assert_equal %w[MAGIC STATUS], base.registers.map(&:name)
+    assert_nil base.derived_from
+    assert_equal %w[MAGIC STATUS SELECT SIZE STEP LIMIT], kind.registers.map(&:name)
+    assert_equal base.registers, kind.registers.first(2)
+    assert_equal [32, 32, 8, 8, 16, 32], kind.registers.map(&:width)
+    assert_equal 'BASE', kind.derived_from
+    table = Erx::Hardware.device_table_header([base, kind])
+    assert_match(/\.name = "select", \.writable = UINT8_C\(0xff\), \.offset = 16,.*\.width = 8,/, table)
+    assert_match(/\.name = "kind", .*\.derived_from = "base"/, table)
+    assert_match(/\.name = "base", .*\.derived_from = NULL/, table)
+    access = Erx::Hardware.device_access_header
+    %w[load8 store8 load16 store16 load32 load64].each { |name| assert_includes access, "erx_device_access_#{name}(" }
+    assert_raises(Erx::Error) { Erx::Hardware.parse_svd(KINDS) }
+  end
+
+  # Each rule of the profile's derivation and widths, broken once.
+  def test_a_derivation_or_a_narrow_register_outside_the_profile_is_refused
+    derived = '<cluster derivedFrom="BASE.TRANSPORT"><name>TRANSPORT</name><description>shared</description>' \
+              '<addressOffset>0</addressOffset></cluster>'
+    select = '<size>8</size><addressOffset>0x10</addressOffset>'
+    [KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="NONE.TRANSPORT"'),
+     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="BASE.OTHER"'),
+     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="TRANSPORT"'),
+     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="KIND.TRANSPORT"'),
+     KINDS.sub("#{derived}\n", '').sub('</registers>', "#{derived}</registers>"),
+     KINDS.sub('<addressOffset>0</addressOffset></cluster>', '<addressOffset>8</addressOffset></cluster>'),
+     KINDS.sub('</addressOffset></cluster>', '</addressOffset><register/></cluster>'),
+     KINDS.sub(select, '<size>8</size><addressOffset>0x4</addressOffset>'),
+     KINDS.sub('<size>16</size><addressOffset>0x12</addressOffset>', '<size>16</size><addressOffset>0x13</addressOffset>'),
+     KINDS.sub(select, '<size>24</size><addressOffset>0x10</addressOffset>'),
+     KINDS.sub('<bitWidth>8</bitWidth>', '<bitWidth>9</bitWidth>'),
+     KINDS.sub('<size>0x20</size>', '<size>0x4</size>')].each_with_index do |bytes, index|
+      refute_equal KINDS, bytes, "case #{index} changed nothing"
+      assert_raises(Erx::Error, "case #{index}") { Erx::Hardware.parse_peripherals(bytes) }
+    end
+  end
+
+  def test_narrow_accessors_compile_and_touch_only_their_bytes
+    FileUtils.mkdir_p(File.join(@root, 'hw/svd/kinds'))
+    File.binwrite(File.join(@root, 'hw/svd/kinds/kinds.svd'), KINDS)
+    Erx::Hardware.output_plan(root: @root).each do |relative, bytes|
+      FileUtils.mkdir_p(File.dirname(File.join(@root, relative)))
+      File.binwrite(File.join(@root, relative), bytes)
+    end
+    source = File.join(@root, 'narrow.c')
+    File.binwrite(source, <<~C)
+      #include "erx/hw/kind.h"
+      #include "erx/hw/device_access.h"
+      #include <assert.h>
+      int main(void)
+      {
+      \t_Alignas(8) uint8_t registers[0x20] = {0};
+      \terx_mmio_t device = {registers, sizeof(registers)};
+      \tuint8_t size = 0;
+      \tuint16_t step = 0;
+      \tregisters[0x11] = 0x14;
+      \tassert(erx_kind_select_write(device, UINT8_C(0x12)));
+      \tassert(registers[0x10] == 0x12 && registers[0x11] == 0x14 && registers[0x0f] == 0);
+      \tassert(erx_kind_size_read(device, &size) && size == 0x14);
+      \tassert(erx_kind_step_write(device, UINT16_C(0xbeef)));
+      \tassert(erx_kind_step_read(device, &step) && step == 0xbeef && registers[0x11] == 0x14);
+      \terx_device_access_store8(registers, 0x13, 0x7f);
+      \tassert(erx_device_access_load8(registers, 0x13) == 0x7f && erx_device_access_load8(registers, 0x12) == 0xef);
+      \terx_device_access_store16(registers, 0x12, 0x1234);
+      \tassert(erx_device_access_load16(registers, 0x12) == 0x1234 && registers[0x11] == 0x14);
+      \tdevice.length = 0x11;
+      \tassert(!erx_kind_size_read(device, &size));
+      \treturn (0);
+      }
+    C
+    runner = Erx::Runner.new(owner_root: @root, log_dir: File.join(@root, 'logs'))
+    program = File.join(@root, 'narrow')
+    runner.run(['clang', '-std=c17', '-Wall', '-Wextra', '-Werror', '-pedantic',
+                '-fsanitize=address,undefined', '-I', File.join(@root, 'include'), source,
+                '-o', program], name: 'compile-narrow', deadline: 60)
+    assert_equal 'succeeded', runner.run([program], name: 'narrow-accessors', deadline: 30).fetch('state')
   end
 
   def test_generated_accessors_compile_and_preserve_neighbor_bits

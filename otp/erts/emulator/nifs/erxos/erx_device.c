@@ -446,22 +446,44 @@ erx_device_field_by_key(const erx_device_t *device, const erx_device_register_t 
 	return (found == reg->field_count ? NULL : &device->peripheral->fields[reg->first_field + found]);
 }
 
+/* The one load of a register: one access of its declared width, which the table holds as 8, 16, 32 or 64. */
 static uint64_t
 load(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset)
 {
-	if (reg->width == 64)
-		return (erx_device_access_load64(device->windows[reg->window], offset));
-	return (erx_device_access_load32(device->windows[reg->window], offset));
+	volatile uint8_t *const window = device->windows[reg->window];
+
+	switch (reg->width) {
+	case 8:
+		return (erx_device_access_load8(window, offset));
+	case 16:
+		return (erx_device_access_load16(window, offset));
+	case 64:
+		return (erx_device_access_load64(window, offset));
+	default:
+		return (erx_device_access_load32(window, offset));
+	}
 }
 
 /* The one store to a register; a hosted stand-in's device then acts on it, as a device would. */
 static void
 store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset, uint64_t value)
 {
-	if (reg->width == 64)
-		erx_device_access_store64(device->windows[reg->window], offset, value);
-	else
-		erx_device_access_store32(device->windows[reg->window], offset, (uint32_t)value);
+	volatile uint8_t *const window = device->windows[reg->window];
+
+	switch (reg->width) {
+	case 8:
+		erx_device_access_store8(window, offset, (uint8_t)value);
+		break;
+	case 16:
+		erx_device_access_store16(window, offset, (uint16_t)value);
+		break;
+	case 64:
+		erx_device_access_store64(window, offset, value);
+		break;
+	default:
+		erx_device_access_store32(window, offset, (uint32_t)value);
+		break;
+	}
 #ifdef ERX_DEVICE_STAND_IN
 	if (device->form == ERX_DEVICE_FORM_STAND_IN)
 		stand_in_stored(device, reg, offset, value);
@@ -481,7 +503,7 @@ store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t off
 static bool
 stand_in_virtio(const erx_device_t *device)
 {
-	return (device->peripheral == erx_device_peripheral_find("virtio_mmio", sizeof("virtio_mmio") - 1));
+	return (erx_device_peripheral_is(device->peripheral, "virtio_mmio"));
 }
 
 /*
@@ -833,16 +855,17 @@ status_bit(const erx_device_peripheral_t *virtio, const erx_device_register_t *s
 
 /*
  * The registers of a virtio-mmio device: those the NIF only reads by name, and those it owns
- * by their generated index in the table, which is virtio_mmio's because the device's
- * peripheral is. False for any other peripheral.
+ * by their generated index in virtio_mmio's table. The device's peripheral is virtio_mmio or
+ * a kind whose table begins with virtio_mmio's registers at the same indices
+ * (docs/design-hardware-generation.md, "Register inputs"). False for any other peripheral.
  */
 static bool
 virtio_registers(const erx_device_t *device, virtio_registers_t *regs)
 {
-	const erx_device_peripheral_t *const virtio = erx_device_peripheral_find("virtio_mmio", sizeof("virtio_mmio") - 1);
+	const erx_device_peripheral_t *const virtio = device->peripheral;
 	const erx_device_register_t *owned;
 
-	if (virtio == NULL || device->peripheral != virtio)
+	if (!erx_device_peripheral_is(virtio, "virtio_mmio"))
 		return (false);
 	owned = virtio->registers;
 	regs->version = plain_register(device, "version");

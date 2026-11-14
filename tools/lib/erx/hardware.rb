@@ -14,16 +14,23 @@ module Erx
     Field = Struct.new(:name, :offset, :width, :access, :clear, :values, keyword_init: true)
     Register = Struct.new(:name, :offset, :width, :access, :read_action, :fields, :owned_by_nif, :count, :stride,
                           keyword_init: true)
-    Device = Struct.new(:name, :size, :registers, keyword_init: true)
+    # derived_from names the peripheral whose leading cluster this one's registers begin with;
+    # leading is this one's own leading cluster, its name, offset and register count, or nil.
+    Device = Struct.new(:name, :size, :registers, :derived_from, :leading, keyword_init: true)
+    Leading = Data.define(:name, :offset, :count)
     IDENTIFIER = /\A[A-Za-z][A-Za-z0-9_]*\z/
     ARRAY_NAME = /\A(.*)\[%s\]\z/
     ELEMENTS_MAX = 256
+    WIDTHS = [8, 16, 32, 64].freeze
+    PERIPHERALS_MAX = 16
+    # The attributes the profile gives a meaning: the schema's version, and a cluster's derivation.
+    ATTRIBUTES = { 'device' => ['schemaVersion'], 'cluster' => ['derivedFrom'] }.freeze
     # Headers the device table owns under include/erx/hw, so no peripheral may be named for one.
     DEVICE_HEADERS = %w[device_types device_table device_access device_owned].freeze
     # Every SVD file beneath hw/svd is an input; generation discovers them.
     SVD_GLOB = 'hw/svd/**/*.svd'
     MAX_SVD_BYTES = 4 * 1024 * 1024
-    CONTAINERS = %w[device peripherals peripheral addressBlock registers register fields field
+    CONTAINERS = %w[device peripherals peripheral addressBlock registers cluster register fields field
                     enumeratedValues enumeratedValue].freeze
     module_function
 
@@ -53,7 +60,7 @@ module Erx
           count += 1
           raise Error, 'SVD element/depth bound exceeded' if count > 65_536 || stack.size >= 32
           node = XmlNode.new(name: event[0], attributes: event[1], text: ''.dup, children: [])
-          allowed_attributes = node.name == 'device' ? ['schemaVersion'] : []
+          allowed_attributes = ATTRIBUTES.fetch(node.name, [])
           unless (node.attributes.keys - allowed_attributes).empty?
             raise Error, 'SVD attributes require explicit semantic support'
           end
@@ -126,8 +133,7 @@ module Erx
     def known_elements(node, allowed:)
       unknown = node.children.map(&:name) - allowed
       raise Error, "unsupported SVD element: #{unknown.first}" unless unknown.empty?
-      attributes = node.name == 'device' ? ['schemaVersion'] : []
-      unless (node.attributes.keys - attributes).empty?
+      unless (node.attributes.keys - ATTRIBUTES.fetch(node.name, [])).empty?
         raise Error, 'SVD attributes require explicit semantic support'
       end
     end
@@ -137,7 +143,17 @@ module Erx
       value.freeze
     end
 
+    # The one peripheral of an SVD file that describes one, as most do.
     def parse_svd(bytes)
+      devices = parse_peripherals(bytes)
+      raise Error, 'SVD input describes more than one peripheral' unless devices.size == 1
+
+      devices.first
+    end
+
+    # Every peripheral of one SVD file, in order. A peripheral's registers are its own, and
+    # those of a cluster it derives from an earlier peripheral of the file (see derived_cluster).
+    def parse_peripherals(bytes)
       root = xml(bytes)
       raise Error, 'SVD root must be device' unless root.name == 'device'
       raise Error, 'unsupported SVD schema version' unless root.attributes['schemaVersion'] == '1.3'
@@ -145,8 +161,16 @@ module Erx
       raise Error, 'SVD address units must be bytes' unless number(text(root, 'addressUnitBits')) == 8
       default_width = number(text(root, 'width'))
       peripherals = child(root, 'peripherals')
-      raise Error, 'SVD input profile requires one peripheral' unless peripherals.children.size == 1
-      peripheral = child(peripherals, 'peripheral')
+      known_elements(peripherals, allowed: ['peripheral'])
+      unless peripherals.children.size.between?(1, PERIPHERALS_MAX)
+        raise Error, "SVD input profile requires 1..#{PERIPHERALS_MAX} peripherals"
+      end
+      peripherals.children.each_with_object([]) do |node, parsed|
+        parsed << parse_peripheral(node, default_width: default_width, earlier: parsed)
+      end.freeze
+    end
+
+    def parse_peripheral(peripheral, default_width:, earlier:)
       known_elements(peripheral, allowed: %w[name description baseAddress addressBlock registers])
       raise Error, 'SVD peripheral base must be relative zero' unless number(text(peripheral, 'baseAddress')) == 0
       block = child(peripheral, 'addressBlock')
@@ -155,19 +179,75 @@ module Erx
       raise Error, 'SVD address block must hold registers' unless text(block, 'usage') == 'registers'
       size = number(text(block, 'size'), maximum: 1024 * 1024)
       registers = child(peripheral, 'registers')
-      known_elements(registers, allowed: ['register'])
-      list = registers.children.map { |node| parse_register(node, default_width: default_width, block_size: size) }
+      known_elements(registers, allowed: %w[register cluster])
+      derived_from, leading, list = peripheral_registers(registers.children, default_width: default_width, block_size: size,
+                                                                   earlier: earlier)
       raise Error, 'SVD requires 1..4096 registers' unless list.size.between?(1, 4096)
       names = list.map { |register| register.name.downcase }
       raise Error, 'SVD register names collide' unless names.uniq == names
       element_ranges(list).each_cons(2) do |left, right|
         raise Error, 'SVD register ranges overlap' if left.end > right.begin
       end
-      Device.new(name: identifier(text(peripheral, 'name')), size: size,
-                 registers: list.freeze).freeze.then do |device|
+      Device.new(name: identifier(text(peripheral, 'name')), size: size, registers: list.freeze,
+                 derived_from: derived_from, leading: leading).freeze.then do |device|
         validate_symbols(device)
         device
       end
+    end
+
+    # A peripheral's registers in order, a cluster's flattened in its place with their own
+    # names; the peripheral its first cluster derives from, or nil; and its own first cluster
+    # when that is not derived, which a later peripheral may derive from.
+    def peripheral_registers(nodes, default_width:, block_size:, earlier:)
+      derived_from = leading = nil
+      list = nodes.each_with_index.flat_map do |node, index|
+        next [parse_register(node, default_width: default_width, block_size: block_size)] if node.name == 'register'
+
+        if node.attributes.key?('derivedFrom')
+          raise Error, 'an SVD derived cluster must be its peripheral\'s first element' unless index.zero?
+
+          derived_from, copied = derived_cluster(node, earlier: earlier)
+          next copied
+        end
+        cluster_registers(node, default_width: default_width, block_size: block_size).tap do |members|
+          leading = Leading.new(name: text(node, 'name'), offset: number(text(node, 'addressOffset')),
+                                count: members.size) if index.zero?
+        end
+      end
+      [derived_from, leading, list]
+    end
+
+    # A cluster of the profile: one level, no array, its registers at offsets from its own.
+    def cluster_registers(node, default_width:, block_size:)
+      known_elements(node, allowed: %w[name description addressOffset register])
+      identifier(text(node, 'name'))
+      base = number(text(node, 'addressOffset'), maximum: block_size)
+      members = children(node, 'register')
+      raise Error, 'SVD cluster requires registers' if members.empty?
+
+      members.map { |member| parse_register(member, default_width: default_width, block_size: block_size, base: base) }
+    end
+
+    # A cluster derivedFrom "PERIPHERAL.CLUSTER" copies that cluster whole, as CMSIS-SVD's
+    # derivation copies a section, and adds nothing: elements a derived section restates
+    # override what it inherits, and the specification defines no merge of a register list
+    # (svd-spec v1.3.9, doxygen/src/svd_schema.txt, cluster and peripheral derivedFrom). The
+    # cluster it names leads an earlier peripheral of the file and derives from none, and
+    # the copy is the first element of its own peripheral at the same offset, so the copied
+    # registers keep their indices in both tables, which the device NIF relies on.
+    def derived_cluster(node, earlier:)
+      known_elements(node, allowed: %w[name description addressOffset])
+      identifier(text(node, 'name'))
+      path = node.attributes.fetch('derivedFrom').split('.', -1)
+      source = earlier.find { |device| device.name == path.first } if path.size == 2
+      raise Error, 'SVD cluster derives from no earlier peripheral' if source.nil?
+      raise Error, 'SVD cluster derives from a derived peripheral' unless source.derived_from.nil?
+
+      leading = source.leading
+      unless leading&.name == path.last && leading.offset == number(text(node, 'addressOffset'))
+        raise Error, 'SVD derived cluster names no leading cluster at its offset'
+      end
+      [source.name, source.registers.first(leading.count)]
     end
 
     # The byte range of each register, one for each element of an array, in address order.
@@ -210,12 +290,12 @@ module Erx
       [base, count, stride]
     end
 
-    def parse_register(node, default_width:, block_size:)
+    def parse_register(node, default_width:, block_size:, base: 0)
       known_elements(node, allowed: %w[name description addressOffset size access readAction fields
                                        ownedByNif dim dimIncrement])
       width = number(text(node, 'size', default: default_width.to_s))
-      raise Error, 'SVD access width must be 32 or 64 bits' unless [32, 64].include?(width)
-      offset = number(text(node, 'addressOffset'), maximum: block_size)
+      raise Error, 'SVD access width must be 8, 16, 32 or 64 bits' unless WIDTHS.include?(width)
+      offset = base + number(text(node, 'addressOffset'), maximum: block_size)
       name, count, stride = register_shape(node, width: width)
       span = (count - 1) * stride + width / 8
       unless offset % (width / 8) == 0 && offset <= block_size && span <= block_size - offset
@@ -474,7 +554,7 @@ module Erx
     def device_types_header(devices)
       registers_max = devices.map { |device| device.registers.size }.max
       fields_max = devices.map { |device| device.registers.sum { |register| register.fields.size } }.max
-      generated_header('ERX_HW_DEVICE_TYPES_H', <<~C.lines(chomp: true), includes: %w[<stdbool.h> <stdint.h>])
+      generated_header('ERX_HW_DEVICE_TYPES_H', <<~C.lines(chomp: true), includes: %w[<stdbool.h> <stddef.h> <stdint.h>])
         #define ERX_DEVICE_REGISTERS_MAX #{registers_max}u
         #define ERX_DEVICE_FIELDS_MAX #{fields_max}u
 
@@ -514,6 +594,7 @@ module Erx
         \tuint64_t\t\t\twindow_size;
         \tuint32_t\t\t\tregister_count;
         \tuint32_t\t\t\tfield_count;
+        \tconst char\t\t\t*derived_from;	/* the peripheral whose registers lead this one's, or NULL */
         } erx_device_peripheral_t;
       C
     end
@@ -550,7 +631,8 @@ module Erx
         prefix = "erx_device_#{device.name.downcase}"
         "\t{ .name = \"#{device.name.downcase}\", .registers = #{prefix}_registers, .fields = #{prefix}_fields, " \
           ".window_size = #{device.size}, .register_count = #{device.registers.size}, " \
-          ".field_count = #{device.registers.sum { |register| register.fields.size }} },"
+          ".field_count = #{device.registers.sum { |register| register.fields.size }}, " \
+          ".derived_from = #{device.derived_from ? %("#{device.derived_from.downcase}") : 'NULL'} },"
       end
       generated_header('ERX_HW_DEVICE_TABLE_H', [*devices.flat_map { |device| table_device(device) },
                                                  'static const erx_device_peripheral_t erx_device_peripherals[] = {',
@@ -560,7 +642,7 @@ module Erx
     # The one volatile access of each width the table holds, for erx_device.c alone: the funnel
     # that the chokepoint device-register-access keeps.
     def device_access_header
-      body = [32, 64].flat_map do |width|
+      body = WIDTHS.flat_map do |width|
         type = "uint#{width}_t"
         ["static inline #{type}", "erx_device_access_load#{width}(volatile uint8_t *window, uint64_t offset)", '{',
          "\treturn (*(volatile #{type} *)(void *)(window + offset));", '}', '',
@@ -641,7 +723,7 @@ module Erx
     end
     private_class_method :svd_inputs
 
-    def parse_devices(inputs) = inputs.values.map { |bytes| parse_svd(bytes) }
+    def parse_devices(inputs) = inputs.values.flat_map { |bytes| parse_peripherals(bytes) }
     private_class_method :parse_devices
 
     # The generated header of one device's accessors, relative to the root.

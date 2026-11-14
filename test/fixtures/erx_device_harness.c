@@ -213,7 +213,7 @@ check_every_entry(const erx_device_peripheral_t *peripheral)
 		uint64_t ignored;
 
 		CHECK(erx_device_register_named(peripheral, reg->name) == index);
-		CHECK(reg->width == 32 || reg->width == 64);
+		CHECK(reg->width == 8 || reg->width == 16 || reg->width == 32 || reg->width == 64);
 		CHECK((reg->writable & ~width_mask(reg)) == 0);
 		CHECK(reg->offset + (uint64_t)(reg->count - 1) * reg->stride + reg->width / 8 <= peripheral->window_size);
 		CHECK(erx_device_read_allowed(reg) == (reg->access != ERX_DEVICE_WRITE_ONLY));
@@ -701,6 +701,29 @@ check_peripheral(const erx_device_peripheral_t *fixture, const erx_device_t *dev
 	plan = erx_device_field_plan(status, field_of(fixture, status, "pending"), 0xf);
 	CHECK(plan.op == ERX_DEVICE_FIELD_WRITE && plan.bits == 0xf);
 	CHECK(erx_device_field_plan(status, field_of(fixture, status, "id"), 1).op == ERX_DEVICE_FIELD_REFUSED);
+
+	/*
+	 * An 8- or 16-bit register is one access of its own width: a write leaves the bytes
+	 * beside it as they were, a read answers its own bytes alone, and a read-only one
+	 * takes no write.
+	 */
+	const erx_device_register_t *const pick = register_of(fixture, "pick"), *const count = register_of(fixture, "count");
+	const erx_device_register_t *const half = register_of(fixture, "half");
+	uint8_t *const bytes = &window_memory[0][0x9c];
+
+	CHECK(pick->width == 8 && count->width == 8 && half->width == 16);
+	bytes[0] = 0x11;
+	bytes[1] = 0x22;
+	bytes[2] = 0x33;
+	bytes[3] = 0x44;
+	CHECK(erx_device_write(device, pick, plain, 0xa5) && bytes[0] == 0xa5 && bytes[1] == 0x22 && bytes[2] == 0x33);
+	CHECK(!erx_device_write(device, pick, plain, 0x100) && bytes[0] == 0xa5);
+	CHECK(erx_device_read(device, count, plain, &word) && word == 0x22);
+	CHECK(!erx_device_write(device, count, plain, 0) && bytes[1] == 0x22);
+	CHECK(erx_device_read(device, half, plain, &word) && word == 0x4433);
+	CHECK(erx_device_write_field(device, half, plain, field_of(fixture, half, "top"), 0x94));
+	CHECK(bytes[2] == 0x33 && bytes[3] == 0x94 && bytes[1] == 0x22 && window_memory[0][0xa0] == 0);
+	CHECK(!erx_device_write(device, half, plain, 0x10000) && bytes[3] == 0x94);
 }
 #endif
 

@@ -39,6 +39,20 @@ erx_device_peripheral_find(const char *name, size_t length)
 	return (NULL);
 }
 
+/*
+ * Whether the peripheral is the one named or derives from it: a kind whose table begins
+ * with that peripheral's registers, at their indices there (tools/lib/erx/hardware.rb,
+ * derived_cluster).
+ */
+bool
+erx_device_peripheral_is(const erx_device_peripheral_t *peripheral, const char *name)
+{
+	const size_t length = text_length(name);
+
+	return (peripheral != NULL && (same_text(peripheral->name, name, length) ||
+	    (peripheral->derived_from != NULL && same_text(peripheral->derived_from, name, length))));
+}
+
 uint32_t
 erx_device_register_named(const erx_device_peripheral_t *peripheral, const char *name)
 {

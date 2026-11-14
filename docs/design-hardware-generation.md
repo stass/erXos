@@ -16,7 +16,26 @@ one extension, `ownedByNif`, saying whether the device NIF owns it and writes it
 only in sequences of its own (a ring's base address, a queue's setup, the
 device's status and features); `erx/hw/device_owned.h` names each owned register
 by its index in the table, for `erx_device.c` alone;
-a register without it is refused. Unsupported inheritance or access-sequence
+a register without it is refused. A register is 8, 16, 32 or 64 bits wide, at an
+offset aligned to its width, and every access to it is one access of that width,
+as the virtio specification asks of a device's configuration fields (OASIS
+Virtio 1.2, sections 4.2.2.2 and 4.1.3.1).
+
+One file may describe several peripherals. A group of registers several
+peripherals share is written once, as a `cluster` leading one peripheral, and each
+other peripheral copies it with a cluster `derivedFrom="PERIPHERAL.CLUSTER"` as its
+own first element, at the same offset and adding nothing, then declares registers
+of its own. That is CMSIS-SVD's derivation (svd-spec v1.3.9,
+`doxygen/src/svd_schema.txt`, the cluster element): a derived section copies its
+source, and anything it restates overrides what it inherits; the specification
+defines no merge of a peripheral's register list, so derivation is of a cluster,
+never of a peripheral that then adds registers. The profile has one cluster level,
+no cluster arrays and no derivation from a derived peripheral, and a cluster's
+registers keep their own names. The copied registers lead both tables at the same
+indices, and the table records the peripheral a kind derives from, so the device NIF
+treats every kind as its transport. The virtio-mmio transport is such a cluster, and
+each device kind a peripheral that copies it and adds its configuration fields
+(`hw/svd/virtio_mmio/virtio_mmio.svd`). Other inheritance or access-sequence
 extensions fail until their semantic consumer is implemented. Registers fit their address block and cannot
 overlap. Fields fit their register, cannot overlap, and every enumerated
 value fits its field. Names and generated symbols are unique.
@@ -45,8 +64,8 @@ The same model produces the table `erx_device` resolves Erlang's register
 names through ([design-runtime.md](design-runtime.md#the-device-nif)):
 `include/erx/hw/device_types.h` its shapes, `device_table.h` each peripheral's
 registers and fields, lower-cased, with window, offset, width, array shape,
-access, masks, the device-address mark and whether a field may be replaced by
-a read and a write, and `device_access.h` the one volatile load and store of each
+access, masks, the device-address mark, whether a field may be replaced by
+a read and a write, and the peripheral a kind derives from; `device_access.h` the one volatile load and store of each
 width. No peripheral may take one of those names. A bit the source does not declare
 is written as zero, by a field's update too, so a register's source declares every bit
 the hardware implements.
