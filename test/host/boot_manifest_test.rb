@@ -47,9 +47,13 @@ class BootManifestTest < Minitest::Test
     output
   end
 
-  # record: the platform record, by default the named platform's own.
-  def admitted(source = @source, platform: 'qemu-virt', record: platform_record(platform))
-    context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: record, build_kind: 'development'))
+  # record: the platform record, by default the named platform's own; uart_peripherals: the
+  # check's UART kinds, by default the tree's.
+  def admitted(source = @source, platform: 'qemu-virt', record: platform_record(platform),
+               uart_peripherals: ManifestContextFixture.uart_peripherals)
+    arguments = ManifestContextFixture.arguments(@codec).merge(platform: record, build_kind: 'development',
+                                                                 uart_peripherals: uart_peripherals)
+    context = Erx::Manifest::Context.new(**arguments)
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: ManifestContextFixture.accepting_planner).bytes
   end
 
@@ -296,6 +300,19 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "console_page #{0xfe215000}\n"
   end
 
+  # A console UART of a compatible string no row of erx/device_kinds.h's erx_uart_kinds names
+  # would get no console record, and its boot would end with the console's no_console, so
+  # the check refuses it and names the string. Its clock is 0, as a row of no PL011's is.
+  def test_a_console_of_no_uart_kind_is_refused_at_the_check
+    record = platform_record('qemu-virt')
+    console = record.fetch('units').flat_map { |unit| unit.fetch('devices') }
+                    .find { |device| device.fetch('path') == record.fetch('console') }
+    console.merge!('compatible' => 'ns16550a', 'clock' => 0)
+    error = assert_raises(Erx::Manifest::Invalid) { admitted(record: record) }
+    assert_includes error.message, 'ns16550a'
+    assert_equal 'machine.console', error.field
+  end
+
   # The Raspberry Pi 4's development manifest with its framebuffer unit moved from the
   # display domain to the system domain, so a framebuffer row sits on the system domain's page.
   def pi_framebuffer_held_by_system
@@ -425,14 +442,17 @@ class BootManifestTest < Minitest::Test
 
   # The console's record names the CMSIS-SVD peripheral of its entry's compatible string,
   # from the root's table of UART kinds (docs/design-stopgap.md, "The console"); an entry
-  # of a compatible string no console driver drives gets no record, so the console refuses
-  # the boot with its reason rather than start a driver for a UART it does not know.
+  # of a compatible string no row names gets no record, so the console refuses the boot with
+  # its reason rather than start a driver for a UART it does not know. The check refuses such
+  # a manifest (test_a_console_of_no_uart_kind_is_refused_at_the_check), so this one is
+  # admitted against a table with one more row than the root's.
   def test_a_console_of_no_uart_kind_gets_no_record
     record = platform_record('qemu-virt')
     console = record.fetch('units').flat_map { |unit| unit.fetch('devices') }
                     .find { |device| device.fetch('path') == '/pl011@9000000' }
     console.merge!('compatible' => 'ns16550a', 'clock' => 0)
-    output, status = read(admitted(record: record))
+    planted = ManifestContextFixture.uart_peripherals.merge('ns16550a' => 'ns16550')
+    output, status = read(admitted(record: record, uart_peripherals: planted))
     assert status.success?, output
     assert_includes output, "console_uart none 0 0 0 direct 0\n"
     assert_includes output, "console_wordsexact 0 short 0\n"

@@ -766,7 +766,9 @@ console_driver(Records) ->
         [_, _ | _] -> {error, {bad_console, "more than one -erx_record console"}}
     end.
 
-%% The console's driver of each peripheral a console record may name.
+%% The console's driver of each peripheral a console record may name: each row of
+%% erx/device_kinds.h's erx_uart_kinds, and the hosted entry's stdio, which
+%% test/host/erx_console_shell_test.rb checks these clauses cover.
 driver("pl011") -> {ok, erx_pl011};
 driver("mini_uart") -> {ok, erx_mini_uart};
 driver("stdio") -> {ok, erx_stdio};

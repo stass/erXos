@@ -5,6 +5,7 @@
 require 'digest'
 require 'tmpdir'
 require 'fileutils'
+require_relative 'device_kinds'
 require_relative 'elf_plan'
 require_relative 'pack_provenance'
 require_relative 'pack_wire'
@@ -70,7 +71,8 @@ module Erx
         catalog = rows.map { |row| row.reject { |key, _| %w[snapshot size plan].include?(key) }.freeze }.freeze
         context = Manifest::Context.new(build_kind: build_kind, platform: platform,
                                         catalog: catalog, root_entry: root_entry,
-                                        artifacts: artifacts, provenance: records)
+                                        artifacts: artifacts, provenance: records,
+                                        uart_peripherals: DeviceKinds.uart_peripherals(@root))
         admitted = Manifest.admit(source: manifest_source, codec: @codec, context: context, planner: @domain_planner)
         unless admitted.is_a?(Manifest::Admitted) && admitted.matches?(context)
           raise Error, 'system manifest is not admitted for this pack'

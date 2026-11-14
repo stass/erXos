@@ -5,6 +5,7 @@
 # Unit tests supply the checked-boundary facts below explicitly. Real pack
 # integration obtains its image facts from erx_elf_plan and provenance receipts.
 require 'digest'
+require_relative '../../tools/lib/erx/device_kinds'
 
 module ManifestContextFixture
   module_function
@@ -14,6 +15,9 @@ module ManifestContextFixture
   def images
     { 'release' => { 'kind' => 'erofs_image', 'extents' => [{ 'slot_offset' => 128 << 20, 'length' => 8192 }] } }
   end
+
+  # The tree's own UART kinds, which the checked context carries.
+  def uart_peripherals = Erx::DeviceKinds.uart_peripherals(File.expand_path('../..', __dir__))
 
   def platform
     { 'name' => 'fixture', 'cpuset' => 1, 'console' => '/uart@0', 'hostlink' => '',
@@ -82,7 +86,8 @@ module ManifestContextFixture
       catalog: catalog,
       provenance: [{ 'path' => 'fixture/root.c', 'sha256' => 'a' * 64,
                      'license' => 'BSD-2-Clause', 'evidence' => 'fixture',
-                     'status' => 'permanent', 'notice' => "original\xffnotice".b }] }
+                     'status' => 'permanent', 'notice' => "original\xffnotice".b }],
+      uart_peripherals: uart_peripherals }
   end
 
   # The development manifest's text with two configured domains of the domain

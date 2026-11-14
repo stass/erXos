@@ -21,9 +21,8 @@
  * which device is the platform record's and the manifest's to say, so the selection is
  * by configuration and touches no register: only erx_device reads a device, and a
  * driver's first reads, of the transport's magic, version and device id, find whether a
- * disk is behind it. The console is not a row: two UARTs share its role and compatible
- * string, and machine.console names which one (console_read), whose record names the
- * peripheral uart_kinds gives its compatible string. The host link's UART is
+ * disk is behind it. The console is no row of that table: machine.console names its UART
+ * (console_read), whose record is its row of erx_uart_kinds. The host link's UART is
  * the other of the two, named by machine.hostlink, and becomes the record hostlink_kind
  * describes, which the host link's driver alone asks for (docs/design-live.md, "The host
  * link"), when the boot asks for the host link: a machine may have no UART at that path,
@@ -32,32 +31,8 @@
  */
 typedef erx_device_kind_t device_kind_t;
 
-/*
- * The UARTs the root names, each compatible string's CMSIS-SVD peripheral: the console's
- * record carries it, and erx_console starts that peripheral's driver
- * (docs/design-stopgap.md, "The console").
- */
-typedef struct uart_kind {
-	const char	*compatible;
-	const char	*peripheral;
-} uart_kind_t;
-
-#define PL011_COMPATIBLE	"arm,pl011"
-#define PL011_PERIPHERAL	"pl011"
-#define MINI_UART_PERIPHERAL	"mini_uart"
-
-_Static_assert(sizeof(PL011_PERIPHERAL) <= ERX_BOOT_NAME_WORD_MAX && sizeof(MINI_UART_PERIPHERAL) <= ERX_BOOT_NAME_WORD_MAX,
-    "erx/boot_words.h's console record holds every UART kind's peripheral");
-
-static const uart_kind_t uart_kinds[] = {
-	{ PL011_COMPATIBLE, PL011_PERIPHERAL },
-	{ "brcm,bcm2835-aux-uart", MINI_UART_PERIPHERAL },
-};
-
-#define UART_KINDS_COUNT	(sizeof(uart_kinds) / sizeof(uart_kinds[0]))
-
 /* Selected by machine.hostlink's path, among the PL011s, the one UART its driver drives. */
-static const device_kind_t hostlink_kind = { ERX_MF_DEVICE_ROLE_UART, PL011_COMPATIBLE, "hostlink", PL011_PERIPHERAL };
+static const device_kind_t hostlink_kind = { ERX_MF_DEVICE_ROLE_UART, "arm,pl011", "hostlink", "pl011" };
 
 /* erx_manifest_open checked every string against the table, so these reads stay inside it. */
 static const uint8_t *
@@ -109,19 +84,26 @@ string_is(const erx_manifest_view_t *view, const erx_mf_str_t *string, const cha
 	return (text[at] == '\0');
 }
 
+/* The row of kinds, of count rows, whose role and compatible string are device's; NULL for none. */
+static const device_kind_t *
+kind_find(const erx_manifest_view_t *view, const erx_mf_device_t *device, const device_kind_t *kinds, size_t count)
+{
+	for (size_t at = 0; at < count; at++) {
+		if (device->role == kinds[at].role && string_is(view, &device->compatible, kinds[at].compatible))
+			return (&kinds[at]);
+	}
+	return (NULL);
+}
+
 static const device_kind_t *
 device_kind(const erx_manifest_view_t *view, const erx_mf_device_t *device, bool hostlink)
 {
 	if (device->selector != ERX_MF_SELECTOR_DT)
 		return (NULL);
-	if (hostlink && device->role == hostlink_kind.role && string_is(view, &device->compatible, hostlink_kind.compatible) &&
-	    view->header.hostlink.length != 0 && string_equal(view, &device->path, &view->header.hostlink))
+	if (hostlink && view->header.hostlink.length != 0 && string_equal(view, &device->path, &view->header.hostlink) &&
+	    kind_find(view, device, &hostlink_kind, 1) != NULL)
 		return (&hostlink_kind);
-	for (size_t at = 0; at < ERX_DEVICE_KINDS_COUNT; at++) {
-		if (device->role == erx_device_kinds[at].role && string_is(view, &device->compatible, erx_device_kinds[at].compatible))
-			return (&erx_device_kinds[at]);
-	}
-	return (NULL);
+	return (kind_find(view, device, erx_device_kinds, ERX_DEVICE_KINDS_COUNT));
 }
 
 /*
@@ -225,32 +207,21 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 	return (NULL);
 }
 
-/* The peripheral uart_kinds gives a UART's compatible string; NULL for a UART of no kind. */
-static const char *
-uart_peripheral(const erx_manifest_view_t *view, const erx_mf_str_t *compatible)
-{
-	for (size_t at = 0; at < UART_KINDS_COUNT; at++) {
-		if (string_is(view, compatible, uart_kinds[at].compatible))
-			return (uart_kinds[at].peripheral);
-	}
-	return (NULL);
-}
-
-/* The UART machine.console names, if its compatible string is a UART kind's. */
+/* The UART machine.console names, if its compatible string is a row of erx_uart_kinds. */
 static erx_boot_console_t
 console_read(const erx_manifest_view_t *view)
 {
 	erx_mf_device_t device;
-	const char *peripheral;
+	const device_kind_t *kind;
 
 	for (uint32_t at = 0; view->header.console.length != 0 && at < view->header.devices.count; at++) {
 		if (!erx_manifest_devices_at(view, at, &device) || device.selector != ERX_MF_SELECTOR_DT ||
-		    device.role != ERX_MF_DEVICE_ROLE_UART || !string_equal(view, &device.path, &view->header.console))
+		    !string_equal(view, &device.path, &view->header.console))
 			continue;
-		peripheral = uart_peripheral(view, &device.compatible);
-		if (peripheral == NULL)
+		kind = kind_find(view, &device, erx_uart_kinds, ERX_UART_KINDS_COUNT);
+		if (kind == NULL)
 			break;
-		return ((erx_boot_console_t){ .peripheral = peripheral, .base = device.base, .size = device.size,
+		return ((erx_boot_console_t){ .kind = kind, .base = device.base, .size = device.size,
 		    .line = device.line, .line_shared = line_shared(view, at, device.line), .clock = device.clock });
 	}
 	return ((erx_boot_console_t){ 0 });
@@ -409,8 +380,9 @@ erx_boot_console_words(const erx_boot_console_t *console, char *words, size_t ca
 {
 	size_t used = 0;
 
-	if (console->peripheral != NULL && word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) &&
-	    word_put(words, capacity, &used, "console") && word_put(words, capacity, &used, console->peripheral) &&
+	if (console->kind != NULL && word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) &&
+	    word_put(words, capacity, &used, console->kind->role_word) &&
+	    word_put(words, capacity, &used, console->kind->peripheral) &&
 	    number_put(words, capacity, &used, console->base) && number_put(words, capacity, &used, console->size) &&
 	    number_put(words, capacity, &used, console->line) &&
 	    word_put(words, capacity, &used, line_mark(console->line_shared)) &&

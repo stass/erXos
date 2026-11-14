@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "erx/device_kinds.h"
 #include "liberx/backend/core/boot_manifest.h"
 #include "liberx/backend/core/manifest_dma.h"
 
@@ -186,7 +187,7 @@ main(int argc, char **argv)
 	    (unsigned long long)manifest.limits.overlay, manifest.limits.atoms, manifest.limits.foreign_atoms,
 	    manifest.limits.processes);
 	printf("console_uart %s %llu %llu %u %s %u\n",
-	    manifest.console.peripheral != NULL ? manifest.console.peripheral : "none",
+	    manifest.console.kind != NULL ? manifest.console.kind->peripheral : "none",
 	    (unsigned long long)manifest.console.base,
 	    (unsigned long long)manifest.console.size, manifest.console.line, mark(manifest.console.line_shared),
 	    manifest.console.clock);

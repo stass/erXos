@@ -4,6 +4,7 @@
 
 require 'digest'
 require_relative 'abi_binary'
+require_relative 'device_kinds'
 require_relative 'generated_abi'
 
 module Erx
@@ -75,18 +76,21 @@ module Erx
 
     # Context is supplied by the build's checked artifact/platform boundaries,
     # never read from configuration text. Its catalog includes the reserved
-    # manifest and NOTICES rows before any numeric entry index is assigned.
+    # manifest and NOTICES rows before any numeric entry index is assigned. Its
+    # uart_peripherals are the PERIPHERAL of each compatible string a console may have, the rows
+    # of erx/device_kinds.h's erx_uart_kinds (DeviceKinds.uart_peripherals).
     class Context
       attr_reader :build_kind, :platform, :catalog, :root_entry, :artifacts,
-                  :provenance, :sizing, :fingerprint
+                  :provenance, :sizing, :uart_peripherals, :fingerprint
 
       def initialize(build_kind:, platform:, catalog:, root_entry:, artifacts:,
-                     provenance:, sizing: nil)
+                     provenance:, uart_peripherals:, sizing: nil)
         unless %w[development release].include?(build_kind)
           raise Invalid.new('unknown checked build kind', property: 'context', field: 'build_kind')
         end
         unless platform.is_a?(Hash) && catalog.is_a?(Array) && artifacts.is_a?(Hash) &&
-               provenance.is_a?(Array) && root_entry.is_a?(Integer) && root_entry.between?(0, catalog.size - 1)
+               provenance.is_a?(Array) && root_entry.is_a?(Integer) && root_entry.between?(0, catalog.size - 1) &&
+               uart_peripherals.is_a?(Hash) && !uart_peripherals.empty? && uart_peripherals.values.all?(String)
           raise Invalid.new('incomplete checked context', property: 'context', field: 'input')
         end
         notices = provenance.map do |record|
@@ -110,11 +114,12 @@ module Erx
         @artifacts = Snapshot.copy(artifacts)
         @provenance = Snapshot.copy(notices)
         @sizing = Snapshot.copy(sizing)
+        @uart_peripherals = Snapshot.copy(uart_peripherals)
         validate_catalog_shape
         @fingerprint = Snapshot.digest('build_kind' => @build_kind, 'platform' => @platform,
                                         'catalog' => @catalog, 'root_entry' => @root_entry,
                                         'artifacts' => @artifacts, 'provenance' => @provenance,
-                                        'sizing' => @sizing)
+                                        'sizing' => @sizing, 'uart_peripherals' => @uart_peripherals)
         freeze
       end
 
@@ -546,8 +551,8 @@ module Erx
       TABLES = { 'principal' => 'principals', 'limits' => 'limits',
                  'runtime_limits' => 'runtime_limits', 'lane_class' => 'lane_classes',
                  'image' => 'images', 'domain' => 'domains' }.freeze
-      # The compatible string of the one device whose row carries a clock (device_clock).
-      PL011_COMPATIBLE = 'arm,pl011'
+      # The peripheral of the one UART kind whose row carries a clock (device_clock).
+      CLOCKED_PERIPHERAL = DeviceKinds::PL011
       # What a framebuffer row names (docs/design-device-tree.md, "The framebuffer record"):
       # the node whose children the root searches, and the compatible string the one child
       # it takes must carry.
@@ -1013,7 +1018,7 @@ module Erx
       # codec holds the value to the row's 32 bits.
       def device_clock(device)
         clock = device.fetch('clock', 0)
-        if device['compatible'] == PL011_COMPATIBLE
+        if @context.uart_peripherals[device['compatible']] == CLOCKED_PERIPHERAL
           invalid('a PL011 row lacks its clock in hertz', 'context', 'platform.devices') unless clock.is_a?(Integer) && clock.positive?
         else
           invalid('only a PL011 row carries a clock', 'context', 'platform.devices') unless clock == 0
@@ -1031,10 +1036,24 @@ module Erx
           invalid('UART is not placed', 8, field) unless paths.include?(path)
           invalid('UART is not assigned to the system domain', 8, field) unless unit_holder(rows, path) == @codec.constant('mf_none')
         end
+        check_console_kind(rows, console)
         unless @context.platform['console'] == console && (@context.platform.fetch('hostlink', '') == hostlink)
           invalid('UART paths disagree with checked platform', 8, 'machine.console')
         end
         check_uart_lines(rows, console, hostlink)
+      end
+
+      # The console's record names the PERIPHERAL of its UART's row of erx/device_kinds.h's
+      # erx_uart_kinds, and a UART of no row gets no record, so its console would start no
+      # driver. The console is a placed UART (check_uarts).
+      def check_console_kind(rows, console)
+        return if console.empty?
+
+        compatible = rows.fetch('devices').find { |device| device['path'] == console }.fetch('compatible')
+        return if @context.uart_peripherals.key?(compatible)
+
+        invalid("console UART #{console} is #{compatible}, which no UART kind of #{DeviceKinds::SOURCE} names", 8,
+                'machine.console')
       end
 
       # Property 8's line clause (docs/design-shared-devices.md, "Lines inside a domain"):

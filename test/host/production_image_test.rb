@@ -676,7 +676,7 @@ class ProductionImageTest < Minitest::Test
     refute_equal PLATFORM.manifest_source(ROOT), source
     system_args = source[/^\s*system_args "(.*)"$/, 1].split.size
     display = PLATFORM.record.fetch('units').find { |unit| unit.fetch('key') == 'display' }.fetch('devices')
-    kinds = Erx::ProductionImage::Run.device_kinds(ROOT)
+    kinds = Erx::DeviceKinds.given(ROOT).map { |kind| [kind.role, kind.compatible] }
     given = display.count { |device| kinds.include?(device.values_at('role', 'compatible')) }
     refute_equal 0, given
     words = Erx::ProductionImage::Run.arguments_always(ROOT) + Erx::ProductionImage::Run::DEVICE_RECORD_WORDS +
@@ -712,23 +712,36 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # The count reads erx/device_kinds.h's erx_device_kinds table, the root's own: every row
-  # is read, each names a role of the manifest's mf_device_role, and a row this reader
-  # cannot take whole fails it rather than going uncounted, so a row added there that the
-  # count missed would not leave every production boot's argument count a record short.
-  def test_the_device_kinds_are_read_whole_from_the_roots_table
-    kinds = Erx::ProductionImage::Run.device_kinds(ROOT)
-    table = File.read(File.join(ROOT, Erx::ProductionImage::Run::DEVICE_KINDS))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
-    assert_equal table.lines.grep(/\A\s*\{/).size, kinds.size
+  # The count reads erx/device_kinds.h's erx_device_kinds table, the root's own, and the
+  # manifest check its erx_uart_kinds: every row is read, each names a role of the manifest's
+  # mf_device_role, and a row this reader cannot take whole or a name longer than a record
+  # holds fails it rather than going unread, so a row added there that the count missed would
+  # not leave every production boot's argument count a record short.
+  def test_the_device_kinds_are_read_whole_from_the_roots_tables
+    source = File.read(File.join(ROOT, Erx::DeviceKinds::SOURCE))
     roles = File.read(File.join(ROOT, 'abi/manifest.txt'))[/^enum mf_device_role u32\n((?:  value .*\n)+)/, 1].scan(/value (\w+)/).flatten
-    kinds.each { |role, _compatible| assert_includes roles, role }
+    { 'erx_device_kinds' => Erx::DeviceKinds.given(ROOT), 'erx_uart_kinds' => Erx::DeviceKinds.uarts(ROOT) }.each do |table, kinds|
+      assert_equal source[/#{table}\[\] = \{\n(.*?)^\};/m, 1].lines.grep(/\A\s*\{/).size, kinds.size, table
+      kinds.each { |kind| assert_includes roles, kind.role }
+    end
     Dir.mktmpdir('erx-device-kinds-') do |root|
-      path = File.join(root, Erx::ProductionImage::Run::DEVICE_KINDS)
+      path = File.join(root, Erx::DeviceKinds::SOURCE)
       FileUtils.mkdir_p(File.dirname(path))
-      ["static const erx_device_kind_t erx_device_kinds[] = {\n\t{ ERX_MF_DEVICE_ROLE_GPU, \"virtio,mmio\", \"gpu\" },\n};\n",
-       "static const erx_device_kind_t erx_device_kinds[] = {\n};\n", "no table\n"].each do |source|
-        File.write(path, source)
-        assert_raises(Erx::Error, source) { Erx::ProductionImage::Run.device_kinds(root) }
+      FileUtils.cp(File.join(ROOT, Erx::DeviceKinds::BOOT_WORDS), File.join(root, Erx::DeviceKinds::BOOT_WORDS))
+      ['{ ERX_MF_DEVICE_ROLE_GPU, "virtio,mmio", "gpu" },', '{ ERX_MF_DEVICE_ROLE_GPU, "virtio,mmio", "gpu", "virtio_mmio_sixteen" },', nil]
+        .map { |row| "static const erx_device_kind_t erx_device_kinds[] = {\n#{row && "\t#{row}\n"}};\n" }
+        .push("no table\n").each do |text|
+          File.write(path, text)
+          assert_raises(Erx::Error, text) { Erx::DeviceKinds.given(root) }
+        end
+      # A UART table holding a row of another role, or one kind twice, which the C lookups would
+      # not match or would match only once.
+      uart = '{ ERX_MF_DEVICE_ROLE_UART, "arm,pl011", "console", "pl011" },'
+      ['{ ERX_MF_DEVICE_ROLE_BLOCK, "arm,pl011", "console", "pl011" },', "#{uart}\n\t#{uart}"].each do |rows|
+        File.write(path, "static const erx_device_kind_t erx_uart_kinds[] = {\n\t#{uart}\n};\n")
+        refute_empty Erx::DeviceKinds.uarts(root)
+        File.write(path, "static const erx_device_kind_t erx_uart_kinds[] = {\n\t#{rows}\n};\n")
+        assert_raises(Erx::Error, rows) { Erx::DeviceKinds.uarts(root) }
       end
     end
   end

@@ -14,6 +14,7 @@ require_relative 'build_path'
 require_relative 'compiler_rt'
 require_relative 'crash_frame'
 require_relative 'deterministic_transcript'
+require_relative 'device_kinds'
 require_relative 'dom_planner'
 require_relative 'error'
 require_relative 'fiasco'
@@ -506,6 +507,7 @@ module Erx
     # a PL011's clock other than the tree's (pl011_clock_problem).
     def self.device_problems(platform, nodes)
       devices = platform.fetch('units').flat_map { |unit| unit.fetch('devices') }.select { |device| device.fetch('selector') == 'dt' }
+      pl011 = DeviceKinds.uart_compatible(DeviceKinds::PL011)
       devices.filter_map do |device|
         path = device.fetch('path')
         node = nodes[path]
@@ -516,7 +518,7 @@ module Erx
           "#{path}: compatible #{node.fetch(:compatible).inspect} does not name #{device.fetch('compatible')}"
         elsif recorded != node.fetch(:window)
           "#{path}: base, size or line #{recorded} differ from the tree's #{node.fetch(:window) || 'unreadable reg or interrupts'}"
-        elsif device.fetch('compatible') == Manifest::SystemDomainCheck::PL011_COMPATIBLE
+        elsif device.fetch('compatible') == pl011
           pl011_clock_problem(path, device, node, nodes)
         end
       end
@@ -724,40 +726,16 @@ module Erx
       # link's UART's physical record (docs/design-stopgap.md, "Device records"; record_words).
       GIVEN_RECORD_WORDS = 15
       DEVICE_RECORD_WORDS = 10
-      # The table of the kinds of device a runtime drives, which the root reads to give a
-      # device of a held unit its -erx_record given record.
-      DEVICE_KINDS = 'include/erx/device_kinds.h'
-      # One row of DEVICE_KINDS: { ERX_MF_DEVICE_ROLE_ROLE, "compatible", "role word", "peripheral" }.
-      DEVICE_KIND_ROW = /\A\s*\{\s*ERX_MF_DEVICE_ROLE_([A-Z0-9_]+),\s*"([^"]+)",\s*"\w+",\s*"\w+"\s*\},\s*\z/
-
-      # The [manifest role, compatible] pairs of DEVICE_KINDS's rows, each of which gives a
-      # device of a unit the system domain holds a given record. A row this reader cannot
-      # take whole fails it rather than going uncounted, as does a table it cannot find.
-      def self.device_kinds(root)
-        table = File.read(File.join(root, DEVICE_KINDS))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
-        raise Error, "#{DEVICE_KINDS}: no erx_device_kinds table" if table.nil?
-
-        rows = table.lines.reject { |line| line.strip.empty? }.map do |line|
-          match = DEVICE_KIND_ROW.match(line)
-          raise Error, "#{DEVICE_KINDS}: unreadable row #{line.strip.inspect}" if match.nil?
-
-          [match[1].downcase, match[2]]
-        end
-        raise Error, "#{DEVICE_KINDS}: an empty erx_device_kinds table" if rows.empty?
-
-        rows.freeze
-      end
-
       # The words of the records the root adds to the system domain's arguments: for each unit
       # the manifest gives the system domain, each device of its placement in the platform
-      # record that is of a kind (device_kinds) gives a -erx_record given record, and the host link's
+      # record that is of a kind (DeviceKinds.given) gives a -erx_record given record, and the host link's
       # UART, the UART at machine.hostlink's path, a -erx_record device record when the boot asks for
       # the host link (liberx/backend/core/boot_manifest.c, devices_read). A framebuffer row
       # the system domain holds is not counted: its record depends on whether the firmware's
       # tree placed the framebuffer, which the manifest does not say (TODO.md).
       def self.record_words(root, source, hostlink:)
         platform = Platform.load(root: root, name: source[/^\s*platform "([^"]+)"$/, 1].to_s)
-        kinds = device_kinds(root)
+        kinds = DeviceKinds.given(root).map { |kind| [kind.role, kind.compatible] }
         hostlink_path = hostlink ? source[/^\s*hostlink "([^"]+)"$/, 1] : nil
         placements = source.scan(/^unit \w+\n((?:  .*\n)*?)  holder (\S+)$/)
                            .filter_map { |body, holder| body[/^  placement "([^"]+)"$/, 1] if holder == 'system' }

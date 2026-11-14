@@ -15,6 +15,7 @@ require_relative 'board_tree'
 require_relative 'bounded_file'
 require_relative 'build_path'
 require_relative 'dependencies'
+require_relative 'device_kinds'
 require_relative 'output_directory'
 require_relative 'platform'
 require_relative 'qemu'
@@ -145,8 +146,9 @@ module Erx
     # The one clock of the record's PL011s, which config.txt's init_uart_clock sets for
     # all of them. A record whose PL011s disagree, or that has none, is refused.
     def pl011_clock(platform)
+      pl011 = DeviceKinds.uart_compatible(DeviceKinds::PL011)
       clocks = platform.record.fetch('units').flat_map { |unit| unit.fetch('devices') }
-                       .select { |device| device['compatible'] == 'arm,pl011' }.map { |device| device['clock'] }.uniq
+                       .select { |device| device['compatible'] == pl011 }.map { |device| device['clock'] }.uniq
       raise Error, "#{platform.record_path}: the PL011s need one clock, not #{clocks.inspect}" unless
         clocks.size == 1 && clocks[0].is_a?(Integer) && clocks[0].positive?
 
