@@ -1073,10 +1073,10 @@ zeroing skipped.
 * Linux 6.18's device trees (`deps.lock`, `linux-dts`):
   `arch/arm/boot/dts/broadcom/bcm2711.dtsi` and `bcm2711-rpi.dtsi`, read
   as data.
-* FreeBSD 15.1.0 (`release/15.1.0`): `sys/arm64/broadcom/genet/if_genet.c`
-  (SHA-256 `fbf5c90d...`) and `if_genetreg.h` (`5af53d30...`), the source
-  of the GENET driver's design and the same files as at the network
-  stack's pin, `975e3605ebb1`; `sys/dev/sdhci/sdhci.c` (`4551b7d7...`)
+* FreeBSD at the network stack's pin, `975e3605ebb1`:
+  `sys/arm64/broadcom/genet/if_genet.c` (SHA-256 `fbf5c90d...`) and
+  `if_genetreg.h` (`5af53d30...`), the source of the GENET driver's design.
+* FreeBSD 15.1.0 (`release/15.1.0`): `sys/dev/sdhci/sdhci.c` (`4551b7d7...`)
   and `sdhci.h` (`363ed505...`); `sys/arm64/arm64/busdma_bounce.c`
   (`4707aa4e...`), `cpufunc_asm.S` (`b6de008e...`) and `identcpu.c`
   (`ed62337a...`); `sys/arm64/include/atomic.h` (`e65760cd...`).
