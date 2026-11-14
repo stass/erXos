@@ -2454,49 +2454,61 @@ and the time to the system runtime's first pet.
 where it goes in the order below is undecided.
 
 **Goal.** A USB keyboard, mouse or tablet and a USB stick work on QEMU
-and on the Raspberry Pi 4, along [design-usb.md](design-usb.md): the
-controller's domain holds every USB device, HID reaches the display's
-input router through input numbers, and mass storage reaches a FAT
-server through drives.
+`virt` and on the Raspberry Pi 4, along [design-usb.md](design-usb.md):
+both controllers are xHCI behind a PCIe domain, the controller's domain
+holds every USB device, HID reaches the display's input router through
+input numbers, and mass storage reaches a FAT server through drives.
 
-**Demo.** On QEMU's `raspi4b`, keys typed with QMP into a USB keyboard
-reach a window, a tablet moves its pointer, and a keyboard unplugged
-with a key held releases it; on QEMU `virt` the same over `qemu-xhci`,
-with a USB stick's sectors read and written through a drive; on the
-Pi 4, a USB keyboard types into the kiosk.
+**Demo.** On QEMU `virt`, keys typed with QMP into a USB keyboard on
+`qemu-xhci` reach a window, a tablet moves its pointer, a keyboard
+unplugged with a key held releases it, and a USB stick's sectors are
+read and written through a drive; on the Pi 4, a USB keyboard behind
+the VL805's internal hub types into the kiosk.
 
 **Parts.** Each is a proposal; (a) needs nothing new below it.
 
-* **(a) The cores, on the host.** The descriptor decoder, the bus core,
-  the HID parser and fold, the BOT core, the SCSI builders and the TRB
-  ring form's core, with their fuzz targets and exhaustive tests
+* **(a) The cores, on the host.** The descriptor decoder, the bus and
+  hub cores, the controller core, the HID parser and fold, the BOT core,
+  the SCSI builders, the TRB ring form's core and a register model of
+  the BCM2711 bridge, with their fuzz targets and explored tests
   ([design-usb.md](design-usb.md#verification)).
-* **(b) DWC2 on QEMU `raspi4b`, on the stopgap.** The controller by
-  programmed I/O, the bus, hubs, HID into a display domain and mass
-  storage into drives; it needs a display domain on `raspi4b` (1b-C's
-  part 3 and [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)) and no
-  PCIe.
-* **(c) xHCI on QEMU `virt`.** The TRB ring form and `qemu-xhci`, once a
-  PCIe domain and MSIs exist: at [M9's kernel
-  part](#m9-a-driver-is-an-erlang-process), unless a PCIe enumerator is
-  brought onto the stopgap first
+* **(b) The PCIe domain and `qemu-xhci` on QEMU `virt`, on the
+  stopgap.** The PCIe enumerator with BAR assignment in a `pcie` domain;
+  in the backend, `ERX_IRQ_MSI` over the lines of QEMU `virt`'s MSI
+  frame and the give of a PCIe function on a configured row; the Phase 1
+  manifest check admitting one `pcie` domain
+  ([design-usb.md](design-usb.md#the-phase-1-part)); then the TRB ring
+  form, the controller, the bus, hubs, HID into a display domain and
+  mass storage into drives. It needs [1b-E](#m9-a-driver-is-an-erlang-process)
+  and a display domain that reads input files
   ([design-usb.md](design-usb.md#open-decisions), decision 2).
-* **(d) The VL805 on the Pi 4.** After a design of the Pi 4's PCIe
-  bridge, which needs a clean-room facts record of Linux's
-  `pcie-brcmstb` and the Pi 4's device tree, and the board probes of
-  [design-usb.md](design-usb.md#the-vl805-on-the-raspberry-pi-4); on
-  the stopgap as a part of 1b-I, or at M12 on erXos's kernel
-  ([design-usb.md](design-usb.md#open-decisions), decision 3).
+* **(c) The BCM2711 bridge and the VL805 on the Pi 4, on the stopgap.**
+  The bridge driver translated from FreeBSD's `bcm2838_pci.c`, the
+  board probes B1 to B7, the VL805's firmware check and its INTx line
+  ([design-usb.md](design-usb.md#the-bcm2711-bridge); decisions 1 and
+  3), beside [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)'s board
+  work. The bridge driver and the probes proceed beside (b); the
+  controller is (b)'s code.
+* **(d) On erXos's kernel.** QEMU `virt` at
+  [M9's kernel part](#m9-a-driver-is-an-erlang-process), with the
+  kernel's MSI frame and the IOMMU window; the Pi 4 at
+  [M12](#m12-storage-networking-boards).
+* **(e) DWC2 on QEMU `raspi4b`.** Later and optional
+  ([design-usb.md](design-usb.md#deferred-dwc2); decision 6).
 
 Mass storage's files on a stick also need the FAT server, which
-[Beyond the plan](#beyond-the-plan) places after M13; until then (b) and
-(c) test drives with a raw window client.
+[Beyond the plan](#beyond-the-plan) places after M13; until then (b)
+and (c) test drives with a raw window client.
 
-**Exit criteria, each part.** Its cores' exhaustive tests and fuzz
-targets pass their budgets, each with its seeded fault failing them; its
-QEMU suite passes, with its seeded fault failing it; a malformed report
-or status block ends at most its function; and a device unplugged in
-every state leaves no slot, place or window behind.
+**Exit criteria, each part.** Its cores' explored tests and fuzz
+targets pass their budgets, each with its seeded fault failing them;
+its QEMU suite passes with its seeded fault failing it, or, for (c),
+the board's checklist passes; a malformed report or status block ends
+at most its function; and a device unplugged in every state leaves no
+slot, place or window behind. On the stopgap, a case that checks
+isolation between domains, a bound on memory or CPU, or a neighbour's
+latency reports `unsupported`, as
+[design-usb.md](design-usb.md#on-the-stopgap) records.
 
 ## M10: Users without a container runtime
 
