@@ -1053,7 +1053,9 @@ the child's handler drops the hand-offs and its hold on the child's
 holder entry, the pipe server reads the child's gone, and the other
 ends see the end come and go. A session process starts a program with ends it
 holds the same way, as the program's starter: the program's handler asks
-for the child's ends with the starter as the holder, and once the start
+for the child's ends with the starter as the holder, naming each by the
+end the starter holds ([Holding, speaking and giving](#hand-offs)), and
+once the start
 returns the starter closes its own copy of each end it gave, as a UNIX
 parent closes after a fork. So the LVGL renderer gives `erx-lvgl` the read
 end of one pipe as standard input and the write end of another as standard
@@ -1413,8 +1415,12 @@ again. Three facts stay apart:
   serve: for a program starter, its own handler checked in step 3 of
   [starting a program](design-programs.md#starting-a-program) that the
   end is in the starter's table; a session process names in its start
-  only ends it holds. The step checks that `Starter` holds `End`, as for
-  any inherit. The child's handler is session code, so this rests on the
+  only ends it holds, each by the end it holds, which the program's
+  handler forwards as `{inherit, {process, Starter}, End, {program,
+  Pid}}`: the pipe server finds the pipe and the end that `Starter`
+  holds as `End`, answers `EBADF` when it holds none, and then serves
+  the inherit as any other. The step checks that `Starter` holds `End`,
+  as for any inherit. The child's handler is session code, so this rests on the
   session's code as every decision of the pipe server does.
 
 The pipe server sends the program's handler, the entry's owner, the

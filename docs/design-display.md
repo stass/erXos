@@ -407,7 +407,14 @@ script takes `erx_memdraw`, `erx_display` and `erx_fb`, a client's takes
 neither side, so what the display domain's boot script loads holds no
 module of `erx_win` or `erx_ui`, and the G9 check, which reads every
 application that script boots, `erx` and `erx_files` among them,
-refuses a client module placed outside them by mistake.
+refuses a client module placed outside them by mistake. One name of a
+client module is allowed on the display side: a program's handler, in
+`erx`, calls `erx_pixels` to allocate and lend the window buffer it maps
+into its program, since that buffer is the handler's ([The pixel
+area](#the-pixel-area)). In a domain whose release lacks the allocator,
+the display domain's among them, the handler refuses a buffer with
+`ENODEV`, so the name loads no client module there; the check allows
+that one module that one name and refuses it in any other.
 
 ## Invariants
 
@@ -585,7 +592,10 @@ client can touch the range once its leases are returned:
 * a window's buffer for drawing in the runtime belongs to the window's
   holder, the process that opened it with `erx_win` (a widget server, a
   terminal, a draw connection), whose exit ends the window too;
-* a buffer mapped into a program belongs to the program's handler, and
+* a buffer mapped into a program belongs to the program's handler,
+  which allocates it when a session process names it among a program's
+  descriptors as `{N, {buffer, Peer, Bytes}}` and answers the starter its
+  offset ([design-programs.md](design-programs.md#the-handler)), and
   the program maps it from a lease, which the program driver returns
   only after it has destroyed the program's anchor, which ends the image
   and its sub-space ([design-programs.md](design-programs.md#a-programs-end)).

@@ -652,6 +652,35 @@ bounded by the program's tables and 16 requests, and what reaches its
 mailbox from the program by the program's credit ([The program
 protocol](#the-program-protocol)).
 
+**A session process's program.** A session process, such as the LVGL
+renderer, starts a native program with `erx_prog_handler:start/1`, which
+creates the program's handler with the caller as the program's starter.
+The spec is `erx_program:start/1`'s but for its descriptors, which the
+starter names as it holds them: `{N, {pipe, End}}` for a pipe end it
+holds, which the handler asks the pipe server for as an inherit with the
+starter as the end's holder
+([design-pipes.md](design-pipes.md#inherited-ends)), and
+`{N, {buffer, Peer, Bytes}}` for a window's buffer of `Bytes` in the
+pixel area it shares with the display domain `Peer`, at most one. The
+handler allocates that buffer's range and lends it to the program
+itself, so the range is the handler's, as the buffer of every program is
+([design-display.md](design-display.md#the-pixel-area)), and `start/1`
+answers `{ok, Handler, Offsets}`, `Offsets` the buffer's `{N, Offset}`,
+which the starter names in the window's presents. A domain without the
+display client's pixel allocator refuses a buffer with `ENODEV`. The
+starter is told of the program's end as `{erx_prog_exit, Handler,
+Status}`, `Status` the end as a parent's wait reads it (`{exited, N}` or
+`{signaled, Signal}`), and the handler exits after it; the buffer's
+range goes with the handler, so the starter names its offset in no
+present after that message. The handler
+monitors its starter, and the starter's exit stops the program, as a
+parent's end stops its children ([A program's end](#a-programs-end)), so
+no program outlives the session process that started it and nothing is
+orphaned; the starter may stop it sooner with `erx_prog_handler:stop/1`.
+The handler's decisions are a pure state machine,
+`erx_prog_handler_core`, which the handler process steps with each
+event and whose actions it performs in order.
+
 #### Facets
 
 A **facet** is a process of the system domain that acts for one grantee
@@ -1068,7 +1097,10 @@ The parties in a program's life, all but the first in its session:
 
 * the **starter**, the shell, a program calling `liberx`'s spawn
   functions or a session process such as the LVGL renderer, which names
-  everything the program receives, pipe ends as the ends it holds;
+  everything the program receives, pipe ends as the ends it holds; a
+  session process starts its program through the program's handler
+  ([A session process's program](#the-handler)), hears of its end and
+  takes it down with it;
 * the session's **command server**, an Erlang process with process id 1,
   which keeps the session's process table (each program's process id,
   parent and job), serves the shell's spawns, assigns process ids, and
