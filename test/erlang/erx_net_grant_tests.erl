@@ -150,7 +150,12 @@ grant_test_() ->
       {"a listen with an option the listener does not take is refused einval",
        fun tcp_listen_option_refused/0},
       {"a listen the grant's listen or addresses limit does not allow is refused eacces",
-       fun tcp_listen_limits/0}]}.
+       fun tcp_listen_limits/0},
+      {"at its sockets limit the grant refuses every open emfile, whatever kind it holds, until it ends",
+       fun sockets_limit/0},
+      {"an 'EXIT' naming no process of this node is left out, and the grant serves on",
+       fun forged_exit_left_out/0},
+      {"a malformed sockets or buffers limit refuses the grant's start", fun malformed_limits_refused/0}]}.
 
 remote_other_domain_dropped() ->
     {ok, Grant} = remote_grant(),
@@ -242,6 +247,101 @@ tcp_listen_limits() ->
     after
         ok = gen_server:stop(Narrow)
     end.
+
+%% A grant whose sockets limit is 1, the limit's boundary, holds one socket of each kind in
+%% turn: a listener, a connection, a datagram socket, an echo socket and an adopted
+%% connection. While it holds one, every open and an adoption are refused emfile, so a kind
+%% the grant opens without counting it is caught; the socket's end gives its place back.
+sockets_limit() ->
+    ok = gen_server:stop(erx_net_grant),
+    routed(),
+    Opens = [{tcp_listen, inet, any, 0, []}, {tcp_connect, inet, {10, 0, 2, 2}, 80, [], infinity},
+             {udp_open, inet, any, 0, []}, {icmp_open, inet}],
+    lists:foreach(fun(Kind) -> holds_one(Kind, Opens) end, [adopt | Opens]).
+
+holds_one(Kind, Opens) ->
+    {ok, Grant} = erx_net_grant:start_link(local, #{sockets => 1}),
+    try
+        Holder = hold(Grant, Kind),
+        [?assertEqual({Kind, {error, emfile}}, {Kind, gen_server:call(Grant, Open)}) || Open <- Opens],
+        ?assertEqual({Kind, {error, emfile}}, {Kind, adopted(Grant)}),
+        exit(Holder, kill),
+        reopens(Grant, ?WAIT div 10)
+    after
+        ok = gen_server:stop(Grant)
+    end.
+
+%% A process that opens one socket of Kind at Grant, or is the connection Grant adopts, and
+%% holds it until it is killed. It answers once the grant has acted on its request, which
+%% it knows from the grant's answer to its next call, since the grant takes one caller's
+%% messages in order.
+hold(Grant, Kind) ->
+    Self = self(),
+    Request = case Kind of
+                  adopt -> {adopt, #{snd => 1, rcv => 1}};
+                  Open -> Open
+              end,
+    Holder = spawn(fun() ->
+                           _ = gen_server:send_request(Grant, Request),
+                           #{} = erx_net_grant:counts(Grant),
+                           Self ! {holding, self()},
+                           receive after infinity -> ok end
+                   end),
+    receive {holding, Holder} -> Holder after ?WAIT -> error({no_holder, Kind}) end.
+
+%% Grant's answer to the adoption of a process of its own, which ends at once.
+adopted(Grant) ->
+    Self = self(),
+    Pid = spawn(fun() -> Self ! {adopted, self(), erx_net_grant:adopt(Grant, #{snd => 1, rcv => 1})} end),
+    receive {adopted, Pid, Reply} -> Reply after ?WAIT -> error(no_adoption) end.
+
+%% Grant opens a datagram socket once the socket it held has ended and its exit has reached
+%% the grant, within Tries tries 10 ms apart; the socket is closed again.
+reopens(Grant, Tries) ->
+    case gen_server:call(Grant, {udp_open, inet, any, 0, []}) of
+        {ok, Sock} ->
+            Ref = monitor(process, Sock),
+            exit(Sock, kill),
+            receive {'DOWN', Ref, process, Sock, _} -> ok end;
+        {error, emfile} when Tries > 0 ->
+            timer:sleep(10),
+            reopens(Grant, Tries - 1)
+    end.
+
+%% A route to 10.0.2.0/24 and a neighbour row for 10.0.2.2 over the stand-in interface, so a
+%% connect starts and its SYN goes out to the stand-in, which keeps it.
+routed() ->
+    [{en0, Me, _}] = ets:lookup(erx_net_ifs, en0),
+    Iface = #{name => en0, pid => Me, link => ethernet, lladdr => <<2, 0, 0, 0, 0, 1>>,
+              mtu => 1500, mtu6 => 1500, hlim => 64, finish => none,
+              driver => Me, driver_credit => erx_net_credit:new(256),
+              rx_credit => erx_net_credit:new(256), credit => erx_net_credit:new(256)},
+    true = ets:insert(erx_net_ifs, {en0, Me, Iface}),
+    true = ets:insert(erx_net_addrs, {{Me, <<10, 0, 2, 15>>}, Me, 0,
+                                      #{addr => <<10, 0, 2, 15>>, plen => 24, ifname => en0, flags => [],
+                                        broadcast => <<10, 0, 2, 255>>}}),
+    true = ets:insert(erx_net_routes, {{Me, <<10, 0, 2, 0>>, 24}, Me,
+                                       #{prefix => <<10, 0, 2, 0>>, plen => 24, gateway => none,
+                                         ifname => en0, metric => 0}}),
+    true = ets:insert(erx_net_neigh, {{Me, <<10, 0, 2, 2>>}, <<2, 0, 0, 0, 0, 2>>, fresh, 0}),
+    _ = ets:update_counter(erx_net_gen, gen, 1),
+    ok.
+
+%% An 'EXIT' message naming no process of this node is no exit signal: the grant admits it
+%% as any other message, leaves it out and counts it, and goes on serving.
+forged_exit_left_out() ->
+    Grant = whereis(erx_net_grant),
+    Grant ! {'EXIT', not_a_pid, killed},
+    Grant ! {'EXIT', pid_of(?OTHER), killed},
+    ?assertEqual(#{unknown => 2, refused => 0}, erx_net_grant:counts(Grant)).
+
+%% A grant whose sockets or buffers limit is not a non-negative integer is refused at its
+%% start, and leaves no process behind.
+malformed_limits_refused() ->
+    ok = gen_server:stop(erx_net_grant),
+    [?assertEqual({error, badarg}, erx_net_grant:start_link(local, Limits))
+     || Limits <- [#{sockets => -1}, #{buffers => infinity}]],
+    ?assertEqual(undefined, whereis(erx_net_grant)).
 
 %% A socket protocol call of a socket from its socket process, the caller.
 call(Sock, Request) ->

@@ -55,7 +55,18 @@ ports erx_net_grant_core:bind_ports/3 allows a listener, the grant's `ports` nar
 answered `{error, eacces}`. `Opts` are the listener's own options, which
 erx_tcp_listen_core:options/1 takes (`backlog`, `reuseaddr`, `reuseport`, `nodelay`); any
 other is refused with `einval`. The listener's answer, `{ok, Listener}` or the bind's
-refusal, is the grant's. The grant reserves nothing for a listener, which holds no buffer.
+refusal, is the grant's. The grant reserves no buffer for a listener, which holds none.
+
+**Sockets.** Every socket the grant starts or adopts, a connection, a listener, a datagram
+or an echo socket, is one of its sockets from its start until its exit, or for a
+connection until it gives its buffers back in TIME-WAIT (erx_net_grant_core). Every one
+becomes the grant's by one path, which admits it, starts it, records it and links it to
+the grant, so each is counted and its exit frees its place, whatever its kind. With the
+`sockets` limit reached, `connect`, `listen`, `udp_open` and `icmp_open` are answered
+`{error, emfile}` before anything is started, and an adoption is refused alike, so the
+interface resets that connection and `accept` never answers `emfile` (the design's
+Decision 20). A `sockets` or `buffers` limit that is not a non-negative integer refuses
+the grant's start with `{error, badarg}`.
 
 **Interfaces.** `interfaces` answers `{ok, Interfaces}`, each interface's name, link-layer
 address, MTU, link state, configuration and addresses as erx_net:interfaces/0 gives them,
@@ -83,19 +94,21 @@ answered `{error, badarg}`, so no process charges or frees another's buffers by 
 pid in a call. Before a connection grows a buffer, by rounding it to whole segments or by
 autosizing, it asks `reserve_buffer/4`; a refusal leaves its buffer as it was. A connection
 gives both buffers back with `release_buffers/2` once it needs them no more, in TIME-WAIT
-with its socket process gone, and its exit, by whatever means, releases what it still
-holds; an `'EXIT'` message naming a connection still alive is not its exit, and is ignored.
+with its socket process gone, and leaves the grant's sockets with them; its exit, by
+whatever means, releases what it still holds. An `'EXIT'` message naming a process still
+alive is not an exit and is ignored, and one naming no process of this node is admitted
+as any other message.
 
 **Adoption.** A connection an interface spawned from a listener's handshake (erx_tcp_conn,
 "An accepted connection's start") links to the grant and asks `adopt/2` to count it as
-one of the grant's sockets, with the two buffer sizes its listener's entry gives; the grant
-reserves them under a new token, as a connect does, and answers `{ok, Token}`, or
-`{error, enobufs}` when they do not fit. The socket adopted is the caller, so nothing is
-reserved on the word of a pid in a message, and its exit releases what it holds as any
-connection's does.
+one of the grant's sockets, with the two buffer sizes its listener's entry gives; the
+grant reserves them under a new token, as a connect does, and answers `{ok, Token}`,
+`{error, emfile}` at its `sockets` limit, or `{error, enobufs}` when they do not fit. The
+socket adopted is the caller, so nothing is reserved on the word of a pid in a message,
+and its exit releases what it holds as any connection's does.
 
 The grant's other limits and its account are not built: the grant admits every
-well-formed request whose buffers fit.
+well-formed request within its sockets and buffers.
 """.
 
 -behaviour(gen_server).
@@ -116,7 +129,8 @@ Starts the grant of `local`, the node's own, registered as `erx_net_grant`, wher
 erx_net:local_grant/0 finds it, or of a domain, `{Grantee, Connection, Exports}`: the
 domain id, the port of this domain's connection to it, and the export table's module
 (erx_dist, or a host test's stand-in). A domain's grant is exported to it before this
-returns; a refused export is answered `{error, Reason}` and leaves no grant.
+returns; a refused export is answered `{error, Reason}` and leaves no grant, as is a
+malformed `sockets` or `buffers` limit, with `{error, badarg}`, before any export.
 """.
 -spec start_link(local | {pos_integer(), port(), module()}, map()) -> {ok, pid()} | {error, term()}.
 start_link(local, Limits) when is_map(Limits) ->
@@ -136,11 +150,12 @@ counts(Grant) ->
 -doc """
 Adopts the calling connection, which has linked to the grant, as one of the grant's sockets:
 reserves its send and receive buffers of `Sizes` and answers `{ok, Token}` with the token
-its later buffer calls name, or `{error, enobufs}` past the grant's `buffers` limit;
-a caller the grant already holds buffers for is answered `{error, badarg}`.
+its later buffer calls name, or `{error, emfile}` past the grant's `sockets` limit and
+`{error, enobufs}` past its `buffers` limit; a caller already one of the grant's sockets
+is refused too, with `{error, badarg}` when the limits admit one more.
 """.
 -spec adopt(pid(), #{snd := pos_integer(), rcv := non_neg_integer()}) ->
-          {ok, reference()} | {error, enobufs | badarg}.
+          {ok, reference()} | {error, emfile | enobufs | badarg}.
 adopt(Grant, Sizes) ->
     gen_server:call(Grant, {adopt, Sizes}, infinity).
 
@@ -155,36 +170,44 @@ reserve_buffer(Grant, Token, Kind, Bytes) ->
     gen_server:call(Grant, {reserve_buffer, Token, Kind, Bytes}, infinity).
 
 -doc """
-Gives back both buffers of the calling connection, whose start carried `Token`, which needs
-them no more: `ok`, or `{error, badarg}` for any other caller or token.
+Gives back both buffers of the calling connection, whose start carried `Token`, once it
+needs them no more, in TIME-WAIT with its socket process gone, and with them its place
+among the grant's sockets, so its token reserves nothing more: `ok`, or `{error, badarg}`
+for any other caller or token.
 """.
 -spec release_buffers(pid(), reference()) -> ok | {error, badarg}.
 release_buffers(Grant, Token) ->
     gen_server:call(Grant, {release_buffers, Token}, infinity).
 
 -doc false.
-init({local, Limits}) ->
-    start(local, none, Limits);
-init({{Grantee, Connection, Exports}, Limits}) ->
+%% A malformed `sockets` or `buffers` limit refuses the grant before it is exported.
+init({Client, Limits}) ->
+    maybe
+        {ok, Sockets} ?= erx_net_grant_core:new(Limits),
+        {ok, Grantee, ConnectionMonitor} ?= export(Client),
+        process_flag(trap_exit, true),
+        ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
+        ok = erx_net_tables:watch_resolver(self()),
+        ok = erx_net_tables:watch_grant(self()),
+        {ok, #{grantee => Grantee, connection_monitor => ConnectionMonitor, limits => Limits,
+               gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
+               sockets => Sockets, subscriber => none, resolver => none,
+               unknown => 0, refused => 0}}
+    end.
+
+%% The grantee, exported to when it is a domain, and the monitor of the connection to it.
+export(local) ->
+    {ok, local, none};
+export({Grantee, Connection, Exports}) ->
     %% The monitor comes first: a connection that ends at any time from here on, before the
     %% export or after it, ends the grant, and a port that has ended already is answered at
     %% once with a 'DOWN'. So the grant never outlives the connection whose port it was
     %% given, even when the export binds to a newer one.
     ConnectionMonitor = erlang:monitor(port, Connection),
     case Exports:export(self(), [send], Grantee) of
-        ok -> start(Grantee, ConnectionMonitor, Limits);
+        ok -> {ok, Grantee, ConnectionMonitor};
         {error, _} = Refused -> Refused
     end.
-
-start(Grantee, ConnectionMonitor, Limits) ->
-    process_flag(trap_exit, true),
-    ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
-    ok = erx_net_tables:watch_resolver(self()),
-    ok = erx_net_tables:watch_grant(self()),
-    {ok, #{grantee => Grantee, connection_monitor => ConnectionMonitor, limits => Limits,
-           gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
-           buffers => erx_net_grant_core:new(Limits), subscriber => none, resolver => none,
-           unknown => 0, refused => 0}}.
 
 %% gen_server took a bare call apart; it is put back together, so the grant admits every
 %% call as it came.
@@ -217,70 +240,63 @@ count(Key, S) ->
 
 %% An admitted request: answered, or answered later by what it started.
 act({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} = From,
-    #{grantee := Grantee, gen := Gen0, callers := Callers, buffers := Buffers0} = S) ->
+    #{grantee := Grantee, gen := Gen0, callers := Callers} = S0) ->
+    {Child, Gen} = erx_net_rand:split(Gen0),
+    S = S0#{gen := Gen},
     Initial = #{snd => ?SNDBUF, rcv => ?RCVBUF},
-    case erx_net_grant_core:room(Buffers0) >= ?SNDBUF + ?RCVBUF of
-        false ->
-            {reply, {error, enobufs}, S};
-        true ->
-            {Child, Gen} = erx_net_rand:split(Gen0),
-            Token = make_ref(),
-            Start = #{owner => Owner, origin => Grantee, from => From,
-                      remote => {<<A, B, C, D>>, Port}, opts => Opts, timeout => Timeout,
-                      gen => Child, grant => self(), token => Token, buffers => Initial},
-            case erx_tcp_conn:start_link(Start) of
-                {ok, Conn} ->
-                    %% Nothing else ran in the grant since its room was checked, and the
-                    %% connection's first call waits until this one returns.
-                    {ok, Buffers} = erx_net_grant_core:open(Conn, Token, Initial, Buffers0),
-                    {noreply, S#{gen := Gen, callers := Callers#{Conn => From}, buffers := Buffers}};
-                {error, Reason} ->
-                    {reply, {error, Reason}, S#{gen := Gen}}
-            end
-    end;
-act({adopt, Sizes}, {Conn, _}, #{buffers := Buffers0} = S) ->
-    %% The grant links the socket it adopts, so its exit releases what it holds whatever
-    %% the caller did; a socket already holding buffers is refused, not a crash.
-    Token = make_ref(),
-    try erx_net_grant_core:open(Conn, Token, Sizes, Buffers0) of
-        {ok, Buffers} ->
-            true = link(Conn),
-            {reply, {ok, Token}, S#{buffers := Buffers}};
-        {error, enobufs} = Refused ->
-            {reply, Refused, S}
-    catch
-        error:badarg -> {reply, {error, badarg}, S}
-    end;
-act({reserve_buffer, Token, Kind, Bytes}, {Conn, _}, #{buffers := Buffers0} = S) ->
-    case erx_net_grant_core:reserve(Conn, Token, Kind, Bytes, Buffers0) of
-        {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
+    Start = fun(Token) ->
+                    erx_tcp_conn:start_link(#{owner => Owner, origin => Grantee, from => From,
+                                              remote => {<<A, B, C, D>>, Port}, opts => Opts,
+                                              timeout => Timeout, gen => Child, grant => self(),
+                                              token => Token, buffers => Initial})
+            end,
+    %% The connection answers the caller, or its exit does.
+    case open_socket(Initial, Start, S) of
+        {ok, Conn, _Token, Opened} -> {noreply, Opened#{callers := Callers#{Conn => From}}};
         {error, _} = Error -> {reply, Error, S}
     end;
-act({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S) ->
-    case erx_net_grant_core:release(Conn, Token, Buffers0) of
-        {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
+act({adopt, Sizes}, {Conn, _}, S) ->
+    %% The socket adopted is the caller, already running; a second adoption is refused.
+    case open_socket(Sizes, fun(_Token) -> {ok, Conn} end, S) of
+        {ok, Conn, Token, Opened} -> {reply, {ok, Token}, Opened};
+        {error, _} = Error -> {reply, Error, S}
+    end;
+act({reserve_buffer, Token, Kind, Bytes}, {Conn, _}, #{sockets := Sockets0} = S) ->
+    case erx_net_grant_core:reserve(Conn, Token, Kind, Bytes, Sockets0) of
+        {ok, Sockets} -> {reply, ok, S#{sockets := Sockets}};
+        {error, _} = Error -> {reply, Error, S}
+    end;
+act({release_buffers, Token}, {Conn, _}, #{sockets := Sockets0} = S) ->
+    case erx_net_grant_core:release(Conn, Token, Sockets0) of
+        {ok, Sockets} -> {reply, ok, S#{sockets := Sockets}};
         {error, _} = Error -> {reply, Error, S}
     end;
 act({udp_open, inet, Local, Port, []}, {Owner, _}, #{grantee := Grantee, limits := Limits} = S) ->
-    Reply = maybe
-                {ok, Ports} ?= erx_net_grant_core:bind_ports(udp, Local, Limits),
-                erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee,
-                                          grant => self(), ports => Ports})
+    Start = fun() ->
+                    maybe
+                        {ok, Ports} ?= erx_net_grant_core:bind_ports(udp, Local, Limits),
+                        erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee,
+                                                  grant => self(), ports => Ports})
+                    end
             end,
-    {reply, Reply, S};
+    open_unbuffered(Start, S);
 act({udp_open, inet, _Local, _Port, _Opts}, _From, S) ->
     %% The socket process keeps every option gen_udp:open/2 takes; the socket takes none.
     {reply, {error, einval}, S};
 act({tcp_listen, inet, Local, Port, Opts}, {Owner, _}, #{grantee := Grantee, limits := Limits} = S) ->
-    Reply = maybe
-                {ok, Allowed} ?= erx_net_grant_core:bind_ports(tcp_listen, Local, Limits),
-                {ok, Options} ?= erx_tcp_listen_core:options(Opts),
-                erx_tcp_listen:start_link(#{socket => Owner, origin => Grantee, local => Local,
-                                            port => Port, allowed => Allowed, options => Options})
+    Start = fun() ->
+                    maybe
+                        {ok, Allowed} ?= erx_net_grant_core:bind_ports(tcp_listen, Local, Limits),
+                        {ok, Options} ?= erx_tcp_listen_core:options(Opts),
+                        erx_tcp_listen:start_link(#{socket => Owner, origin => Grantee,
+                                                    local => Local, port => Port,
+                                                    allowed => Allowed, options => Options})
+                    end
             end,
-    {reply, Reply, S};
+    open_unbuffered(Start, S);
 act({icmp_open, inet}, {Owner, _}, #{grantee := Grantee} = S) ->
-    {reply, erx_icmp_sock:open(#{owner => Owner, origin => Grantee, grant => self()}), S};
+    Start = fun() -> erx_icmp_sock:open(#{owner => Owner, origin => Grantee, grant => self()}) end,
+    open_unbuffered(Start, S);
 act(counts, _From, #{unknown := Unknown, refused := Refused} = S) ->
     {reply, #{unknown => Unknown, refused => Refused}, S};
 act(interfaces, _From, S) ->
@@ -290,6 +306,31 @@ act(resolver, _From, S) ->
 act(watch_resolver, {Pid, _}, #{subscriber := Old} = S) ->
     Resolver = resolver(),
     {reply, {ok, Resolver}, S#{subscriber := subscribe(Pid, Old), resolver := Resolver}}.
+
+%% The one way a socket becomes one of the grant's, so every socket is counted and freed
+%% alike: admitted with buffers of Sizes, started by Start with the token the grant makes
+%% for it (an adopted connection is running already), recorded under that token, and
+%% linked, so its exit frees its place and its buffers. The grant's emfile or enobufs, or
+%% Start's refusal, leaves nothing started or recorded.
+open_socket(Sizes, Start, #{sockets := Sockets0} = S) ->
+    Token = make_ref(),
+    maybe
+        ok ?= erx_net_grant_core:admits(Sizes, Sockets0),
+        {ok, Socket} ?= Start(Token),
+        %% Nothing else ran in the grant since it admitted the socket, and a socket just
+        %% started is open nowhere, so only a second adoption is refused here.
+        {ok, Sockets} ?= erx_net_grant_core:open(Socket, Token, Sizes, Sockets0),
+        true = link(Socket),
+        {ok, Socket, Token, S#{sockets := Sockets}}
+    end.
+
+%% A socket that holds no buffer, a listener, a datagram or an echo socket, opened by Start;
+%% the socket, or the refusal, is the reply.
+open_unbuffered(Start, S) ->
+    case open_socket(#{snd => 0, rcv => 0}, fun(_Token) -> Start() end, S) of
+        {ok, Socket, _Token, Opened} -> {reply, {ok, Socket}, Opened};
+        {error, _} = Error -> {reply, Error, S}
+    end.
 
 -doc false.
 handle_cast(_Msg, S) ->
@@ -310,14 +351,17 @@ handle_info({'DOWN', Ref, port, _, _}, #{connection_monitor := Ref} = S) ->
     {stop, {shutdown, connection_ended}, S};
 handle_info({'DOWN', Ref, process, _, _}, #{subscriber := {_, Ref}} = S) ->
     {noreply, S#{subscriber := none}};
-handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, buffers := Buffers} = S0) ->
+handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, sockets := Sockets} = S0)
+  when is_pid(Conn), node(Conn) =:= node() ->
+    %% Every socket of the grant is a process of this node; an 'EXIT' naming anything else
+    %% is no exit signal, and is admitted as any other message.
     case is_process_alive(Conn) of
         true ->
             %% A linked process's exit signal arrives only once it is dead, so this is a
             %% message some process sent in its name: it frees nothing and answers no one.
             {noreply, S0};
         false ->
-            S = S0#{buffers := erx_net_grant_core:exited(Conn, Buffers)},
+            S = S0#{sockets := erx_net_grant_core:exited(Conn, Sockets)},
             case maps:take(Conn, Callers0) of
                 {From, Callers} ->
                     gen_server:reply(From, {error, closed}),

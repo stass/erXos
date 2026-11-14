@@ -8,8 +8,8 @@ require_relative 'erx_net_eunit'
 # Runs the EUnit cases of the network stack's effect layer: the interface core against
 # canned frames (test/erlang/erx_net_if_core_tests.erl), the driver and pipe with a
 # stand-in interface (erx_net_driver_tests.erl) and a TCP connection's loop with a
-# stand-in interface, driver and peer (erx_tcp_conn_tests.erl), the grant's buffer
-# reservations (erx_net_grant_core_tests.erl), and seeds the faults the design names for
+# stand-in interface, driver and peer (erx_tcp_conn_tests.erl), the grant's sockets and
+# buffer reservations (erx_net_grant_core_tests.erl), and seeds the faults the design names for
 # them ("The stack on a development host", "The driver and the clock"; "Receiving").
 class ErxNetEffectTest < Minitest::Test
   include ErxNetEunit

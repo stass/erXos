@@ -43,9 +43,10 @@ otherwise takes them off the control block without a step. A connection in TIME-
 socket process is gone then gives both of its buffers back to the grant
 (erx_net_grant:release_buffers/2): its send buffer is empty, since the peer acknowledged
 the FIN, its receive queue was dropped with the socket process, and nothing more can be
-queued or delivered, so a client's closed connections hold none of the grant's `buffers`
-limit through the 2MSL wait. Then the loop arms the clock no later than the earliest of
-the step's deadline and the connect deadline.
+queued or delivered; with them it leaves the grant's sockets, so a client's closed
+connections hold none of the grant's `buffers` or `sockets` limit through the 2MSL wait.
+Then the loop arms the clock no later than the earliest of the step's deadline and the
+connect deadline.
 
 **The socket protocol** (docs/design-network-stack.md, "The socket process"). The
 connection's owner is its socket process, the grant's caller, which it monitors and the
@@ -704,8 +705,9 @@ pieces([Bin | Rest], Room, Count, Acc, Bytes) when Count > 0, Room > 0 ->
 pieces(Rest, _Room, _Count, Acc, Bytes) ->
     {lists:reverse(Acc), Bytes, Rest}.
 
-%% Both buffers given back to the grant once the connection is in TIME-WAIT and its owner is
-%% gone: nothing is left in them and nothing more can enter them.
+%% Both buffers, and the connection's place among the grant's sockets, given back once the
+%% connection is in TIME-WAIT and its owner is gone: nothing is left in them and nothing
+%% more can enter them.
 release_buffers(#state{buffers = held, owner = none, tcb = #tcb{state = time_wait},
                        grant = Grant, token = Token} = S) ->
     ok = erx_net_grant:release_buffers(Grant, Token),

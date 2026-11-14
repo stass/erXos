@@ -38,6 +38,8 @@ accept_test_() ->
        fun abandon_releases_the_unit/0},
       {"a refused adoption releases the unit and hands the interface its RST",
        fun refused_adoption_resets/0},
+      {"a grant at its sockets limit refuses the adoption, which resets the connection",
+       fun sockets_limit_resets/0},
       {"the listener's exit aborts a queued connection with a RST",
        fun listener_exit_aborts_a_queued_connection/0},
       {"a full accept credit starts nothing", fun full_credit_starts_nothing/0},
@@ -161,11 +163,21 @@ abandon_releases_the_unit() ->
     Holder ! stop.
 
 refused_adoption_resets() ->
+    refused_adoption_resets(#{buffers => 0}).
+
+%% Decision 20: a connection past its grant's sockets limit is counted nowhere and reset at
+%% its handshake, so accept never answers emfile.
+sockets_limit_resets() ->
+    refused_adoption_resets(#{sockets => 0}).
+
+%% A grant of Limits that refuses the adoption: the connection releases its unit, hands the
+%% interface the RST, deletes its key and is never queued.
+refused_adoption_resets(Limits) ->
     Old = whereis(erx_net_grant),
     Ref = monitor(process, Old),
     exit(Old, kill),
     receive {'DOWN', Ref, _, _, _} -> ok end,
-    {ok, Grant} = erx_net_grant:start_link(local, #{buffers => 0}),
+    {ok, Grant} = erx_net_grant:start_link(local, Limits),
     unlink(Grant),
     Unit = erx_net_credit:new(2),
     #{sender := Sender} = Accept = accept(self(), Unit, <<>>),

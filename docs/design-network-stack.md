@@ -2317,7 +2317,8 @@ process with `{reinject, Segment}`, which looks for a listener as
 without ACK is dropped; a retransmitted FIN restarts the 2MSL period; and
 every segment but a bare duplicate ACK is acknowledged.
 
-A connection in TIME-WAIT does not count as one of its grant's sockets.
+A connection in TIME-WAIT whose socket process is gone does not count as
+one of its grant's sockets.
 It counts toward the grant's `time_wait` limit; past that limit a closing
 connection skips TIME-WAIT, as FreeBSD did before 15 when its compressed
 time-wait zone was full. This is a departure from 15, which has no limit,

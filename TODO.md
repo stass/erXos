@@ -2280,8 +2280,7 @@ which its grant adopts and which queues itself on its listener; the grant's `tcp
 (`erx_tcp_listen`), which claims its key by an explicit bind within the ports `erx_net_grant_core:bind_ports/3`
 derives from the `ports`, `listen` and `addresses` limits, and rewrites its entry at a `setopts` of `nodelay`;
 `erx_gen_tcp`'s `listen/2` and `accept/2` reach it through the listening socket's process.
-Missing: the grant's
-`sockets` limit, so `adopt/2` refuses only past `buffers` and a listen never answers `emfile`; pausing, since the grant has no account to pause a
+Missing: pausing, since the grant has no account to pause a
 listener for; and the QEMU case. The core's exploration runs at one end per run, the landing gate's bound; its
 two-end run, `explore(#{ends => 2})`, tens of millions of states, belongs to the milestone gate, on the remote
 development host that runs the 4-CPU gate cells, but nothing runs it yet, so a core bug that needs two ends, such as one in the order of a
@@ -2289,8 +2288,8 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   `erx_tcp_syncache:unreach/3`. A SYN-ACK whose route leaves by another interface is counted `other_interface` and
   never sent, as the closed-port RST already is.
   Not yet: a SYN reinjected from
-  TIME-WAIT (E3, counted `reinject`); the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
-  holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
+  TIME-WAIT (E3, counted `reinject`); the grant's limits other than `sockets` and `buffers`, and its account
+  (`erx_net_grant_core` holds only the sockets and their buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
   stays open until its owner closes it), the packet modes,
   `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; the
@@ -6451,8 +6450,15 @@ document's "residual risks accepted" paragraph.
   resend of the flight each time (RFC 5927 section 7 suggests further checks); a blind SYN
   with an older timestamp still recycles TIME-WAIT about half the time, as FreeBSD ORs
   RFC 6191's timestamp rule with the sequence rule; and a sender that knows the sequence
-  numbers keeps TIME-WAIT alive with retransmitted FINs, within the grant's `time_wait`
-  limit (`erx_tcp_icmp`, `erx_tcp_timewait`).
+  numbers keeps TIME-WAIT alive with retransmitted FINs, as long as it keeps sending them
+  (`erx_tcp_icmp`, `erx_tcp_timewait`).
+* [Medium] erx_net TCP TIME-WAIT, the grant's `time_wait` limit (`erx_net_grant_core`,
+  `erx_tcp_conn`): a connection in TIME-WAIT whose socket process is gone gives its buffers
+  and its place among the grant's sockets back, and the `time_wait` limit that would bound
+  such connections is not built, so a client that opens and closes connections first holds
+  one TIME-WAIT process of the network domain's for each, 2MSL long, without bound. The
+  limit is the design's ("TIME-WAIT", 4,096 by default): count TIME-WAIT connections in the
+  grant's core and let a close past the limit skip TIME-WAIT.
 
 * [Medium] domains, the funnel (`liberx/erx_funnel.c`, `otp/erts/emulator/sys/erxos/erx_lane_drv.c`): until RT8
   adds the queue quota (design-runtime.md edit 15), the funnel delivers every authorised frame whatever the target

@@ -10,7 +10,8 @@ require_relative 'erx_net_eunit'
 # Then seeded faults, each of which must fail: an admission that takes any reply target, a
 # pid or a reply alias of another domain, as a grant that takes a caller-supplied owner
 # would; a mint that admits the system domain as a grantee; a grant that starts without
-# exporting itself; and a grant that outlives its connection to the grantee.
+# exporting itself; a sockets limit one too wide; an open that records nothing; and a grant
+# that outlives its connection to the grantee.
 class ErxNetGrantTest < Minitest::Test
   include ErxNetEunit
 
@@ -36,6 +37,23 @@ class ErxNetGrantTest < Minitest::Test
     unexported = ['case Exports:export(self(), [send], Grantee) of', 'case element(1, {ok, Exports}) of']
     output = refute_erx_net_eunit(:erx_net_grant_tests, fault: { 'erx_net_grant' => unexported })
     assert_case_failed(:minted_exported, output)
+  end
+
+  # A sockets limit that admits one socket past it: the grant at its limit opens a second
+  # socket.
+  def test_a_sockets_limit_off_by_one_is_caught
+    output = refute_erx_net_eunit(:erx_net_grant_tests,
+                                  fault: { 'erx_net_grant_core' => ['map_size(Open) >= SocketsLimit', 'map_size(Open) > SocketsLimit'] })
+    assert_case_failed(:sockets_limit, output)
+  end
+
+  # An open that starts its socket but keeps the sockets it had before it, so it records
+  # nothing: the grant holding it opens another.
+  def test_an_open_that_records_nothing_is_caught
+    unrecorded = ['{ok, Socket, Token, S#{sockets := Sockets}}',
+                  '{ok, Socket, Token, S#{sockets := element(1, {Sockets0, Sockets})}}']
+    output = refute_erx_net_eunit(:erx_net_grant_tests, fault: { 'erx_net_grant' => unrecorded })
+    assert_case_failed(:sockets_limit, output)
   end
 
   def test_a_grant_outliving_its_connection_is_caught
