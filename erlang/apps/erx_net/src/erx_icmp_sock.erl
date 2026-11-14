@@ -77,13 +77,14 @@ erx_net_tables watches it in the grant's place, since the grant's account is not
                 config = none :: none | {non_neg_integer(), erx_net_frame:snapshot()},
                 counters = #{} :: #{atom() => pos_integer()}}).
 
--type options() :: #{owner := pid(), origin := erx_net_admit:origin(), limit => pos_integer()}.
+-type options() :: #{owner := pid(), origin := erx_net_admit:origin(), grant := pid(),
+                     limit => pos_integer()}.
 
 %% --- API -------------------------------------------------------------------------
 
 -doc """
 Opens an echo socket linked to the calling process, for the socket process `owner`, whose
-messages arrive by `origin`. Options: `limit`, the replies that may wait (16 when absent).
+messages arrive by `origin`, as a socket of `grant`. Options: `limit`, the replies that may wait (16 when absent).
 """.
 -spec open(options()) -> {ok, pid()} | {error, term()}.
 open(#{owner := Owner} = Opts) when is_pid(Owner) ->
@@ -92,13 +93,14 @@ open(#{owner := Owner} = Opts) when is_pid(Owner) ->
 %% --- gen_server ------------------------------------------------------------------
 
 -doc false.
-init(#{owner := Owner, origin := Origin} = Opts) ->
+init(#{owner := Owner, origin := Origin, grant := Grant} = Opts) ->
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     Credit = erx_net_credit:new(maps:get(limit, Opts, ?LIMIT_DEFAULT)),
     {Start, Gen} = erx_net_rand:uniform(?IDENTS, erx_net_rand:new(erx_net_clock:entropy(16))),
-    case bind(Start, ?IDENTS, #{pid => self(), credit => Credit}) of
+    %% Watched before the insertion, so a socket that dies right after it leaves no entry.
+    ok = erx_net_tables:watch_holder(self()),
+    case bind(Start, ?IDENTS, #{pid => self(), credit => Credit, grant => Grant}) of
         {ok, Ident} ->
-            ok = erx_net_tables:watch_holder(self()),
             _ = monitor(process, Owner),
             {ok, #state{owner = Owner, origin = Origin, ident = Ident, credit = Credit, gen = Gen}};
         {error, Reason} ->

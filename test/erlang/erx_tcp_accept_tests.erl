@@ -135,7 +135,7 @@ queued_connection_waits_for_the_first_contact() ->
 
 abandon_releases_the_unit() ->
     Holder = spawn(fun() -> receive stop -> ok end end),
-    ok = erx_net_bind:insert(?KEY, Holder, #{pid => Holder, credit => none}),
+    ok = erx_net_bind:insert(?KEY, Holder, #{pid => Holder, credit => none, grant => Holder}),
     Unit = erx_net_credit:new(2),
     ok = erx_tcp_conn:accept(accept(self(), Unit, <<>>)),
     await_free(Unit, 2),

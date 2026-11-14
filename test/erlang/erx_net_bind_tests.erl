@@ -4,7 +4,8 @@
 -module(erx_net_bind_tests).
 -moduledoc """
 An explicit bind's check, erx_net_bind:avail/2, rule by rule (docs/design-network-stack.md,
-"Explicit binds"), and a listener's rewrite of its own entry, erx_net_bind:update/2, which
+"Explicit binds"), the bind that runs it in erx_net_tables with its insertion,
+erx_net_bind:bind/2, the deletion of a grant's entries at its end, and a listener's rewrite of its own entry, erx_net_bind:update/2, which
 replaces an entry only while its caller holds the key with the same credit and grant.
 """.
 
@@ -22,7 +23,7 @@ request(G, Local, Reuse) ->
       reuseport => false, grant => G, allowed => [{1024, 65535}], machine => [?OURS, ?OTHER_ADDR]}.
 
 listener(G, Local) -> {{tcp_listen, inet, Local, ?PORT}, self(), #{pid => self(), credit => c, grant => G}}.
-connection(Local) -> {{tcp, inet, Local, ?PORT, ?PEER, 40000}, self(), #{pid => self(), credit => c}}.
+connection(Local) -> {{tcp, inet, Local, ?PORT, ?PEER, 40000}, self(), #{pid => self(), credit => c, grant => self()}}.
 bound_udp(G, Local) -> {{udp, inet, Local, ?PORT}, self(), #{pid => self(), credit => c, grant => G}}.
 
 grants() -> {spawn(fun() -> ok end), spawn(fun() -> ok end)}.
@@ -48,11 +49,6 @@ another_grants_listener_refuses_whatever_the_reuse_options_test() ->
     %% Distinct addresses of the machine do not overlap.
     ?assertEqual(ok, erx_net_bind:avail(request(G, ?OURS, true), [listener(H, ?OTHER_ADDR)])),
     ?assertEqual(ok, erx_net_bind:avail(request(G, ?OURS), [listener(H, ?OTHER_ADDR)])).
-
-an_entry_naming_no_grant_counts_as_another_grants_test() ->
-    {G, _} = grants(),
-    NoGrant = {{tcp_listen, inet, any, ?PORT}, self(), #{pid => self(), credit => c}},
-    ?assertEqual({error, eaddrinuse}, erx_net_bind:avail(request(G, ?OURS, true), [NoGrant])).
 
 without_reuse_any_overlapping_key_refuses_connections_included_test() ->
     {G, _} = grants(),
@@ -84,6 +80,109 @@ only_keys_of_the_transport_family_and_port_take_part_test() ->
     Connected = {{udp, inet, ?OURS, ?PORT, ?PEER, 53}, self(), #{pid => self(), credit => c, grant => H}},
     ?assertEqual({error, eaddrinuse}, erx_net_bind:avail(Udp, [Connected])),
     ?assertEqual(ok, erx_net_bind:avail(Udp, [listener(H, ?OURS)])).
+
+%% --- bind/2 and a grant's end ---------------------------------------------------------
+
+bind_test_() ->
+    {foreach,
+     fun() ->
+             {ok, Tables} = erx_net_tables:start_link(),
+             unlink(Tables),
+             Me = spawn(fun() -> receive stop -> ok end end),
+             true = ets:insert(erx_net_addrs, {{Me, ?OURS}, Me, 0,
+                                               #{addr => ?OURS, plen => 24, ifname => en0, flags => []}}),
+             Tables
+     end,
+     fun(Tables) ->
+             Ref = monitor(process, Tables),
+             exit(Tables, kill),
+             receive {'DOWN', Ref, _, _, _} -> ok end
+     end,
+     [{"a bind inserts its key and answers its port", fun a_bind_inserts_its_key/0},
+      {"a bind meets the keys of its transport it overlaps", fun a_bind_meets_overlapping_keys/0},
+      {"port 0 takes the first ephemeral port avail/2 allows", fun port_zero_is_checked_as_named/0},
+      {"a bind for another process is refused", fun a_bind_for_another_process_is_refused/0},
+      {"a grant's end deletes every entry naming it", fun a_grants_end_deletes_its_entries/0},
+      {"a holder that ends after its bind leaves no entry", fun an_ended_holder_leaves_no_entry/0},
+      {"a socket deletes only a key it holds", fun a_socket_deletes_only_its_own_key/0}]}.
+
+an_ended_holder_leaves_no_entry() ->
+    {G, _} = grants(),
+    Self = self(),
+    Pid = spawn(fun() -> Self ! {bound, erx_net_bind:bind(spec(udp, any, ?PORT),
+                                                          #{pid => self(), credit => c, grant => G})}
+                end),
+    receive {bound, Bound} -> ?assertEqual({ok, ?PORT}, Bound) end,
+    Ref = monitor(process, Pid),
+    receive {'DOWN', Ref, _, _, _} -> ok end,
+    _ = sys:get_state(erx_net_tables),
+    ?assertEqual([], erx_net_tables:demux({udp, inet, any, ?PORT})).
+
+a_socket_deletes_only_its_own_key() ->
+    {_, H} = grants(),
+    {ok, ?PORT} = bind_in_other(spec(udp, any, ?PORT), H),
+    ok = erx_net_bind:delete({udp, inet, any, ?PORT}),
+    ?assertMatch([#{grant := H}], erx_net_tables:demux({udp, inet, any, ?PORT})).
+
+%% A bind of ?PORT on Local by the calling process for grant G.
+spec(Transport, Local, Port) ->
+    #{transport => Transport, family => inet, local => Local, port => Port, start => 10000,
+      reuseaddr => false, reuseport => false, allowed => [{1024, 65535}]}.
+entry(G) -> #{pid => self(), credit => c, grant => G}.
+
+%% Binds in a process of its own, which stays until it gets stop.
+bind_in_other(Spec, G) ->
+    Self = self(),
+    Pid = spawn(fun() -> Self ! {bound, self(), erx_net_bind:bind(Spec, #{pid => self(), credit => c, grant => G})},
+                         receive stop -> ok end
+                end),
+    receive {bound, Pid, Result} -> Result end.
+
+a_bind_inserts_its_key() ->
+    {G, _} = grants(),
+    ?assertEqual({ok, ?PORT}, erx_net_bind:bind(spec(tcp, ?OURS, ?PORT), entry(G))),
+    ?assertEqual([entry(G)], erx_net_tables:demux({tcp_listen, inet, ?OURS, ?PORT})),
+    ?assertEqual({error, eaddrnotavail}, erx_net_bind:bind(spec(tcp, ?PEER, ?PORT), entry(G))),
+    ?assertEqual({error, eacces}, erx_net_bind:bind(spec(udp, any, 80), entry(G))).
+
+a_bind_meets_overlapping_keys() ->
+    {G, H} = grants(),
+    {ok, ?PORT} = bind_in_other(spec(udp, any, ?PORT), H),
+    ?assertEqual({error, eaddrinuse}, erx_net_bind:bind(spec(udp, ?OURS, ?PORT), entry(G))),
+    ?assertEqual({error, eaddrinuse},
+                 erx_net_bind:bind((spec(udp, ?OURS, ?PORT))#{reuseaddr := true}, entry(G))),
+    %% A TCP listener never meets a UDP key.
+    ?assertEqual({ok, ?PORT}, erx_net_bind:bind(spec(tcp, ?OURS, ?PORT), entry(G))).
+
+port_zero_is_checked_as_named() ->
+    {G, H} = grants(),
+    Narrow = (spec(tcp, any, 0))#{allowed := [{20000, 20000}]},
+    ?assertEqual({ok, 20000}, bind_in_other(Narrow, H)),
+    ?assertEqual({error, eaddrnotavail}, erx_net_bind:bind(Narrow, entry(G))),
+    ?assertEqual({error, eaddrnotavail}, erx_net_bind:bind(Narrow#{allowed := [{80, 1023}]}, entry(G))),
+    {ok, Port} = erx_net_bind:bind((spec(tcp, any, 0))#{start := 20000}, entry(G)),
+    ?assertEqual(20001, Port).
+
+a_bind_for_another_process_is_refused() ->
+    {G, _} = grants(),
+    Other = #{pid => G, credit => c, grant => G},
+    ?assertEqual({error, badarg}, erx_net_tables:bind(spec(tcp, any, ?PORT), Other)),
+    ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, any, ?PORT})).
+
+a_grants_end_deletes_its_entries() ->
+    G = spawn(fun() -> receive stop -> ok end end),
+    {_, H} = grants(),
+    ok = erx_net_tables:watch_grant(G),
+    {ok, _} = erx_net_bind:bind(spec(tcp, any, ?PORT), entry(G)),
+    ok = erx_net_bind:insert({tcp, inet, ?OURS, ?PORT, ?PEER, 40000}, self(), entry(G)),
+    {ok, _} = erx_net_bind:bind(spec(udp, any, ?PORT), entry(H)),
+    Ref = monitor(process, G),
+    G ! stop,
+    receive {'DOWN', Ref, _, _, _} -> ok end,
+    _ = sys:get_state(erx_net_tables),
+    ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, any, ?PORT})),
+    ?assertEqual([], erx_net_tables:demux({tcp, inet, ?OURS, ?PORT, ?PEER, 40000})),
+    ?assertEqual([entry(H)], erx_net_tables:demux({udp, inet, any, ?PORT})).
 
 %% --- update/2 ---------------------------------------------------------------------
 

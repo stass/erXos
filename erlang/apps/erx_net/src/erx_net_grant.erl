@@ -35,12 +35,14 @@ exits, however it ends, the grant answers that caller `{error, closed}` too, so 
 connection that dies before answering leaves no caller waiting. A caller already answered
 never sees the second answer: a call's reply alias is gone once its first reply arrived.
 A connection's demultiplexing entries are deleted by erx_net_tables, which watches it in
-the grant's place.
+the grant's place. Every entry names its socket's grant, and erx_net_tables, which watches
+the grant from its start, deletes every entry naming it when the grant ends.
 
 **Open.** `{udp_open, inet, Local, Port, []}` starts a datagram socket (erx_udp_sock)
 for the caller, its socket process, which the socket monitors and speaks the socket
 protocol to, its messages arriving by the grantee's origin; `Local` is `any` or an IPv4
-address and `Port` 0 for an ephemeral port. Options are the socket process's own, so a
+address and `Port` 0 for an ephemeral port; the socket binds it explicitly within the
+grant's `ports` (erx_net_bind:bind/2). Options are the socket process's own, so a
 non-empty list is refused with `einval`. `{icmp_open, inet}` starts an echo socket
 (erx_icmp_sock) for the caller likewise.
 
@@ -167,6 +169,7 @@ start(Grantee, ConnectionMonitor, Limits) ->
     process_flag(trap_exit, true),
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     ok = erx_net_tables:watch_resolver(self()),
+    ok = erx_net_tables:watch_grant(self()),
     {ok, #{grantee => Grantee, connection_monitor => ConnectionMonitor, limits => Limits,
            gen => erx_net_rand:new(erx_net_clock:entropy(16)), callers => #{},
            buffers => erx_net_grant_core:new(Limits), subscriber => none, resolver => none,
@@ -247,13 +250,14 @@ act({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S) ->
         {ok, Buffers} -> {reply, ok, S#{buffers := Buffers}};
         {error, _} = Error -> {reply, Error, S}
     end;
-act({udp_open, inet, Local, Port, []}, {Owner, _}, #{grantee := Grantee} = S) ->
-    {reply, erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee}), S};
+act({udp_open, inet, Local, Port, []}, {Owner, _}, #{grantee := Grantee, limits := Limits} = S) ->
+    {reply, erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee,
+                                      grant => self(), ports => ports(Limits)}), S};
 act({udp_open, inet, _Local, _Port, _Opts}, _From, S) ->
     %% The socket process keeps every option gen_udp:open/2 takes; the socket takes none.
     {reply, {error, einval}, S};
 act({icmp_open, inet}, {Owner, _}, #{grantee := Grantee} = S) ->
-    {reply, erx_icmp_sock:open(#{owner => Owner, origin => Grantee}), S};
+    {reply, erx_icmp_sock:open(#{owner => Owner, origin => Grantee, grant => self()}), S};
 act(counts, _From, #{unknown := Unknown, refused := Refused} = S) ->
     {reply, #{unknown => Unknown, refused => Refused}, S};
 act(interfaces, _From, S) ->
@@ -301,6 +305,12 @@ handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, buffers := Buffers} 
     end;
 handle_info(Message, S) ->
     admit(Message, S).
+
+%% The local ports the grant may bind explicitly, as inclusive ranges: its `ports` limit,
+%% 1024 to 65535 by default, as FreeBSD reserves the ports below 1024 to privilege
+%% (`ipport_reservedhigh`, in_pcb.c).
+ports(Limits) ->
+    maps:get(ports, Limits, [{1024, 65535}]).
 
 %% The interfaces as the `interfaces` operation shows them: what ifconfig prints, and not
 %% the routes and resolver servers, which the resolver operation answers.

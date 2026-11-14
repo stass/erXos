@@ -213,9 +213,11 @@ init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport},
         {Start, Rand1} = erx_net_bind:ephemeral_start(Rand0),
         Now = erx_net_clock:now(),
         KeyOf = fun(P) -> {tcp, inet, Src, P, Raddr, Rport} end,
-        {ok, Port, Iss, TsOffset} ?= erx_net_bind:claim_tcp(KeyOf, Start, self(),
-                                                           #{pid => self(), credit => Credit}, Now),
+        %% Watched before the claim, so a connection that dies right after it leaves no entry.
         ok = erx_net_tables:watch_holder(self()),
+        {ok, Port, Iss, TsOffset} ?= erx_net_bind:claim_tcp(KeyOf, Start, self(),
+                                                           #{pid => self(), credit => Credit,
+                                                             grant => Grant}, Now),
         {TcbGen, Rand} = erx_net_rand:split(Rand1),
         Tcb = erx_tcp_user:new(#{family => inet, local => {Src, Port}, remote => {Raddr, Rport},
                                  iss => Iss, ts_offset => TsOffset,
@@ -239,14 +241,15 @@ connection the verdict, `go`, or `abandon` when another socket holds the four-tu
 interface waits on nothing here, and from the spawn on the unit is the connection's.
 """.
 -spec accept(accept()) -> ok | full.
-accept(#{entry := #{credit := Unit}, conn := Conn} = Accept) ->
+accept(#{entry := #{credit := Unit, grant := Grant}, conn := Conn} = Accept) ->
     case erx_net_credit:reserve(Unit, 1) of
         full ->
             full;
         ok ->
             Credit = erx_net_credit:new(?CREDIT_LIMIT),
             Pid = proc_lib:spawn(?MODULE, accepted, [Accept#{credit => Credit}]),
-            Pid ! case erx_net_bind:insert(key(Conn), Pid, #{pid => Pid, credit => Credit}) of
+            Pid ! case erx_net_bind:insert(key(Conn), Pid, #{pid => Pid, credit => Credit,
+                                                          grant => Grant}) of
                       ok -> go;
                       {error, eaddrinuse} -> abandon
                   end,

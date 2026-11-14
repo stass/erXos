@@ -2169,8 +2169,7 @@ it; git history is the record of completed work.
 * [Medium] network, effect layer (E1, `erx_net_if`, `erx_udp_sock`, `erx_net_tables`): the first
   package runs ARP, ICMP echo, DHCP and UDP only. Not yet: `erx_net_vclock` and `erx_net_script` (the virtual clock is refused at
   start); grants, `erx_net_admit` and `erx_net_client` (`erx_udp_sock` has a
-  provisional `gen_udp`-shaped interface, and `erx_net_tables:watch_holder/1` deletes a dead
-  socket's entries in its grant's place); the listener, IPv6, reassembly and redirect paths of
+  provisional `gen_udp`-shaped interface); the listener, IPv6, reassembly and redirect paths of
   `erx_net_if_core` (counted `unsupported`); an `erx_net` application module and its `env` keys
   (the stack starts with `erx_net_sup:start_link/1`); the credit limits are fixed defines, not
   application keys; a datagram socket's credit counts datagrams, not bytes of its receive
@@ -2205,11 +2204,10 @@ it; git history is the record of completed work.
   opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
 which its grant adopts and which queues itself on its listener, and `erx_tcp_listen` serves as that
-listener around `erx_tcp_listen_core`, but no grant starts one yet. The explicit bind's check
-(`erx_net_bind:avail/2`) and the entry's rewrite (`update/2`) exist but nothing calls them. Missing: the grant's
-`tcp_listen` and the listener's explicit bind of its key (`erx_net_bind:bind/2`, the call to `erx_net_tables` that
-reads the port's keys and the machine's addresses, runs `avail/2` and inserts in one step, and walks the ephemeral
-range for port 0 within the ports the grant allows a listener), the Erlang form of the grant's `ports`, `listen`
+listener around `erx_tcp_listen_core`, but no grant starts one yet. The explicit bind
+(`erx_net_bind:bind/2`) binds datagram sockets within the grant's `ports`; nothing calls the entry's rewrite
+(`update/2`) yet. Missing: the grant's `tcp_listen` and the listener's explicit bind of its key through `bind/2`,
+within the ports the grant allows a listener, the checked Erlang form of the grant's `ports`, `listen`
 and `addresses` limits (`avail/2` takes ports as inclusive ranges, `[{1024, 65535}]`), with `listen`'s options
 checked, its backlog an integer, and the listener's
 `setopts` of the options its entry holds; `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's

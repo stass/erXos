@@ -4625,18 +4625,21 @@ of them for a minute after closing it.
 ### Ports and the demultiplexing table
 
 The demultiplexing table, `erx_net_demux` in `erx_net_tables`, maps a
-key to the socket that receives for it, its entry `#{pid, credit}`:
+key to the socket that receives for it, its entry `#{pid, credit, grant}`:
+the holder, the credit a frame for it takes a unit of, and the grant
+whose socket the holder is, which every entry names, connections and
+datagram sockets included, so that a grant's entries are one match on
+`grant`:
 
 * `{tcp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
   connection;
 * `{tcp_listen, Family, LocalAddr | any, LocalPort}`: a listener, whose
-  entry also holds its grant, its grantee and what it passes to the
+  entry also holds its grantee and what it passes to the
   connections it accepts ([The listener](#the-listener)), and whose
   credit is its accept credit;
 * `{udp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
   connected datagram socket;
-* `{udp, Family, LocalAddr | any, LocalPort}`: a bound one, whose entry
-  also holds its grant.
+* `{udp, Family, LocalAddr | any, LocalPort}`: a bound one.
 
 Lookup goes from the most specific key to the wildcard, as
 `in_pcblookup_hash` does ([Classifying a frame](#classifying-a-frame)). Every insertion goes through `erx_net_bind`,
@@ -4679,7 +4682,7 @@ one process: `erx_net_bind:bind/2` makes a call to `erx_net_tables`,
 the table's owner, which runs both, and two explicit binds are ordered
 by their calls. The check is a pure function, `erx_net_bind:avail/2`,
 of the request (transport, family, address or `any`, port, `reuseaddr`,
-`reuseport`, grant, the ports the grant allows this bind, and the
+`reuseport`, grant, which the binding socket's entry names, the ports the grant allows this bind, and the
 machine's own addresses of the family, which `erx_net_tables` reads from
 `erx_net_addrs` without waiting on an interface) and the keys of the
 request's transport held on that port, with their entries:
@@ -4725,12 +4728,18 @@ claim can race an explicit bind of its port under rule 4; either way
 the result is a state FreeBSD reaches when the listener binds first,
 since a connect never checks listeners.
 
-A socket removes its own entries when it ends normally. When a socket
-exits abnormally, its grant, which traps the exit, deletes every entry
-whose holder is that pid. When a grant ends, `erx_net_tables`, which
-monitors every grant, deletes every entry the grant's sockets held. These
-are the only two ways an entry outlives its holder, and both are handled
-by one owner each.
+A socket removes its own entries when it ends normally, each only while
+it still holds the key, so a key that a grant's end freed and another
+socket claimed is left to that socket. When a socket exits abnormally,
+`erx_net_tables`, which watches every holder from the step that
+inserted its key (inside the call, for an explicit bind), deletes every
+entry whose holder is that pid. When a grant ends, `erx_net_tables`, which
+monitors every grant, deletes every entry naming the grant, with one
+`ets:select_delete/2` matching the entries' `grant`, so no list of the
+grant's sockets takes part and an entry inserted for a socket the grant
+has not yet linked or adopted goes too. These
+are the only two ways an entry outlives its holder, and `erx_net_tables`
+handles both.
 
 ## The interface towards Erlang programs
 

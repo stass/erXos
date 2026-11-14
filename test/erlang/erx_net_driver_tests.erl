@@ -482,7 +482,7 @@ queued_batches_reach_a_holder_as_one_message() ->
         Driver = answers_arp(Far, 50),
         [{en0, If, _}] = ets:lookup(erx_net_ifs, en0),
         KeyOf = fun(P) -> {tcp, inet, ?ME4, P, ?PEER4, ?PEER_PORT} end,
-        Entry = #{pid => self(), credit => erx_net_credit:new(16)},
+        Entry = #{pid => self(), credit => erx_net_credit:new(16), grant => self()},
         {ok, Port, _, _} = erx_net_bind:claim_tcp(KeyOf, 49152, self(), Entry, erx_net_clock:now()),
         ok = sys:suspend(If),
         [Driver ! {erx_net_pipe, Far, peer_segment(Port, Seq)} || Seq <- [1, 2, 3]],
@@ -542,7 +542,7 @@ with_holder(Limit, Fun) ->
         [{en0, If, _}] = ets:lookup(erx_net_ifs, en0),
         KeyOf = fun(P) -> {tcp, inet, ?ME4, P, ?PEER4, ?PEER_PORT} end,
         Credit = erx_net_credit:new(Limit),
-        Entry = #{pid => self(), credit => Credit},
+        Entry = #{pid => self(), credit => Credit, grant => self()},
         {ok, Port, _, _} = erx_net_bind:claim_tcp(KeyOf, 49152, self(), Entry, erx_net_clock:now()),
         Fun(Far, Driver, If, Port, Credit)
     after

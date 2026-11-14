@@ -40,7 +40,8 @@
 -moduledoc """
 The port rules of the demultiplexing table's one insertion funnel
 (docs/design-network-stack.md, "Ports and the demultiplexing table"): an explicit bind's
-check, `avail/2`, translated from `in_pcbbind_avail`; the one rewrite of an entry,
+check, `avail/2`, translated from `in_pcbbind_avail`, and the bind that runs it with its
+insertion, `bind/2`; the one rewrite of an entry,
 `update/2`, by the key's holder alone; an active open's claim, `claim_tcp/5`; and the
 choice of an ephemeral port, translated from `in_pcb_lport_dest` of
 FreeBSD's `sys/netinet/in_pcb.c` at commit 975e3605 (erlang/apps/erx_net/NOTICE-freebsd),
@@ -59,9 +60,10 @@ once.
 """.
 
 -export([ephemeral_start/1, next_ephemeral/2]).
--export([insert/3, insert_ephemeral/4, claim_tcp/5, delete/1, avail/2, allowed/2, update/2]).
+-export([insert/3, claim_tcp/5, delete/1, avail/2, allowed/2, update/2]).
+-export([bind/2, claim_bound/3]).
 
--export_type([port_number/0, ports/0, bind_request/0]).
+-export_type([port_number/0, ports/0, bind_request/0, bind_spec/0]).
 
 %% IPPORT_EPHEMERALFIRST and IPPORT_EPHEMERALLAST (sys/netinet/in.h).
 -define(FIRST_AUTO, 10000).
@@ -104,10 +106,11 @@ after_port(Port) -> Port + 1.
 
 -doc """
 Inserts `Key` for `Pid` with its entry, unless another socket holds it: `ets:insert_new/2`
-decides a race between two binders, so a key has exactly one holder by construction.
+decides a race between two binders, so a key has exactly one holder by construction. The
+entry must name `Pid` and a grant, so every entry is one its grant's end deletes.
 """.
 -spec insert(erx_net_input:key(), pid(), erx_net_input:entry()) -> ok | {error, eaddrinuse}.
-insert(Key, Pid, Entry) ->
+insert(Key, Pid, #{pid := Pid, credit := _, grant := Grant} = Entry) when is_pid(Grant) ->
     case ets:insert_new(erx_net_demux, {Key, Pid, Entry}) of
         true -> ok;
         false -> {error, eaddrinuse}
@@ -165,7 +168,7 @@ of the table may be wider than the port. In order:
    `listen` for a listener), is refused `eacces`;
 3. a key without a remote end (for UDP, any key) that another grant holds, on the same
    address or with either address `any`, is refused `eaddrinuse` whatever the reuse
-   options; an entry that names no grant counts as another grant's;
+   options;
 4. without `reuseaddr` and `reuseport`, any key on the same address, or with either `any`,
    connections included, is refused `eaddrinuse`;
 5. with either option, a key without a remote end on exactly the same address is refused
@@ -180,8 +183,8 @@ avail(#{transport := Transport, family := Family, local := Local, port := Port,
        is_boolean(ReuseAddr), is_boolean(ReusePort), is_list(Allowed), is_list(Machine) ->
     %% Each key of the request's transport, family and port: its local address, whether it
     %% has a remote end, and the grant its entry names.
-    Same = [{HeldLocal, Remote, maps:get(grant, Entry, none)}
-            || {Key, _Pid, Entry} <- Held, is_map(Entry),
+    Same = [{HeldLocal, Remote, HeldGrant}
+            || {Key, _Pid, #{grant := HeldGrant}} <- Held,
                {T, F, HeldLocal, P, Remote} <- [view(Key)], T =:= Transport, F =:= Family, P =:= Port],
     Reuse = ReuseAddr orelse ReusePort,
     Ours = Local =:= any orelse (is_binary(Local) andalso lists:member(Local, Machine)),
@@ -197,7 +200,7 @@ avail(#{transport := Transport, family := Family, local := Local, port := Port,
 %% Rules 3 to 5 for one held key on the request's port.
 conflicts({HeldLocal, Remote, HeldGrant}, Transport, Local, Grant, Reuse) ->
     Overlaps = HeldLocal =:= Local orelse HeldLocal =:= any orelse Local =:= any,
-    OtherGrant = HeldGrant =:= none orelse HeldGrant =/= Grant,
+    OtherGrant = HeldGrant =/= Grant,
     Unconnected = Remote =:= unconnected,
     if
         %% 3: another grant's key without a remote end (for UDP, any of its keys).
@@ -225,6 +228,86 @@ view({udp, F, L, P}) -> {udp, F, L, P, unconnected};
 view(_) -> {none, none, none, none, none}.
 
 -doc """
+An explicit bind as its socket asks for it: a `bind_request()` without the grant, which the
+entry names, and without the machine's addresses, which erx_net_tables reads; `port` 0 asks
+for an ephemeral port, whose search begins at `start`, drawn from the socket's generator
+with `ephemeral_start/1` (any port of the range when `port` is not 0).
+""".
+-type bind_spec() :: #{transport := tcp | udp, family := inet | inet6,
+                       local := binary() | any, port := 0..16#ffff,
+                       reuseaddr := boolean(), reuseport := boolean(), allowed := ports(),
+                       start := port_number()}.
+
+-doc """
+Claims an explicit bind's key, a listener's `{tcp_listen, Family, Local, Port}` or a bound
+datagram socket's `{udp, Family, Local, Port}`, for the calling socket with `Entry`, and
+answers the port bound. The check and the insertion are one step of erx_net_tables, which
+orders every explicit bind by its call: it reads the machine's addresses of the family and
+the keys of the transport and family held on the port (on every port, in one scan, for
+port 0), and runs `claim_bound/3`. Port 0 takes the first port of the ephemeral search from
+`start` that `avail/2` allows, so a chosen port passes the same rule 2 as a named one, and
+a search that finds none is answered `{error, eaddrnotavail}`, as a spent range is.
+""".
+-spec bind(bind_spec(), erx_net_input:entry()) ->
+          {ok, 1..16#ffff} | {error, eaddrnotavail | eacces | eaddrinuse}.
+bind(#{transport := Transport, family := Family, local := Local, port := Port, start := Start,
+       reuseaddr := ReuseAddr, reuseport := ReusePort, allowed := Allowed} = Spec,
+     #{pid := Self, credit := _, grant := Grant} = Entry)
+  when Self =:= self(), is_pid(Grant), (Transport =:= tcp orelse Transport =:= udp),
+       (Family =:= inet orelse Family =:= inet6), (Local =:= any orelse is_binary(Local)),
+       is_integer(Port), Port >= 0, Port =< 16#ffff, is_integer(Start), Start >= ?FIRST_AUTO,
+       Start =< ?LAST_AUTO, is_boolean(ReuseAddr), is_boolean(ReusePort), is_list(Allowed) ->
+    erx_net_tables:bind(maps:with([transport, family, local, port, start, reuseaddr, reuseport,
+                                   allowed], Spec), Entry).
+
+-doc """
+The step of `bind/2` that erx_net_tables runs, its one caller: `Request` is the bind's
+`bind_spec()` with its `grant` and `machine` added, and `Held` the keys of its transport and
+family that erx_net_tables read, on its port or, for port 0, on every port. Checks each
+candidate port with `avail/2` against the keys held on it and inserts the first one allowed
+with `ets:insert_new/2`.
+""".
+-spec claim_bound(map(), [{erx_net_input:key(), pid(), map()}], erx_net_input:entry()) ->
+          {ok, 1..16#ffff} | {error, eaddrnotavail | eacces | eaddrinuse}.
+claim_bound(#{port := 0, start := Start, local := Local, machine := Machine} = Request, Held,
+            Entry) ->
+    %% Rule 1 refuses every port alike, so an address not the machine's is answered before
+    %% the walk rather than after a refusal on each port of the range.
+    case Local =:= any orelse lists:member(Local, Machine) of
+        true ->
+            ByPort = maps:groups_from_list(fun({Key, _, _}) -> key_port(Key) end, Held),
+            search_bound(Start, Start, Request, ByPort, Entry);
+        false ->
+            {error, eaddrnotavail}
+    end;
+claim_bound(#{port := Port} = Request, Held, #{pid := Pid} = Entry) ->
+    maybe
+        ok ?= avail(Request, Held),
+        ok ?= insert(bound_key(Request, Port), Pid, Entry),
+        {ok, Port}
+    end.
+
+%% Port 0's search: each port in turn from Start, as next_ephemeral/2 gives them, until
+%% avail/2 allows one whose key is free.
+search_bound(Port, Start, Request, ByPort, #{pid := Pid} = Entry) ->
+    Claimed = case avail(Request#{port := Port}, maps:get(Port, ByPort, [])) of
+                  ok -> insert(bound_key(Request, Port), Pid, Entry);
+                  {error, _} = Refused -> Refused
+              end,
+    case {Claimed, next_ephemeral(Port, Start)} of
+        {ok, _} -> {ok, Port};
+        {{error, _}, exhausted} -> {error, eaddrnotavail};
+        {{error, _}, Next} -> search_bound(Next, Start, Request, ByPort, Entry)
+    end.
+
+bound_key(#{transport := tcp, family := Family, local := Local}, Port) -> {tcp_listen, Family, Local, Port};
+bound_key(#{transport := udp, family := Family, local := Local}, Port) -> {udp, Family, Local, Port}.
+
+key_port(Key) ->
+    {_, _, _, Port, _} = view(Key),
+    Port.
+
+-doc """
 Replaces the entry of `Key` with `Entry`, only while the caller holds the key and the held
 entry has `Entry`'s pid, credit and grant: one `ets:select_replace/2`, whose match and
 replacement ETS makes one atomic step (`ets.erl:1864-1870`), so a key its grant's end has
@@ -245,8 +328,11 @@ update(Key, #{pid := Self, credit := Credit, grant := Grant} = Entry) when Self 
         0 -> gone
     end.
 
--doc "Removes `Key` from the demultiplexing table.".
+-doc """
+Removes `Key` from the demultiplexing table while the caller holds it, so a key its grant's
+end deleted and another socket claimed since is left to that socket.
+""".
 -spec delete(erx_net_input:key()) -> ok.
 delete(Key) ->
-    true = ets:delete(erx_net_demux, Key),
+    true = ets:match_delete(erx_net_demux, {Key, self(), '_'}),
     ok.

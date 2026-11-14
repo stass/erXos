@@ -8,7 +8,8 @@ require_relative 'erx_net_eunit'
 # An explicit bind's check and a listener's rewrite of its entry
 # (test/erlang/erx_net_bind_tests.erl; docs/design-network-stack.md, "Explicit binds" and
 # "Ports and the demultiplexing table"), with seeded faults aimed at the two properties
-# that keep one grant's binds from reaching another's: rule 3, and update/2's holder check.
+# that keep one grant's binds from reaching another's: rule 3, update/2's holder check and
+# the bind's.
 class ErxNetBindTest < Minitest::Test
   include ErxNetEunit
 
@@ -28,6 +29,14 @@ class ErxNetBindTest < Minitest::Test
       "Spec = [{{Key, '_', '$3'},"
     ]
   }.freeze
+
+  # The holder check dropped: a bind inserts a key held in another process's name.
+  def test_seeded_fault_fails_a_bind_for_another_process_is_refused
+    fault = ['#{pid := Holder, grant := Grant} = Entry}, {Holder, _}, Watched)',
+             '#{pid := Holder, grant := Grant} = Entry}, {_, _}, Watched)']
+    output = refute_erx_net_eunit(:erx_net_bind_tests, fault: { 'erx_net_tables' => fault })
+    assert_match(/a_bind_for_another_process_is_refused/, output)
+  end
 
   FAULTS.each do |name, fault|
     define_method("test_seeded_fault_fails_#{name}") do

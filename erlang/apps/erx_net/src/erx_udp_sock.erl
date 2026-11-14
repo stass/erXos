@@ -70,16 +70,19 @@ enobufs}`.
                 config = none :: none | {non_neg_integer(), erx_net_frame:snapshot()},
                 counters = #{} :: #{atom() => pos_integer()}}).
 
--type options() :: #{owner := pid(), origin := erx_net_admit:origin(), ip => inet:ip4_address() | any,
+-type options() :: #{owner := pid(), origin := erx_net_admit:origin(), grant := pid(),
+                     ports := erx_net_bind:ports(), ip => inet:ip4_address() | any,
                      limit => pos_integer()}.
 
 %% --- API -------------------------------------------------------------------------
 
 -doc """
 Opens a socket bound to `Port` (0 for an ephemeral port), linked to the calling process,
-for the socket process `owner`, whose messages arrive by `origin`. Options: the local
-address `ip` (`any` when absent) and `limit`, the datagrams that may wait (64 when
-absent).
+for the socket process `owner`, whose messages arrive by `origin`, as a socket of `grant`,
+which may bind the inclusive port ranges of `ports`. The bind is explicit
+(erx_net_bind:bind/2), so it meets the UDP keys it overlaps, those of another grant
+included. Options: the local address `ip` (`any` when absent) and `limit`, the datagrams
+that may wait (64 when absent).
 """.
 -spec open(0..16#ffff, options()) -> {ok, pid()} | {error, term()}.
 open(Port, #{owner := Owner} = Opts) when is_integer(Port), Port >= 0, Port =< 16#ffff, is_pid(Owner) ->
@@ -88,30 +91,20 @@ open(Port, #{owner := Owner} = Opts) when is_integer(Port), Port >= 0, Port =< 1
 %% --- gen_server ------------------------------------------------------------------
 
 -doc false.
-init({Port0, #{owner := Owner, origin := Origin} = Opts}) ->
+init({Port0, #{owner := Owner, origin := Origin, grant := Grant, ports := Ports} = Opts}) ->
     ok = (erx_net_sup:runtime()):serve(?MAX_REQUEST),
     Ip = case maps:get(ip, Opts, any) of
              any -> any;
              Tuple -> addr(Tuple)
          end,
     Credit = erx_net_credit:new(maps:get(limit, Opts, ?LIMIT_DEFAULT)),
-    Entry = #{pid => self(), credit => Credit},
-    Gen0 = erx_net_rand:new(erx_net_clock:entropy(16)),
+    Entry = #{pid => self(), credit => Credit, grant => Grant},
+    {Start, Gen} = erx_net_bind:ephemeral_start(erx_net_rand:new(erx_net_clock:entropy(16))),
     KeyOf = fun(P) -> {udp, inet, Ip, P} end,
-    {Bound, Gen} =
-        case Port0 of
-            0 ->
-                {Start, Gen1} = erx_net_bind:ephemeral_start(Gen0),
-                {erx_net_bind:insert_ephemeral(KeyOf, Start, self(), Entry), Gen1};
-            _ ->
-                {case erx_net_bind:insert(KeyOf(Port0), self(), Entry) of
-                     ok -> {ok, Port0};
-                     Error -> Error
-                 end, Gen0}
-        end,
-    case Bound of
+    Spec = #{transport => udp, family => inet, local => Ip, port => Port0, start => Start,
+             reuseaddr => false, reuseport => false, allowed => Ports},
+    case erx_net_bind:bind(Spec, Entry) of
         {ok, Port} ->
-            ok = erx_net_tables:watch_holder(self()),
             _ = erlang:monitor(process, Owner),
             {ok, #state{owner = Owner, origin = Origin, ip = Ip, port = Port, key = KeyOf(Port),
                         credit = Credit, gen = Gen}};

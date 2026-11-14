@@ -40,7 +40,9 @@ dns_test_() ->
       {"a datagram goes to the connected peer and its answer back", fun udp_exchange/0},
       {"a connected socket takes only its peer's datagrams", fun udp_connected_filters/0},
       {"a socket ends with its owner", fun udp_ends_with_owner/0},
-      {"bad requests and options are refused", fun udp_refusals/0}]].
+      {"bad requests and options are refused", fun udp_refusals/0},
+      {"a bind meets the keys it overlaps, the machine's addresses and the allowed ports",
+       fun udp_bind_checks/0}]].
 
 config_test_() ->
     [{"a well-formed answer is taken", fun config_accepted/0},
@@ -248,6 +250,19 @@ udp_ends_with_owner() ->
     exit(Owner, kill),
     receive {'DOWN', Ref, process, Sock, _} -> ok after ?WAIT -> error(socket_outlived_owner) end,
     ?assertEqual([], erx_net_tables:demux({udp, inet, any, Port})).
+
+%% An explicit bind runs erx_net_bind:avail/2 with its insertion: a socket bound to one of
+%% the machine's addresses meets one bound to any address on the port, an address not the
+%% machine's is refused, and so is a port the grant does not allow (below 1024 by default).
+udp_bind_checks() ->
+    {ok, Any} = erx_gen_udp:open(20000, [{active, false}]),
+    ?assertEqual({error, eaddrinuse}, erx_gen_udp:open(20000, [{ip, {10, 0, 2, 15}}])),
+    ok = erx_gen_udp:close(Any),
+    {ok, Ours} = erx_gen_udp:open(20000, [{ip, {10, 0, 2, 15}}]),
+    ?assertEqual({error, eaddrinuse}, erx_gen_udp:open(20000, [])),
+    ok = erx_gen_udp:close(Ours),
+    ?assertEqual({error, eaddrnotavail}, erx_gen_udp:open(0, [{ip, {10, 0, 2, 99}}])),
+    ?assertEqual({error, eacces}, erx_gen_udp:open(53, [])).
 
 udp_refusals() ->
     ?assertEqual({error, eafnosupport}, erx_gen_udp:open(0, [inet6])),

@@ -323,10 +323,12 @@ socket holds its identifier, the one key of the echo replies it takes.
              | {icmp_echo, inet, Ident :: 0..16#ffff}.
 
 -doc """
-A holder of a key: its pid and the credit a frame for it takes one unit of; a listener's
-entry also holds its grant and the options of the connections it accepts.
+A holder of a key: its pid, the credit a frame for it takes one unit of, and the grant
+whose socket it is, whose end deletes the entry (erx_net_tables); a listener's entry also
+holds the options of the connections it accepts.
 """.
--type entry() :: #{pid := pid(), credit := term(), listener => erx_tcp_syncache:listener(),
+-type entry() :: #{pid := pid(), credit := term(), grant := pid(),
+                   listener => erx_tcp_syncache:listener(),
                    atom() => term()}.
 
 -doc "The decision on one frame.".
