@@ -185,7 +185,7 @@ gains one column, the images each NIF is linked into.
 A domain that runs the interpreter or BeamAsm image maps OpenSSL whether
 or not it uses it, and the library's constructor on AArch64,
 `OPENSSL_cpuid_setup` (`armcap.c:65-67`), runs there at load, reading
-the feature words and `OPENSSL_armcap` (below), and the CPU's `MIDR_EL1`
+the feature words and `OPENSSL_armcap` (below), and the CPU's main ID register
 only when those claim `HWCAP_CPUID`, which the kernel's feature words
 never do (below). Nothing
 more of
@@ -262,7 +262,7 @@ branch; each file carries its notice:
   so CPU features come from `getauxval(AT_HWCAP)` and `AT_HWCAP2`, which
   the seam answers from the boot information page, and the `SIGILL`
   probe is never compiled. One read of the CPU stays: when the words
-  claim `HWCAP_CPUID`, `OPENSSL_cpuid_setup` reads `MIDR_EL1` (in the
+  claim `HWCAP_CPUID`, `OPENSSL_cpuid_setup` reads the main ID register (in the
   tree's `armcap.c`, the `ARMV8_CPUID` test before `_armv8_cpuid_probe`)
   to pick code tuned for the core, and user mode's read of it traps on
   erXos. The kernel's feature words never claim `HWCAP_CPUID` (the rule
@@ -386,7 +386,7 @@ difference between them is erXos's
 | **K1.** The system domain holds no OpenSSL | its image is linked without it; a build check proves it (below) |
 | **K2.** OpenSSL's only seed is `erx_entropy_read` | `getrandom` is the only seed method compiled in, `syscall_random` calls it directly, and the seam's row reads nothing else |
 | **K3.** A failed seed never yields bytes | the seam answers `EIO` and OpenSSL's unseeded generator refuses |
-| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no `SIGILL` probe; its one read of the CPU, `MIDR_EL1`, runs only when the feature words claim `HWCAP_CPUID`, which the kernel's never do |
+| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no `SIGILL` probe; its one read of the CPU, the main ID register, runs only when the feature words claim `HWCAP_CPUID`, which the kernel's never do |
 | **K5.** OpenSSL loads no code, and reads no file unless a caller names one | `no-shared`, `no-module`, `no-dso` and `no-engine` leave no loader; `no-autoload-config` reads no configuration file at start. OpenSSL's file functions (`BIO_new_file`, the configuration and store loaders) stay compiled and run only on a path a caller passes, and `crypto`'s NIF passes none |
 
 ## Failure handling
