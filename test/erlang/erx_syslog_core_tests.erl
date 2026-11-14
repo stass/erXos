@@ -180,3 +180,80 @@ incarnation(N, Table) ->
                  {N, Lines}),
     ?assertEqual({N, erx_syslog_core:new((N + 1) * ?S)}, {N, Turned}),
     Turned.
+
+%% The consumer protocol, exhaustively over each role's states and events
+%% (docs/design-log.md, "Consumers and backlogs"): from idle and from waiting on
+%% consumer A, with and without a line in the backlog, each of A's own request,
+%% another process B's request, a line joining, the store's wait running out, and
+%% A's end followed by a line.
+consumer_protocol_test_() ->
+    [?_test(protocol(Role, State, Backlog, Event))
+     || Role <- [console, store], State <- [idle, waiting], Backlog <- [empty, line],
+        Event <- [ask_a, ask_b, line, late, end_a]].
+
+a_pid() -> list_to_pid("<0.1.0>").
+b_pid() -> list_to_pid("<0.2.0>").
+
+requester(Pid, Tag) -> {{Pid, Tag}, make_ref()}.
+
+%% Consumers with Role in State, its backlog empty or holding one line joined at 0,
+%% and A's monitor. A waiting console with a line has been answered at once; at time
+%% 0 no store's batch is due.
+consumers(Role, State, Backlog) ->
+    C0 = erx_syslog_core:consumers(),
+    {[], C1} = case Backlog of
+                   empty -> {[], C0};
+                   line -> erx_syslog_core:lines(0, system(), [{messages, <<"old">>}], C0)
+               end,
+    case State of
+        idle ->
+            {C1, make_ref()};
+        waiting ->
+            {_, Monitor} = A = requester(a_pid(), a),
+            {Actions, C2} = erx_syslog_core:ask(Role, A, 0, system(), C1),
+            ?assertEqual(case {Role, Backlog} of
+                             {console, line} -> [{send, a, 1}];
+                             _ -> []
+                         end, [shape(Action) || Action <- Actions]),
+            {C2, Monitor}
+    end.
+
+protocol(Role, State, Backlog, Event) ->
+    {C, Monitor} = consumers(Role, State, Backlog),
+    Waiting = State =:= waiting andalso not (Role =:= console andalso Backlog =:= line),
+    Held = Backlog =:= line andalso not (Role =:= console andalso State =:= waiting),
+    {Actions, _Next} =
+        case Event of
+            ask_a -> erx_syslog_core:ask(Role, requester(a_pid(), a2), 0, system(), C);
+            ask_b -> erx_syslog_core:ask(Role, requester(b_pid(), b), 0, system(), C);
+            line -> erx_syslog_core:lines(0, system(), [{kernel, <<"new">>}], C);
+            late -> erx_syslog_core:due(2 * ?S, system(), C);
+            end_a -> erx_syslog_core:lines(0, system(), [{kernel, <<"new">>}],
+                                           erx_syslog_core:ended(Monitor, C))
+        end,
+    ?assertEqual({Role, State, Backlog, Event, expected(Role, Waiting, Held, Event)},
+                 {Role, State, Backlog, Event, [shape(Action) || Action <- Actions]}).
+
+%% An action by kind and requester tag, with a batch's line count.
+shape({send, {{_, Tag}, _}, Batch}) -> {send, Tag, length(Batch)};
+shape({forget, {{_, Tag}, _}}) -> {forget, Tag};
+shape({refuse, {{_, Tag}, _}}) -> {refuse, Tag}.
+
+%% The protocol's answers: A's own request replaces its kept one; B's is refused while
+%% A's is kept; a waiting console gets a line at once and a waiting store only past
+%% its wait; and after A's end nothing is answered.
+expected(Role, true, Held, ask_a) -> [{forget, a} | due_now(Role, Held, a2)];
+expected(Role, false, Held, ask_a) -> due_now(Role, Held, a2);
+expected(_Role, true, _Held, ask_b) -> [{refuse, b}];
+expected(Role, false, Held, ask_b) -> due_now(Role, Held, b);
+expected(console, true, Held, line) -> [{send, a, count(Held) + 1}];
+expected(_Role, _Waiting, _Held, line) -> [];
+expected(store, true, true, late) -> [{send, a, 1}];
+expected(_Role, _Waiting, _Held, late) -> [];
+expected(_Role, _Waiting, _Held, end_a) -> [].
+
+due_now(console, true, Tag) -> [{send, Tag, 1}];
+due_now(_Role, _Held, _Tag) -> [].
+
+count(true) -> 1;
+count(false) -> 0.

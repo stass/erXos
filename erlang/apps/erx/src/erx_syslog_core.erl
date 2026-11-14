@@ -44,6 +44,25 @@ domain's own records. The core charges a text of any length, so a text
 whose escape is longer than the rate, such as 4 KiB of controls, is always
 dropped and shows only in its domain's drops line.
 
+**The consumers** (docs/design-log.md, "Consumers and backlogs"). The console
+and the store each have a backlog of lines and a state, `idle` or
+`{waiting, Requester}`, which is all the service knows of them. Every line
+joins both backlogs (lines/4), each tagged with its family, `kernel` or
+`messages`, for the store. A backlog holds at most BACKLOG_BYTES (1 MiB) of
+lines, each counted with its LF; past that its oldest lines go, counted, and
+its consumer's next batch begins with the note `erx_syslog: N lines missed`,
+which joins that batch alone. A consumer asks for its next batch (ask/5); its
+second request replaces its first, and another process's is refused while one
+is kept. A batch is sent only as the answer to a
+kept request (due/3): a waiting console's whole backlog as soon as it holds a
+line, and a waiting store's oldest lines up to STORE_BATCH_BYTES (64 KiB) once
+that many have gathered or the oldest has waited STORE_WAIT_NS (one second).
+Once sent, the role is idle until its consumer asks again, so a consumer holds
+at most one batch and a writer never waits on it. The answers are actions for
+the service to do: `{send, Requester, Batch}` answers a request and forgets its
+monitor, `{forget, Requester}` forgets a replaced one, and `{refuse, Requester}`
+answers a refused one `{error, busy}` and forgets it.
+
 Times are nanoseconds of a monotonic clock that does not go below zero,
 such as os:perf_counter(nanosecond). Nothing here reads a clock, sends a
 message or keeps state between calls.
@@ -52,10 +71,16 @@ message or keeps state between calls.
 -include("generated/erx_abi.hrl").
 
 -export([line/5, new/1, write/4, turn/3]).
+-export([note/3, consumers/0, lines/4, ask/5, ended/2, due/3]).
 -export_type([source/0, log_record/0, table/0]).
+-export_type([family/0, role/0, requester/0, action/0, consumers/0]).
 
 -define(NS_PER_S, 1000000000).
 -define(NS_PER_US, 1000).
+%% A backlog's bound, the store's batch and the store's longest wait for one.
+-define(BACKLOG_BYTES, 1048576).
+-define(STORE_BATCH_BYTES, 65536).
+-define(STORE_WAIT_NS, ?NS_PER_S).
 
 %% One of the logger's eight levels.
 -define(IS_LEVEL(Level),
@@ -78,6 +103,27 @@ message or keeps state between calls.
                     #{non_neg_integer() =>
                           {Charged :: non_neg_integer(),
                            Dropped :: non_neg_integer()}}}.
+
+%% Which of the store's files a line belongs to: the kernel's or the domains'.
+-type family() :: kernel | messages.
+%% A consumer of the log.
+-type role() :: console | store.
+%% A consumer's kept request: its gen_server reply target and the monitor the
+%% service holds on its sender.
+-type requester() :: {gen_server:from(), reference()}.
+%% What the service does for the core: answer a request with a batch, the
+%% console's lines or the store's lines with their families, or forget one.
+-type action() :: {send, requester(), [binary()] | [{family(), binary()}]}
+                | {forget, requester()}
+                | {refuse, requester()}.
+%% A role's backlog: its lines, oldest first, each with when it joined and its
+%% family; their bytes, each counted with its LF; the lines dropped since its
+%% last batch; and whether its consumer waits.
+-record(backlog, {lines = queue:new() :: queue:queue({non_neg_integer(), family(), binary()}),
+                  bytes = 0 :: non_neg_integer(),
+                  missed = 0 :: non_neg_integer(),
+                  waiting = idle :: idle | {waiting, requester()}}).
+-opaque consumers() :: #{console := #backlog{}, store := #backlog{}}.
 
 -doc """
 The line of Record, which the domain Id, of principal Principal and named
@@ -174,3 +220,138 @@ principal(unknown) ->
     <<"unknown">>;
 principal(Principal) when is_integer(Principal), Principal >= 0 ->
     integer_to_binary(Principal).
+
+-doc """
+A note of the service's own, as a line of the system domain, System, at time
+Now and level `notice`: what the service says of the log itself, never
+charged to the rate.
+""".
+-spec note(non_neg_integer(), source(), binary()) -> binary().
+note(Now, #{id := Id, principal := Principal, name := Name}, Text) when is_binary(Text) ->
+    line(Now, Id, Principal, Name, {notice, Text}).
+
+-doc """
+Both consumers, the console and the store, idle, with empty backlogs.
+""".
+-spec consumers() -> consumers().
+consumers() ->
+    #{console => #backlog{}, store => #backlog{}}.
+
+-doc """
+Lines join both backlogs at time Now, each with its family, oldest first:
+`kernel` for a line the kernel's ring held, `messages` for every other. A
+backlog past its bound drops its oldest lines, counted. The answer is the
+batches that fall due, each `lines missed` note at their head a line of the
+system domain, System, and the next consumers.
+""".
+-spec lines(non_neg_integer(), source(), [{family(), binary()}], consumers()) ->
+          {[action()], consumers()}.
+lines(_Now, _System, [], Consumers) ->
+    {[], Consumers};
+lines(Now, System, Lines, Consumers) ->
+    Joined = maps:map(fun(_Role, Backlog) -> bounded(joined(Now, Lines, Backlog)) end, Consumers),
+    due(Now, System, Joined).
+
+-doc """
+The role's consumer asks for its next batch with Requester, its request and
+the monitor the service holds on its sender. A request kept for the role is
+replaced only by its own sender's, and the service forgets the old monitor;
+a request from any other process while one is kept is refused, so no other
+process can take the role's batches from its consumer. The answer is the
+refusal or the batch, if one falls due now, and the next consumers.
+""".
+-spec ask(role(), requester(), non_neg_integer(), source(), consumers()) ->
+          {[action()], consumers()}.
+ask(Role, {{Pid, _Tag}, Monitor} = Requester, Now, System, Consumers) when is_reference(Monitor) ->
+    #{Role := Backlog} = Consumers,
+    case Backlog#backlog.waiting of
+        {waiting, {{Other, _}, _}} when Other =/= Pid ->
+            {[{refuse, Requester}], Consumers};
+        Waiting ->
+            Forgotten = [{forget, Old} || {waiting, Old} <- [Waiting]],
+            {Due, Next} = due(Now, System, Consumers#{Role := Backlog#backlog{waiting = {waiting, Requester}}}),
+            {Forgotten ++ Due, Next}
+    end.
+
+-doc """
+The sender whose request's monitor is Monitor has ended: its kept request,
+if any, is dropped, and the role is idle.
+""".
+-spec ended(reference(), consumers()) -> consumers().
+ended(Monitor, Consumers) ->
+    maps:map(fun(_Role, #backlog{waiting = {waiting, {_From, M}}} = Backlog) when M =:= Monitor ->
+                     Backlog#backlog{waiting = idle};
+                (_Role, Backlog) ->
+                     Backlog
+             end, Consumers).
+
+-doc """
+The batches that fall due at time Now, with no line added: a waiting
+console's once its backlog holds a line, and a waiting store's once
+STORE_BATCH_BYTES have gathered or the oldest line has waited STORE_WAIT_NS.
+Each batch is answered to its requester, which is then forgotten, and the
+role is idle.
+""".
+-spec due(non_neg_integer(), source(), consumers()) -> {[action()], consumers()}.
+due(Now, System, Consumers) ->
+    lists:foldl(fun(Role, {Actions, Acc}) ->
+                        #{Role := Backlog} = Acc,
+                        case batch(Role, Now, System, Backlog) of
+                            none -> {Actions, Acc};
+                            {Action, Rest} -> {Actions ++ [Action], Acc#{Role := Rest}}
+                        end
+                end, {[], Consumers}, [console, store]).
+
+%% The batch of a waiting role whose batch is due, and the backlog after it.
+batch(_Role, _Now, _System, #backlog{waiting = idle}) ->
+    none;
+batch(_Role, _Now, _System, #backlog{bytes = 0}) ->
+    none;
+batch(console, Now, System, #backlog{waiting = {waiting, Requester}, lines = Lines} = Backlog) ->
+    Batch = [Line || {_Joined, _Family, Line} <- queue:to_list(Lines)],
+    {{send, Requester, missed(Now, System, Backlog) ++ Batch},
+     #backlog{}};
+batch(store, Now, System, #backlog{waiting = {waiting, Requester}, lines = Lines, bytes = Bytes} = Backlog) ->
+    {value, {Oldest, _, _}} = queue:peek(Lines),
+    case Bytes >= ?STORE_BATCH_BYTES orelse Now - Oldest >= ?STORE_WAIT_NS of
+        true ->
+            {Taken, Left, LeftBytes} = take_batch(Lines, Bytes, 0, []),
+            Missed = [{messages, Line} || Line <- missed(Now, System, Backlog)],
+            {{send, Requester, Missed ++ Taken},
+             #backlog{lines = Left, bytes = LeftBytes}};
+        false ->
+            none
+    end.
+
+%% The oldest lines of a store's backlog within STORE_BATCH_BYTES, at least one, and
+%% what remains.
+take_batch(Lines, Bytes, Size, Taken) ->
+    case queue:out(Lines) of
+        {{value, {_Joined, Family, Line}}, Rest}
+          when Taken =:= [] orelse Size + byte_size(Line) + 1 =< ?STORE_BATCH_BYTES ->
+            Cost = byte_size(Line) + 1,
+            take_batch(Rest, Bytes - Cost, Size + Cost, [{Family, Line} | Taken]);
+        _ ->
+            {lists:reverse(Taken), Lines, Bytes}
+    end.
+
+%% The note at the head of a batch whose backlog dropped lines since the last.
+missed(_Now, _System, #backlog{missed = 0}) ->
+    [];
+missed(Now, System, #backlog{missed = Missed}) ->
+    [note(Now, System, iolist_to_binary([<<"erx_syslog: ">>, integer_to_binary(Missed),
+                                         <<" lines missed">>]))].
+
+joined(Now, Lines, Backlog) ->
+    lists:foldl(fun({Family, Line}, #backlog{lines = Q, bytes = Bytes} = B)
+                      when (Family =:= kernel orelse Family =:= messages), is_binary(Line) ->
+                        B#backlog{lines = queue:in({Now, Family, Line}, Q),
+                                  bytes = Bytes + byte_size(Line) + 1}
+                end, Backlog, Lines).
+
+%% A backlog within BACKLOG_BYTES: past it, its oldest lines go, counted.
+bounded(#backlog{bytes = Bytes} = Backlog) when Bytes =< ?BACKLOG_BYTES ->
+    Backlog;
+bounded(#backlog{lines = Lines, bytes = Bytes, missed = Missed} = Backlog) ->
+    {{value, {_Joined, _Family, Line}}, Rest} = queue:out(Lines),
+    bounded(Backlog#backlog{lines = Rest, bytes = Bytes - byte_size(Line) - 1, missed = Missed + 1}).

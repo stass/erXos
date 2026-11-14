@@ -609,6 +609,15 @@ display display
   policy single
   idle_dim_s 0
   idle_off_s 0
+# log: the system log's write interface (docs/design-log.md, "The log facet"), served by
+# the system domain, where erx_syslog_sup registers as its server (erx_facet:serve/2).
+# No facet row grants it, so no other domain holds a log facet. A row that grants it
+# must give a max_request that holds one full write of log_write_max records of
+# log_write_text_max bytes, or the facet drops a legal write unanswered (TODO.md,
+# "log facet").
+service log
+  server system
+  interface log
 # inspect: the inspector's queries for each session made from root's template
 # (docs/design-live.md, "The inspect service"), served by the system domain, so it
 # travels on the session's system connection and takes none of max_connections. A

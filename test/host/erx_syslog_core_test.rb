@@ -38,6 +38,11 @@ class ErxSyslogCoreTest < Minitest::Test
               from: 'Now div ?NS_PER_S > Second ->', to: 'Now div ?NS_PER_S >= Second ->'),
     Fault.new(name: 'the rate one byte short',
               from: 'Charged + Cost =< ?ERX_LOG_RATE_BYTES ->', to: 'Charged + Cost < ?ERX_LOG_RATE_BYTES ->'),
+    Fault.new(name: "a requester's end that keeps its request",
+              from: 'Backlog#backlog{waiting = idle};', to: 'Backlog;'),
+    Fault.new(name: "another process's request that replaces the kept one",
+              from: '{waiting, {{Other, _}, _}} when Other =/= Pid ->',
+              to: '{waiting, {{Other, _}, _}} when Other =:= nobody ->'),
     Fault.new(name: 'drops lines in the map\'s order',
               from: '<- lists:sort(maps:to_list(Domains)),', to: '<- maps:to_list(Domains),')
   ].freeze

@@ -268,6 +268,15 @@ facet data_session
   reductions 100000
   period_ns 1000000000
   max_heap_size 262144
+# log: the system log's write interface (docs/design-log.md, "The log facet"), served by
+# the system domain, where erx_syslog_sup registers as its server (erx_facet:serve/2).
+# No facet row grants it, so no other domain holds a log facet. A row that grants it
+# must give a max_request that holds one full write of log_write_max records of
+# log_write_text_max bytes, or the facet drops a legal write unanswered (TODO.md,
+# "log facet").
+service log
+  server system
+  interface log
 service inspect
   server system
   interface inspect

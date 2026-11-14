@@ -24,9 +24,18 @@ not one of the eight, or a text that is not a binary or is longer. The
 request names no source: who wrote the records is the facet's to say, so
 a domain can lie only in its own text. decode/1 creates no atom, never
 raises, and walks at most the log_write_max records it accepts.
+
+It is also the log facet's erx_facet callback, which the domain service
+mints for each grantee of `log` in front of erx_syslog_sup. admit/3 decodes
+the request and forwards its records as `{write, Grantee, Records}`, with the
+grantee the facet was minted for, to the erx_syslog registered at that
+moment, so a facet outlives the service's restarts; with none registered it
+refuses with `{error, unavailable}`.
 """.
+-behaviour(erx_facet).
 
 -export([decode/1]).
+-export([init/1, admit/3]).
 
 -include("generated/erx_abi.hrl").
 
@@ -39,6 +48,24 @@ decode({write, Records}) ->
     end;
 decode(_Request) ->
     {error, badarg}.
+
+-spec init(erx_facet:grant()) -> {ok, #{grantee := pos_integer()}}.
+init(#{grantee := Grantee}) ->
+    {ok, #{grantee => Grantee}}.
+
+-spec admit(term(), pid(), #{grantee := pos_integer()}) ->
+          {forward, pid(), {write, pos_integer(), [erx_syslog_core:log_record()]}, map()}
+        | {refuse, badarg | unavailable, map()}.
+admit(Request, _From, #{grantee := Grantee} = State) ->
+    case decode(Request) of
+        {ok, Records} ->
+            case whereis(erx_syslog) of
+                undefined -> {refuse, unavailable, State};
+                Service -> {forward, Service, {write, Grantee, Records}, State}
+            end;
+        {error, badarg} ->
+            {refuse, badarg, State}
+    end.
 
 %% A proper list of at most ?ERX_LOG_WRITE_MAX records, walked no further than that.
 records([], _Count) ->

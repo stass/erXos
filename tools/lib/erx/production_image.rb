@@ -661,8 +661,8 @@ module Erx
       # holds net_kernel and the connection agent), in which_children's order: the last
       # started first (docs/design-runtime.md, Configuration).
       KERNEL_CHILDREN = %w[kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
-                           global_group net_sup global_name_server rex inet_db erx_watchdog on_load
-                           file_server_2 standard_error code_server].freeze
+                           global_group net_sup global_name_server rex inet_db erx_syslog_sup
+                           erx_watchdog on_load file_server_2 standard_error code_server].freeze
       # From the banner to -eval's first output, which loads the evaluator: long under TCG.
       EVAL_SECONDS = 120
       # An expression for init's -eval: one word, since the kernel command line splits on spaces.

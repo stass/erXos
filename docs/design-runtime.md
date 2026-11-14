@@ -453,7 +453,7 @@ of behaviour, however many lines it touches:
 | `lib/kernel/src/prim_tty.erl` | 38. `isprint/1` is the ASCII printable test and `wcwidth/1` answers from `erx_width`, the system's one width table ([C library seam](#the-c-library-seam)), so terminal-less rendering reaches no NIF and counts the columns the terminal and musl count; `isatty/1` answers `false` and the terminfo calls answer that no capability exists, which is what `io_ansi` reads when a terminal has no terminfo ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/standard_error.erl` | 39. `server/0` calls no `prim_tty`: its encoding is `unicode`, and it writes with `erlang:display_string(stderr, Bytes)`, which waits as any process's write does |
 | `lib_src/common/ethr_aux.c` | 40. the page size is `getpagesize()`, in place of `sysconf` |
-| `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load; `kernel_safe_sup`'s `init/1` makes the domain's file version counter (`erx_fs_version:init/0`) and adds `erx_ramfs_sup`, the domain's `/tmp`, as its last child ([design-tmp.md](design-tmp.md#starting-and-mounting)); `start_distribution false` leaves out only `net_sup` and `dist_ac`, so `rex`, `global_name_server` and `global_group` start as on a stock node that is not distributed ([Configuration](#configuration)) |
+| `lib/kernel/src/kernel.erl` | 41. `kernel_sup` starts `erx_watchdog` right after `on_load`, when a module with a NIF can load, and `erx_syslog_sup` right after it, before `user` ([design-log.md](design-log.md#the-kernels-records)); `kernel_safe_sup`'s `init/1` makes the domain's file version counter (`erx_fs_version:init/0`) and adds `erx_ramfs_sup`, the domain's `/tmp`, as its last child ([design-tmp.md](design-tmp.md#starting-and-mounting)); `start_distribution false` leaves out only `net_sup` and `dist_ac`, so `rex`, `global_name_server` and `global_group` start as on a stock node that is not distributed ([Configuration](#configuration)) |
 | `beam/bif.c` | 42. while another process holds `erx_tty_owner`, `halt_2` with `{flush, true}` traps to `erx_output:halt/2`, which drains the tty before it halts ([The console](#the-console-and-standard-io)) |
 | `lib/kernel/src/logger_simple_h.erl` | 43. `log_internal/2` and `display_log/1` build each event's text on one line, and print `erx_text:escape_line/1` of it and a CR-LF in one `erlang:display_string/2` ([design-live.md](design-live.md#the-console)) |
 | `lib/stdlib/src/shell.erl` | 44. `prompt_width/1` asks no group when `erx_console` calls it, as when `user_drv` does |
@@ -3712,12 +3712,13 @@ cannot satisfy and whose mode `0444` it refuses (`auth.erl:347-374`, `:513`). A
 release that runs with no carrier says `-kernel start_distribution false`
 instead, and is no node.
 
-`kernel_sup` then starts these, in stock's order with `erx_watchdog` added right after `on_load` (edit 41):
+`kernel_sup` then starts these, in stock's order with `erx_watchdog` added right after `on_load` and `erx_syslog_sup` right after it (edit 41):
 
 | Child | In erXos |
 | --- | --- |
 | `code_server`, `file_server_2`, `on_load` | stock: the first two over `erl_prim_loader` and the release file system |
 | `erx_watchdog` | [design-stopgap.md](design-stopgap.md#the-watchdog) |
+| `erx_syslog_sup` | the system log's service, temporary as `user` is, in the system domain alone; it makes the kernel log's first take before `user` starts the console's driver ([design-log.md](design-log.md#service-lifetime-and-restart)) |
 | `inet_db`, `erl_signal_server`, `logger_sup`, `kernel_config`, `kernel_refc`, `kernel_safe_sup` | stock: `inet_db`'s lookup is `file`, its hosts table, then `dns` once the domain holds a network grant, through `inet_res` over `gen_udp` with the name servers and search list from the grant's `resolver` operation ([design-network-stack.md](design-network-stack.md#name-resolution)); with no grant there is no resolver and no `inet_gethost`, `inet_gethost_native` answering `{error, notsup}` for a well-formed lookup, `localhost` too when this module is asked directly, since none ran, where stock answers `{error, notfound}` for a name its resolver does not know; `inet`'s calls read any error as not found and still answer `nxdomain`, and the difference is `inet_SUITE:t_gethostnative`'s, which accepts neither; and `inet_config` finding no UDP port names the host `nohost` |
 | `standard_error` | stock's I/O protocol over descriptor 2 (edit 39) |
 | `user` | `user_sup`, then `erx_console` and the group it registers |

@@ -13,11 +13,11 @@ module Erx
   # the same with configured domains (ManifestContextFixture.domain_source), the empty
   # native manifest of the structural test images, with prefixes of the first, the
   # configured domains' with its first row's boot_timeout_s 0, which the reader refuses,
-  # the configured domains' with alpha's log granted to the system principal's
+  # the configured domains' with alpha's probe granted to the system principal's
   # session template, so the facet table holds a session grantee, and the same with a
   # start row for that template, left off and with its own restart intensity.
   module ManifestSeeds
-    SESSION_FACET = "facet session_log\n  grantee @session.system\n  service @service.log\n  operations none\n" \
+    SESSION_FACET = "facet session_probe\n  grantee @session.system\n  service @service.probe\n  operations none\n" \
                     "  max_request 64\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
     START_ROW = "start system\n  enable NO\n  restarts 3\n  restart_period_s 60\n"
 

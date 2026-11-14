@@ -9,8 +9,8 @@
 %% string. The result is a log record, {log, Level, Text}, Text a binary of at most
 %% ?TEXT_MAX bytes, which goes to the console:
 %%
-%%   * in the system domain to erx_console, which renders it with the line escape under
-%%     the domain's id, principal and name;
+%%   * in the system domain to the log service, erx_syslog, which renders it with the
+%%     line escape under the domain's id, principal and name (docs/design-log.md);
 %%   * in any other domain to the handler's process, the domain's logger proxy, which
 %%     sends it on to the domain's console facet.
 %%
@@ -20,10 +20,12 @@
 %% A domain's console facet comes from the domain service, which hands out none (TODO.md),
 %% so the proxy writes each record into the kernel log, which escapes it and labels it
 %% with the domain's space, and the console writes that record as it writes the kernel's.
-%% A record finds no proxy and no erx_console only while either is starting or after it
-%% has gone; it then goes into the kernel log from the process that logs.
+%% A record finds no proxy and no erx_syslog only while either is starting or after it
+%% has gone; it then goes into the kernel log from the process that logs. In the system
+%% domain the proxy stands in while the service restarts or after it has ended, so those
+%% records reach the kernel log too.
 %%
-%% Which of the two a runtime has decides where its records go: erx_console runs only in
+%% Which of the two a runtime has decides where its records go: erx_syslog runs only in
 %% the system domain, and a process of another domain that took that name would receive
 %% only its own domain's records.
 -module(erx_log_h).
@@ -89,7 +91,7 @@ log(Event, Config) ->
 -doc """
 Returns once the proxy has handled every record the caller sent it before, so a
 caller that logs and then halts knows its records are in the kernel log. Where
-erx_console takes the records, in the system domain, they may still wait in its
+erx_syslog takes the records, in the system domain, they may still wait in its
 queue.
 """.
 -spec sync() -> ok.
@@ -166,17 +168,17 @@ character_end(Text, Limit) ->
         _ -> Limit
     end.
 
-%% Where log/2 sends a record: the system domain's console where it runs, the proxy
-%% elsewhere, and none while neither is running.
+%% Where log/2 sends a record: the system log's service where it runs, the proxy
+%% elsewhere or while the service is not running, and none while neither is.
 sink() ->
-    case whereis(erx_console) of
+    case whereis(erx_syslog) of
         undefined ->
             case whereis(?PROXY) of
                 undefined -> none;
                 Proxy -> Proxy
             end;
-        Console ->
-            Console
+        Service ->
+            Service
     end.
 
 %% Where a record goes in a domain with no console facet: the kernel log, one record of

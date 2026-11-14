@@ -9,7 +9,7 @@ require_relative '../fixtures/erlang_build'
 
 # The log sink on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies):
 # test/erlang/erx_log_sink_tests.erl, the EUnit cases of erx_log_h's records and of the
-# lines erx_console_log renders for them, and logger_simple_h's early log (edit 43 of
+# lines the log service makes of them, and logger_simple_h's early log (edit 43 of
 # docs/design-runtime.md), compiled from the tree (outside the applications, it is a
 # test module of its own run) and loaded in place of stock's, which
 # must show an event with a tab, an escape sequence and a newline as one line of tokens.

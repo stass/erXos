@@ -861,6 +861,10 @@ grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) -
 system_facet(inspect, {message, Behind, Limits}, Principal,
              #{inspect_policy := #{roots := Roots, development := Development}}) ->
     {facet, erx_inspect_facet, Behind, Limits#{scope => erx_domain_core:inspect_scope(Principal, Roots, Development)}};
+system_facet(log, {message, Behind, Limits}, _Principal, _State) ->
+    %% docs/design-log.md, "The log facet": Behind is erx_syslog_sup, and the callback
+    %% finds erx_syslog at each request.
+    {facet, erx_log_facet, Behind, Limits};
 system_facet(_Name, {message, Behind, Limits}, _Principal, _State) ->
     {facet, erx_domain_facet, Behind, Limits#{behind => Behind}};
 system_facet(_Name, {files, Grants, Limits}, _Principal, _State) ->

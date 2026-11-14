@@ -157,12 +157,12 @@ class ManifestDomainsTest < Minitest::Test
 
   # Property 2: services, facets and introductions name what the manifest contains.
   def test_a_service_of_a_configured_domain_is_admitted
-    view = @codec.open('manifest', admit(@source + service('log', '@domain.alpha')).bytes)
+    view = @codec.open('manifest', admit(@source + service('probe', '@domain.alpha')).bytes)
     assert_equal [0], rows(view, 'services').map { |row| row.fetch('server') }
   end
 
   def test_a_service_of_no_configured_domain_is_refused
-    refused(Erx::Manifest::Invalid, 2, 'service.server', @source + service('log', '@domain.absent'))
+    refused(Erx::Manifest::Invalid, 2, 'service.server', @source + service('probe', '@domain.absent'))
   end
 
   def test_a_facet_naming_no_service_is_refused
@@ -199,7 +199,7 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   def test_a_facet_of_the_system_domains_own_service_to_it_is_refused
-    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', @source + service('log', 'system') + facet('f', 'system', '@service.log'))
+    refused(Erx::Manifest::Invalid, 2, 'facet.grantee', @source + service('probe', 'system') + facet('f', 'system', '@service.probe'))
   end
 
   # Property 8: a facet of the driver-control interface stops and starts the drivers of
@@ -267,15 +267,15 @@ class ManifestDomainsTest < Minitest::Test
   end
 
   def test_one_name_on_two_servers_is_admitted
-    source = @source + service('log_a', '@domain.alpha').sub('service log_a', "service log_a\n  name \"log\"") +
-             service('log_b', '@domain.beta').sub('service log_b', "service log_b\n  name \"log\"")
+    source = @source + service('probe_a', '@domain.alpha').sub('service probe_a', "service probe_a\n  name \"probe\"") +
+             service('probe_b', '@domain.beta').sub('service probe_b', "service probe_b\n  name \"probe\"")
     view = @codec.open('manifest', admit(source).bytes)
     assert_equal [0, 1], rows(view, 'services').map { |row| row.fetch('server') }
   end
 
   def test_one_name_twice_on_one_server_is_refused
-    source = @source + service('log_a', '@domain.alpha').sub('service log_a', "service log_a\n  name \"log\"") +
-             service('log_b', '@domain.alpha').sub('service log_b', "service log_b\n  name \"log\"")
+    source = @source + service('probe_a', '@domain.alpha').sub('service probe_a', "service probe_a\n  name \"probe\"") +
+             service('probe_b', '@domain.alpha').sub('service probe_b', "service probe_b\n  name \"probe\"")
     refused(Erx::Manifest::Invalid, 5, 'service.name', source)
   end
 
@@ -452,7 +452,7 @@ class ManifestDomainsTest < Minitest::Test
   def test_nothing_names_a_session_template
     source = with_session(self.class.session)
     refused(Erx::Manifest::Invalid, 2, 'introduce', "#{source}introduce @domain.alpha @session.system\n")
-    refused(Erx::Manifest::Invalid, 2, 'service.server', source + service('log', '@session.system'))
+    refused(Erx::Manifest::Invalid, 2, 'service.server', source + service('probe', '@session.system'))
     refused(Erx::Manifest::Invalid, 8, 'window.holder', source.sub("window data\n  holder system", "window data\n  holder @session.system"))
     refused(Erx::Manifest::Invalid, 1, 'unit.holder', source.sub(/(unit block\n(?:  .*\n)*?  holder )system/, '\1@session.system'))
   end

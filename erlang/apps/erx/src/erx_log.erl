@@ -2,8 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The kernel log from Erlang (docs/design-stopgap.md, "The console"): a labelled line into
-%% it, a read from a cursor of the reader's own, and the console's take of the lines nobody
-%% has taken. Both return each record as the line the log core rendered, so every byte of a
+%% it, a read from a cursor of the reader's own, and the log service's take of the lines
+%% nobody has taken. Both return each record as the line the log core rendered, so every byte of a
 %% record's text is already escaped, tab and newline included, and the line's own newline is
 %% its only control byte.
 
@@ -53,9 +53,10 @@ pieces(Last) ->
 read(Cursor) ->
     read_nif(Cursor).
 
-%% The console's read, erx_console's alone: the lines nobody has taken, which it takes, so
-%% the console writes each line once across the handoff from the early console. Next says
-%% where the take stopped and needs passing nowhere.
+%% The log service's read, erx_syslog's alone (docs/design-log.md, invariant L4): the
+%% lines nobody has taken, which it takes, so each kernel line reaches the log once across
+%% the handoff from the early console. Next says where the take stopped and needs passing
+%% nowhere.
 -spec take() -> lines().
 take() ->
     take_nif().

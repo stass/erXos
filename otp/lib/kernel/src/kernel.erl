@@ -17,7 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: kernel_sup starts erx_watchdog right after on_load, and
+%% Modified by erXos: kernel_sup starts erx_watchdog right after on_load and the
+%% system log's erx_syslog_sup right after it, before user, and
 %% kernel_safe_sup makes the domain's file version counter and starts the namespace
 %% table's writer, /tmp, /proc, the domain's inspection agent and the process behind
 %% the inspect facets; start_distribution false starts the local part of distribution
@@ -152,6 +153,17 @@ init([]) ->
                  type => worker,
                  modules => [erx_watchdog]},
 
+    %% erXos: the system log's service, temporary as user is, so its end is neither
+    %% restarted nor counted here; its init makes the kernel log's first take, which
+    %% must come before user starts the console's driver (docs/design-log.md, "The
+    %% kernel's records" and "Service lifetime and restart").
+    Syslog = #{id => erx_syslog_sup,
+               start => {erx_syslog_sup, start_link, []},
+               restart => temporary,
+               shutdown => infinity,
+               type => supervisor,
+               modules => [erx_syslog_sup]},
+
     %% Must be started before user
     SigSrv = #{id => erl_signal_server,
                start => {gen_event, start_link, [{local, erl_signal_server}]},
@@ -213,7 +225,7 @@ init([]) ->
         {ok, [["minimal"]|_]} ->
             {ok, {SupFlags,
                   [Code, StdError | EarlyFile] ++
-                      [OnLoad, Watchdog | LateFile] ++
+                      [OnLoad, Watchdog, Syslog | LateFile] ++
                       [SigSrv | Peer] ++
                       [User, LoggerSup, Config, RefC, SafeSup]}};
         _ ->
@@ -239,7 +251,7 @@ init([]) ->
 
             {ok, {SupFlags,
                   [Code, StdError | EarlyFile] ++
-                      [OnLoad, Watchdog, InetDb | DistChildren] ++ LateFile ++
+                      [OnLoad, Watchdog, Syslog, InetDb | DistChildren] ++ LateFile ++
                       [SigSrv | Peer] ++
                       [User, LoggerSup, Config, RefC, SafeSup] ++
                       Timer ++ CompileServer}}

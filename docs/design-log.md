@@ -45,16 +45,12 @@ Decisions every reader needs:
 
 ## Context
 
-The current implementation makes the console the log
-([design-live.md](design-live.md#the-console), Logs): `erx_console` is
-`erx_log:take/0`'s only caller and renders the system domain's events
-with `erx_console_log:accept/4`, while other domains' proxies write
-theirs into the kernel's 64 KiB ring, the only record kept
-(`erlang/apps/erx/src/erx_console.erl`, `erx_console_log.erl`,
-`erx_log_h.erl`). The inspector reads the ring without taking
-(`erx_log_records.erl`) for `/proc/kernel/log` and `dmesg`. This design
-keeps the ring and its two reads, `erx_log_h`'s formatting,
-`erx_console_log`'s line and rate, the line escape
+The log stands on the kernel's 64 KiB ring, which the inspector reads
+without taking (`erx_log_records.erl`) for `/proc/kernel/log` and
+`dmesg`, and on the console's lines
+([design-live.md](design-live.md#the-console), Logs). This design
+keeps the ring and its two reads, `erx_log_h`'s formatting, the line
+escape
 `erx_text:escape_line/1`
 ([design-live.md](design-live.md#attributed-text)), facets, `erx_fs`
 trees and littlefs at `/data`.
@@ -142,7 +138,7 @@ domain.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **L1.** A line's time and source are the service's | `write` carries a list of levels and texts and nothing else; the log facet's callback forwards it as `{write, Grantee, Records}`, with the grantee bound when the facet was minted, and the service takes the principal and name for that id from the domain service, as `erx_console_log` does; the service reads the time when it takes the batch | a `write` with a source or time field; a facet that forwards a source from the request | a domain whose text imitates another domain's line head appears under its own id, principal and name; a seeded facet that copies a source from the request fails it |
+| **L1.** A line's time and source are the service's | `write` carries a list of levels and texts and nothing else; the log facet's callback forwards it as `{write, Grantee, Records}`, with the grantee bound when the facet was minted, and the service takes the principal and name for that id from the domain service; the service reads the time when it takes the batch | a `write` with a source or time field; a facet that forwards a source from the request | a domain whose text imitates another domain's line head appears under its own id, principal and name; a seeded facet that copies a source from the request fails it |
 | **L2.** No line holds a byte the line escape would not pass | `erx_syslog_core:line/5` is the one function that turns a domain's text into a line, and passes the name and the text through `erx_text:escape_line/1`; the kernel's lines arrive escaped by the kernel, as printable ASCII ([design-kernel.md](design-kernel.md#console-log-and-panic)); the console and the writer receive only lines the core made, and the writer stores nothing else | a second renderer; a consumer handed a record instead of a line | every C0 and C1 control, `Cf`, `Zl`, `Zp`, default-ignorable and invalid UTF-8 class, and every CSI, OSC, DCS, APC, PM and SOS form, as a record's text, reads as tokens on the console's line and in `/var/log/messages`; with the escape removed from `line/5` the test fails |
 | **L3.** No writer waits on a consumer | a consumer receives a batch only as the answer to its own request for the next one, so it holds at most one; lines for it wait in its backlog, which is bounded by bytes and drops its oldest lines past the bound, counted; a `write` is answered when the service has taken it, never when a consumer has | a write answered after a consumer has written the lines; an unbounded backlog; a batch sent without a request | a console driver that never answers and a store that never answers, while domains write at their rate for a minute: every `write` answers within its facet's deadline and the service's heap stays within its bound; a seeded unbounded backlog fails on memory |
 | **L4.** Each kernel record is taken once, by the log service | `erx_syslog` is the only caller of `erx_log:take/0`, which a build check holds; the take and the early console move the ring's one taken position, so a restarted service takes on from where the last take stopped and nothing the early console wrote is taken again ([design-stopgap.md](design-stopgap.md#the-console)) | a second caller of `take/0` | a serial transcript across the handoff holds each kernel record once; the service killed between takes doubles no kernel line on the console or in `kernel/messages`; the build check with a seeded caller in `erx_console` |
@@ -154,7 +150,7 @@ domain.
 
 ### The line
 
-A domain's record renders as `erx_console_log` renders it, one line:
+A domain's record renders as `erx_syslog_core:line/5` renders it, one line:
 
 ```text
 SECONDS.MICROSECONDS LEVEL domain ID principal P NAME: TEXT
@@ -167,7 +163,7 @@ system domain's own records until the domain service has named the
 system principal; `NAME` the domain's name and `TEXT` the record's text,
 both through the line escape. Everything before `NAME` is the service's
 own text and ASCII by construction. A record's text is at most
-`log_write_text_max`, 4 KiB, before escaping, as `erx_console_log` admits it.
+`log_write_text_max`, 4 KiB, before escaping, as `erx_log_facet` admits it.
 
 A kernel record keeps the line the kernel's log core rendered:
 
@@ -372,8 +368,7 @@ ring with `erx_log:debug_text/1`, as `erx_log_h` does. It is then a
 kernel line, labelled with the domain's space by the kernel, and
 reaches the console and the kernel's stored files through the take.
 
-**The rate** is the service's, `erx_console_log`'s rule moved into
-`erx_syslog_core`: at most 16 KiB of lines per second per domain, the
+**The rate** is the service's, decided by `erx_syslog_core`: at most 16 KiB of lines per second per domain, the
 rate `erx_debug_log` allows a space, each record charged its whole line,
 head and escaped text, so neither empty records nor text that the escape
 lengthens write more than that. Past it the record is dropped and
@@ -743,7 +738,7 @@ None.
   failure answer), `erlang/apps/erx/src/erx_inspect_facet.erl`,
   `erlang/apps/erx_domain/src/erx_domain_srv.erl` (`system_facet/4`,
   `mint/5`), `erlang/apps/erx/src/erx_console.erl`,
-  `erlang/apps/erx/src/erx_console_log.erl`,
+  `erlang/apps/erx/src/erx_syslog_core.erl`,
   `erlang/apps/erx/src/erx_text.erl`,
   `erlang/apps/erx_files/src/erx_procfs.erl` (`start_link/0`, a tree that
   mounts its own grant), `otp/erts/preloaded/src/erx_file_remote.erl`

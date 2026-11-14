@@ -14,7 +14,7 @@ require_relative '../fixtures/manifest_context'
 # so a seed fails for its own reason and not for an unrelated difference.
 class ManifestStopgapTest < Minitest::Test
   BLOCK = '/virtio_mmio@a003e00'
-  SERVICE = "service log\n  server system\n  interface 1\n"
+  SERVICE = "service probe\n  server system\n  interface 1\n"
 
   def setup
     root = File.expand_path('../..', __dir__)
@@ -173,7 +173,7 @@ class ManifestStopgapTest < Minitest::Test
   # no domains, so without its session template, the services only sessions are granted
   # (inspect and apps) and its storage, network and web domains.
   def partial_boot
-    changed(ManifestContextFixture.without_session_services(
+    changed(ManifestContextFixture.without_system_services(
       ManifestContextFixture.domainless(@source).sub('flags development', 'flags development,partial_boot')
                             .sub(/^session system\n(?:  .*\n)*/, '')
     ))
@@ -191,15 +191,15 @@ class ManifestStopgapTest < Minitest::Test
 
   def test_admitted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
-    # The development manifest's own, apps, data, display, inspect, net, network_ctl,
+    # The development manifest's own, apps, data, display, inspect, log, net, network_ctl,
     # storage_ctl and web, and this one.
-    assert_equal %w[apps data display inspect log net network_ctl storage_ctl web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    assert_equal %w[apps data display inspect log net network_ctl probe storage_ctl web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 
   # The watchdog pets whether or not a service lives, so a record that says it watches one is refused.
   def test_a_liveness_record_is_refused_because_nothing_reads_it
-    refused(Erx::Manifest::Unsupported, 'unsupported', 'liveness', @source + SERVICE + "liveness @service.log\n",
+    refused(Erx::Manifest::Unsupported, 'unsupported', 'liveness', @source + SERVICE + "liveness @service.probe\n",
             message: /watchdog/)
   end
 
@@ -468,7 +468,7 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   def test_two_services_sharing_a_name_are_refused
-    second = "service other\n  name \"log\"\n  server system\n  interface 2\n"
+    second = "service other\n  name \"probe\"\n  server system\n  interface 2\n"
     refused(Erx::Manifest::Invalid, 5, 'service.name', @source + SERVICE + second)
   end
 

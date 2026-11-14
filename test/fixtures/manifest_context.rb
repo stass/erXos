@@ -100,7 +100,7 @@ module ManifestContextFixture
           "  peer_held 4096\n  peer_held_total 4096\n"
     with_quota(domainless(plain), 3).sub("window data\n  holder system", "window data\n  holder @domain.alpha") +
       app + domain.call('alpha', 'required') + domain.call('beta', 'rescue') +
-      "service log\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
+      "service probe\n  server @domain.alpha\n  interface 1\nintroduce @domain.alpha @domain.beta\n"
   end
 
   # The system principal's session template, its domain quota and max_domains in
@@ -129,23 +129,25 @@ module ManifestContextFixture
   # source (ProductionImage.without_sessions) does not hold.
   SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/,
                     /^facet apps\n(?:  .*\n)*/].freeze
-  # The services the system domain serves to session templates alone, inspect and apps.
-  SESSION_SERVICES = [/^service inspect\n(?:  .*\n)*/, /^service apps\n(?:  .*\n)*/].freeze
+  # The services the system domain serves: inspect and apps, to session templates alone,
+  # and log, which no facet row grants.
+  SYSTEM_SERVICES = [/^service inspect\n(?:  .*\n)*/, /^service apps\n(?:  .*\n)*/,
+                     /^service log\n(?:  .*\n)*/].freeze
   DOMAIN_HOLDER = /^  holder @domain\.(?:storage|network)$/
 
   # The development manifest as the domain tests start from it: without its session
   # template, since they write their own, without its own configured domain, so the
   # domains a test adds are the only ones, and with no domain quota or max_domains,
-  # since they set what their rows need. The services only sessions are granted go
-  # with the template, the one grantee of their facets.
+  # since they set what their rows need. The system domain's own services go with the
+  # template, the one grantee of their facets, or are granted to no one.
   def sessionless(source)
     templateless = substitute(domainless(source), SESSION_TEMPLATE, '')
-    with_quota(without_session_services(templateless), 0)
+    with_quota(without_system_services(templateless), 0)
   end
 
-  # source without SESSION_SERVICES, for a source whose session facets are gone.
-  def without_session_services(source)
-    SESSION_SERVICES.reduce(source) { |text, service| substitute(text, service, '') }
+  # source without SYSTEM_SERVICES, for a source whose session facets are gone.
+  def without_system_services(source)
+    SYSTEM_SERVICES.reduce(source) { |text, service| substitute(text, service, '') }
   end
 
   # source without its configured domains, storage, network, web and display: their rows

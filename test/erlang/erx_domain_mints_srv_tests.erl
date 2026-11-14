@@ -213,14 +213,15 @@ funnel() ->
 %% The running table holds only the manifest's service names: none of the names the
 %% facet-names check exempts travels into it. The funnel's one stopgap name, console,
 %% stands outside it and still passes with a process of the system domain, so the spec
-%% fails only at its boot, and is refused with a process of another node; log, which
-%% no interface declares and the funnel does not exempt, web_line, exempt in the
-%% check but no stopgap of the funnel, and a name in neither are refused, alone or
-%% beside console.
+%% fails only at its boot, and is refused with a process of another node; log, a
+%% manifest service name in the table that a spec cannot hand on, since the funnel
+%% passes no facet on unattenuated (attenuated/2), web_line, exempt in the check but
+%% no stopgap of the funnel, and a name in neither are refused, alone or beside
+%% console.
 stopgap_names() ->
     #{facet_names := Names} = sys:get_state(erx_domain_srv),
-    ?assertEqual([], [Name || Name <- [console, log, web_line], lists:member(Name, Names)]),
-    ?assert(lists:member(data, Names)),
+    ?assertEqual([], [Name || Name <- [console, web_line], lists:member(Name, Names)]),
+    ?assert(lists:member(data, Names) andalso lists:member(log, Names)),
     Spec = fun(Facets) -> #{boot => <<"../x">>, name => <<"c">>, facets => Facets} end,
     ?assertEqual({error, {bad_spec, boot}}, erx_domain:create(Spec(#{console => self()}))),
     [?assertEqual({error, {bad_spec, facets}}, erx_domain:create(Spec(Facets)))

@@ -46,19 +46,17 @@
 %% (erx_irq_line:start_owners/1), linked to it as the driver is, and takes an owner's end
 %% as the driver's (docs/design-shared-devices.md, "Lines inside a domain").
 %%
-%% The console is also the reader that writes the kernel log on the line (docs/design-live.md,
-%% "The console"; docs/design-stopgap.md, "The console"). Every LOG_POLL_MS it takes the
-%% records nobody has taken, each as the line the log core rendered with every byte of its
-%% text escaped, and sends each to the driver whole, ending in CR-LF, between whatever else
-%% is written. A log line can therefore land inside a program's line or an edited prompt, as
-%% a kernel message does on a UNIX serial console. Until the root hands the log to the
-%% console, the root writes each record to the line itself and takes it, so a take finds
-%% nothing and no line is written twice. Other readers of the log read from cursors of their
-%% own and take nothing from the console.
-%%
-%% It is the log sink's end too: the system domain's erx_log_h sends it each log event as a
-%% record, {log, Level, Text}, and erx_console_log decides whether to take it and renders its
-%% line, with the line escape, under the system domain's id, principal and name.
+%% The system console is also the system log's console consumer (docs/design-log.md,
+%% "Consumers and backlogs"). It asks the log service, erx_syslog, for its next batch
+%% (erx_syslog:next/1) without waiting, and writes each line of the batch to the driver
+%% whole, ending in CR-LF, between whatever else is written; a log line can therefore land
+%% inside a program's line or an edited prompt, as a kernel message does on a UNIX serial
+%% console. It asks again once the driver has written the batch, so it holds at most one,
+%% and when the service ends or is not running it asks again each LOG_ASK_MS. Every line
+%% is the service's, made through the line escape or escaped by the kernel, and the
+%% console takes nothing from the kernel's ring: the service is its one taker, and its
+%% first take, before user_sup starts the console, hands the UART over from the early
+%% console.
 %%
 %% It is the master of each session's tty (docs/design-live.md, "Between domains"). A
 %% session's create spec names `console => facet()`, and the domain service mints the
@@ -140,7 +138,8 @@
 
 -define(DEFAULT_SIZE, {80, 24}).
 -define(MAX_SIDE, 65535).
--define(LOG_POLL_MS, 100).
+%% How long the console waits to ask again when the log service is not running.
+-define(LOG_ASK_MS, 1000).
 -define(ESC, 16#1B).
 
 -record(state, {role :: system | session,
@@ -167,8 +166,10 @@
                 %% Whether the input has ended: each group that gets the input from then
                 %% on is told so.
                 input_ended = false :: boolean(),
-                %% Each domain's log records this second, and those dropped.
-                log_records = erx_console_log:new() :: erx_console_log:state(),
+                %% The system console as the log's console consumer (log_ask/0): asked
+                %% for its next batch, writing one, or idle until it asks again; a
+                %% session's console is none.
+                log = none :: none | idle | writing | {asked, gen_server:request_id()},
                 %% The start of a character whose other bytes have not been read yet.
                 pending = <<>> :: binary(),
                 %% The input's escape state, which tells a typed Ctrl-G from the BEL that ends
@@ -355,8 +356,11 @@ init(Config = #{role := Role, name := Name, driver := Start, first_shell := Firs
                 none -> User;
                 Shell -> start_shell(Shell, Terminal)
             end,
-    [erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll) || Role =:= system],
     {ok, gets_input(#state{role = Role,
+                           log = case Role of
+                                     system -> log_ask();
+                                     session -> none
+                                 end,
                            name = Name,
                            first_shell = FirstShell,
                            driver = DriverPid,
@@ -498,100 +502,93 @@ handle_cast(_Request, State) ->
     {noreply, State}.
 
 -spec handle_info(term(), #state{}) -> {noreply, #state{}} | {stop, term(), #state{}}.
-handle_info({erx_console_input, Bytes}, State = #state{keys = Keys, line = {menu, Menu}}) when is_binary(Bytes) ->
+handle_info(Message, State = #state{log = {asked, Request}}) ->
+    %% The log service's answer, or its end, comes first: its DOWN is no session's.
+    case gen_server:check_response(Message, Request) of
+        {reply, Lines} when is_list(Lines) ->
+            {noreply, log_batch(Lines, State)};
+        Ended when element(1, Ended) =:= error; Ended =:= {reply, {error, busy}} ->
+            %% The service ended or is not running yet, or still holds the request of
+            %% a console that has just ended: ask again then.
+            erlang:send_after(?LOG_ASK_MS, self(), erx_console_log_ask),
+            {noreply, State#state{log = idle}};
+        no_reply ->
+            info(Message, State)
+    end;
+handle_info(Message, State) ->
+    info(Message, State).
+
+info({erx_console_input, Bytes}, State = #state{keys = Keys, line = {menu, Menu}}) when is_binary(Bytes) ->
     {Action, Next} = erx_console_menu:key(Bytes, Keys, Menu),
     {noreply, menu_action(Action, Menu, State#state{keys = Next})};
-handle_info({erx_console_input, Bytes}, State = #state{menu = true, keys = Keys}) when is_binary(Bytes) ->
+info({erx_console_input, Bytes}, State = #state{menu = true, keys = Keys}) when is_binary(Bytes) ->
     {Pieces, Next} = erx_console_keys:split(Bytes, Keys),
     {noreply, read(Pieces, State#state{keys = Next})};
-handle_info({erx_console_input, Bytes}, State) when is_binary(Bytes) ->
+info({erx_console_input, Bytes}, State) when is_binary(Bytes) ->
     %% A console with no menu, a session's relay, reads a BEL as a raw tty does: as a byte.
     {noreply, read([Bytes], State)};
-handle_info(erx_console_eof, State = #state{role = session, base = Base, shells = Shells}) ->
+info(erx_console_eof, State = #state{role = session, base = Base, shells = Shells}) ->
     %% A session's line has hung up: every shell on it ends, and the console with them,
     %% as a UNIX session ends at its terminal's hangup. No group is told of the end of
     %% input: the Erlang shell would halt the runtime at it, and edlin edits with it.
     lists:foreach(fun(Group) -> exit(Group, kill) end, [Base | [G || {G, _Caller, _Shell} <- Shells]]),
     {stop, normal, State};
-handle_info(erx_console_eof, State = #state{pending = Pending}) ->
+info(erx_console_eof, State = #state{pending = Pending}) ->
     %% What began a character will never end it, so it reads as stock reads a bad byte.
     [deliver({data, latin1(Pending)}, State) || Pending =/= <<>>],
     {noreply, gets_input(State#state{pending = <<>>, input_ended = true})};
-handle_info({erx_console_size, Columns, Rows}, State = #state{tty = TTY})
+info({erx_console_size, Columns, Rows}, State = #state{tty = TTY})
   when is_integer(Columns), is_integer(Rows),
        Columns >= 1, Columns =< ?MAX_SIDE, Rows >= 1, Rows =< ?MAX_SIDE ->
     {noreply, session_size(State#state{tty = prim_tty:update_geometry(TTY, Columns, Rows),
                                        size = {Columns, Rows}})};
-handle_info({erx_console_size, _Columns, _Rows}, State) ->
+info({erx_console_size, _Columns, _Rows}, State) ->
     {noreply, State};
-handle_info(erx_log_poll, State = #state{driver = Driver}) ->
-    case erx_log:take() of
-        {Whole, _Next, Lost, Lines} ->
-            Notes = [<<"erx_console: ", (integer_to_binary(Lost))/binary, " kernel log records lost\n">>
-                     || Lost > 0],
-            Broken = [<<"erx_console: a kernel log record failed its checks\n">> || Whole =:= corrupt],
-            lists:foreach(fun(Line) -> Driver ! {erx_console_output, none, log_line(Line)} end,
-                          Notes ++ Lines ++ Broken),
-            erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
-            {noreply, State};
-        {error, Status} ->
-            Line = <<"erx_console: the kernel log refused a take: ", (integer_to_binary(Status))/binary, "\n">>,
-            Driver ! {erx_console_output, none, log_line(Line)},
-            erlang:send_after(?LOG_POLL_MS, self(), erx_log_poll),
-            {noreply, State}
-    end;
-handle_info({log, _Level, _Text} = Record,
-            State = #state{role = system, driver = Driver, log_records = Records}) ->
-    %% A record sent to this name is the system domain's: another domain's send to a
-    %% registered name never leaves that domain (edit 27 of docs/design-runtime.md),
-    %% and its records arrive through its console facet, under its own source.
-    case erx_console_log:accept(Record, system_source(State), os:perf_counter(nanosecond), Records) of
-        {line, Line, Next} ->
-            Driver ! {erx_console_output, none, Line},
-            {noreply, State#state{log_records = Next}};
-        {dropped, Next} ->
-            {noreply, State#state{log_records = Next}}
-    end;
-handle_info({erx_console_written, none}, State) ->
+info(erx_console_log_ask, State = #state{log = idle}) ->
+    {noreply, State#state{log = log_ask()}};
+info({erx_console_written, log_batch}, State = #state{log = writing}) ->
+    %% The batch is on the line: only now is the next one asked for.
+    {noreply, State#state{log = log_ask()}};
+info({erx_console_written, none}, State) ->
     {noreply, State};
-handle_info({erx_console_written, {tty, Domain, N}}, State = #state{sessions = Sessions}) ->
+info({erx_console_written, {tty, Domain, N}}, State = #state{sessions = Sessions}) ->
     %% Output N of Domain's tty is on the line: only now is it taken.
     case Sessions of
         #{Domain := #{master := Master}} -> {noreply, carry_out(Domain, erx_tty_master:written(N, Master), State)};
         #{} -> {noreply, State}
     end;
-handle_info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
+info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
     %% A message of Domain's tty, which its console facet admitted and forwarded through
     %% the endpoint. It is answered once acted on, so the facet's limit in flight bounds
     %% what the session has queued here; the facet drops the answer.
     Next = from_tty(Domain, Facet, Message, State),
     gen:reply(From, ok),
     {noreply, Next};
-handle_info({'DOWN', Monitor, process, _Pid, Reason}, State = #state{sessions = Sessions}) ->
+info({'DOWN', Monitor, process, _Pid, Reason}, State = #state{sessions = Sessions}) ->
     %% A session's domain pid or its console facet, which ends with its domain, has ended:
     %% so has the session.
     case [Domain || Domain := Session <- Sessions, lists:member(Monitor, monitors(Session))] of
         [Domain] -> {noreply, session_ended(Domain, Reason, State)};
         [] -> {noreply, State}
     end;
-handle_info({erx_console_principal, Principal}, State = #state{principal = unknown}) ->
+info({erx_console_principal, Principal}, State = #state{principal = unknown}) ->
     %% The system principal, as the domain service names it, which is fixed for the
     %% system domain's life; a line keeps the first it hears.
     {noreply, State#state{principal = Principal}};
-handle_info({erx_console_principal, _Principal}, State) ->
+info({erx_console_principal, _Principal}, State) ->
     {noreply, State};
-handle_info({erx_console_started, Why, Principal, Started}, State) ->
+info({erx_console_started, Why, Principal, Started}, State) ->
     {noreply, session_started(Why, Principal, Started, State)};
-handle_info({erx_console_written, {caller, From}}, State) ->
+info({erx_console_written, {caller, From}}, State) ->
     gen_server:reply(From, ok),
     {noreply, State};
-handle_info({erx_console_written, {Group, Reply}}, State) ->
+info({erx_console_written, {Group, Reply}}, State) ->
     Group ! {reply, Reply, ok},
     {noreply, State};
-handle_info({'EXIT', User, Reason}, State = #state{user = User}) ->
+info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% `user` ends only as the runtime stops (user_sup kills the system console's).
     {stop, Reason, State};
-handle_info({'EXIT', Pid, Reason},
+info({'EXIT', Pid, Reason},
             State = #state{role = Role, driver = Driver, line_owners = LineOwners, base = Base, shells = Shells,
                            first_shell = FirstShell, terminal = Terminal, input_ended = Ended}) ->
     LineEnded = Pid =:= Driver orelse lists:member(Pid, LineOwners),
@@ -630,7 +627,7 @@ handle_info({'EXIT', Pid, Reason},
         false ->
             {noreply, State}
     end;
-handle_info(Message, State = #state{user = User, line = Line})
+info(Message, State = #state{user = User, line = Line})
   when is_tuple(Message), tuple_size(Message) >= 2, is_pid(element(1, Message)) ->
     Pid = element(1, Message),
     Current = current(State),
@@ -643,7 +640,7 @@ handle_info(Message, State = #state{user = User, line = Line})
         false ->
             {noreply, State}
     end;
-handle_info(_Message, State) ->
+info(_Message, State) ->
     {noreply, State}.
 
 ended_by(Reason) ->
@@ -1208,17 +1205,20 @@ deliver(suspend, State = #state{shells = Shells}) ->
 onlcr(Bytes) ->
     binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
 
-%% The system domain as the source of its own log records: its id, the system
-%% domain's line principal, the system principal once the domain service has named it
-%% (unknown before), and its name.
-system_source(#state{principal = Principal}) ->
-    #{id => erx_kernel_records:system_domain(), principal => Principal, name => <<"system">>}.
+%% The console's ask for its next batch of the log (erx_syslog:next/1).
+log_ask() ->
+    {asked, erx_syslog:next(console)}.
 
-%% A rendered log line ends in its one newline; a terminal's line ends in CR-LF.
-log_line(<<>>) ->
-    <<>>;
-log_line(Line) ->
-    [binary:part(Line, 0, byte_size(Line) - 1), <<"\r\n">>].
+%% A batch of the log's lines, each made by the log service through the line escape
+%% and ending in nothing: each goes to the driver whole, ending in CR-LF, between
+%% whatever else is written. The last one's written says the batch is on the line.
+log_batch([], State) ->
+    State#state{log = log_ask()};
+log_batch(Lines, State = #state{driver = Driver}) ->
+    {Head, [Last]} = lists:split(length(Lines) - 1, Lines),
+    [Driver ! {erx_console_output, none, [Line, <<"\r\n">>]} || Line <- Head],
+    Driver ! {erx_console_output, log_batch, [Last, <<"\r\n">>]},
+    State#state{log = writing}.
 
 group_request(tty_geometry, Pid, State = #state{size = Size}) ->
     Pid ! {self(), tty_geometry, Size},
