@@ -278,14 +278,20 @@ size_t	erx_program_end_next(erx_program_end_t *end, erx_program_input_t input,
 
 /*
  * What ERX_PROGRAM_INSTALL passes into the image's table, by index: at each of program_arg's
- * indices the object whose value the first thread's argument register of that index carries
- * (abi/erx_abi.txt), then the data area, whose value the startup message carries. The
+ * object indices, budget to doorbell, the object whose value the first thread's argument
+ * register of that index carries (abi/erx_abi.txt), then the data area, whose value the
+ * startup message carries. program_arg's hwcap and hwcap2 follow the doorbell and name no
+ * object: install index 5 is the data area while register 5 is hwcap, so an array indexed
+ * by install never takes a feature word's index. The
  * session keeps the only DESTROY, and no copy carries DUP or GIVE, so on erXos's kernel the
  * program cannot end, copy or hand on what the session made; on the stopgap the rights are
  * the session's discipline only (docs/design-programs.md, "A program is a port" and "The
  * channel"; docs/design-stopgap.md).
  */
 #define ERX_PROGRAM_INSTALL_DATA	((uint32_t)ERX_PROGRAM_ARG_DOORBELL + 1)
+_Static_assert(ERX_PROGRAM_ARG_HWCAP == ERX_PROGRAM_ARG_DOORBELL + 1 &&
+    ERX_PROGRAM_ARG_HWCAP2 == ERX_PROGRAM_ARG_HWCAP + 1,
+    "program_arg's objects end at the doorbell, and the feature words follow them");
 #define ERX_PROGRAM_INSTALLS		(ERX_PROGRAM_INSTALL_DATA + 1)
 
 /* The rights the program's copy at index carries: 0 past the last index. */

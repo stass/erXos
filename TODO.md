@@ -1332,29 +1332,13 @@ it; git history is the record of completed work.
   It should fill `struct utsname` from `erx/abi.h`'s `ERX_UNAME_SYSNAME_STRING`, `ERX_UNAME_RELEASE_STRING` and
   `ERX_ARCH_MACHINE_STRING`, and the node name from the host part of the boot information's node name, which the shell's `uname`
   (`erlang/apps/erx_shell/src/erx_cmd_uname.erl`) reads as init's `-sname` or `-name`, with no value of its own; `docs/design-shell.md`, "Text commands".
-* [Medium] liberx, CPU feature words (`liberx/backend/core/boot_info.h`, `liberx/backend/fiasco/program_task.c`): musl's start
-  gives `AT_HWCAP` and `AT_HWCAP2` from the boot information page's `hwcap` and `hwcap2` (`libc_start.c`), but every page holds
-  0: the root's by `docs/design-stopgap.md`, "Boot information", and the domain library's because `erx_boot_inputs_t` has no
-  field for them. A program's are 0 too: the C library seam's table of `docs/design-runtime.md` serves them from the startup
-  message, which carries no feature words (`docs/design-abi.md`, "Program protocol"), and musl's start runs before the message
-  arrives. OpenSSL's `armcap.c` reads its CPU features through them (`docs/design-crypto.md`, "Building OpenSSL"), so it
-  takes its software paths on every CPU. Fill the root's page with the features the CPU has and the kernel enables and saves
-  for user mode (a bit for state the kernel does not save, such as SVE's, would let a program lose it), carry them into
-  each domain's page, and give a program its domain's from a source it has at start.
-  When they are filled, `HWCAP_CPUID` (bit 11) must stay clear unless the kernel emulates user-mode reads of the ID
-  registers: with it set, OpenSSL's `OPENSSL_cpuid_setup` (`openssl/crypto/armcap.c`, a constructor in every image with
-  `libcrypto`) runs `_armv8_cpuid_probe`, an `mrs` of `MIDR_EL1`, which traps in user mode without emulation and ends the
-  domain at load. `docs/design-crypto.md`'s K4 ("no probe") and "Domains that call no OpenSSL" ("the feature words and
-  `OPENSSL_armcap` and nothing else") then need that rule stated.
-* [Medium] liberx, CPU feature words of programs (`liberx/backend/fiasco/program_task.c`,
-  `otp/erts/emulator/sys/erxos/erx_program_drv.c`): the root's and every domain's boot page carry the CPU's
-  feature words (`docs/design-arch-aarch64.md`, "CPU feature words"), but a program's `AT_HWCAP` and `AT_HWCAP2`
-  are 0: musl's start runs before the startup message arrives, and the message carries no feature words. Give
-  them in the program's argument registers, `program_arg` values 5 and 6 of `abi/erx_abi.txt`, set by the
-  session's port driver from its own boot page, and pass them to `erx_fiasco_libc_start`.
 * [Low] bootstrap, CPU feature words (`kernel/arch/aarch64/cpu_id.c`): only the boot CPU's identification
   registers are read, and every CPU is taken to have its features. QEMU `virt` and the Raspberry Pi boards
   have identical CPUs; a board whose CPUs differ needs the intersection over all of them.
+* [Low] test, CPU feature words of programs (`test/guest/programs/bigargs.c`): the programs suite checks that a
+  program's `AT_HWCAP` has FP and Advanced SIMD and no refused bit and equals its registers, not that it equals its
+  session's words, since no Erlang call reads the boot information page's `hwcap`; a driver writing a constant would
+  pass. Compare against the session's words once an inspection path (`/proc`) shows them.
 * [Medium] test, CPU feature words (`test/guest/native_musl/guest.c` `case_auxv`): the guest checks that `AT_HWCAP`
   has FP and Advanced SIMD and no refused bit, but runs no claimed instruction, so a feature the kernel or a
   hypervisor traps (EL0 `DC CVAP` under HVF is unchecked) would pass. For each claimed bit that is set, run one
@@ -2584,8 +2568,9 @@ it; git history is the record of completed work.
 * [Low] `tools/fuzz/lane_writer_fuzz.c`: the lane writer's fuzz target never puts an item marked
   `whole`; the channel's host test (`test/host/prog_channel_test.rb`) covers the all-or-nothing
   put, the whole-record need and the refusal of a record larger than the area.
-* [Low] `abi/erx_abi.txt` (`program_arg`): the generator emits no count, so
-  `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes `doorbell` is the last index.
+* [Low] `abi/erx_abi.txt` (`program_arg`): the generator marks no value as an object, so
+  `ERX_PROGRAM_INSTALL_DATA` (`erx_program_core.h`) assumes the objects end at `doorbell`; its static
+  assertion catches an object put between `doorbell` and `hwcap`, not one appended after `hwcap2`.
 * [Medium] ABI generator, `tools/lib/erx/abi_profile.rb` (`capability_fields`): the generated
   capability walk covers only a union a frame to the program carries. A capability in a
   to-program frame of another kind (a tuple, a map) is neither walked nor refused, which is

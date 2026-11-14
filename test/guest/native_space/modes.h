@@ -93,8 +93,9 @@
 /*
  * The program MODE_MAKER starts, as a session starts one: its first thread finds
  * PROGRAM_TAG in its last argument register, which no mode's argument reaches, the
- * values the maker installed in the registers the ABI's program_arg names, and
- * PROGRAM_MARK with its index in each register past them. Each party maps the program's
+ * values the maker installed in program_arg's object registers, budget to doorbell,
+ * and PROGRAM_MARK with its index in each register past them, where a session puts
+ * its feature words. Each party maps the program's
  * side of the channel at PROGRAM_SIDE_ADDR and the session's at SESSION_SIDE_ADDR. The
  * program's doorbell rings under CHANNEL_LABEL, and the maker leaves the value of a
  * group the program may not bind into at CHANNEL_OTHER_WORD of the session's side.

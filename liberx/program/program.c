@@ -48,8 +48,8 @@ int	main(int, char **, char **);
 
 extern char **environ;
 
-/* program_arg's last value, the session's doorbell, is its highest index. */
-_Static_assert(ERX_PROGRAM_ARG_DOORBELL < ERX_ARCH_START_ARGS,
+/* program_arg's last value, the second feature word, is its highest index. */
+_Static_assert(ERX_PROGRAM_ARG_HWCAP2 < ERX_ARCH_START_ARGS,
     "a program's values fit the argument registers it starts with");
 
 /* The verdict word: the first thread waits while it is VERDICT_WAIT. */

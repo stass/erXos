@@ -131,10 +131,12 @@ What the sources say, read at the pins of [Sources](#sources):
   `erx_fiasco_libc_start`) gives musl `AT_HWCAP` and `AT_HWCAP2` from the
   boot information page's feature words (`hwcap` and `hwcap2`,
   `abi/erx_abi.txt`), as the C library seam's table says
-  ([design-runtime.md](design-runtime.md#the-c-library-seam)), but every
-  page holds 0 ([design-stopgap.md](design-stopgap.md#boot-information))
-  and a program's words are 0, so `getauxval(AT_HWCAP)` answers 0 on every
-  CPU; the gap is recorded in `TODO.md`.
+  ([design-runtime.md](design-runtime.md#the-c-library-seam)): the
+  features the boot CPU has and the kernel enables and saves for user
+  mode, never `HWCAP_CPUID`
+  ([design-arch-aarch64.md](design-arch-aarch64.md#cpu-feature-words)).
+  A program takes its session's words from its argument registers
+  ([design-programs.md](design-programs.md#the-channel)).
 * `erx_bytes:entropy/1` exists (`erlang/apps/erx/src/erx_bytes.erl`).
 
 ## Design
@@ -262,7 +264,8 @@ branch; each file carries its notice:
 
 * `crypto/armcap.c` defines `OSSL_IMPLEMENT_GETAUXVAL` under `__erxos__`,
   so CPU features come from `getauxval(AT_HWCAP)` and `AT_HWCAP2`, which
-  the seam answers from the boot information page, and the `SIGILL`
+  the seam answers from the boot information page, or in a program from
+  its argument registers, and the `SIGILL`
   probe is never compiled. One read of the CPU stays: when the words
   claim `HWCAP_CPUID`, `OPENSSL_cpuid_setup` reads the main ID register (in the
   tree's `armcap.c`, the `ARMV8_CPUID` test before `_armv8_cpuid_probe`)
@@ -388,7 +391,7 @@ difference between them is erXos's
 | **K1.** The system domain holds no OpenSSL | its image is linked without it; a build check proves it (below) |
 | **K2.** OpenSSL's only seed is `erx_entropy_read` | `getrandom` is the only seed method compiled in, `syscall_random` calls it directly, and the seam's row reads nothing else |
 | **K3.** A failed seed never yields bytes | the seam answers `EIO` and OpenSSL's unseeded generator refuses |
-| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no `SIGILL` probe; its one read of the CPU, the main ID register, runs only when the feature words claim `HWCAP_CPUID`, which the kernel's never do |
+| **K4.** CPU features come from the kernel's report | `armcap.c`'s edit compiles `getauxval` and no `SIGILL` probe; its one read of the CPU, the main ID register, runs only when the feature words claim `HWCAP_CPUID`, which the kernel's never do (`liberx/backend/core/arch/aarch64/cpu_features.c`, `test/host/cpu_features_test.rb`) |
 | **K5.** OpenSSL loads no code, and reads no file unless a caller names one | `no-shared`, `no-module`, `no-dso` and `no-engine` leave no loader; `no-autoload-config` reads no configuration file at start. OpenSSL's file functions (`BIO_new_file`, the configuration and store loaders) stay compiled and run only on a path a caller passes, and `crypto`'s NIF passes none |
 
 ## Failure handling

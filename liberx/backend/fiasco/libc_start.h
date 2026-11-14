@@ -35,7 +35,8 @@ bool	erx_fiasco_libc_fd(long, const long[6], long *);
 /*
  * The CPU feature words a program's start gives musl as AT_HWCAP and AT_HWCAP2, in the
  * boot information page's encoding (Linux's AT_HWCAP words). An entry with a page passes
- * the page's hwcap and hwcap2; one without passes zeros, which claim no optional feature.
+ * the page's hwcap and hwcap2, a program's entry the words its session wrote in its
+ * argument registers, and any other zeros, which claim no optional feature.
  */
 typedef struct erx_fiasco_cpu_features {
 	uint64_t	hwcap;

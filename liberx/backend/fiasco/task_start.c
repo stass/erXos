@@ -29,8 +29,8 @@ ERX_DECLARE_ABI_NOTE(erx_task_abi_note);
 void erx_fiasco_task_main(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 
 _Static_assert(ERX_FIASCO_START_ARGS == 8, "erx_fiasco_task_main takes each argument register the trampoline loads");
-/* program_arg's last value, the session's doorbell, is its highest index. */
-_Static_assert(ERX_PROGRAM_ARG_DOORBELL < ERX_FIASCO_START_ARGS, "a program's values fit the argument registers");
+/* program_arg's last value, the second feature word, is its highest index. */
+_Static_assert(ERX_PROGRAM_ARG_HWCAP2 < ERX_FIASCO_START_ARGS, "a program's values fit the argument registers");
 
 uint64_t
 erx_fiasco_service_gate(void)

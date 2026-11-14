@@ -1637,8 +1637,8 @@ applied in this order, each step undoing the ones before it on failure:
    ([design-pipes.md](design-pipes.md#waiting-and-doorbells)); let each
    hand-off go;
    and create the image's first thread, stopped, with the values of the
-   budget, the group, the channel's two sides and the session's doorbell
-   in its argument registers.
+   budget, the group, the channel's two sides and the session's doorbell,
+   then the session's own CPU feature words, in its argument registers.
    The driver's start ends here: the port is open and its owner, linked
    to it as ERTS links every port, reads the start's answer, which carries
    the values the install made that the startup message names, each
@@ -3133,7 +3133,7 @@ runtime and native program. It reaches the kernel only through `liberx`:
 | `posix_spawn`, `wait`, `kill`, `poll`, pipes, `sigaction`, `mmap` | in a program, the POSIX-lite personality: requests to the handler over the channel, `liberx`'s pipes ([design-pipes.md](design-pipes.md)), the event executor, `liberx`'s signals over vCPU upcalls, and memory objects ([The POSIX-lite personality](design-programs.md#the-posix-lite-personality)) |
 | `fork`, the `exec` family, the dynamic linker | in a program, the personality's second tier: `fork` as the session's copy of the sub-space, `exec` as the session replacing the image, and musl's dynamic linker adapted into the loader `erx_exec` to map file objects ([The second tier](design-programs.md#the-second-tier)) |
 | abort and exit | `erx_space_stop(ERX_CAP_SELF, status)` after the crash path |
-| CPU features (`getauxval` for `AT_HWCAP`, `AT_HWCAP2`) | the boot information page, or the startup message |
+| CPU features (`getauxval` for `AT_HWCAP`, `AT_HWCAP2`) | the boot information page, or a program's argument registers |
 
 musl's Linux system-call layer (`__syscallN` and its 341 `SYS_` numbers) is
 deleted, so no Linux system-call number exists in erXos. musl's `fork`

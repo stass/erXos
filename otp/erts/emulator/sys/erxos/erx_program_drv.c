@@ -318,13 +318,16 @@ release_index(const program_t *program, uint64_t *index)
 }
 
 /*
- * The first thread's starting registers, as erx_thread_create reads them: the image's entry,
- * and in each program_arg argument register the value the install made of that index's
- * copy (abi/erx_abi.txt), every other register 0.
+ * The first thread's starting registers, as erx_thread_create reads them: the image's entry;
+ * in each program_arg register of an object the value the install made of that index's
+ * copy, and in hwcap and hwcap2 the CPU feature words of this domain's own boot information
+ * page (abi/erx_abi.txt), so a program claims exactly the features its session does; every
+ * other register 0.
  */
 static void
 first_registers(const program_t *program)
 {
+	const erx_boot_info_t *const boot = erx_runtime_boot();
 	erx_thread_start_t start;
 	uint64_t words[sizeof(start) / sizeof(uint64_t)];
 
@@ -332,6 +335,8 @@ first_registers(const program_t *program)
 	start.regs.pc = program->pc;
 	for (uint32_t arg = 0; arg < ERX_PROGRAM_INSTALL_DATA; arg++)
 		start.regs.gpr[arg] = program->installed[arg];
+	start.regs.gpr[ERX_PROGRAM_ARG_HWCAP] = boot->hwcap;
+	start.regs.gpr[ERX_PROGRAM_ARG_HWCAP2] = boot->hwcap2;
 	memcpy(words, &start, sizeof(words));
 	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
 		(void)erx_utcb_mr_store(erx_utcb_self(), word, words[word]);

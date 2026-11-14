@@ -655,7 +655,9 @@ the only FP instructions in the kernel's objects are those two routines
 ### CPU feature words
 
 The boot information page's `hwcap` and `hwcap2`, which musl's start gives
-a program as `AT_HWCAP` and `AT_HWCAP2`, come from the boot CPU's
+a program as `AT_HWCAP` and `AT_HWCAP2`, and which a session hands each of
+its native programs in the program's argument registers
+([design-programs.md](design-programs.md#the-channel)), come from the boot CPU's
 identification registers. EL0 cannot read them, so the stopgap's bootstrap
 reads `ID_AA64ISAR0_EL1`, `ID_AA64ISAR1_EL1`, `ID_AA64ISAR2_EL1`,
 `ID_AA64PFR0_EL1` and `ID_AA64PFR1_EL1` at EL1 through the accessors

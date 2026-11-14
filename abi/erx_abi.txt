@@ -209,19 +209,26 @@ enum exit_kind i64
   value nothread -9223372036854775805
   value crash -9223372036854775804
   value signal 256
-# Which argument register of a program's first thread carries the value
-# of each object its session installed in the image's table
+# Which value each argument register of a program's first thread carries
 # (docs/design-programs.md, "The channel"; docs/design-runtime.md,
-# "Programs as ports", step 5), named from the program's view: its
-# budget, its group, its own side of the channel, which it writes, the
-# session's side, its peer side, which it maps read-only, and the
-# session's doorbell, which the program triggers.
+# "Programs as ports", step 5), named from the program's view. budget to
+# doorbell carry the value of each object its session installed in the
+# image's table: its budget, its group, its own side of the channel,
+# which it writes, the session's side, its peer side, which it maps
+# read-only, and the session's doorbell, which the program triggers.
+# hwcap and hwcap2 carry no object: they are the CPU feature words of the
+# session's own boot information page, which musl's start gives the
+# program as AT_HWCAP and AT_HWCAP2 (docs/design-arch-aarch64.md, "CPU
+# feature words"). erx_program_core.h checks that the feature words
+# follow doorbell directly.
 enum program_arg u32
   value budget 0
   value group 1
   value own_side 2
   value peer_side 3
   value doorbell 4
+  value hwcap 5
+  value hwcap2 6
 # Each lane of a program's channel: its ring's data area, in bytes, a power
 # of two (docs/design-programs.md, "The channel"). The session sizes both
 # sides with it and liberx maps them with it, so neither reads it from the

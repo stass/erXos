@@ -31,7 +31,7 @@
 /* The handle table of each space the creator makes. */
 #define CREATED_CAP_LIMIT	16u
 
-_Static_assert(PROGRAM_TAG_ARG > ERX_PROGRAM_ARG_DOORBELL && PROGRAM_TAG_ARG < ERX_FIASCO_START_ARGS,
+_Static_assert(PROGRAM_TAG_ARG > ERX_PROGRAM_ARG_HWCAP2 && PROGRAM_TAG_ARG < ERX_FIASCO_START_ARGS,
     "the tag's register is an argument register no program value uses");
 
 /* A word of the program's writable data, of which each task has its own copy. */
@@ -368,8 +368,9 @@ maker_install(uint64_t child, uint64_t gate, const uint64_t handles[INSTALL_ITEM
 
 /*
  * The child's starting registers, as a session writes a program's: the installed
- * values where program_arg puts them, PROGRAM_MARK with its index in the registers
- * past them, and PROGRAM_TAG in the last.
+ * values in program_arg's object registers, budget to doorbell, PROGRAM_MARK with its
+ * index in the registers past them, where a session puts its feature words, and
+ * PROGRAM_TAG in the last.
  */
 static void
 program_registers(uint64_t pc, const uint64_t values[INSTALL_ITEMS])

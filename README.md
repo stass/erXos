@@ -258,7 +258,9 @@ Error in process <0.150.0> with exit value:
 * **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
   backend. OTP 29.1.2 and musl live in the tree, modified. musl's start
   gives a program `AT_RANDOM`, 16 bytes of the entropy source, and
-  `AT_HWCAP` and `AT_HWCAP2`, whose words hold 0. OpenSSL 3.5.9 lives in
+  `AT_HWCAP` and `AT_HWCAP2`: the boot CPU's features that the kernel
+  enables and saves for user mode, the same in every domain and in a
+  session's native programs. OpenSSL 3.5.9 lives in
   the tree too and builds `libcrypto.a` for `erxos-aarch64`
   (`tools/erx build openssl`); no runtime links it yet.
 * **The serial console's driver** (PL011) is an Erlang process.

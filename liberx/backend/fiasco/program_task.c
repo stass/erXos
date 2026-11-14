@@ -197,13 +197,14 @@ erx_fiasco_libc_fd(long n, const long args[6], long *result)
 }
 
 /*
- * musl's start runs before the startup message arrives, and the message carries no CPU
- * feature words, so a program's AT_HWCAP and AT_HWCAP2 are 0, which claim no optional
- * feature (TODO.md).
+ * musl's start runs before the startup message arrives, so a program's AT_HWCAP and
+ * AT_HWCAP2 come from its argument registers: its session's own feature words, in the
+ * registers program_arg's hwcap and hwcap2 name.
  */
 int64_t
 erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 {
 	erx_prog_enter(args);
-	return (erx_fiasco_libc_start(liberx_program_main, (erx_fiasco_cpu_features_t){ 0 }));
+	return (erx_fiasco_libc_start(liberx_program_main, (erx_fiasco_cpu_features_t){
+	    .hwcap = args[ERX_PROGRAM_ARG_HWCAP], .hwcap2 = args[ERX_PROGRAM_ARG_HWCAP2] }));
 }
