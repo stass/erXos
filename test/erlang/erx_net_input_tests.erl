@@ -66,7 +66,7 @@ holders(Keys) ->
     maps:from_list([{Key, [entry(Key, Credit)]} || {Key, Credit} <- Keys]).
 
 entry({tcp_listen, _, _, _}, Credit) ->
-    #{pid => self(), credit => Credit, listener => #{rcv_buf => 0, mss => 536, rcv_scale => 0}};
+    #{pid => self(), credit => Credit, listener => #{rcv_buf => 0, rcv_scale => 0}};
 entry(_, Credit) ->
     #{pid => self(), credit => Credit}.
 

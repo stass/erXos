@@ -119,7 +119,8 @@ encapsulation of TCP, so FreeBSD's branches for `path_mtu_discovery` off and for
 not translated.
 """.
 
--export([update/4, mtudisc/5, mss/5, mssopt/3, maxseg/2, initwnd/1, sack_prohibited/1]).
+-export([update/4, mtudisc/5, mss/5, mssopt/3, synack_mssopt/2, maxseg/2, initwnd/1,
+         sack_prohibited/1]).
 
 -export_type([family/0, offer/0, options/0]).
 
@@ -268,6 +269,16 @@ mssopt(Family, PathMtu, CachedMtu)
         {0, _} -> CachedMtu - ProtoH;
         {_, _} -> min(PathMtu, CachedMtu) - ProtoH
     end.
+
+-doc """
+The MSS option a SYN-ACK of the syncache carries (`syncache_respond`,
+tcp_syncache.c:1823-1827): `tcp_mssopt` over the path MTU (0 when there is no route), raised
+to `tcp_minmss`, so a tiny MTU never makes us ask a peer for segments below it, and within
+the option's 16 bits.
+""".
+-spec synack_mssopt(family(), non_neg_integer()) -> ?TCP_MINMSS..16#ffff.
+synack_mssopt(Family, PathMtu) ->
+    min(16#ffff, max(?TCP_MINMSS, mssopt(Family, PathMtu, 0))).
 
 -doc """
 The effective sender MSS of RFC 5681 (`tcp_maxseg`): `Maxseg` less the option bytes a

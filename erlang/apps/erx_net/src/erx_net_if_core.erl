@@ -412,8 +412,24 @@ listener(#{src := Src, dst := Dst} = Head,
         Flags band ?TH_ACK =/= 0 ->
             {count(listen_syn_ack, Core0), []};
         true ->
-            {Cache, Actions} = erx_tcp_syncache:add(Conn, Tcp, Listener, CacheCtx, Cache0),
+            MssOpt = synack_mssopt(Head, Core0),
+            {Cache, Actions} = erx_tcp_syncache:add(Conn, Tcp, Listener, MssOpt, CacheCtx, Cache0),
             syncache_actions(Actions, Core0#core{syncache = Cache}, Now)
+    end.
+
+%% The MSS option a SYN-ACK to the segment's source offers (erx_tcp_mss:synack_mssopt/2):
+%% from the MTU of the route back to the peer, or the family's default without a route or
+%% configuration, as tcp_maxmtu answers 0 then. The listener's entry holds no MSS, so a
+%% wildcard listener offers each peer its own route's.
+synack_mssopt(#{family := Family, src := Peer, dst := Ours}, #core{snapshot = Snapshot}) ->
+    erx_tcp_mss:synack_mssopt(Family, path_mtu(Peer, Ours, Snapshot)).
+
+path_mtu(_Peer, _Ours, none) ->
+    0;
+path_mtu(Peer, Ours, Snapshot) ->
+    case erx_net_frame:path(Peer, #{src => Ours}, Snapshot) of
+        {ok, #{mtu := Mtu}} -> Mtu;
+        {error, _} -> 0
     end.
 
 %% syncache_expand's result (tcp_input.c:1081-1135): a handshake becomes the connection,

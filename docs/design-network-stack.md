@@ -2200,7 +2200,7 @@ no other process and creates no process:
   512 buckets of 30 (`tcp_syncache.c:162-163`), with SYN-ACK
   retransmission under FreeBSD's limit and backoff, driven by the
   interface's deadlines.
-* Before it looks the SYN up, `erx_tcp_syncache:add/5` drops a SYN to
+* Before it looks the SYN up, `erx_tcp_syncache:add/6` drops a SYN to
   or from itself, from or to a multicast address or from the limited
   broadcast, the checks `tcp_input` makes before `syncache_add`
   (`tcp_input.c:1295-1338`) that read the four-tuple alone. A SYN to a
@@ -4014,7 +4014,7 @@ a cycle.
   and one past the limit is reset at its handshake; FreeBSD counts a
   descriptor only at `accept`, which answers `EMFILE` and leaves the
   connection queued (`kern_accept4`, `uipc_syscalls.c:358-370`). See
-  [Open decisions](#open-decisions), 3.
+  [Decisions](#decisions), 20.
 * Two sockets never share one key: `reuseport` on two listeners or two
   bound datagram sockets of one grant, on the same address and port, is
   refused with `{error, eaddrinuse}`, where FreeBSD allows it
@@ -7678,7 +7678,7 @@ it plugs into, except pacing, which BBR brings.
 
 ## Decisions
 
-These are settled. One question remains open
+These are settled. Two questions remain open
 ([Open decisions](#open-decisions)).
 
 1. **The grant's account covers its sockets.** Every reduction a grant's
@@ -7886,6 +7886,19 @@ These are settled. One question remains open
     stream piece, credit or exit of a socket ever waits behind
     `system_queue`, where a plain message past it is dropped and any
     other signal ends the destination domain.
+20. **A queued connection counts toward `sockets` from its adoption.**
+    Its grant counts it in the call that reserves its buffers, so a
+    grant at its limit has new connections reset at their handshakes
+    and `accept` never answers `emfile` ([The listener](#the-listener)).
+    The limit bounds what the network domain holds for a client, and a
+    queued connection is held there, with a process and buffers,
+    whether accepted or not; the grant is involved once per
+    connection, and the listener never calls it. FreeBSD's way, counting
+    at `accept`, which answers `EMFILE` and leaves the connection queued
+    (`kern_accept4`, `uipc_syscalls.c:358-370`), would cost a call from
+    the listener to the grant at every `accept` and leave a client at
+    its limit holding up to `3 * Backlog div 2 + 1` uncounted
+    connections per listener, bounded only by `buffers`.
 
 ### Open decisions
 
@@ -7917,23 +7930,6 @@ These are settled. One question remains open
    use `netadmin` from their sessions. It costs nothing today; the
    alternative keeps `netadmin` available to the system shell for an
    operator whose only line is the system shell's.
-3. **When a queued connection counts toward `sockets`.** The design
-   counts an accepted connection from its adoption, in the same call
-   that reserves its buffers, so a grant at its limit has its new
-   connections reset at their handshakes and `accept` never answers
-   `emfile` ([The listener](#the-listener)). The recommendation is to
-   keep this: the limit bounds what the network domain holds for a
-   client, and a queued connection is held there, with a process and
-   buffers, whether accepted or not; the grant is involved once per
-   connection, and the listener never calls it. The alternative is
-   FreeBSD's: count at `accept`, which answers `emfile` while the grant
-   is full and leaves the connection queued (`kern_accept4`,
-   `uipc_syscalls.c:358-370`). It costs a call from the listener to the
-   grant at every `accept`, and a client at its limit then holds up to
-   `3 * Backlog div 2 + 1` uncounted connections per listener, bounded
-   only by `buffers`. Either way the buffers are reserved at adoption,
-   before the connection is queued, so every accepted connection stays
-   within a bound of its grant's from then on.
 
 ## Alternatives considered
 

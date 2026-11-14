@@ -28,8 +28,9 @@
 link() -> #{link => ethernet, lladdr => ?MINE, mtu => 1500, state => up, tx_limit => 16,
             finish => none}.
 
-core(Config) ->
-    erx_net_if_core:new(#{name => en0, link => link(), gen => erx_net_rand:new(<<7:128>>),
+core(Config) -> core(Config, link()).
+core(Config, Link) ->
+    erx_net_if_core:new(#{name => en0, link => Link, gen => erx_net_rand:new(<<7:128>>),
                           config => Config}).
 
 static() -> static(#{}).
@@ -309,7 +310,7 @@ link_change_goes_to_the_client_only_under_dhcp_test() ->
 
 %% --- Passive open: the syncache in the step ------------------------------------------
 
--define(LISTENER, #{rcv_buf => 65536, mss => 1460, rcv_scale => 6}).
+-define(LISTENER, #{rcv_buf => 65536, rcv_scale => 6}).
 -define(CONN, {?ME4, 80, ?PEER4, 4000}).
 
 listener_entry() -> #{pid => self(), credit => none, listener => ?LISTENER}.
@@ -346,12 +347,24 @@ syn_ack_of(Actions) ->
     ?assertEqual(?TH_SYN bor ?TH_ACK, Flags),
     SynAck.
 
+%% The MSS a SYN-ACK offers is the route's, not the listener's (tcp_mssopt for each
+%% connection): over an interface of MTU 9,000 the same listener offers 8,960.
+syn_ack_offers_the_mss_of_the_route_to_the_peer_test() ->
+    {Core0, [{publish, Rows} | _]} = step(start, core(static(), (link())#{mtu := 9000})),
+    Core1 = configured(Rows, Core0),
+    {Core, _} = step(local(who_has_me(), Core1), Core1),
+    {_, Out} = to_listener(syn_frame(100), Core),
+    ?assertMatch(#tcp{opts = #tcp_opts{mss = 8960}}, syn_ack_of(Out)),
+    %% Without a route the family default, and never below tcp_minmss (syncache_respond).
+    ?assertEqual(536, erx_tcp_mss:synack_mssopt(inet, 0)),
+    ?assertEqual(216, erx_tcp_mss:synack_mssopt(inet, 68)).
+
 syn_draws_a_syn_ack_and_its_ack_completes_the_handshake_test() ->
     {Core1, Out1} = to_listener(syn_frame(100), resolved()),
     #tcp{sport = 80, dport = 4000, seq = Iss, ack = 101, opts = #tcp_opts{mss = 1460}} = syn_ack_of(Out1),
     Ack = tcp_frame(?TH_ACK, 101, erx_tcp_seq:wire(Iss + 1), <<>>),
     {Core2, Out2} = to_listener(Ack, Core1),
-    ?assertMatch([{accept, #{listener := #{mss := 1460}}, ?CONN, #{iss := Iss, irs := 100, peer_mss := 1460},
+    ?assertMatch([{accept, #{listener := #{rcv_buf := 65536, rcv_scale := 6}}, ?CONN, #{iss := Iss, irs := 100, peer_mss := 1460},
                    {#tcp{seq = 101, flags = ?TH_ACK}, <<>>, 0, unicast}, _}], Out2),
     ?assertMatch(#{syncache_completed := 1}, counters(Core2)),
     %% The entry is gone: the same ACK again finds no handshake and draws a RST.

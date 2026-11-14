@@ -643,7 +643,7 @@ echo_keys(inet, <<0, _, _:16, Id:16, _/binary>>) ->
 echo_keys(_, _) ->
     [].
 
-entry({tcp_listen, _, _, _}, N) -> #{pid => self(), credit => N, listener => #{rcv_buf => 0, mss => 536, rcv_scale => 0}};
+entry({tcp_listen, _, _, _}, N) -> #{pid => self(), credit => N, listener => #{rcv_buf => 0, rcv_scale => 0}};
 entry(_, N) -> #{pid => self(), credit => N}.
 
 other(em0) -> em1;
