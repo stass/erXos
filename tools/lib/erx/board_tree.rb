@@ -64,7 +64,7 @@ module Erx
     # Linux's GPL-2.0 text in its tree (deps.lock's linux-dts members name it).
     LICENSE = 'LICENSES/preferred/GPL-2.0'
     # The name it ships by, beside the board's tree and source.
-    LICENSE_FILE = 'LICENCE.linux-dts'
+    LICENSE_FILE = 'LICENSE.linux-dts'
 
     module_function
 

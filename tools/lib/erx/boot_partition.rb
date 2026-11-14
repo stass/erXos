@@ -51,7 +51,7 @@ module Erx
     KERNEL = PiMedium::BOOT_FILE
     ARMSTUB = 'bl31.bin'
     CONFIG = 'config.txt'
-    ARMSTUB_LICENSE = 'LICENCE.tf-a'
+    ARMSTUB_LICENSE = 'LICENSE.tf-a'
     # A file of the layout whose bytes are given, not read from a path.
     Text = Data.define(:bytes)
     # The firmware's files, by deps.lock pin; each keeps its pinned file name.

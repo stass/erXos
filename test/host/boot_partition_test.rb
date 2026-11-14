@@ -75,7 +75,7 @@ class BootPartitionTest < Minitest::Test
       Dir.mkdir(output)
       File.write(File.join(output, 'image.boot'), 'kernel')
       written = write(root, output, plan(root))
-      names = %w[LICENCE.broadcom LICENCE.linux-dts LICENCE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
+      names = %w[LICENCE.broadcom LICENSE.linux-dts LICENSE.tf-a bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts bl31.bin config.txt fixup4.dat
                  kernel8.img overlays/uart3.dtbo start4.elf]
       files = Dir.glob('**/*', base: output).reject { |name| File.directory?(File.join(output, name)) }.sort
       assert_equal [*names.map { |name| "boot/#{name}" }, 'image.boot', 'sdcard.img', 'sdcard.img.receipt.json'].sort, files
@@ -260,7 +260,7 @@ class BootPartitionTest < Minitest::Test
     Dir.mktmpdir do |root|
       sources = plan(root)
       tree = Erx::BoardTree::Built.new(board: sources.fetch('bcm2711-rpi-4-b.dtb'), source: sources.fetch('bcm2711-rpi-4-b.dts'),
-                                       license: sources.fetch('LICENCE.linux-dts'),
+                                       license: sources.fetch('LICENSE.linux-dts'),
                                        model: '', overlays: {})
       assert_raises(Erx::Error) do
         Erx::BootPartition.plan(platform: PI, build_kind: 'development', bootable: 'k', bl31: 'b', bl31_license: 'l', tree: tree,

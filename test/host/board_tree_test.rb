@@ -68,7 +68,7 @@ class BoardTreeTest < Minitest::Test
                             "Linux's arch/arm/boot/dts/broadcom/bcm2711-rpi-4-b.dts"
     assert_includes source, 'SPDX-License-Identifier: GPL-2.0'
     assert_match(/GNU GENERAL PUBLIC LICENSE\s+Version 2, June 1991/, File.read(built.license))
-    assert_equal 'LICENCE.linux-dts', File.basename(built.license)
+    assert_equal 'LICENSE.linux-dts', File.basename(built.license)
     assert_equal ['uart3'], built.overlays.keys
     assert File.file?(built.overlays.fetch('uart3'))
   end

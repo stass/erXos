@@ -2084,7 +2084,7 @@ it; git history is the record of completed work.
   (`tcp_ctlinput`), which the design names as a source; and check whether `udp_common_ctlinput`
   looks up with `INPLOOKUP_WILDCARD`, which the design says it does not.
 * [Medium] build, the Raspberry Pi 4's card (`tools/lib/erx/boot_partition.rb`, `tools/lib/erx/bl31.rb`):
-  `LICENCE.tf-a` is TF-A's `docs/license.rst` alone, whose BSD-3-Clause text carries only TF-A's placeholder
+  `LICENSE.tf-a` is TF-A's `docs/license.rst` alone, whose BSD-3-Clause text carries only TF-A's placeholder
   copyright, and none of the notices of the third-party code BL31 links (TF-A's libc, libfdt, compiler-rt's
   builtins). The website offers the card, so BL31's link closure needs its notices beside the armstub, as
   the packer gathers them for the boot image (`NOTICES`).
