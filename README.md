@@ -308,10 +308,11 @@ Error in process <0.150.0> with exit value:
   FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
   the kernel log from `/proc/kernel/log`, which reads the log without taking
   it from the console and marks the records it cannot show, overwritten or
-  unreadable, as `[missing N]`. The system log's core, which renders a
-  domain's record as one escaped line and holds each domain to a rate of
-  stored bytes, and the decoder of its write interface are built and
-  tested on the host; the service is not. `top` shows
+  unreadable, as `[missing N]`. The system log's service runs in the system
+  domain: it takes the kernel's records and the system domain's own, renders
+  each as one escaped line, holds each domain to a rate of stored bytes and
+  feeds the console; other domains do not write to it yet, and no store keeps
+  its lines. `top` shows
   the process table under a header of uptime, memory and run queue, read
   from the one tree of system values that `/proc` also serves. Every
   runtime's `/proc`, `top` and `dmesg` read through the inspect facet, and
