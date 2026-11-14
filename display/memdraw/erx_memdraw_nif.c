@@ -299,15 +299,14 @@ store_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	if (!erx_fb_store_layout_ok(&src, &dst, &geometry))
 		return error(env, ERX_MEMDRAW_EINVAL);
 	for (list = argv[3]; enif_get_list_cell(env, list, &head, &list);)
-		if (!get_rect(env, head, &r) ||
-		    !erx_fb_store_rect_ok(&geometry, (erx_fb_rect_t){ r.x0, r.y0, r.x1, r.y1 }))
+		if (!get_rect(env, head, &r) || !erx_fb_store_rect_ok(&geometry, r))
 			return error(env, ERX_MEMDRAW_EINVAL);
 	if (!enif_is_empty_list(env, list))
 		return enif_make_badarg(env);
 	/* Every rectangle passed above, so each store below writes. */
 	for (list = argv[3]; enif_get_list_cell(env, list, &head, &list);) {
 		(void)get_rect(env, head, &r);
-		(void)erx_fb_store(&src, &dst, &geometry, &(erx_fb_rect_t){ r.x0, r.y0, r.x1, r.y1 }, 1);
+		(void)erx_fb_store(&src, &dst, &geometry, &r, 1);
 	}
 	return atom_ok;
 }

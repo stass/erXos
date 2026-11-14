@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx_memdraw.h"
+
 /* One side of the copy: its first byte, its length and the bytes of one row. */
 typedef struct erx_fb_side {
 	volatile uint8_t *base;	/* read only on the source side */
@@ -33,11 +35,6 @@ typedef struct erx_fb_geometry {
 	uint32_t depth;
 } erx_fb_geometry_t;
 
-/* A rectangle, x0 and y0 inside, x1 and y1 past it. */
-typedef struct erx_fb_rect {
-	int32_t x0, y0, x1, y1;
-} erx_fb_rect_t;
-
 /*
  * Whether src and dst can be copied between as geometry lays them out: each
  * base on a 4-byte boundary, each stride a multiple of 4 and at least a row's
@@ -46,7 +43,7 @@ typedef struct erx_fb_rect {
 bool	erx_fb_store_layout_ok(const erx_fb_side_t *src, const erx_fb_side_t *dst, const erx_fb_geometry_t *geometry);
 
 /* Whether r is nonempty and lies in (0, 0)-(width, height). Pure. */
-bool	erx_fb_store_rect_ok(const erx_fb_geometry_t *geometry, erx_fb_rect_t r);
+bool	erx_fb_store_rect_ok(const erx_fb_geometry_t *geometry, erx_rect_t r);
 
 /*
  * Copies each of the n rectangles of src into dst, every row's span widened to
@@ -55,6 +52,6 @@ bool	erx_fb_store_rect_ok(const erx_fb_geometry_t *geometry, erx_fb_rect_t r);
  * returns whether it wrote.
  */
 bool	erx_fb_store(const erx_fb_side_t *src, const erx_fb_side_t *dst,
-	    const erx_fb_geometry_t *geometry, const erx_fb_rect_t *rects, size_t n);
+	    const erx_fb_geometry_t *geometry, const erx_rect_t *rects, size_t n);
 
 #endif /* ERX_FB_STORE_H */

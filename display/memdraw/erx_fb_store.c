@@ -46,7 +46,7 @@ erx_fb_store_layout_ok(const erx_fb_side_t *src, const erx_fb_side_t *dst, const
 }
 
 bool
-erx_fb_store_rect_ok(const erx_fb_geometry_t *geometry, erx_fb_rect_t r)
+erx_fb_store_rect_ok(const erx_fb_geometry_t *geometry, erx_rect_t r)
 {
 	return (r.x0 >= 0 && r.y0 >= 0 && r.x0 < r.x1 && r.y0 < r.y1 && (uint32_t)r.x1 <= geometry->width &&
 	    (uint32_t)r.y1 <= geometry->height);
@@ -66,7 +66,7 @@ store_row(const uint8_t *src, volatile uint8_t *dst, uint64_t first, uint64_t en
 
 bool
 erx_fb_store(const erx_fb_side_t *src, const erx_fb_side_t *dst, const erx_fb_geometry_t *geometry,
-    const erx_fb_rect_t *rects, size_t n)
+    const erx_rect_t *rects, size_t n)
 {
 	const uint64_t row = row_words_bytes(geometry);
 
@@ -78,7 +78,7 @@ erx_fb_store(const erx_fb_side_t *src, const erx_fb_side_t *dst, const erx_fb_ge
 	/* The source is ordinary memory; only the framebuffer is written through volatile stores. */
 	const uint8_t *const from = (const uint8_t *)(uintptr_t)src->base;
 	for (size_t i = 0; i < n; i++) {
-		const erx_fb_rect_t r = rects[i];
+		const erx_rect_t r = rects[i];
 		const uint64_t first = ((uint64_t)r.x0 * geometry->depth / 8) & ~(uint64_t)3;
 		const uint64_t past = (((uint64_t)r.x1 * geometry->depth + 7) / 8 + 3) & ~(uint64_t)3;
 		const uint64_t end = past < row ? past : row;

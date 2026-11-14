@@ -61,7 +61,7 @@ only(const erx_fb_side_t *src, const erx_fb_side_t *dst, size_t dst_off, int32_t
 
 static void
 stores(const char *name, erx_fb_geometry_t g, size_t src_stride, size_t dst_stride, size_t dst_off, size_t dst_len,
-    erx_fb_rect_t r, size_t first, size_t end)
+    erx_rect_t r, size_t first, size_t end)
 {
 	reset();
 	const erx_fb_side_t src = { .base = src_bytes, .bytes = ROOM, .stride = src_stride };
@@ -75,7 +75,7 @@ stores(const char *name, erx_fb_geometry_t g, size_t src_stride, size_t dst_stri
 
 static void
 refuses(const char *name, erx_fb_geometry_t g, size_t src_stride, size_t dst_stride, size_t dst_off, size_t dst_len,
-    const erx_fb_rect_t *rects, size_t n)
+    const erx_rect_t *rects, size_t n)
 {
 	reset();
 	const erx_fb_side_t src = { .base = src_bytes, .bytes = ROOM, .stride = src_stride };
@@ -96,34 +96,34 @@ main(void)
 	const erx_fb_geometry_t xrgb = { .width = 4, .height = 3, .depth = 32 };
 	const erx_fb_geometry_t rgb565 = { .width = 5, .height = 2, .depth = 16 };
 	const erx_fb_geometry_t rgb888 = { .width = 3, .height = 2, .depth = 24 };
-	const erx_fb_rect_t whole = { 0, 0, 4, 3 };
+	const erx_rect_t whole = { 0, 0, 4, 3 };
 
 	/* The firmware's stride wider than the image's, the framebuffer at an offset in its page. */
 	stores("whole-32", xrgb, 16, 32, 64, 96, whole, 0, 16);
-	stores("corner-32", xrgb, 16, 32, 0, 96, (erx_fb_rect_t){ 3, 2, 4, 3 }, 12, 16);
-	stores("inner-32", xrgb, 16, 20, 4, 60, (erx_fb_rect_t){ 1, 1, 3, 2 }, 4, 12);
+	stores("corner-32", xrgb, 16, 32, 0, 96, (erx_rect_t){ 3, 2, 4, 3 }, 12, 16);
+	stores("inner-32", xrgb, 16, 20, 4, 60, (erx_rect_t){ 1, 1, 3, 2 }, 4, 12);
 	/* 16 bits: pixel 1 alone widens to the word of pixels 0 and 1; the last pixel's word ends the row. */
-	stores("odd-16", rgb565, 12, 16, 0, 32, (erx_fb_rect_t){ 1, 0, 2, 1 }, 0, 4);
-	stores("edge-16", rgb565, 12, 12, 0, 24, (erx_fb_rect_t){ 4, 1, 5, 2 }, 8, 12);
+	stores("odd-16", rgb565, 12, 16, 0, 32, (erx_rect_t){ 1, 0, 2, 1 }, 0, 4);
+	stores("edge-16", rgb565, 12, 12, 0, 24, (erx_rect_t){ 4, 1, 5, 2 }, 8, 12);
 	/* 24 bits: a row of 9 bytes rounds up to 12, which both strides hold. */
-	stores("row-24", rgb888, 12, 12, 0, 24, (erx_fb_rect_t){ 0, 0, 3, 2 }, 0, 12);
-	stores("middle-24", rgb888, 12, 16, 0, 28, (erx_fb_rect_t){ 1, 1, 2, 2 }, 0, 8);
+	stores("row-24", rgb888, 12, 12, 0, 24, (erx_rect_t){ 0, 0, 3, 2 }, 0, 12);
+	stores("middle-24", rgb888, 12, 16, 0, 28, (erx_rect_t){ 1, 1, 2, 2 }, 0, 8);
 
-	refuses("past-right", xrgb, 16, 16, 0, 48, &(erx_fb_rect_t){ 0, 0, 5, 1 }, 1);
-	refuses("past-bottom", xrgb, 16, 16, 0, 48, &(erx_fb_rect_t){ 0, 2, 1, 4 }, 1);
-	refuses("negative", xrgb, 16, 16, 0, 48, &(erx_fb_rect_t){ -1, 0, 1, 1 }, 1);
-	refuses("empty", xrgb, 16, 16, 0, 48, &(erx_fb_rect_t){ 2, 1, 2, 3 }, 1);
-	refuses("one-bad-of-two", xrgb, 16, 16, 0, 48, (erx_fb_rect_t[]){ whole, { 0, 0, 1, 9 } }, 2);
+	refuses("past-right", xrgb, 16, 16, 0, 48, &(erx_rect_t){ 0, 0, 5, 1 }, 1);
+	refuses("past-bottom", xrgb, 16, 16, 0, 48, &(erx_rect_t){ 0, 2, 1, 4 }, 1);
+	refuses("negative", xrgb, 16, 16, 0, 48, &(erx_rect_t){ -1, 0, 1, 1 }, 1);
+	refuses("empty", xrgb, 16, 16, 0, 48, &(erx_rect_t){ 2, 1, 2, 3 }, 1);
+	refuses("one-bad-of-two", xrgb, 16, 16, 0, 48, (erx_rect_t[]){ whole, { 0, 0, 1, 9 } }, 2);
 	refuses("stride-short", xrgb, 16, 12, 0, 48, &whole, 1);
 	refuses("stride-unaligned", xrgb, 16, 18, 0, 54, &whole, 1);
 	refuses("base-unaligned", xrgb, 16, 16, 2, 48, &whole, 1);
 	refuses("bytes-short", xrgb, 16, 16, 0, 47, &whole, 1);
 	refuses("source-stride-short", xrgb, 12, 16, 0, 48, &whole, 1);
-	refuses("row-24-stride-9", rgb888, 12, 9, 0, 18, &(erx_fb_rect_t){ 0, 0, 1, 1 }, 1);
+	refuses("row-24-stride-9", rgb888, 12, 9, 0, 18, &(erx_rect_t){ 0, 0, 1, 1 }, 1);
 	refuses("depth-8", (erx_fb_geometry_t){ .width = 4, .height = 1, .depth = 8 }, 4, 4, 0, 4,
-	    &(erx_fb_rect_t){ 0, 0, 1, 1 }, 1);
+	    &(erx_rect_t){ 0, 0, 1, 1 }, 1);
 	refuses("no-height", (erx_fb_geometry_t){ .width = 4, .height = 0, .depth = 32 }, 16, 16, 0, 48,
-	    &(erx_fb_rect_t){ 0, 0, 1, 1 }, 1);
+	    &(erx_rect_t){ 0, 0, 1, 1 }, 1);
 	if (failures == 0)
 		printf("ok\n");
 	return failures == 0 ? 0 : 1;

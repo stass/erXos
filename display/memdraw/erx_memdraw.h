@@ -24,6 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* A rectangle, x0 and y0 inside, x1 and y1 past it. */
 typedef struct erx_rect {
 	int32_t x0, y0, x1, y1;
 } erx_rect_t;
