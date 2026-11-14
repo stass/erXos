@@ -3343,12 +3343,10 @@ on a display edits nothing of the board's:
 * **The manifest says what the display is.** A display's manifest entry
   names the `windows` service whose tree its display domain serves,
   whose name is the display's name, and gives the display's policy,
-  `rio` or `single`, its idle policy, its keyboard's layout and repeat,
-  and its reserved chord, which the domain service puts in the display
-  domain's environment when it creates the domain: `display` is the name
-  of the display it serves, `display_policy` its policy, which the
-  display domain refuses, with one line in its log and no window system
-  started, when it is not a policy the domain has,
+  its idle policy, its keyboard's layout and repeat, and its reserved
+  chord, which the domain service puts in the display domain's
+  environment when it creates the domain: `display` is the name of the
+  display it serves, `display_policy` its policy,
   `display_idle_dim_s` and `display_idle_off_s` its idle times in
   seconds, `display_keymap` its layout, `us` unless the entry names
   another the tree has ([Input events](#input-events)), and
@@ -3358,8 +3356,10 @@ on a display edits nothing of the board's:
   otherwise, the `normal` rate of FreeBSD's kbdcontrol(1)
   (`usr.sbin/kbdcontrol/kbdcontrol.1`, release/15.1.0, lines 115-121;
   `kbdcontrol.c`, lines 1066-1070); the domain's own manifest row sets
-  none of them. It names
-  no session, no application and no renderer.
+  none of them. It names no session, no application and no renderer.
+  The policy is a member of `mf_display_policy`, which has one for each
+  window manager the display domain has, so the manifest check admits
+  `single`, `erx_wm_single`'s, and `rio` only beside `erx_wm_rio`.
 * **Facet rows say who may draw there, and how much.** A facet row of
   the display's service grants its tree to a configured domain or to a
   session template, an app's among them, with the grant's quotas,
@@ -3758,10 +3758,10 @@ serves no other interface to a client.
 **A display's manifest entry**: a `display` record named after the
 `windows` service it describes, whose server is the display domain and
 whose name is the display's everywhere: in every grantee's registry and
-in a start row; its policy, `rio` or
-`single`; its idle policy; its keyboard's layout and repeat delay and
-period; the reserved chord, by evdev code. The entry names no
-session, no renderer and no application.
+in a start row; its policy, a member of `mf_display_policy`; its idle
+policy; its keyboard's layout and repeat delay and period; the reserved
+chord, by evdev code. The entry names no session, no renderer and no
+application.
 
 **The display's session**: the start row that names the display
 ([design-apps.md](design-apps.md#the-start-table)), whose keeper's

@@ -680,7 +680,7 @@ constructors(void)
 	configured.env = "LANG=C";
 	configured.env_len = sizeof("LANG=C");
 	configured.display = (erx_dom_display_t){ .name = "screen", .name_len = 6,
-	    .policy = ERX_MF_DISPLAY_POLICY_RIO, .idle_dim_s = 60, .idle_off_s = 4294967295u };
+	    .policy = ERX_MF_DISPLAY_POLICY_SINGLE, .idle_dim_s = 60, .idle_off_s = 4294967295u };
 	status = erx_dom_plan_configured(&view, 6, 0, ERX_DOM_PID_NONE, &plan);
 	printf("ctor configured_display %d ", (int)status);
 	for (uint32_t at = 0; at < plan.spec.env_len; at++) {

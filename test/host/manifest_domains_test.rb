@@ -698,13 +698,19 @@ class ManifestDomainsTest < Minitest::Test
     fields = %w[service policy idle_dim_s idle_off_s]
     assert_equal [[service_index(view, 'b'), @codec.member('mf_display_policy', 'single'), 60, 600]],
                  rows(view, 'displays').map { |row| row.values_at(*fields) }
-    rio = DISPLAY.sub('single', 'rio').sub('idle_off_s 600', 'idle_off_s 0')
-    view = @codec.open('manifest', admit(with_windows(record: rio)).bytes)
-    assert_equal [[@codec.member('mf_display_policy', 'rio'), 0]], rows(view, 'displays').map { |row| row.values_at('policy', 'idle_off_s') }
+    never = DISPLAY.sub('idle_off_s 600', 'idle_off_s 0')
+    view = @codec.open('manifest', admit(with_windows(record: never)).bytes)
+    assert_equal [0], rows(view, 'displays').map { |row| row.fetch('idle_off_s') }
   end
 
+  # A policy is a member of mf_display_policy, which has one for each window manager the
+  # display domain has, so rio, whose erx_wm_rio is not one, is refused as a word that
+  # names no policy is.
   def test_a_display_record_s_policy_and_idle_times_are_checked
-    assert_raises(Erx::ABI::SchemaError) { admit(with_windows(record: DISPLAY.sub('single', 'tiled'))) }
+    %w[rio tiled].each do |policy|
+      error = assert_raises(Erx::ABI::SchemaError) { admit(with_windows(record: DISPLAY.sub('single', policy))) }
+      assert_match(/policy names no member of mf_display_policy: single\z/, error.message, policy)
+    end
     refused(Erx::Manifest::Invalid, 18, 'display.idle_off_s', with_windows(record: DISPLAY.sub('idle_off_s 600', 'idle_off_s 59')),
             message: /off before it dims/)
   end

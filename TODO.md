@@ -582,10 +582,6 @@ it; git history is the record of completed work.
   the first source's up drops it from the `K` set while the other still holds it. Key it by source and code.
 * [Low] `erlang/apps/erx_display/src/erx_window.erl`, [Input events](docs/design-display.md#input-events): a
   wheel step reaches a window but is not encoded in its `mouse` file as buttons 8 and 16.
-* [Low] `tools/lib/erx/manifest.rb`, [A display's session](docs/design-display.md#a-displays-session): the
-  manifest check accepts `display_policy` `rio`, which the display domain refuses at boot because `erx_wm_rio`
-  is not built, so a valid image boots a display with no window system and one log line. Refuse it in the
-  check while the policy is missing.
 * [Low] `tools/lib/erx/keymap.rb`, [Input events](docs/design-display.md#input-events): the generator accepts
   U+0000, which means no rune, as a modifier's or a lock's rune; `erx_input` drops such a
   rune from `Mods`, but the generator should refuse it.
@@ -1176,8 +1172,9 @@ it; git history is the record of completed work.
   gitlink with a small path-to-license map, or check the archive's defining members (`llvm-nm --defined-only`)
   against such a map. `src/misc/lv_lru.c` cites willcannings/C-LRU-Cache with no notice of its own; its upstream
   license is unverified.
-* [High] `erx_wm_rio` (desktop, not built, so `erx_fb_sup` refuses a `rio` display's policy and starts no window
-  system; the P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
+* [High] `erx_wm_rio` (desktop, not built, so `abi/manifest.txt`'s `mf_display_policy` has no `rio` member and
+  the manifest check refuses a `rio` display; landing it adds the member and its clause in `erx_fb_sup:policy/1`; the
+  P7 version is on branch `disp-p7`, commit 5ea13441): rio's rule that
   the window taking the keyboard is the topmost shown one lets any client take the keyboard from another session's
   window by a `wctl` `top`, `hide` then `show`, or a `mkdir`, and so read what the user types next. Before the
   overlapping policy lands, its design keeps the current window in the policy's state and moves it only on the

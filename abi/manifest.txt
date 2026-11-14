@@ -109,11 +109,14 @@ enum mf_parameter_kind u32
 # A name that is an identifier, a domain's or a service's among them
 # (docs/design-system.md, "Identifiers"): 1 to this many bytes.
 limit identifier_max u32 63
-# A display's window policy (docs/design-display.md, "Policies"). Its
-# members' names are the words of a display domain's display_policy.
+# A display's window policy (docs/design-display.md, "Windows and the
+# window system"). Its members' names are the words of a display domain's
+# display_policy, one for each window manager the display domain has, so
+# the manifest check admits no policy the domain cannot start: single is
+# erx_wm_single's, and the overlapping policy, rio, takes value 2 with
+# erx_wm_rio.
 enum mf_display_policy u32
   value single 1
-  value rio 2
 # The keys of the environment a display domain gains from its display
 # record (docs/design-display.md, "A display's session"), each word
 # KEY=VALUE: "display", the display's service name; "display_policy", a

@@ -188,7 +188,6 @@ class AbiGenerationTest < Minitest::Test
     end
     tree = @plan.files.fetch('include/erx/abi.h')
     assert_includes tree, "\tcase ERX_MF_DISPLAY_POLICY_SINGLE:\n\t\treturn (\"single\");"
-    assert_includes tree, "\tcase ERX_MF_DISPLAY_POLICY_RIO:\n\t\treturn (\"rio\");"
     assert_includes tree, '#define ERX_MF_DISPLAY_POLICY_NAME_MAX 6'
   end
 

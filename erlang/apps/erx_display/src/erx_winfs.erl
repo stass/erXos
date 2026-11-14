@@ -68,7 +68,7 @@ writes come here; every other file is its window process's
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, attach/2, input/2, mint_request/3]).
+-export([start_link/1, start_link/2, attach/2, input/2, mint_request/3]).
 %% The process.
 -export([winfs_init/2, loop/1]).
 %% The erx_fs callbacks of the tree.
@@ -78,6 +78,9 @@ writes come here; every other file is its window process's
 -define(ID_MAX, 16#7fffffff).
 -define(READ_ONLY, [mouse, kbd]).
 
+%% A window policy: its window manager module and that module's configuration.
+-type policy() :: {module(), map()}.
+
 -type options() :: #{service := atom(),
                      system := pos_integer(),
                      exports := module(),
@@ -85,7 +88,7 @@ writes come here; every other file is its window process's
                      area := fun((pos_integer()) -> {ok, term(), pos_integer()} | {error, term()}),
                      clients := domain | own,
                      provide := boolean(),
-                     policy := {module(), map()},
+                     policy := policy(),
                      input => erx_input:config()}.
 
 %% The input router's configuration when the options name none: the layout us,
@@ -118,25 +121,30 @@ writes come here; every other file is its window process's
 %% The process ---------------------------------------------------------------
 
 -doc """
-Starts the window system linked to the caller. Given an atom, Service,
-it is this display domain's, started by `erx_fb_sup` under the single
-policy, and names itself the mint of Service, the display's service. Given
-Options: `service`, the service whose mint requests it grants; `system`,
-the system domain's id; `exports`, the export table grants export
-themselves through; `minted`, how a mint is answered; `area`, how a
-client's pixel area is opened;
-`clients`, `domain` for grants bound to their grantee's domain, or `own`
-for a host test's grants of this domain; `provide`, whether it names
-itself the mint; `policy`, the window policy and its configuration; and
-`input`, the input router's configuration (erx_input:new/1). The
-display domain's router has the layout `us`, FreeBSD's `normal` repeat
-of 500 and 126 milliseconds and no reserved chord.
+Starts the display domain's window system linked to the caller, started by
+`erx_fb_sup`: the mint of Service, the display's service, under Policy, the
+window manager and its configuration, with the domain's own system id,
+export table, mint answer and pixel areas, and the default input router.
 """.
--spec start_link(atom() | options()) -> {ok, pid()} | {error, term()}.
-start_link(Service) when is_atom(Service) ->
+-spec start_link(atom(), policy()) -> {ok, pid()} | {error, term()}.
+start_link(Service, Policy) when is_atom(Service) ->
     start_link(#{service => Service, system => erx_kernel_records:system_domain(), exports => erx_dist,
                  minted => fun erx_facet:minted/2, area => fun erx_area:open/1,
-                 clients => domain, provide => true, policy => {erx_wm_single, #{}}});
+                 clients => domain, provide => true, policy => Policy}).
+
+-doc """
+Starts the window system linked to the caller with Options: `service`, the
+service whose mint requests it grants; `system`, the system domain's id;
+`exports`, the export table grants export themselves through; `minted`, how
+a mint is answered; `area`, how a client's pixel area is opened; `clients`,
+`domain` for grants bound to their grantee's domain, or `own` for a host
+test's grants of this domain; `provide`, whether it names itself the mint;
+`policy`, the window policy and its configuration; and `input`, the input
+router's configuration (erx_input:new/1). The display domain's router has
+the layout `us`, FreeBSD's `normal` repeat of 500 and 126 milliseconds and
+no reserved chord.
+""".
+-spec start_link(options()) -> {ok, pid()} | {error, term()}.
 start_link(#{service := Service} = Options) when is_atom(Service) ->
     proc_lib:start_link(?MODULE, winfs_init, [self(), Options]).
 

@@ -722,13 +722,20 @@ module Erx
         return 0 if token.value == 'none'
         names = token.value.split(',', -1)
         invalid('duplicate flag', 'source', key) unless names.uniq.size == names.size
-        names.reduce(0) { |mask, name| mask | @codec.member(type, name) }
+        names.reduce(0) { |mask, name| mask | member(record.line, key, type, name) }
       end
 
       def enum(record, key, type)
         token = one(record, key)
         record.line.fail!('enumeration value cannot be quoted') if token.quoted
-        @codec.member(type, token.value)
+        member(record.line, key, type, token.value)
+      end
+
+      # The value of the member of enumeration or flag set type that a source word names,
+      # refused on its line when type has no such member.
+      def member(line, key, type, name)
+        members = @codec.schema.types.fetch(type).members
+        members.fetch(name) { line.fail!("#{key} names no member of #{type}: #{members.keys.join(', ')}") }
       end
 
       def reference(record, key, kind)
@@ -1614,9 +1621,7 @@ module Erx
       # One display record: its service's index, its policy and its idle times, of
       # which a nonzero time to turn the panel off comes no sooner than the time to dim it.
       def display_row(record, service)
-        token = one(record, 'policy')
-        record.line.fail!('policy is single or rio') if token.quoted || !%w[single rio].include?(token.value)
-        row = { 'service' => service, 'policy' => @codec.member('mf_display_policy', token.value) }
+        row = { 'service' => service, 'policy' => enum(record, 'policy', 'mf_display_policy') }
         %w[idle_dim_s idle_off_s].each do |key|
           row[key] = number(record, key)
           invalid("a display's #{key} is over #{(1 << 32) - 1}", 18, "display.#{key}") if row.fetch(key) >= (1 << 32)

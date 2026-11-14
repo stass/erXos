@@ -10,10 +10,10 @@
 %% domain's environment variable display names, which the domain service sets from the
 %% display's manifest entry (docs/design-display.md, "A display's session"); with the
 %% variable unset, empty or no service name, no window system starts. The window system
-%% runs the policy the domain's display_policy variable names, and single is the one
-%% policy built: any other value, rio included, or none, is refused with one line in the
-%% kernel log and starts no window system, so a display never boots a policy its manifest
-%% did not name. Then the display
+%% runs the window manager of the policy the domain's display_policy variable names, a
+%% member of mf_display_policy, which the manifest check holds it to; policy/1 maps each
+%% member to its window manager and has no clause for anything else, so a member with no
+%% window manager fails this supervisor's start. Then the display
 %% driver, registered as erx_fb, then erx_screen over it: erx_virtio_gpu over the domain's
 %% `gpu virtio_mmio` device record (QEMU virt), or erx_firmware_fb over its framebuffer
 %% record, the framebuffer a board's firmware set up (the Raspberry Pi). A driver's end
@@ -63,34 +63,28 @@ init([]) ->
             auto_shutdown => any_significant}, Winfs ++ Display ++ Inputs}}.
 
 %% The window system's child for Display and Policy, the values of the domain's display
-%% and display_policy variables: the mint of the service Display names under the single
-%% policy, or none, with a debug line, when Display names no service or Policy is not
-%% single. The
-%% variable comes from the trusted manifest, an identifier of at most ERX_IDENTIFIER_MAX bytes,
-%% and is made an atom with list_to_atom/1, one atom per start of the domain: the
-%% service's atom need not exist in the display domain before, so list_to_existing_atom/1
-%% would refuse a real display's name.
+%% and display_policy variables: the mint of the service Display names under Policy's
+%% window manager, or none, with a debug line, when Display names no service. The
+%% display variable comes from the trusted manifest, an identifier of at most
+%% ERX_IDENTIFIER_MAX bytes, and is made an atom with list_to_atom/1, one atom per start
+%% of the domain: the service's atom need not exist in the display domain before, so
+%% list_to_existing_atom/1 would refuse a real display's name.
 -spec winfs(string() | false, string() | false) -> [supervisor:child_spec()].
-winfs(Display, "single") when is_list(Display), Display =/= [], length(Display) =< ?ERX_IDENTIFIER_MAX ->
+winfs(Display, Policy) when is_list(Display), Display =/= [], length(Display) =< ?ERX_IDENTIFIER_MAX ->
+    {Wm, _} = Manager = policy(Policy),
     [#{id => erx_winfs,
-       start => {erx_winfs, start_link, [list_to_atom(Display)]},
+       start => {erx_winfs, start_link, [list_to_atom(Display), Manager]},
        restart => temporary,
        significant => true,
        shutdown => 2000,
        type => worker,
-       modules => [erx_winfs, erx_window, erx_wm_single]}];
-winfs(Display, Policy) when is_list(Display), Display =/= [], length(Display) =< ?ERX_IDENTIFIER_MAX ->
-    _ = erx_log:debug(["erx_fb: the display's policy ", policy_text(Policy),
-                       " is not one this display domain has (single); no window system"]),
-    [];
+       modules => [erx_winfs, erx_window, Wm]}];
 winfs(_Display, _Policy) ->
     _ = erx_log:debug(["erx_fb: no display variable names the display's service; no window system"]),
     [].
 
-%% The policy's value as the log line shows it: the manifest's word, which the manifest
-%% check holds to an mf_display_policy member, or unset.
-policy_text(false) -> "unset";
-policy_text(Policy) -> Policy.
+%% The window manager and its configuration of each mf_display_policy member, by its name.
+policy("single") -> {erx_wm_single, #{}}.
 
 %% The driver and screen of the domain's display record, the virtio-gpu's or the firmware
 %% framebuffer's, or none, with a line saying why.

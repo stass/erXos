@@ -2014,7 +2014,9 @@ the service's index, so the display's name is the service's
 are sorted by service, and every `windows` service has exactly one,
 whose server is a configured domain (property 18 of
 [design-system.md](design-system.md#the-manifest)). `policy` is
-`mf_display_policy`, `single` 1 or `rio` 2. `idle_dim_s` and
+`mf_display_policy`, which has a member only for a window manager the
+display domain has, so a manifest names no policy its display cannot
+start: `single` 1, and `rio` 2 only beside `erx_wm_rio`. `idle_dim_s` and
 `idle_off_s` are the idle times after which `erx_screen` dims the panel
 and turns it off, 0 meaning never, and `idle_off_s` is 0 or at least
 `idle_dim_s`. The record names no session, application or renderer. The
@@ -2088,7 +2090,7 @@ field or computed charge is an accepted property.
 | `liveness SERVICE` | one service reference on the declaration line; no properties |
 | `shell_principal PRINCIPAL` | one principal reference on the declaration line; no properties |
 | `partial_boot NAME` | `image` artifact reference |
-| `display NAME` | the display of the service whose source alias is NAME, a service of the `windows` interface; exactly `policy`, `single` or `rio`, and `idle_dim_s` and `idle_off_s` integers |
+| `display NAME` | the display of the service whose source alias is NAME, a service of the `windows` interface; exactly `policy`, a member of `mf_display_policy`, and `idle_dim_s` and `idle_off_s` integers |
 
 A `share` is a source value expanded by value, not another packed table
 or runtime object. Every share field is required. Flag and operation

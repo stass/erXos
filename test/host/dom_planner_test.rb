@@ -649,14 +649,14 @@ class DomPlannerTest < Minitest::Test
   # the row's own.
   def test_a_display_domain_that_sets_its_display_s_keys_is_refused
     with_env = ->(words) { ->(source) { source.sub("domain display\n", "domain display\n  env \"#{words}\"\n") } }
-    ['display=other', 'LANG=C display_policy=rio', 'LANG=C display_idle_off_s=1'].each do |words|
+    ['display=other', 'LANG=C display_policy=single', 'LANG=C display_idle_off_s=1'].each do |words|
       error = assert_raises(Erx::Manifest::Invalid) { display_manifest(with_env.call(words)) }
       assert_equal [18, 'domain.env'], [error.property, error.field], words
     end
-    bytes = display_manifest(with_env.call('LANG=C dispXay_policy=rio'))
-    assert_equal 1, bytes.scan('dispXay_policy=rio').size
+    bytes = display_manifest(with_env.call('LANG=C dispXay_policy=single'))
+    assert_equal 1, bytes.scan('dispXay_policy=single').size
     assert_equal ['refused manifest: a display domain\'s environment sets a key its display record gives it'],
-                 view_lines(bytes.sub('dispXay_policy=rio', 'display_policy=rio'), 'display-renamed')
+                 view_lines(bytes.sub('dispXay_policy=single', 'display_policy=single'), 'display-renamed')
     lines = view_lines(display_manifest(with_env.call('displayed=yes display_mode=x')), 'display-own')
     assert_empty lines.grep(/\Arefused /)
     assert_equal 1, lines.grep(/\Adisplay \d+ name=display /).size
