@@ -94,9 +94,9 @@ class ErxNetEffectTest < Minitest::Test
       "        abandon ->\n            ok = erx_net_credit:release(Unit, 1);",
       "        abandon ->\n            _ = Unit;"
     ],
-    # A connection that carries on after a refused adoption: no RST, and it is queued.
+    # A connection that does not refuse after a refused adoption: no RST.
     refused_adoption_resets: [
-      '{{error, _}, _} ->', '{{error, _}, Path1} when Path1 =:= x ->'
+      '{error, _} -> refuse(Accept)', '{error, _} when Accept =:= x -> refuse(Accept)'
     ],
     # A queued connection that ignores its listener's exit: no RST to the peer.
     listener_exit_aborts_a_queued_connection: [
@@ -112,11 +112,11 @@ class ErxNetEffectTest < Minitest::Test
     bind_to_a_gone_socket_process_aborts: [
       "{'EXIT', SockProc, noproc} ->", "{'EXIT', SockProc, noproc_seeded} ->"
     ],
-    # The buffer sizes stepped before the completing segment: each answer's output, in
-    # SYN-RECEIVED, sends the peer the SYN-ACK again.
+    # A step before the completing segment: its output, in SYN-RECEIVED, sends the peer the
+    # SYN-ACK again.
     no_second_syn_ack: [
-      "    Completed = guarded({segments, [Segment]}, S1),\n    Sized = ask_grant(Reserves, Completed),\n",
-      "    Sized0 = ask_grant(Reserves, S1),\n    Sized = guarded({segments, [Segment]}, Sized0),\n"
+      'settle(guarded({segments, [Segment]}, S0))',
+      'settle(guarded({segments, [Segment]}, step({expired, 0}, S0)))'
     ]
   }.freeze
 

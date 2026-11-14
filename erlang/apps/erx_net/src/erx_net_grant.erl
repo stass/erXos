@@ -101,7 +101,8 @@ as any other message.
 
 **Adoption.** A connection an interface spawned from a listener's handshake (erx_tcp_conn,
 "An accepted connection's start") links to the grant and asks `adopt/2` to count it as
-one of the grant's sockets, with the two buffer sizes its listener's entry gives; the
+one of the grant's sockets, with the two buffer sizes its control block starts at, its
+listener's rounded up to whole segments (erx_tcp_user:accepted/3); the
 grant reserves them under a new token, as a connect does, and answers `{ok, Token}`,
 `{error, emfile}` at its `sockets` limit, or `{error, enobufs}` when they do not fit. The
 socket adopted is the caller, so nothing is reserved on the word of a pid in a message,

@@ -1788,8 +1788,11 @@ the RST of `tcp_drop`, then tells the socket process how it ended and returns
 state.
 
 A buffer grows only through the grant. When `tcp_mss` rounds the buffers
-up to whole segments, or autosizing grows the send buffer, the step
-returns `{reserve_buffer, Kind, Bytes}` and changes nothing; the
+up to whole segments at a SYN the step takes, or autosizing grows the
+send buffer, the step returns `{reserve_buffer, Kind, Bytes}` and
+changes nothing (a connection made from the syncache starts at its
+rounded sizes, which its grant reserves when it adopts it: [The
+listener](#the-listener), "An accepted connection's start"); the
 connection process asks its grant
 ([Sockets act for one domain](#sockets-act-for-one-domain)) once it has
 performed the step's other actions, and steps the answer: `{buffer,
@@ -3862,33 +3865,43 @@ interface with the accept unit, does in order:
    its grant deletes any entry the interface inserted for it. At `go` it
    drops the monitor: from then on it needs nothing of the interface but
    the sender credit it was given.
-3. It asks its grant to adopt it, `erx_net_grant:adopt(Grant, #{snd :=
-   SndHiwat, rcv := RcvHiwat})`, a local call with the entry's sizes.
-   The grant counts the caller as one of its sockets, reserves its two
-   buffers, as `soreserve` reserves an accepted socket's from its
-   listener's sizes (`uipc_socket.c:1207`), and answers `{ok, Token}`
-   with the token every later buffer call names; past its `sockets` or
-   `buffers` limit it records nothing and answers `{error, emfile}` or
-   `{error, enobufs}`. The socket adopted is the caller, so nothing is
-   reserved on the word of a pid in a message. Refused, or with its
-   grant gone, the connection releases the unit, hands its interface
-   `{accept_refused, FourTuple, Segment}` under the sender credit it was
-   given, so the interface sends the RST FreeBSD sends when
-   `solisten_clone` fails (`uipc_socket.c:1207-1212`,
+3. It makes its control block with `erx_tcp_user:accepted/3` from the
+   handshake and the entry's `accept`, over the path to the peer: the
+   MSS from the peer's offer, and the listener's buffer sizes rounded up
+   to whole segments of it, as `syncache_socket` sizes them with
+   `tcp_mss` and runs no output (`tcp_syncache.c:938`,
+   `tcp_input.c:3922-3969`). It asks its grant to adopt it,
+   `erx_net_grant:adopt(Grant, #{snd := Snd, rcv := Rcv})`, a local call
+   with the block's sizes. The grant counts the caller as one of its
+   sockets, reserves its two buffers, as `soreserve` reserves an accepted
+   socket's from its listener's sizes (`uipc_socket.c:1207`) and
+   `tcp_mss` grows them, and answers `{ok, Token}` with the token every
+   later buffer call names; past its `sockets` or `buffers` limit it
+   records nothing and answers `{error, emfile}` or `{error, enobufs}`.
+   The two reservations are one: a grant with room for the listener's
+   sizes but not for the rounded ones refuses the connection, where
+   FreeBSD ignores the failed `sbreserve` in `tcp_mss` and keeps the
+   listener's sizes. The socket adopted is the caller, so nothing is
+   reserved on the word of a pid in a message. Refused, with its grant
+   gone, or with no route to the peer, which is met only when the
+   configuration changed since the SYN-ACK left, the connection releases
+   the unit, hands its interface `{accept_refused, FourTuple, Segment}`
+   under the sender credit it was given, so the interface sends the RST
+   FreeBSD sends when `solisten_clone` fails (`uipc_socket.c:1207-1212`,
    `tcp_sc_rst_sock_fail`), deletes its key and ends.
 4. It links to its listener and sends it `{queued, self()}` under the
    unit. A listener already gone answers the link with `noproc`, which
    the connection meets in its loop as its listener's exit.
-5. It makes its control block with `erx_tcp_user:accepted/3` from the
-   handshake and `accept`, steps the completing segment, asking its
-   grant under its token for any buffer that step asks for, then asks it
-   for the buffer sizes `accepted/3` rounded to the MSS, and enters its loop with `gen_server:enter_loop/3`, **queued**:
-   its owner is `{listener, Listener}`. The completing segment is the
-   control block's first event, as `tcp_input` hands it to
-   `tcp_do_segment` straight after `syncache_expand`
-   (`tcp_input.c:1081-1160`). Every step ends in output, and output in
-   SYN-RECEIVED carries SYN and ACK (`tcp_output.c:432-443`,
-   `:700-702`), so a buffer answer stepped before the segment would send
+5. It steps the completing segment, asking its grant under its token for
+   any buffer that step asks for, and enters its loop with
+   `gen_server:enter_loop/3`, **queued**: its owner is `{listener,
+   Listener}`. The completing segment is the control block's first
+   event, as `tcp_input` hands it to `tcp_do_segment` straight after
+   `syncache_expand` (`tcp_input.c:1081-1160`), and it sees the buffers
+   FreeBSD's would. The block carries its buffers from step 3, so
+   nothing is stepped before that segment: every step ends in output,
+   and output in SYN-RECEIVED carries SYN and ACK
+   (`tcp_output.c:432-443`, `:700-702`), so any step before it would send
    the peer a second SYN-ACK.
 
 While queued the connection runs as any connection does, as FreeBSD

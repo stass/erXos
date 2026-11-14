@@ -1952,17 +1952,17 @@ it; git history is the record of completed work.
   domain restarts, but a connection can end while both domains live (`malformed`,
   `no_memory`, `disconnect`). State whether the two domains are introduced and granted
   again then, or the client keeps a dead `net` facet until a restart.
-* [Medium] network, SYN-RECEIVED output (`erx_tcp`, `erx_tcp_output`, `erx_tcp_conn`):
-  every step ends in output, and output in SYN-RECEIVED carries SYN and ACK, as FreeBSD's
-  does (`tcp_output.c:432-443`, `:700-702`); FreeBSD sends no second SYN-ACK only because
-  nothing calls `tcp_output` there between `syncache_expand` and the completing ACK. An
-  accepted connection steps that segment first (`erx_tcp_conn:queue/4`), but a raise in
-  that step, counted by `guarded/2`, leaves it in SYN-RECEIVED for the buffer answers,
-  and a simultaneous open's SYN-RECEIVED steps clock hints and requests. Two ways to make
-  it hold by construction: adopt at the sizes `accepted/3` rounds to the MSS, so
-  `accepted/3` returns a control block alone and the completing segment sees FreeBSD's
-  buffers (`tcp_syncache.c:938`), or let output resend a SYN in SYN-RECEIVED only after
-  the retransmission timer rewound `snd_nxt`.
+* [Medium] network, SYN-RECEIVED output (`erx_tcp`, `erx_tcp_output`): every step ends
+  in output, and output in SYN-RECEIVED carries SYN and ACK, as FreeBSD's does
+  (`tcp_output.c:432-443`, `:700-702`); FreeBSD calls `tcp_output` there only for a
+  segment, a timer that fired or a user request. An accepted connection steps nothing
+  before its completing segment, but a step in SYN-RECEIVED that FreeBSD would not
+  follow with output still sends the peer the SYN-ACK again: in a simultaneous open, the
+  grant's answers to the buffers `tcp_mss` rounds at the SYN (FreeBSD reserves them
+  inside `tcp_do_segment`, `tcp_input.c:3935`, `:3968`), and a clock hint that fires no
+  timer; after a raise in an accepted connection's completing step, counted by
+  `guarded/2`, the hint alike. Making it hold by construction: let output resend a SYN
+  in SYN-RECEIVED only after the retransmission timer rewound `snd_nxt`.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:

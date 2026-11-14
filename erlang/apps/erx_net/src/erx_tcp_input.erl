@@ -434,22 +434,28 @@ negotiate(#seg{wscale = PeerShift, ts = SegTs, sack_permitted = SackOk, mss = Ms
                false -> Tcb1#tcb{sack = off}
            end,
     case Mss of
-        none -> {Tcb2, []};
-        _ -> tcp_mss(Mss, Tcb2, Ctx)
+        none ->
+            {Tcb2, []};
+        _ ->
+            #tcb{snd_hiwat = Snd0, rcv_hiwat = Rcv0} = Tcb2,
+            {Tcb, {Snd, Rcv}} = tcp_mss(Mss, Tcb2, Ctx),
+            {Tcb, [{reserve_buffer, snd, Snd} || Snd =/= Snd0]
+                  ++ [{reserve_buffer, rcv, Rcv} || Rcv =/= Rcv0]}
     end.
 
 -doc """
-The MSS from the peer's offer and the path (`tcp_mss`), for a SYN taken here and for a
-connection made from the syncache (erx_tcp_user:accepted/3); the send and receive buffers
-rounded up to whole segments are asked of the grant, whose answer sets them (`{buffer, Kind,
-Bytes}`).
+The MSS from the peer's offer and the path (`tcp_mss`), set in the control block, and the
+send and receive buffer sizes rounded up to whole segments. A SYN taken here asks the grant
+for those sizes, whose answer sets them (`{buffer, Kind, Bytes}`); a connection made from
+the syncache (erx_tcp_user:accepted/3) starts at them, and its grant reserves them when it
+adopts the connection.
 """.
--spec tcp_mss(erx_tcp_mss:offer(), #tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
+-spec tcp_mss(erx_tcp_mss:offer(), #tcb{}, #tcp_ctx{}) ->
+          {#tcb{}, {Snd :: non_neg_integer(), Rcv :: non_neg_integer()}}.
 tcp_mss(Offer, #tcb{family = Family, snd_hiwat = Snd0, rcv_hiwat = Rcv0} = Tcb,
         #tcp_ctx{mtu = Mtu}) ->
     {Maxseg, Snd, Rcv} = erx_tcp_mss:mss(Family, Offer, {Mtu, 0}, {Snd0, Rcv0}, ?SB_MAX),
-    {Tcb#tcb{maxseg = Maxseg},
-     [{reserve_buffer, snd, Snd} || Snd =/= Snd0] ++ [{reserve_buffer, rcv, Rcv} || Rcv =/= Rcv0]}.
+    {Tcb#tcb{maxseg = Maxseg}, {Snd, Rcv}}.
 
 %% A SYN-ACK accepted in SYN-SENT (tcp_input.c:2047-2104): our SYN is acknowledged, the
 %% advertised edge moves by the window, data on it waits for a delayed ACK and anything else

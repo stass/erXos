@@ -88,7 +88,8 @@ it and its four-tuple inserted, and the connection's first message is the verdic
 insertion, `go` or `abandon`. The unit is the connection's from the spawn until its
 `{queued, Conn}` notice carries it to the listener, so whichever way the connection gives
 up before then, at `abandon`, at the interface's end before the verdict or at a refused
-adoption, it releases the unit itself. After `go` it is adopted by its grant
+adoption, it releases the unit itself. After `go` it makes its control block
+(erx_tcp_user:accepted/3) and is adopted by its grant at the block's buffer sizes
 (erx_net_grant:adopt/2), which it linked to first, and only then links to its listener and
 queues itself: from its spawn to its end it holds a unit, one of its grant's sockets, or
 both. A refused adoption hands the interface `{accept_refused, FourTuple, Segment}` for
@@ -259,8 +260,8 @@ accept(#{entry := #{credit := Unit, grant := Grant}, conn := Conn} = Accept) ->
 
 -doc false.
 %% The spawned connection's start, in the order "An accepted connection's start" gives: the
-%% links and the watch first, then the verdict alone, the adoption, the listener, and the
-%% control block with the completing segment stepped.
+%% links and the watch first, then the verdict alone, the control block and its adoption,
+%% the listener, and the completing segment stepped.
 -spec accepted(map()) -> ok.
 accepted(#{entry := #{credit := Unit, grant := Grant}, interface := Interface} = Accept) ->
     %% First, so that erx_net_tables deletes the four-tuple the interface inserts for this
@@ -280,29 +281,46 @@ accepted(#{entry := #{credit := Unit, grant := Grant}, interface := Interface} =
             exit({shutdown, interface_ended})
     end.
 
-%% Adopted by the grant, or refused: the unit released, the refusal's RST handed to the
-%% interface under its sender credit, the key deleted, and the process ended. A grant that
-%% has ended is a refusal too. No route to the peer, whose SYN-ACK just left over one, is
-%% met only when the configuration changed in between, and is refused alike.
-adopt(#{entry := #{credit := Unit, grant := Grant, accept := Init}, conn := Conn,
-        segment := Segment, interface := Interface, sender := Sender} = Accept) ->
-    #{snd_hiwat := SndHiwat, rcv_hiwat := RcvHiwat} = Init,
+%% The control block made from the handshake over the path to the peer, then adopted by the
+%% grant at the buffer sizes accepted/3 rounded to the MSS, as syncache_socket reserves them
+%% in tcp_mss (tcp_syncache.c:938), or refused. No route to the peer, whose SYN-ACK just
+%% left over one, is met only when the configuration changed in between, and is a refusal.
+adopt(#{entry := #{grant := Grant}, conn := {Local, _, Remote, _}, segment := Segment} = Accept) ->
     {ConfigGen, Snap} = erx_net_tables:configuration(),
-    {Local, _, Remote, _} = Conn,
-    Adopted = case erx_net_frame:path(Remote, #{src => Local}, Snap) of
-                  {ok, Path} -> {grant_adopt(Grant, #{snd => SndHiwat, rcv => RcvHiwat}), Path};
-                  {error, _} -> {{error, ehostunreach}, none}
-              end,
-    case Adopted of
-        {{ok, Token}, Path1} ->
-            queue(Accept, Token, Path1, ConfigGen);
-        {{error, _}, _} ->
-            ok = erx_net_credit:release(Unit, 1),
-            %% A full sender credit drops the RST, as a full queue drops any; the peer's
-            %% retransmitted ACK then finds no entry and draws one from the syncache.
-            _ = erx_net_credit:hand(Interface, Sender, 1, {accept_refused, Conn, Segment}),
-            erx_net_bind:delete(key(Conn))
+    maybe
+        {ok, Path} ?= erx_net_frame:path(Remote, #{src => Local}, Snap),
+        #state{tcb = #tcb{snd_hiwat = Snd, rcv_hiwat = Rcv}} = S0 =
+            accepted_state(Accept, Path, ConfigGen),
+        {ok, Token} ?= grant_adopt(Grant, #{snd => Snd, rcv => Rcv}),
+        start_queued(Segment, S0#state{token = Token})
+    else
+        {error, _} -> refuse(Accept)
     end.
+
+%% The accepted connection's state, its token not yet given: the control block made from
+%% the handshake over Path, queued on its listener.
+accepted_state(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init},
+                 conn := {Local, Lport, Remote, Rport} = Conn, handshake := Handshake,
+                 gen := Rand0, credit := Credit}, Path, ConfigGen) ->
+    {TcbGen, Rand} = erx_net_rand:split(Rand0),
+    Tcb = erx_tcp_user:accepted(Handshake,
+                                Init#{family => family(Local), local => {Local, Lport},
+                                      remote => {Remote, Rport}, gen => TcbGen},
+                                ctx(Path, ok)),
+    #state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
+           owner_ref = none, origin = Origin, grant = Grant, connect = none, path = Path,
+           config_gen = ConfigGen, gen = Rand}.
+
+%% A refused adoption: the unit released, the refusal's RST handed to the interface under
+%% its sender credit, the key deleted, and the process ended. A grant that has ended is a
+%% refusal too.
+refuse(#{entry := #{credit := Unit}, conn := Conn, segment := Segment, interface := Interface,
+         sender := Sender}) ->
+    ok = erx_net_credit:release(Unit, 1),
+    %% A full sender credit drops the RST, as a full queue drops any; the peer's
+    %% retransmitted ACK then finds no entry and draws one from the syncache.
+    _ = erx_net_credit:hand(Interface, Sender, 1, {accept_refused, Conn, Segment}),
+    erx_net_bind:delete(key(Conn)).
 
 grant_adopt(Grant, Sizes) ->
     try
@@ -311,34 +329,19 @@ grant_adopt(Grant, Sizes) ->
         exit:{_, {gen_server, call, _}} -> {error, closed}
     end.
 
-%% Adopted: linked to the listener and queued on it under the unit, then the control block
-%% made from the handshake and the completing segment stepped, and the loop entered queued.
-%% A listener already gone answers the link with its exit, which the loop takes as an abort.
+%% Adopted: linked to the listener and queued on it under the unit, then the completing
+%% segment stepped, and the loop entered queued. A listener already gone answers the link
+%% with its exit, which the loop takes as an abort.
 %%
 %% The completing segment is the control block's first event, as tcp_input hands it to
-%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160); the buffers
-%% accepted/3 sizes are asked of the grant only after it. Every step ends in output, and
-%% output in SYN-RECEIVED sends the SYN-ACK again (tcp_output.c:432-443, :700-702), which
-%% FreeBSD does not send once the handshake is complete.
-queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init}, conn := Conn,
-        handshake := Handshake, segment := Segment, gen := Rand0, credit := Credit},
-      Token, Path, ConfigGen) ->
+%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160): the block carries
+%% its buffers already, so nothing is stepped before it. Every step ends in output, and
+%% output in SYN-RECEIVED sends the SYN-ACK again (tcp_output.c:432-443, :700-702).
+start_queued(Segment, #state{owner = {listener, Listener}} = S0) ->
     ok = (erx_net_sup:runtime()):serve(?MAX_IN_FLIGHT + 2),
     true = link(Listener),
     ok = erx_net_credit:send(Listener, {queued, self()}),
-    {Local, Lport, Remote, Rport} = Conn,
-    {TcbGen, Rand} = erx_net_rand:split(Rand0),
-    {Tcb, Actions} = erx_tcp_user:accepted(Handshake,
-                                           Init#{family => family(Local), local => {Local, Lport},
-                                                 remote => {Remote, Rport}, gen => TcbGen},
-                                           ctx(Path, ok)),
-    S0 =#state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
-                owner_ref = none, origin = Origin, grant = Grant, token = Token, connect = none,
-                path = Path, config_gen = ConfigGen, gen = Rand},
-    {S1, Reserves} = perform_actions(Actions, S0),
-    Completed = guarded({segments, [Segment]}, S1),
-    Sized = ask_grant(Reserves, Completed),
-    case settle(Sized) of
+    case settle(guarded({segments, [Segment]}, S0)) of
         {noreply, S} -> gen_server:enter_loop(?MODULE, [], S);
         {stop, normal, _} -> ok
     end.

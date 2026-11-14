@@ -238,14 +238,13 @@ the ACK that
 completes the handshake moves snd_una past it in erx_tcp_input's SYN-RECEIVED stage, as
 `incforsyn` does (tcp_input.c:2514-2515, :2897-2898). The receive side starts past the
 peer's SYN with the window the SYN-ACK offered. The options are those the handshake
-negotiated, ECN as `tcp_ecn_syncache_socket` sets it, the MSS from the peer's offer
-(`tcp_mss`, whose buffer sizes the returned actions ask of the grant), one segment of
+negotiated, ECN as `tcp_ecn_syncache_socket` sets it, the MSS from the peer's offer and
+the listener's buffers rounded up to whole segments of it (`tcp_mss`), one segment of
 congestion window when the SYN-ACK was sent more than once, the entry's challenge-ACK
-window, and the connection-establishment timer (TT_KEEP at TP_KEEPINIT). The connection
-then steps the segment that completed the handshake, as tcp_input does.
+window, and the connection-establishment timer (TT_KEEP at TP_KEEPINIT). The block
+carries the rounded buffer sizes, for its caller to have them reserved.
 """.
--spec accepted(erx_tcp_syncache:handshake(), listener_init(), #tcp_ctx{}) ->
-          {#tcb{}, [erx_tcp:action()]}.
+-spec accepted(erx_tcp_syncache:handshake(), listener_init(), #tcp_ctx{}) -> #tcb{}.
 accepted(#{iss := Iss, irs := Irs, rcv_wnd := RcvWnd, peer_mss := PeerMss, wscale := Wscale,
            sack := Sack, ts := Ts, ecn := Ecn, rxmits := Rxmits, challenge := Challenge},
          Init, #tcp_ctx{now = Now} = Ctx) ->
@@ -289,7 +288,8 @@ accepted(#{iss := Iss, irs := Irs, rcv_wnd := RcvWnd, peer_mss := PeerMss, wscal
                     %% :984.
                     deadlines = D#deadlines{keep = Now + ms(KeepInit)}},
     %% :938.
-    erx_tcp_input:tcp_mss(PeerMss, Tcb1, Ctx).
+    {Tcb, {Snd, Rcv}} = erx_tcp_input:tcp_mss(PeerMss, Tcb1, Ctx),
+    Tcb#tcb{snd_hiwat = Snd, rcv_hiwat = Rcv}.
 
 %% A keepalive option: 0 or absent means the default, as TP_KEEPIDLE and its kin read
 %% (tcp_timer.h); anything but a positive integer is refused.

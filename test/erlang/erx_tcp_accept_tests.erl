@@ -13,7 +13,7 @@ and keeps the peer's bytes until its socket process's first message; that its
 listener's exit aborts it with a RST; that a `bind` from any process but its listener, or a
 second one, ends it; that a `bind` to a socket process already gone aborts it with a
 RST and an end at once; and that the segment completing the handshake is its first event,
-so it sends the peer no second SYN-ACK.
+so it sends the peer no second SYN-ACK, and sees the receive buffer rounded to the MSS.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -42,6 +42,8 @@ accept_test_() ->
        fun refused_adoption_resets/0},
       {"a grant at its sockets limit refuses the adoption, which resets the connection",
        fun sockets_limit_resets/0},
+      {"a grant without room for the rounded buffers refuses the adoption",
+       fun rounded_buffers_past_the_limit_reset/0},
       {"the listener's exit aborts a queued connection with a RST",
        fun listener_exit_aborts_a_queued_connection/0},
       {"a full accept credit starts nothing", fun full_credit_starts_nothing/0},
@@ -50,8 +52,10 @@ accept_test_() ->
       {"a second bind ends the connection", fun second_bind_ends_the_connection/0},
       {"a bind to a socket process already gone sends no bound and aborts",
        fun bind_to_a_gone_socket_process_aborts/0},
-      {"the completing segment is stepped before the buffers, so no second SYN-ACK goes out",
-       fun no_second_syn_ack/0}]].
+      {"the completing segment is the first step, so no second SYN-ACK goes out",
+       fun no_second_syn_ack/0},
+      {"the completing segment's ACK advertises the receive buffer rounded to the MSS",
+       fun completing_segment_sees_the_rounded_buffer/0}]].
 
 %% --- The stand-ins ---------------------------------------------------------------
 
@@ -139,16 +143,34 @@ listener() ->
 %% The control block starts in SYN-RECEIVED, whose output carries SYN and ACK
 %% (tcp_output.c:432-443, :700-702), and every step ends in output. So its first event is
 %% the segment that completed the handshake, as tcp_input hands that segment to
-%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160), and the buffer
-%% sizes accepted/3 rounds to the MSS are stepped only after it. A pure ACK completes this
-%% handshake: the connection is established at the rounded sizes, 23 and 45 segments of
-%% 1460 bytes, and has sent nothing.
+%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160), and nothing is
+%% stepped before it. A pure ACK completes this handshake: the connection is established
+%% at the sizes accepted/3 rounds to the MSS, 23 and 45 segments of 1460 bytes, and has
+%% sent nothing.
 no_second_syn_ack() ->
     Conn = queued(),
     #tcb{state = State, snd_hiwat = Snd, rcv_hiwat = Rcv} = element(2, sys:get_state(Conn)),
     ?assertEqual({established, 33580, 65700}, {State, Snd, Rcv}),
     ?assertEqual(none, receive {transmit, Frames} -> [decode(iolist_to_binary(F)) || F <- Frames]
                        after 200 -> none end).
+
+%% syncache_socket reserves the buffers tcp_mss rounds to the MSS before tcp_input hands the
+%% completing segment to tcp_do_segment (tcp_syncache.c:938, tcp_input.c:1081-1160), so that
+%% segment sees the rounded receive buffer. Here it carries 1000 bytes and a FIN, whose ACK
+%% goes out in the same step: its window is the rounded 65700 bytes less the 1000 held, not
+%% the listener's 65536 less them.
+completing_segment_sees_the_rounded_buffer() ->
+    Unit = erx_net_credit:new(2),
+    #{segment := {Ack, <<>>, Ecn, Cast}} = Accept = accept(self(), Unit, <<>>),
+    Fin = Ack#tcp{flags = ?TH_ACK bor ?TH_FIN},
+    ok = erx_tcp_conn:accept(Accept#{segment := {Fin, binary:copy(<<"x">>, 1000), Ecn, Cast}}),
+    receive {queued, _} -> ok after ?WAIT -> error(not_queued) end,
+    receive
+        {transmit, [Frame | _]} ->
+            {#tcp{flags = Flags, win = Win}, <<>>} = decode(iolist_to_binary(Frame)),
+            ?assertEqual({?TH_ACK, 65700 - 1000}, {Flags, Win})
+    after ?WAIT -> error(no_ack)
+    end.
 
 queued_connection_waits_for_the_first_contact() ->
     Unit = erx_net_credit:new(2),
@@ -187,6 +209,13 @@ refused_adoption_resets() ->
 %% its handshake, so accept never answers emfile.
 sockets_limit_resets() ->
     refused_adoption_resets(#{sockets => 0}).
+
+%% The grant reserves the buffers rounded to the MSS at the adoption, 33580 and 65700 bytes:
+%% a grant with room for the listener's 32768 and 65536 but not for those refuses the
+%% connection, where FreeBSD ignores the failed sbreserve in tcp_mss (tcp_input.c:3935,
+%% :3968) and keeps the listener's sizes.
+rounded_buffers_past_the_limit_reset() ->
+    refused_adoption_resets(#{buffers => 32768 + 65536}).
 
 %% A grant of Limits that refuses the adoption: the connection releases its unit, hands the
 %% interface the RST, deletes its key and is never queued.
