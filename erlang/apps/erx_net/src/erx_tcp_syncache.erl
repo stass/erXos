@@ -185,13 +185,17 @@ The result of a completed handshake, the fields `syncache_socket` copies into th
 connection: the initial send and receive sequence numbers, the receive window offered, the
 peer's MSS (0 when it sent none, which `tcp_mss` reads as the default), the window shifts
 (`{SndScale, RcvScale}`, or `none` when not negotiated), SACK permitted, the timestamp to
-echo and the connection's timestamp offset (or `none`), and ECN.
+echo and the connection's timestamp offset (or `none`), ECN, the SYN-ACKs sent for the last
+SYN (`sc_rxmits`, 0 for a cookie) and the challenge-ACK window, its end in milliseconds and
+the challenge ACKs sent in it (`sc_challenge_ack_end`, `sc_challenge_ack_cnt`).
 """.
 -type handshake() :: #{iss := erx_tcp_seq:wire(), irs := erx_tcp_seq:wire(),
                        rcv_wnd := 0..16#ffff, peer_mss := 0..16#ffff,
                        wscale := none | {0..14, 0..14}, sack := boolean(),
                        ts := none | {TsRecent :: erx_tcp_seq:wire(), TsOffset :: erx_tcp_seq:wire()},
-                       ecn := boolean()}.
+                       ecn := boolean(),
+                       rxmits := non_neg_integer(),
+                       challenge := none | {EndMs :: integer(), Sent :: non_neg_integer()}}.
 
 -doc """
 What an ACK for a listener leads to (`syncache_expand`'s return): a connection, a silent
@@ -448,7 +452,7 @@ expand_cookie(Conn, #tcp{opts = #tcp_opts{ts = AckTs}} = Ack, Listener, Secrets)
                              none -> none;
                              {TsVal, _} -> {TsVal, ts_offset(Secrets, Conn)}
                          end,
-                   ecn => false}}
+                   ecn => false, rxmits => 0, challenge => none}}
     end.
 
 validate_cookie(Conn, #tcp{seq = Seq, ack = Ack}, Secrets) ->
@@ -494,9 +498,9 @@ mac(Secrets, Slot, {LAddr, LPort, FAddr, FPort}, Irs, Flags) ->
     High bxor Low.
 
 handshake(#entry{irs = Irs, iss = Iss, rcv_wnd = Wnd, peer_mss = PeerMss, wscale = Wscale,
-                 sack = Sack, ts = Ts, ecn = Ecn}) ->
+                 sack = Sack, ts = Ts, ecn = Ecn, rxmits = Rxmits, ack_war = War}) ->
     #{iss => Iss, irs => Irs, rcv_wnd => Wnd, peer_mss => PeerMss, wscale => Wscale,
-      sack => Sack, ts => Ts, ecn => Ecn}.
+      sack => Sack, ts => Ts, ecn => Ecn, rxmits => Rxmits, challenge => War}.
 
 -doc """
 A RST for a listener (`syncache_chkrst`). With an entry, a RST at exactly IRS + 1 drops it

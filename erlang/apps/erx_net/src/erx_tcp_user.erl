@@ -62,14 +62,45 @@
 %% LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 %% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 %% SUCH DAMAGE.
+%%
+%% FreeBSD: sys/netinet/tcp_syncache.c
+%% Copyright (c) 2001 McAfee, Inc.
+%% Copyright (c) 2006,2013 Andre Oppermann, Internet Business Solutions AG
+%% All rights reserved.
+%%
+%% This software was developed for the FreeBSD Project by Jonathan Lemon
+%% and McAfee Research, the Security Research Division of McAfee, Inc. under
+%% DARPA/SPAWAR contract N66001-01-C-8035 ("CBOSS"), as part of the
+%% DARPA CHATS research program. [2001 McAfee, Inc.]
+%%
+%% Redistribution and use in source and binary forms, with or without
+%% modification, are permitted provided that the following conditions
+%% are met:
+%% 1. Redistributions of source code must retain the above copyright
+%%    notice, this list of conditions and the following disclaimer.
+%% 2. Redistributions in binary form must reproduce the above copyright
+%%    notice, this list of conditions and the following disclaimer in the
+%%    documentation and/or other materials provided with the distribution.
+%%
+%% THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+%% ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+%% IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+%% ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+%% FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+%% DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+%% OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+%% HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+%% LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+%% OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+%% SUCH DAMAGE.
 
 -module(erx_tcp_user).
 -moduledoc """
 A connection's user requests (docs/design-network-stack.md, "Events and the step"),
 translated from sys/netinet/tcp_usrreq.c (`tcp_connect`, `tcp_usr_send`, `tcp_usr_rcvd`,
-`tcp_usr_shutdown`, `tcp_usr_close`, `tcp_disconnect`, `tcp_usrclosed`, `tcp_usr_abort`)
-and from sys/netinet/tcp_subr.c (`tcp_newtcpcb`, `tcp_drop`, `tcp_close`) at the commit
-NOTICE-freebsd records.
+`tcp_usr_shutdown`, `tcp_usr_close`, `tcp_disconnect`, `tcp_usrclosed`, `tcp_usr_abort`),
+from sys/netinet/tcp_subr.c (`tcp_newtcpcb`, `tcp_drop`, `tcp_close`) and from
+sys/netinet/tcp_syncache.c (`syncache_socket`) at the commit NOTICE-freebsd records.
 
 The requests are those of FreeBSD's `pr_usrreqs` for a connected stream, as the connection
 process passes them on: the socket layer (owner, active mode, packet framing, the receive
@@ -82,9 +113,9 @@ calling `tcp_output`.
 
 -include("erx_tcp.hrl").
 
--export([new/1, request/3, rcvd/2, drop/2, close/1, usrclosed/2, fill/3]).
+-export([new/1, accepted/3, request/3, rcvd/2, drop/2, close/1, usrclosed/2, fill/3]).
 
--export_type([request/0, init/0]).
+-export_type([request/0, init/0, listener_init/0]).
 
 -doc """
 A request: `connect` (`tcp_connect`), `send` (`tcp_usr_send`), `rcvd` (`Bytes` left the
@@ -127,6 +158,28 @@ whether the remote address is one of the machine's own (`local_peer`, false if a
                   keep_cnt => pos_integer(),
                   keep_init => pos_integer()}.
 
+-doc """
+What accepted/3 makes a control block from besides the handshake: init()'s keys but `iss`,
+`ts_offset` and `now`, which the handshake and the step's context give.
+""".
+-type listener_init() :: #{family := inet | inet6,
+                           local := {binary(), 0..16#ffff},
+                           remote := {binary(), 0..16#ffff},
+                           local_peer => boolean(),
+                           cc := module(),
+                           cc_params => erx_tcp_cc:params(),
+                           loss := module(),
+                           snd_hiwat := pos_integer(),
+                           rcv_hiwat := non_neg_integer(),
+                           snd_lowat => non_neg_integer(),
+                           gen := erx_net_rand:gen(),
+                           nodelay => boolean(),
+                           linger => off | non_neg_integer(),
+                           keep_idle => pos_integer(),
+                           keep_intvl => pos_integer(),
+                           keep_cnt => pos_integer(),
+                           keep_init => pos_integer()}.
+
 %% tcp_subr.c: V_tcp_mssdflt and V_tcp_v6mssdflt (TCP_MSS, TCP6_MSS).
 -define(TCP_MSS, 536).
 -define(TCP6_MSS, 1220).
@@ -144,8 +197,8 @@ whether the remote address is one of the machine's own (`local_peer`, false if a
 A new control block in CLOSED (`tcp_newtcpcb`): the default MSS of the family, timestamps,
 window scaling and SACK requested (`tcp_do_rfc1323` 1, `tcp_do_sack` 1), ECN as erx_tcp_ecn
 starts it, the RTT estimator's initial state, windows of `TCP_MAXWIN << TCP_MAX_WINSHIFT`,
-and `t_rcvtime` now. Its next event is `connect`, or the passive open fills in the
-handshake.
+and `t_rcvtime` now. Its next event is `connect`; a passive open's block is made by
+accepted/3 instead.
 """.
 -spec new(init()) -> #tcb{}.
 new(#{family := Family, local := Local, remote := Remote, iss := Iss, ts_offset := TsOffset,
@@ -180,6 +233,67 @@ new(#{family := Family, local := Local, remote := Remote, iss := Iss, ts_offset 
          nodelay = maps:get(nodelay, Init, false),
          linger = maps:get(linger, Init, off),
          gen = Gen}.
+
+-doc """
+A control block in SYN-RECEIVED made from a completed handshake (`syncache_socket`,
+tcp_syncache.c:894-984), with the listener's options in `Init`. Our SYN-ACK is the SYN in
+flight: snd_una is the ISS, snd_nxt and snd_max are past it, and the send log holds it, so
+the ACK that
+completes the handshake moves snd_una past it in erx_tcp_input's SYN-RECEIVED stage, as
+`incforsyn` does (tcp_input.c:2514-2515, :2897-2898). The receive side starts past the
+peer's SYN with the window the SYN-ACK offered. The options are those the handshake
+negotiated, ECN as `tcp_ecn_syncache_socket` sets it, the MSS from the peer's offer
+(`tcp_mss`, whose buffer sizes the returned actions ask of the grant), one segment of
+congestion window when the SYN-ACK was sent more than once, the entry's challenge-ACK
+window, and the connection-establishment timer (TT_KEEP at TP_KEEPINIT). The connection
+then steps the segment that completed the handshake, as tcp_input does.
+""".
+-spec accepted(erx_tcp_syncache:handshake(), listener_init(), #tcp_ctx{}) ->
+          {#tcb{}, [erx_tcp:action()]}.
+accepted(#{iss := Iss, irs := Irs, rcv_wnd := RcvWnd, peer_mss := PeerMss, wscale := Wscale,
+           sack := Sack, ts := Ts, ecn := Ecn, rxmits := Rxmits, challenge := Challenge},
+         Init, #tcp_ctx{now = Now} = Ctx) ->
+    TsOffset = case Ts of
+                   {_, Offset} -> Offset;
+                   none -> 0
+               end,
+    #tcb{loss = Loss, ccv = Ccv, sendlog = Log, deadlines = D, keep_init = KeepInit} = Tcb0 =
+        new(Init#{iss => Iss, ts_offset => TsOffset, now => Now}),
+    %% tcp_rcvseqinit, tcp_sendseqinit and :894-905; the SYN-ACK takes one sequence number.
+    Tcb1 = Tcb0#tcb{state = syn_received, irs = Irs, snd_wl1 = Irs,
+                    snd_nxt = Iss + 1, snd_max = Iss + 1,
+                    sendlog = erx_tcp_sendlog:sent(Log, Iss, Iss + 1, Tcb0#tcb.maxseg, Now),
+                    rcv_nxt = Irs + 1, rcv_up = Irs + 1, rcv_wnd = RcvWnd,
+                    rcv_adv = Irs + 1 + RcvWnd, last_ack_sent = Irs + 1,
+                    %% :910-929.
+                    wscale = case Wscale of
+                                 {_, _} -> Wscale;
+                                 none -> off
+                             end,
+                    ts = case Ts of
+                             {Recent, _} -> #ts{recent = Recent, recent_age = Now, offset = TsOffset};
+                             none -> off
+                         end,
+                    sack = case Sack of
+                               true -> on;
+                               false -> off
+                           end,
+                    loss_state = Loss:init(#{sack => Sack}),
+                    ecn = erx_tcp_ecn:syncache_socket(Ecn),
+                    %% :945-946, read by cc_conn_init as one segment.
+                    ccv = case Rxmits > 1 of
+                              true -> Ccv#ccv{cwnd = 1};
+                              false -> Ccv
+                          end,
+                    %% :948-949, from the syncache's milliseconds.
+                    challenge = case Challenge of
+                                    {EndMs, Sent} -> {EndMs * 1000, Sent};
+                                    none -> none
+                                end,
+                    %% :984.
+                    deadlines = D#deadlines{keep = Now + ms(KeepInit)}},
+    %% :938.
+    erx_tcp_input:tcp_mss(PeerMss, Tcb1, Ctx).
 
 %% A keepalive option: 0 or absent means the default, as TP_KEEPIDLE and its kin read
 %% (tcp_timer.h); anything but a positive integer is refused.

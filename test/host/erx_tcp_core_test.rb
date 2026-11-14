@@ -45,7 +45,8 @@ class ErxTcpCoreTest < Minitest::Test
   RST_FOR_ANY_LINK_CAST = 'Flags band ?TH_RST =/= 0; LinkCast =:= none ->'
 
   def test_core_cases_pass_under_eunit
-    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests, :erx_tcp_merged_tests)
+    assert_erx_net_eunit(:erx_tcp_tests, :erx_tcp_input_tests, :erx_tcp_input_ack_tests, :erx_tcp_merged_tests,
+                         :erx_tcp_accepted_tests)
   end
 
   # A merged segment hands cc_ack_received its count of segments (lro_nsegs), and takes the

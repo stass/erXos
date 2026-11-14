@@ -65,7 +65,7 @@ erx_tcp_timewait's (`tcp_twcheck`), and TIME-WAIT begins in erx_tcp_timewait:sta
 -include("erx_tcp_wire.hrl").
 -include("erx_tcp_loss.hrl").
 
--export([segments/3, stages/0, run/4]).
+-export([segments/3, stages/0, run/4, tcp_mss/3]).
 
 -export_type([stage/0, result/0]).
 
@@ -438,8 +438,13 @@ negotiate(#seg{wscale = PeerShift, ts = SegTs, sack_permitted = SackOk, mss = Ms
         _ -> tcp_mss(Mss, Tcb2, Ctx)
     end.
 
-%% tcp_mss: the MSS from the peer's offer and the path; buffers rounded up to whole segments
-%% are asked of the grant, whose answer sets them ({buffer, Kind, Bytes}).
+-doc """
+The MSS from the peer's offer and the path (`tcp_mss`), for a SYN taken here and for a
+connection made from the syncache (erx_tcp_user:accepted/3); the send and receive buffers
+rounded up to whole segments are asked of the grant, whose answer sets them (`{buffer, Kind,
+Bytes}`).
+""".
+-spec tcp_mss(erx_tcp_mss:offer(), #tcb{}, #tcp_ctx{}) -> {#tcb{}, [erx_tcp:action()]}.
 tcp_mss(Offer, #tcb{family = Family, snd_hiwat = Snd0, rcv_hiwat = Rcv0} = Tcb,
         #tcp_ctx{mtu = Mtu}) ->
     {Maxseg, Snd, Rcv} = erx_tcp_mss:mss(Family, Offer, {Mtu, 0}, {Snd0, Rcv0}, ?SB_MAX),
@@ -538,7 +543,9 @@ check_rst(#seg{flags = Flags, seq = Seq} = Seg, Tcb, Ctx) ->
 %% sequence number. Kept, as FreeBSD keeps it, its data would be taken one byte early,
 %% since the byte at its sequence number is the SYN. RFC 9293 section 3.10.7.4 treats
 %% SYN-RECEIVED after an active open as a synchronized state, so such a SYN is challenged.
-%% A passive open never reaches this state here (erx_tcp_syncache).
+%% A passive open's SYN-RECEIVED (erx_tcp_user:accepted/3) is challenged alike; it lasts only
+%% for the step of the ACK that completed the handshake, whose acknowledgement, sequence
+%% number and timestamp the syncache has already checked, so that step leaves it.
 check_syn(#seg{flags = Flags, seq = Seq} = Seg, #tcb{state = State, rcv_nxt = RcvNxt} = Tcb,
           Ctx) ->
     Challenged = case State of
@@ -711,7 +718,8 @@ ack(Seg, Tcb, Ctx) ->
 %% owner has already shut down (TF_NEEDFIN, whose FIN output then sends). The acknowledgement
 %% covers our SYN, which `syn_sent` checked, so snd_una moves past it here: the SYN takes a
 %% sequence number but is not data, and process_ack counts only what lies beyond it. FreeBSD
-%% does the same in two places, `incforsyn` for a SYN-RECEIVED made by a listener and the
+%% does the same in two places, `incforsyn` (:2514-2515, :2897-2898) for a SYN-RECEIVED made by
+%% a listener (erx_tcp_user:accepted/3, which leaves snd_una at the ISS) and the
 %% TF_NEEDSYN block of :2869-2883 for a simultaneous open; both leave snd_una one past the
 %% SYN before the bytes acknowledged are counted, and the window shifts were fixed when the
 %% SYN was taken. Data queued before ESTABLISHED is handed over now unless this segment
