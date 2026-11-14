@@ -200,9 +200,16 @@ requires the loader to quiesce every DMA-capable device before entry
 platform contract additionally requires that quiescence drain outstanding
 DMA through the platform's documented completion or reset mechanism
 before memory is reclaimed. Setting an SMMU to abort future traffic does
-not drain requests already beyond it. An unknown or failed drain stops
-boot before allocator handoff; the platform's loader evidence is a
-security gate ([DMA](design-platforms.md#dma), [IOMMU](#iommu)).
+not drain requests already beyond it. A failed drain stops boot before
+allocator handoff in every build. A drain that is unknown, because the
+platform's DMA contract lists a bus master's handover as unknown, is a
+question of the platform's admission, since the kernel cannot observe
+the time before its entry: development builds boot on such a platform,
+because they run trusted code only, say so in their banner and never
+ship, and the gap stays an open security residual; release builds refuse
+the platform until the loader evidence its DMA contract names is
+recorded for each loader release the port supports
+([DMA](design-platforms.md#dma), [IOMMU](#iommu)).
 
 At entry (`boot.S`), with the MMU off, the kernel saves `x0` and checks
 the device tree's header. If `CurrentEL` is EL2, it installs an EL2 vector
@@ -885,7 +892,7 @@ The AArch64 forms of the generic chokepoint rules
 | the kernel never accesses memory through a user address | no `LDTR`, `LDTRB`, `LDTRH`, `LDTRSB`, `LDTRSH`, `LDTRSW`, `STTR`, `STTRB` or `STTRH` anywhere in the kernel image; `erx_uword_t` read only in `kernel/arch/aarch64/uword.c` |
 | system-register instructions only in their accessors | `mrs`, `msr`, `sys` and `sysl` only in generated accessors, the named barrier and maintenance helpers and the listed assembly files |
 | TLB and cache maintenance only in the helpers | `tlbi`, `dc` and `ic` only in `kernel/arch/aarch64/tlb.c` and `cache.S` |
-| exception returns and firmware calls only where listed | `eret` only in the vector and exit object and in the boot entry's drop from EL2; `hvc` and `smc` only in the SMCCC routine; the firmware mailbox's registers only in the trial request and the boot-time key read in `kernel/platform/rpi_mbox.c`, the key read and its derivation in the boot-only section `.text.boot_only`, which the kernel unmaps before the system domain starts |
+| exception returns and firmware calls only where listed | `eret` only in the vector and exit object and in the boot entry's drop from EL2; `hvc` and `smc` only in the SMCCC routine; the firmware mailbox's registers only in the trial request, the boot-time key read and the VL805's firmware notification in `kernel/platform/rpi_mbox.c`, the key read and its derivation in the boot-only section `.text.boot_only`, which the kernel unmaps before the system domain starts |
 | only the early-console writer writes a UART's registers in the kernel | the UART register accessors only in the early-console writers `kernel/platform/pl011.c` and `miniuart.c`, which only the boot path, the panic path and the machine's end call |
 | the board's watchdog only from its driver, reloaded only from the kernel's timer | its registers only in `kernel/platform/bcm2835_wdt.c`, whose reload function only the timer calls ([design-platforms.md](design-platforms.md#the-watchdog)) |
 | the kernel touches no PCIe configuration space | no accessor generated for `pci-host-ecam-generic` or `brcm,bcm2712-pcie` registers is linked into the kernel |

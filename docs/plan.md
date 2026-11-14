@@ -2224,8 +2224,8 @@ on a board before it counts as done; stages (b), (c) and (d) are proven
 on the board
 ([design-platforms.md](design-platforms.md#bring-up-under-qemu) lists
 what the model cannot check). The Pi has no input device: no USB
-keyboard, since the Pi 4's USB host sits
-behind the PCIe bridge no domain drives, so input comes over the serial
+keyboard, since the Pi 4's USB host sits behind the PCIe bridge, whose
+driver is [Track U](#track-u-usb-proposed)'s, so input comes over the serial
 console or the web front end over the host link. Drivers are Erlang,
 programmed I/O first where the device allows it. The kernel's platform
 items of M12, the hardware watchdog, the crash region, trial boot, the
@@ -2447,6 +2447,83 @@ model and on every board. Measures, through the boot probe, where the firmware p
 bootable file and the device tree, the entry state, the memory map,
 whether `stdout-path` names the mini UART, where the framebuffer lies,
 and the time to the system runtime's first pet.
+
+## Track U: USB (proposed)
+
+**Status.** Proposed, not scheduled: no milestone depends on it, and
+where it goes in the order below is undecided.
+
+**Goal.** A USB keyboard, mouse or tablet and a USB stick work on QEMU
+`virt` and on the Raspberry Pi 4, along [design-usb.md](design-usb.md):
+both controllers are xHCI behind a PCIe domain, the controller's domain
+holds every USB device, HID reaches the display's input router through
+input numbers, and mass storage reaches a FAT server through drives.
+
+**Demo.** On QEMU `virt`, keys typed with QMP into a USB keyboard on
+`qemu-xhci` reach a window, a tablet moves its pointer, a keyboard
+unplugged with a key held releases it, and a USB stick's sectors are
+read and written through a drive; on the Pi 4, a USB keyboard behind
+the VL805's internal hub types into the kiosk.
+
+**Parts.** Each is a proposal; (a) needs nothing new below it.
+
+* **(a) The cores, on the host.** The descriptor decoder, the bus and
+  hub cores, the controller core, the HID parser and fold, the BOT core,
+  the SCSI builders, the TRB ring form's core and a register model of
+  the BCM2711 bridge, with their fuzz targets and explored tests
+  ([design-usb.md](design-usb.md#verification)).
+* **(b) The PCIe domain and `qemu-xhci` on QEMU `virt`, on the
+  stopgap.** The PCIe enumerator with BAR assignment in a `pcie` domain;
+  in the backend, `ERX_IRQ_MSI` over the lines of QEMU `virt`'s MSI
+  frame and the give of a PCIe function on a configured row; the Phase 1
+  manifest check admitting one `pcie` domain
+  ([design-usb.md](design-usb.md#the-phase-1-part)); then the TRB ring
+  form, the controller, the bus, hubs, HID into a display domain and
+  mass storage into drives. It needs [1b-E](#m9-a-driver-is-an-erlang-process)
+  and a display domain that reads input files; `qemu-xhci` interrupts
+  by MSI on the stopgap as on erXos's kernel
+  ([design-usb.md](design-usb.md#interrupts)).
+* **(c) The BCM2711 bridge and the VL805 on the Pi 4, on the stopgap.**
+  The bridge driver with the vendor's bring-up from the clean-room facts
+  record, its link check, its keep-or-reset decision and its clean
+  turn-off, the board probes B1 to B8, the VL805's firmware check, its
+  INTx line on the Pi 4's closed bus ([design-usb.md](design-usb.md#interrupts)),
+  and, once probe B1's readings are recorded, the VL805's firmware
+  notification in the stopgap's root
+  ([design-usb.md](design-usb.md#the-vl805s-firmware)), beside
+  [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)'s board work. The
+  bridge driver and the probes proceed beside (b); the controller is
+  (b)'s code. The part is complete only with its dependencies in
+  place: 1b-I's board boot and display, the binary form of input
+  records and a display domain that reads input files, (b)'s TRB form
+  and controller, and the device NIF's non-coherent DMA verified on the
+  board.
+* **(d) On erXos's kernel.** QEMU `virt` at
+  [M9's kernel part](#m9-a-driver-is-an-erlang-process), with the
+  kernel's MSI frame and the IOMMU window; the Pi 4 at
+  [M12](#m12-storage-networking-boards), with the VL805's firmware
+  notification as a kernel operation.
+
+DWC2 on QEMU `raspi4b` is not a part of the track; it is planned work
+in `TODO.md` ([design-usb.md](design-usb.md#dwc2)).
+
+Mass storage's files on a stick also need the FAT server, which
+[Beyond the plan](#beyond-the-plan) places after M13; until then (b)
+and (c) test drives with a raw window client.
+
+**Exit criteria, each part.** Its cores' explored tests and fuzz
+targets pass their budgets, each with its seeded fault failing them;
+its QEMU suite passes with its seeded fault failing it, or, for (c),
+the board's checklist passes; a malformed report or status block ends
+at most its function; a device unplugged in every state leaves no
+slot, place or window behind; and the stack's own bounds, its queue,
+block, process and backlog capacities and its per-call work, hold
+under the storm cases on both phases. On the stopgap, only a case that
+checks a guarantee the kernel enforces, isolation between domains, a
+domain held to its budget or a neighbour's latency, reports
+`unsupported`, as [design-usb.md](design-usb.md#on-the-stopgap)
+records. For (c), the board checklist includes writing, flushing and
+reading back a stick and removing it during writes.
 
 ## M10: Users without a container runtime
 
@@ -2760,8 +2837,9 @@ no row, are built here and tested here.
   since neither board's tree confines its DMA devices, puts the TPM's SPI
   controller in the vault's domain
   ([design-system.md](design-system.md#devices)), gives PCIe
-  configuration space on a board that drives a bridge, the Pi 5, to the
-  PCIe domain alone (the Pi 4 drives none and has no PCIe domain), and
+  configuration space on a board that drives a bridge, the Pi 5, and the
+  Pi 4 once [Track U](#track-u-usb-proposed) drives its BCM2711 bridge,
+  to the PCIe domain alone, and
   passes the manifest check; Erlang drivers for each board's storage and
   network devices, with their reset sequences, each measured for its row
   or absence of a row in the driver table (G9); the IOMMU support a board
@@ -3152,5 +3230,6 @@ Each is small, adds its tests, and leaves `make check` green.
 | An MSI translation service in the interrupt controller | QEMU `virt`'s MSI frame serves both accelerators ([design-platforms.md](design-platforms.md#msi-frames)) | with a board that needs it |
 | Unmapping the kernel from user-mode page tables | needed only on cores that Arm lists as affected by rogue data cache loads | with each board port, from Arm's list of affected cores |
 | The release process: who keeps the release signing key and how it is replaced; whether release builds offer a host link | erXos is a prototype and makes no releases | when erXos makes releases |
-| Graphics, USB, audio | not needed for the thesis | not planned |
+| Graphics, audio | not needed for the thesis | not planned |
+| USB | not needed for the thesis; wanted for keyboards, pointers and USB sticks on QEMU and the Raspberry Pi 4 | proposed as [Track U](#track-u-usb-proposed), not scheduled |
 | x86-64 | out of scope | not planned |

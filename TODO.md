@@ -5526,10 +5526,6 @@ to the corpus and follow rc
   kernel's polled early-console writes at a panic complete after the
   console driver has reconfigured the UART, on each board
   ([design-platforms.md](docs/design-platforms.md#uarts)).
-* [Low] platforms: the Pi 4's VL805 USB host sits behind a PCIe bridge no
-  domain drives, so the Pi 4 has no USB; decide whether a PCIe domain
-  drives the bridge on the Pi 4
-  ([design-platforms.md](docs/design-platforms.md)).
 * [Low] live, the host tree over virtio-9p: QEMU's 9p server on Darwin
   and FreeBSD hosts translates only six errnos to Linux numbering (its
   `errno_to_dotl` has a FIXME), so an error from `/host` on a macOS host
@@ -6404,7 +6400,38 @@ to the corpus and follow rc
   its window's invalidation completes and an unconfined device's for the
   boot, until the exact supported platform meets the contract
   ([design-platforms.md](docs/design-platforms.md),
-  [plan.md](docs/plan.md#m11-security-closure)).
+  [plan.md](docs/plan.md#m11-security-closure)). A platform whose DMA
+  contract lists a bus master's handover as unknown boots in development
+  builds, which run trusted code only, and release builds refuse it, so
+  this blocks each platform's release, not its development
+  ([design-arch-aarch64.md](docs/design-arch-aarch64.md#boot-entry)).
+  The Pi 4 is such a platform: every bus master's handover is unknown.
+* [High] platforms, the Pi 4's VL805 at handover
+  ([design-usb.md](docs/design-usb.md#the-bcm2711-bridge),
+  [design-platforms.md](docs/design-platforms.md#dma)), part of the DMA
+  platform-evidence item, blocking the Pi 4's release and not its
+  development builds: the board's installation sets the EEPROM's boot
+  order to the microSD card alone so that the boot firmware has no reason
+  to start the VL805, but no source read says what the firmware does
+  with it, so the VL805 counts as possibly running at entry and the
+  boot contract's stopped-and-drained rule is unmet for it. A VL805 left
+  running may write memory the kernel has reclaimed; development builds
+  boot with that open. Establish the handover
+  for each firmware release the port supports: fetch and record
+  Raspberry Pi's documentation of the boot firmware and the EEPROM
+  bootloader at the pinned release, which must say that under this boot
+  order the firmware never starts the VL805, or stops and drains it by a
+  documented reset, before it starts the ARM cores, on boards with and
+  without the VL805's EEPROM; and on the 4 GB Pi 4, with a USB keyboard
+  and stick attached, halt the cores at the kernel's first instruction
+  with a JTAG probe and read the bridge's reset and PERST# bits, its link
+  state and, with the link up, the VL805's command register, `USBCMD`
+  and `USBSTS`. Probe B3, the same reading at the PCIe domain's first
+  start, comes after the kernel has reclaimed memory, so it can refute
+  the handover but never establish it. If the documentation is silent or
+  a reading refutes it, a release for the Pi 4 needs a stop before
+  kernel entry, which is to be designed. Record the bootloader version
+  and the boot order's value in the board's port.
 * [Medium] kernel, attributing asynchronous errors: on a board with PCIe,
   a device error caused by a posted write can be reported after the window
   that would attribute it, and then ends the wrong domain; one the
@@ -6522,6 +6549,11 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] USB, DWC2 on QEMU `raspi4b` ([design-usb.md](docs/design-usb.md#dwc2)): `erx_dwc2`, a
+  programmed-I/O host driver for the model's DWC2 beside `erx_xhci` under the same USB core, for low- and
+  full-speed devices with control, bulk and interrupt transfers. It serves QEMU `raspi4b` alone, since a real
+  Pi 4's DWC2 is the USB-C power connector's, so it comes after Track U's parts
+  ([plan.md](docs/plan.md#track-u-usb-proposed)); its design keeps the three rules the USB design records.
 * [Low] bootstrap, boot lines: print `/chosen/bootloader/build-timestamp` from the device tree
   (`rpi-eeprom-update` of `raspberrypi/rpi-eeprom` at `3831e51dba65f4493f3f88c1d049de73165c082e`, l.48), so a
   board report shows the bootloader version, which the Pi 4's A/B card needs to be 2022-12-01 or later

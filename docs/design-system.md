@@ -402,11 +402,13 @@ violation fails the build with the property, the record and the field:
    holds nothing else,** on every platform where erXos drives a PCIe
    bridge in a full boot: the PCIe domain, `pcie`, which runs the PCIe enumerator and
    nothing beside it. QEMU `virt`, the Raspberry Pi 4, whose BCM2711
-   bridge is closed, and the Raspberry Pi 5 drive bridges; on a
-   platform that drives none, no domain holds configuration space and
-   there is no PCIe domain. A `pci` row names an interrupt line only
-   at a place a closed bridge's platform record lists, and then the line
-   its place's pin routes ([design-pcie.md](design-pcie.md#the-closed-bus)).
+   bridge is closed and leads to the VL805 USB controller
+   ([design-usb.md](design-usb.md#the-bcm2711-bridge)), and the
+   Raspberry Pi 5 drive bridges; on a platform that drives none, no
+   domain holds configuration space and there is no PCIe domain. A
+   `pci` row names an interrupt line only at a place a closed bridge's
+   platform record lists, and then the line its place's pin routes
+   ([design-pcie.md](design-pcie.md#the-closed-bus)).
 4. **Budgets and grants sum within the root's.** The principals' budgets,
    the system domain's baseline and its reservation for `max_domains`
    admitted domains ([Resource policy](#resource-policy)), the unconfined
@@ -2934,7 +2936,7 @@ names (functions interrupt by MSI or MSI-X: a bridge's INTx lines,
 which the functions behind it share, go to no domain, and a function that
 offers neither is given with no interrupt, except behind a closed
 bridge, the Raspberry Pi 4's, whose row's INTx line is a line of its
-unit,
+unit, given as a device-tree unit's line is,
 [design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and creates its DMA window on the stream that the device tree's
 `iommu-map` gives its requester id, when the function lies on one of the
 machine's fixed buses

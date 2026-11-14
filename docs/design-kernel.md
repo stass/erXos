@@ -2495,8 +2495,11 @@ implements the same protocol, so no step is specific to one loader
    register transition to close future requests. For every bus master,
    confined or unconfined, the platform contract also establishes a
    completed drain or reset of outstanding DMA, including the IOMMU's own
-   accesses; unknown or failed completion stops boot before allocator
-   handoff ([design-platforms.md](design-platforms.md#dma)). Then seed the
+   accesses; a failed completion stops boot before allocator handoff,
+   and a platform whose contract leaves a completion unknown boots in
+   development builds only, release builds refusing the platform
+   ([design-platforms.md](design-platforms.md#dma),
+   [design-arch-aarch64.md](design-arch-aarch64.md#boot-entry)). Then seed the
    physical page allocator with RAM less the image, its tables, the device
    tree, the boot image, the reservation block and the reserved-memory
    nodes; then carve, before any budget exists, the per-CPU areas, each
@@ -7122,7 +7125,8 @@ other than the CPU's, where a physical address would be wrong
   there the first cell carries the space code at bits 24 and 25 and the
   other two the PCI address, as FreeBSD reads a host bridge's `ranges`
   (`pci_host_generic_fdt.c:66-68`, `:179-230`), and an entry of I/O space
-  is skipped ([design-pcie.md](design-pcie.md#dma)). The
+  is skipped ([design-pcie.md](design-pcie.md#dma),
+  [design-device-tree.md](design-device-tree.md#the-reader)). The
   walk goes up from the device's bus, the parent of its node or, for a
   PCIe function, its host bridge's node, whose own `dma-ranges` is the
   first level, to the root, and carries the device's windows through
@@ -8772,7 +8776,7 @@ advances, so nothing it checked changes unseen before it is applied.
 | no FP or SIMD in the kernel (K10) | no FP or SIMD encoding outside the two FP save and restore routines | disassembly |
 | system registers and inline assembly only in their accessors | system-register instructions only in generated accessors, the named barrier and maintenance helpers and the listed assembly files; the `asm` keyword only in generated headers and those helpers. The `inline-asm` rule holds erXos's user-mode C to the same: `liberx`, the NIFs, the runtimes' and musl's erXos directories keep the `asm` keyword to the files its site list names | disassembly by symbol, syntax trees |
 | TLB and cache maintenance only in the maintenance helpers | TLB and cache maintenance instructions only in the architecture layer's maintenance helpers | disassembly |
-| exception returns and firmware calls only where listed | exception-return instructions only in the exit path, which an upcall also leaves through after rewriting the saved state, and in the boot entry's drop from a more privileged mode; firmware-call instructions only in the one firmware-call routine, which serves the CPU and power calls and the speculation workarounds; a firmware mailbox's registers referenced only from the platform's trial request and its boot-time key read | disassembly, relocations |
+| exception returns and firmware calls only where listed | exception-return instructions only in the exit path, which an upcall also leaves through after rewriting the saved state, and in the boot entry's drop from a more privileged mode; firmware-call instructions only in the one firmware-call routine, which serves the CPU and power calls and the speculation workarounds; a firmware mailbox's registers referenced only from the platform's trial request, its boot-time key read and the Raspberry Pi 4's VL805 firmware notification ([design-usb.md](design-usb.md#the-vl805s-firmware)) | disassembly, relocations |
 | a board's key is read once, at boot | the key read and the derivation sit in the boot-only section, which nothing references but boot step 6 and which the kernel unmaps before it starts the root task | relocations of the linked image, with a seeded reference from outside boot |
 | the kernel touches no PCIe configuration space | no register accessor of a PCIe bridge is linked into the kernel: the platform's register sources mark bridges as the PCIe enumerator's, and the generator emits no kernel accessor for them | relocations, the generator |
 | device registers only through generated accessors | the `volatile` qualifier only in generated headers | syntax trees |
