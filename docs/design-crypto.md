@@ -193,8 +193,10 @@ OpenSSL runs in a domain that never calls `crypto`. The network domain
 is one: no module of the network stack calls `crypto`, which a build
 check of the stack proves
 ([design-network-stack.md](design-network-stack.md#build-checks)), and
-its release ships no `crypto`, so no `on_load` there reaches the NIF and
-no packet reaches OpenSSL. So the network domain keeps the BeamAsm image
+its boot script names no `crypto`, so `crypto` is not on its code path,
+no `on_load` there reaches the NIF and no packet reaches OpenSSL. (The
+one domain release holds every script's applications, so a domain could
+still load `crypto` by name; nothing in the network domain does.) So the network domain keeps the BeamAsm image
 and its speed, and what keeps OpenSSL off its packets is the stack's own
 check rather than the image; the system domain alone needs the image to
 lack the library, since a constructor run there is code of the library

@@ -84,9 +84,10 @@ module Erx
 
     # erXos's applications in the tree, as tree paths to the files they copy, each laid
     # out as the system release lays it out (ReleaseFiles.application_layout) from the
-    # hosted build at otp.
+    # hosted build at otp; none whose NIF the hosted runtime lacks
+    # (ReleaseFiles::DOMAIN_IMAGE_ONLY).
     def self.application_files(root:, otp:)
-      ReleaseFiles::APPLICATIONS.flat_map do |application|
+      (ReleaseFiles::APPLICATIONS - ReleaseFiles::DOMAIN_IMAGE_ONLY).flat_map do |application|
         ReleaseFiles.application_layout(root: root, otp: otp, application: application)
                     .map { |path, artifact| ["lib/#{application}/#{path}", artifact] }
       end.to_h

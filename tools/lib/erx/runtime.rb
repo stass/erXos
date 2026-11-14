@@ -51,12 +51,20 @@ module Erx
     GENERATED_OTP = File.join(Generated::OUTPUT, 'otp')
     LIBERX_FLAGS = %w[-std=c17 -D_DARWIN_C_SOURCE -D_GNU_SOURCE -Wall -Wextra -Werror -pedantic -O2 -g -pthread
                       -I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/core -I kernel/crypto -I .].freeze
-    # OTP's applications in the release, each built by both runtimes: what a shell needs,
+    # OTP's applications the releases ship, each built by both runtimes: what a shell needs,
     # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
     # loads without starting (ReleaseFiles::LOAD_ONLY). OTP's `libs` and `start_scripts`
     # targets are not usable: lib/tools's crashdump.erl includes public_key.hrl and
-    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both.
-    APPLICATIONS = %w[kernel stdlib compiler runtime_tools].freeze
+    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both. asn1 and
+    # crypto ship in the domain releases that ask for them (ReleaseFiles::RELEASE_SCRIPTS),
+    # never in the system release, and their NIFs are in the domains' runtime images alone
+    # (docs/design-crypto.md, "OTP's applications").
+    APPLICATIONS = %w[kernel stdlib compiler runtime_tools asn1 crypto].freeze
+    # What an application's make is given beyond the build's own variables. asn1 ships
+    # its run-time module, asn1rt_nif, alone: with CT_MODULES empty its make builds that
+    # module and the .app, which lists only it, and neither the ASN.1 compiler nor the
+    # templates it is generated from (docs/design-crypto.md, "OTP's applications").
+    MAKE_VARIABLES = { 'asn1' => %w[CT_MODULES=].freeze }.freeze
     # Where OTP keeps beams and boot scripts built from its sources: the build's own make
     # writes erts/ebin and each application's ebin, and the others held prebuilt copies.
     # otp/ORIGIN.md excludes each, so make check refuses a file there, and the copy takes
@@ -316,7 +324,8 @@ module Erx
     # makes the directory.
     def build_application(application, jobs:)
       FileUtils.mkdir_p(in_copy(File.join('lib', application, 'ebin')))
-      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/src", 'opt', "TARGET=#{self.class::TARGET}"],
+      @runner.run(['gmake', "-j#{jobs}", '-C', "lib/#{application}/src", 'opt', "TARGET=#{self.class::TARGET}",
+                   *MAKE_VARIABLES.fetch(application, [])],
                   name: "runtime-#{application}", deadline: DEADLINES.fetch(:libs), chdir: @output.root,
                   env: build_environment)
     end

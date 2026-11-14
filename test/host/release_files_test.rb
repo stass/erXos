@@ -107,16 +107,19 @@ class ReleaseFilesTest < Minitest::Test
     end
   end
 
-  # The block driver and littlefs run in the storage domain alone, the network stack
-  # and its client in the domains that use the network, and the web line in a session
-  # alone, the display's applications in the display domain alone and the client side of
-  # the window system in display clients alone, so the system release neither ships nor
-  # names them. They are named here, not taken from the allow-list, so that adding one to
-  # SYSTEM_APPLICATIONS fails this test.
+  # The system release neither ships nor names an application that runs only in other
+  # domains. asn1 and crypto, whose NIFs the system image lacks, ship only in the domain
+  # releases that ask for them. The block driver and littlefs run in the storage domain
+  # alone, the network stack and its client in the domains that use the network, the web
+  # line in a session alone, the display's applications in the display domain alone and
+  # the client side of the window system in display clients alone. They are named here,
+  # not taken from the allow-list, so that adding one to SYSTEM_APPLICATIONS fails this
+  # test.
   def test_the_system_release_ships_no_domain_only_application
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
-    only = %w[erx_blk erx_storage erx_memdraw erx_display erx_fb erx_win erx_ui erx_web erx_net erx_net_client erx_web_line]
+    only = %w[asn1 crypto erx_blk erx_storage erx_memdraw erx_display erx_fb erx_win erx_ui erx_web erx_net erx_net_client
+              erx_web_line]
     assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"
@@ -134,6 +137,14 @@ class ReleaseFilesTest < Minitest::Test
     files = Erx::OracleHosted.application_files(root: ROOT, otp: @otp)
     assert_equal File.join(@otp, 'lib/runtime_tools/ebin/dbg.beam'), files['lib/runtime_tools/ebin/dbg.beam']
     assert_includes files.keys, 'lib/runtime_tools/ebin/runtime_tools.app'
+  end
+
+  # The hosted runtime links neither crypto's NIF nor asn1rt_nif, so its tree carries
+  # neither application, and OTP's suites see no crypto there, as on a stock OTP built
+  # without it, rather than a crypto whose every call fails.
+  def test_the_hosted_tree_ships_no_application_of_the_domain_images_alone
+    files = Erx::OracleHosted.application_files(root: ROOT, otp: @otp)
+    %w[asn1 crypto].each { |application| refute(files.keys.any? { |path| path.start_with?("lib/#{application}/") }) }
   end
 
   # The oracle tests what the image ships: each application the two share is laid out

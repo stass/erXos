@@ -169,6 +169,50 @@ Third-party notices remain in their original files.
     {
       "path": "prebuilt.files",
       "reason": "lists the prebuilt files of a prebuilt source delivery, which erXos removes"
+    },
+    {
+      "path": "lib/asn1/ebin",
+      "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"
+    },
+    {
+      "path": "lib/crypto/ebin",
+      "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_ber.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_check.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_ext.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_jer.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_per.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_per_common.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_real_common.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/asn1rtt_uper.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/asn1/src/prepare_templates.beam",
+      "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
     }
   ],
   "files": {
@@ -13681,198 +13725,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "lib/asn1/ebin/asn1.app": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "05e825cc71a1d902ad296cfe173987c423dbd56aaa11da8a684d26b0b0fed128",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1.appup": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "10ac4872c179e021badc89d44f97cdeef22268331897bf25cfb93ade117be80c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1_db.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "db161a651281ad2c7c56ac488e687ffbdd6f5e1cb8a0052bca93c1d2752fe264",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "c6ca16dd382fc3b295f7c82b7dfdfb779fc5f07812e1bb7478b284dc2c19e084",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_check.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "c20721e9a8b0b275c7a30e2b8acd2519210e073ebd29a003b8309e37545c0198",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_constructed_ber_bin_v2.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "b04b84282f507a09c8f2a31b291a9ec012466f0a5554d3c49eb68e255ffd2f41",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_constructed_per.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "20709d6302b15235098741fb263f3d33ed03fe1336b1d129c5d6cf9a4151ce8c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_eval_ext.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "78bd9ae502fbe808e86316e2a2f74fc8daf9ebb4411ef5167920f2bc20df5093",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_func.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "ea7792bddb06ee65db4e84cd1a5f68f26c0393e8b9445e4352397070596dfcef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_gen.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "9fca2e42242ffd5b3e4f3f00378ac028bfbfba3cd011fb278c1a8083fb1804d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_gen_ber_bin_v2.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "1e683ead321cffb78f483348715e9eb6a8296c3683fd049cc7b2d70e9980879d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_gen_check.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "50c55c042ff4969341aeedd14fde9f99067b520d71e2bea6963f44480bc6b3e3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_gen_jer.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "a7056f27cc3e9c11e849503fccab5313ee61f67f52f1ac111d96d685f8bdcc8e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_gen_per.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "7ffd2c092035e0c7becf7fd28e9d34592a8ae00adc234e191df79d33b28cc7c5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_imm.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "a70c530aa7073cc8acfb1a6f7a652b3397306c9d83ee42b46d1c5d6d16268dbd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_name.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "2f21dd94217c68d5d5c23a1b424c3a1bad3fae9191ada52f9e85087a5ce537e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_parser2.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "e7c4ed3ac303280aee2fea551d2c4ba6c7ccc0d488bd0b136aab573ebe3dfcba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_partial_decode.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "49c24bb2573c088fc192b87587edfba0987eab8109fe0fe8b342ac324d53acb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_pretty_format.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "319030b47de78fa46e59d06246a47dc0cfb587c5ba9401305b26ed38777fe08d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_rtt.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "1c82ab4ad49562926c57f90dc18238d05ad926cd69d91722a21a48bbf2f48ea5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_table.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "e1e7ffcf7451aa7dbbd74f0cf58ee6ccaa81a49abeb7fa3e5b2338532ca6bf45",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_tok.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "fee8a7bbe9a108bda9e12c548ac74ef9fd0906b5024dbfd7cd8d3d5228206340",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1ct_value.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "e76b71dc84a5f193cb3dca4e4e621d53fc0d66bb5003cb012305a01d56a84ba1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/ebin/asn1rt_nif.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "0c8984d5bcc226817109a150d924a809816aadfc7ea870c3810dd3d6dbb3618c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "lib/asn1/examples/InfClass3.asn": {
       "license": "Apache-2.0",
       "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
@@ -14185,27 +14037,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "lib/asn1/src/asn1rtt_ber.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "c91675aab8fa2bf5f7d343c16b712479fadc23e1fa10c0a66704fadcfe568d14",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "lib/asn1/src/asn1rtt_ber.erl": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "4ac2eb4e2ac42ac5c589a01449cf7f36db385702add84352de660eca920ff9a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/src/asn1rtt_check.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "9736de9b0b0e1ba62a2d9a6c7a429ae00f0c4babc2f33b627dbbf237d91cd543",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -14217,27 +14053,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "lib/asn1/src/asn1rtt_ext.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "0590d46236340755cd9ffc6caf6bfab6baed235000449e18fecb320dae435c22",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "lib/asn1/src/asn1rtt_ext.erl": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "8c3ce48be7a94b22ddb4a7aed0a288571094679af9a3ea51f7f15938daecc679",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/src/asn1rtt_jer.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "7f8d46b4fbcff20cc6c403d12846bf466edcd78e153ba01eb4bb8621d58a9a84",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -14249,27 +14069,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "lib/asn1/src/asn1rtt_per.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "40f1b30643e9e12e765603ce73569229d04aba53874b47f1279049cf7d69f740",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "lib/asn1/src/asn1rtt_per.erl": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "49d182163cda948a185b0716360eb50f22a0f5df614ed58023d52ebe2a518be1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/src/asn1rtt_per_common.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "b9fdb8caf87a02e127b11878c5c4e166114b299738e07734284ea7124c028015",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -14281,27 +14085,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "lib/asn1/src/asn1rtt_real_common.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "9a4fd4b3de8044d6952e6ca7300971a7aacb8e31e0498ce09549fe4f4f3ef8b5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "lib/asn1/src/asn1rtt_real_common.erl": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "2fa991a69be468c8b2fd2c12f0277768b70764560eb2275244f7b59af52184e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/src/asn1rtt_uper.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "1a240788fb7110f47b456e5263616f14cdffca82ce65142a74b822151356e1b6",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -14334,14 +14122,6 @@ Third-party notices remain in their original files.
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "771669d44d05dc5ba08aa2bbc2c451e8b7c406e7dea1a3fbe95540c15edb246d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/asn1/src/prepare_templates.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "22f5855ed6187f7ab9fea8527fc2e99b6ae375d56d86907bf62608fce58b822c",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -22531,38 +22311,6 @@ Third-party notices remain in their original files.
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "e650ac21ed7fc108702d883e23938e888688e78c5bfea05a6d33ecab9f6bb192",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/crypto/ebin/crypto.app": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "76099ce2afe7a454f6cc1800dfb459738445de3ec50ede151d8f1f2af79855de",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/crypto/ebin/crypto.appup": {
-      "license": "Apache-2.0",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "2456d1ee31ef1b7d741aea383d0b67bed79e309505743c2d0ff2c5abb051b680",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/crypto/ebin/crypto.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "1d820b6a5ed0f729a6d3d220e70332153983c623c8d874136ab741b23cb8a2d6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "lib/crypto/ebin/crypto_ec_curves.beam": {
-      "license": "Apache-2.0",
-      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
-      "reviewed": true,
-      "sha256": "3527b219559fce75db4b9f6e9be52b3cfc63d22f08ce121b8efe835d6edbb9d5",
       "kind": "file",
       "non_ascii_lines": []
     },

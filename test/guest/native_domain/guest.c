@@ -19,7 +19,9 @@
  * each of the domain's CPUs calls it and finds no stale code, and halts with 0;
  * in the others a block of the code space runs through its executable alias,
  * then is written through that alias, or run through its writable one, which
- * ends the domain with a memory fault (jit_reload.erl).
+ * ends the domain with a memory fault (jit_reload.erl). A domain of each
+ * image boots the release's ssh script and calls OTP's crypto and asn1rt_nif
+ * NIFs, which only those two images link (crypto_args).
  * Then an ERTS domain opens
  * its system connection's lane port, and the root, as the system domain with
  * liberx's lane writer and reader, takes a burst that fills the lane while it
@@ -99,9 +101,31 @@ static uint32_t erts_release, erts_files;
  * has no tty yet, and -noshell would start user_drv, whose NIF is gone, so it
  * starts no user; erlang:display writes to the console through the service.
  */
-#define ERTS_BOOT	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
-    "-boot\0/bin/erts\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
+#define BOOT_WITH(script)	"--\0-root\0/\0-bindir\0/bin\0-progname\0erl\0-home\0/\0" \
+    "-boot\0/bin/" script "\0-nouser\0-nocookie\0-kernel\0start_distribution\0false\0-eval\0"
+#define ERTS_BOOT	BOOT_WITH("erts")
 static const char erts_args[] = ERTS_BOOT "erlang:display(init_started),erlang:halt(0)";
+/*
+ * What the crypto cases' domains run (docs/design-crypto.md, "Verification"): the ssh
+ * boot script, whose release ships asn1 and crypto, then crypto's NIF from the domain's
+ * runtime image: 32 bytes from OpenSSL's generator, the first call in the fresh domain
+ * that draws from it, so the one that seeds it through getrandom; SHA-256 of "abc"
+ * against FIPS 180-2's digest; an Ed25519 key made, a message signed and verified and a
+ * changed message refused. Then asn1rt_nif's NIF decodes one BER TLV, an OCTET STRING
+ * of "A", which needs its on_load to find the NIF in the image's static table. Any
+ * mismatch raises in -eval, which ends init without the crypto_passed line.
+ */
+static const char crypto_args[] = BOOT_WITH("ssh")
+    "<<_:32/binary>>=crypto:strong_rand_bytes(32),"
+    "<<16#ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:256>>="
+    "crypto:hash(sha256,<<\"abc\">>),"
+    "{P,S}=crypto:generate_key(eddsa,ed25519),"
+    "G=crypto:sign(eddsa,none,<<\"erxos\">>,[S,ed25519]),"
+    "true=crypto:verify(eddsa,none,<<\"erxos\">>,G,[P,ed25519]),"
+    "false=crypto:verify(eddsa,none,<<\"erxoS\">>,G,[P,ed25519]),"
+    "{{4,<<\"A\">>},<<>>}=asn1rt_nif:decode_ber_tlv(<<4,1,65>>),"
+    "erlang:display(crypto_passed),erlang:halt(0)";
+_Static_assert(sizeof(crypto_args) <= ERX_BOOT_STRINGS_MAX, "crypto_args fits a request's strings");
 /*
  * What the logger case's domain runs: an error logged through the logger, whose text
  * holds a tab, an escape sequence and a newline, and a record of the domain's own making
@@ -290,6 +314,16 @@ logger_request(uint32_t runtime)
 	(void)erts_request(runtime);
 	memcpy(request.strings, logger_args, sizeof(logger_args));
 	request.args_len = (uint32_t)sizeof(logger_args);
+	return (&request);
+}
+
+/* A request for a domain whose ERTS boots the ssh script with crypto_args. */
+static const erx_dom_spec_t *
+crypto_request(uint32_t runtime)
+{
+	(void)erts_request(runtime);
+	memcpy(request.strings, crypto_args, sizeof(crypto_args));
+	request.args_len = (uint32_t)sizeof(crypto_args);
 	return (&request);
 }
 
@@ -2555,6 +2589,7 @@ erx_fiasco_root_main(void)
 	case_end("lanes", request_for("halt", program, 1), RUN_PLAIN, ERX_DOM_END_HALT, HALT_STATUS);
 	case_end("erts", erts_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("logger", logger_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
+	case_end("crypto", crypto_request(erts), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("erts_refused", erts_request(erts), RUN_SPOIL, ERX_DOM_END_HALT, ERX_FIASCO_TASK_STATUS_BOOT_PAGE);
 	case_end("crash", crash_request(erts), RUN_CRASH, ERX_DOM_END_CRASH, 0);
 	case_end("jit_reload", jit_request(jit, jit_reload_args, sizeof(jit_reload_args)), RUN_PLAIN, ERX_DOM_END_HALT, 0);
@@ -2562,6 +2597,7 @@ erx_fiasco_root_main(void)
 	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
 	case_end("jit_run_rw", jit_request(jit, jit_run_rw_args, sizeof(jit_run_rw_args)), RUN_PLAIN,
 	    ERX_DOM_END_FAULT, ERX_FAULT_MEMORY);
+	case_end("jit_crypto", jit_request(jit, crypto_args, sizeof(crypto_args)), RUN_PLAIN, ERX_DOM_END_HALT, 0);
 	case_end("connection", connection_request(erts, connection_eval), RUN_LANE, ERX_DOM_END_HALT, DIST_LOST_STATUS);
 	case_end("exports", connection_request(erts, exports_eval), RUN_EXPORTS, ERX_DOM_END_HALT, 0);
 	case_end("refs", connection_request(erts, refs_eval), RUN_REFS, ERX_DOM_END_HALT, DIST_LOST_STATUS);

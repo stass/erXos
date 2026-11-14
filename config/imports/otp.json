@@ -32,6 +32,17 @@
     {"path": "lib/sasl/ebin", "reason": "prebuilt beams and .app files of an application erXos does not build or ship"},
     {"path": "lib/sasl/examples/ebin", "reason": "prebuilt beams and .app files of an application erXos does not build or ship"},
     {"path": "lib/tools/ebin", "reason": "prebuilt beams and .app files of an application erXos does not build or ship"},
+    {"path": "lib/asn1/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
+    {"path": "lib/crypto/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
+    {"path": "lib/asn1/src/asn1rtt_ber.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_check.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_ext.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_jer.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_per.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_per_common.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_real_common.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/asn1rtt_uper.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
+    {"path": "lib/asn1/src/prepare_templates.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
     {"path": "bootstrap", "reason": "prebuilt boot scripts; erXos's build runs every Erlang step on the stock oracle's own"},
     {"path": "prebuilt.files", "reason": "lists the prebuilt files of a prebuilt source delivery, which erXos removes"}
   ]

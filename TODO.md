@@ -1613,9 +1613,12 @@ it; git history is the record of completed work.
   and the configure stamp does not cover OpenSSL's options or headers, so a change to `Libcrypto::OPTIONS`, `openssl/include` or
   `erl_nif.h` leaves them compiled against the old headers. Fold a digest of the OpenSSL prefix into the stamp, as
   `NativeJitRuntime#sdk_root` does for libc++, and give the prefix's header copy `--delete`.
-* [Medium] OTP import, prebuilt beams (`config/imports/otp.json`): the crypto and asn1 import keeps upstream's beams in
-  `lib/asn1/ebin`, `lib/crypto/ebin` and `lib/asn1/src`, which the other applications' exclusions leave out; make could take them
-  as up to date once the applications are built. Exclude them with the same reason.
+* [Medium] crypto, first seeding's failing half (`docs/design-crypto.md`, "Verification"; `test/guest/native_domain/guest.c`,
+  the crypto cases): the QEMU test that a domain of each image whose generator fails before its first seed gets an exception
+  from `crypto:strong_rand_bytes/1`, not bytes, is not written. No test hook makes the generator service refuse one domain's
+  reads, and refusing them from the domain's start ends it before ERTS runs (`liberx/backend/fiasco/libc_start.c`, AT_RANDOM's
+  read, `ERX_FIASCO_TASK_STATUS_ENTROPY`), so the hook must refuse a running domain's reads only. The passing half runs in
+  native_domain's crypto and jit_crypto cases.
 * [Low] crypto NIFs, link lists (`tools/lib/erx/native_runtime.rb`, `production_image.rb`): `crypto_archives` is a positional
   array whose last entry `ProductionImage#crypto_archives` takes as libcrypto; make it a `Data` with named parts, name the two
   flavours' link lists alike (`domain_archives`, `link_archives`), and derive the system image's list beside them.

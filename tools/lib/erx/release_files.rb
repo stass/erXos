@@ -43,6 +43,14 @@ module Erx
     DOMAIN_ONLY = %w[erx_session].freeze
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
+    # OTP's applications whose NIFs only the domains' runtime images link
+    # (docs/design-crypto.md, "Three runtime images"): neither the system release nor the
+    # hosted runtime, which links neither NIF, can load them, so the hosted oracle's tree
+    # leaves them out (OracleHosted.application_files) and a suite there skips them as on a
+    # stock OTP built without crypto.
+    DOMAIN_IMAGE_ONLY = %w[asn1 crypto].freeze
+    raise Error, "DOMAIN_IMAGE_ONLY names what the release does not ship: #{DOMAIN_IMAGE_ONLY - APPLICATIONS}" unless
+      (DOMAIN_IMAGE_ONLY - APPLICATIONS).empty?
 
     NAME = 'erxos'
     BOOT_DEADLINE = 120
@@ -104,13 +112,18 @@ module Erx
     #   the display domain (G9, DisplayRelease).
     #   No manifest names it yet: it is the client side's release, which DisplayRelease
     #   reads, and a client domain's own script takes the same applications.
+    # * ssh, the SSH domain's (docs/design-ssh.md, "The SSH domain"): asn1 and crypto
+    #   (DOMAIN_IMAGE_ONLY), and public_key, ssh and erx_ssh as the runtime builds them.
+    #   No other script names crypto, so no other domain has it on its code path.
+    #   No manifest names it yet; the native domain tests boot it (NativeDomain).
     RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
                         'session' => [*DOMAIN_BASE, 'erx_net_client', 'erx_shell', 'erx_web_line', 'erx_session'].freeze,
                         'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
                         'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
                         'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
                         'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
-                        'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win', 'erx_ui'].freeze }.freeze
+                        'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win', 'erx_ui'].freeze,
+                        'ssh' => [*DOMAIN_BASE, 'asn1', 'crypto'].freeze }.freeze
 
     # Refuses applications of which no release holds one: an application the runtime
     # builds that neither the system release (system) nor a script of the release

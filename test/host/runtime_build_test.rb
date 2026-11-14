@@ -210,8 +210,16 @@ class RuntimeBuildTest < Minitest::Test
   def test_the_build_makes_runtime_tools_erlang_only
     build
     assert_includes @runner.steps, 'runtime-runtime_tools'
-    assert_equal %w[kernel stdlib compiler runtime_tools].map { |application| "lib/#{application}/src" },
+    assert_equal %w[kernel stdlib compiler runtime_tools asn1 crypto].map { |application| "lib/#{application}/src" },
                  @runner.directories
+  end
+
+  # asn1 ships its run-time module alone (docs/design-crypto.md, "OTP's applications"):
+  # its make is told to build none of the ASN.1 compiler's modules; crypto's is not.
+  def test_the_build_makes_asn1_run_time_module_only
+    build
+    assert_includes @runner.argvs.fetch('runtime-asn1'), 'CT_MODULES='
+    refute_includes @runner.argvs.fetch('runtime-crypto'), 'CT_MODULES='
   end
 
   # An application's make writes into ../ebin without creating it, and otp/ tracks none.
