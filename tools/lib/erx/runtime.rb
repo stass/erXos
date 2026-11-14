@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'open3'
+require_relative 'asn1_specifications'
 require_relative 'dependencies'
 require_relative 'domain_image_apps'
 require_relative 'erlang_apps'
@@ -233,15 +234,14 @@ module Erx
       end
     end
 
-    # The modules generated from an application's ASN.1 specifications (M.asn1, or a set
-    # M.set.asn that is one module) whose generated Erlang the copy holds. A beam of one
-    # whose Erlang is gone goes too: make takes that Erlang for an intermediate file, which
-    # it does not generate again for a beam it finds newer than the specification, and
-    # the src make would then miss the headers generated beside it.
+    # The modules generated from an application's ASN.1 specifications (Asn1Specifications)
+    # whose generated Erlang the copy holds. A beam of one whose Erlang is gone goes too:
+    # make takes that Erlang for an intermediate file, which it does not generate again
+    # for a beam it finds newer than the specification, and the src make would then miss
+    # the headers generated beside it.
     def modules_with_generated_erlang(otp, application)
-      specifications = Dir.glob('asn1/*.{asn1,set.asn}', base: File.join(otp, 'lib', application))
-                          .map { |path| File.basename(path).delete_suffix('.set.asn').delete_suffix('.asn1') }
-      specifications.select { |name| File.file?(in_copy(File.join('lib', application, 'src', "#{name}.erl"))) }
+      Asn1Specifications.modules(File.join(otp, 'lib', application, 'asn1'))
+                        .select { |name| File.file?(in_copy(File.join('lib', application, 'src', "#{name}.erl"))) }
     end
 
     def build_liberx

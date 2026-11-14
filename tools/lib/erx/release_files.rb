@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'asn1_specifications'
 require_relative 'domain_image_apps'
 require_relative 'erlang_apps'
 require_relative 'error'
@@ -373,23 +374,7 @@ module Erx
               Dir.glob(File.join(directory, '**', "#{base}.erl")).min
       return [found] if found
 
-      asn1 = File.join(directory, 'asn1')
-      specification = File.join(asn1, "#{base}.asn1")
-      return [specification] if File.file?(specification)
-
-      set = File.join(asn1, "#{base}.set.asn")
-      File.file?(set) ? [set, *set_members(set, asn1)] : []
-    end
-
-    # The specifications a set names, one per line after its comment header.
-    def set_members(set, asn1)
-      File.readlines(set, chomp: true).reject { |line| line.empty? || line.start_with?('%') }.map do |name|
-        member = File.join(asn1, name)
-        raise Error, "#{set} names #{name}, which is not a specification beside it" if
-          name.include?('/') || !File.file?(member)
-
-        member
-      end
+      Asn1Specifications.sources(File.join(directory, 'asn1'), base)
     end
 
     def version(application) = self.class.app_version(File.join(@otp, 'lib', application, 'ebin'), application)

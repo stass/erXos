@@ -230,7 +230,8 @@ class RuntimeBuildTest < Minitest::Test
   # generated from it, and removes it once that Erlang is gone, as make would otherwise
   # find the beam current and generate neither the Erlang nor the headers beside it.
   def test_public_key_generates_its_asn1_modules_deterministically
-    %w[DSS.asn1 OTP-PKIX.asn1 PKCS-FRAME.set.asn].each { |name| write_otp("lib/public_key/asn1/#{name}", 'spec') }
+    %w[DSS.asn1 OTP-PKIX.asn1 PKCS5v2-0.asn1].each { |name| write_otp("lib/public_key/asn1/#{name}", 'spec') }
+    write_otp('lib/public_key/asn1/PKCS-FRAME.set.asn', "%% a set\n\nPKCS5v2-0.asn1\n")
     build
     %w[runtime-public_key-asn1 runtime-public_key-src].each do |step|
       assert_includes @runner.argvs.fetch(step), 'ERL_DETERMINISTIC=yes', step

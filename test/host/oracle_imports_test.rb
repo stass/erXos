@@ -58,9 +58,10 @@ class OracleImportsTest < Minitest::Test
 
   # otp/ORIGIN.md records what a re-import with the profile would exclude, each path
   # for the profile's reason and in the order the import records them: the import's
-  # exclusions, run over a tree that holds every recorded path and every name an
-  # exclusion keeps, record the same. Otherwise a re-import would bring back the
-  # prebuilt beams, boot scripts and ASN.1 compiler and record them as imported.
+  # exclusions, run over a tree that holds every recorded path, every name an
+  # exclusion keeps and public_key's ASN.1 specifications, record the same.
+  # Otherwise a re-import would bring back the prebuilt beams, boot scripts, ASN.1
+  # compiler and generated ASN.1 modules and record them as imported.
   def test_the_import_profile_excludes_what_the_origin_record_excludes
     profile = JSON.parse(File.read(File.expand_path('../../config/imports/otp.json', __dir__)))
     recorded = Erx::Origin.new(root: File.expand_path('../../otp', __dir__)).inventory.fetch('exclusions')
@@ -74,6 +75,7 @@ class OracleImportsTest < Minitest::Test
         # The import prunes an application outside the profile's set only as a directory.
         relative.match?(%r{\Alib/[^/]+\z}) ? FileUtils.mkdir_p(path) : File.write(path, '')
       end
+      FileUtils.cp_r(File.expand_path('../../otp/lib/public_key/asn1', __dir__), File.join(root, 'lib/public_key'))
       assert_equal recorded, Erx::ImportOrigins.remove_exclusions(root, profile: profile, component: 'otp')
     end
     assert_includes recorded.map { |exclusion| exclusion.fetch('path') }, 'erts/ebin'
@@ -134,6 +136,54 @@ class OracleImportsTest < Minitest::Test
       refute File.exist?(File.join(project, 'otp/erts/ebin'))
       excluded = Erx::Origin.new(root: File.join(project, 'otp')).inventory.fetch('exclusions')
       assert_includes excluded.map { |exclusion| exclusion.fetch('path') }, 'erts/ebin'
+    end
+  end
+
+  # What the ASN.1 compiler wrote for each module the specifications make, a new
+  # one included, leaves the import without a row in the profile: a set's module
+  # goes, and a hand-written module named after one of the set's members stays.
+  def test_generated_asn1_modules_leave_the_import
+    notice = "%% SPDX-License-Identifier: Apache-2.0\n"
+    asn1 = 'lib/public_key/asn1'
+    source = 'lib/public_key/src'
+    Dir.mktmpdir('erx-otp-asn1-') do |project|
+      fixture_import(project, bad_notice: false,
+                              extra: { "#{asn1}/New-2030.asn1" => "-- SPDX-License-Identifier: Apache-2.0\n",
+                                       "#{asn1}/Member.asn1" => "-- SPDX-License-Identifier: Apache-2.0\n",
+                                       "#{asn1}/Frame.set.asn" => "#{notice}\nMember.asn1\n",
+                                       "#{source}/New-2030.erl" => notice, "#{source}/New-2030.asn1db" => 'db',
+                                       "#{source}/Frame.erl" => notice, "#{source}/Frame.hrl" => notice,
+                                       "#{source}/Member.erl" => notice, "#{source}/public_key.erl" => notice })
+      Erx::ImportOrigins.write(root: project, component: 'otp')
+      excluded = Erx::Origin.new(root: File.join(project, 'otp')).inventory.fetch('exclusions')
+                            .select { |exclusion| exclusion.fetch('path').start_with?("#{source}/") }
+      assert_equal %W[#{source}/pubkey_moduli.hrl #{source}/Frame.erl #{source}/Frame.hrl #{source}/New-2030.erl
+                       #{source}/New-2030.asn1db],
+                   excluded.map { |exclusion| exclusion.fetch('path') }
+      assert_equal %w[Member.erl public_key.erl], Dir.children(File.join(project, 'otp', source)).sort
+    end
+  end
+
+  # The compiler's output is found from an asn1 directory of the archive and the plain
+  # files its sets name, never through a link to other specifications, and a set that
+  # names anything else fails the import with a diagnostic.
+  def test_generated_asn1_modules_come_from_the_archive_s_own_specifications
+    Dir.mktmpdir('erx-otp-asn1-link-') do |root|
+      FileUtils.mkdir_p([File.join(root, 'lib/public_key/src'), File.join(root, 'lib/other')])
+      File.write(File.join(root, 'lib/other/DSS.asn1'), 'spec')
+      File.write(File.join(root, 'lib/public_key/src/DSS.erl'), 'hand-written')
+      File.symlink('../other', File.join(root, 'lib/public_key/asn1'))
+      profile = { 'applications' => %w[other public_key], 'exclusions' => [] }
+      error = assert_raises(Erx::Error) { Erx::ImportOrigins.remove_exclusions(root, profile: profile, component: 'otp') }
+      assert_match(/lib\/public_key\/asn1 is something other than a directory/, error.message)
+      assert File.file?(File.join(root, 'lib/public_key/src/DSS.erl'))
+      ["x\0y.asn1\n", "../other/DSS.asn1\n", ".hidden\n"].each do |set|
+        File.write(File.join(root, 'lib/other/Frame.set.asn'), set)
+        assert_raises(Erx::Error) { Erx::Asn1Specifications.modules(File.join(root, 'lib/other')) }
+      end
+      File.unlink(File.join(root, 'lib/other/Frame.set.asn'))
+      File.symlink('DSS.asn1', File.join(root, 'lib/other/Frame.set.asn'))
+      assert_raises(Erx::Error) { Erx::Asn1Specifications.modules(File.join(root, 'lib/other')) }
     end
   end
 
