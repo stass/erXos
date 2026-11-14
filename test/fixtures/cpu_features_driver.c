@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "erx/arch/aarch64/cpu_id.h"
+#include "erx/abi.h"
 #include "liberx/backend/core/cpu_features.h"
 #include "musl/arch/aarch64/bits/hwcap.h"
 
@@ -44,6 +44,14 @@ static const named_bit_t hwcap2_names[] = {
 	NAMED(HWCAP2, RNG), NAMED(HWCAP2, BTI), NAMED(HWCAP2, MTE),
 };
 
+/* The handoff word each argument fills, in the order the arguments come. */
+static const uint32_t argument_words[] = {
+	ERX_CPU_ID_WORD_AA64ISAR0, ERX_CPU_ID_WORD_AA64ISAR1, ERX_CPU_ID_WORD_AA64ISAR2,
+	ERX_CPU_ID_WORD_AA64PFR0, ERX_CPU_ID_WORD_AA64PFR1,
+};
+
+#define ARGUMENTS	(sizeof(argument_words) / sizeof(argument_words[0]))
+
 static void
 print_word(const char *label, uint64_t word, const named_bit_t *names, size_t count)
 {
@@ -64,10 +72,10 @@ main(int argc, char **argv)
 	uint64_t id[ERX_BOOT_CPU_ID_COUNT] = { 0 };
 	erx_cpu_features_t features;
 
-	if (argc != 1 + ERX_CPU_ID_WORDS)
+	if ((size_t)argc != 1 + ARGUMENTS)
 		return (2);
-	for (int index = 0; index < ERX_CPU_ID_WORDS; index++)
-		id[index] = strtoull(argv[1 + index], NULL, 16);
+	for (size_t index = 0; index < ARGUMENTS; index++)
+		id[argument_words[index]] = strtoull(argv[1 + index], NULL, 16);
 	features = erx_cpu_features(id);
 	print_word("hwcap", features.hwcap, hwcap_names, sizeof(hwcap_names) / sizeof(hwcap_names[0]));
 	print_word(" hwcap2", features.hwcap2, hwcap2_names, sizeof(hwcap2_names) / sizeof(hwcap2_names[0]));

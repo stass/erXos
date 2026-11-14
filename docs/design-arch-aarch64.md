@@ -663,34 +663,37 @@ reads `ID_AA64ISAR0_EL1`, `ID_AA64ISAR1_EL1`, `ID_AA64ISAR2_EL1`,
 `ID_AA64PFR0_EL1` and `ID_AA64PFR1_EL1` at EL1 through the accessors
 generated from `hw/sysreg/aarch64.json` (`kernel/arch/aarch64/cpu_id.c`,
 the one caller the `sysreg-read` chokepoint allows) into the handoff's
-`cpu_id` words, in the order `include/erx/arch/aarch64/cpu_id.h` gives.
-The root turns the words into feature bits with a pure core,
-`liberx/backend/core/arch/aarch64/cpu_features.c`, in two steps:
+`cpu_id` words, at the word the `cpu_id_word` enum of
+`abi/arch/aarch64.txt` gives each. The root turns the words into feature
+bits with a pure core, `liberx/backend/core/arch/aarch64/cpu_features.c`,
+over one table with a row for each feature the stopgap lets EL0 use. A
+row holds the feature field, read through the accessors generated from
+`hw/sysreg/aarch64.json`; the least value that has the feature, as
+FreeBSD 15.1.0 maps fields to bits (`sys/arm64/arm64/identcpu.c`, its
+`MRS_HWCAP` tables, with the values of `sys/arm64/include/armreg.h`); and
+the bit, musl's own from its `arch/aarch64/bits/hwcap.h`, in `hwcap` or
+`hwcap2`. `FP` and `AdvSIMD` are signed: `0b1111` means absent. Field
+positions and bit values come from their sources; the least values are
+FreeBSD's, written into the rows, since `hw/sysreg/aarch64.json` keeps
+only each field's name, offset and width.
 
-1. **Decode.** Each feature field is compared with the least value that
-   has the feature, as FreeBSD 15.1.0 maps fields to bits
-   (`sys/arm64/arm64/identcpu.c`, `parse_cpu_features` and its
-   `MRS_HWCAP` tables, with the values of `sys/arm64/include/armreg.h`).
-   `FP` and `AdvSIMD` are signed: `0b1111` means absent. Field positions
-   are Arm's, through the generated field accessors; the bits are musl's
-   own, from its `arch/aarch64/bits/hwcap.h`, so no value is copied.
-2. **Allow.** Only features the kernel enables at EL0 and saves on a
-   switch survive. On the stopgap these are FP and Advanced SIMD with
-   their half-precision forms, AES, PMULL, SHA1, SHA2, SHA512, SHA3, SM3,
-   SM4, CRC32, the LSE atomics, the dot product, FCMA, JSCVT, LRCPC and
-   its immediate-offset form, DC CVAP and FLAGM: Fiasco saves `q0` to
-   `q31`, `FPCR` and `FPSR` on every switch, the flags live in `PSTATE`,
-   and `SCTLR_EL1.UCI` lets EL0 clean to the point of persistence.
-   `hwcap2` claims nothing. Never claimed: SVE and its extensions (Fiasco
-   neither enables nor saves their state, and `CONFIG_ARM_SVE` is
-   forbidden), pointer authentication and BTI (their `SCTLR_EL1` enables
-   are clear), MTE, and CPUID: a program that reads the identification
-   registers on its word, as OpenSSL's `armcap.c` reads `MIDR_EL1`, would
-   fault, since no kernel here emulates the read. A bit for state the
-   kernel does not save would let one thread read another's registers.
+Each row carries the reason the stopgap honours it: the kernel enables
+the feature at EL0 and saves its state on a switch. The table itself is
+the list of claimed features. On the stopgap the reasons are that Fiasco
+saves `q0` to `q31`, `FPCR` and `FPSR` on every switch and the general
+registers and `PSTATE`'s flags on every entry, and that `SCTLR_EL1.UCI`
+lets EL0 clean to the point of persistence. No `hwcap2` feature has a
+row. With no row, and so never claimed: SVE and its
+extensions (Fiasco neither enables nor saves their state, and
+`CONFIG_ARM_SVE` is forbidden), pointer authentication and BTI (their
+`SCTLR_EL1` enables are clear), MTE, and CPUID: a program that reads the
+identification registers on its word, as OpenSSL's `armcap.c` reads
+`MIDR_EL1`, would fault, since no kernel here emulates the read. A bit for
+state the kernel does not save would let one thread read another's
+registers.
 
-A feature joins the allowed set only once the kernel's enable and its
-save are checked; the host test ties the refused set to the options
+A feature joins by adding its row, once the kernel's enable and its save
+are checked; the host test ties the refused set to the options
 `tools/lib/erx/fiasco_config.rb` forbids.
 
 ### Cache maintenance

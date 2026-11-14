@@ -67,8 +67,8 @@ struct erx_boot_handoff_view {
 	 */
 	erx_boot_range_t tree;
 	/*
-	 * The boot CPU's identification registers as bootstrap read them, in the
-	 * order of the architecture's reader (erx_boot_cpu_id_read); what they
+	 * The boot CPU's identification registers as bootstrap read them, at the
+	 * words the architecture's cpu_id_word gives (abi/arch/<arch>.txt); what they
 	 * claim is untrusted until the root's feature core takes them.
 	 */
 	uint64_t	 cpu_id[ERX_BOOT_CPU_ID_COUNT];
@@ -129,8 +129,8 @@ erx_boot_tree_range_valid(uint64_t start, uint64_t size)
 }
 
 /*
- * Reads the boot CPU's identification registers into id, in kernel mode, in the
- * order the architecture's layer defines, its unused words 0
+ * Reads the boot CPU's identification registers into id, in kernel mode, at the
+ * words the architecture's cpu_id_word gives (abi/arch/<arch>.txt), its other words 0
  * (kernel/arch/<arch>/cpu_id.c). Bootstrap calls it and hands the words to
  * erx_boot_handoff_write.
  */

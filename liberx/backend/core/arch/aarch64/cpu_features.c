@@ -4,154 +4,123 @@
  */
 
 /*
- * AT_HWCAP and AT_HWCAP2 from the boot CPU's identification registers, in two
- * steps (docs/design-arch-aarch64.md, "CPU feature words"):
+ * AT_HWCAP and AT_HWCAP2 from the boot CPU's identification registers
+ * (docs/design-arch-aarch64.md, "CPU feature words"). The table in
+ * erx_cpu_features has one row for each feature the stopgap kernel lets user
+ * mode use, and a feature's bit is set when its field is at least the least
+ * value that has it. Fields are read through the accessors generated from
+ * hw/sysreg/aarch64.json; the least values are FreeBSD 15.1.0's
+ * (sys/arm64/arm64/identcpu.c, its MRS_HWCAP tables, with the values of its
+ * sys/arm64/include/armreg.h); the bits are musl's own, from its
+ * arch/aarch64/bits/hwcap.h.
  *
- * 1. decode: each feature field's value against the least value that has the
- *    feature, as FreeBSD 15.1.0 maps them (sys/arm64/arm64/identcpu.c,
- *    parse_cpu_features and its MRS_HWCAP tables; the values are its
- *    sys/arm64/include/armreg.h's). The fields' positions are Arm's, through
- *    the accessors generated from hw/sysreg/aarch64.json, and the bits are
- *    musl's own, from its arch/aarch64/bits/hwcap.h.
- * 2. allow: only the bits of CLAIMED_HWCAP and CLAIMED_HWCAP2 survive, the
- *    features the stopgap kernel enables for user mode and whose state it
- *    saves on a switch. A bit for state the kernel does not save (SVE's
- *    vectors, say) would let one thread see another's registers, so decode
- *    may say present and allow still drops it.
+ * A feature gets a row only once the stopgap is shown to enable it for user
+ * mode and to save its state on a switch, and the row's comment cites where,
+ * in Fiasco's sources under fiasco/kernel/src/kern/arm: a bit for state the
+ * kernel does not save would let one thread see another's registers. Without
+ * a row, and so never claimed: SVE (CONFIG_ARM_SVE is forbidden, so its state
+ * is neither enabled nor saved); pointer authentication and BTI
+ * (Sctlr_el1_generic, 64/cpu-arm-64.cpp:43-49, leaves EnIA, EnIB, EnDA, EnDB
+ * and BT0 clear); MTE; and CPUID, which FreeBSD claims on every CPU because
+ * its kernel emulates user mode's reads of the identification registers
+ * (identcpu.c:2864). Fiasco emulates none, and a program that read them on
+ * CPUID's word (OpenSSL's armcap.c reads MIDR_EL1) would fault. No AT_HWCAP2
+ * feature has a row; a row names its bit in either word.
  *
  * Nothing here reads a register: the words come from the handoff.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
-#include "erx/arch/aarch64/cpu_id.h"
+#include "erx/abi.h"
 #include "erx/arch/aarch64/sysreg_fields.h"
 #include "liberx/backend/core/cpu_features.h"
 #include "musl/arch/aarch64/bits/hwcap.h"
 
-_Static_assert(ERX_CPU_ID_WORDS <= ERX_BOOT_CPU_ID_COUNT,
-    "the handoff holds every identification register decode reads");
+/* A feature field's value, the least value that has the feature, and its bit. */
+typedef struct claim {
+	int			 value;
+	int			 least;
+	erx_cpu_features_t	 bit;
+} claim_t;
 
 /*
- * What the stopgap gives user mode, from Fiasco's kern/arm sources: FP and
- * SIMD are on (CONFIG_FPU, which tools/lib/erx/fiasco_config.rb requires) and
- * saved whole on every switch, q0-q31 with FPCR and FPSR
- * (64/fpu-arm.cpp:211-243), so the FP and SIMD instruction sets below cost no
- * state of their own; FLAGM's flags live in PSTATE, saved on every entry;
- * DC CVAP from user mode needs SCTLR_EL1.UCI, which Sctlr_el1_generic sets
- * (64/cpu-arm-64.cpp:43-49). Never claimed: SVE (CONFIG_ARM_SVE is forbidden,
- * so its state is neither enabled nor saved), pointer authentication and BTI
- * (Sctlr_el1_generic leaves EnIA, EnIB, EnDA, EnDB and BT0 clear), and
- * CPUID (user mode cannot read the identification registers, and Fiasco
- * emulates no such read). What else decode finds stays out until each is
- * checked against the stopgap.
+ * A signed 4-bit feature field's value, as identcpu.c's mrs_field_cmp (:2491)
+ * compares the fields its table marks signed, FP and AdvSIMD (:1757-1760):
+ * 0xf, -1, says absent and 0 present.
  */
-#define CLAIMED_HWCAP	(HWCAP_FP | HWCAP_ASIMD | HWCAP_FPHP | HWCAP_ASIMDHP | HWCAP_AES | \
-	HWCAP_PMULL | HWCAP_SHA1 | HWCAP_SHA2 | HWCAP_SHA512 | HWCAP_SHA3 | HWCAP_SM3 | HWCAP_SM4 | \
-	HWCAP_CRC32 | HWCAP_ATOMICS | HWCAP_ASIMDDP | HWCAP_FCMA | HWCAP_JSCVT | HWCAP_LRCPC | \
-	HWCAP_ILRCPC | HWCAP_DCPOP | HWCAP_FLAGM)
-#define CLAIMED_HWCAP2	0
-
-static erx_cpu_features_t	decode(const uint64_t id[ERX_BOOT_CPU_ID_COUNT]);
+static int
+signed_field(uint64_t field)
+{
+	return ((int)(field ^ 0x8) - 0x8);
+}
 
 erx_cpu_features_t
 erx_cpu_features(const uint64_t id[ERX_BOOT_CPU_ID_COUNT])
 {
-	const erx_cpu_features_t present = decode(id);
+	/* Each word read lies in the handoff, which the parameter's type does not check. */
+	_Static_assert(ERX_CPU_ID_WORD_AA64PFR0 < ERX_BOOT_CPU_ID_COUNT, "PFR0 is a handoff word");
+	_Static_assert(ERX_CPU_ID_WORD_AA64ISAR0 < ERX_BOOT_CPU_ID_COUNT, "ISAR0 is a handoff word");
+	_Static_assert(ERX_CPU_ID_WORD_AA64ISAR1 < ERX_BOOT_CPU_ID_COUNT, "ISAR1 is a handoff word");
+	const uint64_t pfr0 = id[ERX_CPU_ID_WORD_AA64PFR0];
+	const uint64_t isar0 = id[ERX_CPU_ID_WORD_AA64ISAR0];
+	const uint64_t isar1 = id[ERX_CPU_ID_WORD_AA64ISAR1];
+	const claim_t claims[] = {
+		/*
+		 * FP and SIMD, with their half-precision forms (identcpu.c:1703-1716):
+		 * enabled (CONFIG_FPU, which tools/lib/erx/fiasco_config.rb requires)
+		 * and saved whole on every switch, q0-q31 with FPCR and FPSR
+		 * (64/fpu-arm.cpp:211-243), since the same file forbids CONFIG_LAZY_FPU.
+		 */
+		{ signed_field(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0)), 0, { .hwcap = HWCAP_FP } },
+		{ signed_field(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0)), 1, { .hwcap = HWCAP_FPHP } },
+		{ signed_field(erx_sysreg_id_aa64pfr0_el1_advsimd_get(pfr0)), 0, { .hwcap = HWCAP_ASIMD } },
+		{ signed_field(erx_sysreg_id_aa64pfr0_el1_advsimd_get(pfr0)), 1, { .hwcap = HWCAP_ASIMDHP } },
 
-	return ((erx_cpu_features_t){ .hwcap = present.hwcap & (uint64_t)(CLAIMED_HWCAP),
-	    .hwcap2 = present.hwcap2 & (uint64_t)(CLAIMED_HWCAP2) });
-}
+		/*
+		 * Instructions over the FP and SIMD registers above, so they have no
+		 * state of their own; JSCVT also writes a general register and the flags,
+		 * saved as the next group says (identcpu.c:716, :726, :736, :746,
+		 * :792-793, :803, :814-815, :962, :972).
+		 */
+		{ erx_sysreg_id_aa64isar0_el1_aes_get(isar0), 1, { .hwcap = HWCAP_AES } },
+		{ erx_sysreg_id_aa64isar0_el1_aes_get(isar0), 2, { .hwcap = HWCAP_PMULL } },
+		{ erx_sysreg_id_aa64isar0_el1_sha1_get(isar0), 1, { .hwcap = HWCAP_SHA1 } },
+		{ erx_sysreg_id_aa64isar0_el1_sha2_get(isar0), 1, { .hwcap = HWCAP_SHA2 } },
+		{ erx_sysreg_id_aa64isar0_el1_sha2_get(isar0), 2, { .hwcap = HWCAP_SHA512 } },
+		{ erx_sysreg_id_aa64isar0_el1_sha3_get(isar0), 1, { .hwcap = HWCAP_SHA3 } },
+		{ erx_sysreg_id_aa64isar0_el1_sm3_get(isar0), 1, { .hwcap = HWCAP_SM3 } },
+		{ erx_sysreg_id_aa64isar0_el1_sm4_get(isar0), 1, { .hwcap = HWCAP_SM4 } },
+		{ erx_sysreg_id_aa64isar0_el1_dp_get(isar0), 1, { .hwcap = HWCAP_ASIMDDP } },
+		{ erx_sysreg_id_aa64isar1_el1_fcma_get(isar1), 1, { .hwcap = HWCAP_FCMA } },
+		{ erx_sysreg_id_aa64isar1_el1_jscvt_get(isar1), 1, { .hwcap = HWCAP_JSCVT } },
 
-/* bit when an unsigned 4-bit feature field is at least least. */
-static uint64_t
-at_least(uint64_t field, uint64_t least, uint64_t bit)
-{
-	return (field >= least ? bit : 0);
-}
+		/*
+		 * Instructions whose operands are the general registers and PSTATE's
+		 * flags, which every kernel entry saves (64/ivt.S:33-52 and :293-296)
+		 * and every return restores (:54-73 and :75-79) (identcpu.c:695, :771,
+		 * :781, :951-952).
+		 */
+		{ erx_sysreg_id_aa64isar0_el1_crc32_get(isar0), 1, { .hwcap = HWCAP_CRC32 } },
+		{ erx_sysreg_id_aa64isar0_el1_atomic_get(isar0), 2, { .hwcap = HWCAP_ATOMICS } },
+		{ erx_sysreg_id_aa64isar0_el1_ts_get(isar0), 1, { .hwcap = HWCAP_FLAGM } },
+		{ erx_sysreg_id_aa64isar1_el1_lrcpc_get(isar1), 1, { .hwcap = HWCAP_LRCPC } },
+		{ erx_sysreg_id_aa64isar1_el1_lrcpc_get(isar1), 2, { .hwcap = HWCAP_ILRCPC } },
 
-/*
- * bit when a signed 4-bit feature field is at least least, compared as
- * identcpu.c's mrs_field_cmp compares them: 0xf (-1) says absent, 0 present.
- */
-static uint64_t
-signed_at_least(uint64_t field, uint64_t least, uint64_t bit)
-{
-	return ((field ^ 0x8) >= (least ^ 0x8) ? bit : 0);
-}
+		/*
+		 * DC CVAP, which user mode may issue because Sctlr_el1_generic sets
+		 * SCTLR_EL1.UCI (64/cpu-arm-64.cpp:43-49; identcpu.c:1016).
+		 */
+		{ erx_sysreg_id_aa64isar1_el1_dpb_get(isar1), 1, { .hwcap = HWCAP_DCPOP } },
+	};
+	erx_cpu_features_t features = { 0 };
 
-/*
- * Every feature the words say the CPU has, whether or not the kernel enables it, and
- * CPUID, which FreeBSD claims for every CPU: decode is FreeBSD's mapping whole, and
- * what the stopgap cannot honour is allow's to drop.
- */
-static erx_cpu_features_t
-decode(const uint64_t id[ERX_BOOT_CPU_ID_COUNT])
-{
-	const uint64_t isar0 = id[ERX_CPU_ID_AA64ISAR0];
-	const uint64_t isar1 = id[ERX_CPU_ID_AA64ISAR1];
-	const uint64_t isar2 = id[ERX_CPU_ID_AA64ISAR2];
-	const uint64_t pfr0 = id[ERX_CPU_ID_AA64PFR0];
-	const uint64_t pfr1 = id[ERX_CPU_ID_AA64PFR1];
-	uint64_t hwcap = 0, hwcap2 = 0;
-
-	/*
-	 * CPUID says user mode may read the identification registers, which FreeBSD
-	 * claims on every CPU because its kernel emulates the read (identcpu.c:2864).
-	 * The stopgap does not, and a program that read them on its word (OpenSSL's
-	 * armcap.c reads MIDR_EL1) would fault, so allow always drops it.
-	 */
-	hwcap |= HWCAP_CPUID;
-
-	/* ID_AA64PFR0_EL1 (identcpu.c:1649-1716); FP and AdvSIMD are signed (:1757-1759). */
-	hwcap |= signed_at_least(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0), 0, HWCAP_FP);
-	hwcap |= signed_at_least(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0), 1, HWCAP_FPHP);
-	hwcap |= signed_at_least(erx_sysreg_id_aa64pfr0_el1_advsimd_get(pfr0), 0, HWCAP_ASIMD);
-	hwcap |= signed_at_least(erx_sysreg_id_aa64pfr0_el1_advsimd_get(pfr0), 1, HWCAP_ASIMDHP);
-	hwcap |= at_least(erx_sysreg_id_aa64pfr0_el1_sve_get(pfr0), 1, HWCAP_SVE);
-	hwcap |= at_least(erx_sysreg_id_aa64pfr0_el1_dit_get(pfr0), 1, HWCAP_DIT);
-
-	/* ID_AA64PFR1_EL1 (identcpu.c:1849-1860). */
-	hwcap |= at_least(erx_sysreg_id_aa64pfr1_el1_ssbs_get(pfr1), 1, HWCAP_SSBS);
-	hwcap2 |= at_least(erx_sysreg_id_aa64pfr1_el1_bt_get(pfr1), 1, HWCAP2_BTI);
-
-	/* ID_AA64ISAR0_EL1 (identcpu.c:676-816). */
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_aes_get(isar0), 1, HWCAP_AES);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_aes_get(isar0), 2, HWCAP_PMULL);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sha1_get(isar0), 1, HWCAP_SHA1);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sha2_get(isar0), 1, HWCAP_SHA2);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sha2_get(isar0), 2, HWCAP_SHA512);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_crc32_get(isar0), 1, HWCAP_CRC32);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_atomic_get(isar0), 2, HWCAP_ATOMICS);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_rdm_get(isar0), 1, HWCAP_ASIMDRDM);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sha3_get(isar0), 1, HWCAP_SHA3);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sm3_get(isar0), 1, HWCAP_SM3);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_sm4_get(isar0), 1, HWCAP_SM4);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_dp_get(isar0), 1, HWCAP_ASIMDDP);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_fhm_get(isar0), 1, HWCAP_ASIMDFHM);
-	hwcap |= at_least(erx_sysreg_id_aa64isar0_el1_ts_get(isar0), 1, HWCAP_FLAGM);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar0_el1_ts_get(isar0), 2, HWCAP2_FLAGM2);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar0_el1_rndr_get(isar0), 1, HWCAP2_RNG);
-
-	/* ID_AA64ISAR1_EL1 (identcpu.c:871-1017). */
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_dpb_get(isar1), 1, HWCAP_DCPOP);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar1_el1_dpb_get(isar1), 2, HWCAP2_DCPODP);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_apa_get(isar1), 1, HWCAP_PACA);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_api_get(isar1), 1, HWCAP_PACA);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_jscvt_get(isar1), 1, HWCAP_JSCVT);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_fcma_get(isar1), 1, HWCAP_FCMA);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_lrcpc_get(isar1), 1, HWCAP_LRCPC);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_lrcpc_get(isar1), 2, HWCAP_ILRCPC);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_gpa_get(isar1), 1, HWCAP_PACG);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_gpi_get(isar1), 1, HWCAP_PACG);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar1_el1_frintts_get(isar1), 1, HWCAP2_FRINT);
-	hwcap |= at_least(erx_sysreg_id_aa64isar1_el1_sb_get(isar1), 1, HWCAP_SB);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar1_el1_bf16_get(isar1), 1, HWCAP2_BF16);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar1_el1_dgh_get(isar1), 1, HWCAP2_DGH);
-	hwcap2 |= at_least(erx_sysreg_id_aa64isar1_el1_i8mm_get(isar1), 1, HWCAP2_I8MM);
-
-	/* ID_AA64ISAR2_EL1 (identcpu.c:1114-1124): the third pointer-authentication algorithm. */
-	hwcap |= at_least(erx_sysreg_id_aa64isar2_el1_apa3_get(isar2), 1, HWCAP_PACA);
-	hwcap |= at_least(erx_sysreg_id_aa64isar2_el1_gpa3_get(isar2), 1, HWCAP_PACG);
-	return ((erx_cpu_features_t){ .hwcap = hwcap, .hwcap2 = hwcap2 });
+	for (size_t index = 0; index < sizeof(claims) / sizeof(claims[0]); index++) {
+		if (claims[index].value >= claims[index].least) {
+			features.hwcap |= claims[index].bit.hwcap;
+			features.hwcap2 |= claims[index].bit.hwcap2;
+		}
+	}
+	return (features);
 }

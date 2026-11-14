@@ -53,7 +53,7 @@ class ChokepointsInlineAsmTest < Minitest::Test
   # user mode.
   def test_a_read_outside_the_listed_files_fails
     call = "unsigned long f(void) { return erx_sysreg_id_aa64pfr0_el1_read(); }\n"
-    %w[kernel/core/x.c kernel/arch/aarch64/x.c include/erx/arch/aarch64/cpu_id.h liberx/x.c].each do |path|
+    %w[kernel/core/x.c kernel/arch/aarch64/x.c include/erx/arch/aarch64/x.h liberx/x.c].each do |path|
       refute_empty evaluate([rule('sysreg-read')], { path => call }), path
     end
     pasted = "#include \"erx/arch/aarch64/sysreg.h\"\n#define RD(r) erx_sysreg_##r##_read()\n" \

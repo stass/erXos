@@ -29,10 +29,10 @@ class CpuFeaturesTest < Minitest::Test
     'CONFIG_LAZY_FPU' => [],
     'CONFIG_CPU_VIRT' => []
   }.freeze
-  # Never claimed on the stopgap, whatever its configuration (cpu_features.c's CLAIMED_HWCAP).
+  # Never claimed on the stopgap, whatever its configuration: cpu_features.c's table has no row for them.
   NEVER = %w[PACA PACG BTI MTE CPUID].freeze
 
-  # Every feature field at or past each threshold decode knows: unsigned fields 2,
+  # Every feature field at or past each threshold FreeBSD maps: unsigned fields 2,
   # FP and AdvSIMD 1 (half precision), SVE, DIT and BT 1, SSBS 2.
   ALL = %w[2222222222222220 2222222222222222 2222222222222222 0001000100110000 21].freeze
 
@@ -138,34 +138,42 @@ class CpuFeaturesTest < Minitest::Test
   end
 
   # CPUID would have a program read MIDR_EL1 from user mode (OpenSSL's armcap.c does), which
-  # the stopgap does not emulate: decode always finds it, and it is never claimed.
+  # the stopgap does not emulate: no field gives it, and it is never claimed.
   def test_cpuid_is_never_claimed
     [ALL, %w[0 0 0 0 0], %w[ffffffffffffffff ffffffffffffffff ffffffffffffffff 7777777777777777 ffffffffffffffff]].each do |words|
       refute_includes features(words).first, 'CPUID', words.inspect
     end
   end
 
-  # Seeded fault: CPUID let through the allowlist must be caught.
-  def test_an_allowlist_that_admits_cpuid_is_caught
-    driver = seeded('(HWCAP_CPUID | HWCAP_FP | ')
+  # Seeded fault: a row that claims CPUID must be caught.
+  def test_a_row_that_claims_cpuid_is_caught
+    driver = seeded(name: 'cpuid', row: '{ 0, 0, { .hwcap = HWCAP_CPUID } },')
     assert_raises(Minitest::Assertion) { refute_includes features(ALL, driver: driver).first, 'CPUID' }
     assert_equal %w[CPUID], refused(%w[0 0 0 0 0], driver: driver)
   end
 
-  # Seeded fault: SVE let through the allowlist must be caught.
-  def test_an_allowlist_that_admits_sve_is_caught
-    assert_equal %w[SVE], refused(ALL, driver: seeded('(HWCAP_SVE | HWCAP_FP | '))
+  # Seeded fault: a row that claims SVE must be caught.
+  def test_a_row_that_claims_sve_is_caught
+    row = '{ erx_sysreg_id_aa64pfr0_el1_sve_get(pfr0), 1, { .hwcap = HWCAP_SVE } },'
+    assert_equal %w[SVE], refused(ALL, driver: seeded(name: 'sve', row: row))
+  end
+
+  # Seeded fault: a row that claims an AT_HWCAP2 bit, BTI, must be caught, so the table's
+  # second word is checked too.
+  def test_a_row_that_claims_bti_is_caught
+    row = '{ erx_sysreg_id_aa64pfr1_el1_bt_get(id[ERX_CPU_ID_WORD_AA64PFR1]), 1, { .hwcap2 = HWCAP2_BTI } },'
+    assert_equal %w[BTI], refused(ALL, driver: seeded(name: 'bti', row: row))
   end
 
   private
 
-  # A driver over the core with CLAIMED_HWCAP opening with head instead of "(HWCAP_FP | ".
-  def seeded(head)
+  # A driver over the core with row added to its table, before the FP row.
+  def seeded(name:, row:)
     source = File.read(File.join(ROOT, CORE))
-    original = "#define CLAIMED_HWCAP\t(HWCAP_FP | "
-    assert_includes source, original
-    path = File.join(@directory, "seeded-#{head.scan(/[A-Z]+/)[1].downcase}.c")
-    File.write(path, source.sub(original) { "#define CLAIMED_HWCAP\t#{head}" })
+    anchor = "\t\t{ signed_field(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0)), 0, { .hwcap = HWCAP_FP } },\n"
+    assert_includes source, anchor
+    path = File.join(@directory, "seeded-#{name}.c")
+    File.write(path, source.sub(anchor) { "\t\t#{row}\n#{anchor}" })
     build(path, name: File.basename(path, '.c'))
   end
 end
