@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/erlang/otp",
   "revision": "OTP-29.1.2",
-  "applications": ["asn1", "compiler", "crypto", "kernel", "runtime_tools", "sasl", "stdlib", "tools"],
+  "applications": ["asn1", "compiler", "crypto", "kernel", "public_key", "runtime_tools", "sasl", "ssh", "stdlib", "tools"],
   "default_license": "Apache-2.0",
   "default_evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
   "rules": [
@@ -34,6 +34,8 @@
     {"path": "lib/tools/ebin", "reason": "prebuilt beams and .app files of an application erXos does not build or ship"},
     {"path": "lib/asn1/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
     {"path": "lib/crypto/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
+    {"path": "lib/public_key/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
+    {"path": "lib/ssh/ebin", "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"},
     {"path": "lib/asn1/src/asn1rtt_ber.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
     {"path": "lib/asn1/src/asn1rtt_check.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},
     {"path": "lib/asn1/src/asn1rtt_ext.beam", "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"},

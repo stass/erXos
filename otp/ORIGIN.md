@@ -91,19 +91,11 @@ Third-party notices remain in their original files.
       "reason": "outside the shipped OTP application set in the runtime design"
     },
     {
-      "path": "lib/public_key",
-      "reason": "outside the shipped OTP application set in the runtime design"
-    },
-    {
       "path": "lib/reltool",
       "reason": "outside the shipped OTP application set in the runtime design"
     },
     {
       "path": "lib/snmp",
-      "reason": "outside the shipped OTP application set in the runtime design"
-    },
-    {
-      "path": "lib/ssh",
       "reason": "outside the shipped OTP application set in the runtime design"
     },
     {
@@ -213,6 +205,14 @@ Third-party notices remain in their original files.
     {
       "path": "lib/asn1/src/prepare_templates.beam",
       "reason": "prebuilt beams that generate asn1's compiler (its templates and their preparer); erXos ships asn1's run-time module alone"
+    },
+    {
+      "path": "lib/public_key/ebin",
+      "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"
+    },
+    {
+      "path": "lib/ssh/ebin",
+      "reason": "prebuilt beams and .app files; erXos's runtime build compiles each application it ships from source"
     }
   ],
   "files": {
@@ -26786,6 +26786,6624 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
+    "lib/public_key/AUTHORS": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8aad52e8a6ad4b06777d7620a3b93016e0ff886a50d49d5b37994085326defc4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a4a89cbd01a8a688afa4b431ee5db88968b9e4dc364a881bea7b11e25660248a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/AlgorithmInformation-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7e290995d3ac41267823e1756d249e3770723eb53d37a47b81aceb30a5488d7f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/AsymmetricKeyPackageModuleV1.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "311b3a311922fed786d59403b031647bf4625c07202c2d47e60444af25809275",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/AttributeCertificateVersion1-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fe655fb902674849189b8f89e914e09d35a2138a79588261e3012bfe116632ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/CMSAesRsaesOaep-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e618ee2ce7df6d90ebae5436d0e5786e4f67ff70bf5327faab8cf0fb0215b692",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/CryptographicMessageSyntax-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "805c99a3b242a9c7b23ccec9727934de9d8f0ce3910ddc742b010eec3aa81c35",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/CryptographicMessageSyntaxAlgorithms-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2cf8d54fffa00148940fe7c98bdd21bd07d0659fa77d368eece7088f3c500a74",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/DSS.asn1": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f1f98246610d901749efee24086863ed35195e55158b6e3f34a5e47414ed195c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/ECPrivateKey.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5abc0d6574f37747815923a4dd37af8df8bc518a78b355251ab630c882087b0f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/EnrollmentMessageSyntax-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3594a41485d9fdf27b0657b5d8c4e92ed2e5643e4e1b1f51f5f263fa1748874f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/KEMAlgorithmInformation-2023.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "619552a731de197e58b2efafb535fb30c6c90fc953e2e45fcf5b16a4c6142639",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d7dbe49380fb031314d4795a5fae9df46a727e882ed92e630efd05078e6f14a6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/OCSP-2024-08.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d056a2d28ef7896fcf7755d9de2efad9f5ccf6e4e920e9592c6458c4c9081823",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/OTP-PKIX-Relaxed.asn1": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "864ee6cc3e630ff99c736dde262b24de0f5ed2767187ea21add7a042fbda1c94",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/OTP-PKIX-Relaxed.asn1config": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fe4759916029d0d18b79e529b28bf0ac0ec382263b086ecb4abfd52d54bebd2d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/OTP-PKIX.asn1": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "838e6d0333710c91d25679767e119088db8296f51da0d11bdb75b6d0890d4285",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/OTP-PKIX.asn1config": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0351072dcf2ec1748d68c46736b9072c519742be526e4cad20f4939449cd18bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKCS-1.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "56d3f437b5ec3587e0372a6c7771f5de619fe67ef8e38136180922689efee59b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKCS-10.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6547d14630beb3cb8ffd2e0757a0a70a708e2996dc78e180c54486d2c718c8e3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKCS-3.asn1": {
+      "license": "LicenseRef-RSA-PKCS3",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f100049a1a461ea564731b2f8778316c6a99ff8c97faa905fa9d3bd0e6ad02ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKCS-FRAME.set.asn": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "194d232d4ddffff48f11480b02dc4c3a5173dc4995736cdb62b9d71dd0035c19",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKCS5v2-0.asn1": {
+      "license": "LicenseRef-RSA-PKCS5v2-0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "03f47a7667892914c4b19ff6f738aca95a6bfb98030f5af2d9ed3937f1f2c430",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX-CommonTypes-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5e6a55ae79ede8480966faa98d9cfd217dda5dd6efe787faab8ca7ab5b553eb8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX-X400Address-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "116888b89f0dee910cdaf0607d724dc779c92137dbf96ed3de9a33615e2834c6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX1-PSS-OAEP-Algorithms-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "424c14becbd39ebcb1d4aea2e82cd4090d643b5db52941595c46eff65a1fa012",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX1Explicit-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5093e523b48cdc195f0a208a28bb835b887b97da1ac8110d4e48acd6fbbdd722",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX1Explicit-2009.asn1config": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c5cc0f1128ca22e15bff68ba10bf5780624bec4f99e01fa740cba153404018c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIX1Implicit-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0578d0f1f073aa6e89b1c25e3e31923b44eaec3989830788337bcbfb409908fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIXAlgs-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6ac79d673860f0c0a39677e56d103a6778b2b7ceecf63b95e0cc57dd78b66d6d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIXAttributeCertificate-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f84941d1468c58ef9dba2b46dd0aa857d4ac8933aef06d6e5a5883bb2d01eaea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIXCMP-2023.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1481878da07e0dfa8115df2bb321627fe66e87911f1c5ef9d862a656c4e23674",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/PKIXCRMF-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a8723e014ebe229d6c0603d7ce3d7c66cff94536f0a4a92a022afa8d4463cb66",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/RFC5639.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "827726dc35178899aa7958e2507af25e109b1ae35fcc3488a3b00cdc35fa8d74",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/SLH-DSA-Module-2024.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f5416c0e4c7aea9c6f4656d95f0438e1d525dbdec4c5a244d540fbea3ebd2585",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/Safecurves-pkix-18.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ad2319f29c44f55c62a5e7d7df9bcb357e5405fdea520878928c5b13c66ff113",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/SecureMimeMessageV3dot1-2009.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cdb07568048c09f5f5616c9b01c3ed82576616c6710a4bdb5023ab9c23be61c4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/X509-ML-DSA-2025.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "45b2075aa50ae145b6855d58ab098cfb1dcea90de49329b066f317c59c142d56",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/asn1/X509-ML-KEM-2025.asn1": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9c12c0d2feb5ae0ee96feb9c83730303846a6ce2cc0efb49080645644941b59e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/c_src/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3f448d18446c29b961d10183ce86dad8641614f51e1675e4296a07b1aef085be",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/c_src/public_key.c": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "37340e742df2896d2ac23713cfb658cb5401f199d8dd737d91236ba234174fbf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "48725c90acb8ab23c9a39bdbea454807e532d172b9d4eda9098d2d7425a2af9c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/docs.exs": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b876fd6afbdd7a912fa91bd01190fb344a03a039e550c510d228f2b355e239e9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/guides/public_key_records.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "692deb33dde0493e565af68105c0cb3bd1c75b219d7af068fa54edc789a88fef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/guides/using_public_key.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "589c3e71eeb6f53b8af6250fa312674d321146ecb588b96fe56a3714f7bfa3c6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/notes.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "194c28e8528312310cf3ff3ca011f938690ce632b86d315da46f4f68bd63fef3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/doc/public_key_app.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e5cbcc1743e6ce009dc910296e0905c2e29a45f6113c62908a924b7e5b3863c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/include/OTP-PUB-KEY.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d7826f40b1443f6c164da8ecaf8f91e8d5ae66c574784499aee8a41346adc5d3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/include/PKCS-FRAME.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f15544f2958d1654914c3e3f2bcbde1a73314e9c738e94650216f53796a58c22",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/include/PKIXCMP.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9121d638901bcf4a0407816e2e5505745e58bcc59f0692b18c0501219f77bdb3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/include/PKIXCRMF.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "42a62cf9fb0c2f1d723d7ee57c4b17d0f1e4a27391747201154c3baa51b50051",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/include/public_key.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "54944c6aaf3fd08e337870e86e3b482fb3c5f988b11168eed35306d525501f26",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/priv/convert.escript": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3addd38a7748787048e871491be3aaa0e60fe48d079ec89832051ca96d8a7f06",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/priv/generate": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "494f0dd643e61b00c58905134a56564f71ae50a4e93ce158adeacaa8fed4705b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/priv/moduli": {
+      "license": "BSD-2-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc876931a4433a5a6ea77bc0fc1384c3f70015f86f87cc01e83a5eedef9f641b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AlgorithmInformation-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "92e1fc0c6b53fdf4350a96a7cd43c7ae59189db6720920a2a6cbc6735ba1fde9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AlgorithmInformation-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "44da55a21987776b2e050a09d1881ae4231621eb9a81a7e459670432ab5d3185",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AlgorithmInformation-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0a3b8b1ac1d3c84754a5477b246393abd27719edfefcc9f718e952ce54099b95",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AttributeCertificateVersion1-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8353cd13485658d501aa35537f5b600a3e664e4d2ccb51a643c81b6c22c06638",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AttributeCertificateVersion1-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9f2384e08e78602ba5c85dc34c33bc40f4433874f19391c406bcd2944fda101a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/AttributeCertificateVersion1-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ef14c4a104b077d59a007f12ac6d8164ed343606548676c14e906d6acc29ad40",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CMSAesRsaesOaep-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "09ed9a69061a6224389f914eada74d9528facdcb3fc9943b5ce5569fa4b3f76a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CMSAesRsaesOaep-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "58343c284ef8d3f47e01d672f5548b8ed56cea7b67af3df462640d4178b3fc6f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CMSAesRsaesOaep-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6d111263de9bba6ce21e7c3e72928f86b816b16f5769e99e4e8503d47f543fe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntax-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ffad58b92f3288ddfd4bb60c9994be70b79cc2f5764ca8d7d906caba5a4a41a1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntax-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a081894c8a8ad975d78d1c891ae711155869735aef307284c59f5cade74b9d03",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntax-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "340652d52333e8929d647734876727f1524f29895462c79b0fcf9c7051296429",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntaxAlgorithms-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5f8044a247a22d5c248ebef7c2cf05cb2c6c543ed5292a792ae79c61f69ac1fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntaxAlgorithms-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "542b3789fdaefdf0375e3cd7696a596ab56181de24640e5f1b4aff7788e5921e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/CryptographicMessageSyntaxAlgorithms-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "acafc7b7eff26ff8e0313e7586aa1b2d126909cf9dc9030456d7bda99859ab18",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/DSS.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ca30a7155993f92825a3aa36badd95bac71d200c3714ab80ce1771cd0dac8166",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/DSS.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f378c49d2970f2e2ef7ec53e00fa37c3b398736917b8c7ca440b6bec0b463158",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/DSS.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a07792ec99c1700275f3989dc7ca00bef5623da7174ae1f2975b569a5f123a5a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/ECPrivateKey.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7e27a19c54b238a0c48b55143c0bc7499f74e335bf73b519d7df7caa1be45ccb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/ECPrivateKey.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8d22e6182c383f9de76148cef13fa78fac9c019b17ea5f2c9a1bc73c63a28603",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/ECPrivateKey.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4b210cc9d67dee27a73ce6adb53e5775b97ed1b1f111be65235a459b60382944",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/EnrollmentMessageSyntax-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cd340300246bb94a01746b40da3895d801309ecd8eb587f64f8e9ab30a5309c4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/EnrollmentMessageSyntax-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ede2f8e576fe391f59e76199e946bab6b195c1e16064321b0898e408fd008a1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/EnrollmentMessageSyntax-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "99ed42398447caf61f7786b11fd2dd5cbd62fb4f130dcf9f5c152133f602a0a4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/KEMAlgorithmInformation-2023.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c7e40029d7d121b8ec84ad601282601344883191ab3f3b7a4d13f677f50339da",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/KEMAlgorithmInformation-2023.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fbbdd8bc834ebf8df689651df113cdcba114324d7a428300e4727acbecaa8644",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b2a6f570a3c485b5c970e188bd7430658940fde51fc5f950d82a3f80ce639712",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OCSP-2024-08.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6baf603fc68879c1a636adff296d520fb0f0ea4630542cdd3225e3f2bfb09559",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OCSP-2024-08.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "07c7a23f36219e7d592e0bbea696d0051264b706df01835beece58ce5dd52107",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OCSP-2024-08.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bf47280274b9e46715148ed5cb47966f6be37f21b58f43b05299c212911eb75e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX-Relaxed.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b0bb724f94eacc3cb465808a3675f49851ec82c7c52ab2b3558288fc03ed2970",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX-Relaxed.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6eaeda81c71ecc0affa417730199c9257143277c97666184ee1a43798abcdcea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX-Relaxed.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "886691d5f3adb59acfdb653c60498647be227ca6657a813a6c3347ba25a2bfdd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8e5a7fb8f36639b498399107f77ccda2a64ffb81c6928be848c92f537546addb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e17ffd4eb0e1a7173213dbf8a40d23546fa319cfb77b98dd06a76ce6e8f39723",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/OTP-PKIX.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7205efe2a298f1e580d6928f82c4e4abce13c40e5fe5a98577df45f07f7075e5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-1.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cce72f8a271cf7cdf2e7a89861d6d08f2563ce377174f21de796a31d8770eb0b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-1.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d7c51a54793738c8220a5206a5f68a54d227f0e3af1378d681c78cc204e33557",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-1.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2c0ddf351ef4c17273407084961aa07ba00f48db20f820362b7f1a732d73d1b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-10.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e66f106b94e7f0812a27219867d89033ecb607ea7131d8c80cb3ee81d7cc691e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-10.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7f338d7e5d289e0cd0ada0a037522e41c1309dd3d135355599a325f97460f308",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-10.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "25524ee34ba53b43ebe2a2603dc0de1bd4cfb131687d55039d8d9f92b44dbba6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-3.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0ffbcb193178bcc6cfb592d9fe947fc8ba72cffaad8a96f984bc15b24ae46d4f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-3.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4390e3b19f2693fe2533320a4f634b5ea6c3400225282bde256e589251646d75",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-3.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "52b73906f042618a410bf5e149b7d29062b33d3daa14610743ebdd3c2e935b3f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-FRAME.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1ebc9a1deac6898979b4e1fd924175530a8978a557d1cac97ad9fd844a5cab3b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-FRAME.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5eb60e7f7135261da2038b779ba3b0ca1f33ae7fac999deddbc3f70806ce1657",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKCS-FRAME.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f15544f2958d1654914c3e3f2bcbde1a73314e9c738e94650216f53796a58c22",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-CommonTypes-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4d622e23310484100fdcf25afa5af54b204c0e00746d5708866e33cfd456f05b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-CommonTypes-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "eef71e756c67c50cc26c094ed3bef1329a607a2ae6c76cf3cbd504c19ce62bdd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-CommonTypes-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0e1dfcb54cc82091c05d9ec22d616d997c2ea1451af07e8762a2c1a1eb83f903",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-X400Address-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "63587e57bd43e297fe9e20ddb2e3a0d35c6429494f2605ca1c1d1297c8bfa3cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-X400Address-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4a2f0f0192e1a594c6f318032089e646f72bb7067b559cd456e6e4417df0d494",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX-X400Address-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "65ccfe8028e843bf8105b26d9b59cbbfcd5d8e1261cd5484e9ff60dbbc106a9f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1-PSS-OAEP-Algorithms-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ee8e2c382af4f8dd9856480bfabf8d97b08cf32bed97a4e83afb72843bdd5060",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1-PSS-OAEP-Algorithms-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "46c5271758cf991c7e4908094b98dedbc846279f80632f4a05d25de8831e5e5c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1-PSS-OAEP-Algorithms-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9ddaef3fcf96d945b61c3b8c841c960acf8eaabf308a4ef7c0f78a410ff05ceb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Explicit-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ffcde811e9fa5ace413599dd53f663a674ba105ae12463087e868b59f3f2e233",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Explicit-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f9e857d0e2e3b0462db4b7f14ddbdbf1b9527d2427f9822462132829f3908e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Explicit-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2a12dcb7913d3c21a7ae2502c892fad6cb81a9e3e5581eda0a087440d3255f9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Implicit-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0c2231a5c4170b03ab871faf14fee9cf0190af4d42e092e12b0f4640562f0fe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Implicit-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "45dec6e71c6db91e4e9779042e0816ca119a2d0aa4304300265251189195607f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIX1Implicit-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cf8183ecf1bba12f9f65cee6e7ef63399bb74884b9d2b33ba17171ef3b5f9066",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAlgs-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e62c9b2d0f3135fb24808d29265a55078cafa7bb8bc8a6567d84dd079d4c43fd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAlgs-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5e8bd526a6b07de2cc6d33d906ee404d6dcbe90e78f1c76816911aaa812516e4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAlgs-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "350aebd02d06db4979d1cc12b4bb3a9d97f6e6822281fd3f6237b6f1737f421b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAttributeCertificate-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4ca23cb1b43a233be836f32f8b637d1100ae7a0ffb9ae00b1d5860f05468f726",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAttributeCertificate-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c5e4188b9eab578d0fa8b727a89265ae9f0a8dbf854f0209eba6f080bba4d318",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXAttributeCertificate-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "209abf11329af83b13a493c1dadc07ac95ac6b9e70c7e06d1d44f96a0ca49aef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCMP-2023.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0a43b32f1b9d7047d8c827fc3d24296c43e1b0e6ce11eb799634e29c6b27e378",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCMP-2023.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4315ab709a9efdf2144adc1482724ffc942c234e4e473ca3856f3ebf8093e054",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCMP-2023.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "47eb0aeff1f11c29af5a4ae4cf318cf94e0e593387b2be41703449f9ce7af244",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCRMF-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9b7298efa49f22d3216aa0cb2140e003dd31811518563abe30795e1378ee4b0b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCRMF-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9218f47b389e85e811750531b8cb43ee0f3e687f53235c82dcf7250430c62ff0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/PKIXCRMF-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9745b452281c52d73e2ee2510f5c89a83f4a9f884c17c150a883c2782ee8be4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/RFC5639.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5f116ba0c54a4accfd173291cd64b6f06ab12ce0aaa4009340a78fc979b812c0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/RFC5639.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b3cd0b948ca53085234be941114b3dd9ec9e71366e9d07bb1eed67ce13f87e31",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/RFC5639.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3e713814d0a74052702ed233a788a60b8680856ff14ef67fb0c64c59bd29e35a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SLH-DSA-Module-2024.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "83ce689b1e633dc29e59c611878ea16ab9d30408d97cebd0dc5710e60ab6d15d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SLH-DSA-Module-2024.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b47cab0d284c1d704a9166709d62ffd4c23d3d31ac4880cb74781487da2a286a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SLH-DSA-Module-2024.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "678f8a38d5fb9d353eda8a6443e59f9dcffdcd31c8afab429efe316971b89ecd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/Safecurves-pkix-18.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3c2236a57fd31d23476c6d2393c7fbafbd78462b353df3624ba041a8d5c4c27f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/Safecurves-pkix-18.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2c3562f464dbf8c80e8fbdeb3b97e0d402a82228a71982d3e24342c8ee4ee328",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/Safecurves-pkix-18.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d6010079ebbed62f612403e0327bae0917f38ee0a901991764203b70fdceabf5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SecureMimeMessageV3dot1-2009.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "93e33af58f25b25e3953e85e9a8596dccab23ad08771d15918ef0a8522ba54a3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SecureMimeMessageV3dot1-2009.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "22477038cd7f2cfc9b3dfdee6e68f5650aa3b6f9c7eb4c6782e931f5ad140047",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/SecureMimeMessageV3dot1-2009.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "04bcb9c935aa6c9f2ab0748859d0b55be1af374dda229f5ae6fd05036b8c00e5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-DSA-2025.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "593a0bcdc5a8774d2e161fdee1b7897cab3c218ce8a168efd75683d68b1abe76",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-DSA-2025.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "134ee528e8a54b8ef4a4c0e9dd3e9ea0154599dd0de83aa9cd41ac02fcdf9235",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-DSA-2025.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2dec35d2d4fc5f5f8d0620e69cdd3e9e9b4a44cebb389e60bf93d22e8bcc1d6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-KEM-2025.asn1db": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "326db7e25cd5572441bef3f0307a3de75a3e113eccbc2d040c91d7fff505c5b4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-KEM-2025.erl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9890fd14eb636b93ea504f018fb677c55bf3df79b41c86a0fb3e3b47d25cab21",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/X509-ML-KEM-2025.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "598c9996cfc384e2c170dcbfd071af9ca12ea029df17fbced3bfd0aeb4cdd24c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/deps/deps.mk": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f3cf70c676f3b84c75f39a37ca01a16ebb118d16f774bf039f615902f66ebcff",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_cert.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8ccafe60ba18cd182d0f1aee5ab88f8062dad5ddfd3961827650b9fa256968a9",
+      "kind": "file",
+      "non_ascii_lines": [
+        "4c5199d5173c9ad05e6c54ed1e134773e1e2a848004cb4fd7c0ee826d3dd838f",
+        "bc7c815baed40280d0e884a3de640ffb026d524f81f21f2d690e549ea68c95d6",
+        "9db8f93364a6c2d9b7ef1f6273a8675754f3f683366daf6bce2909153ffb7023"
+      ]
+    },
+    "lib/public_key/src/pubkey_cert_records.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c37e383204580af3d857a633198319074a694cc2e028d7cdd277753b908edca5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_crl.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7ec288a1c4b4fada2973d34f42b1c54d6829cb3222ae538346527f037d04810f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_moduli.hrl": {
+      "license": "BSD-2-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "adf94ba8ad5ddf74bc0764181bed32a5cdfe0ef1894b05aec3e5102c4fcb8579",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_ocsp.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "469a94e1c253a8d9d75c27382e8187a550e7b4b8915f704576c60e45504f1ef6",
+      "kind": "file",
+      "non_ascii_lines": [
+        "79bb0e8de0afb961d8c1f356ee3aa16bf2641f3b57839b29f5ddaea5311f75eb",
+        "c30700f509f361886b431e2b641a7ba59d361a816cef63c7669b3b77f051c55b",
+        "3c01cfecaab0451c62d4df318ce86f7342574cd78f1c19ae4fd9711c0fb7345a"
+      ]
+    },
+    "lib/public_key/src/pubkey_os_cacerts.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2c694c5f43f44e336817cd218e140b8b700d1d016cb274ead0b4b95a0480a3aa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_pbe.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fed5bbcc035788e7dc8a9161805c0400bb057ec470e3c1e37d0e780d2fa7f8c9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_pem.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b55db7affd2684b2cd0ffedd8ff1c9bcaeb2f6f12948fa24bcc41439c9cee155",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_policy_tree.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "651154708cfc4078867b08b60a3f6525a95a959560f78ab9567c91b864d1bb31",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_ssh.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8f4d8d27e96bd11218f771d2fa388dadde9a36e71e9b9abffdb3c75afc0381a1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/pubkey_translation.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e926f72ee8197bafdd3f1672f577c7b2c8b95b11eaca0a835430a1438a33ba00",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/public_key.app.src": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7ac78a5703a95255751575c506f57c3da21100c404174e5bea24a12961829c26",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/public_key.appup.src": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f0db3fdd5ad59509fe1882e0b2fe04a48bdeea6d638392535d764ee133b79cb5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/public_key.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7e70d3ba79815525ee74c2b2942f392e93453ca9b8a5ebb58b0df3f6f3f22ce3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/src/public_key_internal.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ab7725be2032b93a138eb1d0f80535bcfbbf75dccebdc36045c277da00b850a2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ab7b975ec818a34b770774a74420f092141e8b7bd0ac75316673dbcdbe2075af",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/erl_make_certs.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cfef6cd3e0e8cf1a0af92ee8ab59cb1371e85fa1e863769e199e2f0052635e20",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cac46933cf3d4744523693a3b75b1ecaadd0befb140342ad06e2926851bdf4de",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/old_aes_128_cbc.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "999dec90fd3f2cb2c0c995924d3a1b5b3192f5a7bdbb60e0a55ab3756a7b6e20",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/old_aes_256_cbc.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e740e4cfe8e8e65c8e29e863cbe493150af1bec2f576930877c8470885a78fe5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes1_des_cbc_md5_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4c961cae5d716997e49aec395120635c144a2e9ee2b4369e97fe1c1bed58f9e0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_aes_128_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "97766f4a9b484691f863aa282c39ca331c94b68068988f721e6329cb48298441",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_aes_192_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1284c203ba848ec164b666944f943fa5941426053ac9227d759ef1e9bbfed271",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_aes_256_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "56f78f63d84e04a89982aff64048acd3f685ef29c5cdaba202bc4b1b3951f7d0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_des_cbc_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "af21a7db8324cfb82000257d469c09c956341dcc4372d0b78579ea920bf5f297",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_des_ede3_cbc_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "092cd9a1074fbbcb73f7dae5e5c9d377a92848402092c13ae42edf3bc1861835",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pbe_SUITE_data/pbes2_rc2_cbc_enc_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "45c8d90ad1f81256aa65604ed6ebccc02852f422fdca63d7684a3b176f9ba214",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f31896189e8463f8c9927fad2caa68ce03823844b5e20c05e99ace4fe49cbfe1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/certs/TrustAnchorRootCertificate.crt": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a6395a49b176c2c9e50fa8c85edb8dbfceba2e8be573ee7172af85065bbe5387",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BadCRLIssuerNameCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2aae1a07cbaab341b0e6d98ae36dfddf97d98fdc0e7bae88b71cbc5d291eb087",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BadCRLSignatureCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f66856bf747515d523d037ba5f2f5f41ea577c2b346ac41e4a17c96e02ed10c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BadSignedCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2821b5865b68644cc980545d8c71254ac2befa1af6aed1904460d185ccb12121",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BadnotAfterDateCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ce27e3cb9e198da51b2de5efb977963915d774cb99dc35fa5046f2581b8b5fb5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BadnotBeforeDateCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0a73c2bef993ef51975581023f20993b360b65d0d81c46291d395a37e5699eb5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BasicSelfIssuedCRLSigningKeyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6ba2415cb0d7cc7278303efe29c5a5ceeef8848288ac7b0c464babe162d81098",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BasicSelfIssuedCRLSigningKeyCRLCertCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5039d8b334641160e159a3032938311b33482ea6ef9f839630d223d0642097fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BasicSelfIssuedNewKeyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "717f11324154c16eaad0bf39c74e38698dccc49e5249335f1580ea824adfcdd1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BasicSelfIssuedOldKeyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "637617c845927b14a15a81cea1f31ddf45f9a8b3bb3c12eef71ecb30d7f9f8da",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/BasicSelfIssuedOldKeySelfIssuedCertCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "caa50d2b6e50f1f8800be2eae0129cb47f29bc753c37440a802a58562b1da07a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/DSACACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "eecc05e7dc2e08fa08d47aa46878470b7752e8fd7ff1b9816fdc372c7b02b396",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/DSAParametersInheritedCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3765def17b3c82ebe800804c1d9bdd16962a48dbf072ef9e8513800186ffaa46",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/GeneralizedTimeCRLnextUpdateCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5a22199e258803292bc432298d0f503c2ca010cea781d07c85225b62158405a4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/GoodCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8ea02585cc2d280658d1bcc8f54dc11772e8a97c33e80f29564d39539bfcf8d4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/GoodsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b29203992df42e772588de2077b7b8c4858e46e579230bd427dd094d3de3981d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/GoodsubCAPanyPolicyMapping1to2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e458a17783bec61db69d55d4203c008413a0cf9944fa8cfd64a1783bbdd81376",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/LongSerialNumberCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "27c8909bd6593b0311bcf26bf07cdd129629b63afd144df355a99bec52c9b392",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/Mapping1to2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e2efd5d33ecdee0246563d0c016dc7851badde0d7a7310806d13fceb3f3b3580",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/MappingFromanyPolicyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d8863589653d9ffd2e0829f61785e5cb0f2fd11335ee38f3ccbd4219ae6855db",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/MappingToanyPolicyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a77f583e07304b9cb5c33510a52885577afd2f36ccfdbf004bfd03e93aba34a6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/MissingbasicConstraintsCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1d4f5d24cd0cf4c65fa13e7958d8b304a53bcf578a50c9c5dc9b805af51c16ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/NameOrderCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "24116946afc47783cc9d9dc7a1a57557df175c9b9e5c4d317633e3584a2a5a9c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/NegativeSerialNumberCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "327d089c6a3d8f0ef248ce457609b3f003ddcfd482e29b68429c10879855f9ac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/NoPoliciesCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "86ad56aed63dc8c19ff6c93dc86dec94825c9bc064aaf487b1d751e25d95d8c3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/NoissuingDistributionPointCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "01872e42c5edbf82fce1bbadba05004c11ffafdebb4c9f36f150b2f733acf931",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/OldCRLnextUpdateCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d90f5f7fe578ac2a93c5ac9aa0dc9392f80c23a4ad54f8b9fd7c413fde961b99",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P12Mapping1to3CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "34119f93091bc42e21c1c661f1ccd8d7217a86d96e33721c58fcede2123bf475",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P12Mapping1to3subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "13c18ea86631e1fef284662f60cadbfd988dfcc6a01888165703dc911556f91d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P12Mapping1to3subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6188eae0d99957b20503fa0ac5d53ee39839b342edf757fa20f9775bd8a64762",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P1Mapping1to234CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3e03f7c7586c0209134a8605ce5ac2542a03770fd688e5965e83c3105f2861be",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P1Mapping1to234subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9b67177c698dd55060e11a8b388b5fd7870b96a3b53b37ae479a2a492e7ff638",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/P1anyPolicyMapping1to2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "28e62f18c9ddc616ef9fd116e1f0e1c367bfe5499b13dccf9195de1193c75142",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PanyPolicyMapping1to2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b0faa37076a8d667f07b5e1a7c1b4a3a07fef32792643ea1d64f77ed3a3029c2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP1234CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8a3f63a63901ce16e9138f98ca89a5aee906cb6b71550c27167ecc9f0af98809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP1234subCAP123CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "db79b53a6fdccf3518934bce7a9a5d75b18727859bab39eec5e92578d46648bf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP1234subsubCAP123P12CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "36743c7c30724ade67c1f1f6485dc0dbf871675f72721cfa77c907687f93f84d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP123CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3eea0db92d5c4fdb65d3580967304f4e1d3b48795f38a6077fe94ef5eac78fc8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP123subCAP12CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e4f91ca46a46e4b92c3686a48296ee66691bd059e92945137c55d1cea5599af4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP123subsubCAP12P1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0ba2880ef28384ccd1450748fb3e60bcfc95144de35a12ca0c8dcb4f90c055d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP123subsubCAP2P2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1e87a34008e4c7628b0355b99ad1c0b25a7c0ffbedc392005de8e0ca76fda3d9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP123subsubsubCAP12P2P1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ed59c600749f4eb9b677a942bcfd8f17da8ee31409593c4c4906eb257b0d2bdb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP12CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b7a39c00c7ea8923e39835429e2567f29a44785419b080972cd1baf9b6b15447",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP12subCAP1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "24561cda37bf67492f94d7586bef1060337569261c28d3141eb0e153c1944f04",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP12subsubCAP1P2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "43e3b0e76efe27eec724166731bfb3316f91d852f38111c680e50cb9fb237a19",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP2subCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ed3aeb6cc6e89327de407f02298d27066ad3296c8946dc43704fbcc9d13b2c5b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP2subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ff9a283735801fd01be1014e480f29954f11065e915a10dc033dcf3afb7c24cc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/PoliciesP3CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e83c51b1a42d89ef4717149ff68750df1f0f1caf9cf3bee795e121c06766e55d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/RFC3280MandatoryAttributeTypesCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "39de3ba2fa0a7bc9752343496bd085e08211ff0ab64bb3f5a999849719f3fbd7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/RFC3280OptionalAttributeTypesCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "695a8e8b446f3491c23eca80a27f40905ca88d5aa5b1015d0297d9e474520964",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/RevokedsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "04cef36058ae40e63845eca5f9da907af224a1667519c1fd8ecf5c4861a25859",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/RolloverfromPrintableStringtoUTF8StringCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "be165dffbd24d73e4abbcba90d267cd3b5e8f951d63822f5ba6997f5caa3f638",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/SeparateCertificateandCRLKeysCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "36ca12444fea845525395fbcf85faf48611430e3229f8b53ce38a045bde09aa5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/SeparateCertificateandCRLKeysCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1c23d7610141b1a2c92046b2ff603fb0436fb6ce117ff6ff50887ef44b236b2d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/TrustAnchorRootCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5611270074b75f04341b07829326e0db0bd3703a0aceb514492de07cf746c6b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/TwoCRLsCABadCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b399e0191a7ab7018bf508461cb825e0ca97728c11b53402fe59b8695599c06a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/TwoCRLsCAGoodCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1d30bfe81d26275f781c458eb94c55a8d2292532255ce8921b9772115df0fad4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/UIDCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6dc939a698f979885dbcad50b6ae0fabcb133105b8ddc3d3cc1582cff0d50345",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/UTF8StringCaseInsensitiveMatchCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2388b3e15316a8ff2430aa137f73efddd8765fdb92cfbf0f66163b136e0cd19d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/UTF8StringEncodedNamesCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "609f3979ee2ad955ffe5d8ceb4483c241690604081b00471f0b96a681b0d58ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/UnknownCRLEntryExtensionCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6f2c496d85e855c3145d13a72b08cc3d52d2edef0951328d1541c30828732220",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/UnknownCRLExtensionCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c2b4bd6c313f2809427768fbf9ba9e703f825cfa0b6fa6d8c34951471de80725",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/WrongCRLCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5611270074b75f04341b07829326e0db0bd3703a0aceb514492de07cf746c6b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/anyPolicyCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8293ea97357cf9dcd14ff86984c6bf14f057ad6ba17832815fe1e2e534faf71b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/basicConstraintsCriticalcAFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ef376ca9bf27fb3de4fb7e693d0a8ae7260c122464ec41bfed7f87b02ccd5c73",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/basicConstraintsNotCriticalCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2682a6ffda1d4f1fb772017ff863fd934add5548a82ecc6d4dd6baaa8599cd82",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/basicConstraintsNotCriticalcAFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e74eec81f4812241c51314426f0b3ab8984dca8c444893f24de3a61f39fc3721",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c6dec055135c0e346a48aecb1e0a4c83d0f9c9782e081bc4f66a81e244eb7199",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA1deltaCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d73cfe0f34d8af337f6a257a0075d1f0481fc8b66f5384a45141f03150e5b037",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7010d015a2cf0597a437b10380ad38b9a469b13db65520bd34c8087d1a5c4706",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA2deltaCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bd5384b5027059325e27dca9024c96a9d2b4babcac5309556fedd8b3199dec5b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA3CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "66ceaf90b77ddb9ff55a88c23ada586ba561bc8c0c2e4f20ad50cc946589b581",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLCA3deltaCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "83e79fb3d9695fabb05b04091f8fb02167ab6927711d8c4aba526a5ed1c3d42e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/deltaCRLIndicatorNoBaseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f979182c5687fffdad05c31fa62485a9c21c058c006c0d5da89f68db49f9e258",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/distributionPoint1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "27e9252954f33c603574dc72c6b295d427df8ede71e5ba4a7b9557ef30fe864a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/distributionPoint2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "01768b2dc23444e510a6461f8806583eb4f56c6e1b9be589b08d454b07148138",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/indirectCRLCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b96fdbb147d9d791c11b21fe279f978e5806114fcfa62d917f38d42272c2735e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/indirectCRLCA3CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fd0892ba7c578edbd8723856a148cf933cc32f579530cde709a1cfeef84a05ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/indirectCRLCA3cRLIssuerCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "38496936b88d2c3613a1d706390025dc8c7359359dcc09d567b00c450b6f22b2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/indirectCRLCA4cRLIssuerCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3ffeb07805c9b72c8a9f548b5b875bdefc0e6e19ff5ff3e5e25f6a3dc1e98061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/indirectCRLCA5CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6b686af2c8b24604ea6945576939b9f6f8844123c98e6026e2c75dcb6dfe0c38",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy0CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1367cf6c330631fab96eb98f6c4a1358f5b2e08589ecad5dbfac4190146c7121",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9f9fc34a8ac6e58a349eb2b889083c76d9e559a7aa3ca0a5c4d113ec0e125bac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy1subCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c09279b2d07e8785e8e0a62632b3567ecba06e33e8664123453539c9ad56c263",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy1subCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "51070a58d2ab3f79a3adb5bf85ece56333c6585efdde8f0c6a138e6e2a765638",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy1subCAIAP5CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "36414d9e8c16cef89d66d0cd2f6944890a034b7e0c7bf0a2f85b503ba6c5c37e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy1subsubCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "47f764fd503d8087bd2107880e43074336e3cca482ec32bd3bdff269e1396c0a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy5CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "92f80b757865d5f6fec50bd06ee4f553c2bf4c13085c2dfd184671e829fea97f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy5subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b12af4e2ff2c2ccc0485d273dcf22475da7f7581ec25b9cab8fce11474c38502",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitAnyPolicy5subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6fa64288ea620f38f00f55f8435476ed15d04475b8c5692cedc4c895192b79eb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping0CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "22e801bff3f985c29c7ec379f8b935f683f522bac943d3f53dac1f6abb0420ef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping0subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7d608af4a6bd11bdab0c95013407bb1fdd5a13041881ce5885e72f3fea701237",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P12CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8e7c22016b572203bdc3bae577f0741e033a844696f3308cbb11373668a560be",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P12subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d2a432fa4031d22f82bb3d4f517b595b055a427cf363c8f8d2c4fb51d296221b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P12subCAIPM5CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7a3487289ca4575d46c8ebb8af91f7993ec917339e1396bc79f19690ef32ee7f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P12subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "794585a9c2cec037e5d6f1ed9bb32d0d7cfdace89f1427d2238af37d7387fc30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P12subsubCAIPM5CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7de2a745b3403a4f7d1747a93eeb7ac28bb49875701b499788a1b723cc576409",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bc93abcd925cfffd4e2f4c8fda736401a6305fc05e62dc96e29613f7114ea981",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P1subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9777c57ebc344ad50e3fcfdd742fdab98178ce0168c18326fef9bbd056b0f989",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping1P1subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cf00346846ce22c30929eae8b7f460cbca119421bb439f3109e75fa53cc748ab",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping5CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "99a9d878b3b252902c16173b428e54d7994aef4ef75d44de2d64a22ae34f583c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping5subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e3a6d42a626d11e092f791f2dc32e415609ec6e64598d2d783b6510e3a00cf70",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping5subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8898884e2c98cc0ad04b682af83d0e65763e3d5db903fa7ee86927247994b6ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/inhibitPolicyMapping5subsubsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9d0454b79f0332705f1f03cd640ee1dbd8b2f03be58cb4f4a3b23b248cbb4737",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/keyUsageCriticalcRLSignFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4f9ac76c22b1adfb7cc3bb8ff02bbaa788b8e8b62c4a7aeec7eccb345fdd3b0b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/keyUsageCriticalkeyCertSignFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f9bca941de2a3c4c090ee45a5e9937ef0dd5f38195a528caacabcf522a256cd7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/keyUsageNotCriticalCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4225f97cd08eb6522e592e23a90dc839e5895c030163410b221ba292a3d53b1e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/keyUsageNotCriticalcRLSignFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "559b44e54620b5d27faf82fc6139b3dbc2d9ba04d6596c4b357a611be23446a4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/keyUsageNotCriticalkeyCertSignFalseCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d0637ce5892ee5352e8e2b478d48cd2718c7766ee85bf8e395f2f1a073144aa7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cf191b98a86331b11bc0e7e71a14ff2f45498d4a72e3a79297d05c2281a319c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN1subCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a827899eb340363f6b3788689ac2a526461e541a92e865a5427289c8fb813779",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN1subCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "631892ec6e83dd9cb22920fa97fd3d97f51421046dd41f3c1266b5aed482a4ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN1subCA3CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "287055417a7d084ae271fa9a09a005ca783853b6a57cc2952ea75e3f56b58577",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c46588369d5b2e8b8da07f8357dd45cfbcd36065cac2056335e259b48b9bca40",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN3CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5834dc9712d9775d35e50c9fdfaf1aa5217b605a74db87fadef4650dccd7758e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN3subCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "868311c9edcc7ec7c87eebb1f8260d8b32f9c9a4ee6ce41e1979909fa9cd7d40",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN3subCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "eacfce7ce367b32f440364fd8a37837f0abc6c8ad9cbe0d3409c3f3283a81e62",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN4CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fa9702fa57f619aad160d0e46c6e2115d4de204c416418cb902f066960ade2c6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDN5CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fdee6786414fdcd428472359ed1b72d0069851abdae263937d910bc8d115d05e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDNS1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "afdf002d202d2841bc5f7be5138a61961f7c37dc2e3ee40768fe1d8362accde1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsDNS2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "03686b0c65847b935e83009e82fdaeba81a37131d1a115c2977c7a9f50d43f1d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsRFC822CA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "740ea3e8469e9ba367cdb994ca90e9beae8f4aacf7a9f382c28205ca2cc300e2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsRFC822CA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6a866b4e7b43805963c8ff3751420aa74cebd180c28ebe75b1f497fac36b14e6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsRFC822CA3CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8ba3a96f153d091406f2d8c0fbf0e508deebb681f3cfbde3fa1d8cef78c8e0ba",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsURI1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6f6d6f753644fb76bd1acd4d5b4c0efc09773d5047f8d1cc70e3ec812135a171",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/nameConstraintsURI2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b5bcb4e1324b8caaa6712f590f3b79169e1e6aa7618b017b96617b4b9e2820e4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlyContainsAttributeCertsCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cc39a81729a06a445d45a0beff6724c383e54a480d19a42a6a4f08c305dde12f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlyContainsCACertsCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "642af33f718e7e6735bfdd4509e88e65d35d8769db5321cddefd7ad45e1560d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlyContainsUserCertsCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "580bf5924a692eab6275af4d2690f0a33c3eb8d634ad08bfbcda602dc25235f2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA1compromiseCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b1c33e0226288c9ac1b6a4c222e9bb2c5541ddbe026031ea2406ba88a426b696",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA1otherreasonsCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bef50ef99048b24628debde7ad1b2962db77a39a8973d03e87ab7c1a63bc1141",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA2CRL1.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2f6c71d5fbb5306c67879e8531a999650d3834642d13835573ef5b49a5a116af",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA2CRL2.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fea45638987e96dbacc0ca497c640634e7c71dbd86690113109c37e89ec9438b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA3compromiseCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e760a0c4a7e62b5cd1b0d7f5b9b7ae2343f29a555152280882394d65fbd46306",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA3otherreasonsCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cedc1b4093ff21625c58301290594999eb259be00ef2bad773c29552134bda91",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA4compromiseCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cae765bd587311e642622e8cf6e2bd9800d5acc748af849383b7d5af01ed5431",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/onlySomeReasonsCA4otherreasonsCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "022eab4ca416fed2bf66c065df0bce3b96efeea556e3fc83282e097c55d686f8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint0CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bc83cee17adaddfd858055af42726e1f200ec6e391b0e87c3f5634621ef5d86b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint0subCA2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "31036b9354ec7d10a5bb0da4bcb77ae0ffe36210b52752d23867f5fe65768195",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint0subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "df0954f4e6ab9eb198b1063701f67c9e3c83e548e380e5f10b703000b8a51e2d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint1CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "676fcfa7d00816aa5d39d45655457dd8ea190d437052c258bb0935a8a6da7cc7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint1subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8ed73a513b88c439dff4ef517888fb1168ee34503053b214feeb7e4bbea5a23f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e7621738664cb5246f146fd838c6321bfba978c576bb0fc7ffebcb1c53612225",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subCA0CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9d22a3eeec7fe9669997f085c9915362e6f686d875568b89fa790f3ee99b947a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subCA1CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bf10332ba4729e71861abd4372bc935bebb468308382d994cbd0428946972f6b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subCA4CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "46d056cddd750e2db4414e636c1cecb5b0430a6874904d8647a97f4f3383b491",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subsubCA00CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "674c7fe98dd29c0a7009ff8ee7857a33d492049820d0f3a7ba2963e4dc3d2298",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subsubCA11CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d14331ea72f62c5f06055b623543ef4f7521f2b6c6e6f81b41ce20363c75ad3b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subsubCA41CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "32ef287dd8dfe7a4d797ea30271b16c3415fa7e0fd19e032e960afd9b01a8a6b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subsubsubCA11XCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "902fadc6cb8b7230874c40307ec7f2df2bb8bcf0d0c402759c1d365a7babcb1d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pathLenConstraint6subsubsubCA41XCRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7172954b253327dd89dc0fc9d8a3bad6ffb63c2b04d84cbe8c74a20a37b5cfdd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/pre2000CRLnextUpdateCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4425092007bbf680efd2ff0ed570f8369fecc49de8926ccca75c6d27f368a4df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy0CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "35e516e6c16b4488aaaf8e4bbe6bc05d7e225338f68c0b1f35f8f1392182a81c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy0subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "133b4485889c60f9188c90eacbf124f960e9eeb4fb0035b4aa82c2e1f04741c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy0subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "376a4802723ec1f81a56e19ada3d64e8ba730443b1bda5b251b202d29e734079",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy0subsubsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ed3185ae3dd6b3b630febf873f40429ea5db30cd33310ece6d23cc50f94f0857",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy10CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6a0a204289165076250257594b5439f19e7cd89e99ce9fc6ec34b1ddd87b80bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy10subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "907064973b4300b9fde96b819aa3862d62d5fe6836f30a3a09fe7a7b5077c571",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy10subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "13dbd7b761b72b26e1f101f3a542e3d0ddf889b9a1b09caad0086fbdf49d8513",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy10subsubsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ab064cc4e627de4874b742058c6c8c78eea8154d9dc88dd29c5ab085e39cd962",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy2CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1ab818beac75808a5bdba2ef9e9ff0a8a55f1aa9d11b2cc657ffb3f91db9c050",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy2subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "73ae3e7face27df9ea051b167b58762f6f67c9afde88a2ba08ff2b8ef7ab58c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy4CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0aece5c82ceb86f290f2774b7d22a17536754600742863bd2b059f7998a0372d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy4subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7c941fb28e8c09ef8776d6c96765791bcb6375d3bc669da2b0ad7bcbba4572e6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy4subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5e82954c2e72a3b80f21af27c288363913b75b7d6fd8b6fe100da783dea510a5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy4subsubsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fe1b21ff968180a4bf99fc4f9501becbe2304436ec5b5c21e520d0589de8e9bb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy5CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e1c6e47e344c318530903790335c8949b43c846c825d4c78d8b47f418880a25b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy5subCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ab00c67a38d72b32bd74a820b23f271fac1cd3f3db33ca2404967e9caed3595d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy5subsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a47e2dd20b8027980055b40ce5445b576a4e6f93993bacd1d15c7541ee5e8727",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy5subsubsubCACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e4dbc8420404d52f41052186556bdef89f6412b228e3604ff30bd49fc49b126b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy7CACRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a43d0233ff46c12e620c4579702fb5772deccbd47b7e972270143df743aaaf4b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy7subCARE2CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f1a0579d45a7e2a64e1903511e4cf6e70c475498fc4c6cd1faaf566143c8d8d3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy7subsubCARE2RE4CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "be5176570bd19bf3e9d5a19cfdf662360b6f54463e75c79b5a5e1fd40f9a5a37",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/crls/requireExplicitPolicy7subsubsubCARE2RE4CRL.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1c1e43ab03e3263ac7e4adf3f0915270fc24d30fd1323893bf5a66810d85ecef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/AllCertificatesNoPoliciesTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8dbc49d95efe44c5a259171448f5f7d5c402a18433f6e4954038ba07415e6090",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/AllCertificatesSamePoliciesTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0ddc85adedb7464a76bd5a8e6d65557ea03b4cc485271a708b7ed7eed8406f51",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/AllCertificatesSamePoliciesTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "eee15f263b20c5febebe92847ef4c7074363bc61b0520d3419c75f3033457a60",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/AllCertificatesanyPolicyTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "576cc96d1019f413aeda17d31cfbe1241abec2faba317678e0f89a08edba775a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/AnyPolicyTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e6edc6d561b259d3c71af6ad9b0f1402fe6bdc72a23cc25d0152c1dce7a0a30b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BadCRLIssuerNameCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9030b8b682785feb954cee3df60753917d274a42c1a557ea9d14940caf659ef7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BadCRLSignatureCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0afda32d97e1720bf61f2d5c3c7cb8910b7b96e99c36449fb1403adeef374cec",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BadSignedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "83bfdd3112cb8a7c6ddcdbee6a491402533bd77ae2dad45289dfe3477aa26352",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BadnotAfterDateCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2edaab37a293e1a3121b25547c625a8eb48690d3603b5aba9f7536c862fe4597",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BadnotBeforeDateCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e69c9cad8e65b668f661ab4adbfaf47fbce57329445bddd08606072fe98607a6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedCRLSigningKeyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3f0bf9325a0b0c8219c532f1710c55b6883008060a42484e1b1fc0334190f491",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedCRLSigningKeyCRLCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e68c54bc0f43eece3c0e6c758700d73a088e083ee9f7ef1a9fa62b46d45d89db",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedNewKeyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "78a0f1a258b5cf74dbaf0687b2b31ce351e95c0b5d210a2128c61ec60405fd0e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedNewKeyOldWithNewCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3d64d5237fb5174e64bd46935ed7166ba7408de109e00b1d7c494e98a7cd2bb7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedOldKeyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "857f5053f0a87f0ad62a2031da7cec424c180186dd2e11329bf4ba1ad54f1cfc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/BasicSelfIssuedOldKeyNewWithOldCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "73b461992bf1c639e5554fece8d4bf663b5c3a2be490379ed5bbb39e646b8551",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/CPSPointerQualifierTest20EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "44898227907e7b5c3f223c275a9f22f95637ea2fdbea977ec5dee3de2c74e5f5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DSACACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "70338e0332cc96f00a758bd0455cec7c4cb734178a3ef6199efc88df6799f58c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DSAParametersInheritedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e5d7376b69bd7f3e3cb906c4afe0a92a2b19560c857b35d11122df2103aaf3c9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "aa87e0e5c067267a53f16fe411077256754df90d6acb6db0b73811da5f0bbd63",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "16e3957b5c365f56b4e83966d0f78e1eb78b2d5b5bdd657d2af7f82e5e10ac2e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fdf5b432aee8d9629484fd9ed114324ebe0e6bf932b92bfff2ab4a93bd1b0581",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ad35ea25703b127bdfedefe3d77f53196231e03d31eb3900efa35c94800ddb54",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c0c7ceaa490db5a33bafd5f0b094ab001c49d9a85679490901816bad9d7f8202",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8d59b42b1e3e55a4861a2e21c307e139b281869b37a60dc48490ea01f8ebbf51",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/DifferentPoliciesTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b4bb4d1bb02926f48395c2506923cd4ff476d2a95984b9aaae305505d2756f52",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/GeneralizedTimeCRLnextUpdateCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d8d869e673266b422e511a605db30c36be592daff753f53ea235110cc73f9d45",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/GoodCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d13b9ac164f2af01796efccf603c9540913ad6c561c3268e30077ae0569c0dee",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/GoodsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e393f6925d4a912dfc6a4a53184e6f14ce1176801784d625f2101fff36b7acb4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/GoodsubCAPanyPolicyMapping1to2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c1ace43d633aa2a8c39c87baa646fe5aa25ad95fe2c105a85d4f58c3820aa1c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBadCRLIssuerNameTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "862b28df6e00ad1c96eb7cdcdece2fd3f6b882c2e5c7fc26a713d639c32f0ebd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBadCRLSignatureTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7fc728e6ef45789911177a9dfb808576f4930d43d023427b052aa544f952dc61",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBasicSelfIssuedCRLSigningKeyTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ca75942df3a989b4fdf892d771733e3ba883ab8c7f809bd0ee2842f88dcdd692",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBasicSelfIssuedCRLSigningKeyTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "55463f89089d16bb38972c3a025a1a1e7047bc71be1b32233821febc9552e315",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBasicSelfIssuedNewWithOldTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "41e74d42eb6df3fa74c673e629947b8e9cd2cbd8d7b6250ea9796534d9213467",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidBasicSelfIssuedOldWithNewTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e92463238a95b6e0619080c76d75ffcf266e7eb7607a1d9b6c89280f3f700749",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidCASignatureTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6fb70937db5eab317ccf806cb5154ef28d2275234e78f2ef66cfe08b42057d47",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidCAnotAfterDateTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "02970d7d78e0e7e0111d3b4935c371d61f1e6bb62c65a8cb278b9baa07ba8e07",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidCAnotBeforeDateTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "80b22f8c3e722363fc857daf80bace5e6c0b22bcd15401706fc7706de697d5dd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNSnameConstraintsTest31EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3a4c651f843dd6956e3d916dc02354e478d88f7fb95720f06a3a422edf703669",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNSnameConstraintsTest33EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5334ee1ec11dec8afea0bbc0e69751e320c2ace8302c8859416f909d3ddc93c5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNSnameConstraintsTest38EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "18f9fd178ab0cbbea3820a7802b3f4e2b86586609d4d8b0d7190b373108a4d04",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNandRFC822nameConstraintsTest28EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1252bf8c39a7cd1ee47d3301c2e3856c8d83921e20c198c1ec291c50a56398ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNandRFC822nameConstraintsTest29EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e62c539a3103c8ee95538b3f7bbc4f7459690c167ebcb7279a5f90fb6d958c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "63c0344267a5a22576a66d8e0ef92d3f1b05370e60e75ad886f6df6bc8f3fc87",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1c39197c76a0f473008561e93fcfa07a8cb6931b5ef11d2e7f82beff8500d4cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e60261deae129fcd27b6d9b094c01a3d211b903ee38cf53e35b34d1cbb937a37",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest15EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "20f5eac6a0223b38ea83628c3b338cb4f821bf365b2f7936d19d280606413480",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest16EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4bc474e24af90fe42dadffcbbf4ea59faabf9e42a1d7d1a31717e736433ce636",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest17EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ed522c35070fae23a3bfc9595b08ec86bccda9870d3d82721a676be2846cd970",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest20EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bca86bf1d12d9d0f38fbe309a54b2c75f9792bce531a0df0c6b4b77adb265f64",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c354905ed55fb3ec31b1362ffd881f5028985340c20fb62f9bd90bd1130fab33",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1e46cc0da615111d5cf66a810626e22adec60e9190e4cee70f2a202497113c0d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6b3d9ce1fc9d660f6d04c9ce54309e8f3c2aaaa42aa72a00582a7cb7e3e06071",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "310c869ce3d02e04429038efcdb76ca59e4cf54b127215b69853921ac4337898",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDNnameConstraintsTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ba7710ea15a8d7342a91aa386d774105b78aeab55d76c40ced266642e81db341",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidDSASignatureTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bc1b30ea1b0a6c12e705d80ea4d73229f45429b2958cf72b47a75cc2f03752df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidEESignatureTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fee14cd92049cc5fa3aafe82c29a9d02f8bcf38bcfa83f954f5d19e4ff09268b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidEEnotAfterDateTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a1c0a024af70c7fc6ab3eb5c5c1793fa8141062fa28604c483c5d67f650f1664",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidEEnotBeforeDateTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b8d6a0ecb9a8d6125649a207e57122088a7f6931ebba6f98d8020d98758ca407",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidIDPwithindirectCRLTest23EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9c42e2ac504b83bcbe5fe514b9c6a4906ceb637331b9b6bc5e7b31115b715e89",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidIDPwithindirectCRLTest26EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e17c7e5b323cd74932040354ba288d67903316892da8c48968d003548048c311",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidLongSerialNumberTest18EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e14e87399f575872ef7f188655f5da14499e558f608c7d6d5d30e51a0080420b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidMappingFromanyPolicyTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6684aa3676174032162edae50fa2e90ad330cc45b875b0629db4b69206c36482",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidMappingToanyPolicyTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c0ed379f2cc8c110da0d5bcbb8421e92547cbd418a5c1b7b4896451994ff5d7c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidMissingCRLTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8e1db4aa4bb4390e79a937628eac8adc162078409d1489c98aa6dce008eb5de5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidMissingbasicConstraintsTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a2b176609f92da85a491feafede2b37fdcfc8b73f5c455723263d8b90156ee68",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidNameChainingOrderTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0b78d4e3f68f4e5f72d3db47823f3b32e2572fbe1d309001a13d810005b8ae69",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidNameChainingTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e3c2268c91c3bc2bbfd6906e2678afd8fe823894d02c0794721d6bc09f4b75c6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidNegativeSerialNumberTest15EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7be6d5b4a4ed3aae9102a6f530d4ac9f23a8527cd3d1b81057d5ac5f7eab2937",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidOldCRLnextUpdateTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2f1a36e85574d6894cedfb2183ecfee3713287ac852d5d5a9883b8045d381925",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidPolicyMappingTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b35466b40971aa115e214f335a45f986c5ba4d59e5454bccc95f060e1f0d89fd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidPolicyMappingTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b69b7b51334b45e4b2b0736c46d8fc7c60cf48314a3da4708f24c37e51812dfc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidPolicyMappingTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cb8321ebbf5411bf3bf17847837958b32e45edcae4f7ac04cf2a491039bfa6f1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidRFC822nameConstraintsTest22EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d43e4565159907bcb222440638460ed0a3e47a10a4fa3d3d3e46a6378583d36f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidRFC822nameConstraintsTest24EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "aa8b5ecf2e29f3e60df0d889d02f83f540e59decf51b114d14c9c2e1b3b45489",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidRFC822nameConstraintsTest26EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "88f39ebb4a557fc27d429c889ea110ad34f0538959c79cd1a446704b133e35f5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidRevokedCATest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "02dcfb3315075384ab90460c825467a96e13703f79d3ac58f4c41b2d89fc376b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidRevokedEETest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e3b8ec86d686acc50af23efd66236fc01a50ead6b23f828eca36e27a2d4a89df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitAnyPolicyTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5c6049b42f2b50ac8908e3db4f4ca2f7aa0d8e617aa8091fcc876635db5920f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitAnyPolicyTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4ce4a7aa71dcd85981ac88c67c1344c963bdaefb7eae76ea571081f2cf449f9e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitPolicyMappingTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d0d4725e28ed5b89394c9144829d3c1c1ca71722be23b60f0bd6db7d33481d36",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitPolicyMappingTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e46edb4a8e3ded72d3bc7f6ef29a98d098ae4e66f1b6ec3b9392620c7e1600c6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitPolicyMappingTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "03624d2b906c791b5708147a7f7c8234c5016925ee572c23659b6f9465452e71",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedinhibitPolicyMappingTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "efdd12243fc9072da2f54a4111838d83116b0a95989f494f36e5d5fe59a76be3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedpathLenConstraintTest16EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d002b10bd5c3c885d5bf1af51436a41aa4a4d2f117e4e6fc11502d3e764fdf69",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedrequireExplicitPolicyTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8189d9bf0bf480155e0bad8b4968e45e3fd15411439cde2402b529fb7efd7b93",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSelfIssuedrequireExplicitPolicyTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "23af9576e3565f0c90976803884bedc13b5e40de378a3399bcc904601af1ca08",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSeparateCertificateandCRLKeysTest20EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6eae0ea8470760759eaf5cdcb881a0b9058c703bace503a326925b0dbe37d5fc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidSeparateCertificateandCRLKeysTest21EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5ccf48ed8d32fbcd00f917dfcdc68a72ae7572912386e2e4915e59e2808eb9c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidURInameConstraintsTest35EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6d926449bf4d92953d1c34ce9877c52e2030f9817d78b40e2faa049bb5f53b60",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidURInameConstraintsTest37EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ec7297e3eb87c7df2faceb0022a0c7427b67ea049b6e15837bb464f176eac764",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidUnknownCRLEntryExtensionTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ecabfdec23dcb6b4a5d4247959a8751b1f162b99b30e16e3f8f08119f66bcb25",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidUnknownCRLExtensionTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7018dd2a1903b4d7f19e80bb7ad8413d70a577cf45b16caed4f0343e88653a94",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidUnknownCRLExtensionTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "69bec9713d1f8294616d3a7cc9eee52d098a0825ededd57b643237fbcee8c1dd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidUnknownCriticalCertificateExtensionTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1cc4e48b56c054af9057ed5c16b5e1dee36da53a31f0d16901e818b6fca78bc5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidWrongCRLTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0ee9a82ff535d364f5a5b9e49c9be5a8ab2bc95e55ef0f03348d2accb6c5311a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcAFalseTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0b97218354629d7199be8c68ea1738c3fcdb5f9e6e65513aa70d9a82aba6d0c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcAFalseTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2ed06ca3a7838789cebb7b860d4a016ceb70d7464cb1c054b646c199c57cde58",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcRLIssuerTest27EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5d725b5a2a0580c6f2107ed645233821da8a6f67849d290ca77976b9634d2d4f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcRLIssuerTest31EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "51e54ffbf5367c3416f2b3094968fb9c388522e1d24af1b41a228bfd9b5c3474",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcRLIssuerTest32EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d1bbb05b7f77fc7129e2278191c3bc5312613d766ef0aa782f0046678b031857",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcRLIssuerTest34EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a33b26fa60b7f5a4450325dc9120a10473b91a4c2588540f808f9bce8c473177",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidcRLIssuerTest35EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6bb96edf0b7ce0a5dbff12990388bb0636df47b0335b534dcd2c0febe814d86d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLIndicatorNoBaseTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "465ea024e5e281412a7df9a235d90f342453f6c2b7b17b5d0228035028ec8033",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2f5adede128126be9a1568469e5aad2601f2b6e8ce303d1b065dfe646ffffda3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "80d363cc31ef452d758f1cf8bddec53be2a59ce4e9b269f89ce279ad9a822bd2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "53502feb068646d03df752aeb4351991d9eb3e87081e5a534bcf2dd0e92b837b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "11791ef8573b09e452c755d21f3295a3bfcaf45b75f901b83945f4fbbfef282a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddeltaCRLTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fd57f64c0ca80a037e569b30b51d96f9b113965b3061ab75a27fbee82b3b7271",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddistributionPointTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9436828043218b19d5bb50db068845be6a18e9c49c935dee1a5d17b549c4906e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddistributionPointTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1e78fed8ec1e1d1d2419392be25ad3ad1e9b8464dfd2c0dd396469baea005de3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddistributionPointTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9d06ebfd6038a2f810476558845b68e483d26a026c2be2e2ebcd8675bb42fea9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddistributionPointTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0698281196b949649cd0bc86d00271fa9f5089348ac4a5a5bc5f17545f090baa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvaliddistributionPointTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a606a40d4e74f8705b604258e7ea8e0f5d133e5f2c1e4724c2f7ae9ea59a1a39",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitAnyPolicyTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d039cf1d60f306a3068cc16635d14986e9bb3ce00f2fde0cc4565a75e37ae242",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitAnyPolicyTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8e02262b6a872fc8bc9562422cfce785b5cc3d52183919476df45dd03b2fd010",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitAnyPolicyTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "02fd49fea30bc9f8645749311f62cab5ca61ed90aac693bd57f2d54c5bdcde0e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitAnyPolicyTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "100d240d2bc6db733917c9a560568b567a7c8c8bae95fe434216903571efdb3e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitPolicyMappingTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "46f43795499b78869e52e01daf114660cb4d17a7ad0a3b955fe9b1c27e8fa3cc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitPolicyMappingTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ade31c51ea9ac502a75c998975abf0642f711954da418efe79cee161e7a481c9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitPolicyMappingTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "939cd1e9ed729358cb4369f04ed9a782b8224cb1cb4d128fdff55c04b50f13f5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidinhibitPolicyMappingTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "82e86ab8f51c8bc1fbac86d225697cee52644d4d7c5032a937215f2608fdcafc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidkeyUsageCriticalcRLSignFalseTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "50df9cfd4fe2c5cee146a891716618d61c3916ea9b87385c57e966dff72ea1ab",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidkeyUsageCriticalkeyCertSignFalseTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "27c059417fe460948f34cfb8fc971cf0f9b29d4794cb7665ddc5dd968681f378",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidkeyUsageNotCriticalcRLSignFalseTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c1c7a2f63fe322667220a130a96686117b40c60b2fca72816671beff0520fdb6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidkeyUsageNotCriticalkeyCertSignFalseTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fba20fd45bfd469f9bf7847d1e7c4d67d3cf3154b26090e92af8c2e333827c51",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlyContainsAttributeCertsTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "accbcda73633cb5fa3500cdddbdcc2a2147bc8617825562f6bc2c80ab85ae245",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlyContainsCACertsTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fd94ea8ba6364face5638445c724eb5483b9ff2161226cb2d67d17e3b1016a68",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlyContainsUserCertsTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5b05b99c0627a149b83fe9c20d5cc075bcbd76e74cc83a76ba4b146cb5bccf0a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlySomeReasonsTest15EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c3a96fc7375d0fb0de901f47afca809ecebc84c15676fd489828bf09fd0d172a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlySomeReasonsTest16EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "20394bc069d0f1dceb1353095ec7d2266fa588e5aadab3a3ccf06a27392fd109",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlySomeReasonsTest17EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6eb2235b7e1fe5f83267bda1232bb373f46d02fcc479bc1099738605c3e64300",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlySomeReasonsTest20EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "84e44a87da6bc2a81ede21a7cb64a42bc2e7eec5ff579828e217af827d956188",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidonlySomeReasonsTest21EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7d94a2d132f57a5723483fd41cf16f5a74f3f0c1a1847570e97a84b715acf09b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8abd6c43fee4137798b7b9c3e05b9d3b11f1c17190c58d82074f3831df5ca739",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9b91c68475224051b4c43d2fc6ab983c76477e46add31dbf54e2ee63434795ca",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b2e31ff7b83f51a5d212d1f795aa5e881341c9a2231e10e3096d00125b3a78eb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ebad636a520e61fdae18c340b36118b6146d3502d6043442ec21fda9cd24d5da",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e8b6b629f80f5ab0e166bf16f6a04d0456872a84dab59adcfa97b2c1c8f0300e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidpathLenConstraintTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "33a435ce643048a23d49c77a444533da8249f0e81a38ad7defbf5a2b460a290b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/Invalidpre2000CRLnextUpdateTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "03cbc3c32631373e6eab237f582bc9473e886d96d7f32d1cf8b93eea8a6c5a59",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/Invalidpre2000UTCEEnotAfterDateTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "713e6e41dcd3d3ce8db59728be6868ecfa35e1cea02b454117a3858258b4da99",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidrequireExplicitPolicyTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b1e26b84d947a3278d0dc0f8f15cac989b02b51aecb4be7972ab2100fc96fa16",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/InvalidrequireExplicitPolicyTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "27700fe37a2449b1563be2f7884bb2689a1c3a7ce7112efd22080284b50ec696",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/LongSerialNumberCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "46f496df061cd0668fc37420afc7b38fdbe51e30053b7b003c561486210bba54",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/Mapping1to2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "657f9f2e1bdc05db6c242a82d38c805322692396c0fbbd7eb01b2bec004f89e1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/MappingFromanyPolicyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d131a892cef08107f8a5a7ecb3add4a595ecc79dc90fb4efbe74010674544dc7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/MappingToanyPolicyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9b3bb3c68f55217149fc2510010c528160305afc57136e64280eef2da636acd3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/MissingbasicConstraintsCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f20873adab4846ba10ac31dda70b401be2984d91615c0da801fe67f85d00c6f4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/NameOrderingCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b1b42930bd6f5d8f9fb9802c3bb815f901254dd2c9a7fe66fe8f04d5ba720ad3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/NegativeSerialNumberCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "56fd838eb74753dd9df7556ad20ae4325492e4192328baf626e09acea8e75834",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/NoCRLCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5a67913a46538ff625e06dcafac257ea9790c7cc3d5892dd38b370c572c9db4b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/NoPoliciesCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "35a6916eef423ad1c762e44526d30b4da4cd9a84207ce5d5b3e8c25536490fb2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/NoissuingDistributionPointCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2e3112ebade05959af70803ab756b7fdd0533d27ffe06238c866229790d37006",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/OldCRLnextUpdateCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7e1be11fe24b11c17dad8240aa4ae2f4198bece528dc84ab1e8040b5f210eca9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/OverlappingPoliciesTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e40b4b4a6b7b52c57cf550f097c1f0442f8cfe0f3aea30b07b474274dd6cd7e9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P12Mapping1to3CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e727098da1f9f75fe5443fe9619f399f39dd83a899917a0a0b2a011ee3e0951a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P12Mapping1to3subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8eb38f3c718ea89057ed54a71e21628887e2d9518e0b789c2488794a9d1964a5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P12Mapping1to3subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "41b83b515b5de82eb69d6f48ee19989224b7c29259cfa8a25196fc908fc59caf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P1Mapping1to234CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "03eb6127fc60b639feeb6e68d7e81b846f49d871990769492724159628246c18",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P1Mapping1to234subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0bb2101a7725f13cbe18ba12dae7c9657e7352f000287ce0739c7a9bff219621",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/P1anyPolicyMapping1to2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2879496e6087ee8c32af75c3b00c56536d4f065dc3230466326c5559acc1eae6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PanyPolicyMapping1to2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f8fb6e6ffff728250bd56fbb7c0f14c8d6cd0dfce53e6fcd9c8453b09264e99a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP1234CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a13082bc63944a65e2c4e8d296663bd5e21289c32ea8239bddc4174e63a66242",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP1234subCAP123Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9eff7d9071db6d7e86ae1bb5d3125f51e40e0beab6942ff8ff784545faadcf8c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP1234subsubCAP123P12Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8c82f48bdec144c8d9f929e0ada86cc752dc04bb4b962c70d3dd9ed1efbc0704",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP123CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cda0ffb67f39a918e1855bc91c135bf50728e9736e98598624e8cc6049e716a8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP123subCAP12Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "958891858d83bd4891dd4071f2863d5042b96d23ad10bee5a3bf823ecacb1faa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP123subsubCAP12P1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6edda686ce5f1762b0391cf209ae05c7d65ef3ee8c23648e8ee1344309095395",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP123subsubCAP12P2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f7596312068afa60d8a81501568f71aa70231554fc149259ea5a24e558b6f3bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP123subsubsubCAP12P2P1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e0ba802841b77d4d96e61d0b8bd4e8b3e24f509dcd6c4ea532c2e271fd4139c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP12CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8d437ad614e2a073a2760d5b0b92391a047ecf7884afe7b56463e907631bf960",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP12subCAP1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6077581b8650d17ecbdf1d2ef13d7a79c38e54dbe3462f03c37b62e655d64a2b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP12subsubCAP1P2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f23a77a9c4d647d161b4b3d441e36d0747522f8d2715f23a81ff28932aafd474",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP2subCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cb85b64ebd65d14ce198d3dcccc33ebb02d0738bffe2f6762c4753de4afabbac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP2subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "78cb9f7ba1aba98cb78a92eeeb48e5b290b9d1ebc872f3df93efe42c4c1965d4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/PoliciesP3CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "62c5c2f2c2f0f854be1d4bbb8b52c34c96f5ab12ec4e07d318b8bbcb3f63387b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/RFC3280MandatoryAttributeTypesCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5cd2e245077a7efad666de90fd793eabaf9bb08145e638f8ea454912f0e8e204",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/RFC3280OptionalAttributeTypesCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3129229fd8c124742d4f4e16f05d0faebc794b5044daf58ead431ae7b77936bb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/RevokedsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b8cdd7599e6c2c61689008e9d929baea724d75855e7f119978cd12e4319d64df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/RolloverfromPrintableStringtoUTF8StringCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c0c19eddeb8455ca1113c28ed5368f57d9aec79a5e5be5b58f80b07defab139d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/SeparateCertificateandCRLKeysCA2CRLSigningCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5b319cc821d525b5714e062dd9f565b38276b4a0492cf7cc26631b88536b2fe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/SeparateCertificateandCRLKeysCA2CertificateSigningCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2dda7df43a346d517110f3b9ee52e31a565301ad5c31e8cb71ee84e7b99b5f46",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/SeparateCertificateandCRLKeysCRLSigningCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5e50eeea5b6a6c9bb4bc33697aeb341372a143cab50e1cf23f0f3effa35ca7fc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/SeparateCertificateandCRLKeysCertificateSigningCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c01f584aaa786240105524b0c6aca94c1003afec430de3bcd5d533bc03df53f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/TrustAnchorRootCertificate.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cd45e724a9a85066bd83f80c3bab445038118638c922b95fdcb2e203ded73077",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/TwoCRLsCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3807ad3250e665fd82de183429ec1a4048174e5847c074cbaf693b7df3ddd939",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UIDCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c6a4602ae8cae32699f8e1679ad5b28784e60266a629bb5d3e60f2358856f6ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UTF8StringCaseInsensitiveMatchCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7db4d77be6f155bc675e7edf5d54e6155d76bf2714c05ff64604b799142ae485",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UTF8StringEncodedNamesCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2d8f47e0e4faf044c19d4b43cc307f6d8f0a73babaaa452f2bee8bda45adde71",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UnknownCRLEntryExtensionCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "63b1259e3a24802713cd117d6c838e4d228006fd081fb048f416ca1c17d3d520",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UnknownCRLExtensionCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b312f114c379f27fb2491f9ba30e44eaade56c87d20843626033d7087fc4c72c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UserNoticeQualifierTest15EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5e359fbdafc91f5c5732909770228fd21d6230411520d4a936b0fdf23ffe2c15",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UserNoticeQualifierTest16EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e15d0c41b68b31d6b8f86eb1990e037489038d28ead62be76ca3444eb0078be8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UserNoticeQualifierTest17EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c75a1fe5ddc2c202431e98bace81264d9fb5ef9d1ab8866af530c2db32856d1d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UserNoticeQualifierTest18EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1d9be64548392ae97a8b6a835353b62447ddf2171b641598ab30776d1e16c8ed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/UserNoticeQualifierTest19EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "de1e2ac49255331f8169547b54c7b3bf6e30b53f55efffaa14055fcbdd01ed55",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidBasicSelfIssuedCRLSigningKeyTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "af28cd13691d78b111ee447dc35db227123ddf934b36d3f68f5672d34c1373e2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidBasicSelfIssuedNewWithOldTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "26fadfb13910150a7083f6642a7e7486286bbaa42cfeb479398c8b5e32391827",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidBasicSelfIssuedNewWithOldTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "be3707e99121324c17ce5e911921acc055cbe8ebf0a39b9d9dfb3d5f30dbd512",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidBasicSelfIssuedOldWithNewTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9f55e444db4a249062cf9d12b03f4e371cb2d2ea07d31e72870775941ee1874c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidCertificatePathTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5343e0ee1e01c4373e2161a26002fca08a25919e30eec94839e44ce2b40af758",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNSnameConstraintsTest30EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7b7dc1f87eb6363f094f4fa5d3399ab93300daf82233cdeb6b3eb3ba935b0d3c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNSnameConstraintsTest32EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "392f137392ffe8e323018721198cdba5237d810b56e3f2a11bdf28e01fdc68e3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNandRFC822nameConstraintsTest27EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5f249b3469efabe9c4d7c740c80e0660e88dc9511c4b6c21d60c497a0a525071",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b454505b4cd77d5683f6ab5dc161733c07ac5d4a232fca9bf45196c92c30c590",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "793be8a7e851d49f86cdd2db434d532cc8a7f6d31eecb34179271c5a2b169031",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest18EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f98b025dd85dfc86886826515f0445c59bf22f5d8de4e54b49f924c41627ab64",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest19EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "63842d92c36ac4aa8f68247bc59238355a28106558543808b24bab220ed6108b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b3eaa1e2fc39d02038279d00b6bdf46ed0786deb3c81f1752ded0b3245d3ebd1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2f20abf6f57484ee1c814a4090d12a24c62c571549711d66cec0ee9475bdb9f4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "32b95cef9bfe0592b512bf341ca2814aa4d2b45e63588a20e7a71e66321478b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDNnameConstraintsTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f2c489d53ab241e4db22fd2cedae830b659e403fe44b963fb74baa47e1dbd7c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDSAParameterInheritanceTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1bcbb0b337de45db0a510dec9a6b4d13edc9767a1b2505e667be65cbbef83640",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidDSASignaturesTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6567c3318c3615eddc6b1b2f357b298fc7b47d00f9546b31c0c561b20be53711",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidGeneralizedTimeCRLnextUpdateTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5a8f63b41c0369456bf0b534aece39cfe6acde7815c924f234bd9715f0cce012",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidGeneralizedTimenotAfterDateTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "793d0638f6c2cc802601a3aa2d56c5da3ace20ad83cf53528473d6bb9f3328ac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidGeneralizedTimenotBeforeDateTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b49e464e141175e0faa509ad80c74fca7bff1d22e506d0d16d7f2efc440edbc8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidIDPwithindirectCRLTest22EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "94694524cf81ee9f284f4d34388dcc893a8c57e07361c96946a6bea92db1779c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidIDPwithindirectCRLTest24EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "47fd41bc032b4cb1e367a1499bac8fb13602e231f8559c62b5bcbeb59f553c3b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidIDPwithindirectCRLTest25EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "61c46ca546419afd7d65dd7e878de3a4bf26066aecef506d1a5ee02ac32e32a7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidLongSerialNumberTest16EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "755ec39c653f3dad40a8703e9003de87561ba4f4eb8a9e3dc45993e15fe307f9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidLongSerialNumberTest17EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "75a08773136483c96cae63cf9111d0482bea4cae39d81211b0270362dbe42449",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNameChainingCapitalizationTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ffe8e6d57302a995e7065e21f0cba43fb61fa227c63a5927d17de286bcc47f95",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNameChainingWhitespaceTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a5feb5386baa29c118fd3abd5b250cceda98a7a0a2dd44587d68ad90982edb23",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNameChainingWhitespaceTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "96d06b9214f83b15e423f6f9413678683ef3de515b4e95f434851b206abe7d6d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNameUIDsTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "263a1e3dce4f23df99200539b44e820ae60d7e24da43afb8004114b5dfc928b7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNegativeSerialNumberTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a4a7a7796ba70623b0d44cbf32c0a87ba5a0d95ce2a46addd0ec5bd913da7069",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidNoissuingDistributionPointTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a2df9ba50e508c0044d5f10f7bfcc505337aaed87c697642751e4698ff5b64e5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "24ad3c2833fe0955e8e1dc17b8d0242b001c5ae0e478ad6638d9134204eb66ac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest12EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4ebfea20a7dd57cc74b4639d78cf49e02c99227588395ddfe6b7c90d3f3d3f51",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7f74abb6470af60c42cd6989c5d88c071bdf09e4816c464e25d574651a5300be",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "43cf74e0728f934b4e21a3415baeac744f696a7a6861e09e47ba7dac57e6168c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8762c190c0dc368ba06d6d6dba013ac8f726a22113ce9df501a27ce25d598870",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9a99e6cca85c35130a354763df8b4d10dffa9c93303e122e8999c05fa9f928bf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "074b6804487e92565630d426e0fae7e82e07b3a5996bcfb85a77283b91f72d85",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "000cc19421a8d73fee1e4be500aa1e85b394c40032fe8eedaa398127fe3890cc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidPolicyMappingTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "be8ff24af7f4b8bfb00d81bac6904f00ce7f246c505af1185cee2aac2e24d882",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRFC3280MandatoryAttributeTypesTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ce94a68a187465831691a4f485f00474f371451ccccb58fd21047a5cc1991600",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRFC3280OptionalAttributeTypesTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "93b8b431bd27dbb0a4ba672649e2c7d28c335e9bc41459e89d321ed2354e4116",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRFC822nameConstraintsTest21EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6fa6126337e869187b1e19a452deac2865745451241d5fdae4f2c01288febfca",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRFC822nameConstraintsTest23EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0af7b661295ee4e0b440952b9e18419820f9512819012f987728d90177a47035",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRFC822nameConstraintsTest25EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e1607b20be3121e77f3dc11506747aa2acb8fd71a7f8e25ce2586dcbc825c326",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidRolloverfromPrintableStringtoUTF8StringTest10EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e12b05762c09c2d8e038bcc1d6c3667d733c835b75c01988ced0646c4d7bf899",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedinhibitAnyPolicyTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c9362a167b858bceb8890dbec680269b27719d5a8390acedee194ecd4d0f1015",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedinhibitAnyPolicyTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4700838508475f36bb0163ea92de213cbad6f0ae81813609c3a32d75955cdd1e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedinhibitPolicyMappingTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d463bd358aae08d740ecd441ca654536e11a06944ca84ab2f2884e4668d27215",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedpathLenConstraintTest15EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0955939b24f16f2e262f437b5732f4efe19185c2a24ccd0fee2199a67575f1ac",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedpathLenConstraintTest17EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6d377f15a3bd9249f2031d33e7b72d9569df3e604aaea4fd8bd700d72343129d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSelfIssuedrequireExplicitPolicyTest6EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e6bec79ff8033dedd8380d3bdac094b78a361d564c6150a602ad8558dbfd50f4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidSeparateCertificateandCRLKeysTest19EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8de64e5e1be2ce510ac731de33bc7006dbff15d2b39ffb40f0f6906f73b042c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidTwoCRLsTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "dbfa686c48ced621a5767b5549c90f5034487a541f45950e37fea44a458665d4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidURInameConstraintsTest34EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "dbb3ff0fb9c059f60b6b42ce0f4c2fb94e4de4a127976a4472aeedfcc07ba423",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidURInameConstraintsTest36EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "67d287ede5b8feaa94aa297deb8ad962a0eeaf756c3029df0211d4ace966d12b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidUTF8StringCaseInsensitiveMatchTest11EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f5836320052afec26e9d4e1f81a1ae615242ad3d66fec989494803c74d57eab4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidUTF8StringEncodedNamesTest9EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9875541ba9f1190a5670c4baec31f5f55080fc980a7ef123a4a8d192d074484f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidUnknownNotCriticalCertificateExtensionTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8acedf2ec38ffcd2c20bb6d77461ac8343426385520f00cd7d5811f2720829f5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidbasicConstraintsNotCriticalTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e94af180d7bcb5998b2115d86337d41751e19d750ba13b4fa91d535e1828bd96",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidcRLIssuerTest28EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ac87919ffff52d89b13c7a38e8b70631aef07d91c39268890ea71a2c246c47c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidcRLIssuerTest29EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "314e24fc7ef29434c90cee2c1275576d8e42d2cbce837b65632426d556b067fd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidcRLIssuerTest30EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e5106bd72cd254097d4afbd268fb85b8d6a4c95d103ab3befed31a86c8c0ef07",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidcRLIssuerTest33EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c99b3057cd437e035f4c7746005a2c4c89c9005b2418fa1b8f0f701dd4426650",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddeltaCRLTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e49a260b0cf72659810c4ca2af68eb17bd8ed7f65bd9a05b62ed339dfdac987e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddeltaCRLTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5823eca71e836e82cf75afb822b772a35023381667b7fd4593f9fe77bcdf3026",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddeltaCRLTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e3f0a6ff34c920be1142b9ee9647dd493ead9da8284763973710499951940724",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddeltaCRLTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6bbd78ceca56f575a9f7e936802a1f49eac369506f7dbb19a30d48eda040157c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddistributionPointTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b3bf6af111687cb25460648b295f5f614881fd4944dce2428f66372a5e481eec",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddistributionPointTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4985611a34f9f608a148a7daec128f7bf8ac2923d1e516772b193b8f2b1761e6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddistributionPointTest5EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "eee63cefa5dafa493ae8ed5768d97647f20c121872863e82ac67dedfaa63c55e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValiddistributionPointTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1da9422b4085d6a1d750521b7bd0b8ba7447e6f8cd79b1967a5fc1902efb91f4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidinhibitAnyPolicyTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "85783f1ae09d3cb1dd5afe5a636b2c7fde1e5fc41fca005507bafd0983304344",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidinhibitPolicyMappingTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "76c5b5fadf72398be0d1d661f1ec3579e12afcbcf0e08740985f96e2d9d2e75e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidinhibitPolicyMappingTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "585724fed74ea67f5b3d451343f0f1142024070833126114a437d890ec1e41d6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidkeyUsageNotCriticalTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "df8516ff3fc47b34d82ac8312f6f0eccb506a215f5f92f1f602f63282e353cee",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidonlyContainsCACertsTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "693a346d7137b0e0c365de209d17268e75a9d7b5b6d9d69780ac2b2201b8ba5e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidonlySomeReasonsTest18EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "465c2a4e3097d11964917d566b84a0bd11dff6cc690b62a7c0964212df96b7c8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidonlySomeReasonsTest19EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d652e8a849e395a2620ef066dd9359217fb3c4f69c348752bb68e0982775b075",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidpathLenConstraintTest13EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2e27570eec25ff3062ebf5815efa2ff01816afbbdc2bef93d980d4f31caef7bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidpathLenConstraintTest14EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "16398fcab4804224d778a539f4b0e4ee1624829eca98170db7c2f27f9c41281f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidpathLenConstraintTest7EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "350db874088357f792cc0d6cda69ffbbfedcc27fc8c77751f7c09b6bc7e6d547",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidpathLenConstraintTest8EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "05e3730fe30017a2fb1b1889a6d0e698d9278cc804d56cd029a4161343c6c698",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/Validpre2000UTCnotBeforeDateTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6dcb9ebb6c3d38ef1a40ea38424c781777c112960f49c14a6cbc1f369abfaef2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidrequireExplicitPolicyTest1EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3ad3ad0e382771aab0f9ac528388112961191a18c67c5a7a2d117ea524221cf4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidrequireExplicitPolicyTest2EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "895fd89add012b3030d12ab7c43fe5252143063d2f55f00625fa0b248469d0c2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/ValidrequireExplicitPolicyTest4EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d24d42b63c6592abb1c0e1f959eacd6e8a7905638b50096c34341753d53834fc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/WrongCRLCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "52e4ea5e6548af6278d6d6f3aa016c3b55203a7464c1911c3d5c701e8c8e11ef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/anyPolicyCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0dc4ace0995f1646e0a6fec92cb2c8d6b9b6199c5caaf87fc0d8dde65e758ce1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/basicConstraintsCriticalcAFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "58b30f527cc6086db06c454593215939bcdf714233c876381a82842514cf8cc8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/basicConstraintsNotCriticalCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4369f61720a177bb04f77f943f30c2851cd0450950c2cd7a824ffcc209d393a7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/basicConstraintsNotCriticalcAFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e4df14f2a87c07df1af17158169cfd0e6f4f4885243bb06bc2886029bfaf909a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/deltaCRLCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7242889f234a1d3106aa512d6e6056036e98acb2a9f60d93100cd03bb6088379",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/deltaCRLCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "83dab7a5e65a36fe7a64751a98ea3a680f182d2958f261dca20b5236f514b517",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/deltaCRLCA3Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "984ef01679aeffb6e40bff73ad61953b21bbb6d4b1cb859ab501b3e27301dfbf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/deltaCRLIndicatorNoBaseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "40bb0aa578120ade388f248a627cc25006741ce3d2d1d47af9825ea6a69f4366",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/distributionPoint1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b7e3bb54f6bdfa9a92eff6b75deafffff6c8051b53a6d76a32ebba59b2f77882",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/distributionPoint2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a1be8d027b792f8fdf6ae55de8b84a8fd84fac0d0126f54c75b553e093dc03cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "dac2fdc23e72efd8df3bdb770890d01cb20e7eb7bbded7e03f0e8a77cf1f4a30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9375b54dbb9c525365b4434d80d34dc1f62a022f96eabdd2172aa2040d189a06",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA3Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "02d188bb5a6f1d34347dd65b0fb4e97ecc7f8ba93ab79ba559339415254af10b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA3cRLIssuerCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b63d701bdbad4c9b97553f2997613af5d679ccf03acffe4942109ae17c11096f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA4Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "345bab898940910bb957ac14bba5d8a4b3680809a1737a98453dd7c014339809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA4cRLIssuerCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "cd90491c333031904272efb6a33babebb5b7d37f0c3fdcef681ed49870a8b90c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA5Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "29a115fbfc12bd585c9d0f768bd3e43f83de7122695464365e5e946cd4bbc684",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/indirectCRLCA6Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "3abbb1702d0d563c2c21fa0d243d89006c4f1540a1c39f101b02618decdb9c67",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy0CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9dca245456f1022a0336e93eff17f4a02a95b2adfaa63f47a1afa64b4c26791a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f5bb17ae174ccfdc70335892acd1c017b8d84e3d73c1bcf5f653fdeabe4e3a59",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "145e48c939318d0c414846b855ff8e74bdc725866923b4b245cba085dd3bd907",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1SelfIssuedsubCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9237eb13b01784a224912aec22c5b86b11e2b0e21583ffedbe85a5cde46c9f65",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1subCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0b051bda8ab2d93daece41db04dd599081e8e5fad3ffaa68b5b11a36dd90ad99",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1subCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "de4a2e172d60e0009c57f7b55e31358427c30274079df1238e64cdeade65ad44",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1subCAIAP5Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8913a0328ef4907e61603b877bdc621e195c1a3a4face143a27b54d81044629e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy1subsubCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c1c3db87c3e85edfdaf94a2d51626aa5a085e645bb9fe94df27e1bb84fc75b21",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy5CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0728d90f669d4092b242a9f55771ec0953db6d83d1804b8b06837095f3ab0bcd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy5subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e9affc9bc25c68b4f2cf213a67f7558d0822bb173bba54ee0163b2808a9d081f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicy5subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1e1ba78d96b62e5d81f9092ca125c68ed9420bcf280ee9d3bb81e75db5abc4ad",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitAnyPolicyTest3EE.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b8ddaeafc39ad181184a3d7ab9eb0082ffe1acb455a8282f29bae4c2ec775b2e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping0CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bf9015622dedeb52428e9c60dff51dc0d092b8eb6245759944c259b9907a276f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping0subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "919b49ff905d494f09d781581c660d3d4eda46814d858c86a24c68d4af1c2282",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P12CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5a575f61bcac2413208a2a81c348b482917a797c55b678ac74d520f7b3b04669",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P12subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "de21fab836a4faf006b9a257ee9bbc1e1ae099c607feb8991899d837d8b86ed6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P12subCAIPM5Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a5ddcf683813361d716b7a45a6e633df997a80ca9d7f39a6837e266169b5255c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P12subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0a8470b72e3dab66d53da64eb5a6073bf6e1bf80b29e05697a5e93a774e78df4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P12subsubCAIPM5Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2edd55a246f93c9ec40d3da42ef177ed1e609eab86220c7eac6072b98b4aa243",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2bd7bf9f9b13fe1d3f644ff576c6abae8d8e8c438597d90c7518d600d7309ca1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P1SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c63a3ab346575186ee1d75b4ecef3dc76329552b2b6cbcf3afdb9052f516c75b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P1SelfIssuedsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2670adb3f1d98e972e3a27e191783191773bd8bb53080ea1403a8b27634c3d09",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P1subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1b45c690a97093091f4eed8f0f5f3dd02f260eb5862dbd29e00f046c65c39261",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping1P1subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "21e70c92f85db7a8fc7c32e995248e79981dfcaa3f1f172c77f76b6f585afd1b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping5CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4b0ba0eeecf268153f4f640ee6944095cb6458032248469225ccca82c4db0c77",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping5subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0443bbfb4444b90267cfbbc77f0b4ce8399648f3cbccea06895202665cc1bf95",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping5subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ceb84770de2f5b1f1676209aec4114afc822b98566e97bdc44082bb327e3a71a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/inhibitPolicyMapping5subsubsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b83982260ae329f7bd25c9458c89bee80b0bb079e668e80e6ae51d4107e36a0f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/keyUsageCriticalcRLSignFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0d6f85da720166514ae76b041c48990f25aa280eb4cc075e9a77afbc33a033c0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/keyUsageCriticalkeyCertSignFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "040cf86f8fd3b7cad90afd33dcdb8d8e871dfc6aac9e25c70c83950aaab52d30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/keyUsageNotCriticalCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b268c70352a575eee7241da833e5ddf7657e6c30f9e3d3467e3727e2606bc7ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/keyUsageNotCriticalcRLSignFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "bad183dcb8ead0788027317757ece2ab8b06ef3d157526a25fc1a022c617b4e3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/keyUsageNotCriticalkeyCertSignFalseCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "84aaea34b7d715fc9d7e4c35dc59ff69ee1e6b2b10a12c3998b5806d4df6ac04",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f9f91408676cb14640f05046b52d019bf3f05dfb85f4a227e16c75837bdd0efc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN1SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "49a0a49c1f7d4f697e58082dbcee80f37a38f5a0ebf9b5d2d575f0afa95550c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN1subCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "2fb71a46691e9b394f7cd1b054ea4466daa66c9efc274442e2b5004d297e18d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN1subCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a611322c4852f5d9e76f2439273f9e26c5fe83a146e4027cd47040e5a2e96ff8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN1subCA3Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0a6c5b4c97bea4a7070e9ee5903c6827b641293666e936dbbc349d686ff749ec",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "06098d39d70d6d7442638dfb695c302dc4ed45fb39bb34564436df974ecf6c40",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN3CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "85e2d0514d56e073aefb405fc1af7061fa06e4db2cd19d03a82bdc09a7193ad8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN3subCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "93dc25f4d439d7e25771e0a8d79bd0b5195feb6b9f0a6f76f2faf88be4f5f294",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN3subCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b86dda9199922f68f8506c9cdc80eec3c91e480bd0b366f668b0d919ef06c9a3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN4CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b2361c98edfb5807ad86dea70c32ac73275936b309d699125e25af9b5c913ab0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDN5CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6c63b0c35db340cde327182f3f21aee90224b1114a1833016905713660fb6b1e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDNS1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f268bdbc61dc53d2180797b254158f48f88d194e9923fca27bbcc51ac79169a1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsDNS2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5e0952a3688cdda0250fff30283703682fc4325f0f580a4eb5000d26a8244922",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsRFC822CA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5835053c1d8abe503cc1cbc91fb9b03a4fa54cf2af7375d7ce813e2675a1ff84",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsRFC822CA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "be7529645e4a42108ffbae8988d5947cdbce0d44a9a283cc87630d545771cc0b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsRFC822CA3Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5fde422afb10505d95d7b062bd61222477aea9fd0a72ad2caec44222b6d0b6cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsURI1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "787589851d3d058a3b325943692c53cdd3c293ae8541624a0d4a5a4df18d6e0f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/nameConstraintsURI2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9c9b9da0afc2522e7775ec93dc43a4be498ce89a8f71fd49ca6bd050403af8de",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlyContainsAttributeCertsCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "85563c6facdc4bc889a39e0c89be34420b78a566e0a9f707638b85c4c26daacf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlyContainsCACertsCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "99f9073376504780ed9438626d5f05f510c6eac5840ed854bb26f82e95587d67",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlyContainsUserCertsCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "849c9046fc5c76fdf3783217c4124bff8251dd4cfbbe6a8555b655fd392432d4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlySomeReasonsCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0c324c12c273e8ff86d194739bd888bd6b3da7916a8ea0314e8c32506a6e2b69",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlySomeReasonsCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4fb61ad0973b19e93b84a9b129abd9bd7244f1b3d972321717146b3e5988ec27",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlySomeReasonsCA3Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5097f2dd976a70ced883751920ed610e700d2de8874d559eaf23ff3a01427726",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/onlySomeReasonsCA4Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "ea8d2ac6a861c9c88ccd0e0eecd26c51150f604d6f65e94b2719250f7c949a9c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint0CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fce8f1228736c51effa57c36bd303cabc2fae79e2d7e82757c5f132c0a103fb8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint0SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1b49996e9fc2fc8ce0279ef72ea5d78bd0bef6957db46067f2239722c7ec978c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint0subCA2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "a3916200f57cf6f7a9a960ba8e9fc7cfffbd007a7f5a66d802c048fc185e6b29",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint0subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b263aa4d302d24058e3dfd7584cfa0df449039454826905b9f369cc7c266133e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint1CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "80bb02f046ab906678c4ede9e5ce079ec476eaae4635fbd745c2c789a805d5c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint1SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "6c529b3b83b199a6d5928ec954745b2d6851a0cb119e0485b0d13f945d73c983",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint1SelfIssuedsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7ffd02776f8fa3a49c257c21947f591f2cd19630acc5b28636c8cb28e40e14d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint1subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "60d45e309abcd5d57e65551e1a0ee672cc221bc3492ed5e3e44e190dd6039e24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4e2bb14fbd05a9bc6352a69d48d998e0eca7545689b5b33bb3579accc9ce29d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subCA0Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "af42cc3f5f32b07391ba78e7ab81a2cd7771caffd0e7d92b1de2b5b93e29e257",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subCA1Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d8b2617e85aa8d3377e8b2ad0906ea4f81f11dc55d044ba0f5c2324e1913ed32",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subCA4Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4005523ba1bb32e63f8896ad52ec5f58a1dd36f84fdfe7356062438c04de1189",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subsubCA00Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "285e13345070e8ef47f957282099a8835ee187190e6d978ab46827efd0f57ce5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subsubCA11Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "039e9f438939601f126096b77558bd023dd6dc45298378e78717b133b5da9062",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subsubCA41Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "32aa984c98198cec7647c4551eae79187448d3343cf30c37300ce143665a0fc7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subsubsubCA11XCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "53cd7aadd6771e11b8e3937be306154391e3157f077ccaab66cdedd17a9fc6e2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pathLenConstraint6subsubsubCA41XCert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "c79176978f1fe0fa3073363dd5f6208509c252e6051b8832b8df598b264a2071",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/pre2000CRLnextUpdateCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f5b168d61ca630f44dc6da7912f4962610f990e28a69227ab72ea18e957d3f0c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy0CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "83d025d208bb66ccff165dafc22f51243c5500d51e1cc204200ce9142a7df014",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy0subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "23be34d1c61dc7e5046a1ec03186e0bb3a8568fa833e38669125e17469ee5b38",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy0subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "978cf90a1e2b3ce348e73f45a22251833b2d751bc8880fd1c7b73e4d1656efbc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy0subsubsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "dc37f84dd2aa7449b17fa89abbb240fee7ba3cb75513a294c777c02c6236dbcb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy10CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fbf2b246ed9ffb995a624f249e0e0f9f7cf3741cbf94c0fd6cd392e904b723ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy10subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "07797e4966aaeecacb028e514717a43aea665f82b4a0713590b71b431ddf2321",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy10subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "e153574903cc50f1ab6c454261cdb83871ac26c21f918ff3a02daa669cf5e49f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy10subsubsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "759662722736d722f610b32eb86d2afc38cb8e55cf2a48fccd776c78cc4d8cb7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy2CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "5206e4caf3c85d3a9edf073ada9afc67bc52c191e1d8dcc5c2478e53ddb2f611",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy2SelfIssuedCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "50fa4c59776a912f9ca53ec8729c96f2da878db3c0f94c19b8f066a4869658f3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy2SelfIssuedsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "d85fe09947939f0fc2d3e20e99744de4e552b7834bb2270ad61e2f0b830d76d9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy2subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8a5da67ee91254fb14023a42dbb83e2e8dfacc8f3e6891b66ce1e71c4647beb2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy4CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0512c213727123020acac02b7ea423a81d8fe8f2c5ec7d779d91d1dd0b06c03d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy4subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1273642033646af62f12208486c0fb60af13579248adbdf3478f8a3d673d1de0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy4subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "05d1700bf9d1bd8c1882aa29d7c4abfb4f3a108ecd51b33b94eac2bb8d866cb8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy4subsubsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "32c84e52421ec07e9f22828bbe82518134d8f5d445042b9094b40aa8423505ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy5CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "fc462be0e1ae29d067d0e9297d015eebe928ab37a4841d9ddbfad0defc70b9db",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy5subCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8b5748f4c33c7c88addd824de4ac11e23de9dcc2438aa40639930eaa7589552d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy5subsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7b50d434ce0678f0f9ac83b7604e55eced9bc293c186d7f957f1c737c7439b5b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy5subsubsubCACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8e7263ac43204f73b917eb5231efe660e87f0564e2cef2e2f868fd8473175617",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy7CACert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "0d152fd4e7d9301dbddd5230bcb73c7ff4ee2d77f5583e0a4f7c2007fbec07ed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy7subCARE2Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b8d37742fc76a25f9d69b3ef00e47e70c0c88cc76e1bbebd51a5c20a40edac6d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy7subsubCARE2RE4Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "b83f36089984dc097acb8f01094ee500f318981307949be06cf90be6e327fb76",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pkits_SUITE_data/pkits/smime-pem/requireExplicitPolicy7subsubsubCARE2RE4Cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "76004c202204064d36084fd127c2da9113f0bee0a94600860ab5afe5306c1ac9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/property_test/pkix.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8f4c5170cca37c2b65a9c75db3ec920a499523bf3a1ebe13bc799baeab941c51",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pubkey_cert_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2d0ce20b6a5358b3d3fbfcf0911f942e6472b2282c8fbaa4e7918f4cbaecea1a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pubkey_eqc_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4b853fa78c5bd6af808092f94a249a458b22f64fc12ffe4e951eb3dad80a3ad7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/pubkey_ocsp_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "321c253af11e940a35d092d06baa233e67aae866b9c84892f4f2f1f56a529dfb",
+      "kind": "file",
+      "non_ascii_lines": [
+        "93e8957b475c9b9b3216c0c68a1ea72b1d42d9fd00d9c72a4d93bceae95178f2"
+      ]
+    },
+    "lib/public_key/test/pubkey_policy_tree_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1d89636db89675fee7bfc57c78b3b2d1023a3d315c643a3c2a9b30e78dec9256",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key.cover": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "7aca0947653d295bae39a4bb95a7e501289ca56d618f4ce8e61aec18c744c508",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key.spec": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "9ff643138f9109b429560dba616da568f335e0f25fd8a4e0b70f0942338a8017",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0e7fe8a7c7407810bda739b26a2ed51a3d09ac8753cff4b5ee46a7c2e324ee9e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/bad_date_certchain.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cd626b621577cfab3b1b3651970a5b09c380f71480235b5fd50ce448fb652eae",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/cacerts.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4654e104b0b3aafeb09ec70781a4415e63f0d52e84e0cf792c7d9d43bd01f41c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/client_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "06f15275b72c5f00bc98394fd630e965fc3c3b40fcfc29b297ebbf91314ce18b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/client_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ba95c84b0ea8e40cdb1d5908e336497a269be2d8226ccf88f148c5fd8c24c81f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/crl_signer.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ace188bb81efb33a70222f25b732562cf8d6194db3bd854d12ee0bdf166f4489",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/dh.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a2c81b6882c6800cf45eca8d8b64c2ec9b986724003e4c6c38e10211f946ef4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/dsa.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d21c95e238153b4d8b461e2eb253dd2fdf392475e6a7d38d475f63d937f52ca1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/dsa_ISO.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e809427ad87595ff008ae842c3ae5fcb777cdb034682ad343639c21851cd8523",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/dsa_key_pkcs8.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "36d25692098cc5ab6d2a7d14c13befd4703ec2c1f6bee5e9e46f1f35bdd5c21c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/dsa_pub.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "069a9803ee5f12b708cd4ba115dce43ecb3ef7ef127dd57bd099d39ddb9bf724",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3414d9559878c88115881c44421ac68ba7b0147539a72c733cbbcd063e430d20",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_key2.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "622cdf8d98c4f1546d28de3b889369e8d1e59453708932203782089346aeb8cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_key_param0.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a2df56e5396edb377be0ba3e20599e6bed093b18b2beb8c8c99059f4e15034a3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_key_param1.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "23c6711df2fab3520d4c878df9ace50d76e1530b14a176318c0be17ed571bb94",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_key_pkcs8.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5909b8e53dbc404e7516385542912029a8f68aa0d0cc608ebfa1d2ff49cbd726",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ec_pubkey.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2bf53df24b5289aca66b40faa4bd2faf383255d8f3b9f7d6e6299121d37bca72",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/eddsa_crl.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1ac3d617b0dd3308e80184560c9372ca1d64e7f8f3f232329ea9553c8a55852",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/eddsa_crl_signer.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d61b10b8898325fcda5ba41d1448273090ff47b36ea250edb4a676acac821dfe",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/eddsa_key_pkcs8.pem": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "4b4fc44435f8d20dd4e915752db1019d3936877152b95d5f39414f422b1110cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/eddsa_key_rfc5958.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7b911bb103d90c6f8e8ad38306d4b59e7e64764c791a394d19497da9fa163a30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/empty_rdns_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0976e44c43781383446289ff40a70fa8a4135795a3e62a2696dbd1ac6f4a600f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/idp_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b102871f4bab51a79319ed19185bf16b9e2e594d70c7da92cd737ac23ebf8325",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/idp_crl.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ad2d3773cf54a9aa6020e599bf15084e5a342a5eed961fe100c393fb648969d9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ldap_uri_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5673aac4e9ad0ef7a72086962fa451668906d37fe47605b0c5ef400b44ecf715",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-1024.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8f29b009d934ea2804a7939f068ae3e471804dad0df964898d626977a1fe94ed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-1024_pubkey.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2c3d05e26742cdc29c70c4f57e5da5aff698bf0c8cdb80351761bb106174c13b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-512.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "69fa639c3020321a09fe4a397621daa4cc2a5680790c327208aab527e6455a4e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-512_pubkey.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "de96aaa41e5183e2d45adbc85d3a3bdf7deb7f99df8d85f82f31e0fbb6dee4db",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-768.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d6949cae7a0715bbfdffdd97398c401c7317afc81352061e77ec05597e5e94fe",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/ml-kem-768_pubkey.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "039f1109ce9bf01c6522de956777e21a3d03813739d46e7b8acdfd6165948497",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-44-cert.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9d176f0769dd0185b4bda98d58d0e5c6cb49f18c58887894697322743b5cf31f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-44-pub.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d588c8041fdb597414d2959c34ded25bcafc3e479574fd82439b8826ec9c42d9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-44.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a149b84eb998c3e3cf2173cca4e593d75a3eedd49fb05eb6610ee9106c114b4e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-65-pub.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "aa31b02dbe82f3964b9442c69779709a231b031433ce0ba06eb80eb3d08ada36",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-65.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9328d5f8188b821d5af4cda0968cd332279dc157527becc8f2d4fdda80e51329",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-87-pub.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "62abcc30ace59abe874f9c91b675f48f0c2be0cc873d6e326eb00c39bcf2b49d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/mldsa-87.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f558c563af22c96251ed4488e3dc70111fc8e993b34b605bf5ffd17d1c82a16d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pkcs7_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8ed14137a854e2d4404655596ef0942bf1bf785117d18df2775b541059d5e9fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pkcs7_ext.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a66c97e50cc1aca5b47ef81da9365504ff365996e6645642296cd1b4160c75ea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pkix_verify_hostname_cn.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2a288ccc531821aaee9e964ff6325a6b593030f7c892a9a318747135d1475423",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pkix_verify_hostname_subjAltName.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9bb1b58fcd840885b378e25672b3803f0605fea8bf47dabdf256d32170a7fa67",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pkix_verify_hostname_subjAltName_IP.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ad477053e6db03a29f67668e6d7181b60a6912433499a2c609de03e17bc36376",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/policy_qualifiers_missing.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0f002ccac7d79b55665c6d899741e31878b270ff0a62b4159b9732ceabb7fe8c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/prefix-dots.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "03ca816463b0545573797686f126fecf1a12a430b3a6c7b7ef647dda6b7b32da",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/pss_default.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4fe81e90f522d36a64bbac6a7327abca8b912e42fe8bb669c434804906dc6f6c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/public_eddsa.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5a89deb629f0fc079fd71b73cad2f2737f88e0153f7347f4107ff2e174846df4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/req.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0252518e3bfafd4fd916303d37c9a90c7bc73b4ebbe83eae9869c5c01e66628c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "774885057d71559d0691b73a24822c6feadb01513bb94b7014e122327f2949d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_ISO.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e0fb2d43f4441f05ff5d77c679576157b1186e8fefa848221d53bbccd9d87594",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_key_pkcs8.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1feff94a332191ea13dcb842b424a083355abda67372ab60ee08aa76e4224134",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_md2.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65a7165d80f74afbd171e59e7d1ad37cc6a0b4ea6e63a19e14b3db5eedaee909",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_pss_pss_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c9e8af502f11eb54ab531702e913a809622e38fe8079f1db38838ee82294a9ce",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_pub.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8f6f7b7931da50dddc116974450e5520e429950d874a42855228651e34c3758c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/rsa_pub_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8644ade39bff74f04430251735cee3e8f5c0ea4669aab9b4c0aa315222b31efe",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/server_cert.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e21506833f986a0fed1929c53ea1139e703b6c16b40083addfe2268a927fa490",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/server_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8c59066093d6682bd1b8357bb45387ef08c0420bff1720996eba60794754fb4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/slh-dsa-cert.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ca2f8252aa5943919a6194231543eddc52c99e4a5031071e807758d02c6b6ea6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/slh-dsa-sha2-128s-pub.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1605712857adb132c989c1c5329efedb8bfcfb54457f93ce7b82c6f99722fc12",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/slh-dsa-sha2-128s.pem": {
+      "license": "BSD-3-Clause",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb4d0b8debda9beb83f6e92f73a8436ac7d89fdc30e0fd14efddfac9fced4ae",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/verify_hostname.conf": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "8bd62a34dab472332b94287737c52e06f7abaaba0ccad00913649be0aa349aa2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/test/public_key_SUITE_data/verify_hostname_ip.conf": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "1666c6abb3cdf7da851207294517c6c44e5713d44f75258ac9c8f449b90402b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/public_key/vsn.mk": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bd7246528567bcd19cb1dab4d08a06cf61faee2b07db353f7ad5055fb9b45f01",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
     "lib/runtime_tools/AUTHORS": {
       "license": "Apache-2.0",
       "evidence": "file SPDX",
@@ -29798,6 +36416,4548 @@ Third-party notices remain in their original files.
       "evidence": "file SPDX",
       "reviewed": false,
       "sha256": "2c4cec57d4816804a067c0e0a89fed770a5286c6508868e92750fcd98485e916",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/AUTHORS": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "564656f71c03d69bd1452926ea3e1e06053fe2ba4cf61c07e3eaf30f30ac0b6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3b6cd727cc6d9d4c50288db2fa801f341bf9449ea768613376af71ee2abe363",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0c3b7f2dc196075f7d4ac898d9f9f9b5bfabf097e03f19b54f222650195ab90e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/docs.exs": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1d929bff3bb6135ad1856d8713e4fc1b5bb0291b140fecfe0f06c4db0c534762",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/configurations.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7539f328e7fb6b54f64c3e15c62806c8e5df09a2c3c588451d893825bc799b9a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/configure_algos.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8c3fd52cbaf04fa7649b811e9f455305acf841fa581fc7827093f0312e17da35",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/hardening.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d48e774ed99386832e9826c2dc20768be5fa7943426f55af22098796bd510f2f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/introduction.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "937895c9b37642ef298547dc3ca9449a43464c56759b7ba262f5039f918651fc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/terminology.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1acc894d47f5273852e48aed6301afae5d767fec44b21bb47024e87e95e1453f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/guides/using_ssh.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "abf9c032ab045a5ed13f4246e89bb5f1b937cec46d4bd8a2893f6af2b740b54f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/notes.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "de923db2137f9c65f9a688fcf823d8b4750ba929f4a75ab571dc3f39520fa4ba",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/doc/ssh_app.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b8abfadbeb51954d19703e8658327f8b6e3b914b6bba4c82694ef40355b31604",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/examples/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8c9df8ed5b942d628fc4474403b285cdbfb22d967b9737df397e0b611bc7512c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/examples/ssh_device.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5aa075ef426b5ce2d715dfcf07434c7826cae7a7c3fd8cd57425ceffb4bd4800",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/examples/ssh_sample_cli.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e60cc04bac279395c113b559d4dbe6ce3bac0147a99d0baefd808718eabb2b17",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/internal_doc/ssh_notes.md": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ec1d3174ace9945e7dacdcdcfe894d0347b2899f7f576608e45e89f0ff7942b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c548428aee42dff2f210dcf3c285bd17cb496efec0eb7d68da8710b7ba502216",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/deps/deps.mk": {
+      "license": "Apache-2.0",
+      "evidence": "reviewed OTP README.md licensing section and LICENSE.txt",
+      "reviewed": true,
+      "sha256": "f9c95584b807c3f666b6e477cf98b61b32465d29d842a1646dc9246a518d53df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh.app.src": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c936cf36ebcec7d9c4f148dd3f4c310af3d4a24ddc67e127696069b44fdf3227",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh.appup.src": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bcabf53e0e07d318d7b1be90841c93265d52c4b51f4a228f4072cec9ae7cd7a1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "28577b5e0761f7b01b74461665a101f4d5f72a88ea39098482c6fe8b0e17291d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "159665f9763868336a4e98928517a3e7e6444cfea5d1abaa904a6dfe26840abf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_acceptor.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "78d10a1d7f621899b390da1e1dba9ea1ae2f2a66e06f41dace79013472d03cb5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_acceptor_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b05696e27c388b5e174439813514caac3bef4e37333c049f295606973b7ee4a8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_agent.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5110009c48fb508dbfccffb4d8f9b9c04d00fb48e7339bf047689afe9a36d94c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_agent.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "72ffb00e10137c401cc85c14225331c013eb9dc9e853e3c84a56a17db9a69d0c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_app.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b56c54fe98f2311f3d226eefdd235ca4a1e193e52fe858c70568659d0703cb32",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_auth.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cdc2b35cb6bc6d616b01585c050be102f6e6b11587143da58d6ced43ec68335e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_auth.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a178b8e31f4cd6d6179e28bc165eabafc8d55c8e83f8852aaf584636dafabbf9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_bits.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "612f4dd4c6841c1823453549f834b7ad82c691ed1115b92a8b0912eab6c82733",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_channel.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "83ddc7460332019d071c7c7cb60e261c3c4791315c400658cc80939f8e0d3437",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_channel_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b2cbf889fc18e36de0f8a5cece11a7bb70bb9dc6a5df51353b3cdbf9be5880ee",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_cli.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a0df68a8e43ca3b0c196934804ae67ed85730cb7c7c9f22dd986413692abc05a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_client_channel.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "018d5155210d24c334e17f4754df2d3d130af96bf4c8373737790bf161a79f00",
+      "kind": "file",
+      "non_ascii_lines": [
+        "9c73f43b76f287518df96831839cd2d0f7d45c827744afe79d43356e846449bd",
+        "9c73f43b76f287518df96831839cd2d0f7d45c827744afe79d43356e846449bd"
+      ]
+    },
+    "lib/ssh/src/ssh_client_key_api.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "df36b143a848accec22df6fe12c90ca760e6c67ea4799e93e3cfd8e59198245b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_connect.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5a8179fce70336f0a4b423ba5b84d21e118edbbb2f9ca829fb76b6e286ba2c5b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_connection.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f1f74d4b16e6d0e7673e87b9bbbd5dc725062e03e109041c15c82b657a09f913",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_connection_handler.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0e90ea0b10bb2a2b001ac98b742db2ae5eb33f7407f0a1f8f0ce959f09fa904e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_connection_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "05f5fc507228dbc82fb405ecde11292c875b15f8fd03510c86ddbe6959107a79",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_daemon_channel.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "776e5f33ce4aa4005bf2d38fb875bfa2786935bfbb8c59ee76c40b84a7a7d4f9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_dbg.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "de88ec2aad10acb87d8882f69f76372afca9645052eb61b65cb5dbb1cb400b34",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_file.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "36cf0fb8e430c84e64a99fc3057120d23d9359408c8e6ff8d973478506bdfbd8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_fsm.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "40d08d25a4b1303b0bdc5006a85d56c3e659359a22a469ca8a63bd8de4ce1282",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_fsm_kexinit.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8cf6197297da7c47576a7f12d058ee361c5414440695833ee215343c9e651e24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_fsm_userauth_client.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32b1b853c3681cbebfd230e828d7ce906e980b5a3d9e5b9211365325698b4b2e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_fsm_userauth_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2eb5ec60aa5fe9778e8f79e6c2327519233f0d53f95a00ad84f7052bdfbb66af",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_info.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ee3be9cdca0b16c1cb1e921bf00c57b169adba573e21604346e5d57e4f6dff94",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_io.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4969f4bcdb6bacfa207eab7b0669e5a0d8b532f8367a33d87108df8d3edc4de0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_lib.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9e48e7e56ff8994b96ddcf98c98293d5654846c772ebfa7e09dd159caa928f2a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_lsocket.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7fa962dd3ddae4c4dc4ff6b4686b703e8f915f69579af89c1f651c31f128e629",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_lsocket_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "720ecbfb77870f277567c911bff173e421d5246b621d907b159498a669a76025",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_message.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4bfa08ba4f26847f797dfd85621ef00c7adfd4f9b2e51cf0cf71bf84ec5f57b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_no_io.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "21393e44a3e99451f3d848fbd51bbfe89297b28e4fc4319600649252b74aa7ec",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_options.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b115473200357776f9763a2ce89d54b24460860ec3ea960bdc4b8bc8294feaa2",
+      "kind": "file",
+      "non_ascii_lines": [
+        "ec5ea71d9e20ac1c487722d231aaf7c8ee14cf742914a94c85695cb77906f5f4"
+      ]
+    },
+    "lib/ssh/src/ssh_server_channel.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3d74ba3e5aad349b7296aa3f2819fbb8f1d716dc3e8ed46fea57d717908687c9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_server_key_api.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0a5b5067a88eb84105bb92398637d3592ac50708cac922d339855b8b0ddef1b7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_sftp.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1fb4ac72c24b971547c7ebcae80e18b5e680e90b99c727b7d534e7c83d95654e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_sftpd.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "405290fc08ac91475e54585a2d92f72c36d14489cc705ceb150050d8e2db1b6d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_sftpd_file.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b41432ad0d28c7b80b81f89152f8108584745777d1cb3d19e520414438f3e2d0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_sftpd_file_api.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "78bc338976d9a7f9e670477f774543907fa72a4848e65bf057bdaec940a254f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_shell.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "142de6e92f65ae981ed2ff53861896495337c032903f95d4e2b3934b22a2cb6d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_system_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "68a88e4d942452d10a8a6a78c8225e0e8da51d435fd34ebfe1fd600b29e0dd01",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_tcpip_forward_acceptor.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a2b935b5c74ae6faea714d4cd9054f645c45d4ae43eaf8aabd146d4916a3e26f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_tcpip_forward_acceptor_sup.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c2f440ab05c268c5610dae179f4994b6afd7af4efbdc013b1684e115aec76e64",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_tcpip_forward_client.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "770e7386882b488123ea21e9acceead45d42d65927a501a99aace350976ee5d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_tcpip_forward_srv.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "adb9eddb687d641ca875431b24a2f4afc4d1866f8c50d0651245f9d9e5a4cf23",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_transport.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d6a75856827521a61ab8d61f5e2ed9c6fe9ba9bdf6cb9fc9284f79b6e7cb87c4",
+      "kind": "file",
+      "non_ascii_lines": [
+        "6136d943c3c34f53b8f2ea492412352aade10c94c3de708e8bf7daff1101393b",
+        "23f4e3b2f08d5ef6d30ce15a6bbc843dc195fb6bf64a606601a294e65c890b5e"
+      ]
+    },
+    "lib/ssh/src/ssh_transport.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0a1640b8b0b096e87c5a8264b9d27baf8feec154135ff6acbe11079a91b56832",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_xfer.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6e717605196b9885b05179705786e7adc2b343449a013cdecf12ea5e5b228b66",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/src/ssh_xfer.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1a174c63b1a587a40cfd76f03be19711552560dfb2b8a269cd57b7e1f55b5742",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/subdirs.mk": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "22db2dab3156f4957e9a7cb4f0df67dec225ed0b055fc7a470d013d395a9b0f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/Makefile": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c50b7db5db9f983bf4b9e776695f942feb54136e850c11e9884f5a605291019f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/cth_events.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a1ba530896dd856de3d983f456a8c1e341bd7d56418fc71acba92070d13d35c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/README": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "06b6d43d5aba433c61a00444b82f6d5fa8792c2b579054687710688754a45370",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_info_timing.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "17952e895d2a3acb12df86d6b319a80cdb566d83e0c842ce1e877f2d24993ab5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "edbfea43ae355fbff3fcc22416d3f39718e9bd57e81a2a8c9bfa24b061d91b56",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d80b69e2a4038169894547cc7f6690348afe02cb112200a9a68c1e0fc6bb648f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "215c64205ea8f43d54b9b6af049ad04e01f8dcc92e9448274bd8725ef30d801b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c217b12a1b8b0b9680598e3d3628b77271227c718d74568cfd7bf5f2912b6665",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3250590cf6990061b0baf98d3669f018149d320e39274dadc2b22b36e20c1e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cb3f185d7f3664c4d37f42a4f21a591b87ba2b2711f3e86faabd26cdf9baa9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cc70d47926325bd6a0a998a48ef8c240418d7248f9b9eb5edc7aff55b6f9044",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b1eacf4e05a690aaade956dc4853ddc649278d7d209ae55077159e0a14362858",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65d0c79e4b29b06b4179e8076691cf2e1e0929ae61e6c4949f4f937f1970a061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc3df33e7da8eb059e55a3a9a25e9f789e541e686c5569cdeee3d4092e5068c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1d62ba0e727fc91861a30d74c3bd16447f11f1e53571f9657260975668e2714",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "390297cae5cf5de851eb0e88897bd06705e85709a01b5b17a1f78bd45de1cf30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3921b2ce4d27e2a7554f4d5f21e13980b1f32f44a38f9950376d91b0eaf8bf93",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "665ff71b83c29a2e3535adf41c926174a4f27c0e8aec9018df0966688a81a1fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4ee4a97359ece8ac74dce56cbe8e3036731230c2911b27f193daea429378d500",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32a0fe8199fba396c73fc28d0bbb6f805e7212e9c7f0add9ea5b6b7e08c56874",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "10e07a8d6a7c2fc0684e9a652b1da644e05b66277d8c5a106f3e5d95544690bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d0b093db46da8abde56ed5218368eb3e9b797a3880b32b18f1e422c430a807b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e027254f1b09ebd56d0f847af95f7b25310ca98c40688a49b6ad79e81cc0e7cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfd518a390633b75721274675a51f8bf6d55d598375b0094743b7fc81081fff2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9fa9ccb445aa2755c04459225ee6d0c827265ac496ac48b193659230ec355341",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_client_server_dirs/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "16c9860dc2410f1e828201ac92fb91787c4d266c58537b3a41426d8b4a81df9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_encode_decode.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "adb12ad2b458a53702e38975e03a03bf520bb0867aa31e0589f82b8e8a20a855",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/property_test/ssh_eqc_subsys.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e102034f4b247da7fce74a14a795cd4bcecf26e1c647ea504cad65a2901fe2ad",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh.cover": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "987d98b67484f66c481848221f1eef3366fed1ba2702c7b48c65fd122df8839a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh.spec": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "306c817186622b4cd4045307cd0425b714674fde848ec04b87e5032df9ee9c28",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "90783e257e11342452e261c8ba897fb229fb80d0f6236416cff6ea6b51e489cb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/authorized_keys": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a814c19ac656ed5215228b4c40137b53526594314e7659aa5b3d34df0c40b43d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6c4e293388af2d2984b6657abc7ff5dd8b225d19288455cdd57c5d35dd79ed8b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e7acd582ea14db12047b1b5536f80b702d0d47f3329f6cac099956ea9f1c5bf4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9959bcd8a126bba8a525ea164842ebedc36e7f2b6b0e59c4d9d4978e601b0376",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32a0fe8199fba396c73fc28d0bbb6f805e7212e9c7f0add9ea5b6b7e08c56874",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "10e07a8d6a7c2fc0684e9a652b1da644e05b66277d8c5a106f3e5d95544690bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d0b093db46da8abde56ed5218368eb3e9b797a3880b32b18f1e422c430a807b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e027254f1b09ebd56d0f847af95f7b25310ca98c40688a49b6ad79e81cc0e7cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfd518a390633b75721274675a51f8bf6d55d598375b0094743b7fc81081fff2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "55efed32ee7f3b5d2b1d4523815926442e05e671615ab1b8a59911b14181412c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "35cea9ecc75cf2ae031cbfa8a28bdd8342acf467b41b9f43b3fe63f3b68b59dc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_agent_mock_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5554c7a32ae5a8c0d187d25c0fbc13d089a63430588b86d5801849de4106fb6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6d51b6d0a2dc77c4ad9260e27ce8fefa7684e273315f728a43618aa1e575b098",
+      "kind": "file",
+      "non_ascii_lines": [
+        "a3e1083fa7339f329b95de9c0a19facf4715f02f4445f1e49d8b321bdd48c107",
+        "168193c1e681e2a64b8b53d44ddbffd98e97c061fb9a1dc0849a21fd09508841",
+        "fb55509cba92e41590f9b3fea10fb804b7c5fc0c8b8b97041b1b7f34de1716b8",
+        "a8075f01f0225ad2f18b83ac8e0d467ade1a65b84497b9a6f877fb38538b6a99"
+      ]
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f660e3b9e3c41fcf341205c50e3b5cb6912d7ec66c57c7ed9a48b7afe4f2ee5a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "445c662a4295488494037206f6beec3d051ffab5b929179805a8ec879162ddc9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0036a441b71a6d491592a8ff7112fa7eade4493a67c7fa62097d325d1b451fff",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "445c662a4295488494037206f6beec3d051ffab5b929179805a8ec879162ddc9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0036a441b71a6d491592a8ff7112fa7eade4493a67c7fa62097d325d1b451fff",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fb132ad0a3cca6aadfe32abfb4b0c8b64621870115521dfd4bd9083300de250b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2940c542702dfb4f5d610f980bcd4d27620dc089570a28608b7bc2f8e22dcc40",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "16edb5b345a011005dcfdffae127681c09ca7167a9a5e13cc6bfd44e6d1ccd3a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ed1be2d8284ff09691134e1343fe5ab51b19774dfaa61996ee4b32f5d65034a2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b38d7faea89d2ba3104000e11634bb52c6acc08107e0a23257432c8165cbd2df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8b8a26c8a8722d9d07445e2d2634408a5b7b9ac7861ce16c35fcc15c51e74f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "585638a660755e30578478a3bd6fe1ee0235383230f8a8cf5412e8602a4dcc08",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "44dad5125d7d30aec2c85ef27919362747739211cec7903bb089a98a43149b31",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b78363ea5cec849e2775e2a3efa2088a1d49f32324adf0ee62e2986c3a1613a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "93ae30c66b44a9bc780fc1af5976eb90e03627f6d0acd2a578f86dc4875aaf7e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "41110c5697a8b2711dae41706ad64551ee603114f0cd2db84ceca169d009d45a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c49d3eeb10af94787bdb585257e48ce8cb5b996530796511b1bcbd1034db5a4c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c3595b4df41a5dc18c866f333b4d7fb009dec0f95b714e0ecaeb20da1c808c5e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "555eef19cd92eff6ca650508c573ad379cce89d5f0758673402a57a0e4936f62",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a6845a5c0d58e42b7742b1edf8cefd4a13d3da7512503889d588812185c1d268",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3c370e4ee8733445c4a053bea7425da1b60a0d64585c14b919d922fab9f15bef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7abcd3810938e3d70e0c75af4253b7c3a5c528a0b68558e2f47f54ee7e854c14",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2d83084b5c0216154a571de1c467ce3d349f902baa82e2ec1852ca61772e6a30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "250d8e65a00b18fa6bfa5406f5eb4e6a1e13162eff3a3bbcf827394746cfd706",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_algorithms_key_cb.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "574545bf16a6e9b55d2aa8a16e0d6ce7eb1236648b6d4ecf1207cea41fdf5ac0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_all.cover": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b47779c1fe97680187eae4f87e56613a11e471ab19886cb0cd8561f204930b04",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "de93e15d3c1d9216a0b762fdef1e7dd605505a9d434e8846ad32bb0840552721",
+      "kind": "file",
+      "non_ascii_lines": [
+        "862b5d27e7892e6f52779e6f759bc880cfcb063c3a7e6781a3210cfc3c6e2da0",
+        "8128a6edfa123a5eb0f8b9b9c9d848ff45846090b299a34d1a392cd294b7c8bf"
+      ]
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5f3040f8b8b6a2016242d8e58c65c1f04440dc679d278c6c88201ef2aa139aed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "887d2febe4ed5c13648aaa0c55dda4fb50770b2f8723335a5ada222d10479bb0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "445c662a4295488494037206f6beec3d051ffab5b929179805a8ec879162ddc9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0036a441b71a6d491592a8ff7112fa7eade4493a67c7fa62097d325d1b451fff",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "023a7f9ee38ab3753e7289ad2a6014df4b0151e8dc42afd619738e7b5fd61e89",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "541926894ebd05e2a716d7ce525ec5b2f010393953211586ebd75fc9de4fc767",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5c888081fba50193d9dc0d8afce2e2f008595b7c0d2e5e7262f1e2e33e37920d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e53525442dd40ca124009ffcf4f5dae4cda4d57163b54eb19eb5c0b440d41564",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b38d7faea89d2ba3104000e11634bb52c6acc08107e0a23257432c8165cbd2df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8b8a26c8a8722d9d07445e2d2634408a5b7b9ac7861ce16c35fcc15c51e74f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "585638a660755e30578478a3bd6fe1ee0235383230f8a8cf5412e8602a4dcc08",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "44dad5125d7d30aec2c85ef27919362747739211cec7903bb089a98a43149b31",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0baf3f45779fba7541cbe84bfd784a202e8a0935a8cb9b6e649b8d07310fff16",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "efe4877be44b18adfaa65cac630aac37782b61c82b9cc3bebf46e7e65241d454",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb834e269329502522cb00db189c528384119111ff0884a9403066ee1a8bbe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "880eabade3cd08f8b277711cfce0f22414ee4bd4bacd4f87c232d95630321809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "93ae30c66b44a9bc780fc1af5976eb90e03627f6d0acd2a578f86dc4875aaf7e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "41110c5697a8b2711dae41706ad64551ee603114f0cd2db84ceca169d009d45a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7692ebd00dd6dfad5c00d1d6eae12edd8064eecbd25db45b749c26c58cd44005",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7c1a84fa0dc0d50cb06dc9acd66984e57a29b70c7050a7c71ec43d532ec93fa9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d6aafcb523dbfb1ae5b3e33d5865e3fb7d7966b4bb73c88f9e51ab44eb8d056a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e608acb4d2ff12f0f8e5a95176c6e1e7915f1209bfd24eb3720365914eb6342d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3c370e4ee8733445c4a053bea7425da1b60a0d64585c14b919d922fab9f15bef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7abcd3810938e3d70e0c75af4253b7c3a5c528a0b68558e2f47f54ee7e854c14",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2d83084b5c0216154a571de1c467ce3d349f902baa82e2ec1852ca61772e6a30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "250d8e65a00b18fa6bfa5406f5eb4e6a1e13162eff3a3bbcf827394746cfd706",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "310cc9571d26509a3df5755d476fac87b1b7e8050fae9b5b25a3b36f3ee82ad6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_basic_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "01b26e4d3206617b49558f4b019148ea06e128685a957c4ba543bd290358903d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench.spec": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "668b3fc1ed38924708d19616dc9ffc479e05a7aeb7dc1c9548ac0f54f3befb69",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "803c08908009370fd3beae79595e83c326cc6d6f7888f029ac3dd0b451d4ab5c",
+      "kind": "file",
+      "non_ascii_lines": [
+        "55b797499b8379db96f920d2d9e537ca16ad5a27fe2e79dbea627c87bc2912e8"
+      ]
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "aa14b2629b3dd9eeb1aa50427eb85cba1ba60db4d809a0b92d9c4c2e3f6f7e4b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ec7e4c6b29b1bf1bce536e82c59ccd7825ae8e8a8133714d6dd78e3b878dd9e1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1a362a231a80cd66b81e0a9901a8a5286343eee52e171f0995d50f794d7483f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ef7ac073d3b9df8bebcce0b6e1cb07e095f09772f68f42f0daa6b3982e040aec",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "11de9cd3cdf19e3c32b8a3391d74ba23109d0eaca03b00a93eb080278cfd6a76",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3b46cd7ffd1672aff4b4e21283222cbb573fda4731231ed46887f7b586e948c0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "01b58ba6ee68055eddf79ca22eae85a39c87ac8771f11f23e5f95412435c3b68",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e81d93644cf9aca64485d4a0a2e78eb5579550310143107ad5ad50367ffe596c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "12f90a6ca7ebc5002f2942ae674bfea814844fbde962417742ef4d894525693e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "78df1bd03ae4ca7f4d401a68fc7f67761f2b72c72cf1b82fe5fde9814f276018",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "95cd088de5b718f551b5147c06762abe2b1c469d84cc547ea7d1915187af2274",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b44a82430ed6ff4a60e38af178c59331c4effee1e2c997929d10d25289c00a3e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cbc93f2a4b63f46260c02209ff780b3cebd616fa5d7b4024f89e960cd83092c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "eaf329bb579ab103af7f7dc8be9c7ac2eddd7b9d9242a4ef7ebc7d15df636d91",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "00b3bbe53a082a57a4ecbea2e456e00e3fd6e153a865427dd367c445d85581b1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5bfa9c913fc5f5c3a2bb04a25f9c0d45d8ce8135b4e1bc95dc7d17dbaf773b69",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fbe6993aaea456a41b50fd7815f856f62d69b57a328c79d5b71ef8c7a41cae6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ebba306657047d5499af1e519712c5b6b676e6e3432219dea5420eb1d7581c9a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_bench_dev_null.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e9f97c28f616f60c40d96378531ba4acdbb4b9ef55370cac1f14256e9100254d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "06ca9e44755315e1ec27ee13c6b83705d3a98ff4fba0bde7ac210414adfdccea",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "23363313554504658e1a9725c50d16432494cd3e9fb2a9ea4d6bb9b62c5eb9b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8bb8ab64fa140fdad7256523278f0ed8940ae796e0bf5b81fae9d05103dd282e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "16df10909af562328b0d4a14cbf599c97bfde330644f94dd70b394d2012e4d93",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b6e01e11c946d9d68bd0115d9fac84bd49fa650c29fe95185832302e59e3a3b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c69c45c96b6e153c7083859737bccd42bedbfc4b6dc9f780ca3bd68e7df6d134",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f07dea9295f032711f75edc261c0974529890bcab7f210a3841266cf5bf04d71",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_client.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7d0ccd7f0fba328672f127c0a26ac4e58e584084271dfd75c9209791ccd84fb5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_chan_behaviours_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "748a7c4de683ec33368103d8be4550527e5f47fbf04ca2229cb5c2acbebf9b33",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_collect_labmachine_info_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "337159dcd78cf579dc74da41418ee9bcaa8c18bf783161df6877634d27f38912",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "eaa627879a4329f0db11bf18c230ecea3167909a3a04ca0d9a1e8c9a14662be7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/DF": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dcfa0193a91a43dfa63060507b9edfaf6b6681ce08d868a2793e5d4b6ffd00ed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/MOVE.howto": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a3cd8ddd1535102abde43b5b85f39090c728925fd2236c0c929d17036e99e815",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create-base-image": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f78e0cfd5a2e186b293090c69bf9633cf4669fbd135b207b84cd08a71d0efb53",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create-dropbear-ssh": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a43ba45c424f8638b739da6884a05289ee62265052209b50fd7b5ca40111aa50",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create-dropbear-ssh-run": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a6a29cdd90d308902d3c8fcdfa37c95d774e3215f9669ad0de49f33b9f142143",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create-ssh-image": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "198a28241ff51c4ac78a6cb0b2be0bb3daf716fc6388b83cea7178ee7c4be809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create-ssl-image": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a8d3948770b22407936b1679867a905d7b0ec756d50d2918668bb119a533da20",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/build_scripts/create_all": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2badbdef8cf9f57320ed34bfc1c6d4b0df212b737da43fa01c8474fe6b3c8aaf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3ebb1fa08ffc58c75857e4d9b4a7d9b12b941a8ec7d8b5b988e9c31513c4c70c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f66fde96d4778008ed9445aa763f513f30ff78e261da4a66c6aeb495cb4fc54e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "468e89a968e08c157c303e39c866f54f29e1490f7647eb0a4cc9518f7cf67c89",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4bea3d9cb13a51910c98989632b3800b9172c5b2fca1466ad3c3c1d319c95c02",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "55e2a06fafd6ab5e4911c0556863f0c939abe1abd8b5b58e2bb8c2ec65823e8b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "445eb5e523098c61056abb1f4682121db38600cfd0ad5dd67c18e884614f7872",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a315f0c0f2dc91cbe40fe0528fac9b1f6304670fab4310d6b25067fce37eb4cd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3520bb4ca8ed1bcbe1270c823960c0d47521d1b81840d030ee9775a6387001d4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3c370e4ee8733445c4a053bea7425da1b60a0d64585c14b919d922fab9f15bef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7abcd3810938e3d70e0c75af4253b7c3a5c528a0b68558e2f47f54ee7e854c14",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2d83084b5c0216154a571de1c467ce3d349f902baa82e2ec1852ca61772e6a30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "250d8e65a00b18fa6bfa5406f5eb4e6a1e13162eff3a3bbcf827394746cfd706",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "304fc6a55eb5b8ec3c9c9eec3c9d2989771a623b81f94412b4d5562b3c10c845",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/host_keys/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a7ab632782a3a09468da86a27f04d89fdc0ae66e61f4ba6ca3b86409ab10a37e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0097e6ee014b01347f963cb3b876f0fa7c375c5feaaf4ffcd2b3d67d8419cdbe",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4064c53d2d6b91623cda3e356656da399470d90a42a105363e19d8c67faa54e8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "641be75b232a316832ebe7771c6376abbd5caf6801314e82b7f5090da0125bbd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "641be75b232a316832ebe7771c6376abbd5caf6801314e82b7f5090da0125bbd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6f4da914f148f68381921b88a00b9a061e2809a9b13231c42debb7868f95bd18",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0d5b961429a68836de8009ff2908db88d1d19ff1d4873f3351cd9ad5ab2329a2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "84c0f0ada31ea2cdc7284afe2747816d41653f77c0ebd36a5516e6b88501e8e1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0757025be9076a55546096cd2b97f81eca54c1707b41eb1f7d2bc447bfa0ff12",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ae1e61084a7311bb729bbf786132062fd5ca59306fc70bd450d96c67262ee0a8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b38d7faea89d2ba3104000e11634bb52c6acc08107e0a23257432c8165cbd2df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8b8a26c8a8722d9d07445e2d2634408a5b7b9ac7861ce16c35fcc15c51e74f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "585638a660755e30578478a3bd6fe1ee0235383230f8a8cf5412e8602a4dcc08",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "44dad5125d7d30aec2c85ef27919362747739211cec7903bb089a98a43149b31",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "80e025fc023dbaa883033bc6d139d3d2d9c756a14b897a3b180fe6c89ce77126",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_compat_SUITE_data/users_keys/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2d1b05d9e5452a9883b5111e6785ec2a53d36febaf4690fb765580627e99c83d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_connection_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6ddaa638a519263bd2383fd4a31202f0d58340eea475ee82dba6f3095d8e91c5",
+      "kind": "file",
+      "non_ascii_lines": [
+        "61bccd9559daac59fc07c083a83c637dbf2139aa519b5c3c1ca5a5acb2888f6f",
+        "608a8ad7b560dc3d411cb044dbc108cc369cb744a5e110057512cf234d0c76fa"
+      ]
+    },
+    "lib/ssh/test/ssh_connection_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5bfb094a4182cd629e3f810a6efb614493fb72b8f207266e2d564510ba5dcf83",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_cth.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "aa1b4b62ad5d071b663bddc59e50cbac81e6f7ef9312ef513e282fc46ef5c855",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bbb8ed7656b5c8092e674d7331df184b036712a4033ca07450d12d6f7318f196",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f2cca143c0460bf0e4f20f1c302f82961a8fc54a6ac8bc694f2e8fd082c8094b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "215c64205ea8f43d54b9b6af049ad04e01f8dcc92e9448274bd8725ef30d801b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c217b12a1b8b0b9680598e3d3628b77271227c718d74568cfd7bf5f2912b6665",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3250590cf6990061b0baf98d3669f018149d320e39274dadc2b22b36e20c1e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cb3f185d7f3664c4d37f42a4f21a591b87ba2b2711f3e86faabd26cdf9baa9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cc70d47926325bd6a0a998a48ef8c240418d7248f9b9eb5edc7aff55b6f9044",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b1eacf4e05a690aaade956dc4853ddc649278d7d209ae55077159e0a14362858",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65d0c79e4b29b06b4179e8076691cf2e1e0929ae61e6c4949f4f937f1970a061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc3df33e7da8eb059e55a3a9a25e9f789e541e686c5569cdeee3d4092e5068c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1d62ba0e727fc91861a30d74c3bd16447f11f1e53571f9657260975668e2714",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "390297cae5cf5de851eb0e88897bd06705e85709a01b5b17a1f78bd45de1cf30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "12ddd16c5b1fb1fe76046f6ac710ca84a21c20ddd347b6795bde4403dea7e097",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "23363313554504658e1a9725c50d16432494cd3e9fb2a9ea4d6bb9b62c5eb9b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8bb8ab64fa140fdad7256523278f0ed8940ae796e0bf5b81fae9d05103dd282e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e52d10e8fc87700b69d938bb23c547a0725380aabb72770cc8207c147fb127fd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "62904905642a47798a4759dc54beabedb7aa48d7a495de595c83903cf86ebad2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "16df10909af562328b0d4a14cbf599c97bfde330644f94dd70b394d2012e4d93",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b6e01e11c946d9d68bd0115d9fac84bd49fa650c29fe95185832302e59e3a3b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cfca13f9393bb8141f08d23fffdb554d16dde5aefc20e962f3c5b4c77336b0a9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "538b8ac9c17b9917b8368346648f645f9f816aecec613ddfa370b687136f2fbf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c69c45c96b6e153c7083859737bccd42bedbfc4b6dc9f780ca3bd68e7df6d134",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dbg_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f07dea9295f032711f75edc261c0974529890bcab7f210a3841266cf5bf04d71",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_dev.spec": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0946bb52ab52fc5651786b8eaf330a60a0895dbf1ab66f50c3b3e26992e6a02e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_echo_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5da8a91fe1b8aadc85779f65fb353123819e899fd849457eb5747bf136b6d467",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_engine_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c10b692a4504a5c277974629e63505881daa84cc66f669cd1c216c460c8694bc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_engine_SUITE_data/dsa_private_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5143f4a46ae1fcdf24e247de434e4636f402b89e44dea5200922a15bd6e6a920",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_engine_SUITE_data/ecdsa_private_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b7823a9c8aef367277c60b75b5f59d1fa0c63a5a01cdf43c17f0482030f309b4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_engine_SUITE_data/rsa_private_key.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ca9a9e5138cb4a69ef9dc414003697b4c6fe67ca5a3ea8d71c0644ba5f19f4d0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_engine_SUITE_data/rsa_private_key_pwd.pem": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e0d9a9c1a3c011d6b3db511d54d032a13af29b567f31f3ff9b92cb4007ede2f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_eqc_event_handler.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d068243aee5a9117dc522853e185e1eb4d972234bdd2896be2e32391396c234d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_gh.spec": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "90f6bbc64fc5a959ce2b1cf4ebe0ddc262ba9f5d1a49d42c22034998e0dfddef",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_key_cb.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a3de80ba63e87c9fa4c1b4b75c3eb0931156358a808566a36452a7c230e55378",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_key_cb_engine_keys.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1622ac72b1adbe2e9cb443dae25b5f83e07c77bad3d2f87435600cd9551a963e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_key_cb_options.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "29324bd727ffd1fa9f7982eb5e85509f2486be6bf33d5e6272168315e7a738ed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_limited.cover": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "03f76825d5e667311a317f7845bce956db7eb148c655d30bed971630c855b8c9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_log_h.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "87070624ba77eee623ea12d1574a8431f2537ffe921aa9a57b795907b9be8e37",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9a12774aec3197b9183b0dd4c5bc70405da41f081bbc36de3fad2d8c95f6a0ce",
+      "kind": "file",
+      "non_ascii_lines": [
+        "eea77eaf5ef951159f4c3c6811e1dd15e8ecc02f2a52adc7fc45c3e8700bc207",
+        "1c43040c23cc28a39c84748226d244034a8376a1ec5d0d79f87eac31f83abd33",
+        "4fd7c263c820438a7186588541b1968f460acaea7a182fceb01e7bb92832e63a"
+      ]
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f660e3b9e3c41fcf341205c50e3b5cb6912d7ec66c57c7ed9a48b7afe4f2ee5a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "215c64205ea8f43d54b9b6af049ad04e01f8dcc92e9448274bd8725ef30d801b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c217b12a1b8b0b9680598e3d3628b77271227c718d74568cfd7bf5f2912b6665",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3250590cf6990061b0baf98d3669f018149d320e39274dadc2b22b36e20c1e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cb3f185d7f3664c4d37f42a4f21a591b87ba2b2711f3e86faabd26cdf9baa9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cc70d47926325bd6a0a998a48ef8c240418d7248f9b9eb5edc7aff55b6f9044",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b1eacf4e05a690aaade956dc4853ddc649278d7d209ae55077159e0a14362858",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65d0c79e4b29b06b4179e8076691cf2e1e0929ae61e6c4949f4f937f1970a061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc3df33e7da8eb059e55a3a9a25e9f789e541e686c5569cdeee3d4092e5068c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1d62ba0e727fc91861a30d74c3bd16447f11f1e53571f9657260975668e2714",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "390297cae5cf5de851eb0e88897bd06705e85709a01b5b17a1f78bd45de1cf30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b78363ea5cec849e2775e2a3efa2088a1d49f32324adf0ee62e2986c3a1613a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32a0fe8199fba396c73fc28d0bbb6f805e7212e9c7f0add9ea5b6b7e08c56874",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "10e07a8d6a7c2fc0684e9a652b1da644e05b66277d8c5a106f3e5d95544690bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d0b093db46da8abde56ed5218368eb3e9b797a3880b32b18f1e422c430a807b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e027254f1b09ebd56d0f847af95f7b25310ca98c40688a49b6ad79e81cc0e7cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfd518a390633b75721274675a51f8bf6d55d598375b0094743b7fc81081fff2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_options_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_peername_sockname_server.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e011ba6fa4bde7fe307451a718329f19ac880c1d1265d8e08d6c4416c65ab7a6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "62cbbbb47aea6e604d1cc056db2ef1418bb053e6a30c4980800079d9950ccecd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "23363313554504658e1a9725c50d16432494cd3e9fb2a9ea4d6bb9b62c5eb9b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8bb8ab64fa140fdad7256523278f0ed8940ae796e0bf5b81fae9d05103dd282e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e52d10e8fc87700b69d938bb23c547a0725380aabb72770cc8207c147fb127fd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "62904905642a47798a4759dc54beabedb7aa48d7a495de595c83903cf86ebad2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c69c45c96b6e153c7083859737bccd42bedbfc4b6dc9f780ca3bd68e7df6d134",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_property_test_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f07dea9295f032711f75edc261c0974529890bcab7f210a3841266cf5bf04d71",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2fa968ef557a4286482a52dc1435df0e82d04087d81ae2b35343f2164fdc7f1a",
+      "kind": "file",
+      "non_ascii_lines": [
+        "b619d423851ccf884177e1d63e5cad3b4ef26ab8fb5c6fdf2d2e11fef6f10e78",
+        "7169949e8db4529d39383d48da442a7a245f9ce9a23eb92b4219aaf900d8ba55",
+        "0477af79fef3291ef32705391f3d6e45d57d60e27092b04cbd3ebc039c0e86d1",
+        "a5fc4739d79748efc1d054beb3cd9d75e840090cafe058b0335d10af14f45529",
+        "bd51c61c532652fd1c591c96973c020d2bba06200aea916b457014046e3362dc"
+      ]
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/dh_group_test": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e9fbaf56c3e759781569307f0d78687a65d5e6adc06d4eaf0694384f0c0cf7d0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/dh_group_test.moduli": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f22e90028a58ac24f8cdfd288f895ae979551d8afe3597a084fc09c491a64f07",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f660e3b9e3c41fcf341205c50e3b5cb6912d7ec66c57c7ed9a48b7afe4f2ee5a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "215c64205ea8f43d54b9b6af049ad04e01f8dcc92e9448274bd8725ef30d801b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c217b12a1b8b0b9680598e3d3628b77271227c718d74568cfd7bf5f2912b6665",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3250590cf6990061b0baf98d3669f018149d320e39274dadc2b22b36e20c1e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cb3f185d7f3664c4d37f42a4f21a591b87ba2b2711f3e86faabd26cdf9baa9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cc70d47926325bd6a0a998a48ef8c240418d7248f9b9eb5edc7aff55b6f9044",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b1eacf4e05a690aaade956dc4853ddc649278d7d209ae55077159e0a14362858",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65d0c79e4b29b06b4179e8076691cf2e1e0929ae61e6c4949f4f937f1970a061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc3df33e7da8eb059e55a3a9a25e9f789e541e686c5569cdeee3d4092e5068c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1d62ba0e727fc91861a30d74c3bd16447f11f1e53571f9657260975668e2714",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "390297cae5cf5de851eb0e88897bd06705e85709a01b5b17a1f78bd45de1cf30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b78363ea5cec849e2775e2a3efa2088a1d49f32324adf0ee62e2986c3a1613a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32a0fe8199fba396c73fc28d0bbb6f805e7212e9c7f0add9ea5b6b7e08c56874",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "10e07a8d6a7c2fc0684e9a652b1da644e05b66277d8c5a106f3e5d95544690bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d0b093db46da8abde56ed5218368eb3e9b797a3880b32b18f1e422c430a807b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e027254f1b09ebd56d0f847af95f7b25310ca98c40688a49b6ad79e81cc0e7cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfd518a390633b75721274675a51f8bf6d55d598375b0094743b7fc81081fff2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_protocol_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f7e3902085d9d60983747bb2681df213290c0b8ccc4bc1d1b2f74c64e415ab19",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d747c9fd8511b4dc90b783b427b44733a214c432ad897c4fafbe3ea165f50b9e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b7b1a7a3b513e68989d3ac10835d1785eb6d4fc29b8566a0ab39a05e54d21e50",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ecdsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3876130f95db5b7c9de36584ff5db31e0b97ef0fcf10556e86b6c80b030882ff",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ecdsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "475436f8ddd1054d69b25dd5f3d26e8ccc990ceb2c7c0107d2191257cf0574bf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6e39c8f3ad6378daf796efb25dc44e4ead6e7c34e7979cb34d842d8b47b8ebb3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bbe265522ebeec93baff7fc916a14325a889a4c7d2f8b995ab4866b583debf02",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d3c70ea6d74ff40840ff2b6445e5a2e2d3eaf7e79d42bd0339e5fcaaf42492d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4489873a524891daac9a3bd35f35b91b4fa6d59ed29ab24d584ef910ecefbbf6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "536c14ff861c185a29719ed4f9845c3ceec1d3867fcd614739c04b447c8d7f1d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "496a5150ae8ff1491d230552acf30a7d8076d35343507ada9b7ee5474a2e89f0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1331a4f9c9c65fcb126973ef6a26dab9b83f5a8421db502592e2d0a494acb73b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "71662ef146e09c986c07c76c8a25d8ad504e5603dbea5932f3dd36c0561ea960",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "20d15cac46186306e6c4ccfb1b7752f1915baa950f690deae3600a64638080fb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5dd7dc97ddf672950de9763443d2eae58ca318d17bca623fd8fb28586e04935a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b57b4587002d084a133870b5652d612ba22ebeab4c0c58edc810da6f43e19bb2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d3c70ea6d74ff40840ff2b6445e5a2e2d3eaf7e79d42bd0339e5fcaaf42492d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6f423f7e9a2be25cfdbd97445338e686ea0308ea19afd58dc80aaaa1fc6775d8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/new_format/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "00308adcb593f2b05968f2e7bb27261e08f0fae5502c2cccf39a25d7299c1e79",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "feb89d01cbd10f6427e7b52b762dc2457d4511254f4835a1f9e3208bef798978",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4b070596776116e81bcc116a6e6f5ef9b7f61a551021427033ba686b6d828ac9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_ecdsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dbfdff55843591dd984402437ee7fc885bdff3d56006480112dc023782a29bbd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_ecdsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1c89e50b9ee0f876a6390c44470db4a343d1f4b8bfc15a2b2aed41e44e9b9ac4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5bc0eb0182ee87f405b1df988c225fe07139519785b9b08d6e0181539a39a694",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d45acf35203878d325457e0a455e477d4e2a6747f96cf6023179355ac28764df",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "36d27728b5b95d9e454c5a445aa83e62923e84c3383eb6fe34ac2bbc72da2456",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fc32af8d8fba40072dfeefeeb4153ce53efa5ee7b984003ada5e34e41594f441",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "691bf184539830fdaaf10dcf62ed94ed4be8b65de3dde38f5cfd8b2f63e3322b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "14901f8d3fd25d616ffed39955bb5c8b604c06b9e436e1cfc27e0d188d533ad8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b8adcb81dbdf2906bd50417b36128c84b8261f9d4ad9995c4b01afb83a75a0e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ef7005635c4f78139cd24fd9cd738732f062f6a9d61e7294432923a8b41dfc7e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3950ecf2c635e4ac30d20e31fe5ded7bee636d5732960565239daff3a9cb70ba",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7ce0a0cae66dd07808c261b14cbbc44122718bcbf69a37958a186965eed94079",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "69ed2d0c7746d5a5cc5384f7efc1df5cd7fac3630ea5aab9f2f5a2d858905a0f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6bb7e0693942dcf281bcc2c9a9d8e58ce050d994b7d8989a0c3f05952b1101c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7865a020bfa7eff919ce5512053636596d9748eb2f654889382c927be5c5f686",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "130e46db85a36d29c5f9594057290f0fc2ff8617fc6461ecdcb2ee3fd7c7e047",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_ecdsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bcfe4997ea824f64b56e6050042b01d1d3eab08c65d0d907e6178a20e7ee55fa",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_ecdsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9092a7e271961a25a097a42cef63637901d569cff2545faeecb2e4836ef0b750",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d716440e54934fe59f8be9f1842d187a6202bd1199ffaec242bda7368a273239",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "847907f5bf15ed30001f0f56391bfa41ee72e68841e7612e11bd53b39d070a34",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "36d27728b5b95d9e454c5a445aa83e62923e84c3383eb6fe34ac2bbc72da2456",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fc32af8d8fba40072dfeefeeb4153ce53efa5ee7b984003ada5e34e41594f441",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "691bf184539830fdaaf10dcf62ed94ed4be8b65de3dde38f5cfd8b2f63e3322b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "14901f8d3fd25d616ffed39955bb5c8b604c06b9e436e1cfc27e0d188d533ad8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b8adcb81dbdf2906bd50417b36128c84b8261f9d4ad9995c4b01afb83a75a0e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ef7005635c4f78139cd24fd9cd738732f062f6a9d61e7294432923a8b41dfc7e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3950ecf2c635e4ac30d20e31fe5ded7bee636d5732960565239daff3a9cb70ba",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7ce0a0cae66dd07808c261b14cbbc44122718bcbf69a37958a186965eed94079",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "69ed2d0c7746d5a5cc5384f7efc1df5cd7fac3630ea5aab9f2f5a2d858905a0f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/old_format_passphrase/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6bb7e0693942dcf281bcc2c9a9d8e58ce050d994b7d8989a0c3f05952b1101c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/pkcs8/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ef361452922293c0b7a09b211ae7be7a3872fa95b8c8b76dd64ad519cac05061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/pkcs8/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b9c183300eaeec4d00da20b9fcf6743223e84817744738209a3d3a8c49d1f4d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/pkcs8/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f853450da35fd08167b2ffea5d3bbb82936dab082c2426c6f63c4957735ea56",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/pkcs8/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "428e46802fe3465ef445af60b5efcd3284a2d48cb2c3dd664e84f1fbc62f4568",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/auth_keys": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3e6acf8414daf96a16a8b0fb7bd6c158aa25243bffd181b21e2aba076f7ffde8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/known_hosts": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "02af0c68f3b4a8ffd3cb04b43c4a3d2406478d7a945b75058aac53a12b8b5ecc",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/openssh_dsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "aad9d1acc22ad5fbd0ad5462f67194d46f64329d49b53cf668ee53b71c449d12",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/openssh_dsa_with_comment_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1eb99f09d160a378f9da9e3935b2baa012edccf846c97ab8f23e5a1d49ddbff1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/openssh_ecdsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "46304a2cde828c57432338f937246ed5f830a515067b4e0e3caa2d26a4365d10",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/openssh_rsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c9a5a712a22f44674477944d4c3b880daf38d7212bf5cb42d9074a5a5e2dbf3a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh1_auth_keys": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "352983986f80a6c564011d125ee7571282b5944c2c2ad2f1f802780f5b5e5df2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh1_known_hosts": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "069b051d3602633a2da2d49d55dd0fb23e78628507b81137d14a2e8c4de10324",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_dsa_comment_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c98c3242500580d06789af2c37cecf80a52508a16b82b5c302f55adffbda51cb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_dsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1f32d62e1f1e3fa42eba1dad6984fc1e4611ba9a18e21ad90e7621b0244615be",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_ecdsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4c53663a0025dc488998b7cd7ed99d70aefb1d793948009a4834baac1388ec6c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_rsa_comment_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9f85ad06d6855661fbfb486f86c94e7a243142883208a06b89295f2fc34a8897",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_rsa_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3e49efdc1b61c16f9c6bc218d70863e505d0800fe95b86940c37a8924a48365e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh2_subject_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d258cd355ff27c899d01a794271efba68a1276737748f3ca9491aab0bfbe2ff7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh_rsa_long_comment_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ddb9bcbd03dcc52d1e590cc057da34c060881e115614c375aea24d09bec0b6c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_pubkey_SUITE_data/public_key/ssh_rsa_long_header_pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ddb9bcbd03dcc52d1e590cc057da34c060881e115614c375aea24d09bec0b6c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_relay.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f67c5f99fe4aee67a3b58a42a51afaf23ef580904c483de0cbf2fefdb27a8309",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "05bba670527d21d238ead3b6e1c8dcd53d5979f623b15a685633ccca255c0ff3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f660e3b9e3c41fcf341205c50e3b5cb6912d7ec66c57c7ed9a48b7afe4f2ee5a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "88113eed78ac3c00f2a7bfb3162723e9f8fb334644fee817ae2f331cb446d3b8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "215c64205ea8f43d54b9b6af049ad04e01f8dcc92e9448274bd8725ef30d801b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c217b12a1b8b0b9680598e3d3628b77271227c718d74568cfd7bf5f2912b6665",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3250590cf6990061b0baf98d3669f018149d320e39274dadc2b22b36e20c1e6e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cb3f185d7f3664c4d37f42a4f21a591b87ba2b2711f3e86faabd26cdf9baa9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3cc70d47926325bd6a0a998a48ef8c240418d7248f9b9eb5edc7aff55b6f9044",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b1eacf4e05a690aaade956dc4853ddc649278d7d209ae55077159e0a14362858",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "65d0c79e4b29b06b4179e8076691cf2e1e0929ae61e6c4949f4f937f1970a061",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dc3df33e7da8eb059e55a3a9a25e9f789e541e686c5569cdeee3d4092e5068c1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e1d62ba0e727fc91861a30d74c3bd16447f11f1e53571f9657260975668e2714",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "390297cae5cf5de851eb0e88897bd06705e85709a01b5b17a1f78bd45de1cf30",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "1b78363ea5cec849e2775e2a3efa2088a1d49f32324adf0ee62e2986c3a1613a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24d0df4360a6eb13d04013446b7c8065d36d0be7602e08e651cbfa35cf1f960b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "32a0fe8199fba396c73fc28d0bbb6f805e7212e9c7f0add9ea5b6b7e08c56874",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "10e07a8d6a7c2fc0684e9a652b1da644e05b66277d8c5a106f3e5d95544690bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d0b093db46da8abde56ed5218368eb3e9b797a3880b32b18f1e422c430a807b9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e027254f1b09ebd56d0f847af95f7b25310ca98c40688a49b6ad79e81cc0e7cf",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfd518a390633b75721274675a51f8bf6d55d598375b0094743b7fc81081fff2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f58492f2bc8ccf08e9a4632b6863bbcac7d9a27df38d60434eafec1a5a05c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_renegotiate_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "63e609cbb16992d338fe78169b73fb33c7fb15d7cceca0b5d89095003af878d5",
+      "kind": "file",
+      "non_ascii_lines": [
+        "9a1f415015135e984b79773e94025d9066e9475bac27f1affb247396a98a6371",
+        "c6a72815a439248c4af541654e639fbd0df9f20ca8a02cc86f7e6fd3576adbeb",
+        "1011395b409fa0dc7b49fd1a09bdd422579b8d35de1799b52d4c32ded3230be3",
+        "92f216b00e45ffa456b25fefcff99b22fd842e7ad9100b947a46a6cda441ca8c",
+        "33392c5af1911f49df690875e6101ebb85506347d5f1e529041d744a69cb04ee",
+        "d26a38db3f69d36b0222e13bf07b62000ee420604f2cc960c77d07a052407230",
+        "91a7bf5325e7bcf1313ced0b4e9f69ae8fa244e24964aa58f2dbe5c34df241b6",
+        "8eee25e3495d5d6ed3f3332a18d2c3fdd573b5641ae3267b3758799984cb931b",
+        "b78dabe4f7027fe735851027155652635ede2b33a1e5adcedb619c7f803258c3",
+        "3c30e28f8ebf3a96f9742fd86ca25592e05d72141ba4518c3e24782406768d80",
+        "5337fd58699337fbb960ead102bdaa232ec3563f186e8eb87a2c7884046e7768",
+        "1b64447d4d5e00e65a503900492a1c57473fc9c877aacc541de68aa8ee30ff7d",
+        "87f476ae3ce2a9ac2a50d9fd0ef24b0a19d31c4332bcd4e6ab0c4f70683bee5f",
+        "5c584a6758ee7f04c94bafcbd58d2e03a24ce1f6c585123138eef6834593cb0d",
+        "b7048a32de9d706933df623947eba8babdfe47746f02cb36f2c6cd974f9256ef",
+        "5c584a6758ee7f04c94bafcbd58d2e03a24ce1f6c585123138eef6834593cb0d",
+        "ededc76aa49c0ca1382d9c916b6b991d9b54669e801ac538eef53e6990049835"
+      ]
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/sftp.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ab0c15e6e945ded519df517a8cc6e91ed60190f414a253326a754750b10b66d0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb834e269329502522cb00db189c528384119111ff0884a9403066ee1a8bbe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "880eabade3cd08f8b277711cfce0f22414ee4bd4bacd4f87c232d95630321809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fbe6993aaea456a41b50fd7815f856f62d69b57a328c79d5b71ef8c7a41cae6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ebba306657047d5499af1e519712c5b6b676e6e3432219dea5420eb1d7581c9a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/test_data/big.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4e1f0511a8628079aef0b23b386fda8d0f421f8c2326de7d2bc97faef9b183d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/test_data/d1/f1": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "38a078eca0dbaaf99c8312de84619b1b9b95a0d8e5ee525173d97a94b06b1c1c",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/test_data/d1/f2": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6520c3d4116ac77ee5380b4189ee4833f092d8f97235a4a0663a4ed54a01aa05",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/test_data/f1.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "022ebb7f9c8c03389ee621e5079e37039f1a5e51f26f94eab188fd31efc3384e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftp_SUITE_data/test_data/f2.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7ff0297bb8674387c93a33a72dba572cb684038358e5f5d450d83c770647cec6",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bbda9f9c9ffa0a1b0d9af7b2f7fc1c9ff06acb3198ec1619aa5b7109898d25b0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5f3040f8b8b6a2016242d8e58c65c1f04440dc679d278c6c88201ef2aa139aed",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d7d1fd8658e13d6fc9ddca4773df1d61cb3dc45676b1c6a2c1504a244ab230d7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9049147c617fe42797897e400875cfad1b2afa03b5e9602732a576df6a52518b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "040a3763825c72d50e363aa0da9b00a38f3f334ccdc0ffca16e21884e6130387",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "cc97cba0fb511238f9f7d898e55de36255d6cc8c0a9eef2de7d88213d3a5f2f4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "3ccc32c8cf5e6cecc2f450a0504503e99cd9d5378484d263ec24504546b35bf1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9d513ad8b8ba1b993c0dfb91bbfe7813a0860b1d489eee719396693d58f164c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ecdsa521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "7f768d126f9741adc3eaaddceabd56eaae4d51423c4160942cc0ec076d996d09",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "142866618053efe492090f178b751632a4f8a615f4d83df0ae09d72ae6f4c88d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "9ca29cf9d4beb39650968ea302d5e6574773d6d076ff16b5459e03a84bc0ae6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ed448": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "41404dc9410f9304cec1e4921c4bb0a5ceb41d9d6e85c041626bbb55c845369e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_ed448.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d5a53bee2edbccb4e40a539c8093be2cec48be06e41b6bfbecbef2523e8700fb",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "71f4b7234237fd0708bde33be0969fb6bfff7bc5ab73d770ce8411c37937b2ad",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "be19c0b87a4936b93e50db6dcd78e834273ec9b24f0c3f72978c6b7efabbeffe",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb834e269329502522cb00db189c528384119111ff0884a9403066ee1a8bbe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "880eabade3cd08f8b277711cfce0f22414ee4bd4bacd4f87c232d95630321809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "757884aef3303bb2f3519459668217ea005999bb604d9e6689d8d2de32450b9d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "adc714b1f23501dd8f8ddc74519aa97053a9aa1a8b44b3085d05851179268704",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key384": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfeea0334ddf96afb7c506c97b516b84eca03d1e0fcf0401617d63fdd2dc9246",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key384.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e35f79f23e2dea50812053445fd129a4e0d760e755cca32dc70c0c677eca340a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key521": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3180dc40fdffd4659ac063229d35cd7e75c194f2eaefaa6cb2592d11f997ee0",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ecdsa_key521.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "42766c7b743dfb6d9feb316601d7e3746d989dbbbe7d18481fac39ef3c291c77",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f37164c5600804f8c735ec3f728dca49a8dfe24d3325b19b9fc69015338f4a4b",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d46ed563ebc1021c8df596b9614116f6b4e556657773953cc060b1d0f542aa18",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ed448_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "5ee64d77b89ce4adf7d6e2a01907b5a868defa85b3b3362aa5e2ee2d52bb033d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_ed448_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "50333e11ff9fd76737dd65be85f75767dd8d44e520d65d540408aa01c2b42a2e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "0e039cfb84d70666be9581fe9ccdcf867aa941987b47eb5fa6cb7abead402880",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "90b64388f7b19982e095d94bfde788fd2f1465d456aa15f6783dc49dc3e819f8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_SUITE_data/test.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "334311c91a6a72f8daa2cd66e74cc7cde58dc81085b615b12c7d8fb03cf254a5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4d40cd2923f4082e9b95d9901d0eba3539e29173c519e948ea0895edf834022a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/authorized_keys": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "762880ca4fa704e7190c530c1f0b3404e2091c353089028b38023058a565a331",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6c49dcc8a0e30401005e6e9153278250a5352ba1f8da57bad728c6dd7e7832c7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_dsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "6df6693d430d952af42703376a765aff76089ede0b38c1c874575ddfcef26018",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_ecdsa256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "4384c34ccb81a78edfa7c224f4a7842b91adde5e374c504cee8e63463455c9a7",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_ecdsa256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "26307c828869b07d0dc0a6151dc9ebfbb4734095d2dee3f31aaab6d5ef879fd4",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_ed25519": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c3a70f2b23ea6d288df810b18224ed292772968bd2e8e1b384d1f806432691f3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_ed25519.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "522cfb20e83c5248341e13c81d0e42861a66458045c944da01d1b852b72a2460",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "70e15935af171a88f60a47be1bf81aeb56b78ea62685a27dc66d08367b7b92ee",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/id_rsa.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8cce2971be48a96cc51dbbbf7c6e090cd03707c91ac49015ac73523dc6dc9b22",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb834e269329502522cb00db189c528384119111ff0884a9403066ee1a8bbe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "880eabade3cd08f8b277711cfce0f22414ee4bd4bacd4f87c232d95630321809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_ecdsa_key256": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "bea112775905ca983f98365f424bb119c66ac9eee4d490dbdbe38b647d3b1467",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_ecdsa_key256.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f31d0a95f79a4a240c4d77557f3dde64bb65d337a99a5dec6f966cfbd10e5c25",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "c7838b6081c7ba6f4ceac5edca806385956bd1f58f38a451490ed6a5c6283376",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8954469974e464e63a8ef3a06579bd7012d8a41cf2ffdab3452ac5278a502f98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "fbe6993aaea456a41b50fd7815f856f62d69b57a328c79d5b71ef8c7a41cae6a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "ebba306657047d5499af1e519712c5b6b676e6e3432219dea5420eb1d7581c9a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/ssh_sftpd_file_alt.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "58dd139e1d0582ae9d3b3617ad661dfb4ecb7beb21254b68c7966f07a8816b2f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sftpd_erlclient_SUITE_data/test.txt": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "334311c91a6a72f8daa2cd66e74cc7cde58dc81085b615b12c7d8fb03cf254a5",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup.spec": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b4c2d72dd387dc8cc67a5aba0faf58a5f41399f613f8eb2cb38efb95d64e9672",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "a057e6570ebfebb4c52c72762705efe715ef007b4c047c8290603f9aaae7d2e3",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b06209a2f6bd50724faaf55c1f362be731af10a99f9026ac05d666849bf93c39",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "793ca17ee6352e9917c0dd5c181eb65ef1be91e2143e39447534e2af6f013520",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_sup_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_test_cli.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "efb6f8bbfe45991bed6669ec56b70e5793f0c56752164b7adc77b4c21736ae8d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_test_lib.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "930ebcf214a210d4ae9b1914848b04ced065abb612db830072a467fef70529f7",
+      "kind": "file",
+      "non_ascii_lines": [
+        "13f2869b5326d5707c5d967f39984a3f9524276be71abfc953dd04444e3787ac",
+        "2cad25a3653d52833811ce86bbf08c0bb5d8ea81f790c02698504e37029f2cf1"
+      ]
+    },
+    "lib/ssh/test/ssh_test_lib.hrl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "24ddb29b35a5ef1deea02b88b1d2f793c6a8b12304a03bec9696fc9f351e8283",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f38fb6e4f84c271037b150248272ded0141c01e5a3ab8e15eedec691e2bf96e1",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "dfb834e269329502522cb00db189c528384119111ff0884a9403066ee1a8bbe9",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "880eabade3cd08f8b277711cfce0f22414ee4bd4bacd4f87c232d95630321809",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_ecdsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "8811588753f23acf8b4543a1ad5fc719d8b08d0640526d9358a137485cf78a24",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_ecdsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f9f6467640093c5aa99456897b1e782872c68766ec0511a9baa3b032c3571c98",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_ed25519_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "76e137c8566625dc09238360a5e38a2ce45d3c30a860d3ee65caf36153be543e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_ed25519_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "d1b991db9aeb5ee971e3ffd80db84e65321c0f7c57f0424bc7288b1a0992abe2",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "db2f9811352f5bdb8101a54c0964ea83840ec4db9c42992d87f3c4f575b9383a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_to_openssh_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "01b26e4d3206617b49558f4b019148ea06e128685a957c4ba543bd290358903d",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_trpt_test_lib.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2965793402bf2e0259115de0c74754e0777d49cf3254f63ee4508e6e47e484f6",
+      "kind": "file",
+      "non_ascii_lines": [
+        "9f694395243e83e95f7be74dec939927ac094aa07f3483a06a06d96b629eda56"
+      ]
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE.erl": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "2af8c22a85447d4a1d0620301dc50da1ef8a50808d22f333f0245744d1c1647f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/id_dsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "b06209a2f6bd50724faaf55c1f362be731af10a99f9026ac05d666849bf93c39",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/id_rsa": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "793ca17ee6352e9917c0dd5c181eb65ef1be91e2143e39447534e2af6f013520",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/known_hosts": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "12a4e8b08ca82498ab7fff20c96e5bfb37a54985034e1f4f0de2e626e0efb5bd",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/ssh_host_dsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "e8c99d84f8108fe36c81858e550d172abd8947098a7690c249b47c38285e9c4a",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/ssh_host_dsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "802f93fb20492a4aae1ae491c196a4e61fc0859fce799e8adf094750c0c7776f",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/ssh_host_rsa_key": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "631723421e0f5ccc4ae7ccdcc15799d93f7d9abad93030c5bbd1dee750133d8e",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/test/ssh_upgrade_SUITE_data/ssh_host_rsa_key.pub": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "f3dd823eff0020bc3744e2516eecb6285ceb07350d93aaf190a00a34854e0bf8",
+      "kind": "file",
+      "non_ascii_lines": []
+    },
+    "lib/ssh/vsn.mk": {
+      "license": "Apache-2.0",
+      "evidence": "file SPDX",
+      "reviewed": false,
+      "sha256": "50d5a9b723d3018e8c62298a9c503110b7b31422c244030d69f7c21ea57f73cb",
       "kind": "file",
       "non_ascii_lines": []
     },

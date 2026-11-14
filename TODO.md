@@ -4013,7 +4013,7 @@ it; git history is the record of completed work.
 * [Low] runtime, `beam/erl_time_sup.c`: edit 20 of the design is open. The stock correction runs over `erx_clock_ns`, and stays idle since system time moves with it by one offset; deleting it changes nothing a shell sees.
 * [Low] runtime, `otp/erts/emulator/sys/erxos/sys_time.c`: `os_monotonic_time_source` and `os_system_time_source` report the nanosecond unit as the resolution, where macOS's clock ticks by the microsecond; a backend call for the granularity would make it true.
 * [Low] runtime, `otp/lib/tools`, `otp/erts/etc`, `otp/erts/start_scripts`: not buildable from the imported
-  tree (`public_key.hrl`, `ei.h`, `lib/os_mon/vsn.mk`). The runtime does not need them; `lib/tools` is to ship
+  tree (`ei.h`, `lib/os_mon/vsn.mk`). The runtime does not need them; `lib/tools` is to ship
   or leave the import when the release's application list is settled.
 * [Low] Lane reader and writer, `liberx/erx_lane.c`: each record state
   machine (open, copy, close) is inline in `erx_lane_take` or
