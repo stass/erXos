@@ -451,7 +451,9 @@ Error in process <0.150.0> with exit value:
   through the grant, `gen_udp` and `gen_tcp` go through the grant by
   default, and the `host` command looks names and addresses up in
   FreeBSD's lines. TCP, UDP and ICMP sockets work over a per-client
-  grant that admits every message. Its fast path (checksums folded into the copy, whole runs of
+  grant that admits every message. Root's Erlang shell connects out with
+  `gen_tcp` and also listens: it accepts a connection the host makes
+  through QEMU's host forward and echoes it until the host's end. Its fast path (checksums folded into the copy, whole runs of
   segments sent and merged on receive) was measured on the FreeBSD
   x86-64 test host, over a native FreeBSD tap, with erXos running in
   hosted mode (the medians of 5 runs). Bulk send reaches about 2,470
