@@ -73,6 +73,7 @@ enum mf_device_role u32
   value tpm 6
   value gpu 7
   value framebuffer 8
+  value input 9
 enum mf_grantee u32
   value system 0
   value domain 1

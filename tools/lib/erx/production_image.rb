@@ -720,20 +720,58 @@ module Erx
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
       # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-      # CLOCK COHERENT MAC, which the root adds for the device of each RECORD_UNITS unit but the host link's,
+      # CLOCK COHERENT MAC, which the root adds for each device of a kind in a unit the system domain holds,
       # and of -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK, the host link's UART's physical record
-      # (docs/design-stopgap.md, "Device records").
+      # (docs/design-stopgap.md, "Device records"; record_words).
       GIVEN_RECORD_WORDS = 14
       DEVICE_RECORD_WORDS = 9
-      # The manifest unit that holds the host link's UART, which gives a device record only
-      # when the boot sends erx.hostlink=1.
-      HOSTLINK_UNIT = 'hostlink'
-      # The names of the units the root gives device records. Each device of a held unit whose
-      # role and compatible string match a row of boot_manifest.c's device_kinds table gets
-      # one, and the manifest names each such unit after its row's record role word ("block",
-      # "net", "gpu"), with one device in its placement; the host link's UART gets one too. A host
-      # test keeps this list and that table's role words the same.
-      RECORD_UNITS = ['block', 'net', 'gpu', HOSTLINK_UNIT].freeze
+      # The table of the kinds of device a runtime drives, which the root reads to give a
+      # device of a held unit its -erx given record.
+      DEVICE_KINDS = 'include/erx/device_kinds.h'
+      # One row of DEVICE_KINDS: { ERX_MF_DEVICE_ROLE_ROLE, "compatible", "role word", "peripheral" }.
+      DEVICE_KIND_ROW = /\A\s*\{\s*ERX_MF_DEVICE_ROLE_([A-Z0-9_]+),\s*"([^"]+)",\s*"\w+",\s*"\w+"\s*\},\s*\z/
+
+      # The [manifest role, compatible] pairs of DEVICE_KINDS's rows, each of which gives a
+      # device of a unit the system domain holds a given record. A row this reader cannot
+      # take whole fails it rather than going uncounted, as does a table it cannot find.
+      def self.device_kinds(root)
+        table = File.read(File.join(root, DEVICE_KINDS))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
+        raise Error, "#{DEVICE_KINDS}: no erx_device_kinds table" if table.nil?
+
+        rows = table.lines.reject { |line| line.strip.empty? }.map do |line|
+          match = DEVICE_KIND_ROW.match(line)
+          raise Error, "#{DEVICE_KINDS}: unreadable row #{line.strip.inspect}" if match.nil?
+
+          [match[1].downcase, match[2]]
+        end
+        raise Error, "#{DEVICE_KINDS}: an empty erx_device_kinds table" if rows.empty?
+
+        rows.freeze
+      end
+
+      # The words of the records the root adds to the system domain's arguments: for each unit
+      # the manifest gives the system domain, each device of its placement in the platform
+      # record that is of a kind (device_kinds) gives a -erx given record, and the host link's
+      # UART, the UART at machine.hostlink's path, a -erx device record when the boot asks for
+      # the host link (liberx/backend/core/boot_manifest.c, devices_read). A framebuffer row
+      # the system domain holds is not counted: its record depends on whether the firmware's
+      # tree placed the framebuffer, which the manifest does not say (TODO.md).
+      def self.record_words(root, source, hostlink:)
+        platform = Platform.load(root: root, name: source[/^\s*platform "([^"]+)"$/, 1].to_s)
+        kinds = device_kinds(root)
+        hostlink_path = hostlink ? source[/^\s*hostlink "([^"]+)"$/, 1] : nil
+        placements = source.scan(/^unit \w+\n((?:  .*\n)*?)  holder (\S+)$/)
+                           .filter_map { |body, holder| body[/^  placement "([^"]+)"$/, 1] if holder == 'system' }
+        platform.record.fetch('units').select { |unit| placements.include?(unit.fetch('key')) }
+                .flat_map { |unit| unit.fetch('devices') }
+                .sum do |device|
+                  if kinds.include?(device.values_at('role', 'compatible')) then GIVEN_RECORD_WORDS
+                  elsif hostlink_path && device.fetch('role') == 'uart' && device.fetch('path') == hostlink_path
+                    DEVICE_RECORD_WORDS
+                  else 0
+                  end
+                end
+      end
       # What a plain erx.arg word used to break: it joins the last flag's arguments.
       CONSOLE_PLAIN_WORD = 'erx.arg=plainword'
       # An output longer than any FIFO, so the driver writes it through the transmit check.
@@ -845,10 +883,7 @@ module Erx
         source = manifest_source
         memory, baseline = %w[root_memory system_baseline].map { |key| source[/^\s*#{key} (\d+)$/, 1] }
         units = source.scan(/^unit /).size
-        recorded = hostlink == QemuPlan::NO_HOSTLINK ? RECORD_UNITS - [HOSTLINK_UNIT] : RECORD_UNITS
-        records = source.scan(/^unit (\w+)\n(?:  .*\n)*?  holder (\S+)$/)
-                        .filter_map { |unit, holder| unit if holder == 'system' && recorded.include?(unit) }
-                        .sum { |unit| unit == HOSTLINK_UNIT ? DEVICE_RECORD_WORDS : GIVEN_RECORD_WORDS }
+        records = record_words(root, source, hostlink: hostlink != QemuPlan::NO_HOSTLINK)
         arguments = arguments_always(root) + records + source[/^\s*system_args "(.*)"$/, 1].split.size + extra_arguments
         count = schedulers(source, cpus: cpus)
         raise Error, 'a production boot refuses a test image' if built.test_code && !test_image

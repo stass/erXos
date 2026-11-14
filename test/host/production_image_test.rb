@@ -661,6 +661,27 @@ class ProductionImageTest < Minitest::Test
     assert_raises(Erx::Error) { checkpoint_verifier('erts-start', hostlink: Erx::QemuPlan::NO_HOSTLINK).call("erx: erts: erl_start runs, #{always + system_args} arguments\n") }
   end
 
+  # The root gives a record to each device of a held unit that is a row of erx/device_kinds.h,
+  # whatever the unit is called and however many such devices it has: the development
+  # manifest's display unit, given to the system domain, gives one record per device of its
+  # placement that is of a kind, and its gpu is one.
+  def test_the_erts_line_counts_a_record_per_device_of_a_kind_in_a_held_unit
+    source = PLATFORM.manifest_source(ROOT).sub(/^(unit display\n  placement "display"\n  holder )@domain\.display$/, '\1system')
+    refute_equal PLATFORM.manifest_source(ROOT), source
+    system_args = source[/^\s*system_args "(.*)"$/, 1].split.size
+    display = PLATFORM.record.fetch('units').find { |unit| unit.fetch('key') == 'display' }.fetch('devices')
+    kinds = Erx::ProductionImage::Run.device_kinds(ROOT)
+    given = display.count { |device| kinds.include?(device.values_at('role', 'compatible')) }
+    refute_equal 0, given
+    words = Erx::ProductionImage::Run.arguments_always(ROOT) + Erx::ProductionImage::Run::DEVICE_RECORD_WORDS +
+            (given * Erx::ProductionImage::Run::GIVEN_RECORD_WORDS) + system_args
+    checkpoint_verifier('erts-start', manifest_source: source).call("erx: erts: erl_start runs, #{words} arguments\n")
+    assert_raises(Erx::Error) do
+      checkpoint_verifier('erts-start', manifest_source: source)
+        .call("erx: erts: erl_start runs, #{words - Erx::ProductionImage::Run::GIVEN_RECORD_WORDS} arguments\n")
+    end
+  end
+
   # The count reads boot_info.c's ALLOCATOR_WORDS: a misread string would leave every
   # production boot's count off, so the words read must be ERTS allocator flags, each with a
   # number, and a string this reader cannot take whole fails it rather than counting short.
@@ -685,20 +706,25 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # The root gives a device record to each device that matches a row of erx/device_kinds.h's
-  # erx_device_kinds table and to the host link's UART, so a row added there whose role word is
-  # not in RECORD_UNITS would leave every production boot's argument count one record short.
-  # Every row is read, and a row this test cannot read fails it rather than going unseen, as
-  # does a row that does not name both a role word and a peripheral: erx_dom_entry_driven
-  # (erx/dom.h) asks only for the role word, and the record writes both. Rows
-  # of two controllers may share a role word, as virtio-mmio's and GENET's share net.
-  def test_the_record_units_are_the_roots_device_kinds_and_the_host_link
-    table = File.read(File.join(ROOT, 'include/erx/device_kinds.h'))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
-    rows = table.lines.grep(/\A\s*\{/)
-    words = rows.map { |row| row[/\A\s*\{\s*ERX_MF_DEVICE_ROLE_\w+,\s*"[^"]*",\s*"(\w+)",\s*"\w+"\s*\}/, 1] }
-    refute_empty words
-    refute_includes words, nil
-    assert_equal [*words.uniq, Erx::ProductionImage::Run::HOSTLINK_UNIT].sort, Erx::ProductionImage::Run::RECORD_UNITS.sort
+  # The count reads erx/device_kinds.h's erx_device_kinds table, the root's own: every row
+  # is read, each names a role of the manifest's mf_device_role, and a row this reader
+  # cannot take whole fails it rather than going uncounted, so a row added there that the
+  # count missed would not leave every production boot's argument count a record short.
+  def test_the_device_kinds_are_read_whole_from_the_roots_table
+    kinds = Erx::ProductionImage::Run.device_kinds(ROOT)
+    table = File.read(File.join(ROOT, Erx::ProductionImage::Run::DEVICE_KINDS))[/erx_device_kinds\[\] = \{\n(.*?)^\};/m, 1]
+    assert_equal table.lines.grep(/\A\s*\{/).size, kinds.size
+    roles = File.read(File.join(ROOT, 'abi/manifest.txt'))[/^enum mf_device_role u32\n((?:  value .*\n)+)/, 1].scan(/value (\w+)/).flatten
+    kinds.each { |role, _compatible| assert_includes roles, role }
+    Dir.mktmpdir('erx-device-kinds-') do |root|
+      path = File.join(root, Erx::ProductionImage::Run::DEVICE_KINDS)
+      FileUtils.mkdir_p(File.dirname(path))
+      ["static const erx_device_kind_t erx_device_kinds[] = {\n\t{ ERX_MF_DEVICE_ROLE_GPU, \"virtio,mmio\", \"gpu\" },\n};\n",
+       "static const erx_device_kind_t erx_device_kinds[] = {\n};\n", "no table\n"].each do |source|
+        File.write(path, source)
+        assert_raises(Erx::Error, source) { Erx::ProductionImage::Run.device_kinds(root) }
+      end
+    end
   end
 
   # A scheduler short of a CPU, or started as a worker, leaves the count wrong or the line unsaid.

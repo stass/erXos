@@ -38,6 +38,7 @@ static const erx_device_kind_t erx_device_kinds[] = {
 	{ ERX_MF_DEVICE_ROLE_NETWORK, "brcm,bcm2711-genet-v5", "net", "genet" },
 	{ ERX_MF_DEVICE_ROLE_BLOCK, "brcm,bcm2711-emmc2", "block", "sdhci" },
 	{ ERX_MF_DEVICE_ROLE_GPU, "virtio,mmio", "gpu", "virtio_mmio" },
+	{ ERX_MF_DEVICE_ROLE_INPUT, "virtio,mmio", "input", "virtio_mmio" },
 };
 
 #define ERX_FRAMEBUFFER_COMPATIBLE	"simple-framebuffer"
