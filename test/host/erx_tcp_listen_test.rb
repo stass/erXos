@@ -32,6 +32,10 @@ class ErxTcpListenTest < Minitest::Test
     call_paired_again_after_its_connection_ends: [
       '{Core#core{handing = Rest}, [{reply, N, {error, econnaborted}}, {unlink, SockProc}]};',
       'pair(Core#core{handing = Rest, waiting = [{N, SockProc, infinity} | Core#core.waiting]}, []);'
+    ],
+    # A deadline that fires only after its turn: the call is still waiting at it (p6).
+    timeout_after_the_deadline: [
+      'Deadline =< Now end, Waiting)', 'Deadline < Now end, Waiting)'
     ]
   }.freeze
 

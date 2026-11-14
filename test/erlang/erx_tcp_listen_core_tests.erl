@@ -23,7 +23,7 @@
 %% environment's choice (a kill, an acceptor's call or its end, the listener's close, the
 %% grant's end, a pause, the clock). The model's own seeded faults, a connection that sends
 %% its notice before its adoption and a pause that takes every exit, are options of
-%% explore/1; the core's are seeded by test/host/erx_net_effect_test.rb.
+%% explore/1; the core's are seeded by test/host/erx_tcp_listen_test.rb.
 -module(erx_tcp_listen_core_tests).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -363,16 +363,28 @@ deliver(Pid, Msg, #m{conns = Conns} = M) ->
 %% runs its deadlines when not paused; and may pause before any step.
 listener(#m{l = ended}, _Opts) ->
     [];
-listener(#m{mbox = Mbox, paused = Paused, core = Core, now = Now} = M, Opts) ->
+listener(#m{mbox = Mbox, paused = Paused} = M, Opts) ->
     Take = case [X || X <- Mbox, takes(X, Paused, Opts)] of
                [Msg | _] -> [{owed, take(Msg, M#m{mbox = lists:delete(Msg, Mbox)})}];
                [] -> []
            end,
-    Expire = [{owed, step(expired, M)}
-              || not Paused, erx_tcp_listen_core:next_deadline(Core) =< Now],
+    %% The deadlines are the model's own, from when the listener took each call, so a core
+    %% that misses one is caught: a call still waiting after its turn breaks p6.
+    Expire = [{owed, expire(M)} || not Paused, overdue(M) =/= []],
     %% A pause shows only in what it holds back, so one is taken with a message waiting.
     Pause = [{pause, M#m{paused = true, resume_due = true}} || not Paused, Mbox =/= []],
     Take ++ Expire ++ Pause.
+
+expire(M0) ->
+    M = step(expired, M0),
+    M#m{bad = M#m.bad ++ [p6 || overdue(M) =/= []]}.
+
+%% The calls the model says wait with a finite deadline, and those of them that are due.
+finite_waiting(#m{m_waiting = W, calls = Calls}) ->
+    [{N, At + T} || N <- W, T <- [element(N, ?TIMEOUTS)], T =/= infinity,
+                    {called, At} <- [element(N, Calls)]].
+
+overdue(#m{now = Now} = M) -> [N || {N, Deadline} <- finite_waiting(M), Deadline =< Now].
 
 takes(_Msg, false, _Opts) -> true;
 takes(resume, true, _Opts) -> true;
@@ -382,8 +394,9 @@ takes(_Msg, true, _Opts) -> false.
 
 take(resume, M) ->
     M#m{paused = false};
-take({call, N, Sp, Timeout}, #m{m_waiting = W} = M) ->
-    step({accept, N, Sp, Timeout}, M#m{m_waiting = W ++ [N]});
+take({call, N, Sp, Timeout}, #m{m_waiting = W, calls = Calls, now = Now} = M) ->
+    step({accept, N, Sp, Timeout},
+         M#m{m_waiting = W ++ [N], calls = setelement(N, Calls, {called, Now})});
 take({queued, C}, #m{m_queue = Q} = M) ->
     step({queued, C}, M#m{m_queue = Q ++ [C]});
 take({exit, Pid}, #m{m_queue = Q} = M) ->
@@ -422,7 +435,10 @@ act({reply, N, Reply}, #m{in_flight = InFlight, m_waiting = W, calls = Calls, no
                    [p6 || not lists:member(N, W) orelse element(N, ?TIMEOUTS) =:= infinity
                               orelse At + element(N, ?TIMEOUTS) > Now];
                {ok, C} ->
-                   [p4 || not lists:member(C, BoundSent)];
+                   %% Bound for this call: the connection owned by its acceptor.
+                   {I, _} = conn_index(C),
+                   [p4 || not lists:member(C, BoundSent)
+                              orelse (element(I, M#m.conns))#c.sp =/= sp(N)];
                {error, econnaborted} ->
                    []
            end,
@@ -492,9 +508,9 @@ sp_end(N, #m{sps = Sps, l = L, l_links = Links, mbox = Mbox, conns = Conns} = M)
                 end, M1, lists:seq(1, ?CONNS)).
 
 %% Time matters only to a waiting call: the clock moves while one has a deadline ahead.
-clock(#m{l = alive, core = Core, now = Now} = M) ->
-    case erx_tcp_listen_core:next_deadline(Core) of
-        Deadline when is_integer(Deadline), Deadline > Now -> [{env, M#m{now = Now + 1}}];
-        _ -> []
+clock(#m{l = alive, now = Now} = M) ->
+    case [D || {_, D} <- finite_waiting(M), D > Now] of
+        [] -> [];
+        _ -> [{env, M#m{now = Now + 1}}]
     end;
 clock(_M) -> [].
