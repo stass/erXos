@@ -442,7 +442,12 @@ violation fails the build with the property, the record and the field:
    two UARTs do not share an interrupt line, since the console and the
    host link each start their own UART's driver, and the owner of its
    line when the line is shared, and a line has one binder
-   ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)); only
+   ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
+   a unit whose registers set the function of a pin that the platform
+   record's header map gives to `console` or `hostlink` is held by no
+   domain, by the system domain, or by a domain that holds only such
+   units, since its holder can take or read those lines
+   ([design-header-io.md](design-header-io.md#the-pin-controller-and-the-console)); only
    the storage domain that serves the vault holds the vault's partition,
    and only the vault holds a facet of that domain's tree; only the
    network domain holds a network device; and only the system domain
@@ -3055,9 +3060,12 @@ way, in the vault's domain, the PCIe configuration window, where the
 platform has a bridge erXos drives, in the **PCIe domain**, `pcie`, which
 runs the PCIe enumerator and holds nothing else, the console's and the
 host link's UART units in the system domain (The console, below), and
-every other device the kernel does not keep (GPIO, I2C, the
-other SPI controllers, and whatever else the board offers) in one
-**devices domain**, which is not in the trusted base. On every platform,
+every other device the kernel does not keep (I2C, the other SPI
+controllers, GPIO where it does not set the console's pins, and
+whatever else the board offers) in one **devices domain**, which is not
+in the trusted base. A pin controller that sets the function of the
+console's or the host link's pins is never the devices domain's
+(property 8). On every platform,
 the unit of a device whose DMA is unconfined, so that it reaches all
 memory, gets a domain of its own in a release build's manifest, holding
 that unit and nothing else, so the domains that parse hostile media and
@@ -3235,7 +3243,7 @@ Through the NIF:
   asks for through the same facet
   ([design-pcie.md](design-pcie.md#who-programs-what-and-when)). The reset is the
   driver's because the driver alone knows its device; the system domain
-  never touches a device's registers.
+  never touches the registers of a device another domain holds.
 
 **Native shims.** The **device shim** is the device NIF's C and nothing
 else. Any other native driver code, a ported driver, a vendor's C, a
@@ -4188,7 +4196,9 @@ connection tables as `reported_by => service`
 trusted base, with the domains that hold unconfined devices and the PCIe
 domain, whole, which holds configuration space and nothing else. The
 devices domain is outside it, with no exception: the console's and the
-host link's UARTs are the system domain's.
+host link's UARTs are the system domain's, and a pin controller that
+sets their pins' functions is held by no domain or within the trusted
+base (property 8).
 The domain library and the device NIF are C17 under the construction rules
 that bind the kernel's own C (the chokepoint checks, iterative parsing,
 checked arithmetic, ASCII-only generated code); the rest of the system
