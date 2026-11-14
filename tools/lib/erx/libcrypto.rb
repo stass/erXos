@@ -6,6 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'pathname'
 require_relative 'bounded_file'
+require_relative 'build_memo'
 require_relative 'error'
 require_relative 'musl'
 require_relative 'runner'
@@ -36,8 +37,13 @@ module Erx
     PASSED = %w[HOME TMPDIR].freeze
     FIXED = { 'LC_ALL' => 'C', 'SOURCE_DATE_EPOCH' => '0' }.freeze
     # What Configure reads besides the target file and its options: the tree's own
-    # configurations and every build.info, whose change leaves the configuration stale.
-    CONFIGURE_INPUTS = %w[Configure VERSION.dat configdata.pm.in Configurations/**/* **/build.info].freeze
+    # configurations, every build.info, and the Perl it loads (util/perl's modules, the
+    # template engine under external/perl and util/dofile.pl), whose change leaves the
+    # configuration stale.
+    CONFIGURE_INPUTS = %w[Configure VERSION.dat configdata.pm.in Configurations/**/* **/build.info
+                          util/perl/**/* util/dofile.pl external/perl/**/*].freeze
+    # The file in a configured directory that holds its configuration's key.
+    CONFIGURATION_KEY_FILE = '.erx-configuration-key'
     DEADLINES = { configure: 300, make: 1_800, nm: 120 }.freeze
     # A bound on llvm-nm's listing of the archive, which is a few MiB.
     NM_BYTES = 64 * 1024 * 1024
@@ -155,24 +161,21 @@ module Erx
 
     private
 
-    # Configure runs again, in an emptied directory, when its stamp changes: the stamp
-    # covers the options, the target file, the environment and the bytes of every input
-    # CONFIGURE_INPUTS names, so a configuration is never reused for inputs it was not
-    # made from. Source files are make's to judge.
+    # Configure runs again, in an emptied directory, when the configuration's key
+    # (configuration_key) differs from the one the directory was configured for, so a
+    # configuration is never reused for inputs it was not made from. Source files are
+    # make's to judge.
     def configure(directory:, environment:)
-      inputs = Dir.glob(CONFIGURE_INPUTS, base: @source).sort.select { |path| File.file?(File.join(@source, path)) }
-      digest = Digest::SHA256.new
-      [@source, *OPTIONS, File.binread(target_file), *environment.sort.flatten.map(&:to_s)].each { |part| digest << part << "\0" }
-      inputs.each { |path| digest << path << "\0" << File.binread(File.join(@source, path)) << "\0" }
-      stamp = digest.hexdigest
-      stamp_path = File.join(directory, '.erx-configure-stamp')
-      return if File.file?(stamp_path) && File.read(stamp_path) == stamp
+      command = ['perl', File.join(@source, 'Configure'), TARGET, "--config=#{target_file}", *OPTIONS]
+      key = configuration_key(command, environment)
+      key_file = File.join(directory, CONFIGURATION_KEY_FILE)
+      return if File.file?(key_file) && File.read(key_file) == key
 
       FileUtils.rm_rf(directory)
       FileUtils.mkdir_p(directory)
-      @runner.run(['perl', File.join(@source, 'Configure'), TARGET, "--config=#{target_file}", *OPTIONS],
-                  name: 'openssl-configure', deadline: DEADLINES.fetch(:configure), chdir: directory, env: environment)
-      File.write(stamp_path, stamp)
+      @runner.run(command, name: 'openssl-configure', deadline: DEADLINES.fetch(:configure), chdir: directory,
+                           env: environment)
+      File.write(key_file, key)
     rescue CommandError => e
       raise Error, "OpenSSL's Configure failed for #{TARGET} on #{@source}; log: #{e.result.fetch('log')}"
     end
@@ -183,6 +186,20 @@ module Erx
     end
 
     def target_file = File.join(@root, TARGET_FILE)
+
+    # What a configuration follows from, as a BuildMemo key: Configure's command (the
+    # source tree, the target, the target file's path and the options), the variables it
+    # sees, the target file's bytes, the compiler by identity (a new clang rebuilds every
+    # object, which make alone would not do) and the bytes of every input CONFIGURE_INPUTS
+    # names. perl, gmake and LLVM's archivers are named only by the PATH they are found on.
+    def configuration_key(command, environment)
+      inputs = Dir.glob(CONFIGURE_INPUTS, base: @source).sort.select { |path| File.file?(File.join(@source, path)) }
+      BuildMemo.key('command' => command, 'environment' => environment.compact, 'target' => digest(target_file),
+                    'compiler' => BuildMemo.program_identity(@compiler),
+                    'inputs' => inputs.to_h { |path| [path, digest(File.join(@source, path))] })
+    end
+
+    def digest(path) = Digest::SHA256.file(path).hexdigest
 
     # The whole environment of Configure and make: the caller's variables unset but for
     # PASSED, FIXED's, PATH with the compiler's directory first, and what the target file
