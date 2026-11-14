@@ -1661,6 +1661,11 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] native_domain suite, the connection case (`test/guest/native_domain/guest.c`): its eval sits a few bytes under
+  the boot page's 2,048-byte string limit (`boot_strings_max`), because every record's room is reserved at its
+  longest; the `-erx_record` flag and the PATH word took it to the edge, and its names were shortened to fit. The next
+  growth of boot words refuses its create with `EINVAL`. Move the eval's body into a module the guest loads, so the
+  boot page carries only a call.
 * [Low] OpenSSL, file access (`docs/design-crypto.md`, K5 and CR5): `libcrypto.a` still references `fopen`, `open`,
   `opendir`, `stat` and `syslog` (file BIOs, the `file:` store loader, `X509_LOOKUP` by directory) and keeps
   `OPENSSLDIR="/usr/local/ssl"`; K5 holds because `no-autoload-config` stops the implicit loads and OTP's `crypto` names
