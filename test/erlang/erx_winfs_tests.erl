@@ -344,10 +344,18 @@ a_running_window_system_drops_another_service_s_mint_test() ->
 %% erx_fb_sup starts the window system for the service the display variable names, and
 %% none, refusing, when the variable is unset, empty or longer than a service name.
 the_display_variable_names_the_window_system_s_service_test() ->
-    ?assertMatch([#{id := erx_winfs, start := {erx_winfs, start_link, [screen]}}], erx_fb_sup:winfs("screen")),
-    ?assertEqual([], erx_fb_sup:winfs(false)),
-    ?assertEqual([], erx_fb_sup:winfs("")),
-    ?assertEqual([], erx_fb_sup:winfs(lists:duplicate(64, $a))).
+    ?assertMatch([#{id := erx_winfs, start := {erx_winfs, start_link, [screen]}}], erx_fb_sup:winfs("screen", "single")),
+    ?assertEqual([], erx_fb_sup:winfs(false, "single")),
+    ?assertEqual([], erx_fb_sup:winfs("", "single")),
+    ?assertEqual([], erx_fb_sup:winfs(lists:duplicate(64, $a), "single")).
+
+%% The display domain refuses a display_policy it does not have: the single policy is
+%% the one built, so rio, an unknown word or an unset variable start no window system,
+%% where a rio display would otherwise boot the single policy without a word.
+the_window_system_refuses_a_policy_it_does_not_have_test() ->
+    ?assertEqual([], erx_fb_sup:winfs("screen", "rio")),
+    ?assertEqual([], erx_fb_sup:winfs("screen", "tiles")),
+    ?assertEqual([], erx_fb_sup:winfs("screen", false)).
 
 %% Started as the display domain's, the window system names itself the mint of the
 %% configured service, the name every mint request of it carries.

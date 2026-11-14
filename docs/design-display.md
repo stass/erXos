@@ -3262,7 +3262,9 @@ on a display edits nothing of the board's:
   `rio` or `single`, its idle policy, its keyboard's layout and repeat,
   and its reserved chord, which the domain service puts in the display
   domain's environment when it creates the domain: `display` is the name
-  of the display it serves, `display_policy` its policy,
+  of the display it serves, `display_policy` its policy, which the
+  display domain refuses, with one line in its log and no window system
+  started, when it is not a policy the domain has,
   `display_idle_dim_s` and `display_idle_off_s` its idle times in
   seconds, `display_keymap` its layout, `us` unless the entry names
   another the tree has ([Input events](#input-events)), and
