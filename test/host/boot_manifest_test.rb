@@ -251,14 +251,31 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "console_page #{0xfe215000}\n"
   end
 
-  # The Raspberry Pi 4's development manifest places its framebuffer unit with the system
-  # domain: the page keeps the row, its window and /chosen for the root's framebuffer step,
-  # and no physical record, since the row's record is the framebuffer record.
+  # The Raspberry Pi 4's development manifest with its framebuffer unit moved from the
+  # display domain to the system domain, so a framebuffer row sits on the system domain's page.
+  def pi_framebuffer_held_by_system
+    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
+    row = "unit framebuffer\n  placement \"framebuffer\"\n  holder @domain.display\n"
+    assert_includes pi, row
+    pi.sub(row, row.sub('holder @domain.display', 'holder system'))
+  end
+
+  # A framebuffer unit the system domain holds: the page keeps the row, its window and
+  # /chosen for the root's framebuffer step, and no physical record, since the row's record
+  # is the framebuffer record.
   def test_a_framebuffer_row_the_system_domain_holds_keeps_its_window_and_path
+    output, status = read(admitted(pi_framebuffer_held_by_system, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
+    assert status.success?, output
+    assert_includes output, "framebuffer #{0x3b40_0000} #{0x4c0_0000} /chosen words 0\n"
+  end
+
+  # The shipped Pi manifest gives the framebuffer unit to the display domain, so the system
+  # domain's page has no framebuffer row.
+  def test_the_shipped_pi_manifest_gives_the_system_domain_no_framebuffer_row
     pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
-    assert_includes output, "framebuffer #{0x3b40_0000} #{0x4c0_0000} /chosen words 0\n"
+    refute_match(/^framebuffer /, output)
   end
 
   def dma(role, memory, status, coherent, cpu, bus, last, mac, first, size)
@@ -363,14 +380,16 @@ class BootManifestTest < Minitest::Test
 
   # A framebuffer row names no line, though its line field is 0 (erx/dom.h, the view gives
   # it none), so a device on line 0 beside the Pi's framebuffer row has its line to itself.
+  # The row is on the system domain's page only in pi_framebuffer_held_by_system's copy.
   # The Pi's mini UART is moved to line 0 off the auxiliary SPI controllers' 125.
   def test_a_framebuffer_row_shares_no_line
     record = platform_record('raspi4b')
     record.fetch('units').find { |unit| unit.fetch('key') == 'console-uart' }.fetch('devices')
           .find { |device| device.fetch('path') == '/soc/serial@7e215040' }['line'] = 0
-    pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
-    output, status = read(admitted(pi, platform: 'raspi4b', record: record), stdout_path: '/soc/serial@7e215040')
+    output, status = read(admitted(pi_framebuffer_held_by_system, platform: 'raspi4b', record: record),
+                          stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
+    assert_includes output, "framebuffer #{0x3b40_0000} "
     assert_match(/^console_uart #{0xfe215040} 64 0 direct \d+\n/, output)
   end
 

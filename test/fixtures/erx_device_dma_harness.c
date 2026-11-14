@@ -135,6 +135,17 @@ erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t 
 	return (ERX_OK);
 }
 
+/* Every map here succeeds, so no reservation is ever given back. */
+int
+erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
+{
+	(void)space;
+	(void)addr;
+	(void)size;
+	CHECK(!"a map was refused");
+	return (ERX_EINVAL);
+}
+
 int
 erx_irq_create(uint64_t budget, uint64_t resource, uint32_t kind, uint64_t selector, uint64_t *irq)
 {

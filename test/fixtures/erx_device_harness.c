@@ -38,6 +38,10 @@ static uint32_t next_window;
 static uint64_t last_physical_base, last_physical_size;
 static int fail_physical, fail_reserve, fail_map, fail_irq;
 static uint32_t irq_created, physical_created;
+/* The reservations given back, each after the map into it was refused. */
+static uint32_t released;
+/* The size of the last reservation, which a release must give back whole. */
+static uint64_t last_reserved_size;
 /* The lines the fake kernel has made an IRQ object for; as the kernel, it refuses a second. */
 static uint64_t lines_made[ERX_DEVICE_MAX * ERX_DEVICE_LINES_MAX];
 
@@ -62,6 +66,7 @@ erx_vm_reserve(uint64_t space, uint64_t addr, uint64_t size, uint32_t flags, uin
 	(void)addr;
 	(void)flags;
 	CHECK(space == ERX_CAP_SELF && size <= WINDOW_BYTES && size % ERX_PAGE_SIZE == 0);
+	last_reserved_size = size;
 	*reserved = (uint64_t)(uintptr_t)window_memory[next_window];
 	return (fail_reserve);
 }
@@ -75,6 +80,16 @@ erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint64_t 
 	if (fail_map != ERX_OK)
 		return (fail_map);
 	next_window++;
+	return (ERX_OK);
+}
+
+/* Only the window just reserved is given back, whole, and only after its map was refused. */
+int
+erx_vm_release(uint64_t space, uint64_t addr, uint64_t size)
+{
+	CHECK(space == ERX_CAP_SELF && fail_map != ERX_OK && addr == (uint64_t)(uintptr_t)window_memory[next_window] &&
+	    size == last_reserved_size);
+	released++;
 	return (ERX_OK);
 }
 
@@ -494,10 +509,11 @@ check_open(const char *name, uint64_t block_bytes)
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOTSUP);
 	fail_physical = ERX_OK;
 	fail_reserve = ERX_ENOMEM;
-	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOMEM);
+	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOMEM && released == 0);
 	fail_reserve = ERX_OK;
+	/* A refused map gives its reservation back. */
 	fail_map = ERX_ENOMEM;
-	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOMEM);
+	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_ENOMEM && released == 1);
 	fail_map = ERX_OK;
 	fail_irq = ERX_EBUSY;
 	CHECK(erx_device_open(&spec, NULL, NULL, &device) == ERX_EBUSY);
