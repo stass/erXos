@@ -1925,23 +1925,28 @@ it; git history is the record of completed work.
   domain restarts, but a connection can end while both domains live (`malformed`,
   `no_memory`, `disconnect`). State whether the two domains are introduced and granted
   again then, or the client keeps a dead `net` facet until a restart.
-* [High] network, accept across domains (`erx_gen_tcp`, `erx_tcp_listen`): on erXos a
-  connection the host makes through slirp's host forward to a listener in root's session
-  is reset, and the acceptor's `gen_tcp:accept(L, 10000)` answers `{error, closed}` at once
-  (the `net_device` suite's `tcp-accepted` checkpoint, which fails until this is fixed).
-  The same steps pass on the host's loopback (`erx_gen_tcp_listen_tests`, the half-close
-  echo). `closed` is the answer of a listener core that has closed: the listener's exit,
-  or its accept reply refused by `erx_sock_admit` (a `{count, Check}` warning). The
-  network domain's log does not reach the console, so which one is unknown; a likely
-  suspect is the accepted connection's link to an accept's socket process, which holds
-  only `send` on it (no `expose/2`, below).
+* [High] network, an accepted connection across domains (`erx_tcp_conn`, `erx_gen_tcp_core`):
+  on erXos (QEMU virt, HVF, 1 CPU) root's acceptor takes the host's connection through
+  slirp's host forward, but of the 16 KiB the host sends before shutting its sending side
+  the acceptor's `gen_tcp:recv(A, 0, 10000)` returns one segment, 1460 bytes, and then
+  `{error, closed}`, which the core answers only after an `eof` push with nothing held,
+  so the guest echoes `{echoed,1460,ok}` and the `net_device` suite's `tcp-accepted`
+  checkpoint fails (`listener_exchange`: "echoed 1460 bytes, not the 16384 sent, then
+  closed"). Not an abort: a refused push would answer `econnaborted`. The same half-close
+  echo passes on the host's loopback (`erx_gen_tcp_listen_tests`), and a 256 KiB echo of a
+  connection root opens passes on QEMU. Unknown whether the connection pushed `eof` with
+  bytes unsent or the pushes after the first were lost on the way to root's domain; the
+  network domain's log and the socket process's counters do not reach the console.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:
   the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
-  options, the schema-generated request validators, `erxos/erx_net_client_erxos`'s
-  `expose/2`, and the session template's `grant` key naming its `grant/0` once the grant is
-  in another domain.
+  options, the schema-generated request validators, the session template's `grant` key
+  naming its `grant/0` once the grant is in another domain, and the connection's link to
+  its socket process (erx_tcp_conn monitors its owner instead, so only a listen and an
+  accept expose their socket processes to the network domain with `send` and `link`;
+  `erx_inet`'s `expose_opener/2` must name `tcp_connect` in the same change that makes the
+  connection link, or a cross-domain connect ends at the link's `noproc`).
   The calls the socket process forwards (`sockname`, `peername`, `getopts`, `shutdown`) wait
   for the connection's reply with no deadline of their own, and within one domain a socket
   protocol message proves its sender only by its pid field. Differences from stock at
