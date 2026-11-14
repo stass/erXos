@@ -87,12 +87,12 @@ runes of the modifiers held on the display.
 -type input() :: #{device := binary(),
                    at := integer(),
                    event := {pointer, X :: coord(), Y :: coord(), Buttons :: 0..255}
-                          | {touch, Slot :: 0..9, down | move | up,
+                          | {touch, Slot :: 0..?ERX_INPUT_TOUCH_SLOT_MAX, down | move | up,
                              X :: coord(), Y :: coord()}
                           | {key, down | repeat | up, Code :: 0..?ERX_EVDEV_KEY_MAX,
                              Typed :: rune() | none, Unshifted :: rune() | none,
                              Mods :: [rune()]}
-                          | {wheel, Steps :: -128..127}}.
+                          | {wheel, Steps :: ?ERX_INPUT_WHEEL_MIN..?ERX_INPUT_WHEEL_MAX}}.
 -doc "Where input/3 sends an event.".
 -type route() :: {to, window_id(), input()} | {wm, term()}
                | {windows, [window()]} | drop.

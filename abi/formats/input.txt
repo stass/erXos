@@ -50,3 +50,15 @@ enum input_rune u32
   value kbs 0x08
   value kdel 0x7f
   value kesc 0x1b
+
+# The bounds of a driver's record, erx_input:record() (docs/design-display.md, "Input
+# events"), which erx_input holds every record to and a driver folds its device's events
+# into: a relative move's deltas, an absolute position's or a touch's normalized
+# coordinates, 0 at the device's axis minimum and input_axis_max at its maximum, a
+# touch's slot and a wheel's steps.
+limit input_rel_min i32 -2147483648
+limit input_rel_max i32 2147483647
+limit input_axis_max u32 65535
+limit input_touch_slot_max u32 9
+limit input_wheel_min i32 -128
+limit input_wheel_max i32 127

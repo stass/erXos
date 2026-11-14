@@ -10,7 +10,7 @@
 # is evdev_key_a, and its value is FreeBSD's. The source is sys/dev/evdev/
 # input-event-codes.h at release/15.1.0, and for the key states enum evdev_key_events in
 # sys/dev/evdev/evdev_private.h at the same release, both under the BSD-2-Clause license.
-# FreeBSD's names put the key states, KEY_RESERVED and KEY_MAX under the KEY_ prefix of
+# FreeBSD's names put the key states and KEY_MAX under the KEY_ prefix of
 # the key codes, so the prefix alone does not tell a key code from them: the enum evdev
 # below does, as the one set of key and button codes.
 
@@ -32,15 +32,12 @@ limit evdev_key_event_up i32 0
 limit evdev_key_event_down i32 1
 limit evdev_key_event_repeat i32 2
 
-# KEY_RESERVED, code 0, is no key (line 65).
-limit evdev_key_reserved u16 0
-
 # The codes of the keys and buttons erXos reads, the closed set a row of a keyboard
 # layout names (abi/keymaps/, tools/lib/erx/keymap.rb): the keys of a US PC keyboard,
 # its keypad included (lines 66-148, 152-153, 161-165, 167-176, 184 and 192-193), the
-# pointer's buttons (lines 341-343) and a touch (line 397). The key states, KEY_RESERVED,
-# BTN_MISC and KEY_MAX are limits outside it. A member's generated name is evdev_ and
-# the member, as a limit's would be: key_a is ERX_EVDEV_KEY_A.
+# pointer's buttons (lines 341-343) and a touch (line 397). The key states and KEY_MAX
+# are limits outside it. A member's generated name is evdev_ and the member, as a
+# limit's would be: key_a is ERX_EVDEV_KEY_A.
 enum evdev u16
   value key_esc 1
   value key_1 2
@@ -149,9 +146,6 @@ enum evdev u16
   value btn_right 0x111
   value btn_middle 0x112
   value btn_touch 0x14a
-
-# The first button code, which ends the keys a keyboard reports (line 328).
-limit evdev_btn_misc u16 0x100
 
 # The last key or button code (line 757).
 limit evdev_key_max u16 0x2ff

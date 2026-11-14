@@ -51,6 +51,10 @@ window sees an up or a move it saw no down for.
 -export_type([config/0, state/0, record/0, in/0, view/0, out/0]).
 
 -type code() :: 0..?ERX_EVDEV_KEY_MAX.
+%% A record's bounds, from abi/formats/input.txt.
+-type rel() :: ?ERX_INPUT_REL_MIN..?ERX_INPUT_REL_MAX.
+-type axis() :: 0..?ERX_INPUT_AXIS_MAX.
+-type slot() :: 0..?ERX_INPUT_TOUCH_SLOT_MAX.
 -type rune() :: 0..16#d7ff | 16#e000..16#10ffff.
 -doc """
 The display's input configuration: the keyboard layout, the time a key
@@ -62,11 +66,11 @@ and the reserved chord's key codes, or `none`.
                     repeat_period := pos_integer(),
                     chord := [code(), ...] | none}.
 -doc "One record of a driver, in its device's terms (\"Input events\").".
--type record() :: {pointer, rel, DX :: -16#80000000..16#7fffffff, DY :: -16#80000000..16#7fffffff}
-                | {pointer, abs, X :: 0..65535, Y :: 0..65535}
-                | {touch, Slot :: 0..9, down | move | up, X :: 0..65535, Y :: 0..65535}
+-type record() :: {pointer, rel, DX :: rel(), DY :: rel()}
+                | {pointer, abs, X :: axis(), Y :: axis()}
+                | {touch, slot(), down | move | up, X :: axis(), Y :: axis()}
                 | {key, down | up, code()}
-                | {wheel, Steps :: -128..127}
+                | {wheel, Steps :: ?ERX_INPUT_WHEEL_MIN..?ERX_INPUT_WHEEL_MAX}
                 | release.
 -doc "What erx_winfs hands one step, each stamped with its clock in milliseconds.".
 -type in() :: {record, Source :: pid(), Device :: binary(), At :: integer(), record()}
@@ -91,7 +95,7 @@ and the reserved chord's key codes, or `none`.
 -record(source, {device :: binary(),
                  keys = #{} :: #{code() => held_key()},
                  buttons = #{} :: #{code() => 1..255},
-                 touches = [] :: ordsets:ordset(0..9)}).
+                 touches = [] :: ordsets:ordset(slot())}).
 %% A gesture's destination, fixed by the policy's answer to its first event. A window's
 %% names the buttons of the last pointer event it received, so that once hidden it hears
 %% only those go up.
@@ -500,24 +504,24 @@ count(#input{dropped = Dropped} = S) -> S#input{dropped = Dropped + 1}.
 place({X0, Y0, X1, Y1}, none) -> {(X0 + X1) div 2, (Y0 + Y1) div 2};
 place({X0, Y0, X1, Y1}, {X, Y}) -> {clamp(X, X0, X1 - 1), clamp(Y, Y0, Y1 - 1)}.
 
-%% A normalized position, 0..65535 on each axis, lies inside the screen.
+%% A normalized position, 0..?ERX_INPUT_AXIS_MAX on each axis, lies inside the screen.
 scale(X, Y, {X0, Y0, X1, Y1}) ->
-    {X0 + X * (X1 - X0 - 1) div 65535, Y0 + Y * (Y1 - Y0 - 1) div 65535}.
+    {X0 + X * (X1 - X0 - 1) div ?ERX_INPUT_AXIS_MAX, Y0 + Y * (Y1 - Y0 - 1) div ?ERX_INPUT_AXIS_MAX}.
 
 clamp(V, Low, High) -> max(Low, min(High, V)).
 
 is_code(Code) -> is_integer(Code) andalso Code >= 0 andalso Code =< ?ERX_EVDEV_KEY_MAX.
 
 %% A record within record()'s bounds; anything else is dropped.
-is_record_ok({pointer, rel, DX, DY}) -> is_int32(DX) andalso is_int32(DY);
+is_record_ok({pointer, rel, DX, DY}) -> is_rel(DX) andalso is_rel(DY);
 is_record_ok({pointer, abs, X, Y}) -> is_axis(X) andalso is_axis(Y);
 is_record_ok({touch, Slot, Phase, X, Y}) ->
-    is_integer(Slot) andalso Slot >= 0 andalso Slot =< 9
+    is_integer(Slot) andalso Slot >= 0 andalso Slot =< ?ERX_INPUT_TOUCH_SLOT_MAX
         andalso lists:member(Phase, [down, move, up]) andalso is_axis(X) andalso is_axis(Y);
 is_record_ok({key, Edge, Code}) -> (Edge =:= down orelse Edge =:= up) andalso is_code(Code);
-is_record_ok({wheel, Steps}) -> is_integer(Steps) andalso Steps >= -128 andalso Steps =< 127;
+is_record_ok({wheel, Steps}) -> is_integer(Steps) andalso Steps >= ?ERX_INPUT_WHEEL_MIN andalso Steps =< ?ERX_INPUT_WHEEL_MAX;
 is_record_ok(release) -> true;
 is_record_ok(_Record) -> false.
 
-is_int32(V) -> is_integer(V) andalso V >= -16#80000000 andalso V =< 16#7fffffff.
-is_axis(V) -> is_integer(V) andalso V >= 0 andalso V =< 65535.
+is_rel(V) -> is_integer(V) andalso V >= ?ERX_INPUT_REL_MIN andalso V =< ?ERX_INPUT_REL_MAX.
+is_axis(V) -> is_integer(V) andalso V >= 0 andalso V =< ?ERX_INPUT_AXIS_MAX.

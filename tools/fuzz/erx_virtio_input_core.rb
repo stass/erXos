@@ -7,13 +7,16 @@ require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
 
-# The fuzz target of the virtio-input driver's parse of what the device wrote,
-# erx_virtio_input_core's event/1, config/3, bits/1, absinfo/1 and identify/1, compiled
-# from source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so
-# it needs no hosted build. It runs the module as it is, then each seeded copy, which must
-# fail with its marker: one that trusts the configuration's size field past the data area
-# (the bound holds every read inside the 128 bytes the device has), and one that takes an
-# event record longer than the layout (the exact match holds each buffer to one event).
+# The fuzz target of the virtio-input driver's pure core over what the device wrote,
+# erx_virtio_input_core's event/1, config/1, absinfo/1, new/1 and its update fold, fold/2,
+# compiled from source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
+# oracle's), so it needs no hosted build. It runs the module as it is, then each seeded
+# copy, which must fail with its marker: one that trusts the configuration's size field
+# past the data area (the bound holds every read inside the 128 bytes the device has); one
+# that takes an event record longer than the layout (the exact match holds each buffer to
+# one event); one that sums wheel steps without their range check (the bound check holds
+# every record the fold sends to erx_input:record()'s bounds); and one whose counts keep an entry per event dropped (the target
+# holds the fold's state to the size new/1 gave it, so it keeps no event).
 module ErxVirtioInputCoreFuzz
   ROOT = File.expand_path('../..', __dir__)
   # The generated header named here is in build/gen.
@@ -29,7 +32,15 @@ module ErxVirtioInputCoreFuzz
     Seed.new(fault: 'an event record longer than the layout taken',
              anchor: 'Value:32/little-signed>>) -> typed(Type, Code, Value);',
              replacement: 'Value:32/little-signed, _/binary>>) -> typed(Type, Code, Value);',
-             marker: 'disagrees_with_reference')
+             marker: 'disagrees_with_reference'),
+    Seed.new(fault: 'wheel steps summed without their range check',
+             anchor: 'case is_wheel(Sum + Steps) of',
+             replacement: 'case true of',
+             marker: 'out_of_bounds'),
+    Seed.new(fault: 'counts that keep an entry per event dropped',
+             anchor: 'F#fold{counts = Counts#{Why := N + 1}}',
+             replacement: 'F#fold{counts = Counts#{Why := N + 1, {Why, N} => N}}',
+             marker: 'state_grew')
   ].freeze
   DEADLINE_SECONDS = '120'
 

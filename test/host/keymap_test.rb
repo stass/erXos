@@ -46,8 +46,9 @@ class KeymapTest < Minitest::Test
     assert_equal [30, 42, 58, 103, 0x110], layout.rows.map { |row| row.code.value }
   end
 
-  # The key states and KEY_RESERVED and KEY_MAX share the KEY_ prefix and are entries of
-  # evdev.txt, but none of them is a member of the enum evdev.
+  # The key states and KEY_MAX share the KEY_ prefix and are entries of evdev.txt, and
+  # KEY_RESERVED and BTN_MISC are evdev's names too, but none of them is a member of the
+  # enum evdev.
   def test_a_key_state_is_no_key
     %w[KEY_EVENT_DOWN KEY_EVENT_UP KEY_RESERVED KEY_MAX BTN_MISC EV_KEY KEY_COMPOSE key_a].each do |name|
       assert_refused(/#{name} is not a key or button code of the enum evdev/,

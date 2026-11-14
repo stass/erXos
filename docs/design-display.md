@@ -1199,6 +1199,11 @@ one form the policy and a window see.
 -type rune() :: 0..16#d7ff | 16#e000..16#10ffff.
 ```
 
+A record's bounds, the numbers `record()` shows above and `input()`
+repeats for a touch's slot and a wheel's steps, have one home, the
+`input_` limits of `abi/formats/input.txt`: the router holds every
+record to them, and each driver's fold folds within them, both through
+the generated header.
 A record's relative move is in the device's own units; an absolute
 position, a touch's included, is normalized across the device's own
 axis range, 0 at its minimum and 65535 at its maximum. A key is an
@@ -1240,7 +1245,7 @@ table spells a name in lower case after `evdev_`, so `KEY_A` is
 the codes erXos reads. The codes of keys and buttons are the members of
 one enum, `evdev` (`key_a`, `btn_left`), the closed set a layout's row
 is checked against, and everything else is a `limit`: FreeBSD's names
-put the key states, `KEY_RESERVED` and `KEY_MAX` under the keys' `KEY_`
+put the key states and `KEY_MAX` under the keys' `KEY_`
 prefix, so the prefix cannot tell them apart. The virtio-input core, the keymap's
 generator and the bus drivers of touch controllers, keypads and
 encoders read the names the build generates from it, and
@@ -1713,16 +1718,32 @@ steps, never its events, so its state has the same size however long
 an update runs. A key's edge is sent as it arrives, evdev's repeat
 value dropped, after what the fold keeps, so a press lands where the
 events before it in the update put the pointer; `SYN_REPORT` sends what
-is kept. A sum that an event would take past a record's range is sent
-as it stands and a new sum starts at that event, so no sum overflows
-and no movement is clamped away; a wheel event's own value is clamped
+is kept. When an event would take a sum past a record's range, the sum
+is sent as it stands with all else kept, and a new sum starts at that
+event, so no sum overflows and no movement is clamped away; a wheel
+event's own value is clamped
 to a record's range first. An absolute position is each axis clamped
 to its range and normalized across it as `(V - Min) * 65535 div (Max -
-Min)`. An absolute event of a device with no axes, and every event the
-core does not use, is dropped and counted. At `SYN_DROPPED` the fold
-drops what it keeps, sends `release`, and ignores every event up to
-and including the next `SYN_REPORT`, since those end an update whose
-start is lost; it folds the events after that report as usual. A key
+Min)`; the core takes a range only with `Min` below `Max`, and a device
+that lacks either axis, answering its `ABS_INFO` with size 0 (virtio
+1.2, section 5.8.5.2), has none. The core reads a configuration answer
+by its `size` alone, as section 5.8.5.1 asks, since QEMU's reads as
+zeros, header included, for a query it has nothing for ([facts
+record](research-virtio-input-qemu.md#configuration-space), fact 10).
+What an update kept is sent in one order, the relative move, the
+position, the wheel steps, both at `SYN_REPORT` and when an event would
+take a sum past its range. The position
+outlives its update, since evdev reports an axis only when it changes,
+and it is first sent once both axes have reported: `ABS_INFO` carries a
+range but no current value ([facts record](research-virtio-input-qemu.md#what-the-devices-declare-and-send),
+fact 20; virtio 1.2, section 5.8.4), so until then the core has no
+position it could send but a made-up one. An absolute event of a device
+with no axes, and every event the core does not use, is dropped and
+counted. At `SYN_DROPPED` the fold drops what it keeps and forgets the
+position, which the lost events may have moved and no configuration
+read can restore, sends `release`, and ignores every event up to and
+including the next `SYN_REPORT`, since those end an update whose start
+is lost; it folds the events after that report as usual. A key
 held through the gap is up for the router until it goes down again,
 and its own up before then is one the router drops. A touch
 controller's, an encoder's and a keypad's drivers send the same
@@ -1733,11 +1754,18 @@ the device table.
 router has stepped the record ([The input router](#the-input-router)),
 so a driver has at most one record in the router's mailbox, and it
 gives its device back the buffers of the events it folded only after
-their records are routed. A device that sends faster than the router
-routes therefore fills the event buffers its driver posted, a fixed
-number, and waits there; what QEMU's virtio-input device does with
-events while every buffer is full is unverified, and whatever it is,
-the display holds none of them. The router never waits on a source or a window,
+their records are routed. The driver keeps every entry of the event
+queue posted but those whose events it is folding, and posts each buffer
+again as soon as its records are routed: QEMU's device delivers an
+update only when it has a buffer for each of its events, its
+`SYN_REPORT` included, and otherwise drops the whole update and sends no
+`SYN_DROPPED` for it ([facts record](research-virtio-input-qemu.md#delivery-of-an-update),
+facts 3 and 4; virtio 1.2, section 5.8.6.2), so an update longer than
+the buffers posted never arrives. A device that sends faster than the
+router routes therefore fills the event buffers its driver posted, a
+fixed number, 64 on QEMU (facts record, fact 7), and drops what it
+cannot deliver a whole update at a time, never part of one; the display
+holds none of it. The router never waits on a source or a window,
 so a source waits only for the steps of what is ahead of its record.
 
 A device in another domain, such as a touch controller on a bus the

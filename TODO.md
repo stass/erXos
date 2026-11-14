@@ -588,12 +588,15 @@ it; git history is the record of completed work.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, [The display device](docs/design-display.md#the-display-device):
   on the direct path a display driver maps a client's pixel area read-only into its device's DMA window; the device
   NIF cannot map an area into the window yet.
-* [High] `erlang/apps/erx_fb/src/erx_virtio_input_core.erl`, [Input events](docs/design-display.md#input-events):
+* [High] `erlang/apps/erx_fb/`, [The display device](docs/design-display.md#the-display-device):
   the virtio-input driver process is not built, so no device's input reaches `erx_winfs:input/2` and a booted
-  display takes no input. Build its update fold as a pure core (events up to `SYN_REPORT` into `input()`, the
-  pointer kept and clamped, axes normalized, repeats dropped, `SYN_DROPPED` handled) with its fuzz target and
-  the fold's tests and seeded faults of [Verification and testing](docs/design-display.md#verification-and-testing)
-  (Drivers), the process over the device shim, and its rows in the display domain's supervisor.
+  display takes no input. Its pure core and update fold, `erx_virtio_input_core`, are built; the process over
+  the device shim, its rows in the display domain's supervisor and the display suite's QEMU case wait on three
+  design questions: how the driver writes the configuration space's `select` and `subsel` as the 8-bit
+  accesses virtio 1.2 section 4.2.2.2 asks for (QEMU also takes one 32-bit write,
+  [facts record](docs/research-virtio-input-qemu.md#configuration-space), fact 12); an input device's
+  record and unit in the device table; and the name its records reach the router under (the device's
+  `ID_NAME`, facts record fact 21, or the device table's).
 * [Medium] `abi/manifest.txt`, `liberx/system/dom_core.c`, `erlang/apps/erx_display/src/erx_winfs.erl`, [A display's
   session](docs/design-display.md#a-displays-session): a display's manifest entry carries no `display_keymap`,
   `display_repeat_delay_ms`, `display_repeat_period_ms` or reserved chord, and the domain service puts none of
