@@ -45,7 +45,7 @@ or stopped.
 """.
 
 -export([create/1, start_session/2, info/1, introduce/2, web_line/2, stop/2, id/1, node/1, pid/1]).
--export([system_principal/0, system_namespace/0, display_settled/1]).
+-export([system_principal/0, system_principal_request/0, system_namespace/0, display_settled/1]).
 -export([inspect_view/1]).
 -export_type([domain/0, spec/0]).
 
@@ -145,6 +145,19 @@ service is not running or ends.
 -spec system_principal() -> {ok, pos_integer()} | {error, enotsup}.
 system_principal() ->
     gen_server:call(erx_domain_srv, system_principal, infinity).
+
+-doc """
+system_principal/0 without waiting: the request's id, whose answer the caller
+takes with gen_server:check_response/2 or receive_response/2, as
+system_principal/0's reply. {error, enotsup} while the domain service is not
+running.
+""".
+-spec system_principal_request() -> {ok, gen_server:request_id()} | {error, enotsup}.
+system_principal_request() ->
+    case whereis(erx_domain_srv) of
+        undefined -> {error, enotsup};
+        Service -> {ok, gen_server:send_request(Service, system_principal)}
+    end.
 
 -doc """
 Asks the domain service to answer once the system domain's namespace is in

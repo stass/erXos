@@ -246,11 +246,15 @@ build() ->
     end.
 
 %% The system principal, once the domain service runs: asked once, without waiting,
-%% and asked again only if the service ended before it answered.
+%% and asked again only if the service ended before it answered. A runtime without
+%% the domain library, as a hosted one, has no erx_domain and no principal to ask
+%% for, as erx_console's ask_service/1 treats it.
 principal(State = #state{asking = none}) ->
-    case whereis(erx_domain_srv) of
-        undefined -> State;
-        Service -> State#state{asking = gen_server:send_request(Service, system_principal)}
+    try erx_domain:system_principal_request() of
+        {ok, Request} -> State#state{asking = Request};
+        {error, enotsup} -> State
+    catch
+        error:undef -> State
     end;
 principal(State) ->
     State.
