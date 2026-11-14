@@ -5958,6 +5958,23 @@ to the corpus and follow rc
   task sets the wall clock. [design-time.md](docs/design-time.md#phase-1) holds the one setter by the
   `[only_erx_clock_nif]` imports section and the facet for trusted code; erXos's kernel checks `WRITE` on the
   time page. A Phase 1 residual, not fixed in the stopgap.
+* [Medium] WiFi credentials before the vault, development builds only
+  ([design-wifi.md](docs/design-wifi.md#credentials)): the networks'
+  PMKs and SAE PTs sit unsealed in the `credentials` file of the WiFi
+  domain's own directory on the data partition, readable by any session
+  that holds the data partition's tree and from a copy of the medium.
+  It blocks release. The vault's state slot for `wifi`, shared with the
+  Bluetooth design's bonds, closes it, and the release manifest check
+  refuses the development store.
+* [Medium] WiFi, SAE not constant-time throughout
+  ([design-wifi.md](docs/design-wifi.md#security)): `crypto:sae_pt/3`,
+  `sae_commit/5` and `sae_key/5` multiply in constant time, but their
+  point additions, negation, scalar sum and SWU map use OpenSSL's general
+  `EC_POINT_add` and BIGNUM routines, whose time and branches depend on
+  the values (`openssl/crypto/ec/ecp_smpl.c:702-721`); the per-exchange
+  steps answer the peer, who can time them over the air. It blocks
+  release. The fix is inside the three functions, over the P-256
+  method's own field and point routines (`ecp_nistz256.c:110, 250-252`).
 * [Low] SSH, unauthenticated floods
   ([design-ssh.md](docs/design-ssh.md#limits-and-who-pays)): OTP has no
   counterpart of FreeBSD's `MaxStartups`, so a flood of unauthenticated

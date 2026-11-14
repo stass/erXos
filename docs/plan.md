@@ -2478,12 +2478,14 @@ by side; (f) needs (b) and (c).
      FreeBSD's columns.
   4. **W3, an open network.** DHCP, ping, UDP echo and a TCP transfer
      over `wlan0`, as (c) runs them over GENET.
-  5. **W4, WPA2-PSK.** The 4-way and group handshakes on the host, keys
-     installed, a group rekey survived.
-  6. **W5, WPA3-SAE with PMF.** OTP `crypto`'s two point functions, SAE
+  5. **W4, WPA2-PSK.** The 4-way and group handshakes on the host, each
+     key installed once, a group rekey survived; the network's secret
+     given through `ctl` and kept in the development credential store.
+  6. **W5, WPA3-SAE with PMF.** OTP `crypto`'s three SAE functions, SAE
      with hash-to-element through the firmware's external
      authentication, and PMF; it needs the firmware's `sae_ext`
-     capability, which W1 reads.
+     capability, which W1 reads, and without it WPA3 is reported
+     unsupported.
 
 **Dependencies.**
 
@@ -2500,9 +2502,10 @@ by side; (f) needs (b) and (c).
 * (e): (a); 1b-E's configured domains, for the devices domain; for
   package 4, the answer to Open decision 1 of design-header-io.md; for
   the TPM, the vault's TPM design and a module on the board.
-* (f): (b)'s storage domain and its line owner on the board; (c)'s
-  network domain on the board; for W5, the firmware's `sae_ext`, or
-  the decision of [design-wifi.md](design-wifi.md#open-decisions), 2;
+* (f): (b)'s storage domain on the board; (c)'s network domain on
+  the board; for W5, the firmware's `sae_ext`, or another licensed
+  Cypress build that offers it
+  ([design-wifi.md](design-wifi.md#sae-and-protected-management-frames));
   a test access point, a FreeBSD host's hostapd or a commodity router,
   offering open, WPA2 and WPA3 networks.
 
@@ -2610,12 +2613,14 @@ by side; (f) needs (b) and (c).
   unmeasured; the `ctl` grammars and the clock chip's decoder run
   their fuzz budgets clean. With the GPIO package, the GPIO loopback
   passes and the LED and button answer the shell.
-* (f): on the board, W0's and W1's log lines; a scan listing the test
-  access point; DHCP, ping, UDP echo and a TCP transfer on the open, the
+* (f): on the board, W0's and W1's log lines; no scan before a country
+  is configured; a scan listing the test access point; DHCP, ping, UDP echo and a TCP transfer on the open, the
   WPA2 and, given `sae_ext`, the WPA3 network; a wrong passphrase refused
   with its reason at `/proc`; the WiFi domain killed under load joining
-  again while `genet0` carries on; (b)'s power-cut checklist passing with
-  WiFi under load. Off the board, the station's exhaustive exploration,
+  again while `genet0` carries on; a 64 MiB write to `/data` beside a TCP
+  transfer over `wlan0`, both completing; (b)'s power-cut checklist
+  passing with WiFi under load. Off the board, the station's exhaustive
+  exploration, retransmitted and replayed key messages among its events,
   the Annex J and J.10 vectors, the differential against wpa_supplicant's
   recordings and the network stack's suites over the fake chip pass, each
   failing on its seeded fault; the WiFi parsers run their fuzz budgets

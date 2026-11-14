@@ -395,11 +395,13 @@ applications do
 ([design-runtime.md](design-runtime.md#everything-else)), in releases that
 ask for them; the system release never does.
 
-* **`crypto`** takes one edit: `ec_point_mul/3` and `ec_point_add/3` on
-  `secp256r1`, the point arithmetic WiFi's SAE needs, over OpenSSL's
-  `EC_POINT_mul` and `EC_POINT_add` with every point decoded and checked
-  by `EC_POINT_oct2point`
-  ([design-wifi.md](design-wifi.md#otps-crypto-two-point-functions)).
+* **`crypto`** takes one edit: `sae_pt/3`, `sae_commit/5` and
+  `sae_key/5` on `secp256r1`, each a whole secret-dependent step of
+  WiFi's SAE, so no secret of the exchange becomes an Erlang integer,
+  over OpenSSL's `EC_POINT_mul`, `EC_POINT_add` and BIGNUM with every
+  point decoded and checked by `EC_POINT_oct2point`; their additions and
+  field arithmetic are not yet constant-time, a residual WiFi records
+  ([design-wifi.md](design-wifi.md#otps-crypto-saes-arithmetic)).
   Its NIF is built as `crypto.a` against
   `openssl/`'s `libcrypto.a` and linked into the interpreter and BeamAsm
   images. Its `on_load` finds the NIF in the static table.
@@ -414,9 +416,9 @@ The oracle's stock OTP 29.1.2 builds `crypto` on the development host
 against the same OpenSSL 3.5.9 with the same options, the target and the
 three edits aside, so `crypto:supports/0` agrees on both sides and a
 difference between them is erXos's
-([design-host-oracle.md](design-host-oracle.md)). The two point
+([design-host-oracle.md](design-host-oracle.md)). The three SAE
 functions exist on erXos alone; OTP's suites do not call them, and their
-own tests check them against `crypto:generate_key/3`.
+own tests check them against Annex J.10's vectors and each other.
 
 ## Invariants
 

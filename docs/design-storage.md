@@ -780,8 +780,11 @@ requires, data present). The device process then gives each
 which keeps two tracks as FreeBSD keeps `cmd_done` and `data_done`
 (`sdhci.c:1878, 1921-1923, 2047, 2057-2059`): command complete, at
 which the response is read; and the data track, transfer complete for
-a command that answers with busy, such as CMD7, or the buffer event
-and transfer complete for a data block. The tracks advance in either
+a command that answers with busy, such as CMD7, or a buffer event for
+each data block, one for identification's commands and up to 511 for
+the SDIO host's block-mode CMD53
+([design-wifi.md](design-wifi.md#one-controller-core)), and then transfer
+complete. The tracks advance in either
 order, since a controller may raise transfer complete before command
 complete (`sdhci.c:2026-2033`), and the command is answered once both
 are done. An error bit fails the command before the rest of its word
@@ -1046,20 +1049,21 @@ interrupt line with the SoC's legacy SD controller, `&sdhci`
 unit, given whole to the storage domain
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)),
 and the record marks the line shared. The device process attaches through
-the line's owner, `erx_irq_line`, as every driver on a shared line does
-([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
-and so does the line's second member, the legacy controller's SDIO host,
-`erx_sdio_host`, which serves the WiFi card to the WiFi domain
-([design-wifi.md](design-wifi.md#the-sdio-host-in-the-storage-domain)).
+the line's owner, `erx_irq_line`, of which it is the one member, as every
+driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)).
+The legacy controller's driver, the SDIO host `erx_sdio_host`, which
+serves the WiFi card to the WiFi domain, never joins the line: it holds
+the controller's signal enable, `irpt_en`, at zero and polls, so the
+legacy controller never raises the line and no round waits on a WiFi
+transfer
+([design-wifi.md](design-wifi.md#transactions-and-the-card-interrupt-are-polled)).
 `erx_blk_sup` starts the owner before the device process, `rest_for_one`,
 from `erx_irq_line:owners/1` over the records, and the SDIO host's
 supervisor after them as a `temporary` child, so the SDIO host's end
-never ends the storage domain. A delivery is a hint to look: a round the
-legacy controller raised finds EMMC2's `interrupt` empty, and the device
-process answers it done. The SDIO host enables only the card's interrupt
-on the line, masks it at each firing until its client rearms it, and
-answers between the blocks of a transfer, so it adds at most one block's
-time to a round.
+never ends the storage domain and, since it never signalled, leaves
+nothing on the line. A delivery is a hint to look, and the device
+process answers a round whose `interrupt` is empty done.
 
 **Failure.** Outside the expected timeout above, any error bit in
 `interrupt`, an error bit in an R1, an inhibit that does not clear, a
@@ -1674,7 +1678,12 @@ reported as a durable checkpoint.
   machine's own settings files, `rc.conf` among them: read-only to the
   system domain's grant and read-write to the grants of the session
   templates that hold `start`
-  ([design-apps.md](design-apps.md#the-start-table)).
+  ([design-apps.md](design-apps.md#the-start-table)). On a board with
+  WiFi it also serves the `wifi_etc` tree, a service directory of its
+  own holding the WiFi configuration and no secret: read-only to the
+  WiFi domain's grant and read-write to the grants of the session
+  templates that hold the WiFi domain's `wifi` tree
+  ([design-wifi.md](design-wifi.md#the-wifi-domain)).
 * **The EROFS reader**, `erx_erofs`, serves `prim_file`'s operations on an
   EROFS mount in the calling process
   ([design-runtime.md](design-runtime.md#files)); it reads through

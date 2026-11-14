@@ -136,7 +136,9 @@ Each requirement follows from that one closure:
   Raspberry Pi 4's legacy SD controller, the WiFi chip's SDIO host,
   shares EMMC2's line, so the storage domain drives it and serves its
   card to the WiFi domain through the `sdio` interface
-  ([design-wifi.md](design-wifi.md#the-sdio-interface)).
+  ([design-wifi.md](design-wifi.md#the-sdio-interface)); its driver
+  polls with the controller's signal enable at zero, so the line keeps
+  EMMC2's process as its one member and no round waits on the card.
 * **A device of no kind is held, not driven.** A device whose role and
   compatible string are in no row of `include/erx/device_kinds.h` gets
   no `-erx_record given` record, so no driver opens it, and no register window

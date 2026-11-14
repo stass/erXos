@@ -344,10 +344,14 @@ is also the interrupt of the legacy SD controller, `&sdhci`
 (`bcm2711.dtsi:1147-1149`), so by the unit rule the two controllers are
 one unit, given whole to the storage domain
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and
-the record marks the line shared. The SD device process and the legacy
-controller's SDIO host, `erx_sdio_host`, attach through the line's owner,
-`erx_irq_line`, as every driver on a shared line does
-([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)).
+the record marks the line shared. The SD device process attaches through
+the line's owner, `erx_irq_line`, of which it is the one member, as every
+driver on a shared line does
+([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain));
+the legacy controller's SDIO host, `erx_sdio_host`, holds its
+controller's signal enable at zero and polls, so it never raises the line
+and never joins it
+([design-wifi.md](design-wifi.md#transactions-and-the-card-interrupt-are-polled)).
 The platform record's unit `sd` holds both
 windows, EMMC2's at `0xfe340000` and the legacy controller's,
 `/soc/mmc@7e300000` (`bcm283x.dtsi:423-429`), at `0xfe300000`, each
