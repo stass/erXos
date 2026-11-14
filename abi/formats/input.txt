@@ -1,0 +1,52 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The input records' own values (docs/design-display.md, "Input events"): the runes of
+# the special keys, which a window's kbd records carry, a client and erx_vt read, and a
+# keyboard layout names (abi/keymaps/).
+#
+# Each member is the name 9front's sys/include/keyboard.h gives the key, lowercased,
+# with the value it gives there (9front, commit eb49f1f8788c, keyboard.h SHA-256
+# efbf86fb35c47d8fd59abe51bb1746a8ed46250bccaed364ac8bae3cb8e1654f, MIT under
+# lib/legal/NOTICE). The header writes F1 to F12 as KF|1 to KF|0xC and names them
+# nothing; here they are kf1 to kf12. A layout spells a member with its first letter
+# capitalized, as the header does: khome is Khome, kf1 is Kf1.
+
+# The special runes. All but kbs, kdel and kesc, which are ASCII's backspace, delete and
+# escape (lines 63, 66 and 67), lie in the private-use range: KF, 0xF000 (line 23), with
+# F1 to F12 at KF|1 to KF|0xC (line 27) and the keys of lines 28-43, and Spec, 0xF800
+# (line 24), with kdown at Kview, Spec|0 (lines 26 and 30), and the keys of lines 69-74.
+enum input_rune u32
+  value kf1 0xf001
+  value kf2 0xf002
+  value kf3 0xf003
+  value kf4 0xf004
+  value kf5 0xf005
+  value kf6 0xf006
+  value kf7 0xf007
+  value kf8 0xf008
+  value kf9 0xf009
+  value kf10 0xf00a
+  value kf11 0xf00b
+  value kf12 0xf00c
+  value khome 0xf00d
+  value kup 0xf00e
+  value kpgup 0xf00f
+  value kprint 0xf010
+  value kleft 0xf011
+  value kright 0xf012
+  value kpgdown 0xf013
+  value kins 0xf014
+  value kalt 0xf015
+  value kshift 0xf016
+  value kctl 0xf017
+  value kend 0xf018
+  value kscroll 0xf019
+  value kdown 0xf800
+  value kbreak 0xf861
+  value kcaps 0xf864
+  value knum 0xf865
+  value kaltgr 0xf867
+  value kmod4 0xf868
+  value kbs 0x08
+  value kdel 0x7f
+  value kesc 0x1b

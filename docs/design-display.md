@@ -1227,7 +1227,11 @@ for the key states in `enum evdev_key_events` of that release's
 `sys/dev/evdev/evdev_private.h`, and with its value from there. The
 table spells a name in lower case after `evdev_`, so `KEY_A` is
 `evdev_key_a` and the generated `ERX_EVDEV_KEY_A`, and it holds only
-the codes erXos reads. The virtio-input core, the keymap's
+the codes erXos reads. The codes of keys and buttons are the members of
+one enum, `evdev` (`key_a`, `btn_left`), the closed set a layout's row
+is checked against, and everything else is a `limit`: FreeBSD's names
+put the key states, `KEY_RESERVED` and `KEY_MAX` under the keys' `KEY_`
+prefix, so the prefix cannot tell them apart. The virtio-input core, the keymap's
 generator and the bus drivers of touch controllers, keypads and
 encoders read the names the build generates from it, and
 `abi/formats/virtio.txt` keeps only virtio's own layouts.
@@ -1242,8 +1246,11 @@ under `lib/legal/NOTICE`): `KF|1` to `KF|0xC` for F1 to F12, `Khome`,
 `Kprint`, `Kscroll`, `Kbreak`, `Kshift`, `Kctl`, `Kalt`, `Kaltgr`,
 `Kmod4`, `Kcaps` and `Knum`; Backspace, Delete and Escape are the
 header's `Kbs`, `Kdel` and `Kesc`. `abi/formats/input.txt` holds them by
-those names, with the values taken from that header, so a client, the
-keymap and `erx_vt` read one table. Each is in the private-use range
+those names, lowercased, as the members of the enum `input_rune`, with
+the values taken from that header, so a client, the keymap and `erx_vt`
+read one table; F1 to F12, which the header names nothing, are `kf1` to
+`kf12`, and a layout spells a member with its first letter capitalized
+(`Kup`, `Kf1`). Each is in the private-use range
 but `Kbs`, `Kdel` and `Kesc`, which are ASCII; plan9port's
 `include/keyboard.h` gives `Kdown` the value 0x80 instead and names
 fewer keys, so it is not the source. A key the header names nothing for
@@ -1288,10 +1295,12 @@ the key. A code with no row is dropped by the router and counted.
 `tools/gen_keymap.rb` reads every layout and generates `erx_keymap`, one
 table for each, which the router alone calls, and the list of layout
 names the manifest check holds a display entry's layout to. It refuses
-a layout whose `keymap` line differs from its file's name, a code
-named twice, a name `evdev.txt` does not have, a special rune
-`input.txt` does not have, a row of the wrong width, a surrogate or a
-code point past U+10FFFF, and a byte above 0x7f. Nothing reads a layout
+a layout whose `keymap` line is missing, repeated or differs from its
+file's name, a code named twice, a code outside the enum `evdev`, a
+special rune outside the enum `input_rune`, a row of the wrong width, a
+modifier, lock or button bit outside its set, a surrogate or a code
+point past U+10FFFF, and a byte above 0x7f or a control byte other
+than the line's end. Nothing reads a layout
 at run time, so, as for termcap, it is no input to fuzz. Another layout
 is one more file; dead keys and compose sequences are not in the format,
 and a layout that needs them extends it.
@@ -2878,7 +2887,11 @@ modifiers send the same bytes: Backspace types `Kbs`, 0x08 in
 `keyboard.h`, and so does Control-H at the `ctl` layer. From the modes
 in the state it sends printable keys as UTF-8, Return as CR, `Kbs` as
 DEL (FreeBSD's default `VERASE`) without Control and as BS with it, so
-Control-H and Control-Backspace both send BS, Tab as HT, any other
+Control-H and Control-Backspace both send BS, Control-Space and
+Control-2 as NUL, as FreeBSD's console does (`sys/dev/kbd/kbdtables.h`,
+lines 48 and 102; `share/vt/keymaps/us.kbd`, lines 8 and 62), since a
+`kbd` record, which a NUL ends, cannot carry one and the keymap's `ctl`
+layer types nothing for Space, Tab as HT, any other
 control character as the keymap's `ctl` layer typed it, and Alt with a
 key as ESC before it; the arrows as `CSI A` to
 `CSI D`, or `ESC O A` to `ESC O D` with DECCKM set, Home and End as
@@ -4344,7 +4357,9 @@ pixel quota, is refused before anything is inflated, where a seeded removal of t
   refusal its section names, a code named twice, an unknown evdev name,
   an unknown special rune, a row of the wrong width, a surrogate and a
   byte above 0x7f, and each is refused; a seeded generator that keeps
-  the first of two rows for one code fails the duplicate case. A table
+  the first of two rows for one code fails the duplicate case, and one
+  that takes its codes from every `evdev_key_` name, so a key state
+  passes as a key, fails the unknown-code case. A table
   of every key of the US layout, with the rune each layer types, is
   checked against the generated `erx_keymap`. Through the terminal, an
   Up arrow typed at a terminal window reaches its program as `CSI A`,
@@ -4992,7 +5007,10 @@ Decisions:
   (`ef5be2f7e0f9bd0c8eb4a0c377dc4a30d946484cd0ee2a8c609c32ae4e6cd538`);
   `sys/include/keyboard.h`
   (`efbf86fb35c47d8fd59abe51bb1746a8ed46250bccaed364ac8bae3cb8e1654f`);
-  and `lib/legal/NOTICE`
+  `sys/src/cmd/aux/kbdfs/kbdfs.c`
+  (`4caa22dd9d599ef859584eac37bf7b107f9281c597fd4ddc581a21cd29dee255`),
+  whose US map at lines 162-200 and 282-300 `abi/keymaps/us.txt`
+  follows; and `lib/legal/NOTICE`
   (`8daa82fb04eb56344e06902609a580e8fe40cf900043945288fa58bf1ebb3e6c`),
   which puts them under the MIT license. plan9port at commit
   `1f1396913fb5372408f442ed26933f5ae4b399cd`, `include/keyboard.h`
@@ -5014,7 +5032,11 @@ Decisions:
   `abi/formats/evdev.txt`: `sys/dev/evdev/input-event-codes.h`
   (`fc9c4946818cefcec359ad3a619d448c4cafffa4f8f9571894516fb980b26142`)
   and `sys/dev/evdev/evdev_private.h`
-  (`90763a96ea404d39ad7ee8e5a34f38d246a9c1908354bb95c46121332a91d65f`).
+  (`90763a96ea404d39ad7ee8e5a34f38d246a9c1908354bb95c46121332a91d65f`),
+  and for `erx_vt`'s NUL, `sys/dev/kbd/kbdtables.h`
+  (`0f817d7706aac3d5d07577d32aaf90572c08b782ec4a00cdae547f48c0723991`)
+  and `share/vt/keymaps/us.kbd`
+  (`d8042fbc1b74a059aeae0ac7689c91d5e962993250fa1c46ceb1e8d2f6acd524`).
 * The draw messages were checked against 9front's `sys/man/3/draw`,
   `sys/src/9/port/devdraw.c`, `sys/src/libmemdraw/load.c` and
   `cload.c` and `sys/src/libdraw/badrect.c` at commit `2859ae04`, and

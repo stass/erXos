@@ -13,6 +13,7 @@ require_relative 'abi'
 require_relative 'hardware'
 require_relative 'facet_names'
 require_relative 'terminal_generation'
+require_relative 'keymap'
 
 module Erx
   # The build tree's generated files. Every generator's plan is published
@@ -106,7 +107,8 @@ module Erx
       Generator.new(name: 'abi', plan: ->(root) { ABI::Generator.generation(root: root) }, code: CODE),
       Generator.new(name: 'hardware', plan: ->(root) { Hardware.generation(root: root) }, code: CODE),
       Generator.new(name: 'terminal', plan: ->(root) { TerminalRules.generation(root: root) }, code: CODE),
-      Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE)
+      Generator.new(name: 'facets', plan: ->(root) { FacetNames.generation(root: root) }, code: CODE),
+      Generator.new(name: 'keymap', plan: ->(root) { Keymap.generation(root: root) }, code: CODE)
     ].freeze
 
     class << self

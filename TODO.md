@@ -596,13 +596,11 @@ it; git history is the record of completed work.
   the key `Code`'s number space (evdev's codes or another) and where a `Rune` comes from (a keymap, and whose)
   are not stated; and evdev's repeat has no `input()` form (see the lost key ups item). Settle them in the
   design before the driver's update step is written.
-* [Medium] `abi/formats/evdev.txt`, [Input events](docs/design-display.md#input-events): the table's entries are
-  plain `limit`s, so nothing marks which are key and button codes. FreeBSD's names put the key states
-  (`KEY_EVENT_DOWN` is 1, Esc's code), `KEY_RESERVED` and `KEY_MAX` under the key codes' `KEY_` prefix, and the
-  event types and axes are in the table too, so a keymap generator that refuses only "a name `evdev.txt` does
-  not have" accepts `key KEY_EVENT_DOWN` as Esc. Before `tools/gen_keymap.rb` is written, make the key and
-  button codes a closed set it can check a row against (an ABI `enum` of them, or a declared group), not a
-  list of excepted names.
+* [Medium] `tools/lib/erx/keymap.rb`, [Input events](docs/design-display.md#input-events): the generator
+  writes `erx_keymap` alone, not the list of layout names the manifest check holds a display entry's
+  `display_keymap` to, so until the manifest's display entry carries a layout nothing refuses one the tree
+  lacks; and nothing checks yet that the router alone calls `erx_keymap` (the xref row of the chokepoint
+  table). Add both with the display entry's layout and with `erx_input`.
 * [Medium] `erlang/apps/erx_fb/src/erx_virtio_gpu.erl`, [The display device](docs/design-display.md#the-display-device):
   the driver process runs on QEMU's virtio-gpu only in the `display_domain` suite, whose one boot brings the
   device up and shows a client's window; its failure paths have run only as its pure core's host tests. A host test
@@ -1037,6 +1035,11 @@ it; git history is the record of completed work.
   so what DL and a resize save, and the scrollback's charge per row, are checked only by the EUnit cases.
   The terminal generator writes the width table for Erlang and `include/erx/vt_width.h`, not musl's
   `wcwidth` tables or `erx_width`.
+* [Low] `erlang/apps/erx_win/src/erx_vt.erl`, [The terminal emulator](docs/design-display.md#the-terminal-emulator):
+  when `key/2` is written, Control-Space and Control-2 send NUL, as FreeBSD's console does (release/15.1.0,
+  `sys/dev/kbd/kbdtables.h` lines 48 and 102, `share/vt/keymaps/us.kbd` lines 8 and 62), with a case for each;
+  the keymap's `ctl` layer cannot give NUL, since U+0000 there means the key types nothing and a `kbd` record
+  ends at a NUL.
 * [Medium] `erlang/apps/erx_win/src/erx_vt.erl`, `full_reset/1`, `soft_reset/1` and `resize/3`: what RIS,
   DECSTR and a resize keep is a list of `#vt{}` fields at each site, so a new field (the link grammar's state,
   `key/2`'s) must be remembered at each. Nest what RIS resets (grids, cursor, pen, modes, margins, tabs,

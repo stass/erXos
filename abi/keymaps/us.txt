@@ -1,0 +1,126 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# us: the United States layout (docs/design-display.md, "Input events"), every key and
+# button code of abi/formats/evdev.txt. The characters are those of 9front's US map in
+# sys/src/cmd/aux/kbdfs/kbdfs.c (9front, commit eb49f1f8788c, SHA-256
+# 4caa22dd9d599ef859584eac37bf7b107f9281c597fd4ddc581a21cd29dee255, MIT under
+# lib/legal/NOTICE), whose scan codes 1 to 88 are evdev's: the none and shift layers
+# (lines 162-200), and the ctl layer (lines 282-300), which gives a key that types a
+# character the low five bits of its none layer's, and Space and the grave accent
+# nothing. The US layout has no AltGr, so a key's altgr layers repeat none and shift. A
+# key that types no character types its special rune at every layer, where kbdfs.c's
+# ctl layer gives F1 to F12, Num Lock and Scroll Lock control characters; the keypad
+# types its digits whatever Num Lock's state, as 9front's none layer does, where kbdfs
+# turns the keypad into arrows with Num Lock off. As the design's layout gives them,
+# Caps Lock is the caps lock, where 9front makes it Control; the right Alt is Alt, where
+# 9front makes it AltGr; the right Meta key types Kmod4 like the left, and Pause types
+# Kbreak, where kbdfs maps neither.
+keymap us
+#        code            none    shift   ctl     altgr   shiftaltgr
+key      KEY_ESC         Kesc    Kesc    Kesc    Kesc    Kesc
+key      KEY_1           1       !       U+0011  1       !
+key      KEY_2           2       @       U+0012  2       @
+key      KEY_3           3       U+0023  U+0013  3       U+0023
+key      KEY_4           4       $       U+0014  4       $
+key      KEY_5           5       %       U+0015  5       %
+key      KEY_6           6       ^       U+0016  6       ^
+key      KEY_7           7       &       U+0017  7       &
+key      KEY_8           8       *       U+0018  8       *
+key      KEY_9           9       (       U+0019  9       (
+key      KEY_0           0       )       U+0010  0       )
+key      KEY_MINUS       -       _       U+000D  -       _
+key      KEY_EQUAL       =       +       U+001D  =       +
+key      KEY_BACKSPACE   Kbs     Kbs     Kbs     Kbs     Kbs
+key      KEY_TAB         U+0009  U+0009  U+0009  U+0009  U+0009
+key      KEY_Q           q       Q       U+0011  q       Q       caps
+key      KEY_W           w       W       U+0017  w       W       caps
+key      KEY_E           e       E       U+0005  e       E       caps
+key      KEY_R           r       R       U+0012  r       R       caps
+key      KEY_T           t       T       U+0014  t       T       caps
+key      KEY_Y           y       Y       U+0019  y       Y       caps
+key      KEY_U           u       U       U+0015  u       U       caps
+key      KEY_I           i       I       U+0009  i       I       caps
+key      KEY_O           o       O       U+000F  o       O       caps
+key      KEY_P           p       P       U+0010  p       P       caps
+key      KEY_LEFTBRACE   [       {       U+001B  [       {
+key      KEY_RIGHTBRACE  ]       }       U+001D  ]       }
+key      KEY_ENTER       U+000A  U+000A  U+000A  U+000A  U+000A
+key      KEY_A           a       A       U+0001  a       A       caps
+key      KEY_S           s       S       U+0013  s       S       caps
+key      KEY_D           d       D       U+0004  d       D       caps
+key      KEY_F           f       F       U+0006  f       F       caps
+key      KEY_G           g       G       U+0007  g       G       caps
+key      KEY_H           h       H       U+0008  h       H       caps
+key      KEY_J           j       J       U+000A  j       J       caps
+key      KEY_K           k       K       U+000B  k       K       caps
+key      KEY_L           l       L       U+000C  l       L       caps
+key      KEY_SEMICOLON   ;       :       U+001B  ;       :
+key      KEY_APOSTROPHE  '       "       U+0007  '       "
+key      KEY_GRAVE       `       ~       U+0000  `       ~
+key      KEY_BACKSLASH   \       |       U+001C  \       |
+key      KEY_Z           z       Z       U+001A  z       Z       caps
+key      KEY_X           x       X       U+0018  x       X       caps
+key      KEY_C           c       C       U+0003  c       C       caps
+key      KEY_V           v       V       U+0016  v       V       caps
+key      KEY_B           b       B       U+0002  b       B       caps
+key      KEY_N           n       N       U+000E  n       N       caps
+key      KEY_M           m       M       U+000D  m       M       caps
+key      KEY_COMMA       ,       <       U+000C  ,       <
+key      KEY_DOT         .       >       U+000E  .       >
+key      KEY_SLASH       /       ?       U+000F  /       ?
+key      KEY_KPASTERISK  *       *       U+000A  *       *
+key      KEY_SPACE       U+0020  U+0020  U+0000  U+0020  U+0020
+key      KEY_F1          Kf1     Kf1     Kf1     Kf1     Kf1
+key      KEY_F2          Kf2     Kf2     Kf2     Kf2     Kf2
+key      KEY_F3          Kf3     Kf3     Kf3     Kf3     Kf3
+key      KEY_F4          Kf4     Kf4     Kf4     Kf4     Kf4
+key      KEY_F5          Kf5     Kf5     Kf5     Kf5     Kf5
+key      KEY_F6          Kf6     Kf6     Kf6     Kf6     Kf6
+key      KEY_F7          Kf7     Kf7     Kf7     Kf7     Kf7
+key      KEY_F8          Kf8     Kf8     Kf8     Kf8     Kf8
+key      KEY_F9          Kf9     Kf9     Kf9     Kf9     Kf9
+key      KEY_F10         Kf10    Kf10    Kf10    Kf10    Kf10
+key      KEY_NUMLOCK     Knum    Knum    Knum    Knum    Knum
+key      KEY_SCROLLLOCK  Kscroll Kscroll Kscroll Kscroll Kscroll
+key      KEY_KP7         7       7       U+0017  7       7
+key      KEY_KP8         8       8       U+0018  8       8
+key      KEY_KP9         9       9       U+0019  9       9
+key      KEY_KPMINUS     -       -       U+000D  -       -
+key      KEY_KP4         4       4       U+0014  4       4
+key      KEY_KP5         5       5       U+0015  5       5
+key      KEY_KP6         6       6       U+0016  6       6
+key      KEY_KPPLUS      +       +       U+000B  +       +
+key      KEY_KP1         1       1       U+0011  1       1
+key      KEY_KP2         2       2       U+0012  2       2
+key      KEY_KP3         3       3       U+0013  3       3
+key      KEY_KP0         0       0       U+0010  0       0
+key      KEY_KPDOT       .       .       U+000E  .       .
+key      KEY_F11         Kf11    Kf11    Kf11    Kf11    Kf11
+key      KEY_F12         Kf12    Kf12    Kf12    Kf12    Kf12
+key      KEY_KPENTER     U+000A  U+000A  U+000A  U+000A  U+000A
+key      KEY_KPSLASH     /       /       /       /       /
+key      KEY_SYSRQ       Kprint  Kprint  Kprint  Kprint  Kprint
+key      KEY_HOME        Khome   Khome   Khome   Khome   Khome
+key      KEY_UP          Kup     Kup     Kup     Kup     Kup
+key      KEY_PAGEUP      Kpgup   Kpgup   Kpgup   Kpgup   Kpgup
+key      KEY_LEFT        Kleft   Kleft   Kleft   Kleft   Kleft
+key      KEY_RIGHT       Kright  Kright  Kright  Kright  Kright
+key      KEY_END         Kend    Kend    Kend    Kend    Kend
+key      KEY_DOWN        Kdown   Kdown   Kdown   Kdown   Kdown
+key      KEY_PAGEDOWN    Kpgdown Kpgdown Kpgdown Kpgdown Kpgdown
+key      KEY_INSERT      Kins    Kins    Kins    Kins    Kins
+key      KEY_DELETE      Kdel    Kdel    Kdel    Kdel    Kdel
+key      KEY_PAUSE       Kbreak  Kbreak  Kbreak  Kbreak  Kbreak
+key      KEY_LEFTMETA    Kmod4   Kmod4   Kmod4   Kmod4   Kmod4
+key      KEY_RIGHTMETA   Kmod4   Kmod4   Kmod4   Kmod4   Kmod4
+modifier KEY_LEFTCTRL    Kctl    ctl
+modifier KEY_LEFTSHIFT   Kshift  shift
+modifier KEY_RIGHTSHIFT  Kshift  shift
+modifier KEY_LEFTALT     Kalt    alt
+modifier KEY_RIGHTCTRL   Kctl    ctl
+modifier KEY_RIGHTALT    Kalt    alt
+lock     KEY_CAPSLOCK    Kcaps   caps
+button   BTN_LEFT        1
+button   BTN_MIDDLE      2
+button   BTN_RIGHT       4
+button   BTN_TOUCH       1
