@@ -143,13 +143,13 @@ belong to the driver table of
 | Early console, also the console | PL011 | mini UART | debug PL011 |
 | Host link | a second PL011 | UART3, a PL011 that `config.txt` routes | none |
 | IOMMU | SMMUv3, for PCIe only | none described | none assigned to Ethernet, USB or the SD controllers |
-| PCIe bridge | ECAM (`pci-host-ecam-generic`) | none driven | `brcm,bcm2712-pcie` |
-| PCIe configuration space held by | the PCIe domain, alone | no domain | the PCIe domain, alone |
+| PCIe bridge | ECAM (`pci-host-ecam-generic`) | `brcm,bcm2711-pcie`, a closed bus with the VL805 at its one position ([design-pcie.md](design-pcie.md#the-bridge-seam)) | `brcm,bcm2712-pcie` |
+| PCIe configuration space held by | the PCIe domain, alone | the PCIe domain, alone | the PCIe domain, alone |
 | Random generator | none; `/chosen/rng-seed` | RNG200 | RNG200 |
 | Watchdog | none; the kernel's timer alone | power-management watchdog | power-management watchdog |
 | Crash record | the early console, whose log the harness keeps | the early console, and the crash region in RAM | the early console, and the crash region in RAM |
 | Unconfined DMA devices, each in a domain of its own in a release build | the virtio-mmio devices | the SD controller, Ethernet | the SD controllers, RP1, a function on the external connector |
-| USB | none used | none: the VL805 sits behind the PCIe bridge no domain drives | RP1's two USB hosts |
+| USB | none used | none: no domain holds the VL805, which the PCIe domain enumerates behind the bridge | RP1's two USB hosts |
 | PSCI from | QEMU | TF-A's BL31, from the boot partition | TF-A's BL31, in the firmware |
 | Trial request | the harness | the firmware's mailbox | the firmware's mailbox |
 | Device secret | none | the OTP key, when provisioned | the OTP key, when provisioned |
@@ -362,8 +362,9 @@ The record marks EMMC2 unconfined and `hostile`, with 1 MiB of DMA
 memory for the ADMA2 mode, as the virtio block device's. A
 manifest gives the unit to the storage domain as its unit `block`, the
 name `storage_ctl` acts on. The VL805
-USB controller sits behind the Pi 4's PCIe bridge, which no domain drives,
-so no domain holds it and the Pi 4 has no USB. Its cores have the CRC32
+USB controller sits behind the Pi 4's PCIe bridge, which the PCIe domain
+drives as a closed bus ([design-pcie.md](design-pcie.md#the-closed-bus));
+no domain holds the VL805, so the Pi 4 has no USB. Its cores have the CRC32
 instructions but not the cryptography extension, so SHA-256, which every
 EROFS block's check needs, runs in portable C on it
 ([design-storage.md](design-storage.md#performance)).
@@ -546,7 +547,11 @@ QEMU `virt`'s GICv2m frame is written with the SPI number at its doorbell,
 whose in-kernel GIC has no ITS
 ([research](research-kernel-bases.md#qemu-virt-under-tcg-and-hvf)). The
 Raspberry Pi 5's MIP block raises SPIs 128 to 191. The Raspberry Pi 4's
-devices that erXos drives use wired interrupts, so it needs no frame.
+devices that erXos drives use wired interrupts, the VL805 its closed
+bus's INTx line, so it needs no frame. On the stopgap, which may not read
+the frame's `MSI_TYPER`, QEMU `virt`'s platform record names the frame's
+base and line range, and the backend binds each line edge-triggered
+([design-pcie.md](design-pcie.md#the-msi-frame-on-the-stopgap)).
 
 ### DMA
 
@@ -587,9 +592,11 @@ sees RAM at the CPU's addresses (`bcm2711.dtsi:545-594`), and PCIe sees
 3 GB ([research](research-boards-storage.md#checks-against-local-copies))
 through its bridge's `dma-ranges`, whose PCI addresses take three cells,
 which the walk of
-[design-kernel.md](design-kernel.md#dma-and-the-iommu) does not read, so
-an unconfined PCIe function behind it gets no DMA range; the VL805
-behind the Pi 4's bridge is driven by no domain. The
+[design-kernel.md](design-kernel.md#dma-and-the-iommu) is to read at a
+PCIe function's host bridge, the range then cut at the function row's
+`dma_limit`, which the Pi 4's record sets to FreeBSD's 960 MiB
+([design-pcie.md](design-pcie.md#dma)); no domain holds the VL805
+behind the Pi 4's bridge. The
 firmware rewrites the SD controller's range according to the SoC's
 revision, which the tree's `emmc2bus` alias asks of it
 (`bcm2711.dtsi:411-417`, `bcm2711-rpi.dtsi:14`), so only the tree the
@@ -638,7 +645,7 @@ Raspberry Pi has one.
 
 | | QEMU `virt` | Raspberry Pi 4 | Raspberry Pi 5 |
 | --- | --- | --- | --- |
-| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which no domain drives, so the loader's quiescing leaves it idle, and the firmware, which stays resident with access to all memory ([Firmware](#firmware)) | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
+| Bus masters | PCIe functions behind the ECAM bridge; virtio-mmio devices, whose DMA QEMU performs for them | the SD controller, the legacy and large-address DMA engines, Ethernet, the VL805 USB controller behind the PCIe bridge, which no domain holds, so the loader's quiescing leaves it idle and the PCIe domain keeps it off, and the firmware, which stays resident with access to all memory ([Firmware](#firmware)) | RP1's devices behind PCIe, Ethernet and two USB hosts among them; the SD controllers; a function on the external PCIe connector; the media blocks behind the BCM2712 IOMMUs; the firmware, which stays resident with access to all memory ([research](research-boards-storage.md#raspberry-pi-5-bcm2712-and-rp1), [Firmware](#firmware)) |
 | Translation | the SMMUv3, stage 1, for functions on the root bus, which the harness creates with `iommu=smmuv3`; nothing for virtio-mmio | none described ([research](research-boards-storage.md#raspberry-pi-4-model-b-bcm2711)) | none for Ethernet, USB, the SD controllers or the external connector; each BCM2712 IOMMU serves media blocks or RP1's camera and display paths, with one address space for all its devices |
 | Bypass | none: the driver sets the global bypass to abort before anything else, and a stream without a window aborts | every master | the BCM2712 IOMMUs pass addresses below their windows through untranslated |
 | Requester identity | fixed on the ECAM root bus: `smmu_get_sid` builds the id from the model's bus and `devfn`; `pcibus_num` fixes the root bus at zero, whereas a subordinate bus takes its number from writable bridge configuration. Each root-bus function is its own isolation group. This is source-checked in QEMU v11.1.2; the supported binary must pass the same contract tests before its confined profile is admitted ([audit](research-hardware-contracts.md)) | none used | none per device |
@@ -670,7 +677,15 @@ their configuration windows
 ([design-system.md](design-system.md#devices)); the kernel reads only a
 bridge's memory windows and `iommu-map` from the device tree
 ([design-kernel.md](design-kernel.md#resources-dma-windows-and-consoles)).
-QEMU `virt`'s bridge is ECAM (`pci-host-ecam-generic`). The BCM2712's root
+QEMU `virt`'s bridge is ECAM (`pci-host-ecam-generic`). The BCM2711's
+(`brcm,bcm2711-pcie`) reaches an endpoint's configuration space through
+an index and a data register, locks up its memory controller on an
+access at a root-bus position other than the root port's, and aborts an
+access while its link is down; its platform record marks it closed, with
+the VL805 at bus 1, device 0, and limits its functions' DMA to 960 MiB
+([research-brcmstb-pcie.md](research-brcmstb-pcie.md), sections 2 and
+3; [design-pcie.md](design-pcie.md#the-bridge-seam)).
+The BCM2712's root
 complex (`brcm,bcm2712-pcie`) reaches configuration space through an index
 and a data register of its own rather than ECAM, and aborts an access
 while its link is down
@@ -737,12 +752,12 @@ reads the marks instead of keeping a list of device classes
 | | QEMU `virt` | Raspberry Pi 4 Model B | Raspberry Pi 5 |
 | --- | --- | --- | --- |
 | IOMMU | the SMMUv3, which the harness creates with `iommu=smmuv3`, over the root bus's PCIe functions | none | none over the devices erXos uses: the BCM2712 IOMMUs serve media blocks |
-| Devices the manifest treats as unconfined | the virtio-mmio devices | every DMA device: the SD controller, Ethernet and the DMA engines; no domain holds the VL805, which sits behind the PCIe bridge no domain drives | every DMA device: the SD controllers, RP1 and a function on the external connector |
+| Devices the manifest treats as unconfined | the virtio-mmio devices | every DMA device: the SD controller, Ethernet and the DMA engines; no domain holds the VL805, which sits behind the PCIe bridge | every DMA device: the SD controllers, RP1 and a function on the external connector |
 | Devices the manifest marks `hostile` | the virtio block and network devices, on PCIe or MMIO | the SD controller; Ethernet | the SD controllers; RP1, for its Ethernet and USB hosts; a function on the external connector |
 | Storage domain | the block device, a virtio-pci function on the root bus, confined | in a release build, nothing directly: the SD controller has a domain of its own | in a release build, nothing directly: each SD controller has a domain of its own |
 | Network domain | the network device, a virtio-pci function on the root bus, confined | in a release build, nothing directly: Ethernet (`brcm,bcm2711-genet-v5`) has a domain of its own | in a release build, nothing directly: RP1, whose Ethernet the network stack uses, has a domain of its own |
 | Vault's domain | the TPM (`tcg,tpm-tis-mmio`), when the harness attaches one | the SPI controller a TPM module sits on, with the module | the SPI controller a TPM module sits on, with the module |
-| PCIe domain | the ECAM bridge's configuration window | none: no PCIe bridge is driven | the root complex's configuration window |
+| PCIe domain | the ECAM bridge's configuration window | the BCM2711 bridge's unit: its register window, with the configuration access in it, and its two lines, left masked ([design-pcie.md](design-pcie.md#the-bridge-seam)) | the root complex's configuration window |
 | System domain | the console's PL011 and the host link's PL011 | the mini UART's unit, the console's, with the auxiliary SPI controllers, which it leaves undriven; the PL011s' unit, with the host link | the debug PL011, the console |
 | Devices domain | the remaining slow devices | GPIO, I2C and the SPI controllers outside the mini UART's unit | the slow devices outside RP1 other than the console |
 | Domains of their own in a release build | each unit of virtio-mmio devices the manifest names, the transports of one page | the SD controller; Ethernet; each DMA engine the manifest names | each SD controller; RP1, one unit with its Ethernet, USB hosts and slow devices; a function on the external connector |

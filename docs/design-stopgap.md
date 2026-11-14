@@ -460,7 +460,7 @@ seeded violation and each refusal with a seeded record:
 | --- | --- | --- |
 | 1 one holder per device and unit | kept; a holder is the system domain or a configured domain | |
 | 2 facets name servers | kept, with introductions: a facet names a service of the manifest, served by the system domain or a configured domain, and is granted to the system domain or a configured domain, which takes one facet of a service name; a facet's operations are not resolved, so a facet that names any is refused; its parameters are resolved against its service's declarations | M5 (operations) |
-| 3 PCIe configuration space | QEMU `virt` drives no bridge in Phase 1, so no holder is allowed and no `pci` device is placed | M9 |
+| 3 PCIe configuration space | kept: on QEMU `virt` and on the Raspberry Pi 4 exactly one configured domain, `pcie`, holds the bridge's unit and nothing else; a `pci` device is placed by place on one configured domain, unconfined; a `pci` row names a line only behind the Pi 4's closed bridge ([design-pcie.md](design-pcie.md#on-the-stopgap)) | |
 | 4 budgets and grants sum | kept for `root_memory`, baseline, shares, the configured domains' budgets and grants and `max_domains`; the configured domains' sums are the planner's (property 12); `root_startup` by the rule below. The sums are checked at build time; nothing enforces them at run time ([Budgets and groups as records](#budgets-and-groups-as-records)) | Track K (`root_startup`, enforcement) |
 | 5 names | kept | |
 | 6 no JIT in the root | kept; a full boot may use the native root image, since the interpreter image is not yet the root | |

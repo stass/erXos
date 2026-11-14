@@ -401,9 +401,12 @@ violation fails the build with the property, the record and the field:
 3. **Exactly one domain holds PCIe configuration space, and that domain
    holds nothing else,** on every platform where erXos drives a PCIe
    bridge in a full boot: the PCIe domain, `pcie`, which runs the PCIe enumerator and
-   nothing beside it. On a platform that drives no bridge, as the
-   Raspberry Pi 4, no domain holds configuration space and there is no
-   PCIe domain.
+   nothing beside it. QEMU `virt`, the Raspberry Pi 4, whose BCM2711
+   bridge is closed, and the Raspberry Pi 5 drive bridges; on a
+   platform that drives none, no domain holds configuration space and
+   there is no PCIe domain. A `pci` row names an interrupt line only
+   behind a bridge its platform record closes, and then the line its
+   pin routes ([design-pcie.md](design-pcie.md#the-closed-bus)).
 4. **Budgets and grants sum within the root's.** The principals' budgets,
    the system domain's baseline and its reservation for `max_domains`
    admitted domains ([Resource policy](#resource-policy)), the unconfined
@@ -2885,9 +2888,11 @@ Through the NIF:
   by its supervisor and resets the device again. Its pools and queues stay
   in the NIF's record of the device meanwhile, and the NIF releases them
   only at the new driver's `negotiate/2`. A PCIe function's driver, after
-  its reset, asks the device service through its facet to have the
-  enumerator enable the function's memory space and bus mastering again,
-  the same gate as at its first start (PCIe, below). The reset is the
+  its reset, asks the device service through its `pci` facet to have
+  the enumerator enable the function's bus mastering, the same gate as
+  at its first start (PCIe, below); a reset its registers cannot do it
+  asks for through the same facet
+  ([design-pcie.md](design-pcie.md#who-programs-what-and-when)). The reset is the
   driver's because the driver alone knows its device; the system domain
   never touches a device's registers.
 
@@ -2907,21 +2912,27 @@ single-threaded C under `liberx` and needs no runtime of its own.
 
 **PCIe.** The host bridge is a device like any other, and its driver, the
 **PCIe enumerator**, is an Erlang process in the PCIe domain, which holds
-the bridge's configuration window (ECAM) as its register window and
-nothing else, so the enumerator alone reads and writes configuration
-space. It walks the bus and parses configuration space in Erlang, with
-binary matching in a supervised process and a fuzz target over
-configuration snapshots, since every parser of untrusted input has one,
-and reports each function, with its BARs, capabilities and requester id,
-to the device service, which adds it to the catalogue. To give a function
+the bridge's configuration window (ECAM, or the BCM2711's registers with
+their index and data access) as its register window and nothing else, so
+the enumerator alone reads and writes configuration space. It walks the
+bus and parses configuration space in Erlang, with binary matching and a
+fuzz target over configuration snapshots, since every parser of
+untrusted input has one, places the BARs, and reports each function,
+with its BARs, capabilities and place, to the device service, which
+keeps it in the catalogue as the function's layout; each function's
+configuration is the projection of that layout and of the setting its
+holder asked for, which the domain library keeps
+([design-pcie.md](design-pcie.md)). To give a function
 to the domain the manifest names for it, the library plans the give with
 `erx_dom_plan_unit_give`, whose plan carves the function's BARs as register
 windows after checking that each lies inside the bridge's windows from
 the device tree and overlaps no other device, creates its MSIs as IRQ
 objects on the MSI frame, whose doorbell address and data the result
-names (functions interrupt by MSI or MSI-X only: a bridge's INTx lines,
+names (functions interrupt by MSI or MSI-X: a bridge's INTx lines,
 which the functions behind it share, go to no domain, and a function that
-offers neither is given with no interrupt,
+offers neither is given with no interrupt, except behind a closed
+bridge, the Raspberry Pi 4's, whose row's INTx line is a line of its
+unit,
 [design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and creates its DMA window on the stream that the device tree's
 `iommu-map` gives its requester id, when the function lies on one of the
 machine's fixed buses
@@ -2931,15 +2942,20 @@ The PCIe domain is in the trusted base whole on every platform:
 configuration space turns on any function's bus mastering, which for an
 unconfined function reaches all memory. It holds nothing but the
 configuration window, so no other driver shares that trust and the
-devices domain stays outside it (property 3). The device service then
-asks the enumerator to program the function's MSIs and to enable its
-memory space and bus mastering, and asks it again, for bus mastering and
-memory space alone, when the function's driver reports a reset (Resets,
-above). A confined function cannot reach memory before its binding: the
+devices domain stays outside it (property 3). The give enables nothing:
+the function's driver asks the device service, through its `pci` facet,
+to have the enumerator enable memory space and program the route as it
+starts, and bus mastering once it has reset its device, and at the
+holder's end the device service has the function turned off, so a
+function masters only for a living holder that asked (Resets, above;
+[design-pcie.md](design-pcie.md#who-programs-what-and-when)). A
+confined function cannot reach memory before its binding: the
 kernel sets the IOMMU to abort DMA from every stream not bound to a DMA
 window ([design-kernel.md](design-kernel.md#dma-and-the-iommu)). The
-enumerator restarts like any driver process; a restart re-reads
-configuration space and changes no running function. The kernel keeps the
+PCIe domain restarts like any configured domain; a restart takes the
+targets from the domain library, re-reads configuration space and
+writes only what differs from each target, so it changes no running
+function. The kernel keeps the
 register pages of the devices of `hw/kernel_devices.txt` and no page of
 the console's UART, which it writes by polling, at the address its
 platform build fixes, at boot and at a panic or an end.
@@ -3886,8 +3902,10 @@ domain.
   only its own requester id
   ([design-kernel.md](design-kernel.md#resources-dma-windows-and-consoles)),
   and its DMA aborts at the IOMMU until its stream is bound, whatever the
-  enumerator writes; the enumerator's parser is Erlang in a supervised
-  process with a fuzz target, and its supervisor restarts it.
+  enumerator writes; the enumerator's parser is Erlang with a fuzz
+  target, and a crash of the enumerator ends the PCIe domain, which the
+  domain service restarts and whose restart writes nothing to a running
+  function ([design-pcie.md](design-pcie.md#failure-handling-and-restart)).
 * A domain that holds an unconfined device is in the trusted base, with
   every process in it: a defect in its driver, or a device it drives,
   reaches all memory. A release build's manifest gives each such device a
