@@ -936,6 +936,59 @@ is not one printable byte, an unknown field type, a reference to a
 field that is not an earlier one of the named type, and a count that
 counts two fields.
 
+### Input records
+
+`formats/input.txt` holds the one `input` declaration: the binary form
+of a driver's record, `record()` of [Input
+events](design-display.md#input-events), in which a driver in another
+domain serves its device's records as a file and the display's reader
+of that file reads them ([The display
+device](design-display.md#the-display-device)). Its members, at
+two-space indentation, are the kinds of record; the fields of a kind are
+at four spaces beneath it, in wire order after its tag.
+
+| Member | Meaning |
+| --- | --- |
+| `record NAME TAG [WORD...]` | a kind: its tag, one byte from 1 to 255, and its term, `{NAME, WORD..., Field...}`, or the bare `NAME` when it has no word and no field |
+| `field NAME @TYPE` | a field: a root `scalar` or `enum`, whose base integer is its width and signedness on the wire, and whose range or members are what it admits |
+
+Every record is the same size, one byte for the tag and the fields of
+the largest kind, so a stream of records splits into records by length
+alone and a bad record of the right length never moves the next; a
+writer that loses or adds a byte shifts every record after it, which
+only the serving domain can do and which gives it no reach beyond the
+records it may send anyway. A record is its tag, its
+fields in order, little-endian, an enum field as its member's number,
+and zero bytes to the size. The fields' types live beside the
+declaration, in the same file, as scalars whose ranges name the
+`input_` limits and as the enums `input_touch_phase` and
+`input_key_edge`, so a bound has one home; a scalar's base type is its
+width on the wire, and a limit widened past it is refused by the
+generator. The term rules are those of the program protocol's `union`
+(a bare atom, or a tuple of the name, its literal atoms and its fields),
+and the tag those of the web protocol's; the form is a declaration of
+its own because neither grammar has a fixed-size encoding or fields
+typed by root scalars.
+
+The generator emits from it `erx_input_codec`, in the `erx` application,
+so a driver of any domain writes the form and the display reads it:
+`record()`, the one type of a record, which `erx_input:record()` names;
+`valid/1`, whether a term is a record within the bounds, which the
+router holds every record to and `encode/1` refuses with `badarg`
+outside; `encode/1`, one record's bytes; `decode/1`, which reads a
+stream's bytes into its records in order, the number it dropped and the
+bytes after the last whole record, fewer than one record, which the
+reader keeps for its next read; and `size/0`. A record whose tag no kind
+has, whose padding is not zero, or whose field is outside its type's
+range or members is dropped and counted, never decoded; the decoder
+makes no atom. Generation fails for a second `input` declaration or one
+outside `formats/input.txt`, an argument to it, a member other than
+`record`, a tag outside 1 to 255 or used twice, two kinds of one name
+with different numbers of words or the same words, a field name that is
+not an identifier without an underscore or is used twice in its kind,
+and a field type that is not a root scalar without an alignment or a
+root enum other than a flags type.
+
 ### Web protocol
 
 `protocols/web.txt` holds the one `web VERSION` declaration of the web
@@ -2248,6 +2301,7 @@ The output families have explicit locations, shown relative to `build/gen/`:
 | `fuzz/generated/` | entry points invoking production readers |
 | `web/src/generated/` | the web client's TypeScript: `web.txt`'s types, codec, limits and hash; `ui.txt`'s tables and the reader and writer of its binary form; the inspection schema's kinds, attribute names, units, stopgap reporters and `present` marks ([design-web.md](design-web.md#the-client)) |
 | `erlang/apps/erx_win/src/erx_draw_codec.erl`, `include/erx/draw_codec.h`, `display/generated/erx_draw_codec.c` | the draw protocol's codec and its C twin |
+| `erlang/apps/erx/src/generated/erx_input_codec.erl` | the input records' type, bounds check, reader and writer |
 | `otp/erts/preloaded/src/erx_prog_grammar.erl`, `include/erx/prog_profile.h`, `liberx/generated/prog_profile.c` | the program protocol's Erlang grammar, and the table and typed accessors of its C check |
 | `docs/generated/abi-reference.md` | signatures, assignments, fields, bounds and mapping tables |
 

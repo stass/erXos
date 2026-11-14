@@ -25,7 +25,8 @@ require_relative '../../tools/lib/erx/abi'
 # abi/formats/input.txt, while the cases write each number out. So two more seeded faults
 # edit a copy of a table instead of the module, with erx_abi.hrl generated again from that
 # copy: REL_WHEEL given REL_HWHEEL's code must fail the case that turns a wheel, and a
-# wheel's record range widened must fail the case that clamps one.
+# wheel's record range narrowed must fail the case that clamps one. (A range widened past
+# the wire type of its scalar in input.txt is refused by the generator itself.)
 class ErxVirtioInputCoreTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   # The application holding the module, compiled whole with those it depends on (ErlangBuild), the module and the cases.
@@ -76,9 +77,9 @@ class ErxVirtioInputCoreTest < Minitest::Test
                                  replacement: 'limit evdev_rel_wheel u16 0x06',
                                  catching_case: 'wheel_steps_are_clamped_then_summed_test')),
     TableSeed.new(table: 'abi/formats/input.txt',
-                  seed: Seed.new(fault: "a wheel's record range widened",
+                  seed: Seed.new(fault: "a wheel's record range narrowed",
                                  anchor: 'limit input_wheel_max i32 127',
-                                 replacement: 'limit input_wheel_max i32 255',
+                                 replacement: 'limit input_wheel_max i32 63',
                                  catching_case: 'wheel_steps_are_clamped_then_summed_test'))
   ].freeze
 

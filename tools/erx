@@ -367,6 +367,8 @@ module Erx
                    name: 'fuzz-erx-ui-wire', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_draw_codec.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-draw-codec', deadline: 600, chdir: ROOT, env: environment)
+        runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_input_codec.rb'), '--seed', options.fetch(:seed).to_s],
+                   name: 'fuzz-erx-input-codec', deadline: 600, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_memdraw_y.rb'), '--seed', options.fetch(:seed).to_s],
                    name: 'fuzz-erx-memdraw-y', deadline: 900, chdir: ROOT, env: environment)
         runner.run([RbConfig.ruby, File.join(ROOT, 'tools/fuzz/erx_ui_wire_ts.rb'), '--seed', options.fetch(:seed).to_s],

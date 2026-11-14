@@ -1202,8 +1202,10 @@ one form the policy and a window see.
 A record's bounds, the numbers `record()` shows above and `input()`
 repeats for a touch's slot and a wheel's steps, have one home, the
 `input_` limits of `abi/formats/input.txt`: the router holds every
-record to them, and each driver's fold folds within them, both through
-the generated header.
+record to them through the generated `erx_input_codec:valid/1`, which
+checks the type and binary form that file declares for `record()`
+([Input records](design-abi.md#input-records)), and each driver's fold
+folds within them through the generated header.
 A record's relative move is in the device's own units; an absolute
 position, a touch's included, is normalized across the device's own
 axis range, 0 at its minimum and 65535 at its maximum. A key is an
@@ -1790,7 +1792,8 @@ so a source waits only for the steps of what is ahead of its record.
 
 A device in another domain, such as a touch controller on a bus the
 devices domain holds, is served by its driver there as a file of
-records, in the binary form `abi/formats/input.txt` declares, in a tree
+records, in the binary form `abi/formats/input.txt` declares
+([Input records](design-abi.md#input-records)), in a tree
 of that domain which the manifest grants the display domain read-only,
 an instance of `files`. A granted tree may hold several such files, as
 a USB controller's domain serves one for each of its input numbers
@@ -1798,9 +1801,12 @@ a USB controller's domain serves one for each of its input numbers
 starts one reader for each file the tree holds when the grant arrives,
 and the set does not change while the serving domain lives, so the
 router's sources stay fixed by the manifest. Each reader is the
-source of its file's records: it holds each to the bounds of `record()`,
-drops and counts one outside them, and ends when the file ends or a
-read fails, so the router releases what that device held. It has one
+source of its file's records: it decodes each read with
+`erx_input_codec:decode/1`, which holds each record to the bounds of
+`record()`, drops and counts one outside them, and gives back the bytes
+of a record the read ended inside, which the reader puts before its next
+read; it ends when the file ends or a read fails, so the router releases
+what that device held. It has one
 read outstanding, of at most the file protocol's 64 KiB, and makes the
 next only once every record of the last has been routed, so what the
 serving domain sends faster than the router routes waits in that

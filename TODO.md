@@ -893,12 +893,20 @@ it; git history is the record of completed work.
     target (only the take's refusal does, the `no_lease` case of `tools/lib/erx/programs.rb`); and `fstat`'s modes
     (a pipe end a FIFO of 0600, a mem range a regular file of 0600) checked against FreeBSD's `pipe_stat` and
     `shm_stat`, unverified, and a pipe end's size, 0 where FreeBSD reports the bytes readable.
-  * **Input from another domain** ([The display device](docs/design-display.md#the-display-device)):
-    `abi/formats/input.txt`, its generated reader and writer and their fuzz target.
+  * **Input from another domain** ([The display device](docs/design-display.md#the-display-device)): the
+    display's reader of each file of a granted input tree, a source of the router with one read outstanding, which
+    decodes each read with `erx_input_codec:decode/1` and puts the bytes of a split record before its next read.
   * **The web** ([UIs: the browser renderer](docs/design-web.md#uis-the-browser-renderer)): `erx_ui_server` and
     `erx_ui_browser` start in the application's session; `erx_web_line` keeps the table of open UIs and serves the
     `ui` and `uis` targets as views; `erx_web_conn` decodes an event's record and sends every `open` to the line,
     where it answers `ui`, `uis` and `event` as unsupported today.
+* [Medium] `tools/lib/erx/abi_input.rb`, [Input records](docs/design-abi.md#input-records): the `input`
+  declaration is a fourth reader of tagged records beside the draw messages and the program and web protocols'
+  `union`s. Its term rule (`distinct!`) repeats the program grammar's case selection and its member grouping copies
+  `Draw.messages`; fold the term rules and the grouping into one shared reader. Its `rel`, `axis` and `wheel`
+  limits span their scalars' base types, so widening one takes two edits the generator checks agree; let a scalar
+  with no range be the source and derive the `ERX_INPUT_*` macros from it. `erx_input`'s `code()`, `slot()` and
+  `is_code/1` parallel the codec's field types; export those from `erx_input_codec` and name them there.
 * [Low] `tools/lib/erx/abi_emit_ui_wire.rb` and `abi_emit_ui_wire_ts.rb`, [Widget format](docs/design-abi.md#widget-format):
   the server's records are declared in `abi/formats/ui.txt` and their code generated, but the two reports' fields
   (event's node, event number and detail; damage's count and rectangles) and the report reader's six reasons are

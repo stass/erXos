@@ -62,3 +62,45 @@ limit input_axis_max u32 65535
 limit input_touch_slot_max u32 9
 limit input_wheel_min i32 -128
 limit input_wheel_max i32 127
+
+# The fields of a record, as the scalars and enums its binary form carries: each is held
+# to the bounds above, and its base type is its width on the wire.
+scalar input_rel i32 range @input_rel_min @input_rel_max
+scalar input_axis u16 range 0 @input_axis_max
+scalar input_touch_slot u8 range 0 @input_touch_slot_max
+scalar input_wheel i8 range @input_wheel_min @input_wheel_max
+scalar input_code u16 range 0 @evdev_key_max
+
+enum input_touch_phase u8
+  value down 0
+  value move 1
+  value up 2
+
+enum input_key_edge u8
+  value down 0
+  value up 1
+
+# The binary form of a record (docs/design-abi.md, "Input records"), in which a driver in
+# another domain serves its device's records as a file and the display's reader of that
+# file reads them (docs/design-display.md, "The display device"). Every record is the same
+# size: its tag, its fields in order, little-endian, and zero bytes to the size of the
+# largest. A record decodes to {NAME, WORD..., FIELD...}, or to the bare NAME when it has
+# neither. tools/gen_abi.rb generates the Erlang codec erx_input_codec from it.
+input
+  record pointer 1 rel
+    field dx @input_rel
+    field dy @input_rel
+  record pointer 2 abs
+    field x @input_axis
+    field y @input_axis
+  record touch 3
+    field slot @input_touch_slot
+    field phase @input_touch_phase
+    field x @input_axis
+    field y @input_axis
+  record key 4
+    field edge @input_key_edge
+    field code @input_code
+  record wheel 5
+    field steps @input_wheel
+  record release 6

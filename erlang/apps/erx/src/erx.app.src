@@ -7,7 +7,8 @@
 %% of its device and its device record, the decisions of a shared interrupt line's
 %% owner, the inspector and its collectors, the tracer and its ring reader, the pipe
 %% server's decisions, erx's shell functions, and the modules tools/gen_abi.rb and
-%% tools/gen_terminal.rb generate, the 9P2000.L codec erx_9p among them.
+%% tools/gen_terminal.rb generate, the 9P2000.L codec erx_9p and the input records'
+%% codec erx_input_codec among them.
 %%
 %% It starts nothing of its own; kernel starts what must run, and the boot script's
 %% code path finds the modules here:
@@ -41,6 +42,7 @@
              erx_domain_lib,
              erx_driver_ctl,
              erx_facet,
+             erx_input_codec,
              erx_inspect_agent,
              erx_inspect_facet,
              erx_inspect_query,

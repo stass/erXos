@@ -51,9 +51,6 @@ window sees an up or a move it saw no down for.
 -export_type([config/0, state/0, record/0, in/0, view/0, out/0]).
 
 -type code() :: 0..?ERX_EVDEV_KEY_MAX.
-%% A record's bounds, from abi/formats/input.txt.
--type rel() :: ?ERX_INPUT_REL_MIN..?ERX_INPUT_REL_MAX.
--type axis() :: 0..?ERX_INPUT_AXIS_MAX.
 -type slot() :: 0..?ERX_INPUT_TOUCH_SLOT_MAX.
 -type rune() :: 0..16#d7ff | 16#e000..16#10ffff.
 -doc """
@@ -65,13 +62,11 @@ and the reserved chord's key codes, or `none`.
                     repeat_delay := pos_integer(),
                     repeat_period := pos_integer(),
                     chord := [code(), ...] | none}.
--doc "One record of a driver, in its device's terms (\"Input events\").".
--type record() :: {pointer, rel, DX :: rel(), DY :: rel()}
-                | {pointer, abs, X :: axis(), Y :: axis()}
-                | {touch, slot(), down | move | up, X :: axis(), Y :: axis()}
-                | {key, down | up, code()}
-                | {wheel, Steps :: ?ERX_INPUT_WHEEL_MIN..?ERX_INPUT_WHEEL_MAX}
-                | release.
+-doc """
+One record of a driver, in its device's terms ("Input events"): the type
+abi/formats/input.txt declares, with its bounds and its binary form.
+""".
+-type record() :: erx_input_codec:record().
 -doc "What erx_winfs hands one step, each stamped with its clock in milliseconds.".
 -type in() :: {record, Source :: pid(), Device :: binary(), At :: integer(), record()}
             | {gone, Source :: pid(), At :: integer()}
@@ -155,7 +150,8 @@ take({gone, Source, At}, Step, S) when is_pid(Source), is_integer(At) ->
     {Released, R#input{sources = maps:remove(Source, R#input.sources)}};
 take({record, Source, Device, At, Record}, Step, #input{screen = Screen} = S)
   when Screen =/= none, is_pid(Source), is_binary(Device), is_integer(At) ->
-    case is_record_ok(Record) of
+    %% A record outside record()'s bounds is dropped.
+    case erx_input_codec:valid(Record) of
         true -> record(Record, Source, At, Step, enrol(Source, Device, S));
         false -> {Step, count(S)}
     end;
@@ -511,17 +507,3 @@ scale(X, Y, {X0, Y0, X1, Y1}) ->
 clamp(V, Low, High) -> max(Low, min(High, V)).
 
 is_code(Code) -> is_integer(Code) andalso Code >= 0 andalso Code =< ?ERX_EVDEV_KEY_MAX.
-
-%% A record within record()'s bounds; anything else is dropped.
-is_record_ok({pointer, rel, DX, DY}) -> is_rel(DX) andalso is_rel(DY);
-is_record_ok({pointer, abs, X, Y}) -> is_axis(X) andalso is_axis(Y);
-is_record_ok({touch, Slot, Phase, X, Y}) ->
-    is_integer(Slot) andalso Slot >= 0 andalso Slot =< ?ERX_INPUT_TOUCH_SLOT_MAX
-        andalso lists:member(Phase, [down, move, up]) andalso is_axis(X) andalso is_axis(Y);
-is_record_ok({key, Edge, Code}) -> (Edge =:= down orelse Edge =:= up) andalso is_code(Code);
-is_record_ok({wheel, Steps}) -> is_integer(Steps) andalso Steps >= ?ERX_INPUT_WHEEL_MIN andalso Steps =< ?ERX_INPUT_WHEEL_MAX;
-is_record_ok(release) -> true;
-is_record_ok(_Record) -> false.
-
-is_rel(V) -> is_integer(V) andalso V >= ?ERX_INPUT_REL_MIN andalso V =< ?ERX_INPUT_REL_MAX.
-is_axis(V) -> is_integer(V) andalso V >= 0 andalso V =< ?ERX_INPUT_AXIS_MAX.
