@@ -180,8 +180,8 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted(source))
     assert status.success?, output
     assert_includes output, "devices 2\n"
-    assert_includes output, "device net virtio_mmio 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
-                            "words-erx_record given net virtio_mmio /virtio_mmio@a002e00 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
+    assert_includes output, "device net virtio_net 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
+                            "words-erx_record given net virtio_net /virtio_mmio@a002e00 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first

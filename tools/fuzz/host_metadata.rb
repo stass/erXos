@@ -47,7 +47,7 @@ module Erx
         'roster' => JSON.generate('version' => 1, 'entries' => [entry]),
         'origin' => JSON.generate(origin), 'attribution' => "/* SPDX-License-Identifier: MIT OR BSD-2-Clause */\n",
         'dependencies' => JSON.generate('version' => 1, 'sources' => [source]),
-        'svd' => File.binread(File.expand_path('../../hw/svd/pl011/pl011.svd', __dir__)),
+        'svd' => File.binread(File.expand_path('../../hw/svd/virtio_mmio/virtio_mmio.svd', __dir__)),
         'toolchain' => JSON.generate(toolchain), 'arch_terms' => "word EL1\nprefix ICC_\n",
         'sysreg_specification' => File.binread(File.expand_path('../../hw/sysreg/aarch64.json', __dir__)),
         'sysreg_source' => JSON.generate([SysregFixture.record]) }.freeze
@@ -72,7 +72,7 @@ module Erx
       when 'dependencies'
         DependencySchema.parse(bytes)
       when 'svd'
-        Hardware.device_header(Hardware.parse_svd(bytes))
+        Hardware.parse_peripherals(bytes).map { |device| Hardware.device_header(device) }
       when 'toolchain'
         File.binwrite(File.join(root, 'profile.json'), bytes)
         ToolchainProvenance.registry(profile: File.join(root, 'profile.json'), installation: root)

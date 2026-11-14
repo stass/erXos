@@ -592,12 +592,11 @@ it; git history is the record of completed work.
 * [High] `erlang/apps/erx_fb/`, [The display device](docs/design-display.md#the-display-device):
   the virtio-input driver process is not built, so no device's input reaches `erx_winfs:input/2` and a booted
   display takes no input. Its pure core and update fold, `erx_virtio_input_core`, are built; the process over
-  the device shim, its rows in the display domain's supervisor and the display suite's QEMU case wait on three
-  design questions: how the driver writes the configuration space's `select` and `subsel` as the 8-bit
-  accesses virtio 1.2 section 4.2.2.2 asks for (QEMU also takes one 32-bit write,
-  [facts record](docs/research-virtio-input-qemu.md#configuration-space), fact 12); an input device's
-  record and unit in the device table; and the name its records reach the router under (the device's
-  `ID_NAME`, facts record fact 21, or the device table's).
+  the device shim, its rows in the display domain's supervisor and the display suite's QEMU case wait on two
+  design questions: an input device's record and unit in the device table; and the name its records reach
+  the router under (the device's `ID_NAME`, [facts record](docs/research-virtio-input-qemu.md), fact 21, or
+  the device table's). Its configuration registers are peripheral `VIRTIO_INPUT`'s, `select` and `subsel`
+  one byte each ([Registers by name](docs/design-runtime.md#the-device-nif)).
 * [Medium] `abi/manifest.txt`, `liberx/system/dom_core.c`, `erlang/apps/erx_display/src/erx_winfs.erl`, [A display's
   session](docs/design-display.md#a-displays-session): a display's manifest entry carries no `display_keymap`,
   `display_repeat_delay_ms`, `display_repeat_period_ms` or reserved chord, and the domain service puts none of

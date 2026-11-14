@@ -43,7 +43,7 @@
 %% drives it, or why none does. A new controller is one row and one module.
 -spec transports() -> [{atom(), {ok, module()} | {error, term()}}].
 transports() ->
-    [{virtio_mmio, {ok, erx_blk_virtio}},
+    [{virtio_blk, {ok, erx_blk_virtio}},
      {sdhci, {ok, erx_blk_sd}}].
 
 %% The device process for the domain's block record, or ignore when the domain has none it

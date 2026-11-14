@@ -46,6 +46,7 @@ design places it in the network domain.
 -export([frames/2]).
 
 -include("generated/erx_abi.hrl").
+-include("generated/erx_hw_virtio_net.hrl").
 -include("erx_net_frame.hrl").
 
 -define(RXQ, ?ERX_VIRTIO_NET_QUEUE_RX).
@@ -86,7 +87,7 @@ transport is `init/1`'s to find.
 """.
 -spec interfaces() -> [map()].
 interfaces() ->
-    case erx_device_record:find(net, virtio_mmio) of
+    case erx_device_record:find(net, virtio_net) of
         {ok, Specs} ->
             [#{name => Name, transport => {?MODULE, #{record => Spec}}, ip4 => dhcp}
              || {Name, Spec} <- lists:zip(?NAMES, Specs, trim)];
@@ -126,12 +127,12 @@ start(Spec) ->
         {ok, Tx} ?= step(queue_create, erx_device:queue_create(Dev, ?TXQ, ?QUEUE_SIZE, ?BUFFER)),
         {ok, Features} ?= step(negotiate, erx_device:negotiate(Dev, ?WANTED)),
         {ok, Irq} ?= step(attach, erx_irq_line:attach(Dev, ?IRQ_LINE)),
-        {ok, Words} ?= config(Dev, ?GENERATION_TRIES),
-        {ok, Mtu} ?= mtu(Features, Words),
+        {ok, Config} ?= config(Dev, ?GENERATION_TRIES),
+        {ok, Mtu} ?= mtu(Features, Config),
         T0 = #t{dev = Dev, irq = Irq, rx = Rx, tx = Tx, features = Features, mtu = Mtu},
         {ok, T} ?= refill(?QUEUE_SIZE, T0),
-        {ok, #{link => ethernet, lladdr => lladdr(Features, Words), mtu => Mtu,
-               state => link_state(Features, Words), tx_limit => ?QUEUE_SIZE,
+        {ok, #{link => ethernet, lladdr => lladdr(Features, Config), mtu => Mtu,
+               state => link_state(Features, Config), tx_limit => ?QUEUE_SIZE,
                finish => none}, T}
     end.
 
@@ -143,45 +144,41 @@ identify(Dev) ->
         {Magic, _, _} -> {error, {magic, Magic}}
     end.
 
-%% The configuration's three words, read between two equal reads of the configuration
-%% generation, so they come from one configuration (section 4.2.2.2).
+%% The configuration fields the driver uses, each read by name at its own width from
+%% VIRTIO_NET's registers, between two equal reads of the configuration generation, so they
+%% come from one configuration (section 4.2.2.2).
 config(_Dev, 0) ->
     {error, {config, unstable}};
 config(Dev, Tries) ->
     Before = erx_device:read(Dev, config_generation),
-    Words = [erx_device:read(Dev, {config, Index})
-             || Index <- [?ERX_VIRTIO_NET_CONFIG_MAC_LOW, ?ERX_VIRTIO_NET_CONFIG_MAC_HIGH_STATUS,
-                          ?ERX_VIRTIO_NET_CONFIG_PAIRS_MTU]],
+    Config = #{mac => << <<(erx_device:read(Dev, {mac, Index})):8>> || Index <- lists:seq(0, 5) >>,
+               link_status => erx_device:read(Dev, link_status), mtu => erx_device:read(Dev, mtu)},
     case erx_device:read(Dev, config_generation) of
-        Before -> {ok, Words};
+        Before -> {ok, Config};
         _Changed -> config(Dev, Tries - 1)
     end.
 
 offers(Features, Bit) -> Features band (1 bsl Bit) =/= 0.
 
-lladdr(Features, [Low, High, _]) ->
+lladdr(Features, #{mac := Mac}) ->
     case offers(Features, ?ERX_VIRTIO_NET_F_MAC) of
-        true -> <<Low:32/little, (High band 16#ffff):16/little>>;
+        true -> Mac;
         false -> local_unicast(erx_net_clock:entropy(6))
     end.
 
 %% A random address with the locally administered bit set and the group bit clear.
 local_unicast(<<High:6, _:2, Rest:40>>) -> <<High:6, 1:1, 0:1, Rest:40>>.
 
-mtu(Features, [_, _, PairsMtu]) ->
+mtu(Features, #{mtu := Mtu}) ->
     case offers(Features, ?ERX_VIRTIO_NET_F_MTU) of
-        true ->
-            case PairsMtu bsr 16 of
-                Mtu when Mtu < ?MIN_MTU -> {error, {mtu, Mtu}};
-                Mtu -> {ok, min(Mtu, ?MAX_MTU)}
-            end;
-        false ->
-            {ok, ?MAX_MTU}
+        true when Mtu < ?MIN_MTU -> {error, {mtu, Mtu}};
+        true -> {ok, min(Mtu, ?MAX_MTU)};
+        false -> {ok, ?MAX_MTU}
     end.
 
-link_state(Features, [_, High, _]) ->
+link_state(Features, #{link_status := Status}) ->
     case offers(Features, ?ERX_VIRTIO_NET_F_STATUS) of
-        true when (High bsr 16) band ?ERX_VIRTIO_NET_S_LINK_UP =/= 0 -> up;
+        true when ?ERX_HW_VIRTIO_NET_LINK_STATUS_LINK_UP_GET(Status) =:= 1 -> up;
         true -> down;
         false -> up
     end.
@@ -210,8 +207,8 @@ event({erx_irq, Dev, ?IRQ_LINE}, #t{dev = Dev} = T0) ->
     Status = erx_device:read(Dev, interrupt_status),
     ok = erx_device:write(Dev, interrupt_ack, Status band 3),
     ok = erx_irq_line:ack(T0#t.irq),
-    Link = [{link, State} || Status band 2 =/= 0, {ok, Words} <- [config(Dev, ?GENERATION_TRIES)],
-                             State <- [link_state(T0#t.features, Words)]],
+    Link = [{link, State} || Status band 2 =/= 0, {ok, Config} <- [config(Dev, ?GENERATION_TRIES)],
+                             State <- [link_state(T0#t.features, Config)]],
     {Writable, T1} = reclaim(T0),
     {Received, T} = receive_batch(T1),
     {Link ++ Writable ++ Received, T};

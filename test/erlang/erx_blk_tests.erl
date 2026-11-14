@@ -18,12 +18,12 @@ choose(Arguments) ->
                     || {Peripheral, _Transport} <- erx_blk:transports()]).
 
 virtio_record_starts_the_virtio_process_test() ->
-    ?assertMatch({ok, erx_blk_virtio, #{peripheral := virtio_mmio, window := {object, 5, 0, 512}}},
-                 choose([record(virtio_mmio)])).
+    ?assertMatch({ok, erx_blk_virtio, #{peripheral := virtio_blk, window := {object, 5, 0, 512}}},
+                 choose([record(virtio_blk)])).
 
 no_block_record_starts_nothing_test_() ->
     [?_assertEqual(none, choose([])),
-     ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "/virtio_mmio@a003c00", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
+     ?_assertEqual(none, choose([["given", "net", "virtio_net", "/virtio_mmio@a003c00", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
 
 sdhci_record_starts_the_sd_process_test() ->
     ?assertMatch({ok, erx_blk_sd, #{peripheral := sdhci, window := {object, 5, 0, 512}}},
@@ -39,16 +39,16 @@ shared_line_owner_test_() ->
 owners({ok, Module, Spec}) -> erx_irq_line:owners([{Module, [Spec]}]).
 
 several_block_records_are_refused_test_() ->
-    [?_assertEqual({error, {block_records, [virtio_mmio, virtio_mmio]}},
-                   choose([record(virtio_mmio), record(virtio_mmio)])),
-     ?_assertEqual({error, {block_records, [virtio_mmio, sdhci]}}, choose([record(sdhci), record(virtio_mmio)]))].
+    [?_assertEqual({error, {block_records, [virtio_blk, virtio_blk]}},
+                   choose([record(virtio_blk), record(virtio_blk)])),
+     ?_assertEqual({error, {block_records, [virtio_blk, sdhci]}}, choose([record(sdhci), record(virtio_blk)]))].
 
 %% A record that does not parse refuses the choice, and its text stays out of the reason.
 unreadable_record_is_refused_test() ->
-    ?assertEqual({error, {bad_device_record, [virtio_mmio]}},
-                 choose([record(virtio_mmio), ["given", "block", "virtio_mmio", "x"]])).
+    ?assertEqual({error, {bad_device_record, [virtio_blk]}},
+                 choose([record(virtio_blk), ["given", "block", "virtio_blk", "x"]])).
 
 %% A record of one peripheral that does not parse refuses a good record of another as well.
 unreadable_record_of_another_peripheral_is_refused_test() ->
     ?assertEqual({error, {bad_device_record, [sdhci]}},
-                 choose([record(virtio_mmio), ["given", "block", "sdhci", "x"]])).
+                 choose([record(virtio_blk), ["given", "block", "sdhci", "x"]])).

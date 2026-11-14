@@ -1618,14 +1618,15 @@ it, as it maps a window object once, and two physical records in one page share 
 clock in hertz, which the driver reads and the NIF does not. The record's window and line the device
 NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx_record
 console_uart`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
-transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
+transports, each with compatible `virtio,mmio` and the peripheral of its kind, which copies the
+transport's registers and adds the kind's configuration fields (`hw/svd/virtio_mmio/virtio_mmio.svd`):
 
-| Manifest role | Record role | Holder |
-| --- | --- | --- |
-| `block` | `block` | the storage domain, or the system domain when no storage domain is configured |
-| `network` | `net` | the network domain, or the system domain when no network domain is configured |
-| `gpu` | `gpu` | the display domain |
-| `input` | `input` | the display domain |
+| Manifest role | Record role | Peripheral | Holder |
+| --- | --- | --- | --- |
+| `block` | `block` | `virtio_blk` | the storage domain, or the system domain when no storage domain is configured |
+| `network` | `net` | `virtio_net` | the network domain, or the system domain when no network domain is configured |
+| `gpu` | `gpu` | `virtio_mmio`, the transport alone, since its driver reads no configuration field | the display domain |
+| `input` | `input` | `virtio_input` | the display domain |
 
 A `framebuffer` row, the firmware's framebuffer on the Raspberry Pi 4, is no row of the kinds
 table: its holder's record is the root's framebuffer record

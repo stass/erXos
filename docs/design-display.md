@@ -1706,10 +1706,15 @@ repaints the screen from its windows' buffers.
 Input drivers are Erlang processes over the device NIF too, and each
 sends its device's records to the input router, `erx_winfs`
 ([Input events](#input-events)). The virtio-input driver's pure core,
-`erx_virtio_input_core`, parses the device's event records and its
-configuration space, and reads from the configuration the one fact the
-driver's fold needs: the ranges of the device's two absolute axes, or
-`none` when it has none. It does not decide what kind of device it
+`erx_virtio_input_core`, parses the device's event records, and reads
+from the configuration the one fact the driver's fold needs: the ranges
+of the device's two absolute axes, or `none` when it has none. The
+configuration space is the registers of peripheral `VIRTIO_INPUT`
+([design-runtime.md](design-runtime.md#the-device-nif)): for each axis the
+driver writes the one-byte `select` (ABS_INFO) and `subsel` (the axis's
+evdev code), the only fields it may write, then reads `size`, `abs_min` and
+`abs_max`, all between two equal reads of the configuration generation.
+It does not decide what kind of device it
 drives: a device with keys and axes sends both. The fold turns the
 events of each update, those up to `SYN_REPORT`, into records, and
 keeps of an update only what it has not yet sent: the sum of its

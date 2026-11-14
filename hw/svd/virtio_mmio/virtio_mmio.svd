@@ -7,8 +7,12 @@
      section 4.2.2 "MMIO Device Register Layout".
      Only the registers a split-queue driver uses are described; the shared-memory
      region registers of 0x0ac..0x0bc, QUEUE_RESET at 0x0c0 and the legacy interface
-     are not. CONFIG is
-     the device-specific configuration space, read as 32-bit words. ownedByNif marks
+     are not. The transport is cluster TRANSPORT of VIRTIO_MMIO; each device kind is a
+     peripheral that copies it and declares the fields of its configuration space at
+     0x100 that its driver uses, each register at its field's width and access, since the
+     driver must access a field at its own width (section 4.2.2.2). A field a kind does not
+     declare cannot be read or written. The GPU's driver reads no configuration field, so
+     its records name VIRTIO_MMIO itself. ownedByNif marks
      the registers erx_device writes only in sequences of its own: the device's status
      and features, a queue's selector, size, ready bit and doorbell, and the rings' addresses. -->
 <device schemaVersion="1.3">
@@ -20,161 +24,274 @@
       <name>VIRTIO_MMIO</name><baseAddress>0</baseAddress>
       <addressBlock><offset>0</offset><size>0x200</size><usage>registers</usage></addressBlock>
       <registers>
+        <cluster>
+          <name>TRANSPORT</name>
+          <description>The transport registers every device kind shares, 0x000..0x0fc</description>
+          <addressOffset>0</addressOffset>
+          <register>
+            <name>MAGIC</name><ownedByNif>false</ownedByNif>
+            <description>Magic value, 0x74726976 ("virt" in little-endian order)</description>
+            <addressOffset>0x000</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>VERSION</name><ownedByNif>false</ownedByNif>
+            <description>Device version number, 2 for the non-legacy interface</description>
+            <addressOffset>0x004</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>DEVICE_ID</name><ownedByNif>false</ownedByNif>
+            <description>Virtio subsystem device ID, 0 for a transport with no device</description>
+            <addressOffset>0x008</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>VENDOR_ID</name><ownedByNif>false</ownedByNif>
+            <description>Virtio subsystem vendor ID</description>
+            <addressOffset>0x00c</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>DEVICE_FEATURES</name><ownedByNif>false</ownedByNif>
+            <description>The 32 feature bits of the word DEVICE_FEATURES_SEL selects</description>
+            <addressOffset>0x010</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>DEVICE_FEATURES_SEL</name><ownedByNif>true</ownedByNif>
+            <description>Selects the word of the device's feature bits DEVICE_FEATURES shows</description>
+            <addressOffset>0x014</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>DRIVER_FEATURES</name><ownedByNif>true</ownedByNif>
+            <description>The 32 feature bits the driver accepts, of the word DRIVER_FEATURES_SEL selects</description>
+            <addressOffset>0x020</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>DRIVER_FEATURES_SEL</name><ownedByNif>true</ownedByNif>
+            <description>Selects the word of the driver's feature bits DRIVER_FEATURES writes</description>
+            <addressOffset>0x024</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_SEL</name><ownedByNif>true</ownedByNif>
+            <description>Selects the queue the QUEUE_ registers below address</description>
+            <addressOffset>0x030</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_NUM_MAX</name><ownedByNif>false</ownedByNif>
+            <description>The largest size of the selected queue, 0 when the queue is not available</description>
+            <addressOffset>0x034</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_NUM</name><ownedByNif>true</ownedByNif>
+            <description>The size of the selected queue, a power of two up to QUEUE_NUM_MAX</description>
+            <addressOffset>0x038</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_READY</name><ownedByNif>true</ownedByNif>
+            <description>Whether the device may use the selected queue</description>
+            <addressOffset>0x044</addressOffset><access>read-write</access>
+            <fields><field><name>READY</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_NOTIFY</name><ownedByNif>true</ownedByNif>
+            <description>The doorbell: the index of a queue with new available buffers</description>
+            <addressOffset>0x050</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>INTERRUPT_STATUS</name><ownedByNif>false</ownedByNif>
+            <description>Why the device raised its interrupt</description>
+            <addressOffset>0x060</addressOffset><access>read-only</access>
+            <fields>
+              <field><name>USED_BUFFER</name><description>a queue's used ring changed</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+              <field><name>CONFIG_CHANGE</name><description>the configuration space changed</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+            </fields>
+          </register>
+          <register>
+            <name>INTERRUPT_ACK</name><ownedByNif>false</ownedByNif>
+            <description>Acknowledges the interrupt causes written as ones</description>
+            <addressOffset>0x064</addressOffset><access>write-only</access>
+            <fields>
+              <field><name>USED_BUFFER</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+              <field><name>CONFIG_CHANGE</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
+            </fields>
+          </register>
+          <register>
+            <name>STATUS</name><ownedByNif>true</ownedByNif>
+            <description>Device status; writing zero resets the device</description>
+            <addressOffset>0x070</addressOffset><access>read-write</access>
+            <fields>
+              <field><name>ACKNOWLEDGE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+              <field><name>DRIVER</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+              <field><name>DRIVER_OK</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
+              <field><name>FEATURES_OK</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
+              <field><name>DEVICE_NEEDS_RESET</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
+              <field><name>FAILED</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
+            </fields>
+          </register>
+          <register>
+            <name>QUEUE_DESC_LOW</name><ownedByNif>true</ownedByNif>
+            <description>Low half of the selected queue's descriptor table address</description>
+            <addressOffset>0x080</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_DESC_HIGH</name><ownedByNif>true</ownedByNif>
+            <description>High half of the selected queue's descriptor table address</description>
+            <addressOffset>0x084</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_DRIVER_LOW</name><ownedByNif>true</ownedByNif>
+            <description>Low half of the selected queue's available ring address</description>
+            <addressOffset>0x090</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_DRIVER_HIGH</name><ownedByNif>true</ownedByNif>
+            <description>High half of the selected queue's available ring address</description>
+            <addressOffset>0x094</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_DEVICE_LOW</name><ownedByNif>true</ownedByNif>
+            <description>Low half of the selected queue's used ring address</description>
+            <addressOffset>0x0a0</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>QUEUE_DEVICE_HIGH</name><ownedByNif>true</ownedByNif>
+            <description>High half of the selected queue's used ring address</description>
+            <addressOffset>0x0a4</addressOffset><access>write-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+          <register>
+            <name>CONFIG_GENERATION</name><ownedByNif>false</ownedByNif>
+            <description>Changes whenever the configuration space changes</description>
+            <addressOffset>0x0fc</addressOffset><access>read-only</access>
+            <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+          </register>
+        </cluster>
+      </registers>
+    </peripheral>
+    <peripheral>
+      <name>VIRTIO_BLK</name>
+      <description>The block device (section 5.2): the transport and struct virtio_blk_config (5.2.4)</description>
+      <baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x200</size><usage>registers</usage></addressBlock>
+      <registers>
+        <cluster derivedFrom="VIRTIO_MMIO.TRANSPORT">
+          <name>TRANSPORT</name><description>The virtio-mmio transport</description><addressOffset>0</addressOffset>
+        </cluster>
         <register>
-          <name>MAGIC</name><ownedByNif>false</ownedByNif>
-          <description>Magic value, 0x74726976 ("virt" in little-endian order)</description>
-          <addressOffset>0x000</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>VERSION</name><ownedByNif>false</ownedByNif>
-          <description>Device version number, 2 for the non-legacy interface</description>
-          <addressOffset>0x004</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>DEVICE_ID</name><ownedByNif>false</ownedByNif>
-          <description>Virtio subsystem device ID, 0 for a transport with no device</description>
-          <addressOffset>0x008</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>VENDOR_ID</name><ownedByNif>false</ownedByNif>
-          <description>Virtio subsystem vendor ID</description>
-          <addressOffset>0x00c</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>DEVICE_FEATURES</name><ownedByNif>false</ownedByNif>
-          <description>The 32 feature bits of the word DEVICE_FEATURES_SEL selects</description>
-          <addressOffset>0x010</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>DEVICE_FEATURES_SEL</name><ownedByNif>true</ownedByNif>
-          <description>Selects the word of the device's feature bits DEVICE_FEATURES shows</description>
-          <addressOffset>0x014</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>DRIVER_FEATURES</name><ownedByNif>true</ownedByNif>
-          <description>The 32 feature bits the driver accepts, of the word DRIVER_FEATURES_SEL selects</description>
-          <addressOffset>0x020</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>DRIVER_FEATURES_SEL</name><ownedByNif>true</ownedByNif>
-          <description>Selects the word of the driver's feature bits DRIVER_FEATURES writes</description>
-          <addressOffset>0x024</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_SEL</name><ownedByNif>true</ownedByNif>
-          <description>Selects the queue the QUEUE_ registers below address</description>
-          <addressOffset>0x030</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_NUM_MAX</name><ownedByNif>false</ownedByNif>
-          <description>The largest size of the selected queue, 0 when the queue is not available</description>
-          <addressOffset>0x034</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_NUM</name><ownedByNif>true</ownedByNif>
-          <description>The size of the selected queue, a power of two up to QUEUE_NUM_MAX</description>
-          <addressOffset>0x038</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_READY</name><ownedByNif>true</ownedByNif>
-          <description>Whether the device may use the selected queue</description>
-          <addressOffset>0x044</addressOffset><access>read-write</access>
-          <fields><field><name>READY</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_NOTIFY</name><ownedByNif>true</ownedByNif>
-          <description>The doorbell: the index of a queue with new available buffers</description>
-          <addressOffset>0x050</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>INTERRUPT_STATUS</name><ownedByNif>false</ownedByNif>
-          <description>Why the device raised its interrupt</description>
-          <addressOffset>0x060</addressOffset><access>read-only</access>
-          <fields>
-            <field><name>USED_BUFFER</name><description>a queue's used ring changed</description><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>CONFIG_CHANGE</name><description>the configuration space changed</description><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
-          </fields>
-        </register>
-        <register>
-          <name>INTERRUPT_ACK</name><ownedByNif>false</ownedByNif>
-          <description>Acknowledges the interrupt causes written as ones</description>
-          <addressOffset>0x064</addressOffset><access>write-only</access>
-          <fields>
-            <field><name>USED_BUFFER</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
-            <field><name>CONFIG_CHANGE</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth><modifiedWriteValues>oneToClear</modifiedWriteValues></field>
-          </fields>
-        </register>
-        <register>
-          <name>STATUS</name><ownedByNif>true</ownedByNif>
-          <description>Device status; writing zero resets the device</description>
-          <addressOffset>0x070</addressOffset><access>read-write</access>
-          <fields>
-            <field><name>ACKNOWLEDGE</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>DRIVER</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>DRIVER_OK</name><bitOffset>2</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>FEATURES_OK</name><bitOffset>3</bitOffset><bitWidth>1</bitWidth></field>
-            <field><name>DEVICE_NEEDS_RESET</name><bitOffset>6</bitOffset><bitWidth>1</bitWidth><access>read-only</access></field>
-            <field><name>FAILED</name><bitOffset>7</bitOffset><bitWidth>1</bitWidth></field>
-          </fields>
-        </register>
-        <register>
-          <name>QUEUE_DESC_LOW</name><ownedByNif>true</ownedByNif>
-          <description>Low half of the selected queue's descriptor table address</description>
-          <addressOffset>0x080</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_DESC_HIGH</name><ownedByNif>true</ownedByNif>
-          <description>High half of the selected queue's descriptor table address</description>
-          <addressOffset>0x084</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_DRIVER_LOW</name><ownedByNif>true</ownedByNif>
-          <description>Low half of the selected queue's available ring address</description>
-          <addressOffset>0x090</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_DRIVER_HIGH</name><ownedByNif>true</ownedByNif>
-          <description>High half of the selected queue's available ring address</description>
-          <addressOffset>0x094</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_DEVICE_LOW</name><ownedByNif>true</ownedByNif>
-          <description>Low half of the selected queue's used ring address</description>
-          <addressOffset>0x0a0</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>QUEUE_DEVICE_HIGH</name><ownedByNif>true</ownedByNif>
-          <description>High half of the selected queue's used ring address</description>
-          <addressOffset>0x0a4</addressOffset><access>write-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>CONFIG_GENERATION</name><ownedByNif>false</ownedByNif>
-          <description>Changes whenever the configuration space changes</description>
-          <addressOffset>0x0fc</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
-        </register>
-        <register>
-          <name>CONFIG[%s]</name><ownedByNif>false</ownedByNif><dim>64</dim><dimIncrement>4</dimIncrement>
-          <description>The device-specific configuration space, by 32-bit word</description>
+          <name>CAPACITY_LOW</name><ownedByNif>false</ownedByNif>
+          <description>Low half of the capacity in 512-byte sectors, a 64-bit field read as two 32-bit words</description>
           <addressOffset>0x100</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>CAPACITY_HIGH</name><ownedByNif>false</ownedByNif>
+          <description>High half of the capacity in 512-byte sectors</description>
+          <addressOffset>0x104</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+        </register>
+      </registers>
+    </peripheral>
+    <peripheral>
+      <name>VIRTIO_NET</name>
+      <description>The network device (section 5.1): the transport and the fields of struct virtio_net_config (5.1.4) the driver reads</description>
+      <baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x200</size><usage>registers</usage></addressBlock>
+      <registers>
+        <cluster derivedFrom="VIRTIO_MMIO.TRANSPORT">
+          <name>TRANSPORT</name><description>The virtio-mmio transport</description><addressOffset>0</addressOffset>
+        </cluster>
+        <register>
+          <name>MAC[%s]</name><ownedByNif>false</ownedByNif><size>8</size><dim>6</dim><dimIncrement>1</dimIncrement>
+          <description>The device's MAC address, one byte each, valid when VIRTIO_NET_F_MAC is offered</description>
+          <addressOffset>0x100</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>LINK_STATUS</name><ownedByNif>false</ownedByNif><size>16</size>
+          <description>The link status, the specification's status field, valid when VIRTIO_NET_F_STATUS is offered</description>
+          <addressOffset>0x106</addressOffset><access>read-only</access>
+          <fields>
+            <field><name>LINK_UP</name><bitOffset>0</bitOffset><bitWidth>1</bitWidth></field>
+            <field><name>ANNOUNCE</name><bitOffset>1</bitOffset><bitWidth>1</bitWidth></field>
+          </fields>
+        </register>
+        <register>
+          <name>MAX_VIRTQUEUE_PAIRS</name><ownedByNif>false</ownedByNif><size>16</size>
+          <description>The most receive and transmit queue pairs, valid when VIRTIO_NET_F_MQ or VIRTIO_NET_F_RSS is offered</description>
+          <addressOffset>0x108</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>MTU</name><ownedByNif>false</ownedByNif><size>16</size>
+          <description>The largest MTU the driver should use, valid when VIRTIO_NET_F_MTU is offered</description>
+          <addressOffset>0x10a</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field></fields>
+        </register>
+      </registers>
+    </peripheral>
+    <peripheral>
+      <name>VIRTIO_INPUT</name>
+      <description>The input device (section 5.8): the transport and the fields of struct virtio_input_config (5.8.4) the driver uses</description>
+      <baseAddress>0</baseAddress>
+      <addressBlock><offset>0</offset><size>0x200</size><usage>registers</usage></addressBlock>
+      <registers>
+        <cluster derivedFrom="VIRTIO_MMIO.TRANSPORT">
+          <name>TRANSPORT</name><description>The virtio-mmio transport</description><addressOffset>0</addressOffset>
+        </cluster>
+        <register>
+          <name>SELECT</name><ownedByNif>false</ownedByNif><size>8</size>
+          <description>What the configuration answers, with SUBSEL; the driver sets both (5.8.5.1)</description>
+          <addressOffset>0x100</addressOffset><access>read-write</access>
+          <fields>
+            <field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth>
+              <enumeratedValues>
+                <enumeratedValue><name>UNSET</name><value>0x00</value></enumeratedValue>
+                <enumeratedValue><name>ID_NAME</name><value>0x01</value></enumeratedValue>
+                <enumeratedValue><name>ID_SERIAL</name><value>0x02</value></enumeratedValue>
+                <enumeratedValue><name>ID_DEVIDS</name><value>0x03</value></enumeratedValue>
+                <enumeratedValue><name>PROP_BITS</name><value>0x10</value></enumeratedValue>
+                <enumeratedValue><name>EV_BITS</name><value>0x11</value></enumeratedValue>
+                <enumeratedValue><name>ABS_INFO</name><value>0x12</value></enumeratedValue>
+              </enumeratedValues>
+            </field>
+          </fields>
+        </register>
+        <register>
+          <name>SUBSEL</name><ownedByNif>false</ownedByNif><size>8</size>
+          <description>The item SELECT asks about, such as an axis's evdev code</description>
+          <addressOffset>0x101</addressOffset><access>read-write</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>SIZE</name><ownedByNif>false</ownedByNif><size>8</size>
+          <description>The bytes of the answer, 0 when the device has none for SELECT and SUBSEL</description>
+          <addressOffset>0x102</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>8</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>ABS_MIN</name><ownedByNif>false</ownedByNif>
+          <description>An ABS_INFO answer's min, the first word of struct virtio_input_absinfo, signed</description>
+          <addressOffset>0x108</addressOffset><access>read-only</access>
+          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
+        </register>
+        <register>
+          <name>ABS_MAX</name><ownedByNif>false</ownedByNif>
+          <description>An ABS_INFO answer's max, signed</description>
+          <addressOffset>0x10c</addressOffset><access>read-only</access>
           <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>32</bitWidth></field></fields>
         </register>
       </registers>

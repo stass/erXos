@@ -28,7 +28,7 @@ module Erx
   # first creation's give was never undone fails it too: no second domain becomes ready.
   module DeviceGive
     # The platform's spare unit (config/platforms/qemu-virt.json), whose one device's role
-    # makes its record `net virtio_mmio` (include/erx/device_kinds.h).
+    # makes its record `net virtio_net` (include/erx/device_kinds.h).
     UNIT = "unit spare\n  placement \"spare\"\n  holder @domain.erts\n"
     ARGS_LINE = /^  args ".*"\n\z/
     RESTARTS_LINE = "  restarts 0\n"
@@ -57,12 +57,12 @@ module Erx
     # is not Old, and answers that id, or timeout.
     WAIT = 'DgWait=fun DgW(_,0)->timeout;DgW(DgOld,DgK)->case DgReady()--[DgOld] of [DgNew]->DgNew;' \
            '_->timer:sleep(100),DgW(DgOld,DgK-1) end end'
-    # DgRead(): at the domain's node, its one net virtio_mmio record opened and the magic
+    # DgRead(): at the domain's node, its one net virtio_net record opened and the magic
     # read, with the window's offset and size and the node's creation, which is the
     # domain's id, so the answer names the domain that read; or the class and reason of
     # the failure.
     READ_DEVICE = 'DgRead=fun()->try erpc:call(erts@erxos,fun()->' \
-                  '{ok,[DgSpec]}=erx_device_record:find(net,virtio_mmio),{ok,DgDev}=erx_device:open(DgSpec),' \
+                  '{ok,[DgSpec]}=erx_device_record:find(net,virtio_net),{ok,DgDev}=erx_device:open(DgSpec),' \
                   '{object,_,DgOffset,DgSize}=maps:get(window,DgSpec),' \
                   '{erx_device:read(DgDev,magic),DgOffset,DgSize,erlang:system_info(creation)} end,10000) ' \
                   'catch DgC:DgR->{DgC,DgR} end end'

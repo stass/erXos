@@ -2,8 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% Random device writes through erx_virtio_input_core, the virtio-input driver's pure
-%% core: event records through event/1, configuration space through config/3 and
-%% absinfo/1, a device's axis reads through new/1, and streams of event records through
+%% core: event records through event/1, the registers read for an axis through absinfo/1,
+%% a device's axis reads through new/1, and streams of event records through
 %% fold/2. Whatever arrives, no call raises, and each answer equals the reference's below,
 %% which reads every field by its byte position with binary:decode_unsigned/2 and judges it
 %% against the numbers of section 5.8 of the virtio 1.2 specification, evdev's codes and a
@@ -18,8 +18,7 @@
 
 -define(ROUNDS, 20000).
 -define(EVENT_SIZE, 8).
--define(CONFIG_SIZE, 136).
--define(DATA_MAX, 128).
+-define(ABSINFO_SIZE, 20).
 -define(ABS_INFO, 16#12).
 -define(QUERIES, [{?ABS_INFO, 0}, {?ABS_INFO, 1}]).
 -define(INT32_MIN, -16#80000000).
@@ -45,18 +44,13 @@ run([Seed]) ->
         _ -> error({too_few_accepted, Counts})
     end.
 
-%% One record, one configuration read, and one device with a stream of records folded;
+%% One record, one axis read, and one device with a stream of records folded;
 %% 1 for each of the record and the device that was taken.
 round_of() ->
     Record = record(),
     Event = agree(event, [Record], fun erx_virtio_input_core:event/1, ref_event(Record)),
-    Query = pick(?QUERIES ++ [{1, 0}, {rand:uniform(256) - 1, rand:uniform(256) - 1}]),
-    Block = block(Query, data(Query)),
-    Config = agree(config, [Block], fun erx_virtio_input_core:config/1, ref_config(Block)),
-    case Config of
-        {ok, Data} -> agree(absinfo, [Data], fun erx_virtio_input_core:absinfo/1, ref_absinfo(Data));
-        _ -> ok
-    end,
+    Read = read(),
+    agree(absinfo, [Read], fun erx_virtio_input_core:absinfo/1, ref_absinfo(Read)),
     Reads = device(),
     {taken(Event), fold_stream(Reads)}.
 
@@ -137,39 +131,29 @@ fold_event() ->
                                 {3, pick([0, 1]), value()}, {3, pick([0, 1]), value()}]),
     pick([<<Type:16/little, Code:16/little, Value:32/little-signed>>, record()]).
 
-%% A configuration read for Query: usually its own header and a size within the data area,
-%% sometimes another query's header, a size past the data area or a read of another length.
-block({Select, Subsel}, Data) ->
-    {SaidSelect, SaidSubsel} = pick([{Select, Subsel}, {Select, Subsel}, {Select, Subsel}, {Select, Subsel},
-                                     {Select, Subsel bxor 1}, {rand:uniform(256) - 1, Subsel}]),
-    Size = pick([byte_size(Data), byte_size(Data), byte_size(Data), 0, 128, 129, 255, rand:uniform(256) - 1]),
-    Whole = <<SaidSelect:8, SaidSubsel:8, Size:8, (rand:bytes(5))/binary, Data/binary,
-              (rand:bytes(?DATA_MAX + 8 - byte_size(Data)))/binary>>,
-    binary:part(Whole, 0, pick([136, 136, 136, 136, 136, 135, 137, 8, 0, rand:uniform(144) - 1])).
-
-%% The data of an answer: an axis, often a wide or a narrow one, or random bytes.
-data({?ABS_INFO, _}) ->
+%% What the driver reads for one ABS_INFO query, as the device NIF reads SIZE, ABS_MIN and
+%% ABS_MAX: usually a whole answer with bounds that cluster where the order and sign
+%% matter, or zeros, which QEMU's device answers for an axis it lacks
+%% (docs/research-virtio-input-qemu.md, fact 10); sometimes another size, and rarely what
+%% no register holds.
+read() ->
     Min = pick([0, -1, 5, ?INT32_MIN, rand:uniform(1 bsl 32) - (1 bsl 31)]),
     Max = pick([32767, 1, ?INT32_MAX, Min, Min - 1, rand:uniform(1 bsl 32) - (1 bsl 31)]),
-    Whole = <<Min:32/little-signed, Max:32/little-signed, (rand:bytes(16))/binary>>,
-    binary:part(Whole, 0, pick([20, 20, 20, 20, 20, 0, 0, 19, 24]));
-data(_) -> rand:bytes(rand:uniform(?DATA_MAX + 1) - 1).
+    Words = {?ABSINFO_SIZE, Min band 16#ffffffff, Max band 16#ffffffff},
+    pick([Words, Words, Words, Words, {0, 0, 0}, {0, 0, 0}, setelement(1, Words, rand:uniform(256) - 1),
+          setelement(1, Words, pick([19, 21, 128, 255])), setelement(pick([1, 2, 3]), Words, pick([-1, 1 bsl 32, x])),
+          {?ABSINFO_SIZE, Min}, <<?ABSINFO_SIZE, Min:32>>]).
 
 %% The reads of a device: usually both queries answered with a well-formed read, otherwise
-%% one of them missing or drawn as block/2 draws a read. A well-formed read takes one of
-%% the forms the facts record gives QEMU's (docs/research-virtio-input-qemu.md, facts 10
-%% and 11): an area of zeros, header included, for a query the device has nothing for, or
-%% an answer whose bytes past its size read as 0xff; or the query echoed and zeros after.
+%% one of them missing or drawn as read/0 draws one.
 device() ->
-    Clean = maps:from_list([{Query, clean_block(Query, data(Query))} || Query <- ?QUERIES]),
+    Clean = maps:from_list([{Query, pick([{0, 0, 0}, clean_read()])} || Query <- ?QUERIES]),
     Query = pick(?QUERIES),
-    pick([Clean, Clean, Clean, Clean, maps:remove(Query, Clean), Clean#{Query := block(Query, data(Query))}]).
+    pick([Clean, Clean, Clean, Clean, maps:remove(Query, Clean), Clean#{Query := read()}]).
 
-clean_block({Select, Subsel}, Data) ->
-    Size = byte_size(Data),
-    pick([<<0:(?CONFIG_SIZE * 8)>>,
-          <<Select:8, Subsel:8, Size:8, 0:40, Data/binary, (binary:copy(<<16#ff>>, ?DATA_MAX - Size))/binary>>,
-          <<Select:8, Subsel:8, Size:8, 0:40, Data/binary, 0:((?DATA_MAX - Size) * 8)>>]).
+clean_read() ->
+    Min = pick([0, -100, rand:uniform(1 bsl 16) - 1]),
+    {?ABSINFO_SIZE, Min band 16#ffffffff, (Min + rand:uniform(1 bsl 16)) band 16#ffffffff}.
 
 pick(List) -> lists:nth(rand:uniform(length(List)), List).
 
@@ -199,20 +183,21 @@ judge(3, Code, Value) ->
     end;
 judge(Type, _, _) -> {drop, {type, Type}}.
 
-%% Only the size byte counts (virtio 1.2, section 5.8.5.1), whatever the header names.
-ref_config(Bytes) when byte_size(Bytes) =/= ?CONFIG_SIZE -> {error, {length, byte_size(Bytes)}};
-ref_config(Bytes) ->
-    case binary:at(Bytes, 2) of
-        Size when Size =< ?DATA_MAX -> {ok, binary:part(Bytes, 8, Size)};
-        Size -> {error, {size, Size}}
-    end.
-
-ref_absinfo(Data) when byte_size(Data) =/= 20 -> {error, {absinfo, Data}};
-ref_absinfo(Data) ->
-    case {signed(word(Data, 0, 4)), signed(word(Data, 4, 4))} of
-        {Min, Max} when Min < Max -> {ok, {Min, Max}};
-        _ -> {error, {absinfo, Data}}
-    end.
+%% SIZE 0 is no axis; any other SIZE must be one absinfo's (virtio 1.2, section 5.8.5.1),
+%% and the bounds, signed, must be ordered. A read whose parts no register holds is refused.
+ref_absinfo({Size, Min, Max} = Read) ->
+    case lists:all(fun({Value, Bits}) -> is_integer(Value) andalso Value >= 0 andalso Value < 1 bsl Bits end,
+                   [{Size, 8}, {Min, 32}, {Max, 32}]) of
+        false -> {error, {read, Read}};
+        true when Size =:= 0 -> {ok, none};
+        true when Size =/= ?ABSINFO_SIZE -> {error, {size, Size}};
+        true ->
+            case {signed(Min), signed(Max)} of
+                {Low, High} when Low < High -> {ok, {Low, High}};
+                {Low, High} -> {error, {range, Low, High}}
+            end
+    end;
+ref_absinfo(Read) -> {error, {read, Read}}.
 
 %% The fold's model: the device's ranges, whether it skips to the next report, the
 %% update's relative and wheel sums and whether it moved, the position and the counts.
@@ -232,14 +217,9 @@ fresh(Axes, Counts) ->
 ref_axis(Query, Reads) ->
     case maps:find(Query, Reads) of
         error -> {error, {missing, Query}};
-        {ok, Bytes} ->
-            case ref_config(Bytes) of
-                {ok, <<>>} -> {ok, none};
-                {ok, Data} ->
-                    case ref_absinfo(Data) of
-                        {ok, Range} -> {ok, Range};
-                        {error, Reason} -> {error, {Query, Reason}}
-                    end;
+        {ok, Read} ->
+            case ref_absinfo(Read) of
+                {ok, Axis} -> {ok, Axis};
                 {error, Reason} -> {error, {Query, Reason}}
             end
     end.

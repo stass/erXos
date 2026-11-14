@@ -153,7 +153,7 @@ module Erx
                  'erpc:call(N, fun() -> {ok, #{pid := If}} = erx_net_tables:interface(vtnet0), ' \
                  '{ok, C} = erx_net_if:admin(If, counters), ' \
                  '[G] = [P || {_, P, _, _} <- supervisor:which_children(erx_net_grants)], ' \
-                 'Counts = erx_net_grant:counts(G), {ok, Specs} = erx_device_record:find(net, virtio_mmio), ' \
+                 'Counts = erx_net_grant:counts(G), {ok, Specs} = erx_device_record:find(net, virtio_net), ' \
                  '{maps:get(units, C, 0) > 0, maps:get(refused, Counts), maps:get(unknown, Counts), ' \
                  "[Co || \#{memory := _, coherent := Co} <- Specs]} end, 10000) end.\r"
     # The one edit of the development manifest: the network row runs BeamAsm, as a

@@ -2557,7 +2557,17 @@ file by the one generator that produces every register accessor, maps the
 name to its window, offset, width, access and field masks, and a name the
 table lacks is `badarg`. No raw address or offset exists in the interface,
 so the one-source rule holds in Erlang as in C
-([design.md](design.md#one-source-for-the-abi-and-the-hardware)). Every
+([design.md](design.md#one-source-for-the-abi-and-the-hardware)). Each read
+and write is one access of the register's declared width, 8, 16, 32 or 64
+bits. A virtio device's configuration space is registers of its kind's
+peripheral, each declared at its field's width and access, read and written by
+name like every other register: the kind's peripheral copies the transport's
+registers and adds the configuration fields its driver uses
+([design-hardware-generation.md](design-hardware-generation.md#register-inputs)),
+and the device kinds table names that peripheral for the kind's records. A field
+the peripheral does not declare cannot be reached, and a read-only one cannot be
+written, so the input driver can write only `select` and `subsel`, each one
+byte, as virtio 1.2 sections 4.2.2.2 and 5.8.5.1 require. Every
 register of a peripheral the NIF drives carries a mark in the SVD source,
 `ownedByNif`, saying whether the NIF owns it, and the generator refuses a
 register without the mark. The NIF owns every register through which a

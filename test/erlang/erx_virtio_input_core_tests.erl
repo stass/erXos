@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% Cases of erx_virtio_input_core, the virtio-input driver's pure core: the parse of its
-%% event records and its configuration space, the two absolute axes' ranges new/1 reads,
+%% event records and its configuration registers, the two absolute axes' ranges new/1 reads,
 %% and the fold of each update into erx_input:record()s (docs/design-display.md, "The
 %% display device" and "Verification and testing", Drivers). The numbers are evdev's
 %% (FreeBSD's sys/dev/evdev/input-event-codes.h), section 5.8 of the virtio 1.2
@@ -30,28 +30,23 @@
 -define(ABS_INFO, 16#12).
 -define(INT32_MIN, -16#80000000).
 -define(INT32_MAX, 16#7fffffff).
+-define(NONE, {0, 0, 0}).
 
 record(Type, Code, Value) -> <<Type:16/little, Code:16/little, Value:32/little-signed>>.
 
 event(Type, Code, Value) -> erx_virtio_input_core:event(record(Type, Code, Value)).
 
-%% The configuration space as the driver reads it whole: the header, then Size bytes of
-%% Data and zeros to the end of the data area.
-config(Select, Subsel, Data) -> config(Select, Subsel, byte_size(Data), Data).
+%% What the driver reads after writing an ABS_INFO query: SIZE, then ABS_MIN and ABS_MAX as
+%% the words of their 32-bit registers. none is a device with no such axis, whose SIZE
+%% and words read as zeros.
+absinfo(Min, Max) -> {20, Min band 16#ffffffff, Max band 16#ffffffff}.
 
-config(Select, Subsel, Size, Data) ->
-    <<Select:8, Subsel:8, Size:8, 0:40, Data/binary, 0:((128 - byte_size(Data)) * 8)>>.
-
-absinfo(Min, Max) -> <<Min:32/little-signed, Max:32/little-signed, 0:32, 0:32, 0:32>>.
-
-%% The reads of queries/0 for a device whose ABS_INFO answers for ABS_X and ABS_Y are
-%% these data, <<>> where it has no such axis.
-reads(XInfo, YInfo) ->
-    #{{?ABS_INFO, ?ABS_X} => config(?ABS_INFO, ?ABS_X, XInfo),
-      {?ABS_INFO, ?ABS_Y} => config(?ABS_INFO, ?ABS_Y, YInfo)}.
+%% The reads of queries/0 for a device whose ABS_INFO answers for ABS_X and ABS_Y are these.
+reads(XRead, YRead) ->
+    #{{?ABS_INFO, ?ABS_X} => XRead, {?ABS_INFO, ?ABS_Y} => YRead}.
 
 %% A fold of a device with no absolute axes, and of one with these two ranges.
-fold() -> fold(<<>>, <<>>).
+fold() -> fold(?NONE, ?NONE).
 
 fold({XMin, XMax}, {YMin, YMax}) -> fold(absinfo(XMin, XMax), absinfo(YMin, YMax));
 fold(XInfo, YInfo) ->
@@ -118,71 +113,56 @@ record_of_another_length_is_an_error_test() ->
     ?assertEqual({error, {length, 9}}, erx_virtio_input_core:event(<<Record/binary, 0>>)),
     ?assertEqual({error, {length, 16}}, erx_virtio_input_core:event(<<Record/binary, Record/binary>>)).
 
-config_returns_the_bytes_size_names_test() ->
-    ?assertEqual({ok, <<"QEMU Virtio Keyboard">>},
-                 erx_virtio_input_core:config(config(1, 0, <<"QEMU Virtio Keyboard">>))),
-    ?assertEqual({ok, <<>>}, erx_virtio_input_core:config(config(?ABS_INFO, ?ABS_X, <<>>))),
-    Full = binary:copy(<<16#a5>>, 128),
-    ?assertEqual({ok, Full}, erx_virtio_input_core:config(config(16#11, 1, Full))).
+%% SIZE 0 is no axis, however the words read (section 5.8.5.2; QEMU's reads as zeros for a
+%% query it has nothing for, docs/research-virtio-input-qemu.md, fact 10).
+absinfo_size_zero_is_no_axis_test() ->
+    ?assertEqual({ok, none}, erx_virtio_input_core:absinfo(?NONE)),
+    ?assertEqual({ok, none}, erx_virtio_input_core:absinfo({0, 5, 1})).
 
-%% Only size is read: QEMU's area reads as zeros, header included, for a query it has
-%% nothing for (docs/research-virtio-input-qemu.md, fact 10).
-config_reads_size_whatever_the_header_names_test() ->
-    ?assertEqual({ok, <<>>}, erx_virtio_input_core:config(<<0:(136 * 8)>>)),
-    ?assertEqual({ok, <<1>>}, erx_virtio_input_core:config(config(?ABS_INFO, ?ABS_Y, <<1>>))).
-
-config_size_past_the_data_area_is_an_error_test() ->
-    ?assertEqual({error, {size, 129}}, erx_virtio_input_core:config(config(1, 0, 129, <<>>))),
-    ?assertEqual({error, {size, 255}}, erx_virtio_input_core:config(config(1, 0, 255, <<>>))).
-
-config_of_another_length_is_an_error_test() ->
-    Block = config(?ABS_INFO, ?ABS_X, <<1>>),
-    ?assertEqual({error, {length, 135}}, erx_virtio_input_core:config(binary:part(Block, 0, 135))),
-    ?assertEqual({error, {length, 137}}, erx_virtio_input_core:config(<<Block/binary, 0>>)),
-    ?assertEqual({error, {length, 0}}, erx_virtio_input_core:config(<<>>)).
-
-absinfo_is_the_whole_layout_with_min_below_max_test() ->
+absinfo_is_a_whole_answer_with_min_below_max_test() ->
     ?assertEqual({ok, {-5, 32767}}, erx_virtio_input_core:absinfo(absinfo(-5, 32767))),
     ?assertEqual({ok, {?INT32_MIN, ?INT32_MAX}}, erx_virtio_input_core:absinfo(absinfo(?INT32_MIN, ?INT32_MAX))),
-    ?assertEqual({error, {absinfo, absinfo(7, 7)}}, erx_virtio_input_core:absinfo(absinfo(7, 7))),
-    ?assertEqual({error, {absinfo, absinfo(8, 7)}}, erx_virtio_input_core:absinfo(absinfo(8, 7))),
-    Short = binary:part(absinfo(0, 1), 0, 19),
-    ?assertEqual({error, {absinfo, Short}}, erx_virtio_input_core:absinfo(Short)),
-    Long = <<(absinfo(0, 1))/binary, 0>>,
-    ?assertEqual({error, {absinfo, Long}}, erx_virtio_input_core:absinfo(Long)).
+    ?assertEqual({error, {range, 7, 7}}, erx_virtio_input_core:absinfo(absinfo(7, 7))),
+    ?assertEqual({error, {range, 8, 7}}, erx_virtio_input_core:absinfo(absinfo(8, 7))),
+    ?assertEqual({error, {range, 1, -1}}, erx_virtio_input_core:absinfo(absinfo(1, -1))),
+    [?assertEqual({error, {size, Size}}, erx_virtio_input_core:absinfo({Size, 0, 1})) || Size <- [1, 19, 21, 128, 255]].
+
+%% A read the device NIF cannot have made, a word past its register's width, is refused whole.
+absinfo_refuses_a_read_no_register_holds_test() ->
+    [?assertEqual({error, {read, Read}}, erx_virtio_input_core:absinfo(Read))
+     || Read <- [{256, 0, 1}, {20, -1, 1}, {20, 0, 16#100000000}, {20, 0}, {20, 0, 1, 2}, <<20, 0, 1>>, x]].
 
 %% The axes new/1 reads.
 
 queries_are_the_reads_new_makes_test() ->
-    ?assertEqual(lists:sort(maps:keys(reads(<<>>, <<>>))), lists:sort(erx_virtio_input_core:queries())).
+    ?assertEqual(lists:sort(maps:keys(reads(?NONE, ?NONE))), lists:sort(erx_virtio_input_core:queries())).
 
 new_refuses_a_missing_or_broken_read_test() ->
     Reads = reads(absinfo(0, 32767), absinfo(0, 32767)),
     ?assertEqual({error, {missing, {?ABS_INFO, ?ABS_Y}}},
                  erx_virtio_input_core:new(maps:remove({?ABS_INFO, ?ABS_Y}, Reads))),
     ?assertEqual({error, {{?ABS_INFO, ?ABS_X}, {size, 200}}},
-                 erx_virtio_input_core:new(Reads#{{?ABS_INFO, ?ABS_X} => config(?ABS_INFO, ?ABS_X, 200, <<>>)})),
-    Short = binary:part(absinfo(0, 1), 0, 19),
-    ?assertEqual({error, {{?ABS_INFO, ?ABS_X}, {absinfo, Short}}}, erx_virtio_input_core:new(reads(Short, <<>>))).
+                 erx_virtio_input_core:new(Reads#{{?ABS_INFO, ?ABS_X} => {200, 0, 1}})),
+    ?assertEqual({error, {{?ABS_INFO, ?ABS_X}, {read, nonsense}}},
+                 erx_virtio_input_core:new(Reads#{{?ABS_INFO, ?ABS_X} => nonsense})).
 
 new_refuses_an_empty_or_inverted_range_test() ->
-    ?assertEqual({error, {{?ABS_INFO, ?ABS_Y}, {absinfo, absinfo(9, 9)}}},
+    ?assertEqual({error, {{?ABS_INFO, ?ABS_Y}, {range, 9, 9}}},
                  erx_virtio_input_core:new(reads(absinfo(0, 32767), absinfo(9, 9)))),
-    ?assertEqual({error, {{?ABS_INFO, ?ABS_X}, {absinfo, absinfo(1, -1)}}},
+    ?assertEqual({error, {{?ABS_INFO, ?ABS_X}, {range, 1, -1}}},
                  erx_virtio_input_core:new(reads(absinfo(1, -1), absinfo(0, 32767)))).
 
-%% A keyboard or a mouse answers each ABS_INFO query with an area of zeros, header
-%% included (docs/research-virtio-input-qemu.md, fact 10): a fold with no position.
+%% A keyboard or a mouse answers each ABS_INFO query with zeros (docs/research-virtio-input-qemu.md,
+%% fact 10): a fold with no position.
 a_device_answering_zeros_has_no_position_test() ->
-    Zeros = <<0:(136 * 8)>>,
-    {ok, Fold} = erx_virtio_input_core:new(#{{?ABS_INFO, ?ABS_X} => Zeros, {?ABS_INFO, ?ABS_Y} => Zeros}),
+    {ok, Fold} = erx_virtio_input_core:new(reads(?NONE, ?NONE)),
     {Sent, Next} = run(Fold, [key(?KEY_A, 1), abs(?ABS_X, 1), report()]),
     ?assertEqual([{key, down, ?KEY_A}], Sent),
     ?assertEqual(#{malformed => 0, unused => 1, skipped => 0}, erx_virtio_input_core:counts(Next)).
 
 %% A device with one absolute axis has no position: its axis's events are counted.
 one_axis_alone_makes_no_position_test() ->
-    {Sent, Fold} = run(fold(absinfo(0, 100), <<>>), [abs(?ABS_X, 50), abs(?ABS_Y, 50), report()]),
+    {Sent, Fold} = run(fold(absinfo(0, 100), ?NONE), [abs(?ABS_X, 50), abs(?ABS_Y, 50), report()]),
     ?assertEqual([], Sent),
     ?assertEqual(#{malformed => 0, unused => 2, skipped => 0}, erx_virtio_input_core:counts(Fold)).
 

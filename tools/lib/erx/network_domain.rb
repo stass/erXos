@@ -63,8 +63,8 @@ module Erx
       '[NdN] -> case catch NdLeased(NdN) of true -> NdN; _ -> timer:sleep(500), NdW(NdK - 1) end; ' \
       '_ -> timer:sleep(500), NdW(NdK - 1) end end',
       'NdNode = NdWait(360)',
-      '{nd_lease, erx_device_record:find(net, virtio_mmio), ' \
-      'case erpc:call(NdNode, erx_device_record, find, [net, virtio_mmio]) of {ok, [#{coherent := true} | _]} -> true; NdR -> NdR end, NdUsed()}'
+      '{nd_lease, erx_device_record:find(net, virtio_net), ' \
+      'case erpc:call(NdNode, erx_device_record, find, [net, virtio_net]) of {ok, [#{coherent := true} | _]} -> true; NdR -> NdR end, NdUsed()}'
     ].join(', ') + ".\r"
     ECHOED_LINE = "{nd_echoed, NdUsed()}.\r"
     # Ends the network domain for good: kills its domain pid, which its row restarts 0

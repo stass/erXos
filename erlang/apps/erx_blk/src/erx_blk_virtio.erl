@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% The block driver's virtio-mmio transport (docs/design-storage.md, "The block driver"):
-%% the device process erx_blk starts for a block record whose peripheral is virtio_mmio,
+%% the device process erx_blk starts for a block record whose peripheral is virtio_blk,
 %% registered as erx_blk, under erx_blk_sup in the storage domain, over erx_device
 %% (docs/design-runtime.md, "The device NIF"). It owns the device's one request queue,
 %% posts each read, write and flush as one request through erx_blk_write, and answers its
@@ -121,8 +121,8 @@ capacity(_Dev, 0) ->
     {error, {capacity, unstable}};
 capacity(Dev, Tries) ->
     Before = erx_device:read(Dev, config_generation),
-    Low = erx_device:read(Dev, {config, ?ERX_VIRTIO_BLK_CONFIG_CAPACITY_LOW}),
-    High = erx_device:read(Dev, {config, ?ERX_VIRTIO_BLK_CONFIG_CAPACITY_HIGH}),
+    Low = erx_device:read(Dev, capacity_low),
+    High = erx_device:read(Dev, capacity_high),
     case erx_device:read(Dev, config_generation) of
         Before -> {ok, erx_blk_request:capacity(Low, High)};
         _Changed -> capacity(Dev, Tries - 1)

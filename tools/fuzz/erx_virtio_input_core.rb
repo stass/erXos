@@ -8,11 +8,11 @@ require 'tmpdir'
 require_relative '../lib/erx/generated'
 
 # The fuzz target of the virtio-input driver's pure core over what the device wrote,
-# erx_virtio_input_core's event/1, config/1, absinfo/1, new/1 and its update fold, fold/2,
+# erx_virtio_input_core's event/1, absinfo/1, new/1 and its update fold, fold/2,
 # compiled from source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the
 # oracle's), so it needs no hosted build. It runs the module as it is, then each seeded
-# copy, which must fail with its marker: one that trusts the configuration's size field
-# past the data area (the bound holds every read inside the 128 bytes the device has); one
+# copy, which must fail with its marker: one that takes an axis bound past its 32-bit
+# register (the width check holds every read to what the device NIF can answer); one
 # that takes an event record longer than the layout (the exact match holds each buffer to
 # one event); one that sums wheel steps without their range check (the bound check holds
 # every record the fold sends to erx_input:record()'s bounds); and one whose counts keep an entry per event dropped (the target
@@ -26,9 +26,10 @@ module ErxVirtioInputCoreFuzz
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
   Seed = Data.define(:fault, :anchor, :replacement, :marker)
   SEEDS = [
-    Seed.new(fault: "the configuration's size trusted past the data area",
-             anchor: 'case Size =< ?ERX_VIRTIO_INPUT_CONFIG_DATA_MAX of', replacement: 'case true of',
-             marker: 'crashed'),
+    Seed.new(fault: "an axis bound taken past its register's width",
+             anchor: 'absinfo({?ERX_VIRTIO_INPUT_ABSINFO_SIZE, Min, Max}) when ?WORD(Min), ?WORD(Max) ->',
+             replacement: 'absinfo({?ERX_VIRTIO_INPUT_ABSINFO_SIZE, Min, Max}) when is_integer(Min), is_integer(Max) ->',
+             marker: 'disagrees_with_reference'),
     Seed.new(fault: 'an event record longer than the layout taken',
              anchor: 'Value:32/little-signed>>) -> typed(Type, Code, Value);',
              replacement: 'Value:32/little-signed, _/binary>>) -> typed(Type, Code, Value);',

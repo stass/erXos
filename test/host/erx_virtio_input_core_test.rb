@@ -62,7 +62,11 @@ class ErxVirtioInputCoreTest < Minitest::Test
     Seed.new(fault: 'a position normalized over one step too many',
              anchor: '* ?ERX_INPUT_AXIS_MAX div (Max - Min).',
              replacement: '* ?ERX_INPUT_AXIS_MAX div (Max - Min + 1).',
-             catching_case: 'an_axis_minimum_and_maximum_normalize_to_0_and_65535_test')
+             catching_case: 'an_axis_minimum_and_maximum_normalize_to_0_and_65535_test'),
+    Seed.new(fault: "an axis bound read from its register unsigned",
+             anchor: '<<Value:32/signed>> = <<Word:32>>,',
+             replacement: '<<Value:32>> = <<Word:32>>,',
+             catching_case: 'absinfo_is_a_whole_answer_with_min_below_max_test')
   ].freeze
 
   TABLE_SEEDS = [

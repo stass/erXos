@@ -43,24 +43,17 @@ limit virtio_blk_t_flush u32 4
 limit virtio_blk_s_ok u8 0
 limit virtio_blk_s_ioerr u8 1
 limit virtio_blk_s_unsupp u8 2
-limit virtio_blk_config_capacity_low u32 0
-limit virtio_blk_config_capacity_high u32 1
 
 # The network device (section 5.1): its receive queue is queue 0 and its transmit queue
 # queue 1; each buffer starts with the 12-byte virtio_net_hdr a VERSION_1 device uses
-# (5.1.6), all zero on transmit, since no offload is negotiated. Its configuration space,
-# read in 32-bit words: word 0 the address's first four bytes, word 1 its last two and
-# then the status, word 2 max_virtqueue_pairs and then the MTU.
+# (5.1.6), all zero on transmit, since no offload is negotiated. Its configuration space
+# is the registers of peripheral VIRTIO_NET (hw/svd/virtio_mmio/virtio_mmio.svd).
 limit virtio_net_f_mtu u32 3
 limit virtio_net_f_mac u32 5
 limit virtio_net_f_status u32 16
-limit virtio_net_s_link_up u32 1
 limit virtio_net_hdr_size u32 12
 limit virtio_net_queue_rx u32 0
 limit virtio_net_queue_tx u32 1
-limit virtio_net_config_mac_low u32 0
-limit virtio_net_config_mac_high_status u32 1
-limit virtio_net_config_pairs_mtu u32 2
 
 # One entry of a queue's descriptor table.
 layout erx_virtq_desc wire_le 8 16
@@ -183,20 +176,15 @@ layout erx_virtio_gpu_mem_entry wire_le 8 16
 # at release/15.1.0 gives it. The driver posts each buffer of its event queue, queue 0, at
 # exactly the size of one erx_virtio_input_event (section 5.8.6.1 asks for at least that),
 # so the device writes one event into each; queue 1 carries status the driver sends, such as keyboard
-# LEDs. Its configuration space is one erx_virtio_input_config: the driver writes select
-# and subsel, then reads size and the first size bytes of the data that follows the header
-# (section 5.8.4). Every value the device writes is untrusted input.
+# LEDs. Its configuration space is the registers of peripheral VIRTIO_INPUT
+# (hw/svd/virtio_mmio/virtio_mmio.svd), select's values among them: the driver writes
+# select and subsel, then reads size and the answer (section 5.8.4). An ABS_INFO answer
+# is one struct virtio_input_absinfo, of five 32-bit words, whose first two, min and max,
+# the driver reads. Every value the device writes is untrusted input.
 limit virtio_id_input u32 18
 limit virtio_input_queue_event u32 0
 limit virtio_input_queue_status u32 1
-limit virtio_input_cfg_unset u8 0x00
-limit virtio_input_cfg_id_name u8 0x01
-limit virtio_input_cfg_id_serial u8 0x02
-limit virtio_input_cfg_id_devids u8 0x03
-limit virtio_input_cfg_prop_bits u8 0x10
-limit virtio_input_cfg_ev_bits u8 0x11
-limit virtio_input_cfg_abs_info u8 0x12
-limit virtio_input_config_data_max u32 128
+limit virtio_input_absinfo_size u8 20
 
 # One event (section 5.8.6): an evdev type, code and value, little-endian. The value is
 # signed, as evdev's struct input_event holds it (FreeBSD sys/dev/evdev/input.h at
@@ -206,20 +194,3 @@ layout erx_virtio_input_event wire_le 4 8
   field code u16 2
   field value i32 4
 
-# The configuration space: the header, then the data select names, a string, a bitmap,
-# an erx_virtio_input_absinfo or an erx_virtio_input_devids.
-layout erx_virtio_input_config wire_le 1 136
-  field select u8 0
-  field subsel u8 1
-  field size u8 2
-  padding 3 5
-  field data u8 8 count 128
-
-# One absolute axis, as VIRTIO_INPUT_CFG_ABS_INFO answers it; signed, as evdev's struct
-# input_absinfo holds its bounds.
-layout erx_virtio_input_absinfo wire_le 4 20
-  field min i32 0
-  field max i32 4
-  field fuzz i32 8
-  field flat i32 12
-  field res i32 16
