@@ -66,6 +66,7 @@ servers included, is loaded. A name that passes holds no byte a terminal acts on
 -doc "A request of the grant, each operation's as the grant takes it.".
 -type request() :: {tcp_connect, inet, inet:ip4_address(), inet:port_number(), [term()], timeout()}
                  | {udp_open, inet, any | inet:ip4_address(), inet:port_number(), [term()]}
+                 | {tcp_listen, inet, any | inet:ip4_address(), inet:port_number(), [term()]}
                  | {icmp_open, inet}
                  | interfaces
                  | resolver

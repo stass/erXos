@@ -65,3 +65,34 @@ release_and_exit_free_both_buffers_test() ->
 %% The design's default: 16 MiB across the grant's sockets.
 default_limit_test() ->
     ?assertEqual(16 * 1024 * 1024, erx_net_grant_core:room(erx_net_grant_core:new(#{}))).
+
+%% --- bind_ports/3 ----------------------------------------------------------------
+
+bind_ports_defaults_test() ->
+    ?assertEqual({ok, [{1024, 65535}]}, erx_net_grant_core:bind_ports(tcp_listen, any, #{})),
+    ?assertEqual({ok, [{1024, 65535}]}, erx_net_grant_core:bind_ports(udp, {10, 0, 2, 15}, #{})).
+
+bind_ports_listen_narrows_ports_test() ->
+    Limits = #{ports => [{22, 22}, {8000, 8999}], listen => [{1, 100}, {8080, 9100}]},
+    ?assertEqual({ok, [{22, 22}, {8080, 8999}]}, erx_net_grant_core:bind_ports(tcp_listen, any, Limits)),
+    %% A datagram socket's bind is not a listen.
+    ?assertEqual({ok, [{22, 22}, {8000, 8999}]}, erx_net_grant_core:bind_ports(udp, any, Limits)),
+    ?assertEqual({ok, []}, erx_net_grant_core:bind_ports(tcp_listen, any, Limits#{listen := [{9000, 9100}]})),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(tcp_listen, any, Limits#{listen := false})),
+    ?assertEqual({ok, [{22, 22}, {8000, 8999}]}, erx_net_grant_core:bind_ports(udp, any, Limits#{listen := false})).
+
+bind_ports_addresses_test() ->
+    Limits = #{addresses => [{10, 0, 2, 15}]},
+    ?assertEqual({ok, [{1024, 65535}]}, erx_net_grant_core:bind_ports(tcp_listen, {10, 0, 2, 15}, Limits)),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(tcp_listen, {10, 0, 2, 16}, Limits)),
+    %% The wildcard would reach addresses the grant was not given.
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(tcp_listen, any, Limits)),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(udp, any, Limits)).
+
+bind_ports_malformed_limits_fail_closed_test() ->
+    ?assertEqual({ok, [{8000, 8001}]},
+                 erx_net_grant_core:bind_ports(udp, any, #{ports => [{8000, 8001}, {0, 5}, {9, 3}, {1, 65536}, x]})),
+    ?assertEqual({ok, []}, erx_net_grant_core:bind_ports(udp, any, #{ports => [{1, 2} | x]})),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(tcp_listen, any, #{listen => maybe_not})),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(udp, {10, 0, 2, 15}, #{addresses => none})),
+    ?assertEqual({error, eacces}, erx_net_grant_core:bind_ports(udp, {10, 0, 2, 15}, #{addresses => [{10, 0, 2, 15} | x]})).

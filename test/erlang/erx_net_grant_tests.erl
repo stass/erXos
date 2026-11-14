@@ -145,7 +145,12 @@ grant_test_() ->
       {"a call of the grantee past its bounds is answered badarg", fun remote_bounds_refused/0},
       {"a local process's call of a remote grant is left out", fun remote_bare_dropped/0},
       {"the interfaces pass the client's check", fun interfaces_checked/0},
-      {"an echo socket is its caller's, and ends with it", fun icmp_open_owned/0}]}.
+      {"an echo socket is its caller's, and ends with it", fun icmp_open_owned/0},
+      {"a listener is its caller's, holds its key, and ends with it", fun tcp_listen_owned/0},
+      {"a listen with an option the listener does not take is refused einval",
+       fun tcp_listen_option_refused/0},
+      {"a listen the grant's listen or addresses limit does not allow is refused eacces",
+       fun tcp_listen_limits/0}]}.
 
 remote_other_domain_dropped() ->
     {ok, Grant} = remote_grant(),
@@ -194,6 +199,54 @@ icmp_open_owned() ->
     Ref = monitor(process, Sock),
     Owner ! stop,
     receive {'DOWN', Ref, process, Sock, _} -> ok after ?WAIT -> error(socket_outlived_owner) end.
+
+%% A listen on port 0 from a socket process of its own: the grant answers the listener,
+%% whose key the bind claimed for the grant with the listener's entry, and whose sockname
+%% is the port bound. The owner's end ends the listener and frees its key.
+tcp_listen_owned() ->
+    Self = self(),
+    Owner = spawn(fun() ->
+                          {ok, L} = Reply = gen_server:call(erx_net_grant, {tcp_listen, inet, any, 0, [{backlog, 2}]}),
+                          Self ! {listening, Reply},
+                          Self ! {sockname, call(L, sockname)},
+                          receive stop -> ok end
+                  end),
+    L = receive {listening, {ok, P}} -> P after ?WAIT -> error(no_listener) end,
+    ?assertEqual({ok, {ok, L}}, erx_sock_admit:answer(tcp_listen, whereis(erx_net_grant), {ok, L})),
+    Port = receive {sockname, {ok, {{0, 0, 0, 0}, N}}} -> N after ?WAIT -> error(no_sockname) end,
+    Grant = whereis(erx_net_grant),
+    ?assertMatch([#{pid := L, grant := Grant, origin := local, listener := #{rcv_buf := 65536},
+                    accept := #{nodelay := false, snd_hiwat := 32768, rcv_hiwat := 65536}}],
+                 erx_net_tables:demux({tcp_listen, inet, any, Port})),
+    Ref = monitor(process, L),
+    Owner ! stop,
+    receive {'DOWN', Ref, process, L, normal} -> ok after ?WAIT -> error(listener_outlived_owner) end,
+    ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, any, Port})).
+
+tcp_listen_option_refused() ->
+    ?assertEqual({error, einval}, gen_server:call(erx_net_grant, {tcp_listen, inet, any, 0, [{active, true}]})),
+    ?assertEqual({error, einval}, gen_server:call(erx_net_grant, {tcp_listen, inet, any, 0, [{backlog, x}]})).
+
+%% A grant whose listen limit is false refuses every listen; one whose addresses limit lists
+%% an address refuses another and the wildcard alike, for a listener and a datagram socket.
+tcp_listen_limits() ->
+    ok = gen_server:stop(erx_net_grant),
+    {ok, NoListen} = erx_net_grant:start_link(local, #{listen => false}),
+    ?assertEqual({error, eacces}, gen_server:call(NoListen, {tcp_listen, inet, any, 0, []})),
+    ok = gen_server:stop(NoListen),
+    {ok, Narrow} = erx_net_grant:start_link(local, #{addresses => [{10, 0, 2, 15}]}),
+    try
+        ?assertEqual({error, eacces}, gen_server:call(Narrow, {tcp_listen, inet, any, 0, []})),
+        ?assertEqual({error, eacces}, gen_server:call(Narrow, {tcp_listen, inet, {10, 0, 2, 16}, 0, []})),
+        ?assertEqual({error, eacces}, gen_server:call(Narrow, {udp_open, inet, any, 0, []}))
+    after
+        ok = gen_server:stop(Narrow)
+    end.
+
+%% A socket protocol call of a socket from its socket process, the caller.
+call(Sock, Request) ->
+    Sock ! {erx_net, self(), {call, 1, Request}},
+    receive {erx_net, Sock, {reply, 1, Reply}} -> Reply after ?WAIT -> error({no_reply, Request}) end.
 
 %% --- erx_net:mint_grant/4 --------------------------------------------------------------
 %%

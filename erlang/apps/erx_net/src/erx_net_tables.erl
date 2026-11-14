@@ -106,7 +106,8 @@ Runs an explicit bind for the calling socket, whose pid `Entry` names (erx_net_b
 its one caller): reads the machine's addresses of the family from `erx_net_addrs` and the
 keys of the transport and family held on the port, on every port for port 0, and hands
 them to erx_net_bind:claim_bound/3, all in this process. A call whose entry names another
-process than the caller is answered `{error, badarg}` and inserts nothing. A bind that
+process than the caller, or whose request erx_net_bind:spec/1 does not take, is answered
+`{error, badarg}` and inserts nothing. A bind that
 inserts watches its holder in the same step, as `watch_holder/1` does.
 """.
 -spec bind(map(), erx_net_input:entry()) -> {ok, 1..16#ffff} | {error, atom()}.
@@ -215,19 +216,23 @@ init([]) ->
 handle_call({watch, Kind, Pid}, _From, Watched) ->
     Ref = erlang:monitor(process, Pid),
     {reply, ok, Watched#{Ref => {Kind, Pid}}};
-handle_call({bind, #{transport := Transport, family := Family, port := Port} = Spec,
-             #{pid := Holder, grant := Grant} = Entry}, {Holder, _}, Watched)
-  when (Transport =:= tcp orelse Transport =:= udp), (Family =:= inet orelse Family =:= inet6),
-       is_integer(Port), is_pid(Grant) ->
-    Request = Spec#{grant => Grant, machine => machine(Family)},
-    case erx_net_bind:claim_bound(Request, held(Transport, Family, Port), Entry) of
-        {ok, _} = Bound ->
-            %% The holder is watched in the step that inserts its key, so a holder already
-            %% gone, or one whose grant ended before its bind came, leaves no entry behind.
-            Ref = erlang:monitor(process, Holder),
-            {reply, Bound, Watched#{Ref => {holder, Holder}}};
-        {error, _} = Refused ->
-            {reply, Refused, Watched}
+handle_call({bind, Spec0, #{pid := Holder, credit := _, grant := Grant} = Entry}, {Holder, _}, Watched)
+  when is_pid(Grant) ->
+    case erx_net_bind:spec(Spec0) of
+        {ok, #{transport := Transport, family := Family, port := Port} = Spec} ->
+            Request = Spec#{grant => Grant, machine => machine(Family)},
+            case erx_net_bind:claim_bound(Request, held(Transport, Family, Port), Entry) of
+                {ok, _} = Bound ->
+                    %% The holder is watched in the step that inserts its key, so a holder
+                    %% already gone, or one whose grant ended before its bind came, leaves
+                    %% no entry behind.
+                    Ref = erlang:monitor(process, Holder),
+                    {reply, Bound, Watched#{Ref => {holder, Holder}}};
+                {error, _} = Refused ->
+                    {reply, Refused, Watched}
+            end;
+        error ->
+            {reply, {error, badarg}, Watched}
     end;
 handle_call({bind, _Spec, _Entry}, _From, Watched) ->
     {reply, {error, badarg}, Watched}.

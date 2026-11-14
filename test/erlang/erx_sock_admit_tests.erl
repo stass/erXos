@@ -75,7 +75,7 @@ answer_off_reasons() ->
 
 answer_unknown_operation() ->
     [?assertEqual({refused, operation}, erx_sock_admit:answer(Operation, self(), Answer))
-     || Operation <- [getifaddrs, hostname, tcp_listen], Answer <- [{ok, self()}, {error, badarg}]].
+     || Operation <- [getifaddrs, hostname, sctp_open], Answer <- [{ok, self()}, {error, badarg}]].
 
 answer_resolver() ->
     ?assertEqual({ok, {ok, #{nameservers => ?SERVERS, search => ["erxos.test"]}}},

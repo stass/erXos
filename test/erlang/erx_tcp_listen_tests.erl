@@ -20,7 +20,8 @@ deadline, the ends of the socket process and the grant, and what admission keeps
 listen_test_() ->
     [{Name, fun() -> process_flag(trap_exit, true),
                      ok = persistent_term:put({erx_net_sup, runtime}, erx_net_local),
-                     try Case() after cleanup() end
+                     {ok, Tables} = erx_net_tables:start_link(),
+                     try Case() after cleanup(Tables) end
             end}
      || {Name, Case} <-
      [{"a queued connection is bound to the next accept and the call answered at bound",
@@ -42,9 +43,20 @@ listen_test_() ->
       {"a message that is not its socket process's is dropped and counted",
        fun stranger_is_dropped/0},
       {"the accept credit holds 3 * backlog div 2 + 1, the backlog clamped to 128",
-       fun credit_limit_follows_the_backlog/0}]].
+       fun credit_limit_follows_the_backlog/0},
+      {"listen's options: the listener's four, a later one replacing an earlier, others einval",
+       fun options_are_the_listeners_four/0},
+      {"its key holds the entry an accepted connection starts from, and its end deletes it",
+       fun the_key_holds_the_entry/0},
+      {"a refused bind is its start's answer and leaves its socket process unlinked",
+       fun a_refused_bind_is_the_answer/0},
+      {"setopts of nodelay rewrites the entry before it is answered", fun setopts_rewrites_the_entry/0},
+      {"close is answered and ends the listener, deleting its key", fun close_ends_the_listener/0},
+      {"once close is answered the port is free to listen on again", fun close_frees_the_port_before_its_answer/0}]].
 
-cleanup() ->
+cleanup(Tables) ->
+    unlink(Tables),
+    exit(Tables, kill),
     flush(),
     process_flag(trap_exit, false).
 
@@ -57,11 +69,15 @@ flush() ->
 %% every message it takes as {sock, Msg}.
 start() -> start(#{}).
 
+%% Extra holds listen's options, and may name the port to bind.
 start(Extra) ->
     Test = self(),
     Sock = relay(sock),
+    {ok, Options} = erx_tcp_listen_core:options(maps:to_list(maps:remove(port, Extra))),
+    Start = #{socket => Sock, origin => local, local => any, port => maps:get(port, Extra, 0),
+              allowed => [{1024, 65535}], options => Options},
     Grant = spawn(fun() ->
-                          {ok, L} = erx_tcp_listen:start_link(Extra#{socket => Sock, origin => local}),
+                          {ok, L} = erx_tcp_listen:start_link(Start),
                           Test ! {listener, L},
                           receive stop -> ok end
                   end),
@@ -302,3 +318,101 @@ credit_limit_follows_the_backlog() ->
     ?assertEqual(193, erx_tcp_listen_core:credit_limit(128)),
     ?assertEqual(193, erx_tcp_listen_core:credit_limit(129)),
     ?assertEqual(193, erx_tcp_listen_core:credit_limit(-1)).
+
+options_are_the_listeners_four() ->
+    ?assertEqual({ok, #{backlog => 5, reuseaddr => false, reuseport => false, nodelay => false}},
+                 erx_tcp_listen_core:options([])),
+    ?assertEqual({ok, #{backlog => 1, reuseaddr => true, reuseport => true, nodelay => true}},
+                 erx_tcp_listen_core:options([{backlog, 9}, {reuseaddr, true}, {reuseport, true},
+                                              {nodelay, true}, {backlog, 1}])),
+    [?assertEqual({error, einval}, erx_tcp_listen_core:options(Opts))
+     || Opts <- [[{active, true}], [{backlog, 1.0}], [{reuseaddr, 1}], [{nodelay, true} | x], x]].
+
+the_key_holds_the_entry() ->
+    #{l := L, sock := Sock, grant := Grant, credit := Credit} = start(#{nodelay => true}),
+    {ok, {{0, 0, 0, 0}, Port}} = sock_call(L, Sock, 1, sockname),
+    Key = {tcp_listen, inet, any, Port},
+    ?assertMatch([#{pid := L, credit := Credit, grant := Grant, origin := local,
+                    listener := #{rcv_buf := 65536, rcv_scale := _},
+                    accept := #{cc := erx_tcp_cc_cubic, loss := erx_tcp_loss_dupack, nodelay := true,
+                                snd_hiwat := 32768, rcv_hiwat := 65536}}],
+                 erx_net_tables:demux(Key)),
+    exit(Sock, kill),
+    ?assertEqual(normal, await_down(L)),
+    ?assertEqual([], erx_net_tables:demux(Key)).
+
+a_refused_bind_is_the_answer() ->
+    #{l := L, sock := Sock} = start(),
+    {ok, {_, Port}} = sock_call(L, Sock, 1, sockname),
+    Test = self(),
+    Sock2 = relay(sock2),
+    {ok, Options} = erx_tcp_listen_core:options([]),
+    spawn(fun() ->
+                  process_flag(trap_exit, true),
+                  Test ! {started, erx_tcp_listen:start_link(#{socket => Sock2, origin => local, local => any,
+                                                                port => Port, allowed => [{1024, 65535}],
+                                                                options => Options})}
+          end),
+    receive {started, Started} -> ?assertEqual({error, eaddrinuse}, Started) after ?WAIT -> error(no_start) end,
+    spawn(fun() ->
+                  process_flag(trap_exit, true),
+                  Test ! {started, erx_tcp_listen:start_link(#{socket => Sock2, origin => local, local => any,
+                                                                port => 80, allowed => [{1024, 65535}],
+                                                                options => Options})}
+          end),
+    receive {started, Started2} -> ?assertEqual({error, eacces}, Started2) after ?WAIT -> error(no_start) end,
+    %% The refused listener unlinked before it ended, so its socket process heard no exit.
+    receive {sock2, {'EXIT', _, _} = Exit} -> error({told, Exit}) after 100 -> ok end,
+    ?assertEqual({links, []}, process_info(Sock2, links)).
+
+setopts_rewrites_the_entry() ->
+    #{l := L, sock := Sock} = start(),
+    {ok, {_, Port}} = sock_call(L, Sock, 1, sockname),
+    ?assertEqual(ok, sock_call(L, Sock, 2, {setopts, [{nodelay, true}]})),
+    [#{accept := #{nodelay := true}}] = erx_net_tables:demux({tcp_listen, inet, any, Port}),
+    ?assertEqual(ok, sock_call(L, Sock, 3, {setopts, []})),
+    %% A key its grant's end deleted is gone: the listener ends as at its grant's exit.
+    ets:delete(erx_net_demux, {tcp_listen, inet, any, Port}),
+    L ! {erx_net, Sock, {call, 4, {setopts, [{nodelay, false}]}}},
+    ?assertEqual({shutdown, grant_ended}, await_down(L)).
+
+close_ends_the_listener() ->
+    #{l := L, sock := Sock} = start(),
+    {ok, {_, Port}} = sock_call(L, Sock, 1, sockname),
+    Ref = monitor(process, L),
+    ?assertEqual(ok, sock_call(L, Sock, 2, close)),
+    receive {'DOWN', Ref, process, L, Reason} -> ?assertEqual(normal, Reason) after ?WAIT -> error(still_running) end,
+    ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, any, Port})).
+
+%% stock's listen, close, listen on one port works, as FreeBSD's soclose frees the port before
+%% close returns: the listener deletes its key before it sends close's answer. A process's
+%% trace messages arrive in the order its events happened, so the trace of the listener's
+%% call of erx_net_bind:delete/1 and of its send of the answer gives the order outright.
+close_frees_the_port_before_its_answer() ->
+    #{l := L, sock := Sock} = start(),
+    {ok, {_, Port}} = sock_call(L, Sock, 1, sockname),
+    Key = {tcp_listen, inet, any, Port},
+    1 = erlang:trace_pattern({erx_net_bind, delete, 1}, true, [global]),
+    1 = erlang:trace(L, true, [call, send]),
+    try
+        ok = sock_call(L, Sock, 2, close),
+        %% The stop that follows deletes again, finding nothing.
+        ?assertMatch([delete, reply | _], traced(L, Key, Sock))
+    after
+        erlang:trace_pattern({erx_net_bind, delete, 1}, false, [global])
+    end.
+
+%% The listener's delete of Key and its send of close's answer to Sock, in the order traced.
+traced(L, Key, Sock) ->
+    receive
+        {trace, L, call, {erx_net_bind, delete, [Key]}} -> [delete | traced(L, Key, Sock)];
+        {trace, L, send, {erx_net, L, {reply, 2, ok}}, Sock} -> [reply | traced(L, Key, Sock)];
+        {trace, L, _, _} -> traced(L, Key, Sock);
+        {trace, L, _, _, _} -> traced(L, Key, Sock)
+    after 200 -> []
+    end.
+
+%% A call of the listener from its socket process, answered to that process.
+sock_call(L, Sock, N, Request) ->
+    L ! {erx_net, Sock, {call, N, Request}},
+    receive {sock, {erx_net, L, {reply, N, Reply}}} -> Reply after ?WAIT -> error({no_reply, N}) end.

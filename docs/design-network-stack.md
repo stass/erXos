@@ -3822,8 +3822,8 @@ keeping its pid, credit and grant, so it changes nothing an explicit
 bind reads and never touches a key that has since passed to another
 socket (**Ports and the demultiplexing table**, below). It returns
 `gone` when it replaced nothing, which for a running listener means its
-grant has ended, and the listener then ends as at its grant's exit,
-which follows.
+grant has ended, and the listener then ends with `{shutdown,
+grant_ended}`, as it would at its grant's exit, which follows.
 The interface reads the entry at a SYN for the SYN-ACK's part and at the
 completing ACK for the rest, so a connection whose handshake completes
 after a successful `setopts` has the new values and one spawned before
@@ -3970,26 +3970,34 @@ of the connection only from the answer, can send it anything.
 
 **Its start and its end.** `gen_tcp:listen/2` opens as every socket
 opens (**Opening**, in [The socket process](#the-socket-process)), with
-`{tcp_listen, Family, Local, Port, Opts, SockProc}`. The grant checks it
-against its `listen`, `addresses` and `sockets` limits, answering
-`{error, eacces}` or `{error, emfile}`, and starts the listener with
-`proc_lib:start_link/3`. The listener links to `SockProc`, makes its
+`{tcp_listen, Family, Local, Port, Opts}`, whose caller is the socket
+process. The grant checks it against its `listen`, `addresses` and
+`sockets` limits, answering `{error, eacces}` or `{error, emfile}`
+([The grant](#the-grant)), takes the listener's options, answering
+`{error, einval}` for one it does not take, and starts the listener
+with `gen_server:start_link/3`. The listener links to the socket process, makes its
 accept credit and claims its key by an explicit bind whose request
 carries the ports the grant allows a listener, its `ports` narrowed by
 `listen`
 ([Ports and the demultiplexing table](#ports-and-the-demultiplexing-table));
 the bind's refusal, `{error, eacces}` for a port outside them among
-others, is its start's and the grant's answer. Of `listen`'s options
-the listener takes `backlog`, `reuseaddr`, `reuseport` and those of
-`accept`; the socket process keeps the rest, the presentation options,
+others, is its start's and the grant's answer; a refused listener
+unlinks the socket process before it ends, so the answer alone tells
+it. Of `listen`'s options the listener takes `backlog`, `reuseaddr`,
+`reuseport` and those of `accept` (`nodelay`); the socket process keeps
+the rest, the presentation options,
 and starts every acceptor's socket process with them, as stock's
 `accept` starts the new socket's server with the listening socket's
 options (`gen_tcp_socket.erl:530-543`).
 
 The listener ends when its socket process ends (`close/1`, its owner's
-exit, a kill), when its grant ends or when its step raises; it deletes
+exit, a kill), at its socket process's `close` request, when its grant
+ends or when its step raises; it deletes
 its key when it ends normally, and its grant otherwise, as for every
-socket. Its exit reaches every queued connection through their links,
+socket. It answers `close` only once its key is deleted, so the port
+is free when `close` returns, as FreeBSD's `tcp_close` takes a closing
+socket out of the hash before it returns (`in_pcbdrop`, `tcp_subr.c:2555`;
+`in_pcbremhash`, `in_pcb.c:1879-1880`). Its exit reaches every queued connection through their links,
 and each aborts with a RST, as FreeBSD's `soclose` aborts every
 connection on a closing listener's queues (`uipc_socket.c:1988-2015`);
 a connection already sent `bind` ignores it, and lives or ends with its
@@ -4167,7 +4175,8 @@ the runtime seam nor the facet machinery changes them:
   Data}` and `close`; a connection those of
   [The socket process](#the-socket-process); a listener, kind
   `tcp_listen`, `{accept, SockProc, Timeout}`, its `SockProc` a pid of
-  the grantee's domain, and the `setopts` of its options; and every kind `{credit, Bytes}`. A
+  the grantee's domain, the `setopts` of its options, `sockname` and
+  `close`; and every kind `{credit, Bytes}`. A
   request of another kind is refused for its shape.
 
   A message wrapped as `{erx_origin, D, Inner}` comes from domain `D`; a
@@ -4479,11 +4488,25 @@ principal's policy:
 | `sockets` | sockets open at once, listeners and accepted connections included | 1,024 |
 | `buffers` | bytes of send and receive buffer reserved across the grant's sockets; what a socket has pushed to its socket process is the client's own memory and does not count | 16 MiB |
 | `time_wait` | connections in TIME-WAIT | 4,096 |
-| `ports` | local ports the grant may bind explicitly; ports below 1,024 only when listed, as FreeBSD requires privilege for them (`ipport_reservedhigh`, `in_pcb.c:132`) | 1,024 to 65,535 |
-| `listen` | whether the grant may listen, and on which of its ports | yes |
-| `addresses` | local addresses the grant may bind | all |
+| `ports` | `[{Lo, Hi}]`, inclusive ranges of the local ports the grant may bind explicitly; ports below 1,024 only when listed, as FreeBSD requires privilege for them (`ipport_reservedhigh`, `in_pcb.c:132`) | `[{1024, 65535}]` |
+| `listen` | `true`, `false` or `[{Lo, Hi}]`: whether the grant may listen, and on which of its `ports`; a listener's bind may claim the ports both hold | `true` |
+| `addresses` | `all` or `[Addr]`, `Addr` an address tuple such as `{10, 0, 2, 15}`, the local addresses the grant may bind, a listener's or a datagram socket's; when it is a list, a bind to `any` is refused with `{error, eacces}` | `all` |
 | `share` | reductions per period, the facet's share | the policy's |
 | `max_request` | the largest decoded request the grant and its sockets take; the runtime drops a larger one before it is queued | fixed, not a policy's: the schema's largest request, which the generator computes |
+
+`erx_net_grant_core:bind_ports/3` turns the three binding limits into
+the ports one explicit bind may claim, which the grant hands the bind
+([Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)):
+`ports` for a datagram socket, `ports` narrowed by `listen` for a
+listener, and `{error, eacces}` for a listener when `listen` is `false`
+and for either when `addresses` does not hold the local address. A limit
+of another shape allows nothing, so a malformed policy fails closed.
+A wildcard bind under a list of addresses is refused rather than
+narrowed: a FreeBSD jail binds `INADDR_ANY` to its one address when it
+has one and otherwise leaves it the wildcard (`prison_local_ip4`,
+`in_jail.c:233-240`), filtering what arrives later, while the table maps
+a key to one socket and a wildcard key would take every address of the
+port from other grants, so a client given addresses names one of them.
 
 Configuring interfaces and reading every client's statistics is a second
 facet, `netadmin`, granted to administrators. Reading the interfaces
@@ -4761,27 +4784,28 @@ an owner's `receive {tcp, S, Data}` matches as on stock, in any domain.
 Each call on an open socket is a local call to the socket process. The
 socket process answers what is its own (presentation, `recv`,
 `controlling_process`, `close`) by itself, and sends the rest as one
-request to its socket. An open is the opener's own call to the grant,
-naming the socket process it started (**Opening**, in
+request to its socket. An open is the socket process's own call to the
+grant, and the grant takes its caller as the socket process, so no open
+request names one (**Opening**, in
 [The socket process](#the-socket-process)).
 
 | Call | Answered by the socket process | Request to the network domain | To |
 | --- | --- | --- | --- |
-| `gen_tcp:connect/3,4` | started by the stub, owned by the caller, which calls the grant | `{tcp_connect, Family, Remote, Port, Opts, Timeout, SockProc}` | grant |
-| `gen_tcp:listen/2` | started by the stub, owned by the caller, which calls the grant | `{tcp_listen, Family, Local, Port, Opts, SockProc}` | grant |
+| `gen_tcp:connect/3,4` | started by the stub, owned by the caller, which calls the grant | `{tcp_connect, Family, Remote, Port, Opts, Timeout}` | grant |
+| `gen_tcp:listen/2` | started by the stub, owned by the caller, which calls the grant | `{tcp_listen, Family, Local, Port, Opts}` | grant |
 | `gen_tcp:accept/1,2` | the listener's socket process starts the new connection's, owned by the caller | `{accept, SockProc, Timeout}`, naming the new socket process | listener |
 | `gen_tcp:send/2` | forwarded in pieces within the send credit; the caller waits, behind any earlier `send`, until its last byte is sent, at once when its credit covers it | `{send, Piece}` for each piece of up to 64 KiB, in order, within the send credit the connection granted ([The socket process](#the-socket-process)); nothing answers it | connection |
 | `gen_tcp:recv/2,3` | from the bytes it holds, waiting until the deadline, behind any earlier `recv` | none; a waiting recv may grant credit | none |
 | `gen_tcp:shutdown/2` | forwarded | `{shutdown, How}` | connection |
 | `gen_tcp:close/1` | answered `ok`, then the socket process ends, and its exit closes the socket | none; the exit, through their link | socket |
 | `gen_tcp:controlling_process/2` | locally, as `gen_tcp_socket` does | none | none |
-| `gen_udp:open/1,2` | started by the stub, owned by the caller, which calls the grant | `{udp_open, Family, Local, Port, Opts, SockProc}` | grant |
+| `gen_udp:open/1,2` | started by the stub, owned by the caller, which calls the grant | `{udp_open, Family, Local, Port, Opts}` | grant |
 | `gen_udp:send/2,3,4,5`, `gen_udp:connect/3` | forwarded; a datagram larger than IP allows is refused here with `{error, emsgsize}` | `{send_to, ...}`, `{connect, ...}` | datagram socket |
 | `gen_udp:recv/2,3` | from the datagrams it holds, waiting until the deadline, behind any earlier `recv` | none | none |
 | `inet:setopts/2`, `inet:getopts/2` | its own options locally, the rest forwarded ([Options](#options)) | `{setopts, Opts}`, `{getopts, Names}` for the socket's options | socket |
 | `inet:peername/1`, `inet:sockname/1`, `inet:port/1`, `inet:getstat/2` | forwarded | `peername`, `sockname`, `{getstat, Names}` | socket |
 | `inet:getifaddrs/0`, `inet:gethostname/0`, `ifconfig` | no socket process: the caller calls the grant through `erx_inet:call/1`, which admits the answer ([Untrusted input](#untrusted-input)); `inet:getifaddrs/0` builds its answer from the interfaces' records | `interfaces`, `hostname` | grant |
-| `erx_gen_icmp:open/0`, which `ping` uses | started by the stub, owned by the caller, which calls the grant | `{icmp_open, Family, SockProc}` | grant |
+| `erx_gen_icmp:open/0`, which `ping` uses | started by the stub, owned by the caller, which calls the grant | `{icmp_open, Family}` | grant |
 
 A socket closes when its owner exits, as a `gen_tcp` socket does: the
 socket process monitors its owner. The pushed messages are stock's:
@@ -4971,14 +4995,17 @@ touched it, and one socket's bulk send would hold up another socket's
   of [design-runtime.md](design-runtime.md#connections-in-erts)). Within
   one domain, `Origin` `local`, the outlet sends plainly: a send within
   a runtime never suspends.
-* **It makes no link, monitor or call towards the network domain.** Its
+* **It makes no link, monitor or call towards the network domain once it
+  holds its socket.** Its
   socket links to it, which needs the `send` and `link` rights that the
   socket process gives the network domain as it starts (`expose/2`,
   [Two places, four seams](#two-places-four-seams)), and it traps exits
   before it exposes itself, so the socket's exit reaches it as a
   message whatever ended the socket: its own end, a kill, its grant's
-  end, or the network domain's end as `noconnection`. Whoever opens a
-  socket calls the grant, not the socket process (**Opening**, below).
+  end, or the network domain's end as `noconnection`. Its one call
+  towards the network domain is the open, the grant's call that it
+  makes for itself in `opening`, before it has a socket whose traffic
+  could wait behind it (**Opening**, below).
 
 A build check holds all three: only `erx_sock_out` starts a socket
 process, and only it sends, links, monitors or calls in the socket
@@ -5079,17 +5106,20 @@ send ([todo-performance.md](todo-performance.md)).
 protocol, and the socket process takes no part in it but to receive
 its socket. The process that calls `gen_tcp:connect`, `gen_tcp:listen`
 or `gen_udp:open`, the opener and the socket's owner, starts the socket
-process, which exposes itself to the grant's domain as it starts; then
-calls the grant, a facet, as any client calls a facet
+process, which exposes itself to the grant's domain as it starts and
+then calls the grant itself, a facet, as any client calls a facet
 ([design-domains.md](design-domains.md#facets)), through
-`erx_inet:call/1`, with a request that names the socket process; the
-grant starts the socket, which links to that socket process before the
-grant answers; and the opener hands the answer's socket to the socket
-process, as the listener's socket process hands an accepted connection
-to the socket process it started (**Accepting**, below). The opener's
-call is an ordinary call, which may suspend the opener behind an
-undrained lane as any call to a stalled domain may, while it waits for
-the open anyway. The answer, `{ok, Socket}`, passes `erx_sock_admit` as
+`erx_inet:open/1`. The request names no process: the grant takes its
+caller as the socket process, as it takes the caller of every request
+as the owner of what the request opens, so no request can name a
+process of another domain, or of no domain, to receive a socket. The
+grant starts the socket, which links to its caller before the grant
+answers, and the socket process holds the answer's socket from then
+on, as the listener's socket process hands an accepted connection to
+the socket process it started (**Accepting**, below). The socket
+process's call is an ordinary call, which may suspend it behind an
+undrained lane as any call to a stalled domain may, while its opener
+waits for the open anyway. The answer, `{ok, Socket}`, passes `erx_sock_admit` as
 every message from the network domain does
 ([Untrusted input](#untrusted-input)): `Socket` must be a pid of the
 grant's own node, `node(Socket) =:= node(Grant)`, so a network domain

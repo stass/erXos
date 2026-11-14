@@ -61,7 +61,7 @@ once.
 
 -export([ephemeral_start/1, next_ephemeral/2]).
 -export([insert/3, claim_tcp/5, delete/1, avail/2, allowed/2, update/2]).
--export([bind/2, claim_bound/3]).
+-export([bind/2, spec/1, claim_bound/3]).
 
 -export_type([port_number/0, ports/0, bind_request/0, bind_spec/0]).
 
@@ -246,19 +246,36 @@ orders every explicit bind by its call: it reads the machine's addresses of the 
 the keys of the transport and family held on the port (on every port, in one scan, for
 port 0), and runs `claim_bound/3`. Port 0 takes the first port of the ephemeral search from
 `start` that `avail/2` allows, so a chosen port passes the same rule 2 as a named one, and
-a search that finds none is answered `{error, eaddrnotavail}`, as a spent range is.
+a search that finds none is answered `{error, eaddrnotavail}`, as a spent range is. A request
+that is no `bind_spec()` (`spec/1`), or an entry that names another process than the caller,
+is answered `{error, badarg}`.
 """.
 -spec bind(bind_spec(), erx_net_input:entry()) ->
-          {ok, 1..16#ffff} | {error, eaddrnotavail | eacces | eaddrinuse}.
-bind(#{transport := Transport, family := Family, local := Local, port := Port, start := Start,
-       reuseaddr := ReuseAddr, reuseport := ReusePort, allowed := Allowed} = Spec,
-     #{pid := Self, credit := _, grant := Grant} = Entry)
-  when Self =:= self(), is_pid(Grant), (Transport =:= tcp orelse Transport =:= udp),
-       (Family =:= inet orelse Family =:= inet6), (Local =:= any orelse is_binary(Local)),
+          {ok, 1..16#ffff} | {error, eaddrnotavail | eacces | eaddrinuse | badarg}.
+bind(Spec, Entry) ->
+    erx_net_tables:bind(Spec, Entry).
+
+-doc """
+The `bind_spec()` that `Term` is, its keys alone, or `error` when it is not one: a transport
+and family, a local address of the family (4 bytes for `inet`, 16 for `inet6`) or `any`, a
+port from 0, two booleans, a proper list of allowed ranges (`allowed/2` skips an element
+that is not a range) and a start in the ephemeral
+range. erx_net_tables checks every bind's request with it, so a malformed call is refused
+`badarg` and never reaches `claim_bound/3`.
+""".
+-spec spec(term()) -> {ok, bind_spec()} | error.
+spec(#{transport := Transport, family := Family, local := Local, port := Port, start := Start,
+       reuseaddr := ReuseAddr, reuseport := ReusePort, allowed := Allowed} = Spec)
+  when (Transport =:= tcp orelse Transport =:= udp), (Family =:= inet orelse Family =:= inet6),
+       (Local =:= any orelse (Family =:= inet andalso is_binary(Local) andalso byte_size(Local) =:= 4)
+        orelse (Family =:= inet6 andalso is_binary(Local) andalso byte_size(Local) =:= 16)),
        is_integer(Port), Port >= 0, Port =< 16#ffff, is_integer(Start), Start >= ?FIRST_AUTO,
-       Start =< ?LAST_AUTO, is_boolean(ReuseAddr), is_boolean(ReusePort), is_list(Allowed) ->
-    erx_net_tables:bind(maps:with([transport, family, local, port, start, reuseaddr, reuseport,
-                                   allowed], Spec), Entry).
+       Start =< ?LAST_AUTO, is_boolean(ReuseAddr), is_boolean(ReusePort),
+       %% length/1 fails the guard on an improper list; allowed/2 skips a malformed range.
+       is_list(Allowed), length(Allowed) >= 0 ->
+    {ok, maps:with([transport, family, local, port, start, reuseaddr, reuseport, allowed], Spec)};
+spec(_) ->
+    error.
 
 -doc """
 The step of `bind/2` that erx_net_tables runs, its one caller: `Request` is the bind's

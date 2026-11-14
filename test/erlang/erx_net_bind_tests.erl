@@ -102,6 +102,7 @@ bind_test_() ->
       {"a bind meets the keys of its transport it overlaps", fun a_bind_meets_overlapping_keys/0},
       {"port 0 takes the first ephemeral port avail/2 allows", fun port_zero_is_checked_as_named/0},
       {"a bind for another process is refused", fun a_bind_for_another_process_is_refused/0},
+      {"a malformed bind is refused and the table owner lives", fun a_malformed_bind_is_refused/0},
       {"a grant's end deletes every entry naming it", fun a_grants_end_deletes_its_entries/0},
       {"a holder that ends after its bind leaves no entry", fun an_ended_holder_leaves_no_entry/0},
       {"a socket deletes only a key it holds", fun a_socket_deletes_only_its_own_key/0}]}.
@@ -168,6 +169,20 @@ a_bind_for_another_process_is_refused() ->
     Other = #{pid => G, credit => c, grant => G},
     ?assertEqual({error, badarg}, erx_net_tables:bind(spec(tcp, any, ?PORT), Other)),
     ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, any, ?PORT})).
+
+%% A call of erx_net_tables:bind/2 whose request is malformed is answered badarg, whether it
+%% comes straight to the table owner or through erx_net_bind:bind/2, and never ends the owner.
+a_malformed_bind_is_refused() ->
+    {G, _} = grants(),
+    Tables = whereis(erx_net_tables),
+    Spec = spec(tcp, ?OURS, ?PORT),
+    Malformed = [Spec#{reuseaddr := sometimes}, Spec#{local := {1, 2, 3, 4}}, Spec#{port := 65536},
+                 Spec#{port := -1}, Spec#{start := 1}, Spec#{allowed := x}, maps:remove(start, Spec),
+                 Spec#{family := inet7}, (spec(udp, any, 0))#{local := <<1>>}, not_a_map],
+    [?assertEqual({error, badarg}, erx_net_tables:bind(M, entry(G))) || M <- Malformed],
+    [?assertEqual({error, badarg}, erx_net_bind:bind(M, entry(G))) || M <- Malformed],
+    ?assertEqual(Tables, whereis(erx_net_tables)),
+    ?assertEqual([], erx_net_tables:demux({tcp_listen, inet, ?OURS, ?PORT})).
 
 a_grants_end_deletes_its_entries() ->
     G = spawn(fun() -> receive stop -> ok end end),

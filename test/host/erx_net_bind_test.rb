@@ -32,8 +32,8 @@ class ErxNetBindTest < Minitest::Test
 
   # The holder check dropped: a bind inserts a key held in another process's name.
   def test_seeded_fault_fails_a_bind_for_another_process_is_refused
-    fault = ['#{pid := Holder, grant := Grant} = Entry}, {Holder, _}, Watched)',
-             '#{pid := Holder, grant := Grant} = Entry}, {_, _}, Watched)']
+    fault = ['#{pid := Holder, credit := _, grant := Grant} = Entry}, {Holder, _}, Watched)',
+             '#{pid := Holder, credit := _, grant := Grant} = Entry}, {_, _}, Watched)']
     output = refute_erx_net_eunit(:erx_net_bind_tests, fault: { 'erx_net_tables' => fault })
     assert_match(/a_bind_for_another_process_is_refused/, output)
   end

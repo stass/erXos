@@ -128,6 +128,8 @@ grant_ok({tcp_connect, inet, Ip, Port, Options, Timeout}) ->
     ip4(Ip) andalso within(Port, 1, 16#ffff) andalso short(Options) andalso timeout_ok(Timeout);
 grant_ok({udp_open, inet, Local, Port, Options}) ->
     (Local =:= any orelse ip4(Local)) andalso within(Port, 0, 16#ffff) andalso short(Options);
+grant_ok({tcp_listen, inet, Local, Port, Options}) ->
+    (Local =:= any orelse ip4(Local)) andalso within(Port, 0, 16#ffff) andalso short(Options);
 grant_ok({icmp_open, inet}) -> true;
 grant_ok(interfaces) -> true;
 grant_ok(resolver) -> true;
@@ -161,13 +163,25 @@ request3() ->
     Origin = grantee(),
     Sock = pick([self(), self(), self(), none, pid(other_node(), 5), sock]),
     Wrong = pick([Sock, Sock, Sock, self(), pid(other_node(), 9)]),
+    Body = socket_body(),
     Message = case rand:uniform(12) of
                   1 -> garbage();
-                  _ -> frame(Origin, {erx_net, Wrong, socket_body()})
+                  _ -> frame(Origin, {erx_net, Wrong, Body})
               end,
-    Kind = pick([tcp, tcp_listen, udp, icmp]),
+    %% Half the time the kind whose request the body is, so each kind's bounds meet their
+    %% own requests often enough for a seeded fault to show within the inputs.
+    Kind = case rand:uniform(2) of
+               1 -> kind_of(Body);
+               2 -> pick([tcp, tcp_listen, udp, icmp])
+           end,
     judge(request3, fun() -> erx_net_admit:request(Kind, Origin, Sock, Message) end,
           expected_request3(Kind, Origin, Sock, Message), {Kind, Origin, Sock, Message}).
+
+kind_of({call, _, {accept, _, _}}) -> tcp_listen;
+kind_of({call, _, Request}) when is_tuple(Request), element(1, Request) =:= send_to;
+                                 is_tuple(Request), element(1, Request) =:= connect -> udp;
+kind_of({call, _, Request}) when is_tuple(Request), element(1, Request) =:= echo_send -> icmp;
+kind_of(_) -> pick([tcp, tcp_listen, udp, icmp]).
 
 expected_request3(Kind, Origin, Sock, Message) ->
     case taken(Origin, Sock, Message) of
@@ -197,18 +211,17 @@ acceptor_ok(_Request, _Origin) -> true.
 
 call_ok(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< 65536;
 call_ok(tcp, {shutdown, How}) -> lists:member(How, [read, write, read_write]);
-call_ok(tcp, {setopts, Options}) -> lists:member(Options, [[], [{nodelay, true}], [{nodelay, false}]]);
+call_ok(Kind, {setopts, Options}) when Kind =:= tcp; Kind =:= tcp_listen -> lists:member(Options, [[], [{nodelay, true}], [{nodelay, false}]]);
 call_ok(tcp, {getopts, Options}) -> lists:member(Options, [[], [nodelay]]);
 call_ok(tcp, peername) -> true;
 call_ok(tcp_listen, {accept, Acceptor, Timeout}) -> is_pid(Acceptor) andalso timeout_ok(Timeout);
-call_ok(tcp_listen, _) -> false;
 call_ok(udp, {send_to, Ip, Port, Data}) -> ip4(Ip) andalso within(Port, 0, 65535) andalso datagram(Data, 65527);
 call_ok(udp, {send, Data}) -> datagram(Data, 65527);
 call_ok(udp, {connect, Ip, Port}) -> ip4(Ip) andalso within(Port, 1, 65535);
 call_ok(icmp, {echo_send, Ip, Seq, Ttl, Data}) ->
     ip4(Ip) andalso within(Seq, 0, 65535) andalso (Ttl =:= default orelse within(Ttl, 1, 255))
         andalso datagram(Data, 65507);
-call_ok(Kind, sockname) -> Kind =/= icmp;
+call_ok(Kind, sockname) -> lists:member(Kind, [tcp, tcp_listen, udp]);
 call_ok(_Kind, close) -> true;
 call_ok(_Kind, _) -> false.
 
@@ -301,7 +314,9 @@ expected_mint(_System, _Message) ->
 %% --- the grant's requests --------------------------------------------------------
 
 grant_request() ->
-    case rand:uniform(12) of
+    case rand:uniform(14) of
+        12 -> {tcp_listen, pick([inet, inet, inet6]), pick([any, any, ip(), x]), port(0), options()};
+        13 -> {tcp_listen, inet, pick([any, ip()]), port(0)};
         1 -> {tcp_connect, pick([inet, inet, inet6]), ip(), port(1), options(), timeout_value()};
         2 -> {tcp_connect, inet, ip(), port(1), options(), timeout_value()};
         3 -> {tcp_connect, inet, ip(), port(1), options(), timeout_value()};

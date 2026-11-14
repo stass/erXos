@@ -15,7 +15,7 @@ exists it is hand-written with the generated module's signatures (Decisions, 10)
 **Answers.** answer/3 checks the grant's reply to one call, which `gen` has already
 taken out of its envelope, against the reply type of the call's operation:
 
-* `tcp_connect`, `udp_open` and `icmp_open`: `{ok, Socket}` with `Socket` a pid of the
+* `tcp_connect`, `tcp_listen`, `udp_open` and `icmp_open`: `{ok, Socket}` with `Socket` a pid of the
   grant's own node, so a network domain cannot name a process of a third domain, nor a
   registered name that `gen_server:call/3` would follow, as a program's socket; the
   answer is `{ok, Pid}`;
@@ -83,7 +83,7 @@ that breaks the protocol.
 -export_type([operation/0, origin/0, kind/0, result_kind/0, check/0, push/0, end_reason/0]).
 
 -doc "An operation of the grant whose reply this module checks.".
--type operation() :: tcp_connect | udp_open | icmp_open | interfaces | resolver | watch_resolver.
+-type operation() :: tcp_connect | tcp_listen | udp_open | icmp_open | interfaces | resolver | watch_resolver.
 
 -doc "How the grant's domain's messages arrive: bare (`local`) or in an envelope naming that domain.".
 -type origin() :: local | term().
@@ -247,6 +247,7 @@ reasons(_) -> [badarg].
 
 %% The reply type of each operation: what its `ok` carries, and its error reasons.
 reply_type(tcp_connect) -> {ok, {socket, ?CONNECT_REASONS}};
+reply_type(tcp_listen) -> {ok, {socket, ?OPEN_REASONS}};
 reply_type(udp_open) -> {ok, {socket, ?OPEN_REASONS}};
 reply_type(icmp_open) -> {ok, {socket, ?OPEN_REASONS}};
 reply_type(interfaces) -> {ok, {interfaces, ?INTERFACES_REASONS}};

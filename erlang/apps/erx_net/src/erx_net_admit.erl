@@ -26,8 +26,8 @@ operations, within its bounds:
 * `{tcp_connect, inet, Ip, Port, Opts, Timeout}`: an IPv4 address tuple, a port from 1,
   a proper list of at most 64 options, and `infinity` or a timeout of at most the longest
   timer, 4294967295 ms;
-* `{udp_open, inet, Local, Port, Opts}`: `any` or an IPv4 address, a port from 0, at most
-  64 options;
+* `{udp_open, inet, Local, Port, Opts}` and `{tcp_listen, inet, Local, Port, Opts}`: `any`
+  or an IPv4 address, a port from 0, at most 64 options;
 * `{icmp_open, inet}`, `interfaces`, `resolver` and `watch_resolver`.
 
 The admitted request comes back with its caller, `{ok, Request, From}`, and the caller's
@@ -53,6 +53,7 @@ from 1 to 64 MiB, or
   `{setopts, [{nodelay, Boolean}]}`, `{getopts, [nodelay]}`, `sockname` or `peername`;
 * `tcp_listen`: `{accept, SockProc, Timeout}`, with `SockProc` a pid of the grantee's
   domain (of this node when the grantee is `local`) and `Timeout` as for `tcp_connect`;
+  `{setopts, [{nodelay, Boolean}]}`, `sockname` or `close`;
 * `udp`: `{send_to, Ip, Port, Data}` with an IPv4 address tuple, a port and a binary of
   at most 65,527 bytes, the largest UDP payload; `{send, Data}` to the connected peer;
   `{connect, Ip, Port}` with a port from 1; `sockname` or `close`;
@@ -105,6 +106,7 @@ until it exists they are written here with its signatures.
 -doc "A request of the grant, as request/2 admits it.".
 -type grant_request() :: {tcp_connect, inet, inet:ip4_address(), 1..16#ffff, list(), timeout()}
                        | {udp_open, inet, any | inet:ip4_address(), 0..16#ffff, list()}
+                       | {tcp_listen, inet, any | inet:ip4_address(), 0..16#ffff, list()}
                        | {icmp_open, inet} | interfaces | resolver | watch_resolver
                        | {adopt, #{snd := pos_integer(), rcv := non_neg_integer()}}
                        | {reserve_buffer, reference(), snd | rcv, non_neg_integer()}
@@ -158,13 +160,19 @@ grant({tcp_connect, inet, Ip, Port, Opts, Timeout}) ->
     is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Port) andalso Port >= 1 andalso Port =< 16#ffff
         andalso options(Opts, 0) andalso timeout(Timeout);
 grant({udp_open, inet, Local, Port, Opts}) ->
-    (Local =:= any orelse (is_tuple(Local) andalso ?IS_IP4(Local))) andalso is_integer(Port)
-        andalso Port >= 0 andalso Port =< 16#ffff andalso options(Opts, 0);
+    local_bind(Local, Port, Opts);
+grant({tcp_listen, inet, Local, Port, Opts}) ->
+    local_bind(Local, Port, Opts);
 grant({icmp_open, inet}) -> true;
 grant(interfaces) -> true;
 grant(resolver) -> true;
 grant(watch_resolver) -> true;
 grant(_) -> false.
+
+%% An explicit bind's request: `any` or an IPv4 address, a port from 0, its options.
+local_bind(Local, Port, Opts) ->
+    (Local =:= any orelse (is_tuple(Local) andalso ?IS_IP4(Local))) andalso is_integer(Port)
+        andalso Port >= 0 andalso Port =< 16#ffff andalso options(Opts, 0).
 
 %% The stack's own calls of the grant.
 own({adopt, #{snd := Snd, rcv := Rcv} = Sizes}) ->
@@ -255,13 +263,12 @@ of_grantee(_Request, _Origin) -> true.
 
 call(tcp, {send, Piece}) -> is_binary(Piece) andalso byte_size(Piece) =< ?PIECE;
 call(tcp, {shutdown, How}) -> How =:= read orelse How =:= write orelse How =:= read_write;
-call(tcp, {setopts, []}) -> true;
-call(tcp, {setopts, [{nodelay, B}]}) -> is_boolean(B);
+call(Kind, {setopts, []}) when Kind =:= tcp; Kind =:= tcp_listen -> true;
+call(Kind, {setopts, [{nodelay, B}]}) when Kind =:= tcp; Kind =:= tcp_listen -> is_boolean(B);
 call(tcp, {getopts, []}) -> true;
 call(tcp, {getopts, [nodelay]}) -> true;
 call(tcp, peername) -> true;
 call(tcp_listen, {accept, SockProc, Timeout}) -> is_pid(SockProc) andalso timeout(Timeout);
-call(tcp_listen, _) -> false;
 call(udp, {send_to, Ip, Port, Data}) ->
     is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Port) andalso Port >= 0 andalso Port =< 16#ffff
         andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_UDP;
@@ -272,6 +279,6 @@ call(icmp, {echo_send, Ip, Seq, Ttl, Data}) ->
     is_tuple(Ip) andalso ?IS_IP4(Ip) andalso is_integer(Seq) andalso Seq >= 0 andalso Seq =< 16#ffff
         andalso (Ttl =:= default orelse (is_integer(Ttl) andalso Ttl >= 1 andalso Ttl =< 255))
         andalso is_binary(Data) andalso byte_size(Data) =< ?MAX_ECHO;
-call(Kind, sockname) -> Kind =:= tcp orelse Kind =:= udp;
+call(Kind, sockname) -> Kind =:= tcp orelse Kind =:= tcp_listen orelse Kind =:= udp;
 call(_Kind, close) -> true;
 call(_Kind, _) -> false.

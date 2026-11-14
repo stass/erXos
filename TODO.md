@@ -2200,18 +2200,19 @@ it; git history is the record of completed work.
   `ignore`, a programming error included; the interrupt status bits are written by hand, as in
   `erx_blk`, not generated from `abi/formats/virtio.txt`; `erx_net_if` has no `format_status/1`
   that keeps queued packets out of a crash report, as `erx_net_driver` has.
+* [Low] network, socket starts (`erx_net_grant` act/3, `erx_udp_sock`, `erx_icmp_sock`, `erx_tcp_conn`): a socket's
+  start that crashes in init/1 answers the grantee `{error, {Reason, Stacktrace}}`, so internal terms cross to the
+  client domain before `erx_sock_admit` refuses them; map any start failure but the socket's own refusals to
+  `badarg` in the grant. The three also refuse with `{stop, Reason}` from init/1, which logs a crash report a
+  client can repeat at will; return `{error, Reason}` as `erx_tcp_listen` does.
 * [Medium] network, TCP effect layer (E2, `erx_tcp_conn`, `erx_net_grant`, `erx_gen_tcp`): active
   opens over IPv4 only. The interface's syncache answers SYNs and completes handshakes over IPv4
 (`erx_net_if_core`), and each completed handshake starts its connection (`erx_tcp_conn:accept/1`),
-which its grant adopts and which queues itself on its listener, and `erx_tcp_listen` serves as that
-listener around `erx_tcp_listen_core`, but no grant starts one yet. The explicit bind
-(`erx_net_bind:bind/2`) binds datagram sockets within the grant's `ports`; nothing calls the entry's rewrite
-(`update/2`) yet. Missing: the grant's `tcp_listen` and the listener's explicit bind of its key through `bind/2`,
-within the ports the grant allows a listener, the checked Erlang form of the grant's `ports`, `listen`
-and `addresses` limits (`avail/2` takes ports as inclusive ranges, `[{1024, 65535}]`), with `listen`'s options
-checked, its backlog an integer, and the listener's
-`setopts` of the options its entry holds; `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's
-`sockets` limit, so `adopt/2` refuses only past `buffers`; pausing, since the grant has no account to pause a
+which its grant adopts and which queues itself on its listener; the grant's `tcp_listen` starts the listener
+(`erx_tcp_listen`), which claims its key by an explicit bind within the ports `erx_net_grant_core:bind_ports/3`
+derives from the `ports`, `listen` and `addresses` limits, and rewrites its entry at a `setopts` of `nodelay`.
+Missing: `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`; the grant's
+`sockets` limit, so `adopt/2` refuses only past `buffers` and a listen never answers `emfile`; pausing, since the grant has no account to pause a
 listener for; and the QEMU case. The core's exploration runs at one end per run, the landing gate's bound; its
 two-end run, `explore(#{ends => 2})`, tens of millions of states, belongs to the milestone gate, on the remote
 development host that runs the 4-CPU gate cells, but nothing runs it yet, so a core bug that needs two ends, such as one in the order of a

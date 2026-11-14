@@ -34,8 +34,8 @@ listener's pid, and a connection links to the listener before its notice, so its
 always follows.
 """.
 
--export([new/2, step/3, next_deadline/1, view/1, credit_limit/1]).
--export_type([core/0, event/0, action/0, reply/0]).
+-export([new/2, step/3, next_deadline/1, view/1, credit_limit/1, options/1]).
+-export_type([core/0, event/0, action/0, reply/0, options/0]).
 
 -record(core, {socket :: pid(),
                grant :: pid(),
@@ -52,6 +52,8 @@ always follows.
 %% flight"), and FreeBSD's SOMAXCONN (socket.h:434), the largest backlog a listener takes.
 -define(MAX_IN_FLIGHT, 64).
 -define(SOMAXCONN, 128).
+%% stock's default backlog (inet_int.hrl:279).
+-define(BACKLOG, 5).
 -type call_id() :: non_neg_integer().
 -type deadline() :: integer() | infinity.
 
@@ -176,6 +178,31 @@ credit_limit(Backlog) when is_integer(Backlog), Backlog >= 0, Backlog =< ?SOMAXC
     3 * Backlog div 2 + 1;
 credit_limit(Backlog) when is_integer(Backlog) ->
     credit_limit(?SOMAXCONN).
+
+-doc """
+`listen`'s options that the listener takes, the rest being its socket process's own: the
+backlog, 5 when absent as on stock (inet_int.hrl:279), clamped by `credit_limit/1`;
+`reuseaddr` and `reuseport`, which its bind checks (erx_net_bind:avail/2); and `nodelay`,
+which every connection it accepts starts with. Each is `false` when absent.
+""".
+-type options() :: #{backlog := integer(), reuseaddr := boolean(), reuseport := boolean(),
+                     nodelay := boolean()}.
+
+-doc """
+The listener's options of `Opts`, a proper list of `{backlog, Integer}`, `{reuseaddr,
+Boolean}`, `{reuseport, Boolean}` and `{nodelay, Boolean}`, a later one replacing an
+earlier as stock takes them; anything else is refused with `{error, einval}`.
+""".
+-spec options(term()) -> {ok, options()} | {error, einval}.
+options(Opts) ->
+    options(Opts, #{backlog => ?BACKLOG, reuseaddr => false, reuseport => false, nodelay => false}).
+
+options([], Acc) -> {ok, Acc};
+options([{backlog, N} | Rest], Acc) when is_integer(N) -> options(Rest, Acc#{backlog := N});
+options([{reuseaddr, B} | Rest], Acc) when is_boolean(B) -> options(Rest, Acc#{reuseaddr := B});
+options([{reuseport, B} | Rest], Acc) when is_boolean(B) -> options(Rest, Acc#{reuseport := B});
+options([{nodelay, B} | Rest], Acc) when is_boolean(B) -> options(Rest, Acc#{nodelay := B});
+options(_, _) -> {error, einval}.
 
 -doc "The earliest deadline of a waiting call, or `infinity`.".
 -spec next_deadline(core()) -> deadline().

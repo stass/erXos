@@ -4,7 +4,7 @@
 -module(erx_net_grant).
 -moduledoc """
 A client domain's grant (docs/design-network-stack.md, "The grant's contract", "The
-grant"), as far as an active open, a datagram socket, an echo socket, the interfaces and
+grant"), as far as an active and a passive open, a datagram socket, an echo socket, the interfaces and
 name resolution need it. Each grant serves one grantee: `local`, the stack's own domain,
 whose grant is registered as `erx_net_grant`, or a domain id, whose grant the network
 service's mint starts (erx_net:mint_grant/4).
@@ -42,9 +42,20 @@ the grant from its start, deletes every entry naming it when the grant ends.
 for the caller, its socket process, which the socket monitors and speaks the socket
 protocol to, its messages arriving by the grantee's origin; `Local` is `any` or an IPv4
 address and `Port` 0 for an ephemeral port; the socket binds it explicitly within the
-grant's `ports` (erx_net_bind:bind/2). Options are the socket process's own, so a
-non-empty list is refused with `einval`. `{icmp_open, inet}` starts an echo socket
-(erx_icmp_sock) for the caller likewise.
+ports erx_net_grant_core:bind_ports/3 allows (erx_net_bind:bind/2), and an address the
+grant's `addresses` does not list is refused with `eacces`. Options are the socket
+process's own, so a non-empty list is refused with `einval`. `{icmp_open, inet}` starts an
+echo socket (erx_icmp_sock) for the caller likewise.
+
+**Listen.** `{tcp_listen, inet, Local, Port, Opts}` starts a listener (erx_tcp_listen),
+linked to the grant, for the caller, its socket process: `Local` is `any` or an IPv4
+address, `Port` 0 for an ephemeral port, and the listener binds them explicitly within the
+ports erx_net_grant_core:bind_ports/3 allows a listener, the grant's `ports` narrowed by
+`listen`; a grant whose `listen` is `false`, or whose `addresses` does not list `Local`, is
+answered `{error, eacces}`. `Opts` are the listener's own options, which
+erx_tcp_listen_core:options/1 takes (`backlog`, `reuseaddr`, `reuseport`, `nodelay`); any
+other is refused with `einval`. The listener's answer, `{ok, Listener}` or the bind's
+refusal, is the grant's. The grant reserves nothing for a listener, which holds no buffer.
 
 **Interfaces.** `interfaces` answers `{ok, Interfaces}`, each interface's name, link-layer
 address, MTU, link state, configuration and addresses as erx_net:interfaces/0 gives them,
@@ -251,11 +262,23 @@ act({release_buffers, Token}, {Conn, _}, #{buffers := Buffers0} = S) ->
         {error, _} = Error -> {reply, Error, S}
     end;
 act({udp_open, inet, Local, Port, []}, {Owner, _}, #{grantee := Grantee, limits := Limits} = S) ->
-    {reply, erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee,
-                                      grant => self(), ports => ports(Limits)}), S};
+    Reply = maybe
+                {ok, Ports} ?= erx_net_grant_core:bind_ports(udp, Local, Limits),
+                erx_udp_sock:open(Port, #{ip => Local, owner => Owner, origin => Grantee,
+                                          grant => self(), ports => Ports})
+            end,
+    {reply, Reply, S};
 act({udp_open, inet, _Local, _Port, _Opts}, _From, S) ->
     %% The socket process keeps every option gen_udp:open/2 takes; the socket takes none.
     {reply, {error, einval}, S};
+act({tcp_listen, inet, Local, Port, Opts}, {Owner, _}, #{grantee := Grantee, limits := Limits} = S) ->
+    Reply = maybe
+                {ok, Allowed} ?= erx_net_grant_core:bind_ports(tcp_listen, Local, Limits),
+                {ok, Options} ?= erx_tcp_listen_core:options(Opts),
+                erx_tcp_listen:start_link(#{socket => Owner, origin => Grantee, local => Local,
+                                            port => Port, allowed => Allowed, options => Options})
+            end,
+    {reply, Reply, S};
 act({icmp_open, inet}, {Owner, _}, #{grantee := Grantee} = S) ->
     {reply, erx_icmp_sock:open(#{owner => Owner, origin => Grantee, grant => self()}), S};
 act(counts, _From, #{unknown := Unknown, refused := Refused} = S) ->
@@ -305,12 +328,6 @@ handle_info({'EXIT', Conn, _Reason}, #{callers := Callers0, buffers := Buffers} 
     end;
 handle_info(Message, S) ->
     admit(Message, S).
-
-%% The local ports the grant may bind explicitly, as inclusive ranges: its `ports` limit,
-%% 1024 to 65535 by default, as FreeBSD reserves the ports below 1024 to privilege
-%% (`ipport_reservedhigh`, in_pcb.c).
-ports(Limits) ->
-    maps:get(ports, Limits, [{1024, 65535}]).
 
 %% The interfaces as the `interfaces` operation shows them: what ifconfig prints, and not
 %% the routes and resolver servers, which the resolver operation answers.
