@@ -13,7 +13,7 @@
 /*
  * The kinds of device a runtime drives, one row each: a manifest device of
  * a row's role and compatible string gets a record with the row's names,
- * -erx given, in the system domain's boot page and in a holder domain's
+ * -erx_record given, in the system domain's boot page and in a holder domain's
  * (docs/design-stopgap.md, "Boot information"). ROLE is the
  * record's role word and PERIPHERAL the CMSIS-SVD peripheral the device
  * NIF opens. A device with a role word is driven (erx_dom_entry_driven,

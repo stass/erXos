@@ -294,7 +294,7 @@ reason on refusal, with checked arithmetic on every offset. Each entry only gath
 | `budget`, `group_ctl`, `group_stat`, `spaces_group`, `release`, `crash_area`, `system_connection` | `ERX_CAP_NULL` and zeros: `erx_vm_*` and `erx_group_status` find theirs with no handle, `erx_release_entry` reads the archive, and no Phase 1 caller takes the rest | the same |
 | `cpuset`, `capacity_mcpu` | the manifest's system share's `cpuset` within what `l4_scheduler_info` reports; 1,000 for each CPU, since Phase 1 has no grants | the host's online CPUs; the same |
 | node name | `system@` and the manifest's `host` | the same |
-| `args` | the manifest's `system_args`, the console's words, `-erx boot VALUE SLOT` ([image windows](#image-windows)), `-erx build ID`, the boot image's build identifier in decimal, and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx console_driver erx_stdio`, then the command line after the archive's path |
+| `args` | the manifest's `system_args`, the console's words, `-erx_record boot VALUE SLOT` ([image windows](#image-windows)), `-erx_record build ID`, the boot image's build identifier in decimal, and each [device record](#device-records), then each `erx.arg=WORD` | the manifest's `system_args`, then `-erx_record console_driver erx_stdio`, then the command line after the archive's path |
 | `env` | empty | empty: the host's environment is not inherited, and the entry sets `TZ=UTC` for libSystem |
 | `hwcap`, `hwcap2` | the features the boot CPU's identification registers name that the kernel enables and saves for user mode, from the handoff's `cpu_id` words ([Boot handoff](#boot-handoff), step 4; the architecture's binding gives the mapping, [design-arch-aarch64.md](design-arch-aarch64.md#cpu-feature-words)) | 0, which claims no optional feature |
 | `limits` | the projection of the manifest's `system_runtime_limits` | the same |
@@ -306,6 +306,17 @@ reads, emulator flags, `--`, then `init`'s arguments, with nothing converted on 
 the command line's words, are `init`'s arguments. Strings past `ERX_BOOT_STRINGS_MAX` (2,048), or a limits record out of range,
 refuses the boot with the reason, as in step 6's failure; ERTS never starts on a
 partial page.
+
+Every record a writer adds to a page's arguments, the console's, each device's, the boot's pair, the
+build and the hosted console driver, opens with one flag, `-erx_record`, whose name is the ABI's
+`boot_record_flag` (`abi/erx_abi.txt`), generated into C (`ERX_BOOT_RECORD_FLAG`, `include/erx/boot_words.h`),
+Erlang and Ruby. The flag names no application: OTP's application controller reads each flag named after an
+application as that application's environment, every word a term
+(`otp/lib/kernel/src/application_controller.erl`, `get_cmd_env`), and a record's PATH is not one. So no record
+word becomes environment, and init hands the records, as words, only to `erx_device_record:records/0`,
+which every record's parser reads. One record word becomes an atom: the module `console_driver` names,
+which the console starts, from the manifest or the hosted entry. A test holds every application's name
+apart from the flag's.
 
 A reader, `erx_boot_info_read(page, size, view)`, checks the version, the ABI version, the flags, the
 reserved words and every string against the page and `ERX_BOOT_STRINGS_MAX`, and `sys/erxos`'s
@@ -324,10 +335,10 @@ function and maps it read-only.
 [Creating a domain](design-system.md#creating-a-domain) gives it, mapped read-only, and passed to the
 task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. Its strings hold the
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
-the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
-every domain names the same build; one record per device it was given that has one, `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
-MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
-block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
+the row's own: `-erx_record build ID` with the boot image's build identifier, as the root's own page carries it, so
+every domain names the same build; one record per device it was given that has one, `-erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx_record framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
+block device, `-erx_record boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). A device of no kind has no record and no window, only the IRQ object of a line that a
 device of a kind in its unit also names, when it is first on that line
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). PATH is the device-tree path of its manifest row, the name its driver gives it (`erx_device_record` returns it as `path`), a node path of at most `device_path_max` bytes (`abi/erx_abi.txt`), which the manifest grammar holds `devices[].path` to; the record writers, the root's reader and the domain library's view refuse any other path (`erx_boot_device_path_valid`), and `erx_device_record` any other PATH word, so a name a driver shows holds no control or escape, and reaches a display only through that sink's escaping function; WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
@@ -1590,7 +1601,7 @@ over each run of pages the unit's registers cover and one IRQ object with `erx_i
 distinct line its devices name, so the records of devices that share a page or a line name one handle
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and, for a device with DMA memory, the
 device's one contiguous object of that size with `erx_mem_create_contiguous`, each in its own
-table, and adds the same `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+table, and adds the same `-erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
 MEM_SIZE CLOCK COHERENT MAC` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
 `erx_boot_device_window` computes the pages and OFFSET). ROLE and PERIPHERAL are the row's names,
 PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as, PATH
@@ -1601,11 +1612,11 @@ has one form in every domain: its queues are carved from its one memory, and the
 driver opens it exactly as a holder's does. Nothing deletes these objects, since the system
 domain holds the device for the boot and its fault resets the machine; an object the backend
 refuses refuses the boot, naming the record. The host link's UART, which does no DMA, is the one
-physical record, `-erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, PATH as in the given record. The record also names, after CLOCK, the base and length
+physical record, `-erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, PATH as in the given record. The record also names, after CLOCK, the base and length
 of the run of pages its unit's registers cover around its own, so the device NIF maps that run once, at the first open of any record in
-it, as it maps a window object once, and two physical records in one page share one mapping; `-erx console_uart` names its run the same way. CLOCK is the device entry's
+it, as it maps a window object once, and two physical records in one page share one mapping; `-erx_record console_uart` names its run the same way. CLOCK is the device entry's
 clock in hertz, which the driver reads and the NIF does not. The record's window and line the device
-NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx
+NIF makes from the numbers in the system domain, as it does for the console's UART from `-erx_record
 console_uart`; a physical device has no queue. The rows are QEMU `virt`'s virtio-mmio
 transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
 
@@ -1619,7 +1630,7 @@ transports, each with compatible `virtio,mmio` and peripheral `virtio_mmio`:
 A `framebuffer` row, the firmware's framebuffer on the Raspberry Pi 4, is no row of the kinds
 table: its holder's record is the root's framebuffer record
 ([design-device-tree.md](design-device-tree.md#facts-into-records)), not a `given` record,
-`-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT`: the handle of a physical
+`-erx_record framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT`: the handle of a physical
 memory object over the framebuffer's pages and nothing else of its row's window, mapped as
 device memory, the framebuffer's offset in the first page and its bytes, and its geometry and
 format's name from the `simple-framebuffer` node. The system domain holds it as any other
@@ -1713,7 +1724,7 @@ driver's first reads of the transport, its magic, version and device id, say whe
 device is behind it. A manifest with no such unit has no record, and a machine without the
 device boots the same, with nothing for its driver to drive.
 
-A given record, a holder domain's or the root's own, has a word of its own, `-erx given ROLE
+A given record, a holder domain's or the root's own, has a word of its own, `-erx_record given ROLE
 PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`: the device's
 device-tree path, as the `device` form carries it, the handles of the window, line and
 memory objects the domain library installed when it created the domain, or the root made for
@@ -1724,7 +1735,7 @@ the device tree the firmware handed over. Since each form has its own word, the 
 the other by counting numbers, and a plain word of the command line after a record cannot
 make one form look like the other.
 
-MARK, in both forms and in `-erx console_uart`, says whether the line is shared: `shared` when
+MARK, in both forms and in `-erx_record console_uart`, says whether the line is shared: `shared` when
 another device of the unit names the line, `direct` otherwise
 ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)). The writer
 decides it from the manifest, so no driver says whether its line is shared. The root marks
@@ -1754,7 +1765,7 @@ the manifest at boot.
 Phase 1 maps no machine page to the system domain, so the root hands its
 ERTS the boot value and slot as it hands it the device records: from the
 handoff, which bootstrap derived from `/chosen/bootloader`, it adds
-`-erx boot VALUE SLOT`, by the names of `include/erx/core/boot_pair.h`
+`-erx_record boot VALUE SLOT`, by the names of `include/erx/core/boot_pair.h`
 (`unknown none`, `normal a`, `trial b` and so on). The hosted entry adds
 none, which reads as unknown.
 
@@ -1784,15 +1795,15 @@ places no image window: the storage domain's `/` is its domain release,
 which holds no manifest, and its runtime does not know its own index
 among the manifest's domains, so `erx_blk_service` logs that the manifest
 cannot be read and serves no image, and `/images/release` is mounted
-nowhere. The `-erx boot` words reach the storage domain all the same,
+nowhere. The `-erx_record boot` words reach the storage domain all the same,
 since the domain library adds them to a configured block holder's
 arguments. Serving the release image from the storage domain is the domain
 library's work: it writes each image window's placement into the holder's boot
-page beside `-erx boot`, so the driver needs no manifest file.
+page beside `-erx_record boot`, so the driver needs no manifest file.
 
 ### The console
 
-The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx console_driver erx_pl011`. The root adds `-erx console_uart BASE SIZE LINE MARK CLOCK`, from the device entry `machine.console` names (`erx_boot_console_words`), and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
+The native boot's console driver is `erx_pl011`, which the manifest's `system_args` name with `-erx_record console_driver erx_pl011`. The root adds `-erx_record console_uart BASE SIZE LINE MARK CLOCK`, from the device entry `machine.console` names (`erx_boot_console_words`), and the driver opens that window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
 
 Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). Without JDB a kernel panic halts and the

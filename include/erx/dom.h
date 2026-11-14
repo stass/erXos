@@ -308,7 +308,7 @@ typedef struct erx_dom_device_entry {
  * Whether a runtime drives entry: a device of a kind (erx/device_kinds.h,
  * whose every row names a role word and a peripheral, set together) or a
  * framebuffer row. A driven device's give makes its windows and memory,
- * and its holder's boot page carries its record, -erx given or -erx
+ * and its holder's boot page carries its record, -erx_record given or -erx_record
  * framebuffer; an unplaced framebuffer is driven but has no range yet, so
  * its give makes no window and writes no record. A device of no kind is
  * held with its unit, not driven: no record, so no driver opens it, and

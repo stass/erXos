@@ -49,7 +49,7 @@ static char zone_word[] = "TZ=UTC";
 static char *hosted_environ[1 + REPORT_WORDS_COUNT + 1] = { zone_word };
 
 /* What the entry adds after the manifest's words: the console's driver, read at its start. */
-static const char console_driver_words[] = "-erx\0console_driver\0erx_stdio";
+static const char console_driver_words[] = ERX_BOOT_RECORD_FLAG "\0console_driver\0erx_stdio";
 
 _Noreturn static void
 fail(const char *reason)

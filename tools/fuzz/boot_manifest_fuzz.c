@@ -89,7 +89,7 @@ check_without_the_hostlink(const uint8_t *bytes, size_t length, const erx_boot_m
  * A framebuffer row's record (erx_boot_framebuffer_words) and its line (erx_boot_framebuffer_line)
  * over the longest facts: every number at its widest, a format of the longest name the room
  * takes, which is longer than every name of the reader's table, and an outside range at the
- * top of the address space. The row itself gives no -erx device words: it has no role.
+ * top of the address space. The row itself gives no -erx_record device words: it has no role.
  */
 static void
 check_a_framebuffer_fits(const erx_boot_device_t *device)

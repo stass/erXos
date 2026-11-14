@@ -5,17 +5,17 @@
 %% "Device records"), one per device the domain drives, in one of two forms, each with its
 %% own word so neither is told from the other by counting:
 %%
-%% - `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`,
+%% - `-erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`,
 %%   a given device: the handles of the window, line and memory objects the domain library
 %%   installed when it created the domain, or the root made for itself at boot for a device
 %%   the system domain holds, the transport's offset and size in the window object, the
 %%   memory's bytes, 0 for a device that does no DMA, and the firmware tree's coherence mark
 %%   and hardware address;
-%% - `-erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, the system domain's physical record
+%% - `-erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, the system domain's physical record
 %%   of its host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c
 %%   from the system manifest.
 %%
-%% A domain that holds a framebuffer finds a third form, `-erx framebuffer WINDOW_H OFFSET
+%% A domain that holds a framebuffer finds a third form, `-erx_record framebuffer WINDOW_H OFFSET
 %% SIZE WIDTH HEIGHT STRIDE FORMAT`, read by framebuffers/0 (docs/design-device-tree.md,
 %% "Facts into records"): the handle of the object over the framebuffer's pages, the
 %% framebuffer's offset in them and its bytes, its geometry and its format's name, all from
@@ -45,7 +45,7 @@
 
 -include("generated/erx_abi.hrl").
 
--export([find/2, find/3, framebuffers/0, framebuffers/1]).
+-export([records/0, find/2, find/3, framebuffers/0, framebuffers/1]).
 -export_type([spec/0, framebuffer/0, format/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
@@ -67,15 +67,15 @@
 -type format() :: a1r5g5b5 | a2r10g10b10 | a8b8g8r8 | a8r8g8b8 | r5g6b5 | r5g5b5a1 | r8g8b8 | x1r5g5b5
                 | x2r10g10b10 | x8r8g8b8 | x8b8g8r8.
 
-%% The records of Role and Peripheral among init's `-erx` arguments.
+%% The records of Role and Peripheral among the boot records.
 -spec find(atom(), atom()) -> {ok, [spec()]} | {error, {bad_device_record, string()}}.
 find(Role, Peripheral) ->
-    find(Role, Peripheral, arguments()).
+    find(Role, Peripheral, records()).
 
-%% The framebuffer records among init's `-erx` arguments.
+%% The framebuffer records among the boot records.
 -spec framebuffers() -> {ok, [framebuffer()]} | {error, {bad_device_record, string()}}.
 framebuffers() ->
-    framebuffers(arguments()).
+    framebuffers(records()).
 
 %% Pure, as find/3 is. A record whose words do not parse, or whose geometry the reader of
 %% the tree would not have passed (a zero dimension, a stride short of a row, rows past
@@ -84,8 +84,14 @@ framebuffers() ->
 framebuffers(Arguments) ->
     collect(fun framebuffer/1, [Words || ["framebuffer" | Words] <- Arguments], []).
 
-arguments() ->
-    case init:get_argument(erx) of
+%% Every boot record of this runtime's boot page, each the word list after one
+%% `-erx_record` flag, as init:get_argument/1 returns them, or [] when the page has none.
+%% The flag's one source is abi/erx_abi.txt's boot_record_flag, and this is its one
+%% reader: every record's parser takes its words from here. The flag names no
+%% application, so the application controller reads none of the words as environment.
+-spec records() -> [[string()]].
+records() ->
+    case init:get_argument(binary_to_atom(?ERX_BOOT_RECORD_FLAG_BYTES)) of
         {ok, Found} -> Found;
         error -> []
     end.

@@ -2416,7 +2416,7 @@ the terminal again.
 `erx_console` answers a `put_chars_sync` only on `erx_console_written`, so
 `io:format` returns when its bytes are out, as `write` on a UNIX terminal does.
 It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
-`-erx console_driver Module`, an ordinary argument of the boot information page,
+`-erx_record console_driver Module`, an ordinary argument of the boot information page,
 names the driver, and the last naming wins: the manifest names the console UART's driver,
 `erx_pl011`, and the hosted entry adds `erx_stdio` after it.
 
@@ -2647,7 +2647,7 @@ names it by the `out` segment `{region, R}` (Posting, below).
 
 **The framebuffer.** `erx_device:framebuffer()` maps the domain's own
 framebuffer. The NIF takes no argument: it reads the window of the
-domain's framebuffer record, `-erx framebuffer WINDOW_H OFFSET SIZE ...`,
+domain's framebuffer record, `-erx_record framebuffer WINDOW_H OFFSET SIZE ...`,
 from the boot information page itself (`erx_boot_framebuffer` in
 `liberx/backend/core/boot_info.c`, over the words after the first
 `--`), the root's object over the pages of the memory a board's

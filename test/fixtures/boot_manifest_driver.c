@@ -18,7 +18,7 @@
 
 /*
  * Prints the window erx_boot_device_window makes of a given device's registers, or that it
- * refuses them, then the -erx given record erx_boot_device_given assembles with the handles
+ * refuses them, then the -erx_record given record erx_boot_device_given assembles with the handles
  * above, NULs as spaces, and what erx_boot_given_words returns given exactly its room and one
  * byte less.
  */

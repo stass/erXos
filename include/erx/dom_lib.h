@@ -99,7 +99,7 @@ typedef struct erx_dom_lib {
 	erx_boot_pair_t	 boot;		/* the handoff's boot pair, for a block
 					 * holder's boot page */
 	uint64_t	 build_id;	/* the boot image's build identifier, as
-					 * -erx build gives it, for each boot page */
+					 * -erx_record build gives it, for each boot page */
 	uint64_t	 hwcap;		/* the system's boot page's CPU feature words, */
 	uint64_t	 hwcap2;	/* for each boot page */
 	erx_dom_device_t *device_records; /* view.ndevices: the view's, which a

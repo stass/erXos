@@ -47,8 +47,6 @@ int	main(int, char **, char **);
 
 static const char	*release_read(const erx_boot_handoff_view_t *, bool, erx_boot_manifest_t *);
 static const char	*gather_args(const erx_boot_handoff_view_t *, const erx_boot_manifest_t *, size_t *);
-static size_t		 boot_build(erx_boot_pair_t);
-static size_t		 word_append(char *, size_t, size_t, const char *);
 static const char	*library_view(const erx_manifest_view_t *, const erx_pack_view_t *);
 static const char	*library_up(const erx_boot_handoff_view_t *);
 static const char	*console_refusal(const erx_boot_manifest_t *, const erx_boot_handoff_view_t *);
@@ -70,7 +68,7 @@ static alignas(ERX_PAGE_SIZE) uint8_t boot_page[ERX_PAGE_SIZE];
  * each erx.arg word, which takes a byte and its NUL at the least.
  */
 static erx_boot_words_t arg_words[4 + ERX_BOOT_DEVICES_MAX + ERX_BOOT_STRINGS_MAX / 2];
-/* -erx console_uart BASE SIZE LINE MARK CLOCK (erx_boot_console_words). */
+/* -erx_record console_uart BASE SIZE LINE MARK CLOCK (erx_boot_console_words). */
 static char console_uart_words[ERX_BOOT_CONSOLE_WORDS_MAX];
 /* Each device record's words: the given form's, or the host link's physical one, which is shorter. */
 static char device_words[ERX_BOOT_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
@@ -84,10 +82,9 @@ static char tree_path[ERX_PATH_MAX];
 static char tree_line[ERX_BOOT_TREE_LINE_MAX];
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_DEVICE_WORDS_MAX, "a device record's room holds either form");
 _Static_assert(ERX_BOOT_GIVEN_WORDS_MAX >= ERX_BOOT_FRAMEBUFFER_WORDS_MAX, "a device record's room holds a framebuffer's");
-/* -erx boot VALUE SLOT: the longest names are "unknown" and "none", each with its NUL. */
-static const char boot_prefix[] = "-erx\0boot";
+/* -erx_record boot VALUE SLOT (erx_boot_pair_words); the handoff's reader accepts only a pair that has its names. */
 static char boot_words[ERX_BOOT_PAIR_WORDS_MAX];
-/* -erx build ID (erx_boot_build_words), the system domain's; the domain library writes every other domain's. */
+/* -erx_record build ID (erx_boot_build_words), the system domain's; the domain library writes every other domain's. */
 static char build_words[ERX_BOOT_BUILD_WORDS_MAX];
 _Static_assert(sizeof(((erx_boot_handoff_view_t *)0)->build_id) == sizeof(uint64_t),
     "the build identifier is one 64-bit number");
@@ -287,7 +284,7 @@ gather_args(const erx_boot_handoff_view_t *handoff, const erx_boot_manifest_t *m
 			return ("the console: its words outgrow their room");
 		arg_words[(*nargs)++] = (erx_boot_words_t){ console_uart_words, console_length };
 	}
-	boot_length = boot_build(handoff->boot);
+	boot_length = erx_boot_pair_words(handoff->boot.value, handoff->boot.slot, boot_words, sizeof(boot_words));
 	if (boot_length == 0)
 		return ("the handoff: a boot value or slot that has no name");
 	arg_words[(*nargs)++] = (erx_boot_words_t){ boot_words, boot_length };
@@ -441,7 +438,7 @@ framebuffer_facts(erx_dom_device_entry_t *entry)
  * holder's creation makes: the register window over the pages of the device's registers,
  * its line's IRQ object and, when the entry admits DMA memory, its contiguous memory for the
  * boot (device_memory). A device whose entry asked the firmware's tree has the root print
- * its facts' line. It then writes the -erx given record (erx_boot_device_given) from the
+ * its facts' line. It then writes the -erx_record given record (erx_boot_device_given) from the
  * entry's facts into words, capacity bytes, with *length its whole length, 0 when it does
  * not fit.
  *
@@ -481,7 +478,7 @@ device_give(const erx_boot_device_t *device, const erx_dom_device_entry_t *entry
  * The root's own give of a framebuffer the system domain holds, whose catalogue entry is entry
  * and which framebuffer_facts placed, so ranges[0] is its pages and offset its offset in them
  * (erx_dom_view_framebuffer, docs/design-device-tree.md,
- * "Facts into records"): a physical memory object over those pages and the -erx framebuffer
+ * "Facts into records"): a physical memory object over those pages and the -erx_record framebuffer
  * record of its facts in words, capacity bytes, with *length its whole length, 0 when it does
  * not fit. Nothing deletes the object, as for device_give. Returns NULL, or why the root
  * cannot boot: the backend refused the object.
@@ -528,41 +525,4 @@ device_memory(const erx_dom_device_entry_t *entry, uint64_t *memory, const char 
 	if ((*absent = erx_boot_dma_absent(&entry->facts, address, entry->memory)) == NULL)
 		*memory = made;
 	return (NULL);
-}
-
-/*
- * Writes -erx boot VALUE SLOT into boot_words, by the names of include/erx/core/boot_pair.h
- * (docs/design-stopgap.md, "Boot information"), and returns their whole length, the last NUL
- * included, or 0 for a value or slot that has no name. The handoff's reader accepts only a
- * valid pair, so a pair always has its names, and boot_words holds the longest two.
- */
-static size_t
-boot_build(erx_boot_pair_t boot)
-{
-	const char *value = erx_boot_value_name(boot.value);
-	const char *slot = erx_boot_slot_name(boot.slot);
-	size_t used = sizeof(boot_prefix);
-
-	if (value == NULL || slot == NULL)
-		return (0);
-	for (size_t at = 0; at < used; at++)
-		boot_words[at] = boot_prefix[at];
-	used = word_append(boot_words, sizeof(boot_words), used, value);
-	if (used != 0)
-		used = word_append(boot_words, sizeof(boot_words), used, slot);
-	return (used);
-}
-
-/* NAME and its NUL at WORDS + USED, within SIZE bytes; returns the new length, or 0 if they do not fit. */
-static size_t
-word_append(char *words, size_t size, size_t used, const char *name)
-{
-	size_t at = 0;
-
-	do {
-		if (used + at == size)
-			return (0);
-		words[used + at] = name[at];
-	} while (name[at++] != '\0');
-	return (used + at);
 }

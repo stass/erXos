@@ -452,8 +452,8 @@ _Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a fr
 /*
  * Whether a domain's boot page's strings hold its arguments and
  * environment beside what the library writes there (docs/design-stopgap.md,
- * "Boot information"): its own node name and the system node's, -erx
- * build, a -erx given record per device of a kind it holds, and -erx boot when it holds a
+ * "Boot information"): its own node name and the system node's, -erx_record
+ * build, a -erx_record given record per device of a kind it holds, and -erx_record boot when it holds a
  * block device of a kind. The reserve takes each at its longest, so a row the view
  * admits never fails its creation for its strings: a node name at
  * ERX_DOM_NODE_MAX, though the system node's is at most 71 bytes, and the
@@ -567,7 +567,7 @@ boot_places(erx_dom_configured_t *configured, uint32_t nconfigured, const erx_ma
  * its strings judged against the devices the catalogue places on it, so
  * it reads view->devices, which boot_devices builds first. Every device
  * on the row is given; only a driven one (erx_dom_entry_driven) gets a
- * record, -erx given or -erx framebuffer.
+ * record, -erx_record given or -erx_record framebuffer.
  */
 static const char *
 boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_configured_t *configured)

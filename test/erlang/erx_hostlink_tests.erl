@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% EUnit cases of erx_hostlink's pure parts (docs/design-live.md, "The host link"): the
-%% build identifier erx_build reads from the root's `-erx build` word, which a hello reports
+%% build identifier erx_build reads from the root's `-erx_record build` word, which a hello reports
 %% and the host checks, and what the root answers. The effects themselves run end to end in the
 %% production image's host link boot (tools/lib/erx/hostlink_guest.rb).
 -module(erx_hostlink_tests).

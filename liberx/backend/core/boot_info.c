@@ -5,6 +5,7 @@
 
 #include <string.h>
 
+#include "erx/boot_words.h"
 #include "liberx/backend/core/boot_info.h"
 
 #define BOOT_FLAGS_KNOWN	(ERX_BOOT_DET | ERX_BOOT_INSTALLED_ONLY | ERX_BOOT_ROOT)
@@ -571,7 +572,7 @@ erx_boot_framebuffer(const erx_boot_view_t *view, erx_boot_framebuffer_t *out)
 	while ((word = next_word(words, length, &used)) != NULL) {
 		after = used;
 		name = next_word(words, length, &after);
-		if (strcmp(word, "-erx") != 0 || name == NULL || strcmp(name, "framebuffer") != 0)
+		if (strcmp(word, ERX_BOOT_RECORD_FLAG) != 0 || name == NULL || strcmp(name, "framebuffer") != 0)
 			continue;
 		if (found)
 			return (false);

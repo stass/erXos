@@ -297,6 +297,12 @@ bytes boot_kernel_path 11 value 626f6f742f6b65726e656c
 bytes boot_sigma0_path 11 value 626f6f742f7369676d6130
 bytes boot_stand_in_root_path 17 value 626f6f742f73746f706761702d726f6f74
 bytes system_manifest_path 15 value 73797374656d2f6d616e6966657374
+# The flag every boot record rides on, without its dash: the argument word
+# "-erx_record" opens each record of a boot page's arguments and init reads them
+# as init:get_argument(erx_record) (docs/design-stopgap.md, "Boot information").
+# It names no application, so the application controller never reads a record
+# word as an application's environment.
+bytes boot_record_flag 10 value 6572785f7265636f7264
 bytes crash_frame_begin 17 value 2d2d6572782d63726173682d626567696e
 bytes crash_frame_end 15 value 2d2d6572782d63726173682d656e64
 bytes abi_note_owner 6 value 6572586f7300

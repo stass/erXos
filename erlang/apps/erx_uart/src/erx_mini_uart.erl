@@ -53,13 +53,12 @@ console_records() ->
     [spec()].
 
 spec() ->
-    {ok, Arguments} = init:get_argument(erx),
-    case console_uart(Arguments) of
+    case console_uart(erx_device_record:records()) of
         {ok, Spec} -> Spec;
         {error, Reason} -> exit(Reason)
     end.
 
-%% The console's device words, `-erx console_uart Base Size Line Mark Clock`, which the root
+%% The console's device words, `-erx_record console_uart Base Size Line Mark Clock`, which the root
 %% writes from the manifest's console row; words after the clock are ignored. Mark is
 %% `shared` when another device of the console's unit names its line, as the auxiliary SPI
 %% controllers name the mini UART's on the Raspberry Pi 4, which reaches erx_device:open/1

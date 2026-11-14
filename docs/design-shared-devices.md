@@ -124,7 +124,7 @@ Each requirement follows from that one closure:
   service `abi/services` declares, never the registers or the line.
 * **A device of no kind is held, not driven.** A device whose role and
   compatible string are in no row of `include/erx/device_kinds.h` gets
-  no `-erx given` record, so no driver opens it, and no register window
+  no `-erx_record given` record, so no driver opens it, and no register window
   of its own, DMA window or memory, so its holder holds no window onto
   its registers that any of its processes could open; the planner's
   overlap check (`life_overlaps`) keeps a driven device's window off its

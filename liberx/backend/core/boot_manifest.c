@@ -367,7 +367,7 @@ erx_boot_console_words(const erx_boot_console_t *console, char *words, size_t ca
 {
 	size_t used = 0;
 
-	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "console_uart") &&
+	if (word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) && word_put(words, capacity, &used, "console_uart") &&
 	    number_put(words, capacity, &used, console->base) && number_put(words, capacity, &used, console->size) &&
 	    number_put(words, capacity, &used, console->line) &&
 	    word_put(words, capacity, &used, line_mark(console->line_shared)) &&
@@ -381,7 +381,7 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 {
 	size_t used = 0;
 
-	if (!device->framebuffer && word_put(words, capacity, &used, "-erx") &&
+	if (!device->framebuffer && word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) &&
 	    word_put(words, capacity, &used, "device") && word_put(words, capacity, &used, device->role) &&
 	    word_put(words, capacity, &used, device->peripheral) && path_put(words, capacity, &used, device->path) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
@@ -545,7 +545,7 @@ erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity
 {
 	size_t used = 0;
 
-	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "given") &&
+	if (word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) && word_put(words, capacity, &used, "given") &&
 	    word_put(words, capacity, &used, given->role) && word_put(words, capacity, &used, given->peripheral) &&
 	    path_put(words, capacity, &used, given->path) && number_put(words, capacity, &used, given->window) &&
 	    number_put(words, capacity, &used, given->offset) &&
@@ -597,7 +597,7 @@ erx_boot_framebuffer_words(const erx_dt_framebuffer_t *fb, const char *format, u
 {
 	size_t used = 0;
 
-	if (fb->status == ERX_DT_FB_OK && format_named(format) && word_put(words, capacity, &used, "-erx") &&
+	if (fb->status == ERX_DT_FB_OK && format_named(format) && word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) &&
 	    word_put(words, capacity, &used, "framebuffer") && number_put(words, capacity, &used, window) &&
 	    number_put(words, capacity, &used, offset) && number_put(words, capacity, &used, fb->length) &&
 	    number_put(words, capacity, &used, fb->width) && number_put(words, capacity, &used, fb->height) &&
@@ -665,7 +665,7 @@ erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity)
 	const char *value_name = erx_boot_value_name(value), *slot_name = erx_boot_slot_name(slot);
 	size_t used = 0;
 
-	if (value_name != NULL && slot_name != NULL && word_put(words, capacity, &used, "-erx") &&
+	if (value_name != NULL && slot_name != NULL && word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) &&
 	    word_put(words, capacity, &used, "boot") && word_put(words, capacity, &used, value_name) &&
 	    word_put(words, capacity, &used, slot_name))
 		return (used);
@@ -677,7 +677,7 @@ erx_boot_build_words(uint64_t build_id, char *words, size_t capacity)
 {
 	size_t used = 0;
 
-	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "build") &&
+	if (word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) && word_put(words, capacity, &used, "build") &&
 	    number_put(words, capacity, &used, build_id))
 		return (used);
 	return (0);

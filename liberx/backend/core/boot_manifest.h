@@ -39,9 +39,9 @@ typedef struct erx_boot_console {
  * which the root hands that ERTS so that erx_device can open it (docs/design-stopgap.md,
  * "Device records"). A device of a row of erx/device_kinds.h is given: the root makes its
  * window, line and memory objects at boot, as a holder's creation makes them, and hands
- * their handles as -erx given (erx_boot_given_words), so a device that does DMA has one
+ * their handles as -erx_record given (erx_boot_given_words), so a device that does DMA has one
  * form in every domain. The host link's UART, which does no DMA, is the one physical
- * record, -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK (erx_boot_device_words).
+ * record, -erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK (erx_boot_device_words).
  * role and peripheral point at a row's names, PATH is the device's device-tree path, which
  * names it to its driver, and the numbers are the manifest's device entry.
  * MARK, in every form, is shared when another device of the unit names the line and direct
@@ -72,7 +72,7 @@ typedef struct erx_boot_device {
 
 /*
  * The pages that hold a device's registers, which its window object covers, and where the
- * registers start in them: the OFFSET of its -erx given record.
+ * registers start in them: the OFFSET of its -erx_record given record.
  */
 typedef struct erx_boot_window {
 	uint64_t	base;		/* the first page's physical address */
@@ -117,19 +117,19 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
 uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
 
 /*
- * Writes a physical record's words, -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK
+ * Writes a physical record's words, -erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK
  * with the numbers in decimal and MARK direct or shared by line_shared, each word ended by
  * NUL, into words, and returns their whole length. Returns 0, having written nothing past
  * capacity, when they do not fit, for a path erx_boot_device_path_valid refuses, or for a
  * framebuffer row, which has no role or peripheral.
- * Only a device that is not given has this record; a given one's is -erx given
+ * Only a device that is not given has this record; a given one's is -erx_record given
  * (erx_boot_device_given), and a framebuffer's the framebuffer record
  * (erx_boot_framebuffer_words).
  */
 size_t	erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capacity);
 
 /*
- * Writes the console's words, -erx console_uart BASE SIZE LINE MARK CLOCK, as
+ * Writes the console's words, -erx_record console_uart BASE SIZE LINE MARK CLOCK, as
  * erx_boot_device_words writes a physical record's, into words, and returns their whole
  * length; 0, having written nothing past capacity, when they do not fit, which
  * ERX_BOOT_CONSOLE_WORDS_MAX bytes (erx/boot_words.h) always do.
@@ -182,7 +182,7 @@ erx_boot_given_t	erx_boot_device_given(const erx_boot_device_t *device, const er
 	    const erx_dt_device_t *facts, uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
 
 /*
- * Writes -erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK
+ * Writes -erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK
  * COHERENT MAC, the numbers in decimal, COHERENT 1 or 0, MARK direct or shared by line_shared,
  * and each word ended by NUL, into words, and returns their whole length; 0, having written
  * nothing past capacity, for a path erx_boot_device_path_valid refuses or when they do not
@@ -289,7 +289,7 @@ bool	erx_boot_framebuffer_place(const erx_dt_framebuffer_t *fb, const char *form
 	    erx_boot_window_t *pages);
 
 /*
- * Writes -erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT into words: window
+ * Writes -erx_record framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT into words: window
  * the handle of the object over the framebuffer's pages in its holder's table, offset the
  * framebuffer's in its first page (erx_boot_framebuffer_place), SIZE the reg length and
  * FORMAT format, the name erx_dt_fb_format_name gives fb->format, which the caller looks up
@@ -318,18 +318,16 @@ size_t	erx_boot_framebuffer_line(erx_boot_words_t path, const erx_dt_framebuffer
 	    char *line, size_t capacity);
 
 /*
- * Writes -erx boot VALUE SLOT by the names of include/erx/core/boot_pair.h into words, and
+ * Writes -erx_record boot VALUE SLOT by the names of include/erx/core/boot_pair.h into words, and
  * returns their whole length; 0 for a value or slot that has no name, or words that do not
  * fit, which ERX_BOOT_PAIR_WORDS_MAX bytes always do.
  */
 size_t	erx_boot_pair_words(uint32_t value, uint32_t slot, char *words, size_t capacity);
 
 /*
- * Writes -erx build ID, the boot image's build identifier in decimal, into words, and
+ * Writes -erx_record build ID, the boot image's build identifier in decimal, into words, and
  * returns their whole length; 0 for words that do not fit, which ERX_BOOT_BUILD_WORDS_MAX
- * bytes always do. init reads an -erx word's values as terms, so a value must scan as one,
- * which hexadecimal digits do not (2255e43f is an illegal integer); a decimal number always
- * does. The root writes it into the system domain's boot page and the domain library into
+ * bytes always do. The root writes it into the system domain's boot page and the domain library into
  * every other domain's, so each domain of the image names the same build.
  */
 size_t	erx_boot_build_words(uint64_t build_id, char *words, size_t capacity);

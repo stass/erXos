@@ -10,7 +10,7 @@ link"): the effects around erx_hostlink_session's pure state machine, and the
 one sink of the host link's UART.
 
 It finds the UART the system manifest names as `machine.hostlink` among the
-root's device records (`-erx device hostlink pl011 ...`) and starts erx_pl011
+root's device records (`-erx_record device hostlink pl011 ...`) and starts erx_pl011
 on it as its owner, so only this process hands that line bytes to write. A
 machine whose manifest names no host link has no record, and the process is
 not started (`ignore`), as a machine without a disk has no block driver.

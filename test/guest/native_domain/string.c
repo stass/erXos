@@ -43,3 +43,16 @@ strlen(const char *text)
 		length++;
 	return (length);
 }
+
+int
+strcmp(const char *left, const char *right)
+{
+	const unsigned char *a = (const unsigned char *)left, *b = (const unsigned char *)right;
+	size_t index = 0;
+
+	while (a[index] != '\0' && a[index] == b[index])
+		index++;
+	if (a[index] == b[index])
+		return (0);
+	return (a[index] < b[index] ? -1 : 1);
+}

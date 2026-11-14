@@ -44,7 +44,7 @@
 -define(BUSY_READS, 100000).
 -define(FULL_WAIT_MS, 1).
 
-%% The console's driver, on the UART of `-erx console_uart`. Terminal is true: a person's
+%% The console's driver, on the UART of `-erx_record console_uart`. Terminal is true: a person's
 %% terminal is on the line, so the group edits lines.
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->
@@ -81,13 +81,12 @@ console_records() ->
 %% carries them to init's arguments. A failure exits with a stated reason, so a malformed
 %% entry stops the driver with that reason rather than a crash in the middle of the parse.
 spec() ->
-    {ok, Arguments} = init:get_argument(erx),
-    case console_uart(Arguments) of
+    case console_uart(erx_device_record:records()) of
         {ok, Spec} -> Spec;
         {error, Reason} -> exit(Reason)
     end.
 
-%% `-erx console_uart BASE SIZE LINE MARK CLOCK`, once, each number in decimal and within its
+%% `-erx_record console_uart BASE SIZE LINE MARK CLOCK`, once, each number in decimal and within its
 %% field of the boot manifest's console (64, 64, 32 and 32 bits), the clock in hertz and not
 %% 0. MARK is `shared` when another device of the console's unit names its line, which
 %% reaches erx_device:open/1 as `{shared, Line}`, and `direct` otherwise; any other word

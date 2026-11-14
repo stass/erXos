@@ -81,7 +81,7 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "node system@erxos\n"
-    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx \n"
+    assert_includes output, "words-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx_record console_driver erx_pl011 -nocookie -no_epmd -proto_dist erx \n"
     assert_includes output, "limits #{system_runtime_limits.join(' ')}\n"
   end
 
@@ -113,15 +113,47 @@ class BootManifestTest < Minitest::Test
   # DMA memory and clock. The console's UART, a UART of the same compatible string in a unit
   # the system domain holds, is no record, and the block and net units are the storage and
   # network domains', so the development manifest gives the system domain one record, the
-  # host link's: erx_pl011 reads -erx console_uart, whose numbers are the console's entry.
+  # host link's: erx_pl011 reads -erx_record console_uart, whose numbers are the console's entry.
   def test_the_hostlink_unit_gives_the_system_domain_s_one_device_record
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
     assert_includes output, "devices 1\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 direct 0 24000000 " \
-                            "words-erx device hostlink pl011 /pl011@9040000 151257088 4096 40 direct 24000000 exact 1 short 0\n"
+                            "words-erx_record device hostlink pl011 /pl011@9040000 151257088 4096 40 direct 24000000 exact 1 short 0\n"
     refute_match(/^device (?:block|net) /, output)
+  end
+
+  # The application controller reads each flag named after an application as that
+  # application's environment, every word a term (otp/lib/kernel/src/application_controller.erl,
+  # get_cmd_env), and a record's PATH such as /pl011@9040000 is no term. So the records ride
+  # on a flag no application is named after: a stock node given the console and device
+  # records the root writes loads an application erx with no environment.
+  def test_no_record_word_becomes_application_environment
+    output, status = read(admitted)
+    assert status.success?, output
+    words = output.scan(/words(\S.*?) exact \d/).flat_map { |(text)| text.split(' ') }
+    assert_includes words, '/pl011@9040000'
+    probe = 'io:format("~p~n", [{application:load({application, erx, [{vsn, "0"}, {modules, []}, ' \
+            '{registered, []}, {applications, [kernel, stdlib]}]}), application:get_all_env(erx)}]), halt().'
+    result, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', *words,
+                                     '-eval', probe, stdin_data: '')
+    assert status.success?, result
+    assert_equal "{ok,[]}\n", result.lines.last
+  end
+
+  # The flag stays apart from every application's name, erXos's and OTP's, and each shipped
+  # manifest names its console's driver on it, as the writers' records are.
+  def test_the_record_flag_names_no_application_and_carries_the_console_driver
+    flag = @codec.fixed_bytes('boot_record_flag')
+    applications = Dir.glob(File.join(ROOT, '{erlang/apps,otp/lib}/*/src/*.app.src')).map { |path| File.basename(path, '.app.src') }
+    assert_includes applications, 'erx'
+    refute_includes applications, flag
+    Dir.glob(File.join(ROOT, 'config/manifest/*.txt')).each do |path|
+      File.read(path).scan(/^  system_args "(.*)"$/).flatten.each do |args|
+        assert_match(/(?:\A| )-#{Regexp.escape(flag)} console_driver \S/, args, path) if args.include?('console_driver')
+      end
+    end
   end
 
   # A record's PATH is its device's device-tree path, which reaches its driver and may be
@@ -138,7 +170,7 @@ class BootManifestTest < Minitest::Test
 
   # With the net unit held by the system domain, its record follows the host link's. Net is
   # given: the root makes a window object over its transport's page, the transport at 0xe00
-  # in it, and its record is -erx given with the driver's stand-in handles 11, 12 and 13 for
+  # in it, and its record is -erx_record given with the driver's stand-in handles 11, 12 and 13 for
   # the window, line and memory objects. The host link's UART, which does no DMA, is the one
   # physical record.
   def test_a_net_unit_the_system_domain_holds_gives_a_given_record
@@ -149,7 +181,7 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "devices 2\n"
     assert_includes output, "device net virtio_mmio 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
-                            "words-erx given net virtio_mmio /virtio_mmio@a002e00 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
+                            "words-erx_record given net virtio_mmio /virtio_mmio@a002e00 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first
@@ -159,7 +191,7 @@ class BootManifestTest < Minitest::Test
   # names no memory object, whatever handle the root holds.
   def test_a_given_device_s_window_covers_the_pages_of_its_registers
     given = lambda do |window, offset, size|
-      "window #{window} #{offset} words-erx given block virtio_mmio /virtio_mmio@a003e00 11 #{offset} #{size} 12 direct 0 0 0 0 0 exact 1 short 0\n"
+      "window #{window} #{offset} words-erx_record given block virtio_mmio /virtio_mmio@a003e00 11 #{offset} #{size} 12 direct 0 0 0 0 0 exact 1 short 0\n"
     end
     {
       %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),
@@ -304,7 +336,7 @@ class BootManifestTest < Minitest::Test
   # erx_dt_dma_status_t's order: 0 ok, 1 no_node, 2 coherence, 3 cells, 4 malformed, 5 ranges.
   def test_the_device_step_gives_memory_only_inside_the_tree_s_range
     all = 0xffff_ffff_ffff_ffff
-    window = 'window 167784448 4096 3584 words-erx given'
+    window = 'window 167784448 4096 3584 words-erx_record given'
     assert_equal "asks 1 before none after none #{window} net virtio_mmio /virtio_mmio@a003e00 11 3584 512 12 direct 13 65536 0 1 0 " \
                  "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 1 range 0x0 0x0 " \
                  "0xffffffffffffffff mac absent\n",
@@ -379,14 +411,14 @@ class BootManifestTest < Minitest::Test
     output, status = read(admitted)
     assert status.success?, output
     assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
-    assert_includes output, "console_words-erx console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
-    assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx device hostlink pl011 \/pl011@9040000 \d+ \d+ 40 direct \d+ exact 1/, output)
+    assert_includes output, "console_words-erx_record console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
+    assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx_record device hostlink pl011 \/pl011@9040000 \d+ \d+ 40 direct \d+ exact 1/, output)
     pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     assert_match(/^console_uart #{0xfe215040} 64 125 shared \d+\n/, output)
-    assert_match(/^console_words-erx console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
-    assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \/\S+ \d+ \d+ 153 shared \d+ exact 1/,
+    assert_match(/^console_words-erx_record console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
+    assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx_record device hostlink pl011 \/\S+ \d+ \d+ 153 shared \d+ exact 1/,
                  output)
   end
 
@@ -419,7 +451,7 @@ class BootManifestTest < Minitest::Test
   # erx_dt_fb_status_t's order: 0 ok, 1 none, 2 ambiguous, 3 malformed, 4 unsupported,
   # 5 outside.
   def test_a_placed_framebuffer_gives_its_pages_its_record_and_its_line
-    assert_equal "pages #{0x3e00_0000} #{0x7e_a000} 1024 words-erx framebuffer 11 1024 #{0x7e_9000} 1920 1080 7680 " \
+    assert_equal "pages #{0x3e00_0000} #{0x7e_a000} 1024 words-erx_record framebuffer 11 1024 #{0x7e_9000} 1920 1080 7680 " \
                  "a8r8g8b8 exact 1 short 0\nline erx: device tree: /chosen: framebuffer 1920x1080 7680 a8r8g8b8\n",
                  framebuffer(0, 0x3e00_0400, 0x7e_9000, 1920, 1080, 7680, 'a8r8g8b8')
     # An empty framebuffer, or one ending past the top of the address space, has no pages.

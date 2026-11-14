@@ -580,7 +580,7 @@ one configuration gives one image. Each value has one source:
   a system identifier and so ASCII, which needs no escaping;
 * the build identifier is the boot image's, the pack header's
   `build_id` in hexadecimal, as the boot banner and the host link's
-  hello show it, which init's `-erx build` gives every domain of the
+  hello show it, which init's `-erx_record build` gives every domain of the
   image; it plays the part of FreeBSD's `kern.build_id`;
 * the source revision is the one the image was built from, in
   FreeBSD's `newvers.sh` form without its branch,

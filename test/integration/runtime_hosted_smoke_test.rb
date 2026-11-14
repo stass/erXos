@@ -522,7 +522,7 @@ class RuntimeHostedSmokeTest < Minitest::Test
     expected = {
       'init:get_argument(root).' => %r{^\{ok,\[\["/"\]\]\}$},
       'init:get_argument(boot).' => %r{^\{ok,\[\["/bin/start"\]\]\}$},
-      'init:get_argument(erx).' => /\["console_driver","erx_stdio"\]\]\}$/,
+      'erx_device_record:records().' => /\["console_driver","erx_stdio"\]\]$/,
       'code:which(lists).' => %r{^"/lib/stdlib-[0-9.]+/ebin/lists\.beam"$},
       'file:read_file_info("/bin/start.boot") =/= {error,enoent}.' => /^true$/,
       'file:read_file("/etc/hosts").' => /^\{error,enoent\}$/,

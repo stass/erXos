@@ -432,7 +432,7 @@ entry admits DMA memory, and 0 for a row that gets none, so no record calls
 a device coherent that has no range to use; and it
 gains a last number, `MAC`, the hardware address as a 48-bit decimal, 0
 when absent or when the row asks for none:
-`-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+`-erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
 MEM_SIZE CLOCK COHERENT MAC`, PATH the row's device-tree path
 ([design-stopgap.md](design-stopgap.md#device-records)). `erx_device_record:find/3` reads it, refusing a `MAC`
 above `2^48 - 1`, and returns it as `mac => Address` for a nonzero value;
@@ -463,7 +463,7 @@ where the firmware put the framebuffer, settles it. An empty window
 admits no framebuffer. When its facts are present, the
 root makes a physical memory object over the framebuffer's pages and,
 for the row's holder, the record
-`-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT`, where
+`-erx_record framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT`, where
 `OFFSET` places the framebuffer in its first page and `FORMAT` is the
 format's name from the reader's table.
 The record's form and the display driver that reads it belong to

@@ -346,8 +346,8 @@ test_header_corruption(void)
 }
 
 /*
- * A holder domain's records (docs/design-stopgap.md, "Boot information"): -erx given per
- * device and -erx boot, as the domain library writes them, travel through a domain's page
+ * A holder domain's records (docs/design-stopgap.md, "Boot information"): -erx_record given per
+ * device and -erx_record boot, as the domain library writes them, travel through a domain's page
  * and its vector unchanged; and the longest of each, names at 15 bytes, the path at
  * ERX_DEVICE_PATH_MAX bytes and every number at UINT64_MAX, takes exactly the room
  * erx/boot_words.h states and the boot view reserves, so a record never outgrows its
@@ -362,8 +362,9 @@ _Static_assert(sizeof(LONGEST_PATH) == ERX_BOOT_PATH_WORD_MAX, "the longest path
 static void
 test_holder_records(void)
 {
-	static const char record[] = "-erx\0given\0block\0virtio_mmio\0/virtio_mmio@a003e00\0" "7\0" "3584\0" "512\0" "8\0"
-	    "direct\0" "9\0" "65536\0" "24000000\0" "1\0" "90520731923542\0" "-erx\0boot\0trial\0b\0";
+	static const char record[] = ERX_BOOT_RECORD_FLAG
+	    "\0given\0block\0virtio_mmio\0/virtio_mmio@a003e00\0" "7\0" "3584\0" "512\0" "8\0"
+	    "direct\0" "9\0" "65536\0" "24000000\0" "1\0" "90520731923542\0" ERX_BOOT_RECORD_FLAG "\0boot\0trial\0b\0";
 	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio",
 	    .path = PATH_WORDS("/virtio_mmio@a003e00"), .window = 7, .offset = 3584,
 	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536, .clock = 24000000,
@@ -372,7 +373,8 @@ test_holder_records(void)
 	    .path = PATH_WORDS(LONGEST_PATH), .window = UINT64_MAX,
 	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .line_shared = true, .memory = UINT64_MAX,
 	    .memory_size = UINT64_MAX, .clock = UINT64_MAX, .coherent = true, .mac = UINT64_MAX };
-	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0/virtio_mmio@a003c00\0" "1\0" "0\0" "512\0" "2\0"
+	static const char shared[] = ERX_BOOT_RECORD_FLAG
+	    "\0given\0net\0virtio_mmio\0/virtio_mmio@a003c00\0" "1\0" "0\0" "512\0" "2\0"
 	    "shared\0" "0\0" "0\0" "0\0" "0\0" "0\0";
 	const erx_boot_given_t shared_given = { .role = "net", .peripheral = "virtio_mmio",
 	    .path = PATH_WORDS("/virtio_mmio@a003c00"), .window = 1, .size = 512, .line = 2, .line_shared = true };
@@ -421,14 +423,14 @@ test_holder_records(void)
 }
 
 /*
- * -erx build ID, which the root and the domain library write into every domain's page: the
- * identifier in decimal, so init scans it as one integer; the longest fills
+ * -erx_record build ID, which the root and the domain library write into every domain's page: the
+ * identifier in decimal, as every number of a boot record is; the longest fills
  * ERX_BOOT_BUILD_WORDS_MAX, and one byte less is refused, writing nothing past its room.
  */
 static void
 test_build_words(void)
 {
-	static const char record[] = "-erx\0build\0" "2474978957553200051\0";
+	static const char record[] = ERX_BOOT_RECORD_FLAG "\0build\0" "2474978957553200051\0";
 	char words[ERX_BOOT_BUILD_WORDS_MAX + 1];
 	size_t used;
 
@@ -660,26 +662,29 @@ framebuffer_of(const char *words, size_t length, erx_boot_framebuffer_t *out)
 	return (erx_boot_framebuffer(&view, out));
 }
 #define FRAMEBUFFER_OF(literal, out)	framebuffer_of((literal), sizeof(literal) - 1, (out))
+/* The flag word that opens each record, with its NUL. */
+#define FLAG_WORD			ERX_BOOT_RECORD_FLAG "\0"
 
 static void
 test_framebuffer_record(void)
 {
 	erx_boot_framebuffer_t fb;
 
-	CHECK(FRAMEBUFFER_OF("-S\0" "2:2\0" "--\0" "-erx\0" "given\0" "x\0" "-erx\0" "framebuffer\0" "7\0" "64\0" "8294400\0"
+	CHECK(FRAMEBUFFER_OF("-S\0" "2:2\0" "--\0" FLAG_WORD "given\0" "x\0" FLAG_WORD "framebuffer\0" "7\0" "64\0" "8294400\0"
 	    "1920\0" "1080\0" "7680\0" "x8r8g8b8\0", &fb), "framebuffer record: a good record refused");
 	CHECK(fb.window == 7 && fb.offset == 64 && fb.size == 8294400, "framebuffer record: the window misread");
-	CHECK(FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "18446744073709551615\0" "0\0" "1\0", &fb) &&
+	CHECK(FRAMEBUFFER_OF("--\0" FLAG_WORD "framebuffer\0" "18446744073709551615\0" "0\0" "1\0", &fb) &&
 	    fb.window == UINT64_MAX, "framebuffer record: the largest handle refused");
 	CHECK(!FRAMEBUFFER_OF("-S\0" "2:2\0" "--\0" "-boot\0" "/bin/start\0", &fb), "framebuffer record: found in none");
-	CHECK(!FRAMEBUFFER_OF("-erx\0" "framebuffer\0" "7\0" "64\0" "4096\0" "--\0" "-boot\0" "x\0", &fb),
+	CHECK(!FRAMEBUFFER_OF(FLAG_WORD "framebuffer\0" "7\0" "64\0" "4096\0" "--\0" "-boot\0" "x\0", &fb),
 	    "framebuffer record: an emulator flag taken for init's record");
-	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7\0" "0\0" "4096\0" "-erx\0" "framebuffer\0" "8\0" "0\0" "4096\0", &fb),
+	CHECK(!FRAMEBUFFER_OF("--\0" FLAG_WORD "framebuffer\0" "7\0" "0\0" "4096\0"
+	    FLAG_WORD "framebuffer\0" "8\0" "0\0" "4096\0", &fb),
 	    "framebuffer record: a second record let through");
-	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7x\0" "0\0" "4096\0", &fb), "framebuffer record: a non-number taken");
-	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "18446744073709551616\0" "0\0" "1\0", &fb),
+	CHECK(!FRAMEBUFFER_OF("--\0" FLAG_WORD "framebuffer\0" "7x\0" "0\0" "4096\0", &fb), "framebuffer record: a non-number taken");
+	CHECK(!FRAMEBUFFER_OF("--\0" FLAG_WORD "framebuffer\0" "18446744073709551616\0" "0\0" "1\0", &fb),
 	    "framebuffer record: a wrapping number taken");
-	CHECK(!FRAMEBUFFER_OF("--\0" "-erx\0" "framebuffer\0" "7\0" "64\0", &fb), "framebuffer record: a short record taken");
+	CHECK(!FRAMEBUFFER_OF("--\0" FLAG_WORD "framebuffer\0" "7\0" "64\0", &fb), "framebuffer record: a short record taken");
 }
 
 int

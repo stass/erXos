@@ -13,7 +13,7 @@
 %%
 %% Once the table is admitted, it also starts a read-only window on each EROFS image of
 %% the booted slot that the release's manifest gives the system domain, of role
-%% {image, Name}, which erx_blk_image places from the root's -erx boot words and the
+%% {image, Name}, which erx_blk_image places from the root's -erx_record boot words and the
 %% manifest; a boot with no slot serves none, and an image it refuses is one line of the
 %% log. mount_images/0, the supervisor's next child, mounts each at /images/NAME
 %% (docs/design-stopgap.md, "Image windows"). In a storage domain, whose namespace holds
@@ -114,11 +114,7 @@ start_window(Window) ->
 %% The windows on the booted slot's images (erx_blk_image). The manifest is read only on a
 %% boot that has a slot.
 image_windows() ->
-    Arguments = case init:get_argument(erx) of
-                    {ok, Words} -> Words;
-                    error -> []
-                end,
-    case erx_blk_image:boot_slot(Arguments) of
+    case erx_blk_image:boot_slot(erx_device_record:records()) of
         {ok, none} ->
             [];
         {ok, Slot} ->

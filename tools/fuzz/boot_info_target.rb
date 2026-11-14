@@ -20,7 +20,7 @@ page = lambda do |args|
 end
 good = page.call("--\0-boot\0start\0")
 # A display domain's page, its framebuffer record among init's arguments.
-framebuffer = page.call("--\0-boot\0start\0-erx\0framebuffer\0" "7\0" "64\0" "8294400\0" "1920\0" "1080\0" "7680\0x8r8g8b8\0")
+framebuffer = page.call("--\0-boot\0start\0-erx_record\0framebuffer\0" "7\0" "64\0" "8294400\0" "1920\0" "1080\0" "7680\0x8r8g8b8\0")
 corrupt = ->(field, value) { good.dup.tap { |bytes| bytes[at.fetch(field), 4] = [value].pack('L<') } }
 Erx::PackFuzz.declare_target(
   sources: ['liberx/backend/core/boot_info.c'],

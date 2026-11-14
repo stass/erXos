@@ -485,7 +485,7 @@ module Erx
       digest = Digest::MD5.file(entry.fetch('artifact')).hexdigest.upcase
       place = "#\{name=><<\"release\">>,format=>#{image.format},data_bytes=>#{image.length}," \
               "extents=>[{#{image.slot_offset},#{image.length}}]}"
-      read = "fun()->{ok,ImSlot}=erx_blk_image:boot_slot(element(2,init:get_argument(erx)))," \
+      read = "fun()->{ok,ImSlot}=erx_blk_image:boot_slot(erx_device_record:records())," \
              "{ok,ImWindow}=erx_blk_image:place(#{place},ImSlot),{ok,ImPid}=erx_blk_window:start_link(ImWindow)," \
              "ok=erx_ns:mount({erofs,ImPid},<<\"/images/release\">>,[])," \
              "case file:read_file(\"#{path}\") of {ok,B}->binary:encode_hex(erlang:md5(B));E->E end end"

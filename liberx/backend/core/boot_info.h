@@ -146,7 +146,7 @@ void			 erx_boot_argv_fill(const erx_boot_view_t *view, const erx_boot_argv_plan
 const char		*erx_boot_erts_admit(const erx_boot_erts_limits_t *limits, const erx_boot_erts_settings_t *settings);
 
 /*
- * The window of a domain's framebuffer record, `-erx framebuffer WINDOW_H OFFSET SIZE ...`
+ * The window of a domain's framebuffer record, `-erx_record framebuffer WINDOW_H OFFSET SIZE ...`
  * among init's arguments, the words after the first `--` (include/erx/boot_words.h): the
  * object the root made over the framebuffer's pages, and the framebuffer's offset and bytes
  * in it. The device NIF maps the framebuffer from this alone (docs/design-runtime.md, "The

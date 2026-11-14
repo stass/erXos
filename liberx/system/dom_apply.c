@@ -52,7 +52,7 @@ typedef struct apply {
 	uint64_t		 bootinfo_addr;	/* where the domain sees its boot page */
 	uint64_t		 release_addr;	/* where it sees its release slice */
 	apply_give_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
-	/* The boot page's -erx given record of each give, -erx boot and -erx build. */
+	/* The boot page's -erx_record given record of each give, -erx_record boot and -erx_record build. */
 	char			 given_words[ERX_DOM_GIVES_MAX][ERX_BOOT_GIVEN_WORDS_MAX];
 	char			 pair_words[ERX_BOOT_PAIR_WORDS_MAX];
 	char			 build_words[ERX_BOOT_BUILD_WORDS_MAX];
@@ -476,11 +476,11 @@ apply_line_installed(const apply_t *apply, uint32_t at)
 }
 
 /*
- * The -erx given record of give `at` (erx_boot_given_words) from the
+ * The -erx_record given record of give `at` (erx_boot_given_words) from the
  * values its installs took in the holder's table, and its line's from
  * apply_line_installed, marked shared as the plan says; the facts of its
  * catalogue entry, COHERENT and, for a network row, MAC, or for a
- * framebuffer row its -erx framebuffer record (erx_boot_framebuffer_words)
+ * framebuffer row its -erx_record framebuffer record (erx_boot_framebuffer_words)
  * over the window it installed; and its length, or 0 when the words do not
  * fit, which the view's names and paths rule out. A device of no kind has no role
  * word to write, so apply_given_words answers 0 for one; apply_args asks
@@ -527,9 +527,9 @@ apply_unrecorded(const apply_t *apply, uint32_t at)
 
 /*
  * The boot page's arguments into words, which holds 3 + ERX_DOM_GIVES_MAX
- * runs: the specification's own, -erx build with the boot image's build
- * identifier, a -erx given or -erx framebuffer record per give that has one,
- * and, for a holder of a block device of a kind, -erx boot with the boot's
+ * runs: the specification's own, -erx_record build with the boot image's build
+ * identifier, a -erx_record given or -erx_record framebuffer record per give that has one,
+ * and, for a holder of a block device of a kind, -erx_record boot with the boot's
  * pair, each as the root's own page carries it. A device of no kind is held
  * with its unit and has no record (erx_dom_entry_driven), so no driver
  * opens it, as the root writes none for the system domain's (devices_read);

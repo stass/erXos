@@ -394,7 +394,7 @@ class DomPlannerTest < Minitest::Test
   end
 
   # The boot page's strings hold both node names beside a row's arguments and
-  # environment, and a -erx given record per device the row holds, so a row whose
+  # environment, and a -erx_record given record per device the row holds, so a row whose
   # own words fit the strings alone, as the Ruby check counts them, is refused at
   # the view rather than at its creation. Words of 100 bytes with their NULs: 19
   # leave less than the two node names' 256 bytes, and 17 leave room for those but
@@ -485,7 +485,7 @@ class DomPlannerTest < Minitest::Test
   # The Raspberry Pi 4's sd unit: EMMC2 and, on its line, the legacy SD controller,
   # whose role and compatible string are in no row of erx/device_kinds.h. A configured
   # row may hold it, as the system domain holds the auxiliary SPI controllers: the
-  # kindless device is given its objects with its unit and gets no -erx given record
+  # kindless device is given its objects with its unit and gets no -erx_record given record
   # (docs/design-shared-devices.md, "The unit rule"). The view admits that placement.
   def test_a_configured_row_holding_a_device_of_no_kind_is_admitted
     platform = JSON.parse(JSON.generate(@context.platform))

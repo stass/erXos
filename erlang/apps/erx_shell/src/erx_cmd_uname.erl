@@ -37,7 +37,7 @@ Where each value comes from (docs/design-shell.md, "Text commands"):
   and otherwise the `-sname` or `-name` word liberx appends to init's
   arguments, which the system release starts with even though it runs
   no distribution;
-* the build identifier is the one init's `-erx build` carries (erx_build);
+* the build identifier is the one init's `-erx_record build` carries (erx_build);
 * the source revision, its date, the configuration and the kernel are
   the build facts the image build wrote into this domain's release
   (erx_build:facts/0). The date is the commit's, in UTC, in the layout of

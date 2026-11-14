@@ -39,7 +39,7 @@
 %% shell and stops, never halting the runtime. A shell holds its console as a terminal (terminal/1),
 %% so neither the shell nor its commands name the console they run on.
 %%
-%% The system console's driver is the module `-erx console_driver Module` names. It implements
+%% The system console's driver is the module `-erx_record console_driver Module` names. It implements
 %% `Module:console_records() -> [erx_device:spec()]`, the device records it drives, and
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
 %% person's terminal is on the line, and exchanges these messages:
@@ -746,8 +746,7 @@ line_owners(Module) ->
 %% wins, since the hosted entry adds its driver after the manifest's arguments, and a plain
 %% word of the command line may have joined it.
 driver_module() ->
-    {ok, Arguments} = init:get_argument(erx),
-    list_to_atom(lists:last([Word || ["console_driver", Word | _] <- Arguments])).
+    list_to_atom(lists:last([Word || ["console_driver", Word | _] <- erx_device_record:records()])).
 
 encoding(true) -> unicode;
 encoding(false) -> latin1.

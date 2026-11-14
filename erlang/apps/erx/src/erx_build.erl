@@ -9,13 +9,12 @@ build (development/0).
 
 The build identifier is the pack header's `build_id` (abi/erx_abi.txt,
 `erx_pack_header`), as every domain's init receives it: liberx's runtime
-entry adds `-erx build ID` to the system domain's arguments and the domain
+entry adds `-erx_record build ID` to the system domain's arguments and the domain
 library to every other domain's, the identifier's bytes read big-endian
-as one number in decimal, since init parses each `-erx` value as a term
-and hexadecimal digits need not scan as one. It is answered in lower-case
+as one number in decimal, as every number of a boot record is. It is answered in lower-case
 hexadecimal, two digits per byte, as the root's identity line, the host
 link's hello and `uname -b` show it. A runtime whose init was given no
-`-erx build`, such as a hosted one, has `{error, {no_build, _}}`, which
+`-erx_record build`, such as a hosted one, has `{error, {no_build, _}}`, which
 its callers report as unknown.
 
 The build facts are the file the image build writes into each release of
@@ -60,27 +59,24 @@ has no such file, such as a hosted one, has
 -define(FACTS, [revision, date, configuration, kernel]).
 -define(FACTS_MAX, 512).
 
--doc "The build identifier among this runtime's init `-erx` arguments.".
+-doc "The build identifier among this runtime's boot records.".
 -spec id() -> {ok, binary()} | {error, {atom(), string()}}.
 id() ->
-    case init:get_argument(erx) of
-        {ok, Arguments} -> id(Arguments);
-        error -> id([])
-    end.
+    id(erx_device_record:records()).
 
--doc "The build identifier among `-erx` arguments as init:get_argument(erx) returns them. Pure, for its tests.".
+-doc "The build identifier among boot records as erx_device_record:records/0 returns them. Pure, for its tests.".
 -spec id([[string()]]) -> {ok, binary()} | {error, {atom(), string()}}.
 id(Arguments) ->
     case [Word || ["build", Word | _] <- Arguments] of
         [Word] ->
             case decimal(Word, ?BITS) of
                 {ok, Id} -> {ok, iolist_to_binary(io_lib:format("~*.16.0b", [?BITS div 4, Id]))};
-                error -> {error, {bad_build, "-erx build is not the build identifier in decimal"}}
+                error -> {error, {bad_build, "-erx_record build is not the build identifier in decimal"}}
             end;
         [] ->
-            {error, {no_build, "the root gave no -erx build"}};
+            {error, {no_build, "the root gave no -erx_record build"}};
         [_, _ | _] ->
-            {error, {bad_build, "more than one -erx build"}}
+            {error, {bad_build, "more than one -erx_record build"}}
     end.
 
 %% Digits only, at most as many as the field's largest value has, so no word

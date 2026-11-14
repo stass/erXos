@@ -546,7 +546,7 @@ it; git history is the record of completed work.
   `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
   (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
 * [Low] `erlang/apps/erx_uart/src/erx_pl011.erl`, `wait_idle`: a boot that leaves the UART or its transmitter disabled with bytes in the transmit FIFO keeps `FR.BUSY` set, and the driver exits `pl011_busy` where clearing `FEN` would flush the FIFO (DDI 0183G 3-16); the wait is bounded by a count of reads, not a time.
-* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a page run (`find_run`), a line entry (`find_line`) and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx given` records over slots it holds otherwise) passes: two records carve the same pages of one memory, and one IRQ object under two handles is two entries, whose second bind takes the first binder's deliveries. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
+* [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a page run (`find_run`), a line entry (`find_line`) and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx_record given` records over slots it holds otherwise) passes: two records carve the same pages of one memory, and one IRQ object under two handles is two entries, whose second bind takes the first binder's deliveries. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
 * [Low] `test/fixtures/erx_device_dma_harness.c`: nothing shows that `open` and `queue_create` read nothing from kept memory (`mprotect` it `PROT_NONE` until `negotiate` in `next_record`), and the harness's `erx_vm_map` takes offset 0 only, so a given window at a nonzero page of its object is not exercised.
 * [Low] stopgap, `liberx/backend/fiasco/page_pool.c` (`erx_fiasco_contig_take`): a contiguous run is aligned only to a
@@ -1431,7 +1431,7 @@ it; git history is the record of completed work.
   the log service's first take, which [design-log.md](docs/design-log.md#the-kernels-records) has `erx_syslog` make
   before `user_sup` starts the console and its driver.
 * [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
-  `-erx console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
+  `-erx_record console_uart` is copied in each driver, as are their fuzz targets. One parse of the four
   numbers, with each driver checking only its clock rule, and one fuzz target.
 * [Medium] QEMU harness, `QemuPlan::MACHINES['raspi4b']` (`tools/lib/erx/qemu.rb`): the loader's
   addresses for BL31 (0) and the bootable file (0x200000) are not checked against the builds that
@@ -1460,7 +1460,7 @@ it; git history is the record of completed work.
 * [Medium] the framebuffer record's target paths (`liberx/system/dom_apply.c`, `apply_given_words` and
   `apply_unrecorded`; `liberx/backend/fiasco/runtime_entry.c`, `gather_args`, `framebuffer_facts`,
   `framebuffer_give`): only the pure core and the view are host-tested, and no shipped manifest gives a framebuffer
-  to a configured domain. A check that a configured holder's boot page carries one `-erx framebuffer` record with a
+  to a configured domain. A check that a configured holder's boot page carries one `-erx_record framebuffer` record with a
   non-null handle for a placed framebuffer and none for an unplaced one would catch a dropped skip or a wrong
   installed index.
 * [Low] the framebuffer format names exist in three hand copies (`kernel/core/dt.c`'s table,
@@ -1472,10 +1472,10 @@ it; git history is the record of completed work.
 * [Low] `liberx/backend/core/boot_manifest.h`, `erx_boot_device_t`: `given` and `framebuffer` are two bools for
   one closed kind (physical, given, framebuffer), so `given && framebuffer` is representable and a consumer that
   forgets the framebuffer case reads a NULL `role`. One enum switched on exhaustively.
-* [Low] `erlang/apps/erx/src/erx_device_record.erl`, the `-erx framebuffer` reader: it accepts an OFFSET of a
+* [Low] `erlang/apps/erx/src/erx_device_record.erl`, the `-erx_record framebuffer` reader: it accepts an OFFSET of a
   page or more, which the root never writes; refuse it, and teach the fuzz reference
   (`test/erlang/erx_device_record_fuzz.erl`) the same bound.
-* [Low] [design-display.md](docs/design-display.md): the display design never names the root's `-erx
+* [Low] [design-display.md](docs/design-display.md): the display design never names the root's `-erx_record
   framebuffer` record ([design-device-tree.md](docs/design-device-tree.md), "Facts into records"), from which a
   framebuffer domain's driver learns its framebuffer.
 * [Low] Pi board pass, the storage domain's `sd` unit (docs/design-storage.md, "The SD controller's line"): no
@@ -3935,7 +3935,7 @@ handing call's socket process exit and its connection's, is not yet looked for. 
 * [Medium] tools, `tools/lib/erx/release.rb`: `boot_file` puts paths into an Erlang expression, so a checkout path holding `"` or `\` breaks or changes it. Pass them with `-extra`.
 * [Medium] tools, `tools/lib/erx/production_image.rb`, `Run.record_words`: it predicts the root's device records with a second copy of `devices_read` (`liberx/backend/core/boot_manifest.c`), reading `include/erx/device_kinds.h` by pattern, and counts no record for a framebuffer row the system domain holds, whose record depends on the firmware's tree. Take the count from the root's own record walk over the manifest (the host build `boot_manifest_test.rb` runs prints the records) and delete the copy.
 * [Low] tools, `tools/lib/erx/boot_image.rb`: `BootImage#build` removes its directory before `OutputDirectory.prepare` checks the path, so a `build/` that links out of the tree has the linked directory removed. Clear it through a check first, as `ProductionImage.clear_directory` does, with a test like `production_image_test.rb`'s link test.
-* [Medium] runtime, `liberx/backend/fiasco/runtime_entry.c`, `device_give`: the root's own give and the domain library's (`liberx/system/dom_apply.c`, `apply_give_step` and `apply_given_words`) each build a device's objects and its `-erx given` record from the manifest row, and the register pages are computed three times (`erx_boot_device_window`, `dom_boot_view.c`'s `boot_pages`, the NIF's `erx_device_window_pages`); they agree today, but nothing compares them. Give the record one producer: build the root's records from the library's catalogue entries (a system give in the library, with the view built before the boot arguments), and keep one pure page function in a shared core header.
+* [Medium] runtime, `liberx/backend/fiasco/runtime_entry.c`, `device_give`: the root's own give and the domain library's (`liberx/system/dom_apply.c`, `apply_give_step` and `apply_given_words`) each build a device's objects and its `-erx_record given` record from the manifest row, and the register pages are computed three times (`erx_boot_device_window`, `dom_boot_view.c`'s `boot_pages`, the NIF's `erx_device_window_pages`); they agree today, but nothing compares them. Give the record one producer: build the root's records from the library's catalogue entries (a system give in the library, with the view built before the boot arguments), and keep one pure page function in a shared core header.
 * [Medium] runtime, `liberx/backend/core/boot_manifest.c`: `peer_held` and `peer_held_total` stay zero on the page, and the projection is hand-written where the design generates it. No reader yet.
 * [Medium] runtime, `liberx/backend/core/boot_info.c` and `liberx/system/dom_core.c`: a startup
   limit ERTS cannot keep (`processes` not a power of two or below 1,024, `atoms` below 8,192) is
@@ -3955,7 +3955,7 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   below its own `foreign_atoms`; once `foreign_atoms` is enforced the lowering should be bounded by it.
 * [Medium] runtime, `tools/fuzz/boot_manifest_fuzz.c`: the target compares the page with the reader's own result, so a swapped limit or a wrong host byte in `erx_boot_manifest_read` passes. Compare with `erx_manifest_open` and `erx_manifest_runtime_limits_at` called directly, field by field.
 * [Low] runtime, `liberx/backend/fiasco/runtime_entry.c`: an `erx.arg` word of the kernel command line reaches ERTS's flag diagnostics unchecked, where the reader in `boot_manifest.c` holds `system_args` to printable ASCII. The command line is the operator's own.
-* [Medium] runtime, `erlang/apps/erx/src/erx_device_record.erl`: `erx.arg` words of the kernel command line can spell `-erx device ...` or `-erx given ...` and add a device record the manifest never assigned, which a driver opens like the root's own; on the stopgap the command line is the operator's, but the manifest should stay the one source of which domain holds a device. Carry the records in a boot-information field only the root writes, or have the system domain's Erlang select them from the manifest through `erx_manifest`.
+* [Medium] runtime, `erlang/apps/erx/src/erx_device_record.erl`: `erx.arg` words of the kernel command line can spell `-erx_record device ...` or `-erx_record given ...` and add a device record the manifest never assigned, which a driver opens like the root's own; on the stopgap the command line is the operator's, but the manifest should stay the one source of which domain holds a device. Carry the records in a boot-information field only the root writes, or have the system domain's Erlang select them from the manifest through `erx_manifest`.
 * [Medium] runtime, `erx_prim_file.c`: that a release file's bytes reach a read only after `erx_release_check` rests on `erx_copy_out` being ERTS's one user of `erx_release_addr`, with no build check. One call, `erx_release_open`, returning the bytes after the verdict with the cache inside `liberx`, removes the import and ERTS's flag, and Phase 2 then changes only what is behind it.
 * [Low] runtime, `erx_prim_file.c`: a refused file is hashed and reported again at each open; `docs/design-kernel.md` has later uses fail at once.
 * [Low] runtime, `liberx/backend/core/boot_manifest.c`: the printable rule for `system_args` lives in the reader, so `Manifest.admit` packs a manifest that then fails at boot, and `domains[].args`, the same string class, is not covered. The rule belongs in the `args` class of the ABI generator.
@@ -6862,7 +6862,7 @@ document's "residual risks accepted" paragraph.
   namespace holds no manifest, and `erx_blk_image` picks only windows the system domain
   holds. Nothing outside tests reads `/images/release` yet. When a reader appears, have
   the domain library write each image window's placement (image name, format, extent)
-  into the holder's boot page beside `-erx boot`, and have `erx_blk_image` read those
+  into the holder's boot page beside `-erx_record boot`, and have `erx_blk_image` read those
   words instead of the manifest file.
 * [Low] storage, log lines at every boot (`erlang/apps/erx_blk/src/erx_blk_service.erl`
   `image_windows/0`, `mount_images/0`): in the storage domain the driver logs that the manifest
@@ -7215,8 +7215,8 @@ document's "residual risks accepted" paragraph.
   reaching only its own window through the register table
   ([design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain)), and test two slots of one page in
   `test/fixtures/erx_device_harness.c`.
-* [Medium] runtime, the device records' writers (`liberx/backend/core/boot_manifest.c`'s `-erx device`, the root's
-  `-erx console_uart`, the domain library's and `runtime_entry.c`'s `-erx given`, and `erx_device_record`): no record
+* [Medium] runtime, the device records' writers (`liberx/backend/core/boot_manifest.c`'s `-erx_record device`, the root's
+  `-erx_record console_uart`, the domain library's and `runtime_entry.c`'s `-erx_record given`, and `erx_device_record`): no record
   carries the page run its unit's windows cover, which
   [design-shared-devices.md](docs/design-shared-devices.md#pages-inside-a-domain) gives it. The device NIF maps each
   record's own pages as its run (`erx_device.c`, `take_window`), so records over one page share its mapping, but a

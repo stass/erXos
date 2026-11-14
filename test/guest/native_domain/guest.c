@@ -45,6 +45,7 @@
 
 #include "erx/abi.h"
 #include "erx/abi_reader.h"
+#include "erx/boot_words.h"
 #include "erx/dom.h"
 #include "erx/dom_lib.h"
 #include "erx/etf.h"
@@ -542,16 +543,16 @@ page_spoil(uint32_t id)
 static const char connection_eval[] =
     "S='" SYSTEM_NODE "',"
     "Up=fun U(0)->false;U(T)->lists:member(S,nodes()) orelse receive after 50->U(T-1) end end,"
-    "Ok0=Up(600),"
-    "Ok1=Ok0 andalso net_adm:ping(S)==pong andalso net_adm:ping('absent@erxos')==pang,"
+    "K0=Up(600),"
+    "K1=K0 andalso net_adm:ping(S)==pong andalso net_adm:ping('absent@erxos')==pang,"
     "M=monitor(process,{x,'absent@erxos'}),"
-    "Ok2=Ok1 andalso receive {'DOWN',M,_,_,noconnection}->true after 10000->false end,"
-    "Ok3=Ok2 andalso erlang:system_info(creation)==~ andalso node()=='" DOMAIN_NODE "',"
+    "K2=K1 andalso receive {'DOWN',M,_,_,noconnection}->true after 10000->false end,"
+    "K3=K2 andalso erlang:system_info(creation)==~ andalso node()=='" DOMAIN_NODE "',"
 /* a send and a monitor to a registered name of the system domain stay in this domain */
 "D=erx_dist:names_dropped(),"
 "{x,S}!m,"
 "M2=monitor(process,{x,S}),"
-"(Ok3 andalso receive {'DOWN',M2,process,{x,S},noproc}->true after 10000->false end "
+"(K3 andalso receive {'DOWN',M2,process,{x,S},noproc}->true after 10000->false end "
 "andalso erx_dist:names_dropped()>D) orelse halt(1),"
 /* D2: pid, port and reference texts (edit 18); E answers no for badarg */
 "E=fun(F,T)->try erlang:F(T) catch error:badarg->no end end,"
@@ -561,9 +562,9 @@ static const char connection_eval[] =
 "Rs=[ok||_<-lists:seq(1,100),P1<-[X(4,Rn(),Rn())],"
 "R1<-[binary_to_term(<<131,90,3:16,119,12,\"" SYSTEM_NODE "\",4:32,(Rn()):96>>)],"
 "Lp(pid_to_list(P1))=:=P1,E(list_to_ref,ref_to_list(R1))=:=R1],"
-"O=pid_to_list(self()),[_,Rt]=string:split(O,\".\"),Old=pid_to_list(X(4000000,1,0)),"
+"O=pid_to_list(self()),[_,Rt]=string:split(O,\".\"),Od=pid_to_list(X(4000000,1,0)),"
 "Id=[length(Rs),lists:prefix(\"<~.\",O),Lp(O)=:=self(),"
-"Lp(\"<0.\"++Rt),lists:prefix(\"<4000000.\",Old),Lp(Old),Lp(\"<18446744073709551620.1.0>\"),"
+"Lp(\"<0.\"++Rt),lists:prefix(\"<4000000.\",Od),Lp(Od),Lp(\"<18446744073709551620.1.0>\"),"
 "E(list_to_ref,\"#Ref<18446744073709551620.1.2>\"),E(list_to_port,\"#Port<4294967300.1>\"),E(list_to_ref,\"#Ref<4.1.2.3.4.5.>\")],"
 "erlang:display({identity,Id}),"
 "Id==[100,true,true,no,true,no,no,no,no,no] orelse halt(1),"
@@ -2253,8 +2254,8 @@ case_undo(uint32_t program)
 #define GIVEN_MEMORY	(UINT64_C(16) * ERX_PAGE_SIZE)
 /* Every given device's device-tree path, the PATH word of its record. */
 #define GIVEN_PATH	"/virtio_mmio@a000000"
-#define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0" GIVEN_PATH "\0"
-#define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
+#define GIVEN_RECORD	ERX_BOOT_RECORD_FLAG "\0given\0block\0virtio_mmio\0" GIVEN_PATH "\0"
+#define GIVEN_PAIR	ERX_BOOT_RECORD_FLAG "\0boot\0normal\0a\0"
 #define GIVEN_NUMBERS	9u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK COHERENT MAC */
 #define GIVEN_MARK	"shared"		/* after LINE_H: every device of the unit names the line */
 #define GIVEN_MARK_AFTER 3u			/* LINE_H's index among the numbers */
@@ -2341,7 +2342,7 @@ given_decimal(const char **at, const char *end, uint64_t *value)
 }
 
 /*
- * The -erx given record at *at, before end, into numbers, and *at past it.
+ * The -erx_record given record at *at, before end, into numbers, and *at past it.
  * False for a record that does not open with GIVEN_RECORD, its words to
  * PATH, or whose numbers are not GIVEN_NUMBERS decimals with GIVEN_MARK
  * after LINE_H.
@@ -2364,8 +2365,8 @@ given_record(const char **at, const char *end, uint64_t *numbers)
 }
 
 /*
- * Reads domain id's -erx given records from its boot page into numbers, one
- * row per device in catalogue order, and whether -erx boot follows them
+ * Reads domain id's -erx_record given records from its boot page into numbers, one
+ * row per device in catalogue order, and whether -erx_record boot follows them
  * with the library's pair. False for a page whose first record is missing
  * or whose records are not GIVEN_RECORDS records, one after another.
  */

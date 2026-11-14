@@ -3,10 +3,10 @@
 
 %% The windows on the booted slot's EROFS images (docs/design-storage.md, "Data model";
 %% docs/design-stopgap.md, "Image windows"): the block service's pure core for them, as
-%% erx_blk_table is for the partition table. erx_blk_service hands it the root's -erx
-%% words and the release's manifest, and starts a window for each window it returns.
+%% erx_blk_table is for the partition table. erx_blk_service hands it the root's boot
+%% records and the release's manifest, and starts a window for each window it returns.
 %%
-%% boot_slot/1 reads the slot from `-erx boot VALUE SLOT`, which the native root adds from
+%% boot_slot/1 reads the slot from `-erx_record boot VALUE SLOT`, which the native root adds from
 %% the handoff (include/erx/core/boot_pair.h names the words). A boot whose value is
 %% unknown, and a runtime the root gave no such words (the hosted entry), has no slot,
 %% so it serves no image window: a window on an image lies only inside the slot the boot
@@ -45,7 +45,7 @@
                    extents := [{non_neg_integer(), non_neg_integer()}]}.
 -type reason() :: {binary(), format | extent_count | extent_bounds | length}.
 
-%% The slot of `-erx boot VALUE SLOT` in Arguments, what init:get_argument(erx) returns:
+%% The slot of `-erx_record boot VALUE SLOT` in Arguments, what erx_device_record:records/0 returns:
 %% none when there is no such word list or its value is unknown; bad_boot for more than
 %% one, or for a value and slot that are not a pair boot_pair.h accepts.
 -spec boot_slot(term()) -> {ok, slot()} | {error, bad_boot}.

@@ -690,8 +690,8 @@ module Erx
       UNKNOWN_WORD_LINE = 'erx.nosuchword=1'
       # The program's name, the twelve words of the flags erx_boot_argv_plan derives from the
       # page's limits and grant (-P, -Q, -t, -S, -SDcpu and -SDio with their values) and the node
-      # flag with its name, around the page's words, and the seven words of -erx console_uart BASE
-      # SIZE LINE MARK CLOCK, the four of -erx boot VALUE SLOT and the three of -erx build ID, which the
+      # flag with its name, around the page's words, and the seven words of -erx_record console_uart BASE
+      # SIZE LINE MARK CLOCK, the four of -erx_record boot VALUE SLOT and the three of -erx_record build ID, which the
       # root adds to the manifest's. The allocator flags erx_boot_argv_plan ends its flags with are
       # counted from their one copy (allocator_words).
       ARGUMENTS_FIXED = 29
@@ -719,14 +719,14 @@ module Erx
 
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
-      # The words of -erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+      # The words of -erx_record given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
       # MEM_SIZE CLOCK COHERENT MAC, which the root adds for each device of a kind in a unit the system
-      # domain holds, and of -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK, the host
+      # domain holds, and of -erx_record device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK, the host
       # link's UART's physical record (docs/design-stopgap.md, "Device records"; record_words).
       GIVEN_RECORD_WORDS = 15
       DEVICE_RECORD_WORDS = 10
       # The table of the kinds of device a runtime drives, which the root reads to give a
-      # device of a held unit its -erx given record.
+      # device of a held unit its -erx_record given record.
       DEVICE_KINDS = 'include/erx/device_kinds.h'
       # One row of DEVICE_KINDS: { ERX_MF_DEVICE_ROLE_ROLE, "compatible", "role word", "peripheral" }.
       DEVICE_KIND_ROW = /\A\s*\{\s*ERX_MF_DEVICE_ROLE_([A-Z0-9_]+),\s*"([^"]+)",\s*"\w+",\s*"\w+"\s*\},\s*\z/
@@ -751,8 +751,8 @@ module Erx
 
       # The words of the records the root adds to the system domain's arguments: for each unit
       # the manifest gives the system domain, each device of its placement in the platform
-      # record that is of a kind (device_kinds) gives a -erx given record, and the host link's
-      # UART, the UART at machine.hostlink's path, a -erx device record when the boot asks for
+      # record that is of a kind (device_kinds) gives a -erx_record given record, and the host link's
+      # UART, the UART at machine.hostlink's path, a -erx_record device record when the boot asks for
       # the host link (liberx/backend/core/boot_manifest.c, devices_read). A framebuffer row
       # the system domain holds is not counted: its record depends on whether the firmware's
       # tree placed the framebuffer, which the manifest does not say (TODO.md).
