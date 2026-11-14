@@ -297,8 +297,8 @@ module Erx
     # An Erlang map expression of pairs, each value an expression already.
     def erlang_map(pairs) = "\#{#{pairs.map { |key, value| "#{key}=>#{value}" }.join(',')}}"
 
-    # The board's site manifest, the development manifest without its web and display
-    # domains, with a domain row and room for two domains (a medium machine's manifest,
+    # The board's site manifest (Platform#site_manifest_source), the development manifest
+    # without the domains the website leaves out, with a domain row and room for two domains (a medium machine's manifest,
     # with no growth of the system). The row, DOMAIN_ROW, is there so the image
     # carries the release and the runtime image it names, which is how a manifest makes
     # its image carry them (docs/design-stopgap.md, "The production image"). The domain
@@ -310,19 +310,14 @@ module Erx
     # the system principal's quota and max_domains each grow by domains (2), and its memory
     # and root_memory each by that many domains' budgets. ProductionImage.without_sessions drops the system
     # principal's session template, so the console's login at boot starts no session. The
-    # source has no web or display domain, so the ids and the room are the cell's own: the
+    # site manifest has no web or display domain, so the ids and the room are the cell's own: the
     # two domains' grants would take the 250 mcpu, of what the system share's reserve
     # leaves, that the cells' rows use, and their ids would come before theirs
-    # (HostlinkGuest, the production image's host link check, boots the web domain); a
-    # source with either is refused. The production
+    # (HostlinkGuest, the production image's host link check, boots the web domain). The production
     # image's own manifest is not grown. row replaces DOMAIN_ROW for a harness whose configured domain runs another
     # way (SystemDomain); domains is how many of domain_memory's domains the principal
     # gains room for.
     def manifest(source, row: DOMAIN_ROW, domains: 2, domain_memory: DOMAIN_MEMORY)
-      if source.match?(/^domain (?:web|display)$/)
-        raise Error, 'a medium boot starts from the site manifest, which has no web or display domain'
-      end
-
       grown(ProductionImage.without_sessions(source), memory: domains * (domain_memory + DOMAIN_OUTER), domains: domains) + row
     end
 

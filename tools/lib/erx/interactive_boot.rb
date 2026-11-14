@@ -104,9 +104,9 @@ module Erx
       build(root: root, runner: runner, jobs: jobs, hostlink: false, platform: platform, **tools).image
     end
 
-    # The system manifest the image is built from, as checked in for platform's board:
-    # the website's manifest, which has no web or display domain, when without_web, else the
-    # development manifest.
+    # The system manifest the image is built from: the website's manifest, which the
+    # platform makes from its development manifest (Platform#site_manifest_source), when
+    # without_web, else the development manifest as checked in for platform's board.
     def manifest_source(root:, platform:, without_web:)
       without_web ? platform.site_manifest_source(root) : platform.manifest_source(root)
     end

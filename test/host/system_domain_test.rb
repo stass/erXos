@@ -9,7 +9,8 @@ require_relative '../../tools/lib/erx/system_domain'
 # Nothing boots here.
 class SystemDomainTest < Minitest::Test
   Suite = Erx::SystemDomain
-  SITE = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+  ROOT = File.expand_path('../..', __dir__)
+  SITE = Erx::Platform.development(ROOT).site_manifest_source(ROOT)
 
   # The rows are MediumBoot's with the halt dropped, so each configured domain stays up,
   # over the erx carrier, as MediumBoot's, so each is a node, behind the flag that lets the

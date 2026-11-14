@@ -72,8 +72,8 @@ class InteractiveBootTest < Minitest::Test
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--hostlink /tmp/socket]) }
   end
 
-  # --without-web builds the website's image from the checked-in site manifest as it
-  # stands, so the image's manifest check runs over the file the site ships, into a
+  # --without-web builds the website's image from the site manifest the platform makes
+  # from the development manifest, so the image's manifest check runs over what the site ships, into a
   # directory of its own, which a development boot never replaces; without the option
   # the image is the development manifest's. It cannot be combined with --hostlink,
   # whose web view the web domain serves.
@@ -84,69 +84,13 @@ class InteractiveBootTest < Minitest::Test
     assert_raises(OptionParser::ParseError) { Erx::InteractiveBoot.request(%w[--without-web --hostlink]) }
     assert_equal File.binread(File.join(root, PLATFORM.manifest_path)),
                  Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: false)
-    assert_equal File.binread(File.join(root, PLATFORM.site_manifest_path)),
+    assert_equal PLATFORM.site_manifest_source(root),
                  Erx::InteractiveBoot.manifest_source(root: root, platform: PLATFORM, without_web: true)
-    assert_equal 'config/manifest/qemu-virt-site.txt', PLATFORM.site_manifest_path
     assert_equal Erx::InteractiveBoot::DIRECTORY, Erx::InteractiveBoot.image_directory(without_web: false)
     assert_equal 'build/production-image/site', Erx::InteractiveBoot.image_directory(without_web: true)
     # The website's image is packed for, and boots on, the RAM the website gives it.
     assert_equal 256, Erx::InteractiveBoot.machine(platform: PLATFORM, without_web: true).memory_mib
     assert_equal PLATFORM.memory_mib, Erx::InteractiveBoot.machine(platform: PLATFORM, without_web: false).memory_mib
-  end
-
-  # The site manifest is the development manifest without its web and display domains:
-  # the development manifest's records less the web domain's six (its share, runtime
-  # limits, limits and domain, its relay service and the system domain's facet of it) and
-  # the display domain's seven (its share, runtime limits, limits and domain, its window
-  # tree's service and display record, and the display unit it holds) are the site's,
-  # line for line, except the room the two domains took: the system principal's memory
-  # and domains less the two limits' budgets and outer ones and less two, and the root's
-  # root_memory, max_domains and max_connections less the same budgets and the display
-  # unit's DMA memory, two domains and their system connections' rows. No reference to
-  # either domain remains, so the site grants nothing the development image does not and
-  # moves with it. Comments and blank lines may differ.
-  def test_the_site_manifest_is_the_development_manifest_without_the_web_and_display_domains
-    root = File.expand_path('../..', __dir__)
-    development = manifest_records(File.binread(File.join(root, PLATFORM.manifest_path)))
-    site = manifest_records(File.binread(File.join(root, PLATFORM.site_manifest_path)))
-    left_out, kept = development.partition { |record| record.first.match?(/\A[a-z_]+ (?:web|display)\n\z/) }
-    kinds = ->(name) { left_out.map(&:first).grep(/ #{name}\n\z/).map { |header| header[/\A[a-z_]+/] } }
-    assert_equal %w[share runtime_limits limits domain service facet], kinds.call('web')
-    assert_equal %w[share runtime_limits limits unit domain service display], kinds.call('display')
-    refute_match(/@(?:share|domain|service)\.(?:web|display)$/, site.join)
-    room = %w[web display].sum do |name|
-      limits = left_out.find { |record| record.first == "limits #{name}\n" }.join
-      Integer(limits[/^  memory ([0-9]+)$/, 1], 10) + Integer(limits[/^  outer ([0-9]+)$/, 1], 10)
-    end
-    dma = PLATFORM.record.fetch('units').find { |unit| unit.fetch('key') == 'display' }
-                  .fetch('devices').sum { |device| device.fetch('dma_memory') }
-    assert_equal kept.map(&:first), site.map(&:first), 'config/manifest/qemu-virt-site.txt has other records'
-    root = kept.find { |record| record.any?(/\A  max_domains /) }.first
-    assert_equal [["principal system\n", 'domains', -2], ["principal system\n", 'memory', -room],
-                  [root, 'max_connections', -2],
-                  [root, 'max_domains', -2],
-                  [root, 'root_memory', -(room + dma)]].sort,
-                 figure_changes(kept, site).sort
-  end
-
-  # A manifest's records, each the list of its lines, header first, without comments
-  # and blank lines.
-  def manifest_records(text)
-    text.lines.reject { |line| line.start_with?('#') || line.strip.empty? }.slice_before(/\A\S/).to_a
-  end
-
-  # Where two lists of the same records differ, each as [header, field, change]: the
-  # lines must be one numeric field each, the same field on both sides.
-  def figure_changes(before, after)
-    before.zip(after).flat_map do |old, new|
-      assert_equal old.size, new.size, "#{old.first.strip} has other lines"
-      old.zip(new).reject { |left, right| left == right }.map do |left, right|
-        field, figure = left.match(/\A {2}([a-z_]+) ([0-9]+)\n\z/)&.captures
-        changed = field && right.match(/\A {2}#{field} ([0-9]+)\n\z/)
-        assert changed, "#{old.first.strip}: #{right.inspect} in place of #{left.inspect}"
-        [old.first, field, Integer(changed[1], 10) - Integer(figure, 10)]
-      end
-    end
   end
 
   # With a link, the second serial line listens on its socket without waiting

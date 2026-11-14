@@ -5,7 +5,7 @@
 require 'json'
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/manifest'
-require_relative '../../tools/lib/erx/manifest_text'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../fixtures/manifest_context'
 
 # Phase 1's manifest check (docs/design-stopgap.md): each kept property of
@@ -126,8 +126,7 @@ class ManifestStopgapTest < Minitest::Test
   # the web and display domains, hold the same windows and image and every device but the
   # display's gpu.
   def test_the_real_site_manifest_is_admitted
-    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
-    result = admit(site)
+    result = admit(site_manifest)
     assert result.matches?(@context)
     view = @codec.open('manifest', result.bytes)
     assert_equal 2, view.count('domains')
@@ -137,22 +136,20 @@ class ManifestStopgapTest < Minitest::Test
   end
 
   # Each manifest's root_memory is what its budgets promise and an 8 MiB margin no one
-  # is promised, and the site's is the development one's less the web and display
-  # domains' budgets, each its memory and outer, and the display unit's DMA memory, which
-  # the domain library charges to the system's budget: all the site manifest leaves out.
+  # is promised: the site manifest's, made from the development one, keeps the margin,
+  # since each domain it leaves out gives back the room it took
+  # (ManifestText.without_domain), the display unit's DMA memory included.
   def test_root_memory_is_the_promise_and_the_margin_in_both_manifests
-    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
-    [@source, site].each do |source|
+    [@source, site_manifest].each do |source|
       report = admit(source).report
       assert_equal 8 << 20, report.fetch('root_memory') - report.fetch('promised_memory')
     end
-    budgets = ['limits web', 'limits display'].product(%w[memory outer]).sum do |record, field|
-      Erx::ManifestText.value(@source, record: record, field: field)
-    end
-    display = @platform.fetch('units').find { |unit| unit.fetch('key') == 'display' }
-    dma = display.fetch('devices').sum { |device| device.fetch('dma_memory') }
-    root_memory = ->(source) { Erx::ManifestText.value(source, record: 'machine', field: 'root_memory') }
-    assert_equal budgets + dma, root_memory.call(@source) - root_memory.call(site)
+  end
+
+  # The website's manifest, made from the development one.
+  def site_manifest
+    root = File.expand_path('../..', __dir__)
+    Erx::Platform.development(root).site_manifest_source(root)
   end
 
   def test_the_report_claims_only_what_was_checked

@@ -2,18 +2,21 @@
 
 require_relative 'error'
 require_relative 'json_input'
+require_relative 'manifest_text'
 
 module Erx
-  # A board's platform record (config/platforms/NAME.json) and the manifests beside it
-  # (config/manifest/NAME-development.txt, and NAME-site.txt for a board the website boots): what every tool that builds or
+  # A board's platform record (config/platforms/NAME.json) and the development manifest beside it
+  # (config/manifest/NAME-development.txt), with the website's made from it: what every tool that builds or
   # boots an image takes as a parameter in place of one board's constants
   # (docs/design-stopgap.md, "The Raspberry Pi 4"). The record states the board's RAM, its
   # first address (ram_first) and size (ram_bytes, the development machine's RAM, which the harnesses give QEMU), the
   # part of it Fiasco keeps (fiasco_reserve), what the boot keeps besides from the rest
   # (root_withheld, in bytes, which the packer's archive check reads), and its device units,
-  # which Pack's manifest check reads. A record without one of these numbers, with a RAM
-  # number that is not a whole number of MiB, or with a root_withheld that is not a positive
-  # number of bytes, is refused when it is loaded, before any tool uses it.
+  # which Pack's manifest check reads, and, for a board the website boots, the configured
+  # domains its site manifest leaves out (site_leaves_out). A record without one of these
+  # numbers, with a RAM number that is not a whole number of MiB, with a root_withheld that
+  # is not a positive number of bytes, or with a site_leaves_out that is not a list of
+  # domain names, is refused when it is loaded, before any tool uses it.
   Platform = Data.define(:name, :record)
   class Platform
     # The board the QEMU harnesses and `tools/erx` build for when no caller names another:
@@ -53,6 +56,11 @@ module Erx
       withheld = record.fetch('root_withheld') { raise Error, "#{self.class.record_path(name)}: no root_withheld" }
       raise Error, "#{self.class.record_path(name)}: root_withheld must be a positive number of bytes" unless
         withheld.is_a?(Integer) && withheld.positive?
+      leaves_out = record['site_leaves_out']
+      raise Error, "#{self.class.record_path(name)}: site_leaves_out must be a list of distinct domain names" unless
+        !record.key?('site_leaves_out') ||
+        (leaves_out.is_a?(Array) && !leaves_out.empty? && leaves_out.uniq.size == leaves_out.size &&
+         leaves_out.all? { |domain| domain.is_a?(String) && domain.match?(/\A[a-z0-9][a-z0-9_-]{0,62}\z/) })
 
       super
     end
@@ -61,16 +69,23 @@ module Erx
     def manifest_path = "config/manifest/#{name}-development.txt"
     def manifest_source(root) = File.binread(File.join(root, manifest_path))
     # The website's manifest, which only a board the website boots has: the development
-    # manifest without its web and display domains, which `tools/erx boot --without-web`
-    # builds the site's image from (InteractiveBoot) and the medium boots start from
-    # (MediumBoot).
-    # A board without one is refused on use, never handed its development manifest.
-    def site_manifest_path = "config/manifest/#{name}-site.txt"
+    # manifest without the domains the record's site_leaves_out names, each taken out
+    # with the room it took (ManifestText.without_domain), which `tools/erx boot
+    # --without-web` builds the site's image from (InteractiveBoot) and the medium boots
+    # start from (MediumBoot). It is made from the development manifest each time it is
+    # read, so it never differs from it in anything but those domains. keep names domains
+    # of site_leaves_out a harness keeps in, as the display suite keeps the display domain.
+    # A board whose record has no site_leaves_out is refused on use, never handed its
+    # development manifest.
+    def site_manifest_source(root, keep: [])
+      leaves_out = record.fetch('site_leaves_out') do
+        raise Error, "the #{name} board's record #{record_path} has no site_leaves_out, so no website image or medium boot"
+      end
+      raise Error, "the site manifest leaves out no #{(keep - leaves_out).join(', ')} to keep" unless (keep - leaves_out).empty?
 
-    def site_manifest_source(root)
-      File.binread(File.join(root, site_manifest_path))
-    rescue Errno::ENOENT
-      raise Error, "the #{name} board has no site manifest #{site_manifest_path}, so no website image or medium boot"
+      (leaves_out - keep).reduce(manifest_source(root)) do |source, domain|
+        ManifestText.without_domain(source, domain, units: record.fetch('units'))
+      end
     end
 
     # RAM's first address, where the root's place is counted from (ProductionImage::Machine).

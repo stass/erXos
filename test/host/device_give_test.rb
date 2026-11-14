@@ -11,7 +11,7 @@ require_relative '../../tools/lib/erx/device_give'
 class DeviceGiveTest < Minitest::Test
   Suite = Erx::DeviceGive
   ROOT = File.expand_path('../..', __dir__)
-  SITE = File.binread(File.join(ROOT, 'config/manifest/qemu-virt-site.txt'))
+  SITE = Erx::Platform.development(ROOT).site_manifest_source(ROOT)
 
   # The manifest is MediumBoot's with the row staying up, restarting once, and holding the
   # spare unit, which the site manifest leaves unplaced.

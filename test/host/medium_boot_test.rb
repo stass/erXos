@@ -104,9 +104,9 @@ class MediumBootTest < Minitest::Test
 
   # The medium manifest gives the system principal room for two more domains, drops its
   # session template, appends the configured one, and leaves every other line of the site
-  # manifest as it was. A manifest with the web domain, the development one, is refused.
+  # manifest as it was.
   def test_the_medium_manifest_has_room_for_two_domains_and_changes_nothing_else
-    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+    site = site_manifest
     grown = Boot.manifest(site)
     growth = 2 * (Boot::DOMAIN_MEMORY + Boot::DOMAIN_OUTER)
     memory, root_memory, domains = [/^principal system\n  memory ([0-9]+)$/, /^  root_memory ([0-9]+)$/, /^  max_domains ([0-9]+)$/]
@@ -126,18 +126,13 @@ class MediumBootTest < Minitest::Test
     assert_equal sessionless.lines.size, grown.lines.size - Boot::DOMAIN_ROW.lines.size
     assert grown.end_with?(Boot::DOMAIN_ROW)
     assert_raises(Erx::Error) { Boot.manifest(site.sub(/^  max_domains [0-9]+\n/, '')) }
-    development = File.binread(File.expand_path('../../config/manifest/qemu-virt-development.txt', __dir__))
-    error = assert_raises(Erx::Error) { Boot.manifest(development) }
-    assert_equal 'a medium boot starts from the site manifest, which has no web or display domain', error.message
-    displayed = site + development[/^domain display\n(?:  .*\n)*/]
-    assert_raises(Erx::Error) { Boot.manifest(displayed) }
   end
 
   # The footprint cell's manifest has room for its three domains and sets the system domain's
   # /tmp cap; its expression creates one domain per step, booting the step's script, the
   # last with a tmp cap, and says what it measures.
   def test_the_footprint_cell_has_room_for_its_domains_and_one_step_each
-    site = File.binread(File.expand_path('../../config/manifest/qemu-virt-site.txt', __dir__))
+    site = site_manifest
     cell = Boot::Footprint
     system_tmp = /^runtime_limits system\n(?:  .*\n)*?  tmp ([0-9]+)$/
     grown = cell.manifest(site, system_tmp: 8_388_608)
@@ -204,6 +199,12 @@ class MediumBootTest < Minitest::Test
     bytes.each_byte.reduce(0xFFFFFFFF) do |crc, byte|
       8.times.reduce(crc ^ byte) { |bits, _| bits.odd? ? (bits >> 1) ^ 0x82F63B78 : bits >> 1 }
     end ^ 0xFFFFFFFF
+  end
+
+  # The website's manifest, which the medium boots start from.
+  def site_manifest
+    root = File.expand_path('../..', __dir__)
+    Erx::Platform.development(root).site_manifest_source(root)
   end
 
   # Two release entries, the second the module the shell reads, whose bytes are this file's.

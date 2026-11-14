@@ -13,41 +13,51 @@ class DisplayDomainTest < Minitest::Test
   Suite = Erx::DisplayDomain
   ROOT = File.expand_path('../..', __dir__)
   PLATFORM = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
-  SITE = PLATFORM.site_manifest_source(ROOT)
+  KEPT = PLATFORM.site_manifest_source(ROOT, keep: [Suite::DOMAIN])
+  DEVELOPMENT = PLATFORM.manifest_source(ROOT)
 
   def figure(text, key) = Integer(text[/^  #{key} ([0-9]+)$/, 1], 10)
+  def field(text, record, key) = Erx::ManifestText.value(text, record: record, field: key)
+  def record(text, header) = text[/^#{header}\n(?:  .*\n)*/]
 
-  # The site manifest gains the display row and the display unit on it, room for one domain
-  # of the row's budgets, the client, and root_memory the gpu's DMA memory and the client
-  # principal's memory on top.
-  def test_the_manifest_places_the_display_unit_and_grows_root_memory_by_its_dma_memory
-    ours = Suite.manifest(SITE, platform: PLATFORM)
-    assert ours.end_with?(Suite::ROW + Suite::UNIT + Suite::CLIENT)
-    refute_match(/placement "display"/, SITE)
-    assert_equal 9_437_184, Suite.dma_memory(PLATFORM)
-    budgets = Suite::MEMORY + Suite::OUTER
-    assert_equal figure(SITE, 'root_memory') + budgets + 9_437_184 + Suite::CLIENT_MEMORY, figure(ours, 'root_memory')
-    assert_equal figure(SITE, 'max_domains') + 1 + Suite::CLIENT_SESSIONS, figure(ours, 'max_domains')
-    assert_match(/^  grant @share\.eighth$/, Suite::ROW)
-    assert_match(/^  release @artifact\.display$/, Suite::ROW)
-    assert_match(/^  restarts 0$/, Suite::ROW)
+  # The suite boots the development manifest's own display records: the site manifest with
+  # the display domain kept holds them line for line, and the suite's manifest changes
+  # only what the client needs (the display's outer budget, by the client's pixel areas
+  # and lanes, its connections and its restarts) and the room the client takes, before
+  # the client itself.
+  def test_the_suite_boots_the_development_manifests_display_records
+    %w[share runtime_limits limits domain service display unit].each do |kind|
+      assert_equal record(DEVELOPMENT, "#{kind} display"), record(KEPT, "#{kind} display"), kind
+    end
+    refute_match(/^domain display$/, PLATFORM.site_manifest_source(ROOT))
+    ours = Suite.manifest(KEPT)
+    assert ours.end_with?(Suite::CLIENT)
+    before = Erx::ProductionImage.without_sessions(KEPT)
+    assert_equal field(before, 'limits display', 'outer') + Suite::CLIENT_AREAS, field(ours, 'limits display', 'outer')
+    assert_equal field(before, 'limits display', 'connections') + Suite::CLIENT_SESSIONS,
+                 field(ours, 'limits display', 'connections')
+    assert_equal 0, field(ours, 'domain display', 'restarts')
+    assert_equal field(before, 'principal system', 'memory') + Suite::CLIENT_AREAS, field(ours, 'principal system', 'memory')
+    assert_equal figure(before, 'root_memory') + Suite::CLIENT_AREAS + Suite::CLIENT_MEMORY, figure(ours, 'root_memory')
+    assert_equal figure(before, 'max_domains') + Suite::CLIENT_SESSIONS, figure(ours, 'max_domains')
+    assert_equal figure(before, 'max_connections') + Suite::CLIENT_SESSIONS, figure(ours, 'max_connections')
+    changed = before.lines.zip(ours.lines).reject { |left, right| left == right }.map { |left, _right| left[/\A {2}([a-z_]+) /, 1] }
+    assert_equal %w[connections max_connections max_domains memory outer restarts root_memory], changed.sort
+    assert_equal before.lines.size + Suite::CLIENT.lines.size, ours.lines.size
   end
 
-  # Property 18's sum for screen, the client template's one grant for each session its
-  # domains quota allows, fits the display's outer budget beside MediumBoot's, and the
-  # display has a connection for each; the start row, enabled, names screen, and the
-  # template boots the client's test script.
+  # Property 18's sum for screen, the client template's one grant of the display for each
+  # session its domains quota allows, is what the display's outer budget gains; the start
+  # row, enabled, names the display, and the template boots the client's test script.
   def test_the_display_s_grants_fit_its_outer_budget
-    cost = Suite::CLIENT_SESSIONS * (Suite::PIXELS + Suite::LANE)
-    assert_equal Erx::MediumBoot::DOMAIN_OUTER + cost, figure(Suite::ROW, 'outer')
-    assert_equal Suite::CLIENT_SESSIONS, figure(Suite::ROW, 'connections')
+    assert_equal Suite::CLIENT_SESSIONS * (Suite::PIXELS + Suite::LANE), Suite::CLIENT_AREAS
     assert_equal Suite::CLIENT_SESSIONS, figure(Suite::CLIENT, 'domains')
     assert_equal Suite::PIXELS, Integer(Suite::CLIENT[/^  parameter pixels ([0-9]+)$/, 1], 10)
-    assert_match(/^start client\n  enable YES\n  display @service\.screen\n/, Suite::CLIENT)
+    assert_match(/^facet screen\n  grantee @session\.client\n  service @service\.display\n/, Suite::CLIENT)
+    assert_match(/^start client\n  enable YES\n  display @service\.display\n/, Suite::CLIENT)
     assert_match(/^  release @artifact\.pattern$/, Suite::CLIENT)
     assert Suite::BOOT.test
     assert_includes Suite::BOOT.applications, 'erx_pattern_test'
-    assert_match(/^service screen\n  server @domain\.display\n  interface windows\ndisplay screen\n/, Suite::ROW)
   end
 
   # The manifest check admits the suite's manifest, properties 4 and 18 among its own,
@@ -58,7 +68,7 @@ class DisplayDomainTest < Minitest::Test
     arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[display network pattern session storage web])
     context = Erx::Manifest::Context.new(**arguments.merge(platform: platform))
     planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
-    assert Erx::Manifest.admit(source: Suite.manifest(SITE, platform: PLATFORM), codec: codec, context: context, planner: planner)
+    assert Erx::Manifest.admit(source: Suite.manifest(KEPT), codec: codec, context: context, planner: planner)
   end
 
   # The input devices sit off the gpu's register page, on a page no unit of the manifest holds.

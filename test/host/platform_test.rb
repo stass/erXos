@@ -31,16 +31,34 @@ class PlatformTest < Minitest::Test
     assert_equal [512, 32], [VIRT.memory_mib, VIRT.fiasco_reserve_mib]
     assert_equal 'config/manifest/qemu-virt-development.txt', VIRT.manifest_path
     assert File.file?(File.join(ROOT, VIRT.manifest_path))
-    assert_equal File.binread(File.join(ROOT, 'config/manifest/qemu-virt-site.txt')), VIRT.site_manifest_source(ROOT)
+    assert_equal %w[web display], VIRT.record.fetch('site_leaves_out')
+  end
+
+  # The site manifest is the development manifest with the domains site_leaves_out names
+  # taken out, in order, and keep keeps one of them in; it keeps nothing the site does not
+  # leave out.
+  def test_the_site_manifest_is_made_from_the_development_manifest
+    development = VIRT.manifest_source(ROOT)
+    without = ->(source, domain) { Erx::ManifestText.without_domain(source, domain, units: VIRT.record.fetch('units')) }
+    assert_equal without.(without.(development, 'web'), 'display'), VIRT.site_manifest_source(ROOT)
+    assert_equal without.(development, 'web'), VIRT.site_manifest_source(ROOT, keep: %w[display])
+    assert_raises(Erx::Error) { VIRT.site_manifest_source(ROOT, keep: %w[storage]) }
+    site = VIRT.site_manifest_source(ROOT)
+    ['domain storage', 'domain network', 'unit block', 'unit net', 'facet data', 'facet net'].each do |header|
+      assert_match(/^#{header}$/, site, 'the site keeps every record of the domains it does not leave out')
+    end
   end
 
   # Only a board the website boots has a site manifest; another board's is refused by
-  # name, never replaced with its development manifest.
+  # name, never replaced with its development manifest; a site_leaves_out that is not a
+  # list of domain names is refused when the record is loaded.
   def test_a_board_without_a_site_manifest_is_refused_on_use
-    Dir.mktmpdir do |root|
-      error = assert_raises(Erx::Error) { VIRT.site_manifest_source(root) }
-      assert_equal 'the qemu-virt board has no site manifest config/manifest/qemu-virt-site.txt, ' \
-                   'so no website image or medium boot', error.message
+    without = Erx::Platform.new(name: 'qemu-virt', record: VIRT.record.reject { |key, _value| key == 'site_leaves_out' })
+    error = assert_raises(Erx::Error) { without.site_manifest_source(ROOT) }
+    assert_equal "the qemu-virt board's record config/platforms/qemu-virt.json has no site_leaves_out, " \
+                 'so no website image or medium boot', error.message
+    [nil, 'web', ['Web'], [1], [], %w[web web]].each do |leaves_out|
+      assert_raises(Erx::Error, leaves_out.inspect) { Erx::Platform.new(name: 'qemu-virt', record: record(site_leaves_out: leaves_out)) }
     end
   end
 

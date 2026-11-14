@@ -4,7 +4,7 @@
 -module(erx_pattern_test).
 -moduledoc """
 The display suite's client (tools/lib/erx/display_domain.rb): the session a
-start row keeps on the display `screen`, which opens a window with
+start row keeps on the display, granted to it as `screen`, which opens a window with
 `erx_win:open/2`, draws a known pattern into its buffer and presents it, so
 a screenshot of the display shows the pattern (docs/design-display.md,
 "Erlang clients" and "A display's session").

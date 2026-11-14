@@ -54,16 +54,20 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   QEMU virt download, with the QEMU command line that boots it: QEMU's
   `-kernel` takes the compressed file as it is. The site's image is built
   with `tools/erx boot --without-web`, which builds it into that directory
-  from the website's own system manifest,
-  [`config/manifest/qemu-virt-site.txt`](../config/manifest/qemu-virt-site.txt),
-  and boots it once on the terminal (quit QEMU with Ctrl-A then X). That
-  manifest is the development manifest without the web domain, which only
-  the host link serves and which would cost boot time; the image's build
-  runs the same manifest check over it as over the development manifest,
-  so the check proves what the site ships. `test/host/interactive_boot_test.rb`
-  fails when the two manifests' records differ in anything but the web
-  domain's rows and the room they take, so a change to the development
-  manifest is made to the site's too. The development image of a plain
+  from the website's own system manifest and boots it once on the terminal
+  (quit QEMU with Ctrl-A then X). That manifest is made from the
+  development manifest,
+  [`config/manifest/qemu-virt-development.txt`](../config/manifest/qemu-virt-development.txt),
+  at each build: it leaves out the domains that
+  [`config/platforms/qemu-virt.json`](../config/platforms/qemu-virt.json)'s
+  `site_leaves_out` names, the web domain, which only the host link serves,
+  and the display domain, which has no gpu on the page, each of which would
+  cost boot time, and gives back the room they took
+  ([docs/design-stopgap.md](../docs/design-stopgap.md), "The Phase 1
+  manifest check"). The image's build runs the same manifest check over it
+  as over the development manifest, so the check proves what the site
+  ships, and a change to the development manifest reaches the site's at
+  once. The development image of a plain
   `tools/erx boot` builds into `build/production-image/interactive/`, so
   it never replaces the website's.
 * The machine's disk is made by the build, not taken: a boot medium laid

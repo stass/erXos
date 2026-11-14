@@ -7,6 +7,7 @@
   "ram_bytes": 536870912,
   "fiasco_reserve": 33554432,
   "root_withheld": 2621440,
+  "site_leaves_out": ["web", "display"],
   "units": [
     {
       "key": "console-uart",

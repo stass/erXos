@@ -421,9 +421,9 @@ class DomPlannerTest < Minitest::Test
   # PL011s on one page and line, and its mini UART and auxiliary SPI controllers, included.
   def test_every_checked_in_manifest_keeps_its_units_whole
     manifests = Dir[File.join(ROOT, 'config/manifest/*.txt')]
-    assert_operator manifests.size, :>=, 3
+    assert_operator manifests.size, :>=, 2
     manifests.each do |path|
-      board = File.basename(path, '.txt').delete_suffix('-development').delete_suffix('-site')
+      board = File.basename(path, '.txt').delete_suffix('-development')
       platform = JSON.parse(File.read(File.join(ROOT, Erx::Platform.record_path(board))))
       context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: platform))
       admitted = Erx::Manifest.admit(source: File.binread(path), codec: @codec, context: context, planner: @planner)
@@ -602,17 +602,17 @@ class DomPlannerTest < Minitest::Test
     arguments = ManifestContextFixture.archive_arguments(@codec, boots: [*%w[display network session storage web], Erx::DisplayDomain::BOOT.name])
     context = Erx::Manifest::Context.new(**arguments.merge(platform: @context.platform))
     planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
-    source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT), platform: platform))
+    source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT, keep: [Erx::DisplayDomain::DOMAIN])))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: planner).bytes
   end
 
-  # The display domain serves screen, so its row carries screen's display record, whose
+  # The display domain serves display, so its row carries that service's display record, whose
   # words its creation puts in its environment (docs/design-display.md, "A display's
   # session"), and no other row carries one.
   def test_the_display_domain_s_row_carries_its_display_record
     lines = view_lines(display_manifest, 'display')
-    server = lines.grep(/\Aservice \d+ name=screen /).first[/ server=(\d+) /, 1]
-    assert_equal ["display #{server} name=screen policy=#{@codec.member('mf_display_policy', 'single')} " \
+    server = lines.grep(/\Aservice \d+ name=display /).first[/ server=(\d+) /, 1]
+    assert_equal ["display #{server} name=display policy=#{@codec.member('mf_display_policy', 'single')} " \
                   'idle_dim_s=0 idle_off_s=0'], lines.grep(/\Adisplay /)
   end
 
@@ -633,7 +633,7 @@ class DomPlannerTest < Minitest::Test
                  view_lines(bytes.sub('dispXay_policy=rio', 'display_policy=rio'), 'display-renamed')
     lines = view_lines(display_manifest(with_env.call('displayed=yes display_mode=x')), 'display-own')
     assert_empty lines.grep(/\Arefused /)
-    assert_equal 1, lines.grep(/\Adisplay \d+ name=screen /).size
+    assert_equal 1, lines.grep(/\Adisplay \d+ name=display /).size
   end
 
   def test_a_malformed_input_is_refused_by_the_helper

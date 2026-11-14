@@ -399,9 +399,26 @@ hash check is a stopgap residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
 manifest
 [config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt);
-the website's image has a manifest of its own,
-[config/manifest/qemu-virt-site.txt](../config/manifest/qemu-virt-site.txt),
-the same without the web domain, which the same check admits.
+the website's image has a manifest of its own, made from the development one
+whenever it is needed and never checked in (`Platform#site_manifest_source`): the
+development manifest without the configured domains the platform record's
+`site_leaves_out` names, which the same check admits. On QEMU `virt` those are
+the web domain, since the website's page has no host link and the web facet is
+all that domain serves, and the display domain, since the page has no gpu for it
+to drive; each would only cost boot time on the emulator's one core.
+`ManifestText.without_domain` takes a domain out as if it had never been written
+in: its record, the units it holds, the services it serves with their display
+records and the system domain's facets of them, and the limits, share and
+runtime limits only it names; it gives the room back where the manifest reckons
+it (the principal's memory and domain quota, and the machine's `root_memory`,
+including the domain's units' DMA memory, `max_domains` and `max_connections`), so
+the result keeps the development manifest's margin and gains no record, grant or
+authority it lacks. A domain whose service a session or another domain is
+granted, or whose removal would leave a record naming one it took, is refused,
+since what such a grant takes is reckoned only in the manifest's comments. The
+room given up stays outside the root's memory; no domain gains it, and the 250
+mcpu the two shares took is what the system share's reserve leaves free for the
+medium boots' test rows (`MediumBoot::EIGHTH_SHARE`).
 Its scope, against
 [design-system.md](design-system.md)'s properties, each kept property with a
 seeded violation and each refusal with a seeded record:
