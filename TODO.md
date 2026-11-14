@@ -669,11 +669,6 @@ it; git history is the record of completed work.
   framebuffer the harness's stand-in for the firmware sets up (design-platforms.md, "The firmware's framebuffer
   under QEMU"); the firmware's own node and a full-size screen are checked on the board by hand
   (design-platforms.md, "Trying a card on a board", step 5). No session is granted the display, as on QEMU virt.
-* [Medium] `tools/lib/erx/display_domain.rb`, `DisplayDomain::ROW`: the `display_domain` suite's display row is
-  a hand-kept copy of the development manifest's (its runtime limits and 24 MiB budget), with the service named
-  `screen`, and no test holds the two equal, so the suite can pass on a row the development image does not
-  ship. Build the suite's manifest from the development manifest's display records (`ManifestText`), changing
-  only what its client needs: the outer budget's pixel area and lane, a connection, and `restarts 0`.
 * [Medium] `tools/lib/erx/manifest.rb`, `check_framebuffer_windows`: a framebuffer window is checked against the
   platform record's register windows and RAM, not against the board tree's every `reg` and `ranges` (the GIC, the
   local peripherals, PCIe windows), which the record does not list; checking it against the board's own tree
