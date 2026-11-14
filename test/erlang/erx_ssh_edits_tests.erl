@@ -50,30 +50,42 @@ login(Kex, Client) ->
     {Host, User} = keys(),
     {Daemon, Port} = daemon(erx_ssh_edits_keys, conf(Host, User), []),
     try
-        Sid = connect(Client, Port, User, Kex),
-        Server = receive {kex_cookie, Pid, ?COOKIE} -> Pid after 5000 -> error(no_kex_cookie) end,
-        {Input, AlgSig} = receive {verify_user, Server, I, S} -> {I, S} after 5000 -> error(no_verify_user) end,
-        ?assertEqual(83, byte_size(AlgSig)),
-        [_VC, _VS, _IC, IS, HostKey | _] = strings(Input, 5),
-        ?assertMatch(<<?SSH_MSG_KEXINIT, ?COOKIE_TEXT, _/binary>>, IS),
-        ?assertEqual(ssh_message:ssh2_pubkey_encode(Host), HostKey),
-        ?assertEqual(Sid, crypto:hash(sha256, Input)),
-        #ssh{kex_input = Left, kex_strict_negotiated = Strict} = ssh_params(Server),
-        ?assertEqual(undefined, Left),
-        ?assertEqual(Client =:= strict, Strict),
-        refute_message(kex_cookie)
+        connect(Client, Port, User, Kex, fun(Sid) -> login_checks(Host, Client, Sid) end)
     after
         ssh:stop_daemon(Daemon)
     end.
 
-%% Logs in and answers the client's session identifier; a nostrict client
-%% runs in a peer node whose ssh_transport offers no strict key exchange.
-connect(strict, Port, User, Kex) ->
+%% What a login leaves behind: the server's KEXINIT carries the cookie,
+%% verify_user/6 gets the exchange's input and the algorithm-named
+%% signature, the session identifier hashes that input, and the server
+%% has cleared it. Runs while the client is still logged in.
+login_checks(Host, Client, Sid) ->
+    Server = receive {kex_cookie, Pid, ?COOKIE} -> Pid after 5000 -> error(no_kex_cookie) end,
+    {Input, AlgSig} = receive {verify_user, Server, I, S} -> {I, S} after 5000 -> error(no_verify_user) end,
+    ?assertEqual(83, byte_size(AlgSig)),
+    [_VC, _VS, _IC, IS, HostKey | _] = strings(Input, 5),
+    ?assertMatch(<<?SSH_MSG_KEXINIT, ?COOKIE_TEXT, _/binary>>, IS),
+    ?assertEqual(ssh_message:ssh2_pubkey_encode(Host), HostKey),
+    ?assertEqual(Sid, crypto:hash(sha256, Input)),
+    #ssh{kex_input = Left, kex_strict_negotiated = Strict} = ssh_params(Server),
+    ?assertEqual(undefined, Left),
+    ?assertEqual(Client =:= strict, Strict),
+    refute_message(kex_cookie).
+
+%% Logs in, returns Check(Sid) for the client's session identifier, and
+%% only then logs out. The server's connection process ends when the
+%% client's does, so whatever Check reads of the server must be read
+%% while the client is still logged in. A nostrict client runs in a peer
+%% node whose ssh_transport offers no strict key exchange.
+connect(strict, Port, User, Kex, Check) ->
     {ok, C} = ssh:connect({127,0,0,1}, Port, client_opts(User, Kex)),
-    #ssh{session_id = Sid} = ssh_params(C),
-    ssh:close(C),
-    Sid;
-connect(nostrict, Port, User, Kex) ->
+    try
+        #ssh{session_id = Sid} = ssh_params(C),
+        Check(Sid)
+    after
+        ssh:close(C)
+    end;
+connect(nostrict, Port, User, Kex, Check) ->
     Here = filename:dirname(code:which(?MODULE)),
     NoStrict = os:getenv("ERX_SSH_NOSTRICT_EBIN"),
     Args = ["-pa", os:getenv("ERX_SSH_EBIN"), Here],
@@ -88,7 +100,7 @@ connect(nostrict, Port, User, Kex) ->
         {ok, _} = peer:call(Peer, application, ensure_all_started, [ssh]),
         {ok, C} = peer:call(Peer, ssh, connect, [{127,0,0,1}, Port, client_opts(User, Kex)], 30000),
         {_, #data{ssh_params = #ssh{session_id = Sid}}} = peer:call(Peer, sys, get_state, [C]),
-        Sid
+        Check(Sid)
     after
         peer:stop(Peer)
     end.
@@ -259,9 +271,11 @@ host_key_blob() ->
     {Host, User} = keys(),
     {Daemon, Port} = daemon(erx_ssh_edits_keys, (conf(Host, User))#{host_form => blob}, []),
     try
-        Sid = connect(strict, Port, User, 'curve25519-sha256'),
-        Server = receive {kex_cookie, Pid, ?COOKIE} -> Pid after 5000 -> error(no_kex_cookie) end,
-        receive {sign, Server, Sid} -> ok after 5000 -> error(no_sign) end
+        connect(strict, Port, User, 'curve25519-sha256',
+                fun(Sid) ->
+                        Server = receive {kex_cookie, Pid, ?COOKIE} -> Pid after 5000 -> error(no_kex_cookie) end,
+                        receive {sign, Server, Sid} -> ok after 5000 -> error(no_sign) end
+                end)
     after
         ssh:stop_daemon(Daemon)
     end.
@@ -286,8 +300,8 @@ stock_module() ->
     {Host, User} = keys(),
     {Daemon, Port} = daemon(erx_ssh_edits_plain_keys, conf(Host, User), []),
     try
-        <<_:32/binary>> = connect(strict, Port, User, 'curve25519-sha256'),
-        refute_message(kex_cookie)
+        connect(strict, Port, User, 'curve25519-sha256',
+                fun(<<_:32/binary>>) -> refute_message(kex_cookie) end)
     after
         ssh:stop_daemon(Daemon)
     end.
