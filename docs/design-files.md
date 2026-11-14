@@ -206,7 +206,9 @@ Non-goals:
   open of one fails, since erXos reaches devices by capability.
 * setuid, and 9P2000.L's authentication: a grant's identity is the lane
   its requests arrive on, so `attach` takes no authentication fid.
-* A union of several servers at one mount point.
+* A union of several servers at one mount point. The session's export
+  over a grant at `/etc` and `/dev`, where the export's names are fixed,
+  is the one join ([Narrowing for a program](#narrowing-for-a-program)).
 
 ## Overview
 
@@ -1421,6 +1423,30 @@ starter's fid on the same grant, with rights within the starter's:
   `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/tty`; and
   `/etc/passwd` and `/etc/group`, with qid paths from the session's
   counter ([design-programs.md](design-programs.md)).
+
+**Where the export and a grant meet.** A session may also mount a grant
+at `/etc` or `/dev`, where the export serves names of its own: a session
+that holds the start service's grant mounts the `etc` tree at `/etc`
+([design-apps.md](design-apps.md#the-start-table)), and an
+administrator's session mounts the device service's tree at `/dev`. At
+those two places the export answers its own names and the program's
+handler passes every other name to the grant. A walk of `passwd` or
+`group` under `/etc`, or of `null`, `zero`, `urandom` or `tty` under
+`/dev`, reaches the export's file; a walk of any other name goes to the
+program's fid on the session's grant at that place, which the handler
+walked within the root and rights the program's namespace was narrowed
+to, so a program narrowed away from the grant finds the export's names
+alone, and one given the grant read-only reaches its files read-only.
+A listing gives the export's names and then the grant's entries less
+any of those names, so every name a listing shows is the file a walk of
+it reaches; the handler numbers the joined listing's offsets itself. A
+writable file of the grant never replaces one of the export's names: a
+grant's own `passwd` or `null` is neither listed nor reached, and a
+create, rename, link or remove that names one of the export's names at
+those places is refused with `eacces` without reaching the grant. This
+is the one place a program's namespace joins two servers, and the names
+the export takes there are its own, fixed; it is no union mount
+(Non-goals).
 
 The program itself receives none of this: its sub-space gets its channel,
 its data area and its pipe ends, and the fids live in the session's
@@ -2844,6 +2870,20 @@ report, so a passing run shows the code under test ran.
   `mkdir /data` with `eexist`, and one started with no mount at all, as
   `within -f inspect -- ps` starts it, whose every path but `/` fails with
   `enoent`.
+* The export over a grant: a session with a writable fixture grant at
+  `/etc` whose tree holds `rc.conf` and its own `passwd`, and one at
+  `/dev` holding `null` and `draw`. A native program's read of
+  `/etc/passwd` gets the export's text, its read of `/etc/rc.conf` the
+  grant's, and its edit of `/etc/rc.conf` reaches the grant; its listing
+  of `/etc` shows `passwd` once, with the export's qid, and every name
+  it lists opens; `/dev/zero` and
+  `/dev/urandom` read as theirs, `/dev/draw` reaches the grant, and a
+  write to `/dev/null` reaches no grant; a create or remove of
+  `/etc/passwd` answers `eacces` and the fixture's `passwd` is
+  unchanged; a program narrowed to the grant read-only gets `erofs` on
+  the edit. Seeded: a join that asks the grant first, which reads the
+  fixture's `passwd`; and a listing that leaves the grant's `passwd` in,
+  which lists it twice.
 * The data area: a program with one slot whose two threads read at once,
   one waiting for the other's slot; reads and writes of every size from 1
   byte to 64 KiB and across slot boundaries, compared with the file; a

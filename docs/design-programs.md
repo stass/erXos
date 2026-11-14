@@ -988,7 +988,10 @@ for its grant's domain alone
 **Devices.** The session's export serves `/dev/null`, `/dev/zero`,
 `/dev/urandom`, the last from the kernel's entropy generator, and
 `/dev/tty`, in every program's namespace that holds the export's `/dev`.
-These, `/bin`, `/etc/passwd` and `/etc/group` form one tree of the
+Where the session also mounts a grant at `/dev` or `/etc`, these names
+stay the export's and every other name there reaches the grant
+([design-files.md](design-files.md#narrowing-for-a-program), "Where
+the export and a grant meet"). These, `/bin`, `/etc/passwd` and `/etc/group` form one tree of the
 export, apart from the tree of each of the session's local providers,
 which is named for its mount when it is mounted, so that a provider
 mounted again is another tree; they take their qid paths from the

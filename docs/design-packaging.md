@@ -37,7 +37,8 @@ deletion, as on macOS, where an app is installed by copying it into
 cp dashboard.app /apps/          install it
 ls /apps                         dashboard.app  system
 ls /apps/system                  the image's apps, read-only
-service dashboard enable         start it now and at every boot
+service dashboard enable         start it at every boot
+service dashboard start          start it now
 cp dashboard.app /apps/          update it: the old one runs until the new one passes its checks
 mount /apps/dashboard.app /mnt   look inside it, read-only, at /mnt; unmount /mnt to end
 rm /apps/dashboard.app           remove it; its data stays
@@ -153,7 +154,8 @@ edited.
 
 **How does it reach a running machine?** `cp dashboard.app /apps/` at
 the shell of a session that holds the `start` grant, then `service
-dashboard enable` if it should start at boot. Copying a newer
+dashboard enable` if it should start at boot and `service dashboard
+start` to start it now. Copying a newer
 `dashboard.app` over it updates it, with its data and its `/etc/rc.conf`
 settings as they were. `rm /apps/dashboard.app` removes it and keeps
 its data. `ls /apps` lists the installed apps, `mount
@@ -205,7 +207,7 @@ copies with `file:copy/2` between two names
 (`otp/lib/kernel/src/file_server.erl:177-193`); design-shell.md has `cp`
 open its target itself and report a failed close.
 
-Two facts of the client decide what `/apps` must answer. On a writable
+Three facts of the clients decide what `/apps` must answer. On a writable
 grant, `erx_file_remote` opens a file for writing with one `lcreate`,
 which creates the file or opens the one already there in one step, and a
 write without append or read carries `O_TRUNC`
@@ -214,6 +216,13 @@ copy over an installed package reaches the tree as a truncating create
 of the same name. And the shell's `rm` of a file is `file:delete/1`
 (`erlang/apps/erx_shell/src/erx_cmd_rm.erl:37-48`), which `prim_file`
 sends as one unlink (`otp/erts/preloaded/src/prim_file.erl:1231-1242`).
+A native program overwrites a file as FreeBSD's `cp` does, which opens
+an existing destination `O_WRONLY | O_TRUNC` without `O_CREAT`
+(`bin/cp/utils.c:189-199`, FreeBSD 15.1.0), and the program's handler
+sends an open without `O_CREAT` as a walk to the file and an `lopen`
+([design-programs.md](design-programs.md#descriptors-and-files)), so
+the same update reaches the tree as a truncating, write-only `lopen` of
+the installed package.
 The namespace already mounts an EROFS image read-only at a point,
 `erx_ns:mount({erofs, Image}, To, Options)`, reading it through
 `erx_verity` ([design-files.md](design-files.md#building-binding-and-mounting)),
@@ -346,7 +355,8 @@ administrator types `cp clock.app /apps/`. The copy lands in a
 temporary file; when it closes, the package process checks the file and
 its header, admits it, makes it durable, renames it to `clock.app`,
 registers the principal `clock` and publishes the package set with it,
-and `cp` succeeds. `service clock enable` starts it. A newer build,
+and `cp` succeeds. `service clock enable` makes it start at boot, and
+`service clock start` starts it now. A newer build,
 copied the same way over `clock.app`, lands in a temporary file too, and
 `clock` runs on unchanged while it is checked; once it passes, the
 package process publishes the set without `clock`, so the start service
@@ -394,7 +404,8 @@ board's source does not hold and the build record lists:
   script (the base every session boots, the client side of the display,
   `erx_memdraw`, `erx_win` and `erx_ui`, and `erx_app`), and whose limits
   are a session's defaults with `SPACES` (property 14);
-* **one facet row for each service of `services`**, granted to the app
+* **one facet row for each service of `services`**, which never holds
+  `packages`, `start`, `apps` or `etc` (property 19), granted to the app
   template, named as the service is, with the parameters the service's
   ABI file gives as its defaults. A service may be named in `services`
   only if its ABI file declares a default for every parameter its rows
@@ -424,8 +435,12 @@ the packages are well formed**, beside the eighteen of
 
 1. at most one `apps` row; each name of `services` is a service of the
    manifest whose ABI file gives every parameter a default, other than
-   `packages`, which every app holds already, and `start` and `apps`,
-   which would let an app command the start table and install packages;
+   `packages`, which every app holds already, and `start`, `apps` and
+   `etc`, which would let an app command the start table, install
+   packages and rewrite `/etc/rc.conf`; property 17 checks the resolved
+   manifest for the last whatever the rows' source, since every writable
+   grant of the `etc` tree must belong to a template that holds `start`
+   ([design-system.md](design-system.md#the-manifest));
    when it names `inspect`, the scope `erx_domain_core:inspect_scope/3`
    gives an app principal is its own, never `all`, which would show an
    app the other apps' domains;
@@ -456,8 +471,8 @@ the packages are well formed**, beside the eighteen of
 Each clause has a seeded violation: a check that counts the app template
 once in property 18, which admits a row whose apps together pass the
 display's budget; an `apps` row whose `max` plus the manifest's start
-rows pass 256; `apps` in `services`; a service in `services` whose ABI
-file gives a parameter no default; two enabled packages whose memory
+rows pass 256; `apps` in `services`; `etc` in `services`; a service
+in `services` whose ABI file gives a parameter no default; two enabled packages whose memory
 passes the `apps` budget; a `package` row whose declaration needs a
 service the row lacks; a configured domain's `data` row carrying `tree
 apps`.
@@ -626,7 +641,7 @@ reaches `/data`, through a fid its handler walks
 
 | Name | Read | Create, write and remove |
 | --- | --- | --- |
-| `NAME.app` | the installed package's bytes | a create (`lcreate`) that truncates, of a name that is not one of the image's, starts a copy, published at its close whether or not the name holds a package ([Installing, updating and removing](#installing-updating-and-removing)); a remove (`unlinkat`) removes the package |
+| `NAME.app` | the installed package's bytes | a create (`lcreate`) that truncates, of a name that is not one of the image's, or a write-only, truncating open (`lopen`) of the installed package, starts a copy, published at its close whether or not the name holds a package ([Installing, updating and removing](#installing-updating-and-removing)); a remove (`unlinkat`) removes the package |
 | `system/NAME.app` | the image package's bytes | none: every change answers `erofs` |
 
 It lists one `NAME.app`, a regular file, for every installed package,
@@ -639,6 +654,17 @@ starts empty: one that appends or also reads answers `einval`, and one
 with `O_EXCL` of a name the tree holds answers `eexist`. While a copy is
 written, the name goes on holding the package it held, and that package
 goes on running.
+
+An `lopen` of an installed `NAME.app` that is write-only and truncating
+is the same act as that create: it starts a copy of its own, in a slot
+of its own, whose close answers as a create's copy does, so a native
+`cp` over a package updates it as the shell's does. Every other
+writing `lopen`, one without truncation, or that appends or also
+reads, answers `einval`, and an `lopen` of a node whose name holds
+another package since its walk, or none, answers `eio` whatever its
+mode, as a read of an open of it does ([Identity](#apps)); neither
+touches the installed package. An `lopen` for reading reads, as any
+open does.
 
 **Reads.** A read that reaches into a package's header is answered from
 the header the package process reads again from `packages`, and served
@@ -1029,7 +1055,7 @@ or not `/apps` holds `clock.app`:
 
 | Step | Why it must exist |
 | --- | --- |
-| 1. the shell's `cp` creates `/apps/clock.app`, write-only and truncating; the `apps` tree accepts a name `NAME.app` with NAME an identifier that is not a name of the image's packages, and opens a fresh, empty temporary file in `packages/`, named `tmp.K` for the first of `max` slots that is free. An installed `clock.app` stays as it is, published and running | copies land on the same file system as their final name, so the rename is atomic; a temporary file has no name in `/apps`, so no other open can write it; an update changes nothing until it has passed |
+| 1. the shell's `cp` creates `/apps/clock.app`, write-only and truncating, or a native `cp` opens the installed `clock.app` the same way with `lopen`; the `apps` tree accepts a name `NAME.app` with NAME an identifier that is not a name of the image's packages, and opens a fresh, empty temporary file in `packages/`, named `tmp.K` for the first of `max` slots that is free. An installed `clock.app` stays as it is, published and running | copies land on the same file system as their final name, so the rename is atomic; a temporary file has no name in `/apps`, so no other open can write it; an update changes nothing until it has passed |
 | 2. `cp` writes the bytes; each write is a request of the copy's handle to `erx_pkg_io`, at most `pkg_bytes_max` bytes in all | |
 | 3. `cp` closes the file, and the close waits for the steps below. The writing open has ended, so nothing writes the file from here on | the bytes checked are the bytes published |
 | 4. the package process runs the file check on the temporary file, its length and its first `pkg_header_max` bytes, under the name `clock.app` and with `{signers, Keys}` | a copy cut short, run on, too large or misnamed never gets a published name; only a trusted signer's package runs |
@@ -1264,7 +1290,7 @@ tree"): it shows what an app's state is, and takes no command.
 
 | Operation | Result |
 | --- | --- |
-| `cp NAME.app /apps/` | installs, or updates the installed app of the name. Errnos at the create: `einval` for a name not of the form `NAME.app` with NAME an identifier, or an open that appends or also reads; `eexist` for a name of the image, or an exclusive create of a name `/apps` holds; `enospc` while `max` copies are open; `eagain` while the `packages` grant is not in place; `eio` while the directory is past the scan bound. A write past `pkg_bytes_max`, 1 GiB, answers `efbig`. Errnos at the close: `efbig` for a file past the size bound; `einval` for a file the file check refuses for its header, its length or its name, or whose name is not an app name; `eacces` for a header that names no trusted signer or carries a bad signature; `eperm` for an admission refused by `no_apps`, ABI, architecture, memory or need; `eexist` for a name of the manifest, or one another signer holds in this boot; `enospc` for no free entry; `eio` for a failed read, write, publication, rename or checkpoint of `packages`, or a lifetime that ended. After every refusal the installed package of the name, if any, is published and running as before |
+| `cp NAME.app /apps/` | installs, or updates the installed app of the name, whether `cp` creates the name (`lcreate`), as the shell's does, or opens the installed package write-only and truncating (`lopen`), as a native FreeBSD `cp` does. Errnos at the create or the open: `einval` for a name not of the form `NAME.app` with NAME an identifier, or an open that appends, also reads or, at an `lopen`, does not truncate; `eio` at an `lopen` of a node whose name holds another package since its walk, or none; `eexist` for a name of the image, or an exclusive create of a name `/apps` holds; `enospc` while `max` copies are open; `eagain` while the `packages` grant is not in place; `eio` while the directory is past the scan bound. A write past `pkg_bytes_max`, 1 GiB, answers `efbig`. Errnos at the close: `efbig` for a file past the size bound; `einval` for a file the file check refuses for its header, its length or its name, or whose name is not an app name; `eacces` for a header that names no trusted signer or carries a bad signature; `eperm` for an admission refused by `no_apps`, ABI, architecture, memory or need; `eexist` for a name of the manifest, or one another signer holds in this boot; `enospc` for no free entry; `eio` for a failed read, write, publication, rename or checkpoint of `packages`, or a lifetime that ended. After every refusal the installed package of the name, if any, is published and running as before |
 | `rm /apps/NAME.app` | removes the installed package and answers `ok`; `enoent` for no package of the name; `erofs` in `/apps/system`; `eio` for a failed deletion or checkpoint, a directory past the scan bound, or a lifetime that ended |
 | `ls /apps`, `ls /apps/system` | every package, installed or of the image, admitted or refused, each a regular file |
 | `cat`, `cp` from `/apps/NAME.app` | the package's bytes; `eio` for a header changed on the medium since its check, or once the name holds another package or none since the open |
@@ -1273,7 +1299,7 @@ tree"): it shows what an app's state is, and takes no command.
 The reason of every refusal goes to the log. Who holds `start`, and so
 `apps`, is the manifest's ([design-apps.md](design-apps.md#interfaces)).
 
-**The `apps` tree**, in the system domain, takes `lcreate`, `write`,
+**The `apps` tree**, in the system domain, takes `lcreate`, `lopen`, `write`,
 `clunk`, `read`, `getattr`, `readdir` and `unlinkat` as [`/apps`](#apps)
 says, with the same errnos. Its `clunk` answers the copy's verdict,
 which the file service passes back to the client once the file's owner
@@ -1553,7 +1579,7 @@ it guards.
 | the app session's plan in `erx_domain_core` | the session's rows are `packages` and the rows its needs name; every minted scope names the app's principal; the session's memory is the declared one; one header admitted as an image package and as an installed one gives the same plan (PK10) | a plan that grants every row of the template; a scope computed from the template's key; a plan that grants an image package the template's whole row set, which the comparison catches |
 | the storage mint's root for an app | one name under two signers and as an image package gives three roots, `apps/N/<hex>`, `apps/N/<hex2>` and `apps/N/image` | a root of the name alone, which gives one |
 | the `apps` tree's header reads | a header read answers the authenticated bytes; the same header changed on the simulated medium after the check answers `eio` | the hash check removed, which serves the changed header |
-| the `apps` tree's names and identity, through the real client | `cp` installs a new name and updates an installed one, and its close's errno reaches `cp`; `rm` sends one `unlinkat`; a create of `ctl`, an appending open and a read-write open answer `einval`; creates and removes in `system/` answer `erofs`; an open held across an update, and one held across a removal and a reinstall of the same image, answer `eio`, and a new open of the name has a qid path that neither earlier package had, also after a restart of the package process between them | a qid path drawn from the name, which gives the reinstalled package its predecessor's path; a counter of the tree's own, which the restart resets; a read that reopens the name, which serves the new package to the old open |
+| the `apps` tree's names and identity, through the real client | `cp` installs a new name and updates an installed one, and its close's errno reaches `cp`; a write-only, truncating `lopen` of an installed package, as a native `cp` sends it, takes a slot of its own, two such opens at once two slots, and its close publishes the new package or answers the same errno as a create's copy of the same bytes, the old package published and running after a refusal; an `lopen` without truncation, and one of a node replaced since its walk, answer `einval` and `eio` with the installed package unchanged; `rm` sends one `unlinkat`; a create of `ctl`, an appending open and a read-write open answer `einval`; creates and removes in `system/` answer `erofs`; an open held across an update, and one held across a removal and a reinstall of the same image, answer `eio`, and a new open of the name has a qid path that neither earlier package had, also after a restart of the package process between them | an `lopen` passed to the default open, which truncates the installed package in place and fails the old app's next read; a check of the node's name alone, which opens a replaced node; a qid path drawn from the name, which gives the reinstalled package its predecessor's path; a counter of the tree's own, which the restart resets; a read that reopens the name, which serves the new package to the old open |
 | the shell's `mount` over a fixture `apps` tree | the mount lists the image at `DIR` and reads a file as the image holds it; after the package is replaced, reads at `DIR` answer `eio`, and a second mount reads the new package; a mount of a package whose header the tree answers `eio` is refused and the namespace is unchanged | a mount that reads the header and the image through two opens, which a fixture that replaces the package between them catches with old layout over new bytes |
 | the session's export across a mount and a remount | a program holds a file of a mount open; the point is unmounted and mounted with another image whose inode numbers repeat; a second program's open of the same path gets a file-table entry of its own and the new bytes | an export that names a tree by its mount point, which joins the second open to the first's entry |
 | `erx_app` over a fixture `/app` | the declared applications start; a fixture app that ships a module of the release's name leaves the release's module loaded, and only the app fails | the app's paths added at the front of the code path, which loads the app's module |
@@ -1579,15 +1605,20 @@ it guards.
 * run-time install: `cp dashboard.app /apps/` succeeds, `/proc/packages`
   shows it `admitted`, `mount /apps/dashboard.app /mnt` and `ls
   /mnt/lib` list its application and `cat` of a file under it matches the
-  app directory's; `service dashboard enable` starts it; a reboot keeps
+  app directory's; `service dashboard enable` starts nothing and
+  `service dashboard start` starts it; a reboot keeps
   it; a copy whose session is killed halfway publishes no name; a copy
   one byte short fails its `cp` with `EINVAL` and publishes nothing;
-* update: with the app running, a copy of a newer build over it runs the
-  new code with the app's files kept and `/proc/packages` showing the new
-  version; a newer build one byte short fails its `cp` and leaves the old
-  one running, its session never ended; reads at `/mnt` answer `EIO`
+* update: with the app running, a copy of a newer build over it, by the
+  shell's `cp` and by a native test program that overwrites as FreeBSD's
+  `cp` does, `O_WRONLY | O_TRUNC` without `O_CREAT`, runs the new code
+  with the app's files kept and `/proc/packages` showing the new
+  version; a newer build one byte short fails either copy and leaves the
+  old one running, its session never ended; reads at `/mnt` answer `EIO`
   after the update; seeded: the update without the publication, after
-  which the old session runs across the rename;
+  which the old session runs across the rename; a tree whose `lopen`
+  answers `einval` to every writing open, after which the native copy
+  fails and the old version runs on;
 * removal: `rm /apps/dashboard.app` leaves no package or row, no session
   of it once the publication has answered, and the app's directory in
   place; `rm` of a package in `/apps/system` answers `EROFS`; seeded: the removal
@@ -1755,7 +1786,9 @@ Questions for the owner, each with a recommendation:
 ## References
 
 * FreeBSD: `pkg-delete(8)`, `pkg.conf(5)` (signature checking against
-  trusted fingerprints), `rc.conf(5)`, `rm(1)`.
+  trusted fingerprints), `rc.conf(5)`, `rm(1)`, `cp(1)`. Read for this
+  design at `release/15.1.0`: `bin/cp/utils.c` (SHA-256
+  `520f936042c8989d11e32788a8db34d4339f65834a12e25e6eb4382f24d16f2d`).
 * Android: application signing and the application sandbox.
   <https://source.android.com/docs/security/features/apksigning>,
   <https://source.android.com/docs/security/app-sandbox>

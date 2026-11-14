@@ -10,7 +10,7 @@ it; git history is the record of completed work.
 
 * [High] apps, [design-packaging.md](docs/design-packaging.md): the packaging design awaits an outside
   review of its update path, its `mount` and its `/etc/rc.conf`, and the answers to its remaining questions
-  for the owner (its "Risks and decisions", and design-apps.md's); then Track A's parts 2 and 3 build it
+  (its "Risks and decisions"); then Track A's parts 2 and 3 build it
   ([plan.md](docs/plan.md#track-a-apps)). An app names its needs, memory and code, and one `apps` row bounds
   every app; each app is a plain file, `/apps/NAME.app` or `/apps/system/NAME.app`; installing is `cp
   NAME.app /apps/`, whose close checks, admits and publishes the package by one rename, a copy over an
@@ -664,9 +664,19 @@ it; git history is the record of completed work.
   read-only `rc.conf` node; `erx_starter_rc` only reads, from the `etc` grant, and its write path and the
   `superseded` rule go; `erx_starter` reads `rc.conf` before every `ctl` command and writes nothing;
   `erx_cmd_service`'s `enable` and `disable` edit `/etc/rc.conf` with `erx_start_table:set/3` (moved where a
-  session can call it), by a new file and a rename, then write `start` or `stop`; the development manifests'
+  session can call it), by a new file and a rename, and write nothing to `ctl`; `ctl` gains `onestart`,
+  `onestop` and `onerestart`, and `erx_start_table:command/3` judges every command after the read
+  (design-apps.md, "How a command is judged"), replacing `apply_ctl/4`'s check, with the errnos `enoent`,
+  `enotsup`, `ealready` and `esrch`; `erx_cmd_service` drops its decisions from `/proc/apps` (`plan/3` and
+  `act/4`, `erlang/apps/erx_shell/src/erx_cmd_service.erl:236-290`, which refuse a start from the cached
+  `enabled` and `state`) and answers from the write's errno, and its `service -e` reads `/etc/rc.conf`
+  itself with the rows' `declared_enable`; the development manifests'
   `service apps` and `facet apps` rows, the session's mount of the facet, the chokepoint that the start
   service writes no file on `etc`, and the QEMU checkpoints that read `/apps/rc.conf` or write `/apps/ctl`.
+  The manifest check gains property 17's clause that every writable grant of `etc` in the resolved manifest
+  belongs to a template holding `start` ([design-system.md](docs/design-system.md#the-manifest)), and a
+  program's handler joins the session's export and its grant at `/etc` and `/dev`
+  ([design-files.md](docs/design-files.md#narrowing-for-a-program)), so a native editor reaches `rc.conf`.
   This removes the A5c residual of an `enable` interrupted during its write.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint

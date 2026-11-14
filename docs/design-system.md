@@ -597,9 +597,20 @@ violation fails the build with the property, the record and the field:
     whose start rows fill a principal's quota or memory with no room left
     for the console's login fails the build, not the boot. A system
     principal with no session template gives the console no session, and
-    none is planned for it. Seeded violation: a check that plans the
-    enabled rows alone, which admits a system principal whose memory
-    holds its start row but not root's console session beside it.
+    none is planned for it. Every facet row of the resolved manifest,
+    the rows the build derives included, that grants the data
+    partition's `etc` tree, which holds `/etc/rc.conf`, with rights
+    other than read-only is granted to a session template that a facet
+    row also grants the start service's tree, `start`, so only who may
+    command the start table may rewrite its settings
+    ([design-apps.md](design-apps.md#the-start-table)). Seeded
+    violations: a check that plans the enabled rows alone, which admits
+    a system principal whose memory holds its start row but not root's
+    console session beside it; a board source that grants `etc`
+    read-write to a session template holding no `start`; and an `apps`
+    row naming `etc` in `services` under a build whose property 19 lacks
+    its `etc` exclusion, so the derived row grants `etc` to the app
+    template, which this clause still refuses.
 18. **A display's pixel areas fit its budget:** every service of the
     `windows` interface has exactly one `display` record and every
     `display` record names such a service, so no grant of a display
