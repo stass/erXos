@@ -421,4 +421,43 @@ class FiascoProvenanceTest < Minitest::Test
       Erx::FiascoProvenance.recorded_compile(command_record('/source/root.h'), object: 'other.o')
     end
   end
+  # Every GCC header the build reads from the cross gcc's include directory is
+  # recorded with the release, the tree's copies of the license texts and the
+  # hash of its own bytes; a cross gcc missing one is refused.
+  def with_cross_gcc(headers:)
+    Dir.mktmpdir do |temporary|
+      root = File.realpath(temporary)
+      include_dir = File.join(root, 'gcc/lib/gcc/aarch64-elf/16.2.0/include')
+      FileUtils.mkdir_p([include_dir, File.join(root, 'gcc/bin'), File.join(root, 'config/provenance/notices')])
+      headers.each { |name| File.write(File.join(include_dir, name), "/* #{name} */\n") }
+      %w[COPYING3 COPYING.RUNTIME].each { |name| File.write(File.join(root, 'config/provenance/notices', name), "#{name}\n") }
+      File.write(File.join(root, 'gcc/bin/aarch64-elf-gcc'), "#!/bin/sh\n")
+      File.chmod(0o755, File.join(root, 'gcc/bin/aarch64-elf-gcc'))
+      cross = Data.define(:target) { def program(name) = "aarch64-elf-#{name}" }.new('aarch64-elf')
+      original = ENV.fetch('PATH')
+      ENV['PATH'] = File.join(root, 'gcc/bin')
+      begin
+        yield root, include_dir, cross
+      ensure
+        ENV['PATH'] = original
+      end
+    end
+  end
+
+  def test_the_gcc_registry_records_each_header_the_build_reads
+    with_cross_gcc(headers: %w[stdarg.h stdbool.h stddef.h]) do |root, include_dir, cross|
+      records = Erx::FiascoProvenance.gcc_registry(root: root, cross: cross)
+      assert_equal %w[stdarg.h stdbool.h stddef.h].map { |name| "toolchain/gcc-16.2.0/#{name}" }, records.map { |record| record.fetch('label') }
+      assert_equal %w[stdarg.h stdbool.h stddef.h].map { |name| File.join(File.realpath(include_dir), name) }, records.map { |record| record.fetch('path') }
+      assert_equal [Digest::SHA256.hexdigest("/* stddef.h */\n")], records.last(1).map { |record| record.fetch('sha256') }
+      assert_equal [File.join(root, 'config/provenance/notices/COPYING3'), File.join(root, 'config/provenance/notices/COPYING.RUNTIME')],
+                   records.first.fetch('notices').map { |notice| notice.fetch('path') }
+    end
+  end
+
+  def test_the_gcc_registry_refuses_a_cross_gcc_without_a_header_the_build_reads
+    with_cross_gcc(headers: %w[stdarg.h stdbool.h]) do |root, _include_dir, cross|
+      assert_raises(Errno::ENOENT) { Erx::FiascoProvenance.gcc_registry(root: root, cross: cross) }
+    end
+  end
 end

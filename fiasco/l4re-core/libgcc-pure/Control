@@ -1,4 +1,0 @@
-provides: libgcc-pure
-requires: ldscripts libgcc-headers
-source-pkg: libgcc
-maintainer: georg.kotheimer@kernkonzept.com

@@ -1,6 +1,5 @@
+<!-- Modified by erXos: the stopgap's user programs link no compiler runtime. -->
 # Compiler runtime
 This is a meta-package that provides configuration and selection of the compiler
-runtime libraries for GCC and Clang.
-
-See libgcc, libgcc_eh, libclang_rt and libunwind_llvm, and each of their pure
-and crt variants.
+runtime libraries for GCC and Clang. The tree carries none of those libraries, so
+it selects none.

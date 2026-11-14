@@ -1,3 +1,4 @@
+# Modified by erXos: the link takes no compiler runtime start or end object.
 PKGDIR		?= .
 L4DIR		?= $(PKGDIR)/../../..
 
@@ -15,15 +16,9 @@ include $(LIBCSRC_DIR)/make_vars.mk
 # ldscripts, i.e. this package.
 COMPILER_RT = compiler-rt-crt
 
-LDSCRIPTS_CRT_BEGIN_PC = $(if $(CONFIG_COMPILER_RT_USE_LIBGCC),%{static:%:if-exists(%:search(crtbeginT.o %(libdir)) %:search(crtbegin.o %(libdir)));shared|static-pie:%:search(crtbeginS.o %(libdir));:%:search(crtbegin.o %(libdir))}) \
-                         $(if $(CONFIG_COMPILER_RT_USE_LIBCLANG_RT),%:search(crtbegin.o %(libdir))) \
-
-LDSCRIPTS_CRT_END_PC = $(if $(CONFIG_COMPILER_RT_USE_LIBGCC),%:search(%{shared|static-pie:crtendS.o;:crtend.o} %(libdir))) \
-                       $(if $(CONFIG_COMPILER_RT_USE_LIBCLANG_RT),%:search(crtend.o %(libdir))) \
-
 define PC_EXTRA
-Link_Start= %{nocrt1|shared:; :%:search(crt1%{static:;static-pie:.p;:.s}.o %(libdir))} %:search(crti%{shared:.s}.o %(libdir)) $(LDSCRIPTS_CRT_BEGIN_PC)
-Link_End=   $(LDSCRIPTS_CRT_END_PC) %:search(crtn%{shared:.s}.o %(libdir))
+Link_Start= %{nocrt1|shared:; :%:search(crt1%{static:;static-pie:.p;:.s}.o %(libdir))} %:search(crti%{shared:.s}.o %(libdir))
+Link_End=   %:search(crtn%{shared:.s}.o %(libdir))
 endef
 
 LD_SCRIPTS      = main_stat.ld main_rel.ld main_dyn.ld \
@@ -48,8 +43,6 @@ LIBC_ARCH_FAMILY ?= $(LIBC_ARCH)
 INSTALL_TARGET	= $(LD_SCRIPTS) crti.o crtn.o crt1.o crti.s.o crtn.s.o crt1.s.o crt1.p.o
 DEFINES_crt1.s.o += -fPIE
 DEFINES_crt1.p.o += -fPIE
-
-REQUIRES_LIBS_all_lib := $(if $(BID_COMPILER_IS_CLANG),,libgcc-headers)
 
 DEPS += $(foreach file,crti_s.o kip_addr.o, $(call BID_dot_fname,$(file)).cmd)
 

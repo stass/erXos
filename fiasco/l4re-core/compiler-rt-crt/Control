@@ -1,5 +1,4 @@
+# Modified by erXos: no compiler runtime object is linked.
 provides: compiler-rt-crt
-requires: libgcc-crt[config(CONFIG_COMPILER_RT_USE_LIBGCC)]
-          libclang_rt-crt[config(CONFIG_COMPILER_RT_USE_LIBCLANG_RT)]
 source-pkg: compiler-rt
 maintainer: georg.kotheimer@kernkonzept.com

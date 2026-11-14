@@ -154,33 +154,37 @@ module Erx
       ToolchainProvenance.llvm(root: root, resource_dir: BoundedFile.read(resource.fetch('log'), maximum: 4096).strip)
     end
 
-    # GCC's stdbool.h, the one GCC header Fiasco's build includes, from
-    # whatever release of the cross gcc (CrossToolchain) is first on PATH, recorded with its
-    # release and the hash of its bytes. Its notices are the tree's copies
-    # of GCC's license texts, which do not vary between GCC releases.
+    # The GCC headers Fiasco's build includes, from whatever release of the
+    # cross gcc (CrossToolchain) is first on PATH, each recorded with its
+    # release and the hash of its bytes. The build takes them from the cross
+    # gcc's own include directory. Their notices are the tree's copies of GCC's
+    # license texts, which do not vary between GCC releases.
     GCC_LICENSE = 'GPL-3.0-or-later WITH GCC-exception-3.1'
-    GCC_NOTICES = %w[COPYING3 COPYING.RUNTIME].map { |name| "fiasco/l4re-core/libgcc/contrib/gcc-16/#{name}" }.freeze
+    GCC_NOTICES = %w[COPYING3 COPYING.RUNTIME].map { |name| "config/provenance/notices/#{name}" }.freeze
+    GCC_HEADERS = %w[stdarg.h stdbool.h stddef.h].freeze
 
     def self.gcc_registry(root:, cross:)
       gcc = cross.program('gcc')
       compiler = HostPath.find_program(gcc, directories: HostPath.directories(ENV.fetch('PATH', '')))
       raise Error, "missing #{gcc}" unless compiler
-      installation = File.expand_path('..', File.dirname(File.realpath(compiler)))
+      installation = File.realpath(File.expand_path('..', File.dirname(File.realpath(compiler))))
       # GCC installs its headers in lib/gcc/<target>/<release>/include.
-      headers = Dir.glob("lib/gcc/#{cross.target}/*/include/stdbool.h", base: installation)
-      raise Error, "cannot find one stdbool.h of #{gcc} under #{installation}" unless headers.size == 1
-      release = headers.first.split('/').fetch(3)
+      directories = Dir.glob("lib/gcc/#{cross.target}/*/include", base: installation)
+      raise Error, "cannot find one include directory of #{gcc} under #{installation}" unless directories.size == 1
+      release = directories.first.split('/').fetch(3)
       raise Error, "unexpected #{gcc} release directory: #{release}" unless /\A[0-9][0-9.]{0,31}\z/.match?(release)
-      header = File.realpath(File.join(installation, headers.first))
-      raise Error, "#{gcc}'s stdbool.h leaves its installation" unless header.start_with?(File.realpath(installation) + '/')
       notices = GCC_NOTICES.map do |relative|
         path = File.join(root, relative)
         { 'path' => path, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(path, maximum: 1024 * 1024)) }.freeze
-      end
-      [{ 'path' => header, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(header, maximum: 1024 * 1024)),
-         'label' => "toolchain/gcc-#{release}/stdbool.h", 'license' => GCC_LICENSE, 'status' => 'stopgap',
-         'evidence' => "stdbool.h's own GPL version 3 or later grant with GCC Runtime Library Exception 3.1",
-         'notices' => notices.freeze }.freeze].freeze
+      end.freeze
+      GCC_HEADERS.map do |name|
+        header = File.realpath(File.join(installation, directories.first, name))
+        raise Error, "#{gcc}'s #{name} leaves its installation" unless header.start_with?(installation + '/')
+        { 'path' => header, 'sha256' => Digest::SHA256.hexdigest(BoundedFile.read(header, maximum: 1024 * 1024)),
+          'label' => "toolchain/gcc-#{release}/#{name}", 'license' => GCC_LICENSE, 'status' => 'stopgap',
+          'evidence' => "#{name}'s own GPL version 3 or later grant with GCC Runtime Library Exception 3.1",
+          'notices' => notices }.freeze
+      end.freeze
     end
 
     def self.canonical_report(report)
@@ -282,8 +286,8 @@ module Erx
         identifiers = license.scan(/[A-Za-z0-9][A-Za-z0-9.+_:\-]*/)
         files = []
         files << 'fiasco/kernel/tool/preprocess/COPYING' unless (identifiers & %w[GPL-2.0-only GPL-2.0-or-later]).empty?
-        files << 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3' unless (identifiers & %w[GPL-3.0-only GPL-3.0-or-later]).empty?
-        files << 'fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME' if identifiers.include?('GCC-exception-3.1')
+        files << 'config/provenance/notices/COPYING3' unless (identifiers & %w[GPL-3.0-only GPL-3.0-or-later]).empty?
+        files << 'config/provenance/notices/COPYING.RUNTIME' if identifiers.include?('GCC-exception-3.1')
         result[license] = files.map { |file| reference(project_input(file)) } unless files.empty?
       end
     end

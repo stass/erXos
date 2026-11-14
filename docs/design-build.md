@@ -366,13 +366,13 @@ are not a runtime or application interface above `liberx`. The imported
 package selection and final linker evidence must agree, with no `moe`,
 `ned`, application loader or unrelated driver in either one.
 
-The inherited `sigma0` link mode also adds the selected compiler runtime.
-With the stopgap's GCC configuration, `bootstrap` uses
-`compiler-rt-pure`, resolved to `libgcc_eh-pure` and `libgcc-pure`, while
-`sigma0` uses `compiler-rt`, resolved to `libgcc_eh` and `libgcc`. The
-headers and retained source notices of those four libraries are part of the
-closure. Neither link takes a member of them, and no link erXos makes names
-them: erXos's own links take LLVM compiler-rt's builtins
+Neither boot executable links a compiler runtime library, and the build
+compiles none: the compiler runtime packages of the import name no library, and
+the link takes no start or end object from a compiler runtime (`sigma0` defines
+its own `__dso_handle`, in `dso_handle.c`). `sigma0` and `bootstrap` take
+the compiler's freestanding headers (`stdarg.h`, `stdbool.h`, `stddef.h`)
+from the cross compiler's include directory, which the build records by
+release and hash. erXos's own links take LLVM compiler-rt's builtins
 (`tools/lib/erx/compiler_rt.rb`). The minimal
 libc uses the pinned `l4re-core` source selection and its bundled libc
 inputs; erXos's `musl/` is not silently substituted into that boot build.

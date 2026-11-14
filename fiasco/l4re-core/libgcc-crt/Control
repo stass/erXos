@@ -1,4 +1,0 @@
-provides: libgcc-crt
-requires: libgcc-headers
-source-pkg: libgcc
-maintainer: georg.kotheimer@kernkonzept.com

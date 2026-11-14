@@ -1,3 +1,4 @@
+# Modified by erXos: dso_handle.c replaces the compiler runtime start object's handle.
 PKGDIR		    ?= ../..
 L4DIR		    ?= $(PKGDIR)/../../..
 
@@ -33,7 +34,7 @@ SRC_CC_mips-l4f  := ioports_none.cc
 SRC_CC_riscv-l4f := ioports_none.cc
 SRC_CC_ppc32-l4f := ioports_none.cc
 SRC_CC_sparc-l4f := ioports_none.cc
-SRC_C  := support.c
+SRC_C  := support.c dso_handle.c
 SRC_S  := $(addprefix ARCH-$(ARCH)/, crt0.S)
 
 LDFLAGS += -nocrt1

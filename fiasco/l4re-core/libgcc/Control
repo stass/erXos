@@ -1,3 +1,0 @@
-provides: libgcc
-requires: libc-headers ldscripts l4sys libgcc-headers
-maintainer: georg.kotheimer@kernkonzept.com

@@ -9,15 +9,15 @@
     "Unicode-3.0": [{"path": "config/provenance/notices/Unicode-3.0.txt", "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1"}],
     "GPL-2.0-only": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
     "GPL-2.0-or-later": [{"path": "fiasco/kernel/tool/preprocess/COPYING", "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70"}],
-    "GPL-3.0-only": [{"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
-    "GPL-3.0-or-later": [{"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
+    "GPL-3.0-only": [{"path": "config/provenance/notices/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
+    "GPL-3.0-or-later": [{"path": "config/provenance/notices/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"}],
     "GPL-3.0-only WITH GCC-exception-3.1": [
-      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
-      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
+      {"path": "config/provenance/notices/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
+      {"path": "config/provenance/notices/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
     ],
     "GPL-3.0-or-later WITH GCC-exception-3.1": [
-      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
-      {"path": "fiasco/l4re-core/libgcc/contrib/gcc-16/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
+      {"path": "config/provenance/notices/COPYING3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"},
+      {"path": "config/provenance/notices/COPYING.RUNTIME", "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"}
     ]
   },
   "packages": [

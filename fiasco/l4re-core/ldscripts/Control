@@ -1,4 +1,5 @@
+# Modified by erXos: no compiler runtime headers or objects are linked.
 provides: ldscripts
-requires: compiler-rt-crt libc-headers libgcc-headers
+requires: compiler-rt-crt libc-headers
 source-pkg: libc
 maintainer: warg@os.inf.tu-dresden.de
