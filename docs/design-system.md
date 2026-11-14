@@ -2919,9 +2919,12 @@ to the domain the manifest names for it, the library plans the give with
 windows after checking that each lies inside the bridge's windows from
 the device tree and overlaps no other device, creates its MSIs as IRQ
 objects on the MSI frame, whose doorbell address and data the result
-names (functions interrupt by MSI or MSI-X only: a bridge's INTx lines,
+names (functions interrupt by MSI or MSI-X: a bridge's INTx lines,
 which the functions behind it share, go to no domain, and a function that
-offers neither is given with no interrupt,
+offers neither is given with no interrupt; the one exception is the
+Raspberry Pi 4's closed bus, whose one position and the INTx line it
+routes the platform record names, so that line is a line of the
+position's unit, given as a device-tree unit's line is,
 [design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and creates its DMA window on the stream that the device tree's
 `iommu-map` gives its requester id, when the function lies on one of the
 machine's fixed buses

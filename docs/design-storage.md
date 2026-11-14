@@ -1418,7 +1418,12 @@ designed. It maps the format onto the file protocol as follows:
   dirty flag, so the server mounts a FAT12 volume read-only. A volume
   found dirty mounts read-only and reports it, so the files can be copied
   off and the volume repaired on another machine, never by a guess on
-  erXos.
+  erXos. A medium that cannot flush mounts read-only too, since every
+  guarantee above rests on its flushes: the server sends one flush as it
+  mounts, and a window that answers it `enotsup`, as a USB medium that
+  refuses SYNCHRONIZE CACHE does, mounts read-only with
+  `no flush: read-only` in the mount's inspection record
+  ([design-usb.md](design-usb.md#the-scsi-subset)).
 
 A FAT image is untrusted input like any other: the boot sector, the FATs,
 the directories and the long-name chains are decoded with checked bounds,

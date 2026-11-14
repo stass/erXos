@@ -33,8 +33,14 @@ Decisions every reader needs:
   line when all of them have answered or exited, and tells them all again
   if the line fired in the meantime. A line that one device names is
   **direct**: its driver binds it, as any line is bound.
-* **PCIe functions interrupt by MSI only.** A bridge's INTx lines, which
-  the functions behind it share, go to no domain.
+* **PCIe functions interrupt by MSI, except on the Raspberry Pi 4's
+  closed bus.** A bridge's INTx lines, which the functions behind it
+  share, go to no domain, since which functions share a line is known
+  only after enumeration. The Pi 4's bus is the one exception: its
+  bridge has one soldered endpoint position, which the platform record
+  names with the INTx line it routes, so the line's sharers are known
+  when the manifest is written, and the line is a line of their unit
+  ([PCIe INTx](#the-unit-rule)).
 
 ## Context
 
@@ -49,7 +55,8 @@ the boards' device trees:
 | QEMU `virt`'s 32 virtio-mmio transports, 0x200 apart from `0x0a000000`, each on a line of its own | eight to a page | four units of eight |
 | a GPIO controller, its pins and its banks' event lines | one device | one unit; its pins are functions, not devices |
 | a clock or reset controller beside the devices it clocks | a page, on some boards | one unit with them |
-| a PCIe bridge's INTx lines | every function behind the bridge | none: MSI only |
+| a PCIe bridge's INTx lines | every function behind the bridge | none: MSI, except on the Raspberry Pi 4 |
+| the Raspberry Pi 4's INTx lines, which its tree routes by pin, INTA to INTD, to SPIs 143 to 146 ([research](research-brcmstb-pcie.md), section 0) | the functions at bus 1, device 0, the bus's one position | one unit: the position's functions with the line their pin routes |
 
 The Raspberry Pi 4's console is its mini UART and its host link is UART3,
 so the console's unit is the auxiliary block's and the host link's is the
@@ -81,7 +88,10 @@ the smallest units; a manifest may join components into one unit for a
 reason of its own, as it may give a device and the controller of the bus
 it sits on together, but it never splits one. PCIe functions take no
 part in the line relation, since they interrupt by MSI, each MSI a line
-of the MSI frame that no other function has.
+of the MSI frame that no other function has, except on the Raspberry
+Pi 4's bus, where the platform record names the one position and the
+INTx line it routes, so the line relation holds between that line and
+the position's functions as between any devices that share a line.
 
 Each requirement follows from that one closure:
 
@@ -158,6 +168,19 @@ erXos needs. The PCIe enumerator therefore programs MSI or MSI-X into
 every function it reports, the device service gives a function its MSIs
 and never an INTx line, and a function that offers neither is given with
 no interrupt, so its driver polls or the manifest leaves it out.
+
+The Raspberry Pi 4's bus is the one exception, because the fan-out
+cannot arise there. Its bridge has one root port and one soldered
+endpoint position, bus 1, device 0, and no MSI frame erXos drives: the
+bridge's MSI decoder shares its register page with the windows the PCIe
+domain programs. The platform record names that position and the INTx
+line its pin routes, so every function that can raise the line is known
+when the manifest is written; the line and those functions form one
+unit by the construction above, given whole to one domain, and the line
+is a direct line of that unit, made as any device-tree unit's line is.
+The enumerator keeps the root port's own INTx disabled. No other
+platform's record names such a bus, so every other PCIe function
+interrupts by MSI ([design-usb.md](design-usb.md#interrupts)).
 
 ## Pages inside a domain
 
@@ -402,7 +425,7 @@ direct line is named by one record, so its only binder is its driver.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **SD1.** No register page and no interrupt line is held by two domains | units are closed under sharing a page and sharing a line; a give makes one window per page run and one IRQ object per line of the unit, in the one holder's budget; PCIe functions get MSIs only | a unit row that splits a component; a give per device; an INTx line given to a domain | the boot view's refusal, in the build and at boot, with a seeded split that shares only a line |
+| **SD1.** No register page and no interrupt line is held by two domains | units are closed under sharing a page and sharing a line; a give makes one window per page run and one IRQ object per line of the unit, in the one holder's budget; PCIe functions get MSIs, except on the Raspberry Pi 4's closed bus, whose INTx line is a line of its position's unit | a unit row that splits a component; a give per device; an INTx line given on a bus the platform record does not close, or apart from the functions its position routes | the boot view's refusal, in the build and at boot, with a seeded split that shares only a line; the manifest check's seeded manifests that give the VL805's line apart from its function and an INTx line to `qemu-xhci` ([design-usb.md](design-usb.md#the-phase-1-part)) |
 | **SD2.** A record reaches only its own device's registers | every access is a register name of its own peripheral below its window size; the generator refuses a table past the window | a raw offset in the interface; a table naming a register past the window | the NIF's host tests on two records of one page; the generator's refusal with a seeded oversized table |
 | **SD3.** A line has at most one binder in a domain, and a shared line's binder is its owner | the NIF keeps one entry per line, whose binding is one process; the record's mark decides which bind the NIF accepts, `irq_bind/2` for a direct line and `irq_bind_owner/2` for a shared one; a bind through another record of a bound line is `ebusy`; only `erx_irq_line` calls the binds and `irq_ack/2` | a table keyed by record; a caller that says whether a line is shared; a driver that binds directly | the NIF's host tests with a seeded per-record table and a seeded mark the bind ignores; the device-callers source check, which reads every token of the Erlang sources, strings, quoted atoms and literal tables included, with seeded direct binds and acknowledgements; a pass over the driver applications' BEAM files, which would also see an atom spelled with escapes, is the target ([TODO.md](../TODO.md)) |
 | **SD4.** A shared line is acknowledged once per round, after every member told of it answered or went down, and no firing goes untold | `erx_irq_line_core` decides every acknowledgement and every notice; a firing during a round sets `Again`, which starts another round; a member is its monitor, so every member's exit reaches the core; the owner performs only the actions the core returns | an acknowledgement at the first answer; a firing during a round dropped; a member the core holds without a monitor | exhaustive exploration of the core on the host, with seeded faults |

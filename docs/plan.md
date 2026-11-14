@@ -2480,14 +2480,17 @@ the VL805's internal hub types into the kiosk.
   ([design-usb.md](design-usb.md#the-phase-1-part)); then the TRB ring
   form, the controller, the bus, hubs, HID into a display domain and
   mass storage into drives. It needs [1b-E](#m9-a-driver-is-an-erlang-process)
-  and a display domain that reads input files
-  ([design-usb.md](design-usb.md#open-decisions), decision 2).
+  and a display domain that reads input files; `qemu-xhci` interrupts
+  by MSI on the stopgap as on erXos's kernel
+  ([design-usb.md](design-usb.md#interrupts)).
 * **(c) The BCM2711 bridge and the VL805 on the Pi 4, on the stopgap.**
   The bridge driver with the vendor's bring-up from the clean-room facts
   record, its link check, its keep-or-reset decision and its clean
-  turn-off, the board probes B1 to B8, the VL805's firmware check and
-  its INTx line ([design-usb.md](design-usb.md#the-bcm2711-bridge);
-  decisions 1 and 3), beside
+  turn-off, the board probes B1 to B8, the VL805's firmware check, its
+  INTx line on the Pi 4's closed bus ([design-usb.md](design-usb.md#interrupts)),
+  and, once probe B1's readings are recorded, the VL805's firmware
+  notification in the stopgap's root
+  ([design-usb.md](design-usb.md#the-vl805s-firmware)), beside
   [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)'s board work. The
   bridge driver and the probes proceed beside (b); the controller is
   (b)'s code. The part is complete only with its dependencies in
@@ -2498,9 +2501,11 @@ the VL805's internal hub types into the kiosk.
 * **(d) On erXos's kernel.** QEMU `virt` at
   [M9's kernel part](#m9-a-driver-is-an-erlang-process), with the
   kernel's MSI frame and the IOMMU window; the Pi 4 at
-  [M12](#m12-storage-networking-boards).
-* **(e) DWC2 on QEMU `raspi4b`.** Later and optional
-  ([design-usb.md](design-usb.md#deferred-dwc2); decision 5).
+  [M12](#m12-storage-networking-boards), with the VL805's firmware
+  notification as a kernel operation.
+
+DWC2 on QEMU `raspi4b` is not a part of the track; it is planned work
+in `TODO.md` ([design-usb.md](design-usb.md#dwc2)).
 
 Mass storage's files on a stick also need the FAT server, which
 [Beyond the plan](#beyond-the-plan) places after M13; until then (b)

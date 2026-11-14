@@ -5434,10 +5434,20 @@ to the corpus and follow rc
   kernel's polled early-console writes at a panic complete after the
   console driver has reconfigured the UART, on each board
   ([design-platforms.md](docs/design-platforms.md#uarts)).
-* [Low] platforms: the Pi 4's VL805 USB host sits behind a PCIe bridge no
-  domain drives, so the Pi 4 has no USB; decide whether a PCIe domain
-  drives the bridge on the Pi 4
-  ([design-platforms.md](docs/design-platforms.md)).
+* [Medium] platforms, the Pi 4's VL805 at handover
+  ([design-usb.md](docs/design-usb.md#the-bcm2711-bridge),
+  [design-platforms.md](docs/design-platforms.md#dma)): the boot contract's
+  stopped-and-drained bus master holds for the VL805 only because the
+  EEPROM's boot order names the microSD card alone, on the claim that the
+  boot firmware then never starts the VL805. No source read says so.
+  Verify it by hand on the 4 GB Pi 4: with that boot order and a USB
+  keyboard and stick attached, read at the PCIe domain's first start,
+  before the bridge driver writes anything, the link, PERST#, the VL805's
+  command register, `USBCMD` and `USBSTS` (probe B3); repeat on a board
+  without the VL805's EEPROM and after a bootloader update. A running
+  controller refutes the setting, and the Pi 4's handover is then
+  refused until a stop before kernel entry is designed. Record the
+  bootloader version and the boot order's value in the board's port.
 * [Low] live, the host tree over virtio-9p: QEMU's 9p server on Darwin
   and FreeBSD hosts translates only six errnos to Linux numbering (its
   `errno_to_dotl` has a FIXME), so an error from `/host` on a macOS host
@@ -6402,6 +6412,11 @@ document's "residual risks accepted" paragraph.
 
 ## Planned features
 
+* [Low] USB, DWC2 on QEMU `raspi4b` ([design-usb.md](docs/design-usb.md#dwc2)): `erx_dwc2`, a
+  programmed-I/O host driver for the model's DWC2 beside `erx_xhci` under the same USB core, for low- and
+  full-speed devices with control, bulk and interrupt transfers. It serves QEMU `raspi4b` alone, since a real
+  Pi 4's DWC2 is the USB-C power connector's, so it comes after Track U's parts
+  ([plan.md](docs/plan.md#track-u-usb-proposed)); its design keeps the three rules the USB design records.
 * [Low] bootstrap, boot lines: print `/chosen/bootloader/build-timestamp` from the device tree
   (`rpi-eeprom-update` of `raspberrypi/rpi-eeprom` at `3831e51dba65f4493f3f88c1d049de73165c082e`, l.48), so a
   board report shows the bootloader version, which the Pi 4's A/B card needs to be 2022-12-01 or later
