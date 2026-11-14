@@ -37,7 +37,8 @@ Messages:
 
 * from the driver: `{frames, Driver, [erx_net_driver:rx_frame()]}`, `{link, Driver, up | down}`;
 * from senders: `{resolve, NextHop, Src, Packets}`, a connection's `{reset, NextHop, Src,
-  Packets}` and `charge_rst`, each against `credit`, and `{hint, NextHop}`;
+  Packets}`, an accepted connection's `{accept_refused, Conn, Segment}` and `charge_rst`, each
+  against `credit`, and `{hint, NextHop}`;
 * from its erx_dhcp4: `{dhcp_attach, Pid}` once, then `{dhcp, Pid, erx_dhcp4_core:action()}`;
   to it, `{erx_net_if, {reply, Msg} | {link, up | down}}`;
 * `admin/2`, a call, for netadmin's requests (`counters`, `lease`, `status`).
@@ -110,6 +111,10 @@ message({link, Driver, State}, #state{driver = Driver, rx = Rx} = S) ->
     step({link, State}, S);
 message({Kind, _NextHop, _Src, _Packets} = Event, #state{sender = Sender} = S)
   when Kind =:= resolve; Kind =:= reset ->
+    ok = erx_net_credit:take(Sender, 1),
+    step(Event, S);
+message({accept_refused, _Conn, _Segment} = Event, #state{sender = Sender} = S) ->
+    %% An accepted connection whose grant refused it, under the sender credit.
     ok = erx_net_credit:take(Sender, 1),
     step(Event, S);
 message(charge_rst, #state{sender = Sender} = S) ->
@@ -297,11 +302,16 @@ perform({dhcp, _Msg}, #state{dhcp = none} = S) ->
 perform({reply, From, Reply}, S) ->
     gen_server:reply(From, Reply),
     S;
-%% A completed handshake. Nothing starts an accepted connection, so every handshake
-%% is refused as one whose listener has no accept credit left, with the RST of
-%% tcp_sc_rst_sock_fail (TODO.md, "erx_tcp_listen").
-perform({accept, _Entry, Conn, _Handshake, Segment, _Gen}, S) ->
-    step({accept_refused, Conn, Segment}, S).
+%% A completed handshake starts its connection (erx_tcp_conn:accept/1), which the interface
+%% never waits on; a listener with no accept credit left has it refused with the RST of
+%% tcp_sc_rst_sock_fail.
+perform({accept, Entry, Conn, Handshake, Segment, Gen}, #state{sender = Sender} = S) ->
+    case erx_tcp_conn:accept(#{entry => Entry, conn => Conn, handshake => Handshake,
+                               segment => Segment, gen => Gen, interface => self(),
+                               sender => Sender}) of
+        ok -> S;
+        full -> step({accept_refused, Conn, Segment}, S)
+    end.
 
 %% The interface's complete rows: new and changed ones written first, those it no longer
 %% has deleted last, and then the generation moved.

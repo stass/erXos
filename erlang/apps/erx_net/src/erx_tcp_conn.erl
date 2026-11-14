@@ -77,19 +77,42 @@ step they were in; nothing of them is logged. Should the loop itself crash, its 
 the connection's state name, four-tuple and counters, never its buffers or the message
 that was in hand, since both hold the peer's bytes.
 
-The process starts in its grant (erx_net_grant), which links to it, and monitors its owner,
-the socket process: the owner's exit closes the connection as `close/1` does.
+An active open starts in its grant (erx_net_grant), which links to it, and monitors its
+owner, the socket process: the owner's exit closes the connection as `close/1` does.
+
+**An accepted connection** (docs/design-network-stack.md, "A connection from the
+syncache", "The listener") starts in its interface, which calls accept/1 for a completed
+handshake: one unit of the listener's accept credit is reserved, the connection spawned with
+it and its four-tuple inserted, and the connection's first message is the verdict on the
+insertion, `go` or `abandon`. The unit is the connection's from the spawn until its
+`{queued, Conn}` notice carries it to the listener, so whichever way the connection gives
+up before then, at `abandon`, at the interface's end before the verdict or at a refused
+adoption, it releases the unit itself. After `go` it is adopted by its grant
+(erx_net_grant:adopt/2), which it linked to first, and only then links to its listener and
+queues itself: from its spawn to its end it holds a unit, one of its grant's sockets, or
+both. A refused adoption hands the interface `{accept_refused, FourTuple, Segment}` for
+its RST, deletes the key and ends.
+
+Its owner moves through three phases. **Queued**, `{listener, L}`: it runs as any
+connection does, acknowledging and taking bytes into its receive buffer, but pushes
+nothing and admits no request; its listener's exit is its abort, a RST and its end. At
+`{bind, SockProc}` from its listener it links to `SockProc` and answers `{bound, self()}`:
+**bound**, `{bound, SockProc}`, it still sends nothing, since nothing crosses to a socket
+process before that process's first message; from that first admitted message on the
+owner is `SockProc`, as an active open's is. An accepted connection traps exits: its
+grant's exit ends it without a step, its owner's closes it as the owner's `'DOWN'` closes an
+active open, and any other exit, its listener's once bound among them, changes nothing.
 """.
 
 -behaviour(gen_server).
 
 -include("erx_tcp.hrl").
 
--export([start_link/1]).
+-export([start_link/1, accept/1, accepted/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, handle_continue/2,
          format_status/1]).
 
--export_type([start/0]).
+-export_type([start/0, accept/0]).
 
 -define(CREDIT_LIMIT, 256).
 %% The socket protocol's bounds (docs/design-network-stack.md, "Message sizes", "Requests
@@ -114,11 +137,32 @@ this connection in the grant's buffer calls; and the initial buffer sizes it res
                    gen := erx_net_rand:gen(), grant := pid(), token := reference(),
                    buffers := #{snd := pos_integer(), rcv := pos_integer()}}.
 
+-doc """
+What an interface hands accept/1 for a completed handshake: the listener's entry in the
+demultiplexing table, the four-tuple (local end first), the syncache's handshake, the
+segment that completed it, the generator the `accept` action carries, and the interface's
+pid and sender credit, under which a refused connection hands back its RST.
+""".
+-type accept() :: #{entry := #{pid := pid(), credit := erx_net_credit:credit(),
+                               grant := pid(), origin := erx_net_admit:origin(),
+                               accept := map(), atom() => term()},
+                    conn := erx_tcp_syncache:conn(),
+                    handshake := erx_tcp_syncache:handshake(),
+                    segment := erx_tcp:segment(),
+                    gen := erx_net_rand:gen(),
+                    interface := pid(),
+                    sender := erx_net_credit:credit()}.
+
+%% The owner: an active open's socket process from the start; an accepted connection's
+%% listener while it is queued, then the socket process an accept bound it to, which it
+%% sends nothing until that process's first message; none once the owner closed.
+-type owner() :: pid() | {listener, pid()} | {bound, pid()} | none.
+
 -record(state, {tcb :: #tcb{},
                 key :: erx_net_input:key(),
                 credit :: erx_net_credit:credit(),
-                owner :: pid() | none,               % the socket process; none once it closed
-                owner_ref :: reference() | none,
+                owner :: owner(),
+                owner_ref :: reference() | none,     % an active open's monitor of its owner
                 origin :: erx_net_admit:origin(),
                 grant :: pid(),                      % reserves the buffers
                 token :: reference(),                % names this connection to the grant
@@ -184,6 +228,114 @@ init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport},
         {error, Reason} -> {stop, Reason}
     end.
 
+-doc """
+An interface's effect for a completed handshake: reserves one unit of the listener's accept
+credit, or answers `full` and starts nothing; otherwise spawns the connection with the unit
+and its receive credit, inserts its four-tuple through erx_net_bind, and sends the
+connection the verdict, `go`, or `abandon` when another socket holds the four-tuple. The
+interface waits on nothing here, and from the spawn on the unit is the connection's.
+""".
+-spec accept(accept()) -> ok | full.
+accept(#{entry := #{credit := Unit}, conn := Conn} = Accept) ->
+    case erx_net_credit:reserve(Unit, 1) of
+        full ->
+            full;
+        ok ->
+            Credit = erx_net_credit:new(?CREDIT_LIMIT),
+            Pid = proc_lib:spawn(?MODULE, accepted, [Accept#{credit => Credit}]),
+            Pid ! case erx_net_bind:insert(key(Conn), Pid, #{pid => Pid, credit => Credit}) of
+                      ok -> go;
+                      {error, eaddrinuse} -> abandon
+                  end,
+            ok
+    end.
+
+-doc false.
+%% The spawned connection's start, in the order "An accepted connection's start" gives: the
+%% links and the watch first, then the verdict alone, the adoption, the listener, and the
+%% control block with the completing segment stepped.
+-spec accepted(map()) -> ok.
+accepted(#{entry := #{credit := Unit, grant := Grant}, interface := Interface} = Accept) ->
+    %% First, so that erx_net_tables deletes the four-tuple the interface inserts for this
+    %% process when it ends, however it ends.
+    ok = erx_net_tables:watch_holder(self()),
+    process_flag(trap_exit, true),
+    true = link(Grant),
+    IfRef = erlang:monitor(process, Interface),
+    receive
+        go ->
+            true = erlang:demonitor(IfRef, [flush]),
+            adopt(Accept);
+        abandon ->
+            ok = erx_net_credit:release(Unit, 1);
+        {'DOWN', IfRef, process, _, _} ->
+            ok = erx_net_credit:release(Unit, 1),
+            exit({shutdown, interface_ended})
+    end.
+
+%% Adopted by the grant, or refused: the unit released, the refusal's RST handed to the
+%% interface under its sender credit, the key deleted, and the process ended. A grant that
+%% has ended is a refusal too. No route to the peer, whose SYN-ACK just left over one, is
+%% met only when the configuration changed in between, and is refused alike.
+adopt(#{entry := #{credit := Unit, grant := Grant, accept := Init}, conn := Conn,
+        segment := Segment, interface := Interface, sender := Sender} = Accept) ->
+    #{snd_hiwat := SndHiwat, rcv_hiwat := RcvHiwat} = Init,
+    {ConfigGen, Snap} = erx_net_tables:configuration(),
+    {Local, _, Remote, _} = Conn,
+    Adopted = case erx_net_frame:path(Remote, #{src => Local}, Snap) of
+                  {ok, Path} -> {grant_adopt(Grant, #{snd => SndHiwat, rcv => RcvHiwat}), Path};
+                  {error, _} -> {{error, ehostunreach}, none}
+              end,
+    case Adopted of
+        {{ok, Token}, Path1} ->
+            queue(Accept, Token, Path1, ConfigGen);
+        {{error, _}, _} ->
+            ok = erx_net_credit:release(Unit, 1),
+            %% A full sender credit drops the RST, as a full queue drops any; the peer's
+            %% retransmitted ACK then finds no entry and draws one from the syncache.
+            _ = erx_net_credit:hand(Interface, Sender, 1, {accept_refused, Conn, Segment}),
+            erx_net_bind:delete(key(Conn))
+    end.
+
+grant_adopt(Grant, Sizes) ->
+    try
+        erx_net_grant:adopt(Grant, Sizes)
+    catch
+        exit:{_, {gen_server, call, _}} -> {error, closed}
+    end.
+
+%% Adopted: linked to the listener and queued on it under the unit, then the control block
+%% made from the handshake and the completing segment stepped, and the loop entered queued.
+%% A listener already gone answers the link with its exit, which the loop takes as an abort.
+queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init}, conn := Conn,
+        handshake := Handshake, segment := Segment, gen := Rand0, credit := Credit},
+      Token, #{mtu := Mtu, iface := #{driver_credit := Tx}} = Path, ConfigGen) ->
+    ok = (erx_net_sup:runtime()):serve(?MAX_IN_FLIGHT + 2),
+    true = link(Listener),
+    ok = erx_net_credit:send(Listener, {queued, self()}),
+    {Local, Lport, Remote, Rport} = Conn,
+    {TcbGen, Rand} = erx_net_rand:split(Rand0),
+    Ctx = #tcp_ctx{now = erx_net_clock:now(), credit = erx_net_credit:free(Tx), mtu = Mtu,
+                   route = ok},
+    {Tcb, Actions} = erx_tcp_user:accepted(Handshake,
+                                           Init#{family => family(Local), local => {Local, Lport},
+                                                 remote => {Remote, Rport}, gen => TcbGen},
+                                           Ctx),
+    S0 =#state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
+                owner_ref = none, origin = Origin, grant = Grant, token = Token, connect = none,
+                path = Path, config_gen = ConfigGen, gen = Rand},
+    {S1a, Reserves} = perform_actions(Actions, S0),
+    S1 = ask_grant(Reserves, S1a),
+    case settle(guarded({segments, [Segment]}, S1)) of
+        {noreply, S} -> gen_server:enter_loop(?MODULE, [], S);
+        {stop, normal, _} -> ok
+    end.
+
+key({Local, Lport, Remote, Rport}) -> {tcp, family(Local), Local, Lport, Remote, Rport}.
+
+family(<<_:32>>) -> inet;
+family(<<_:128>>) -> inet6.
+
 %% --- gen_server ------------------------------------------------------------------
 
 %% The connect's step runs once the grant is out of start_link/1, so a buffer the step asks
@@ -210,9 +362,39 @@ handle_info({erx_net_clock, hint}, S) ->
     settle(timeouts(step({expired, erx_net_clock:now()}, S#state{armed = infinity})));
 handle_info({'DOWN', Ref, process, _, _}, #state{owner_ref = Ref} = S) ->
     settle(owner_closed(S));
+%% The exits an accepted connection traps: its grant's ends it without a step; its
+%% listener's while queued is its abort, a RST; its owner's closes it; any other, its
+%% listener's once bound among them, changes nothing.
+handle_info({'EXIT', Grant, _}, #state{grant = Grant} = S) ->
+    {stop, {shutdown, grant_ended}, S};
+handle_info({'EXIT', Listener, _}, #state{owner = {listener, Listener}} = S) ->
+    settle(step({user, abort}, S));
+handle_info({'EXIT', Owner, _}, #state{owner = {bound, Owner}} = S) ->
+    settle(owner_closed(S));
+handle_info({'EXIT', Owner, _}, #state{owner = Owner} = S) when is_pid(Owner) ->
+    settle(owner_closed(S));
+handle_info({'EXIT', _, _}, S) ->
+    {noreply, S};
+%% An accept takes the queued connection for SockProc: linked, it answers its listener, and
+%% sends SockProc nothing until SockProc's first message. A SockProc already gone answers
+%% the link with its exit. A bind once bound is a programming error that ends it.
+handle_info({bind, SockProc}, #state{owner = {listener, Listener}} = S) when is_pid(SockProc) ->
+    true = link(SockProc),
+    Listener ! {bound, self()},
+    settle(S#state{owner = {bound, SockProc}});
+handle_info({bind, _} = Bind, _S) ->
+    exit({unexpected, Bind});
+handle_info(_Msg, #state{owner = {listener, _}} = S) ->
+    %% Queued: there is no socket process whose request could be admitted.
+    {noreply, count(unknown, S)};
 handle_info(Msg, #state{origin = Origin, owner = Owner} = S) ->
-    case erx_net_admit:request(tcp, Origin, Owner, Msg) of
-        {ok, Request} -> request(Request, S);
+    Admitted = case Owner of
+                   {bound, SockProc} -> SockProc;
+                   _ -> Owner
+               end,
+    case erx_net_admit:request(tcp, Origin, Admitted, Msg) of
+        %% The socket process's first admitted message is the first contact.
+        {ok, Request} -> request(Request, S#state{owner = Admitted});
         unknown -> {noreply, count(unknown, S)};
         {refused, Check} -> {noreply, count(Check, S)}
     end.
@@ -249,7 +431,8 @@ request({call, N, peername}, #state{tcb = #tcb{remote = {Ip, Port}}} = S) ->
 answer(N, Result, #state{pending = Pending} = S) ->
     push({reply, N, Result}, S#state{pending = maps:remove(N, Pending)}).
 
-push(_Body, #state{owner = none} = S) ->
+push(Body, #state{owner = Owner} = S) when not is_pid(Owner) ->
+    _ = Body,
     S;
 push(Body, #state{owner = Owner} = S) ->
     Owner ! {erx_net, self(), Body},
@@ -330,10 +513,14 @@ step_once(Event, S0) ->
     Ctx = #tcp_ctx{now = erx_net_clock:now(), credit = erx_net_credit:free(Tx), mtu = Mtu,
                    route = Route},
     {Tcb, Actions} = erx_tcp:step(Event, Tcb0, Ctx),
+    perform_actions(Actions, S#state{tcb = Tcb}).
+
+%% A step's actions performed in order, but for the buffer reservations, returned in order.
+perform_actions(Actions, S) ->
     {Reserves, Rest} = lists:partition(fun({reserve_buffer, _, _}) -> true;
                                           (_) -> false
                                        end, Actions),
-    {lists:foldl(fun perform/2, S#state{tcb = Tcb}, Rest), Reserves}.
+    {lists:foldl(fun perform/2, S, Rest), Reserves}.
 
 %% The path, built again over the configuration when its generation moved; a path that no
 %% longer exists keeps the old one and makes the route the step's EHOSTUNREACH.
@@ -428,7 +615,7 @@ count(Reason, #state{counters = Counters} = S) ->
 owner_closed(#state{owner = none} = S) ->
     S;
 owner_closed(#state{owner_ref = Ref} = S) ->
-    _ = erlang:demonitor(Ref, [flush]),
+    _ = Ref =:= none orelse erlang:demonitor(Ref, [flush]),
     step({user, close}, S#state{owner = none, owner_ref = none, pending = #{}}).
 
 %% --- Settling: the socket process, the end and the clock ----------------------------
@@ -469,6 +656,9 @@ hand_over(#state{rcv_bytes = 0} = S) ->
     S;
 hand_over(#state{owner = none} = S) ->
     S#state{rcvq = [], rcv_bytes = 0};
+hand_over(#state{owner = {_Phase, _}} = S) ->
+    %% Queued or bound before the first contact: the bytes wait for the socket process.
+    S;
 hand_over(#state{push_credit = 0} = S) ->
     S;
 hand_over(#state{rcvq = Q, rcv_bytes = N, push_credit = Credit} = S) ->
@@ -501,7 +691,8 @@ release_buffers(S) ->
 %% The end of the stream, once every byte before it was pushed: `eof` for the peer's FIN,
 %% then `{error, Reason}` (`closed` without an error) as the last push when the connection
 %% ends, at once if it finishes with bytes the socket process has not taken.
-tell_end(#state{owner = none} = S) ->
+tell_end(#state{owner = Owner} = S) when not is_pid(Owner) ->
+    %% No socket process, or none that has made its first contact: the end waits with it.
     S;
 tell_end(#state{told = none, eof = true, rcv_bytes = 0} = S) ->
     tell_end(push(eof, S#state{told = eof}));

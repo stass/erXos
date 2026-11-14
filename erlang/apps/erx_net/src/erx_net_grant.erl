@@ -73,13 +73,21 @@ gives both buffers back with `release_buffers/2` once it needs them no more, in 
 with its socket process gone, and its exit, by whatever means, releases what it still
 holds; an `'EXIT'` message naming a connection still alive is not its exit, and is ignored.
 
+**Adoption.** A connection an interface spawned from a listener's handshake (erx_tcp_conn,
+"An accepted connection's start") links to the grant and asks `adopt/2` to count it as
+one of the grant's sockets, with the two buffer sizes its listener's entry gives; the grant
+reserves them under a new token, as a connect does, and answers `{ok, Token}`, or
+`{error, enobufs}` when they do not fit. The socket adopted is the caller, so nothing is
+reserved on the word of a pid in a message, and its exit releases what it holds as any
+connection's does.
+
 The grant's other limits and its account are not built: the grant admits every
 well-formed request whose buffers fit.
 """.
 
 -behaviour(gen_server).
 
--export([start_link/2, reserve_buffer/4, release_buffers/2, counts/1]).
+-export([start_link/2, adopt/2, reserve_buffer/4, release_buffers/2, counts/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(MAX_REQUEST, 64).
@@ -111,6 +119,17 @@ asked by a process of its own node.
 -spec counts(pid()) -> #{unknown := non_neg_integer(), refused := non_neg_integer()}.
 counts(Grant) ->
     gen_server:call(Grant, counts, infinity).
+
+-doc """
+Adopts the calling connection, which has linked to the grant, as one of the grant's sockets:
+reserves its send and receive buffers of `Sizes` and answers `{ok, Token}` with the token
+its later buffer calls name, or `{error, enobufs}` past the grant's `buffers` limit;
+a caller the grant already holds buffers for is answered `{error, badarg}`.
+""".
+-spec adopt(pid(), #{snd := pos_integer(), rcv := non_neg_integer()}) ->
+          {ok, reference()} | {error, enobufs | badarg}.
+adopt(Grant, Sizes) ->
+    gen_server:call(Grant, {adopt, Sizes}, infinity).
 
 -doc """
 Asks the grant to let the calling connection, whose start carried `Token`, hold `Bytes` of
@@ -204,6 +223,19 @@ act({tcp_connect, inet, {A, B, C, D}, Port, Opts, Timeout}, {Owner, _} = From,
                 {error, Reason} ->
                     {reply, {error, Reason}, S#{gen := Gen}}
             end
+    end;
+act({adopt, Sizes}, {Conn, _}, #{buffers := Buffers0} = S) ->
+    %% The grant links the socket it adopts, so its exit releases what it holds whatever
+    %% the caller did; a socket already holding buffers is refused, not a crash.
+    Token = make_ref(),
+    try erx_net_grant_core:open(Conn, Token, Sizes, Buffers0) of
+        {ok, Buffers} ->
+            true = link(Conn),
+            {reply, {ok, Token}, S#{buffers := Buffers}};
+        {error, enobufs} = Refused ->
+            {reply, Refused, S}
+    catch
+        error:badarg -> {reply, {error, badarg}, S}
     end;
 act({reserve_buffer, Token, Kind, Bytes}, {Conn, _}, #{buffers := Buffers0} = S) ->
     case erx_net_grant_core:reserve(Conn, Token, Kind, Bytes, Buffers0) of

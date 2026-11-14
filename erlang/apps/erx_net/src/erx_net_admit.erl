@@ -34,7 +34,8 @@ The admitted request comes back with its caller, `{ok, Request, From}`, and the 
 pid is the owner of what the request opens: no request names an owner of its own. A call
 of another shape is `{refused, shape, From}`, answered `{error, badarg}`. The stack's own
 calls of a grant, a connection's reservation and release of its buffers
-(erx_net_grant:reserve_buffer/4, release_buffers/2, whose token the grant checks) and
+(erx_net_grant:adopt/2, which adopts its caller, and reserve_buffer/4 and release_buffers/2,
+whose token the grant checks) and
 `counts` (erx_net_grant:counts/1), are admitted only bare and from a process of this node,
 whatever the grantee.
 
@@ -84,9 +85,11 @@ until it exists they are written here with its signatures.
 -define(MAX_OPTS, 64).
 %% The longest timer erlang:start_timer/3 takes, in milliseconds.
 -define(MAX_TIMEOUT, 4294967295).
-%% A call the stack makes of its own grant: a connection's buffers, or the grant's counts.
+%% A call the stack makes of its own grant: an accepted connection's adoption, a connection's
+%% buffers, or the grant's counts.
 -define(IS_OWN(R), (R =:= counts orelse (is_tuple(R) andalso tuple_size(R) >= 1 andalso
-                                          (element(1, R) =:= reserve_buffer orelse element(1, R) =:= release_buffers)))).
+                                          (element(1, R) =:= adopt orelse element(1, R) =:= reserve_buffer
+                                           orelse element(1, R) =:= release_buffers)))).
 -define(IS_BYTE(X), (is_integer(X) andalso X >= 0 andalso X =< 255)).
 -define(IS_IP4(T), (tuple_size(T) =:= 4 andalso ?IS_BYTE(element(1, T)) andalso ?IS_BYTE(element(2, T))
                     andalso ?IS_BYTE(element(3, T)) andalso ?IS_BYTE(element(4, T)))).
@@ -100,6 +103,7 @@ until it exists they are written here with its signatures.
 -type grant_request() :: {tcp_connect, inet, inet:ip4_address(), 1..16#ffff, list(), timeout()}
                        | {udp_open, inet, any | inet:ip4_address(), 0..16#ffff, list()}
                        | {icmp_open, inet} | interfaces | resolver | watch_resolver
+                       | {adopt, #{snd := pos_integer(), rcv := non_neg_integer()}}
                        | {reserve_buffer, reference(), snd | rcv, non_neg_integer()}
                        | {release_buffers, reference()} | counts.
 
@@ -156,6 +160,8 @@ grant(watch_resolver) -> true;
 grant(_) -> false.
 
 %% The stack's own calls of the grant.
+own({adopt, #{snd := Snd, rcv := Rcv} = Sizes}) ->
+    map_size(Sizes) =:= 2 andalso is_integer(Snd) andalso Snd > 0 andalso is_integer(Rcv) andalso Rcv >= 0;
 own({reserve_buffer, Token, Kind, Bytes}) ->
     is_reference(Token) andalso (Kind =:= snd orelse Kind =:= rcv) andalso is_integer(Bytes) andalso Bytes >= 0;
 own({release_buffers, Token}) ->
