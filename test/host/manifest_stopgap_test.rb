@@ -19,7 +19,7 @@ class ManifestStopgapTest < Minitest::Test
   def setup
     root = File.expand_path('../..', __dir__)
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)))
-    @source = File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt'))
+    @source = Erx::Platform.load(root: root, name: 'qemu-virt').manifest_source(root)
     @platform = JSON.parse(File.read(File.join(root, 'config/platforms/qemu-virt.json')))
     @context = context
   end
@@ -160,7 +160,7 @@ class ManifestStopgapTest < Minitest::Test
   # Each manifest's root_memory is what its budgets promise and an 8 MiB margin no one
   # is promised: the site manifest's, made from the development one, keeps the margin,
   # since each domain it leaves out gives back the room it took
-  # (ManifestText.without_domain), the display unit's DMA memory included.
+  # (Manifest::Edit.without_domain), the display unit's DMA memory included.
   def test_root_memory_is_the_promise_and_the_margin_in_both_manifests
     [@source, site_manifest].each do |source|
       report = admit(source).report

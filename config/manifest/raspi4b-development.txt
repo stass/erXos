@@ -1,196 +1,54 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# The development manifest of the Raspberry Pi 4 Model B on the stopgap
-# (config/platforms/raspi4b.json; docs/plan.md, 1b-I): the system domain, two configured
-# domains, storage and network, and the system principal's session template, from which the
-# console starts root's session at boot (docs/design-system.md, "Booting"). The storage
-# domain is QEMU virt's row (config/manifest/qemu-virt-development.txt, whose comment gives
-# its memory, restarts and storage_ctl facet): an interpreter service domain that holds the
-# platform record's sd unit, EMMC2 and the legacy SD controller that shares its line
-# (docs/design-storage.md, "The SD controller's line"). The unit is named block, as on
-# QEMU virt, because storage_ctl acts on that unit name. The legacy controller is of no
-# kind a runtime drives, so the domain holds it with the unit and is given no record of it
-# and no register window onto it, and no driver opens it (docs/design-shared-devices.md,
-# "The unit rule"). erx_blk drives EMMC2's sdhci record with its SD device process
-# (erx_blk_sd), which logs that the SD card is not driven when no card answers. The domain
-# holds the card's data window and serves /data, littlefs on that partition, as the data
-# facet, with the rows below. The network and display domains are described with their
-# rows below.
+# The Raspberry Pi 4 Model B's part of its development manifest on the stopgap
+# (config/platforms/raspi4b.json; docs/plan.md, 1b-I). The manifest is the records every
+# board takes, config/manifest/development.txt, followed by these (Platform#manifest_source).
+# Together they configure the system domain, three configured domains, storage, network and
+# display, and the system principal's session template, from which the console starts root's
+# session at boot (docs/design-system.md, "Booting"). This part holds the machine, the
+# system principal, the units and windows of the board's devices and the network domain's
+# row, whose driver is the board's. The common part holds the storage and display
+# domains' rows, the shares, runtime limits and limits, and the services and facets; QEMU
+# virt's part (config/manifest/qemu-virt-development.txt) gives their measurements.
+#
+# The storage domain, an interpreter service domain, holds the platform record's sd unit,
+# EMMC2 and the legacy SD controller that shares its line (docs/design-storage.md, "The SD
+# controller's line"). The unit is named block, as on QEMU virt, because storage_ctl acts
+# on that unit name. The legacy controller is of no kind a runtime drives, so the domain
+# holds it with the unit and is given no record of it and no register window onto it, and
+# no driver opens it (docs/design-shared-devices.md, "The unit rule"). erx_blk drives
+# EMMC2's sdhci record with its SD device process (erx_blk_sd), which logs that the SD card
+# is not driven when no card answers. The domain holds the card's data window and serves
+# /data, littlefs on that partition, as the data facet. A boot with no card on EMMC2 has no
+# volume, so the storage domain provides no mint for data, the grants stay idle and /data
+# answers eio.
 #
 # The system domain holds two units (docs/design-platforms.md, "Raspberry Pi 4 Model B"),
 # of one register page of the board each: the console's, the mini UART's page, which it
 # shares with the auxiliary SPI controllers that no driver here drives, and the host
 # link's, the PL011s' page, of which the host link uses UART3. The console's driver is
-# erx_mini_uart, which keeps the divisor the firmware set. The display domain holds the
-# framebuffer's unit: the root reads the framebuffer the firmware set up, prints its line
-# (docs/design-device-tree.md, "The lines") and writes the display domain its record.
+# erx_mini_uart, which keeps the divisor the firmware set.
 #
-# The shares, runtime limits and the session's limits are QEMU virt's development
-# manifest's (config/manifest/qemu-virt-development.txt), whose comment gives their
-# measurements. The system principal holds root's one session, 36 MiB and outer 1 MiB,
-# and 1 MiB for the outer budget of a domain that has ended while another still holds a
-# connection to it, as QEMU virt's comment explains; the storage domain, 30 MiB and outer
-# 1 MiB; the network domain, 36 MiB and outer 1 MiB; and the display domain, 24 MiB and
-# outer 1 MiB: 131 MiB in all. The system baseline is QEMU virt's 46 MiB. root_memory,
-# 185 MiB, admits the baseline, the principal's 131 MiB, the SD controller's 1 MiB of DMA memory and GENET's 1 MiB of device
-# memory with 6 MiB no one is promised, and lies well below what the smallest Pi 4 the
-# record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
-manifest 1
-share system
-  quota_ns 30000000
-  period_ns 10000000
-  cpuset 15
-  capacity_mcpu 3000
-  capacity_first 0
-  slice_us 1000
-  grace_us 5
-  base 24
-  ceiling 47
-  flags none
-share users
-  quota_ns 10000000
-  period_ns 10000000
-  cpuset 15
-  capacity_mcpu 1000
-  capacity_first 0
-  slice_us 1000
-  grace_us 5
-  base 16
-  ceiling 31
-  flags none
-share session
-  quota_ns 10000000
-  period_ns 10000000
-  cpuset 1
-  capacity_mcpu 1000
-  capacity_first 0
-  slice_us 1000
-  grace_us 5
-  base 16
-  ceiling 31
-  flags none
-share display
-  quota_ns 1000000
-  period_ns 10000000
-  cpuset 1
-  capacity_mcpu 100
-  capacity_first 0
-  slice_us 1000
-  grace_us 5
-  base 16
-  ceiling 31
-  flags none
-runtime_limits system
-  max_frame 524288
-  max_message_heap 1048576
-  funnel_depth 64
-  exports 256
-  tmp 4194304
-  overlay 0
-  atoms 65536
-  foreign_atoms 1024
-  processes 4096
-runtime_limits network
-  max_frame 131072
-  max_message_heap 1048576
-  funnel_depth 64
-  exports 256
-  tmp 0
-  overlay 0
-  atoms 16384
-  foreign_atoms 1024
-  processes 4096
-runtime_limits session
-  max_frame 524288
-  max_message_heap 131072
-  funnel_depth 64
-  exports 256
-  tmp 2097152
-  overlay 0
-  atoms 16384
-  foreign_atoms 1024
-  processes 2048
-runtime_limits storage
-  max_frame 131072
-  max_message_heap 131072
-  funnel_depth 64
-  exports 256
-  tmp 0
-  overlay 0
-  atoms 16384
-  foreign_atoms 1024
-  processes 1024
-runtime_limits display
-  max_frame 131072
-  max_message_heap 131072
-  funnel_depth 64
-  exports 256
-  tmp 0
-  overlay 0
-  atoms 16384
-  foreign_atoms 1024
-  processes 1024
-limits native
-  memory 16777216
-  outer 1048576
-  grant @share.users
-  spaces none
-  lane 4096
-  connections 0
-  crash 0
-  flags none
-  runtime_limits @runtime_limits.system
-  peer_held 4096
-  peer_held_total 4096
-limits network
-  memory 37748736
-  outer 1048576
-  grant @share.users
-  spaces none
-  lane 65536
-  connections 2
-  crash 0
-  flags none
-  runtime_limits @runtime_limits.network
-  peer_held 4096
-  peer_held_total 4096
-limits session
-  memory 37748736
-  outer 1048576
-  grant @share.session
-  spaces @share.session
-  lane 65536
-  connections 4
-  crash 0
-  flags spaces
-  runtime_limits @runtime_limits.session
-  peer_held 4096
-  peer_held_total 4096
-limits storage
-  memory 31457280
-  outer 1048576
-  grant @share.users
-  spaces none
-  lane 4096
-  connections 2
-  crash 0
-  flags none
-  runtime_limits @runtime_limits.storage
-  peer_held 4096
-  peer_held_total 4096
-limits display
-  memory 25165824
-  outer 1048576
-  grant @share.display
-  spaces none
-  lane 4096
-  connections 0
-  crash 0
-  flags none
-  runtime_limits @runtime_limits.display
-  peer_held 4096
-  peer_held_total 4096
+# The display domain holds the framebuffer's unit and runs the firmware framebuffer's
+# driver, erx_firmware_fb, and the window system's screen (docs/design-display.md, "The
+# display device"): the root reads the framebuffer the firmware set up, prints its line
+# (docs/design-device-tree.md, "The lines") and writes the display domain its record, so a
+# screen on HDMI 0 shows the empty layout's background. A boot whose firmware set up no
+# framebuffer, QEMU's raspi4b model without the raspi4b suite's stand-in for the firmware
+# among them, gives the domain no framebuffer record, and the domain runs without a
+# screen. Its 24 MiB and the display share's 100 mcpu are QEMU virt's figures, measured on
+# neither board (TODO.md).
+#
+# The system principal holds root's one session, 36 MiB and outer 1 MiB, and 1 MiB for
+# the outer budget of a domain that has ended while another still holds a connection to
+# it, as QEMU virt's comment explains; the storage domain, 30 MiB and outer 1 MiB; the
+# network domain, 36 MiB and outer 1 MiB; and the display domain, 24 MiB and outer 1 MiB:
+# 131 MiB in all. The system baseline is QEMU virt's 46 MiB. root_memory, 185 MiB, admits
+# the baseline, the principal's 131 MiB, the SD controller's 1 MiB of DMA memory and
+# GENET's 1 MiB of device memory with 6 MiB no one is promised, and lies well below what
+# the smallest Pi 4 the record names leaves the root: RAM less fiasco_reserve is 890 MiB
+# there.
 principal system
   memory 137363456
   grant @share.users
@@ -198,11 +56,6 @@ principal system
   names 64
   default_limits @limits.native
   ceiling_limits @limits.native
-session system
-  limits @limits.session
-  runtime @artifact.emu
-  release @artifact.session
-  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net_client grant {erx_net_client_erxos,grant,[]} -eval ok=application:start(erx_session)"
 machine
   flags development
   host "erxos"
@@ -224,15 +77,6 @@ machine
   system_runtime_limits @runtime_limits.system
   native_limits @limits.native
   system_args "-- -root / -bindir /bin -progname erl -home / -boot /bin/start -user erx_console -erx_record console_driver erx_mini_uart -nocookie -no_epmd -proto_dist erx"
-unit console
-  placement "console-uart"
-  holder system
-unit net
-  placement "net"
-  holder @domain.network
-unit hostlink
-  placement "hostlink-uart"
-  holder system
 unit framebuffer
   placement "framebuffer"
   holder @domain.display
@@ -248,79 +92,6 @@ window data
   partition 0
   rights read,write
   image none
-domain storage
-  principal @principal.system
-  limits @limits.storage
-  kind service
-  flags none
-  runtime @artifact.emu
-  release @artifact.storage
-  restarts 5
-  restart_period_s 600
-  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
-service storage_ctl
-  server @domain.storage
-  interface driver_control
-facet storage_ctl
-  grantee system
-  service @service.storage_ctl
-  operations none
-  max_request 256
-  in_flight 1
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 65536
-# data: QEMU virt's rows (config/manifest/qemu-virt-development.txt, whose comment gives
-# their max_request, in_flight and max_heap_size): one erx_fs grant of /data's tree for
-# each grantee, the system domain and each session made from root's template, read-write
-# and bound to the grantee's domain id. Each grantee mounts it at /data
-# (docs/design-files.md, "A facet's mount"). A boot with no card on EMMC2 has no volume,
-# so the storage domain provides no mint for data, the grants stay idle and /data answers
-# eio. The session's grant is one of its quota of four connections and the storage
-# domain's of two; the system domain's travels on the storage domain's system connection.
-service data
-  server @domain.storage
-  interface files
-facet data
-  grantee system
-  service @service.data
-  operations none
-  max_request 131072
-  in_flight 16
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 262144
-facet data_session
-  name "data"
-  grantee @session.system
-  service @service.data
-  operations none
-  max_request 131072
-  in_flight 16
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 262144
-# log: the system log's write interface (docs/design-log.md, "The log facet"), served by
-# the system domain, where erx_syslog_sup registers as its server (erx_facet:serve/2).
-# No facet row grants it, so no other domain holds a log facet. A row that grants it
-# must give a max_request that holds one full write of log_write_max records of
-# log_write_text_max bytes, or the facet drops a legal write unanswered (TODO.md,
-# "log facet").
-service log
-  server system
-  interface log
-service inspect
-  server system
-  interface inspect
-facet inspect
-  grantee @session.system
-  service @service.inspect
-  operations none
-  max_request 4096
-  in_flight 2
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 65536
 # network: QEMU virt's network domain row for row (config/manifest/qemu-virt-development.txt,
 # whose comment explains its memory, connections and restarts), an interpreter service
 # domain that holds the net unit, the platform record's GENET (docs/design-platforms.md,
@@ -354,77 +125,3 @@ domain network
   restarts 5
   restart_period_s 600
   args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -erx_net interfaces {erx_genet,interfaces,[]} -erx_net runtime erx_net_erxos"
-service net
-  server @domain.network
-  interface net
-facet net
-  grantee @session.system
-  service @service.net
-  operations none
-  max_request 64
-  in_flight 16
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 65536
-service network_ctl
-  server @domain.network
-  interface driver_control
-facet network_ctl
-  grantee system
-  service @service.network_ctl
-  operations none
-  max_request 256
-  in_flight 1
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 65536
-# apps: the start service's tree, /apps/ctl and /apps/rc.conf (docs/design-apps.md,
-# "Interfaces"), for each session made from root's template: one erx_fs grant served by
-# the system domain, bound to the session and ending with it, so it travels on the
-# session's system connection and takes none of max_connections. Its max_request is
-# files_max_frame_min (property 16), as for every files grant; a ctl write is one line of at most
-# 4 KiB and rc.conf at most 64 KiB, so in_flight is small; max_heap_size, in words
-# (1 MiB), bounds the grant's process, which holds rc.conf's text while it answers.
-service apps
-  server system
-  interface files
-facet apps
-  grantee @session.system
-  service @service.apps
-  operations none
-  max_request 131072
-  in_flight 4
-  reductions 100000
-  period_ns 1000000000
-  max_heap_size 131072
-shell_principal @principal.system
-# The display domain is QEMU virt's row (config/manifest/qemu-virt-development.txt, whose
-# comment gives its share, limits and connections): an interpreter service domain that holds
-# the platform record's framebuffer unit and runs the firmware framebuffer's driver,
-# erx_firmware_fb, and the window system's screen (docs/design-display.md, "The display
-# device"). It serves display, its window tree, which no facet grants, so a screen on
-# HDMI 0 shows the empty layout's background. A boot whose firmware set up no framebuffer,
-# QEMU's raspi4b model without the raspi4b suite's stand-in for the firmware among them,
-# gives the domain no framebuffer record, and the domain runs without a screen. Its
-# 24 MiB and the display share's 100 mcpu are QEMU virt's figures, measured on neither
-# board (TODO.md).
-domain display
-  principal @principal.system
-  limits @limits.display
-  kind service
-  flags none
-  runtime @artifact.emu
-  release @artifact.display
-  restarts 5
-  restart_period_s 600
-  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx"
-# display: the display domain's window tree (docs/design-display.md, "A display's
-# session"), of the windows interface, and its display record, as on QEMU virt: no facet
-# grants it and no start row names it; the policy is single and the idle times 0.
-service display
-  server @domain.display
-  interface windows
-display display
-  policy single
-  idle_dim_s 0
-  idle_off_s 0

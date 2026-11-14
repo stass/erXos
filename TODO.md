@@ -97,8 +97,9 @@ it; git history is the record of completed work.
      * [Medium] the bulk and request-reply benchmarks under HVF: no TCP peer on QEMU's
        medium yet (the Linux oracle guest is not built; the harness's virtio-net hub carries
        raw frames to a Ruby harness, and slirp's guest forward carries the `net_device`
-       suite's TCP to a Ruby echo server over one host stream, which checks the guest's TCP
-       but is no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
+       suite's TCP to a Ruby echo server over one host stream, and its host forward one
+       connection from the harness to the guest's listener, which check the guest's TCP
+       but are no benchmark peer), and `bench/erx_net_bench.erl` has to be loaded into the guest shell as
        `BenchGuest` loads its module. The Linux-guest baseline stays unsupported until then.
      * [Medium] `erx_net_if_core` counters: the map keeps only counters that were
        incremented, so "kept, zero" reads as "unsupported" in `tools/erx bench net-freebsd`.
@@ -643,7 +644,7 @@ it; git history is the record of completed work.
   from a bound that does not change between restarts and show any mode that fits it. The driver also acknowledges a
   configuration-change interrupt without reading `events_read` or writing `events_clear` (virtio 1.2, 5.7.4.2),
   so a change of display size is not followed.
-* [High] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+* [High] the Raspberry Pi 4's display domain row (`config/manifest/development.txt` and `raspi4b-development.txt`;
   [design-stopgap.md](docs/design-stopgap.md#device-records)): the Pi's platform record carries the
   `framebuffer` unit, which the board's development manifest gives the system domain, and no display domain
   drives it, since no driver of the firmware's framebuffer exists. QEMU virt's development manifest has the
@@ -654,7 +655,7 @@ it; git history is the record of completed work.
   keyboard and tablet only once the unit is the transport page (security residuals,
   `boot_devices`); QEMU virt's four transport pages are the spare's, the display's, the network device's and
   the disks'.
-* [Medium] the Raspberry Pi 4's display domain row (`config/manifest/raspi4b-development.txt`;
+* [Medium] the Raspberry Pi 4's display domain row (`config/manifest/development.txt` and `raspi4b-development.txt`;
   [design-display.md](docs/design-display.md#the-display-device)): the display domain holds the `framebuffer`
   unit and drives it with `erx_firmware_fb`, on QEMU virt's figures, the `display` share's 100 mcpu and
   24 MiB, which are measured on neither board; on the Pi the screen image lives in the domain's own memory
@@ -1655,6 +1656,12 @@ it; git history is the record of completed work.
 
 ## Bugs by subsystem
 
+* [Low] development manifests (`tools/lib/erx/platform.rb` `manifest_source`, `config/manifest/`): a reader error in
+  a board's composed manifest names the line of the joined text (`config/manifest:403`), not the file and line of
+  `development.txt` or the board's part; pass the parts to `ABI::Syntax.parse` with their paths. The network
+  domain's row is still written in each board's part because its `-erx_net interfaces` driver differs, a fact the
+  platform record's net unit already states; deriving the driver would move the row to the common part. The
+  measurements behind the common part's figures are in QEMU virt's part's comment, beside records it no longer holds.
 * [Low] native_domain suite, the connection case (`test/guest/native_domain/guest.c`): its eval sits a few bytes under
   the boot page's 2,048-byte string limit (`boot_strings_max`), because every record's room is reserved at its
   longest; the `-erx_record` flag and the PATH word took it to the edge, and its names were shortened to fit. The next
@@ -1674,10 +1681,13 @@ it; git history is the record of completed work.
   from `crypto:strong_rand_bytes/1`, not bytes, is not written. No test hook makes the generator service refuse one domain's
   reads, and refusing them from the domain's start ends it before ERTS runs (`liberx/backend/fiasco/libc_start.c`, AT_RANDOM's
   read, `ERX_FIASCO_TASK_STATUS_ENTROPY`), so the hook must refuse a running domain's reads only. The passing half runs in
-  native_domain's crypto and jit_crypto cases.
-* [Low] crypto NIFs, link lists (`tools/lib/erx/native_runtime.rb`, `production_image.rb`): `crypto_archives` is a positional
-  array whose last entry `ProductionImage#crypto_archives` takes as libcrypto; make it a `Data` with named parts, name the two
-  flavours' link lists alike (`domain_archives`, `link_archives`), and derive the system image's list beside them.
+  native_domain's crypto and jit_crypto cases, and is K2's one test on a built image: it fails if `rand_unix.c`'s edit is
+  lost (the weak `getentropy` ends the seed in `ENOSYS`), but only the failing half shows `erx_entropy_read` is the only seed.
+* [Low] crypto NIFs, table make rule (`otp/erts/emulator/Makefile.in`, `driver_tab_crypto.c`): the table depends on the
+  archives' times, not on `ERX_CRYPTO_NIF_LIBS`'s value, and its empty-variable guard runs only when the table is remade.
+  An archive taken out of `DomainImageApps` leaves a stale table whose init function no link defines, so the link fails
+  closed, but on an undefined symbol that needs the runtime copy cleaned by hand. A stamp file of the variable's value as
+  a prerequisite would remake it.
 * [Low] crypto NIFs, seam check (`tools/lib/erx/runtime_seam.rb`, `nifs:`): the NIF archives' definitions count as inside ERTS's
   import check, but their own imports from musl and libcrypto are not compared with `imports.txt`.
 * [Low] OpenSSL, build (`tools/lib/erx/libcrypto.rb`): `__FILE__` in libcrypto's error records is the source's path
@@ -1924,13 +1934,27 @@ it; git history is the record of completed work.
   domain restarts, but a connection can end while both domains live (`malformed`,
   `no_memory`, `disconnect`). State whether the two domains are introduced and granted
   again then, or the client keeps a dead `net` facet until a restart.
+* [Medium] network, SYN-RECEIVED output (`erx_tcp`, `erx_tcp_output`, `erx_tcp_conn`):
+  every step ends in output, and output in SYN-RECEIVED carries SYN and ACK, as FreeBSD's
+  does (`tcp_output.c:432-443`, `:700-702`); FreeBSD sends no second SYN-ACK only because
+  nothing calls `tcp_output` there between `syncache_expand` and the completing ACK. An
+  accepted connection steps that segment first (`erx_tcp_conn:queue/4`), but a raise in
+  that step, counted by `guarded/2`, leaves it in SYN-RECEIVED for the buffer answers,
+  and a simultaneous open's SYN-RECEIVED steps clock hints and requests. Two ways to make
+  it hold by construction: adopt at the sizes `accepted/3` rounds to the MSS, so
+  `accepted/3` returns a control block alone and the completing segment sees FreeBSD's
+  buffers (`tcp_syncache.c:938`), or let output resend a SYN in SYN-RECEIVED only after
+  the retransmission timer rewound `snd_nxt`.
 * [High] network, `erx_net_client` (`erx_gen_tcp`; design-network-stack, "The socket
   process"): the TCP socket process lacks parts of the design.
   Still missing:
   the packet modes and the `buffer`, `exit_on_close` and `show_econnreset`
-  options, the schema-generated request validators, `erxos/erx_net_client_erxos`'s
-  `expose/2`, and the session template's `grant` key naming its `grant/0` once the grant is
-  in another domain.
+  options, the schema-generated request validators, the session template's `grant` key
+  naming its `grant/0` once the grant is in another domain, and the connection's link to
+  its socket process (erx_tcp_conn monitors its owner instead, so only a listen and an
+  accept expose their socket processes to the network domain with `send` and `link`;
+  `erx_inet`'s `expose_opener/2` must name `tcp_connect` in the same change that makes the
+  connection link, or a cross-domain connect ends at the link's `noproc`).
   The calls the socket process forwards (`sockname`, `peername`, `getopts`, `shutdown`) wait
   for the connection's reply with no deadline of their own, and within one domain a socket
   protocol message proves its sender only by its pid field. Differences from stock at
@@ -3937,8 +3961,8 @@ handing call's socket process exit and its connection's, is not yet looked for. 
 * [Medium] session, how the console learns a session's tty (`docs/design-live.md`, "Between domains"): the design has the console learn the tty from a `tty` agent in the session domain's ready report, but the relay needs `erx:cap(console)`, which init sets only after that report, so a relay started by the boot script has no master and one started after the report is not in it. Edit 65's `tty` agent, the domain pid's check that every agent is a pid of the domain's node, and a way for the session's creator to read the agents are not built; `erx_console:add_session/2` takes the tty from whoever creates the session. Settle the order when root's session starts at boot.
 * [Low] tests, `test/integration/runtime_console_test.rb` (`make check-runtime-hosted`): the cases that start the Erlang shell wait for `1> ` at the start of a line, but the hosted system domain is a named node and its shell prompts `(system@erxos)1> `, so every `with_erxos` case times out before it begins. Match the prompt with its node name, or make the patterns node-agnostic as the `Ctrl-G` case is.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_core.erl`: the names quota is the constant `NAMES_QUOTA`, 64, for every principal; the manifest's per-principal `names` is read by no one. Take each principal's from its row, as the domain quota is.
-* [Low] session memory, `config/manifest/qemu-virt-development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
-* [Medium] CPU grants, `config/manifest/qemu-virt-development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), and the web and display domains the other 250, 150 and 100, none of them measured, so no further configured domain has room. Size each service domain's grant from its measured use, or grow the reserve's bound, before another configured domain is added.
+* [Low] session memory, `config/manifest/development.txt`: re-measure one session at its command shell under the lane driver's frame-sized funnel scratch (at most about 132 KiB a connection) and lower the session's 36 MiB budget, the principal's memory and its `max_message_heap` of 131,072 words if the numbers allow; they were sized for a scratch of 16 bytes a word of `max_message_heap`.
+* [Medium] CPU grants, `config/manifest/development.txt`: the storage and network domains each take a whole CPU of the users share, 2,000 of the 2,250 mcpu that the system share's reserve leaves configured domains (`dom_system_reserve`, `liberx/system/dom_core.c`), and the web and display domains the other 250, 150 and 100, none of them measured, so no further configured domain has room. Size each service domain's grant from its measured use, or grow the reserve's bound, before another configured domain is added.
 * [Medium] tooling, configured-domain ids in the QEMU harnesses: `MediumBoot` (`NETWORK_ID`, `STORAGE_ID`, `DOMAIN_IDS`, `FREE_ID` and the catalogue rows of `DlControl` and `DlDevices`), `SystemDomain`, `SessionDomain::FIRST_SESSION`, `Regrant` and `DeviceGive::RESTART_ID` each re-derive by hand that configured domains boot in name order and that each later create spends an id, so adding a configured domain edits six files. Derive every id and row from one helper that sorts the manifest's configured domain names with the cell's added rows.
 * [Medium] domain service, `erlang/apps/erx_domain/src/erx_domain_srv.erl`: a domain whose pid died and whose stop the library refused never ends, so `ending/2` counts it for good and every later create and session start of its principal waits the full `release_wait` (10 s); record the refused stop and leave such a domain out of the hold.
 * [Medium] runtime, `erlang/apps/erx/src/erx_console.erl`: a login's session that has had the line and keeps ending (a shell that dies at its first input) is started again without limit, a domain build each round; throttle it as FreeBSD's init throttles a getty that keeps failing, and say so on the line.

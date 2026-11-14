@@ -6,6 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'open3'
 require_relative 'dependencies'
+require_relative 'domain_image_apps'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'generated'
@@ -55,12 +56,11 @@ module Erx
     # and compiler and runtime_tools, which docs/design-runtime.md keeps and the release
     # loads without starting (ReleaseFiles::LOAD_ONLY). OTP's `libs` and `start_scripts`
     # targets are not usable: lib/tools's crashdump.erl includes public_key.hrl and
-    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both. asn1,
-    # crypto, public_key and ssh ship in the domain releases that ask for them
-    # (ReleaseFiles::RELEASE_SCRIPTS), never in the system release: asn1's and crypto's
-    # NIFs are in the domains' runtime images alone, and public_key and ssh call them
-    # (docs/design-crypto.md, "OTP's applications").
-    APPLICATIONS = %w[kernel stdlib compiler runtime_tools asn1 crypto public_key ssh].freeze
+    # erts/start_scripts needs lib/os_mon/vsn.mk, and the import excludes both. The
+    # applications only a domain's runtime image runs (DomainImageApps) come last and ship
+    # in the domain releases that ask for them (ReleaseFiles::RELEASE_SCRIPTS), never in
+    # the system release (docs/design-crypto.md, "OTP's applications").
+    APPLICATIONS = [*%w[kernel stdlib compiler runtime_tools], *DomainImageApps::APPLICATIONS].freeze
     # What an application's make is given beyond the build's own variables. asn1 ships
     # its run-time module, asn1rt_nif, alone: with CT_MODULES empty its make builds that
     # module and the .app, which lists only it, and neither the ASN.1 compiler nor the
@@ -372,7 +372,10 @@ module Erx
         'ERX_HOSTED_LIBERX' => @output.liberx,
         'ERX_SDKROOT' => sdk_root,
         'ERX_TREE' => @root,
-        'ERX_GEN' => File.join(@root, Generated::OUTPUT)
+        'ERX_GEN' => File.join(@root, Generated::OUTPUT),
+        # The hosted runtime links no static NIF of DomainImageApps and never makes
+        # erx_crypto_tab, whose recipe refuses this empty list.
+        'ERX_CRYPTO_NIF_LIBS' => ''
       ).freeze
     end
 

@@ -55,6 +55,14 @@ module Erx
   # restricted mode must refuse it, since the guest reaches the host only through the
   # forward.
   #
+  # The reverse case follows: the Erlang shell listens with gen_tcp, whose backend on
+  # erXos is erx_gen_tcp by default, on QemuPlan::NIC_LISTEN_PORT and spawns an acceptor
+  # that echoes what it reads until the peer's end, then closes and tells the shell how
+  # many bytes it echoed. The harness connects to slirp's host forward to that port
+  # (listener_exchange), sends LISTEN_BYTES random bytes and shuts its sending side; the
+  # same bytes must come back, then the guest's FIN, and the shell must show the
+  # acceptor's count and its close's `ok`.
+  #
   # Every request above that needs the network (ifconfig's interfaces, ping's echo
   # socket, the resolver's and the TCP connect) reaches the stack only as a call of the
   # session's grant, its `net` facet, admitted by erx_net_admit
@@ -140,6 +148,26 @@ module Erx
                 "T = erlang:monotonic_time(millisecond) - T0, E =:= D.\r".freeze
     DIGEST_LINE = "{T, binary:encode_hex(erlang:md5(D))}.\r"
     CLOSE_LINE = "erx_gen_tcp:close(S).\r"
+    # The listener lines, whose shell bindings are L, the listening socket, and Shell, the
+    # shell's pid. ACCEPT_LINE spawns the acceptor, which owns the connection it accepts,
+    # echoes each recv's bytes back until the peer's end, closes, and sends the shell
+    # {echoed, Bytes, Close}; ECHOED_LINE takes that message. Its accept and send matches
+    # are tagged, so the crash report of an acceptor that fails names the call. LISTEN_BYTES
+    # fits the loopback socket's and slirp's buffers, so the harness sends it whole before
+    # it reads.
+    LISTEN_BYTES = 16_384
+    LISTEN_LINE = "{ok, L} = gen_tcp:listen(#{QemuPlan::NIC_LISTEN_PORT}, [binary, {active, false}]), ok.\r".freeze
+    ACCEPT_LINE = 'Shell = self(), _ = spawn(fun() -> ' \
+                  "{accept, {ok, A}} = {accept, gen_tcp:accept(L, #{TCP_RECV_MS})}, " \
+                  "Echo = fun Loop(N) -> case gen_tcp:recv(A, 0, #{TCP_RECV_MS}) of " \
+                  '{ok, B} -> {send, ok} = {send, gen_tcp:send(A, B)}, Loop(N + byte_size(B)); ' \
+                  '{error, closed} -> N end end, ' \
+                  "Echoed = Echo(0), Shell ! {echoed, Echoed, gen_tcp:close(A)} end), ok.\r".freeze
+    ECHOED_LINE = "receive {echoed, _, _} = Msg -> Msg after #{TCP_RECV_MS} -> timeout end.\r".freeze
+    # The acceptor's answer when the exchange passed.
+    ACCEPTED = "{echoed,#{LISTEN_BYTES},ok}".freeze
+    # The longest listener_exchange takes: its connect, and its write and read.
+    HOST_FORWARD_SECONDS = REPLY_SECONDS + 2 * TCP_SECONDS
     # A call of the session's grant, its `net` facet, that is no operation of it.
     GRANT_LINE = "gen_server:call(erx:cap(net), no_operation, infinity).\r"
     # Typed at the system domain's Erlang shell: in the network domain, whether vtnet0's
@@ -241,19 +269,86 @@ module Erx
 
     # What the TCP lines show in the Erlang shell: each step's answer; the comparison of
     # what came back with what was sent, which must be true; T and D's MD5, which the
-    # caller's verify_digest checks against the echo server's; and the refusal of the
-    # connection to the gateway at refused_port.
-    def tcp_checkpoints(refused_port:, verify_digest:)
+    # caller's verify_digest checks against the echo server's; the refusal of the
+    # connection to the gateway at refused_port; then the listener's lines, the acceptor's
+    # spawn verified by the harness's exchange through the host forward at forward_port
+    # (listener_exchange), and the acceptor's count and close, whose checkpoint has the
+    # exchange's time as well. The exchange's failure is raised at that checkpoint, once
+    # the shell has answered for the acceptor, so the serial log holds the guest's side
+    # of it too: the acceptor's answer, or after its crash report ECHOED_LINE's timeout.
+    def tcp_checkpoints(refused_port:, verify_digest:, forward_port:)
       echoed = lambda do |line|
         raise Error, "the #{TCP_BYTES} bytes the guest read back over TCP differ from those it sent" if line.include?('false')
+      end
+      failed = nil
+      host_forward = lambda do |_line|
+        NetDevice.listener_exchange(forward_port)
+      rescue Error => e
+        failed = e
+      end
+      accepted = lambda do |line|
+        raise failed if failed
+        raise Error, "the guest's acceptor did not answer {echoed,#{LISTEN_BYTES},ok}; see the serial log" unless line.include?(ACCEPTED)
       end
       [erl_point('tcp-connect', 'ok', type: DATA_LINE),
        erl_point('tcp-data', TCP_BYTES.to_s, type: ECHO_LINE),
        erl_point('tcp-echo', '(?:true|false)', seconds: TCP_SECONDS, verify: echoed, type: DIGEST_LINE),
        erl_point('tcp-digest', '\{[0-9]+,<<"[0-9A-F]{32}">>\}', verify: verify_digest, type: CLOSE_LINE),
        erl_point('tcp-close', 'ok', type: refused_line(refused_port)),
-       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'), type: GRANT_LINE),
+       erl_point('tcp-refused', Regexp.escape('{error,econnrefused}'), type: LISTEN_LINE),
+       erl_point('tcp-listen', 'ok', type: ACCEPT_LINE),
+       erl_point('tcp-host-forward', 'ok', verify: host_forward, type: ECHOED_LINE),
+       erl_point('tcp-accepted', '(?:\{echoed,[^\r\n]*\}|timeout)', seconds: HOST_FORWARD_SECONDS + SHELL_SECONDS,
+                                                                    verify: accepted, type: GRANT_LINE),
        erl_point('grant-refusal', Regexp.escape('{error,badarg}'), type: ProductionImage::Run::CTRL_G)].freeze
+    end
+
+    # The host's end of the listener case: connects to slirp's host forward at the
+    # loopback port port, sends LISTEN_BYTES random bytes and shuts its sending side, then
+    # reads the echo until the guest's FIN (read_echo). What came back must be the bytes
+    # sent. Each write and read waits at most TCP_SECONDS, and the whole read as long.
+    def listener_exchange(port)
+      sent = Random.bytes(LISTEN_BYTES)
+      echoed = Socket.tcp('127.0.0.1', port, connect_timeout: REPLY_SECONDS) do |socket|
+        socket.timeout = TCP_SECONDS
+        socket.write(sent)
+        socket.close_write
+        read_echo(socket)
+      end
+      raise Error, "the #{LISTEN_BYTES} bytes the guest's listener echoed differ from those sent" unless echoed == sent
+    rescue IOError, SystemCallError => e
+      raise Error, "the host forward to the guest's listener failed: #{e.message}"
+    end
+
+    # The guest listener's echo from socket, up to its FIN: LISTEN_BYTES bytes within
+    # TCP_SECONDS, or an Erx::Error that says how many came. The guest is the code under
+    # test, so reading stops at the first byte past LISTEN_BYTES.
+    def read_echo(socket)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TCP_SECONDS
+      data = +''.b
+      loop do
+        left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        unless left.positive? && socket.wait_readable(left)
+          raise Error, "the guest's listener did not close in #{TCP_SECONDS} s, after #{data.bytesize} bytes"
+        end
+
+        data << socket.readpartial(LISTEN_BYTES + 1 - data.bytesize)
+        raise Error, "the guest's listener echoed more than the #{LISTEN_BYTES} bytes sent" if data.bytesize > LISTEN_BYTES
+      end
+    rescue EOFError
+      return data if data.bytesize == LISTEN_BYTES
+
+      raise Error, "the guest's listener echoed #{data.bytesize} bytes, not the #{LISTEN_BYTES} sent, then closed"
+    end
+
+    # A loopback TCP port free now, for QEMU's host forward to listen on. It is free only
+    # until something else binds it; one that does fails the run, since the listener's
+    # count must then still come from the guest's acceptor (tcp-accepted).
+    def free_tcp_port
+      probe = TCPServer.new('127.0.0.1', 0)
+      probe.addr[1]
+    ensure
+      probe&.close
     end
 
     # The probe's answer: one merge at least, the one refusal, nothing left out, and one
@@ -454,7 +549,9 @@ module Erx
         link = Link.new
         server = NameServer.new(link)
         echo = EchoServer.new(limit: ECHO_LIMIT).start
-        nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port)
+        forward_port = NetDevice.free_tcp_port
+        nic = QemuPlan::Nic.new(frames_port: link.frames_port, peer_port: link.peer_port, echo_port: echo.port,
+                                forward_port: forward_port)
         answered = nil
         transfer_ms = nil
         verify_digest = ->(line) { transfer_ms = NetDevice.check_echo!(line, echo.received) }
@@ -467,7 +564,7 @@ module Erx
                        ProductionImage::Run::SLOGAN,
                        ProductionImage::Run::RELEASE_SHELL, session,
                        *NetDevice.shell_checkpoints(-> { answered.fetch(:mac) }),
-                       *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest),
+                       *NetDevice.tcp_checkpoints(refused_port: echo.port, verify_digest: verify_digest, forward_port: forward_port),
                        *NetDevice.system_checkpoints(coherent: tree.coherent)]
         Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, image: image, memory_mib: @platform.memory_mib,
                                                    directory: directory, checkpoints: checkpoints, nic: nic, dtb: dtb,
@@ -480,7 +577,9 @@ module Erx
                   'and its shell showed vtnet0 with the lease, pinged 10.0.2.2 three times and resolved www ' \
                   "in the lease's domain through the name server at #{SERVER}, with random query IDs; " \
                   "its Erlang shell sent #{TCP_BYTES} bytes over TCP to the echo server and read them back, " \
-                  "and was refused the host's loopback; the session's grant admitted every call " \
+                  "and was refused the host's loopback; it listened on #{QemuPlan::NIC_LISTEN_PORT} and its acceptor " \
+                  "echoed #{LISTEN_BYTES} bytes the harness sent through slirp's host forward, then closed after the " \
+                  "harness's FIN; the session's grant admitted every call " \
                   'of these and refused one that is no operation; the system shell was refused ifconfig, ping and host'
         @measurements << "net_device: #{accel}, 1 CPU, #{tree.coherent ? 'stock' : 'non-coherent'} tree: TCP from the guest's Erlang shell through slirp's guest forward " \
                          "to the harness's echo server: #{TCP_BYTES} bytes each way in #{transfer_ms} ms " \

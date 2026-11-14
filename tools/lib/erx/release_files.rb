@@ -5,6 +5,7 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require_relative 'domain_image_apps'
 require_relative 'erlang_apps'
 require_relative 'error'
 require_relative 'manifest'
@@ -43,18 +44,15 @@ module Erx
     DOMAIN_ONLY = %w[erx_session].freeze
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
-    # OTP's applications whose NIFs only the domains' runtime images link
-    # (docs/design-crypto.md, "Three runtime images"), and those that need them:
-    # public_key and ssh, whose every key operation calls crypto. Neither the system
-    # release nor the hosted runtime, which links neither NIF, can run them, so the hosted
-    # oracle's tree leaves them out (OracleHosted.application_files) and a suite there
-    # skips them as on a stock OTP built without crypto. Every release only loads them
-    # (release_entry): the boot script puts them on the code path and starts nothing of
-    # theirs, so a domain runs no ssh supervisor until a program of its own calls
-    # ssh:start/0 (docs/design-ssh.md, "Stages"); ssh alone has processes to start.
-    DOMAIN_IMAGE_ONLY = %w[asn1 crypto public_key ssh].freeze
-    raise Error, "DOMAIN_IMAGE_ONLY names what the release does not ship: #{DOMAIN_IMAGE_ONLY - APPLICATIONS}" unless
-      (DOMAIN_IMAGE_ONLY - APPLICATIONS).empty?
+    # OTP's applications that only the domains' runtime images run (DomainImageApps).
+    # Neither the system release nor the hosted runtime, which links neither of their
+    # NIFs, can run them, so the hosted oracle's tree leaves them out
+    # (OracleHosted.application_files) and a suite there skips them as on a stock OTP
+    # built without crypto. Every release only loads them (release_entry): the boot script
+    # puts them on the code path and starts nothing of theirs, so a domain runs no ssh
+    # supervisor until a program of its own calls ssh:start/0 (docs/design-ssh.md,
+    # "Stages"); ssh alone has processes to start.
+    DOMAIN_IMAGE_ONLY = DomainImageApps::APPLICATIONS
 
     NAME = 'erxos'
     BOOT_DEADLINE = 120
@@ -127,14 +125,14 @@ module Erx
     #   so no other domain has crypto on its code path. No manifest names it yet; the
     #   native domain tests boot it (NativeDomain).
     RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
-                        'session' => [*DOMAIN_BASE, 'asn1', 'crypto', 'public_key', 'ssh', 'erx_net_client', 'erx_shell',
+                        'session' => [*DOMAIN_BASE, *DOMAIN_IMAGE_ONLY, 'erx_net_client', 'erx_shell',
                                       'erx_web_line', 'erx_session'].freeze,
                         'storage' => [*DOMAIN_BASE, 'erx_blk', 'erx_storage'].freeze,
                         'network' => [*DOMAIN_BASE, 'erx_net'].freeze,
                         'web' => [*DOMAIN_BASE, 'erx_web'].freeze,
                         'display' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_display', 'erx_fb'].freeze,
                         'client' => [*DOMAIN_BASE, 'erx_memdraw', 'erx_win', 'erx_ui'].freeze,
-                        'ssh' => [*DOMAIN_BASE, 'asn1', 'crypto', 'public_key', 'ssh'].freeze }.freeze
+                        'ssh' => [*DOMAIN_BASE, *DOMAIN_IMAGE_ONLY].freeze }.freeze
 
     # Refuses applications of which no release holds one: an application the runtime
     # builds that neither the system release (system) nor a script of the release

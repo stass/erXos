@@ -57,6 +57,7 @@ ruby tools/build_site.rb --no-card [--image IMAGE] [--serve 8000]
   from the website's own system manifest and boots it once on the terminal
   (quit QEMU with Ctrl-A then X). That manifest is made from the
   development manifest,
+  [`config/manifest/development.txt`](../config/manifest/development.txt) followed by
   [`config/manifest/qemu-virt-development.txt`](../config/manifest/qemu-virt-development.txt),
   at each build: it leaves out the domains that
   [`config/platforms/qemu-virt.json`](../config/platforms/qemu-virt.json)'s
@@ -258,9 +259,12 @@ The machine has a virtio-net device on v64's fake router, its `fetch`
 backend (`net_device: { type: "virtio", relay_url: "fetch" }`,
 `NET_DEVICE` in `terminal.js`). The router lives in the page: there is
 no relay server and no CORS proxy (`cors_proxy` is not set). erXos's own
-stack drives the device: the system domain's `erx_net`, through its
+stack drives the device: the network domain's `erx_net`, through its
 `erx_virtio_net` driver, takes a DHCP lease from the router at boot,
-as it takes one from QEMU's user network. The demo is two shell commands:
+as it takes one from QEMU's user network. The site's manifest keeps the
+network domain (`site_leaves_out` in `config/platforms/qemu-virt.json`
+names only the web and display domains), so, as on QEMU, the system
+domain holds neither the device nor the stack. The demo is two shell commands:
 `ifconfig`, which shows the interface with the lease's address,
 192.168.86.100/24, and `ping 192.168.86.1`, which the router answers.
 

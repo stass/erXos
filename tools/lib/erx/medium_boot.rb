@@ -10,7 +10,7 @@ require_relative 'abi_source'
 require_relative 'boot_record'
 require_relative 'error'
 require_relative 'fiasco'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'output_directory'
 require_relative 'production_image'
 require_relative 'qemu'
@@ -326,7 +326,7 @@ module Erx
     # domain quota and max_domains each by domains, and max_connections by connections; a
     # negative figure shrinks them.
     def grown(source, memory:, domains:, connections: 0)
-      ManifestText.grow(source, { ['principal system', 'memory'] => memory, %w[machine root_memory] => memory,
+      Manifest::Edit.grow(source, { ['principal system', 'memory'] => memory, %w[machine root_memory] => memory,
                                   ['principal system', 'domains'] => domains, %w[machine max_domains] => domains,
                                   %w[machine max_connections] => connections })
     end
@@ -672,7 +672,7 @@ module Erx
       # A medium machine's manifest with room for the three domains, the configured rows, and the
       # system domain's /tmp cap at system_tmp bytes.
       def manifest(source, system_tmp:)
-        MediumBoot.manifest(ManifestText.set(source, ['runtime_limits system', 'tmp'] => system_tmp), domains: RELEASES.size, domain_memory: MEMORY,
+        MediumBoot.manifest(Manifest::Edit.set(source, ['runtime_limits system', 'tmp'] => system_tmp), domains: RELEASES.size, domain_memory: MEMORY,
                                                                           row: PROFILE + RELEASES.keys.map { |name| domain_row(name) }.join)
       end
 

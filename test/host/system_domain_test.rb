@@ -202,9 +202,13 @@ class SystemDomainTest < Minitest::Test
     assert_includes rows, "  connections 2\n"
     assert_includes rows, "facet echo_peer\n  grantee @domain.peer\n  service @service.echo\n"
     manifest = regrant.manifest(SITE)
-    assert manifest.end_with?(rows + Erx::ProductionImage.sessions(SITE) + regrant::SESSION_FACET)
-    assert manifest.end_with?("facet echo_session\n  grantee @session.system\n  service @service.echo\n" \
-                              "#{regrant::FACET_LIMITS.sub("  service @service.echo\n", '')}")
+    # Each record the boot adds is in the manifest whole (the edits print it again,
+    # kind by kind, so not at its end).
+    added = (rows + Erx::ProductionImage.sessions(SITE) + regrant::SESSION_FACET).scan(/^[a-z].*\n(?:  .*\n)*/)
+    assert_operator added.size, :>, 3
+    added.each { |record| assert_includes manifest, record }
+    assert_includes manifest, "facet echo_session\n  grantee @session.system\n  service @service.echo\n" \
+                              "#{regrant::FACET_LIMITS.sub("  service @service.echo\n", '')}"
     assert_equal 1, manifest.scan(/^session /).size
     assert_equal Integer(SITE[/^  max_connections ([0-9]+)$/, 1], 10) + 2,
                  Integer(manifest[/^  max_connections ([0-9]+)$/, 1], 10)

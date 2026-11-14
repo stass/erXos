@@ -3,7 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'error'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'medium_boot'
 require_relative 'production_image'
 require_relative 'session_domain'
@@ -119,7 +119,7 @@ module Erx
         sessions = ProductionImage.sessions(source)
         raise Error, 'the manifest has no session template of the system principal' unless sessions.start_with?("session system\n")
 
-        ManifestText.grow(MediumBoot.manifest(source, row: ROWS + sessions + SESSION_FACET, domains: 3),
+        Manifest::Edit.grow(MediumBoot.manifest(source, row: ROWS + sessions + SESSION_FACET, domains: 3),
                           { %w[machine max_connections] => MORE_CONNECTIONS })
       end
 

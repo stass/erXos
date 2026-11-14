@@ -34,12 +34,26 @@ class PlatformTest < Minitest::Test
     assert_equal %w[web display], VIRT.record.fetch('site_leaves_out')
   end
 
+  # Each board's development manifest is the common part followed by the board's own; the
+  # board's part is no manifest alone, and the reader takes the two together (it refuses
+  # a record written in both, so no board repeats a common record).
+  def test_a_boards_manifest_is_the_common_part_then_its_own
+    common = File.binread(File.join(ROOT, Erx::Platform::COMMON_MANIFEST_PATH))
+    %w[qemu-virt raspi4b].each do |board|
+      platform = Erx::Platform.load(root: ROOT, name: board)
+      part = File.binread(File.join(ROOT, platform.manifest_path))
+      assert_equal common + part, platform.manifest_source(ROOT), board
+      assert_raises(Erx::Error, board) { Erx::Manifest::Frontend.read(part) }
+      assert_equal board, Erx::Manifest::Frontend.read(platform.manifest_source(ROOT)).machine.properties.fetch('platform').first.value
+    end
+  end
+
   # The site manifest is the development manifest with the domains site_leaves_out names
   # taken out, in order, and keep keeps one of them in; it keeps nothing the site does not
   # leave out.
   def test_the_site_manifest_is_made_from_the_development_manifest
     development = VIRT.manifest_source(ROOT)
-    without = ->(source, domain) { Erx::ManifestText.without_domain(source, domain, units: VIRT.record.fetch('units')) }
+    without = ->(source, domain) { Erx::Manifest::Edit.without_domain(source, domain, units: VIRT.record.fetch('units')) }
     assert_equal without.(without.(development, 'web'), 'display'), VIRT.site_manifest_source(ROOT)
     assert_equal without.(development, 'web'), VIRT.site_manifest_source(ROOT, keep: %w[display])
     assert_raises(Erx::Error) { VIRT.site_manifest_source(ROOT, keep: %w[storage]) }

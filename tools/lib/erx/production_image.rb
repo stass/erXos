@@ -25,7 +25,7 @@ require_relative 'reload_guest'
 require_relative 'code_watch'
 require_relative 'json_input'
 require_relative 'manifest'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'native_root'
 require_relative 'native_jit_runtime'
 require_relative 'native_runtime'
@@ -231,11 +231,11 @@ module Erx
       # template (ProductionImage.without_sessions), so the console's login at boot starts
       # no session and the UART stays with the system shell, and with root_memory and
       # system_baseline each grown by system_growth_mib and the system domain's /tmp cap,
-      # its runtime limits' tmp, by tmp_growth_mib; any other line is unchanged.
+      # its runtime limits' tmp, by tmp_growth_mib; every other record is unchanged (Manifest::Edit).
       def manifest(source)
         raise Error, "/tmp's growth is more than the system's" if tmp_growth_mib > system_growth_mib
 
-        ManifestText.grow(ProductionImage.without_sessions(source),
+        Manifest::Edit.grow(ProductionImage.without_sessions(source),
                           { %w[machine root_memory] => system_growth_mib << 20,
                             %w[machine system_baseline] => system_growth_mib << 20,
                             ['runtime_limits system', 'tmp'] => tmp_growth_mib << 20 })
@@ -378,10 +378,9 @@ module Erx
 
       sources = Runtime.source_digest(root: @root)
       erts = @runtime.build
-      archives = [*erts.otp_archives, erts.libc, erts.builtins]
       root_task = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: machine.platform,
                                  fiasco: @fiasco)
-                            .build_system_receipted(directory: File.join(directory, 'root'), archives: archives,
+                            .build_system_receipted(directory: File.join(directory, 'root'), archives: erts.system_archives,
                                                     place: machine.root_address)
       kernel = assembled_receipt(@fiasco.kernel_path, name: 'kernel', directory: directory)
       sigma0 = assembled_receipt(@fiasco.sigma0_path, name: 'sigma0', directory: directory)
@@ -1612,7 +1611,7 @@ module Erx
       beamasm = NativeRoot.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @machine.platform,
                                fiasco: @fiasco)
                           .build_jit_runtime_receipted(directory: File.join(directory, 'jit-runtime'),
-                                                       archives: jit.link_archives)
+                                                       archives: jit.domain_archives)
       image = { 'path' => DOMAIN_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0,
                 'id' => 'domain-runtime', 'artifact' => runtime.fetch(:program), 'receipt' => runtime.fetch(:receipt) }
       jit_image = { 'path' => JIT_RUNTIME_PATH, 'kind' => @codec.member('entry_kind', 'image'), 'flags' => 0, 'jit' => true,
@@ -1711,16 +1710,15 @@ module Erx
     def crypto_archives(erts, jit)
       return [] unless jit
 
-      libcrypto = erts.crypto_archives.last
-      [*otp_archives(erts.crypto_archives - [libcrypto], flavour: 'emu'),
-       *otp_archives(jit.crypto_archives - [libcrypto], flavour: 'jit'),
-       Archive.new(path: libcrypto, label: 'openssl libcrypto', license: 'Apache-2.0', status: 'permanent',
+      [*otp_archives([erts.crypto.table, *erts.crypto.nifs], flavour: 'emu'),
+       *otp_archives([jit.crypto.table, *jit.crypto.nifs], flavour: 'jit'),
+       Archive.new(path: erts.crypto.libcrypto, label: 'openssl libcrypto', license: 'Apache-2.0', status: 'permanent',
                    notices: ['openssl/LICENSE.txt'])]
     end
 
     def archives(erts)
       spdx = 'fiasco/l4re-core/LICENSE.spdx'
-      [*otp_archives(erts.otp_archives, flavour: 'emu'),
+      [*otp_archives([erts.system_table, *erts.otp_archives], flavour: 'emu'),
        Archive.new(path: erts.libc, label: 'musl libc', license: 'MIT', status: 'permanent', notices: ['musl/COPYRIGHT']),
        Archive.new(path: erts.builtins, label: 'llvm compiler-rt builtins', license: CompilerRt::LICENSE,
                    status: 'permanent', notices: [CompilerRt.notice(root: @root, runner: @runner)]),

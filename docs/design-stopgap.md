@@ -430,8 +430,11 @@ archive is packed, since the archive's manifest records it; the image does not
 hold the manifest. Phase 1's EROFS windows pass blocks through unchecked; the
 hash check is a stopgap residual recorded in `TODO.md`. QEMU `virt`'s record is
 [config/platforms/qemu-virt.json](../config/platforms/qemu-virt.json) and its
-manifest
-[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt);
+development manifest is the records every board takes,
+[config/manifest/development.txt](../config/manifest/development.txt),
+followed by its own part,
+[config/manifest/qemu-virt-development.txt](../config/manifest/qemu-virt-development.txt)
+(`Platform#manifest_source`), and the packer admits the two as one text;
 the website's image has a manifest of its own, made from the development one
 whenever it is needed and never checked in (`Platform#site_manifest_source`): the
 development manifest without the configured domains the platform record's
@@ -439,7 +442,7 @@ development manifest without the configured domains the platform record's
 the web domain, since the website's page has no host link and the web facet is
 all that domain serves, and the display domain, since the page has no gpu for it
 to drive; each would only cost boot time on the emulator's one core.
-`ManifestText.without_domain` takes a domain out as if it had never been written
+`Manifest::Edit.without_domain` takes a domain out as if it had never been written
 in: its record, the units it holds, the services it serves with their display
 records and the system domain's facets of them, and the limits, share and
 runtime limits only it names; it gives the room back where the manifest reckons

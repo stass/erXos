@@ -113,18 +113,29 @@ module Erx
     # The address is the one slirp gives a guest forward that names none.
     NIC_ECHO_ADDRESS = '10.0.2.4'
     NIC_ECHO_PORT = 7
+    # The guest's port of the host forward: slirp carries each connection to the host's
+    # loopback port Nic#forward_port to this port of the address slirp's DHCP server gives
+    # first, 10.0.2.15, the one a forward that names no guest address goes to (QEMU's
+    # invocation documentation, `-netdev user`) and the guest's lease (NetDevice::GUEST_IP).
+    # It is above 1023, so the default ports limit of a grant takes it.
+    NIC_LISTEN_PORT = 7007
 
     # A virtio-net device on QEMU's user networking (slirp), restricted so that nothing the
     # guest sends leaves the host, which serves the guest DHCP, except through one guest
     # forward: a TCP connection to NIC_ECHO_ADDRESS port NIC_ECHO_PORT, which QEMU carries
     # over its one connection, made when it starts, to the harness's server at loopback
-    # port echo_port. One hub joins it to a `dgram` backend on loopback, QEMU's end at
-    # frames_port and the harness's at peer_port, so the harness exchanges raw Ethernet
-    # frames with the guest as one more host on its link.
-    Nic = Data.define(:frames_port, :peer_port, :echo_port) do
-      def initialize(frames_port:, peer_port:, echo_port:)
-        unless [frames_port, peer_port, echo_port].all? { |port| port.is_a?(Integer) && port.between?(1, 65_535) }
-          raise Error, 'a network device plan names two loopback UDP ports and a loopback TCP port'
+    # port echo_port. A plan with forward_port has one host forward as well: QEMU listens
+    # on that loopback port and carries each connection to it to the guest's
+    # NIC_LISTEN_PORT; restricted mode leaves the forward alone, since it does not affect
+    # forwarding rules (QEMU's invocation documentation, `-netdev user`). One hub joins it
+    # to a `dgram` backend on loopback, QEMU's end at frames_port and the harness's at
+    # peer_port, so the harness exchanges raw Ethernet frames with the guest as one more
+    # host on its link.
+    Nic = Data.define(:frames_port, :peer_port, :echo_port, :forward_port) do
+      def initialize(frames_port:, peer_port:, echo_port:, forward_port: nil)
+        ports = [frames_port, peer_port, echo_port] + (forward_port.nil? ? [] : [forward_port])
+        unless ports.all? { |port| port.is_a?(Integer) && port.between?(1, 65_535) }
+          raise Error, 'a network device plan names two loopback UDP ports and one or two loopback TCP ports'
         end
 
         super
@@ -322,8 +333,9 @@ module Erx
       return [] if nic.nil?
 
       loopback = '127.0.0.1'
+      host_forward = nic.forward_port ? ",hostfwd=tcp:#{loopback}:#{nic.forward_port}-:#{NIC_LISTEN_PORT}" : ''
       ['-netdev', "user,id=nic_user,restrict=on,domainname=#{NIC_DOMAIN}," \
-                  "guestfwd=tcp:#{NIC_ECHO_ADDRESS}:#{NIC_ECHO_PORT}-tcp:#{loopback}:#{nic.echo_port}",
+                  "guestfwd=tcp:#{NIC_ECHO_ADDRESS}:#{NIC_ECHO_PORT}-tcp:#{loopback}:#{nic.echo_port}#{host_forward}",
        '-netdev', "dgram,id=nic_frames,local.type=inet,local.host=#{loopback},local.port=#{nic.frames_port}," \
                   "remote.type=inet,remote.host=#{loopback},remote.port=#{nic.peer_port}",
        '-netdev', 'hubport,id=nic_hub_user,hubid=0,netdev=nic_user',

@@ -3874,9 +3874,15 @@ interface with the accept unit, does in order:
    the connection meets in its loop as its listener's exit.
 5. It makes its control block with `erx_tcp_user:accepted/3` from the
    handshake and `accept`, steps the completing segment, asking its
-   grant under its token for the buffers its steps ask for, and enters
-   its loop with `gen_server:enter_loop/3`, **queued**: its owner is
-   `{listener, Listener}`.
+   grant under its token for any buffer that step asks for, then asks it
+   for the buffer sizes `accepted/3` rounded to the MSS, and enters its loop with `gen_server:enter_loop/3`, **queued**:
+   its owner is `{listener, Listener}`. The completing segment is the
+   control block's first event, as `tcp_input` hands it to
+   `tcp_do_segment` straight after `syncache_expand`
+   (`tcp_input.c:1081-1160`). Every step ends in output, and output in
+   SYN-RECEIVED carries SYN and ACK (`tcp_output.c:432-443`,
+   `:700-702`), so a buffer answer stepped before the segment would send
+   the peer a second SYN-ACK.
 
 While queued the connection runs as any connection does, as FreeBSD
 runs a socket on its listen queue: it acknowledges, takes bytes into its

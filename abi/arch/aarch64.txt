@@ -71,3 +71,14 @@ layout erx_arch_boot_header wire_le 8 64
   field res4 u64 48
   field magic arch_boot_magic 56
   field res5 u32 60
+# Which identification register of the boot CPU each word of the boot
+# handoff's cpu_id holds (kernel.txt, erx_boot_handoff): bootstrap's
+# reader, kernel/arch/aarch64/cpu_id.c, writes them, and the root's
+# feature core, liberx/backend/core/arch/aarch64/cpu_features.c, reads
+# them. Each value indexes cpu_id, whose other words are 0.
+enum cpu_id_word u32
+  value aa64isar0 0
+  value aa64isar1 1
+  value aa64isar2 2
+  value aa64pfr0 3
+  value aa64pfr1 4

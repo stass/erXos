@@ -2159,8 +2159,8 @@ kernel, recorded as residuals here and checked on the boards with M12.
 **Exit criteria.** The packet path and the Internet checksum run their
 fuzz budgets clean; the oracle's socket cases run on erXos and compare
 with stock OTP 29.1.2 case by case; M14's criteria for its first stage
-hold on QEMU; the system image's symbol check finds no `libcrypto`, and
-fails on the seeded `crypto` entry; `crypto`'s, `public_key`'s and
+hold on QEMU; the system image's link list names no `libcrypto`, and a
+link given `crypto`'s table beside it fails; `crypto`'s, `public_key`'s and
 `ssh`'s suites agree with stock OTP 29.1.2 through `check-oracle`; and
 SSH's QEMU interop, algorithm-policy, jobs, limits and hangup tests of
 [design-ssh.md](design-ssh.md#verification) pass, with `ssh -p 2222

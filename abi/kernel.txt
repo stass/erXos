@@ -737,8 +737,8 @@ layout erx_trace_record shared 8 64
 # What bootstrap tells the kernel (docs/design-stopgap.md, "Boot handoff").
 # boot_value and boot_slot are the pair bootstrap derives from /chosen/bootloader,
 # under the machine page's rule for pairs. cpu_id holds the boot CPU's identification
-# registers as bootstrap read them, in the order the architecture's reader gives
-# (kernel/arch/<arch>/cpu_id.c), its unused words 0; the root takes the CPU feature
+# registers as bootstrap read them (kernel/arch/<arch>/cpu_id.c), at the words the
+# architecture file's cpu_id_word gives, its other words 0; the root takes the CPU feature
 # words of every boot information page from them.
 layout erx_boot_handoff wire_le 8 2488
   field version u32 0

@@ -29,8 +29,8 @@ setup() ->
     Clock.
 
 cleanup(Clock) ->
-    [stop(Name) || Name <- [erx_syslog_sup, erx_syslog]],
-    exit(Clock, kill),
+    [stop(whereis(Name)) || Name <- [erx_syslog_sup, erx_syslog]],
+    stop(Clock),
     persistent_term:erase({erx_syslog, started}),
     flush().
 
@@ -192,16 +192,15 @@ wait_new(Old) ->
         _ -> timer:sleep(5), wait_new(Old)
     end.
 
-stop(Name) ->
-    case whereis(Name) of
-        undefined ->
-            ok;
-        Pid ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, kill),
-            receive {'DOWN', Ref, process, Pid, _} -> ok end
-    end.
+%% Kill a process (none when undefined) and return once it is dead, so the name it held
+%% is free for the next case.
+stop(undefined) ->
+    ok;
+stop(Pid) ->
+    Ref = monitor(process, Pid),
+    unlink(Pid),
+    exit(Pid, kill),
+    receive {'DOWN', Ref, process, Pid, _} -> ok end.
 
 flush() ->
     receive _ -> flush() after 0 -> ok end.

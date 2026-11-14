@@ -29,10 +29,10 @@ class CpuFeaturesTest < Minitest::Test
     'CONFIG_LAZY_FPU' => [],
     'CONFIG_CPU_VIRT' => []
   }.freeze
-  # Never claimed on the stopgap, whatever its configuration (cpu_features.c's CLAIMED_HWCAP).
+  # Never claimed on the stopgap, whatever its configuration: cpu_features.c's table has no row for them.
   NEVER = %w[PACA PACG BTI MTE CPUID].freeze
 
-  # Every feature field at or past each threshold decode knows: unsigned fields 2,
+  # Every feature field at or past each threshold FreeBSD maps: unsigned fields 2,
   # FP and AdvSIMD 1 (half precision), SVE, DIT and BT 1, SSBS 2.
   ALL = %w[2222222222222220 2222222222222222 2222222222222222 0001000100110000 21].freeze
 
@@ -98,6 +98,34 @@ class CpuFeaturesTest < Minitest::Test
     end
   end
 
+  # The driver's whole output for fixed snapshots: none and every field all ones, then six
+  # drawn from Random.new(91), which mix signed FP and AdvSIMD values with set unsigned fields.
+  SNAPSHOTS = {
+    %w[0 0 0 0 0] => 'FP ASIMD',
+    %w[ffffffffffffffff ffffffffffffffff ffffffffffffffff ffffffffffffffff ffffffffffffffff] =>
+      'AES PMULL SHA1 SHA2 CRC32 ATOMICS JSCVT FCMA LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP SHA512 ILRCPC FLAGM',
+    %w[3374f8b2fda406ae 543aaf6a7a6380d2 4be7675d91f65874 17e4b71dedecc1ee 5544a72475583365] =>
+      'AES PMULL SHA1 CRC32 ATOMICS JSCVT FCMA LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP ILRCPC FLAGM',
+    %w[b9a8328289f3609c a7013eaa5220d1f5 813ddb0ebff6781c f2844391495b4491 a09d63d8650425fa] =>
+      'ASIMD AES PMULL SHA2 CRC32 ATOMICS ASIMDHP JSCVT LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP SHA512 ILRCPC FLAGM',
+    %w[fe067a413254de12 137cae9475c96728 57b5315619cf85dd 4e9353715667b66a b5cff894763ada6e] =>
+      'FP ASIMD AES SHA1 SHA2 CRC32 ATOMICS FPHP ASIMDHP JSCVT FCMA LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP SHA512 ILRCPC',
+    %w[ead5529186d369fd 14b64d2b84c5c0c6 1015d6b3a807428e 9508fb449aeb053d ab50932209fd14f9] =>
+      'AES PMULL SHA1 SHA2 CRC32 ATOMICS JSCVT FCMA LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP SHA512 ILRCPC FLAGM',
+    %w[26432772647884e 6c03618e2318474f 65385f71a64c6808 12bd8053c3733d4a c532446ed1027435] =>
+      'FP ASIMD AES PMULL SHA1 SHA2 CRC32 ATOMICS FPHP ASIMDHP JSCVT FCMA LRCPC DCPOP SHA3 SM3 SM4 ASIMDDP SHA512 FLAGM',
+    %w[3079d90cbd8fd4ef 77cf5b229108c542 a6d8fdc3b5a0333a 216caab11bacad4 1166cf76568613a3] =>
+      'AES PMULL SHA1 SHA2 CRC32 ATOMICS JSCVT FCMA DCPOP SHA3 SM4 ASIMDDP SHA512 FLAGM'
+  }.freeze
+
+  def test_snapshots_give_their_pinned_words
+    SNAPSHOTS.each do |words, hwcap|
+      output, status = Open3.capture2e(@driver, *words, stdin_data: '')
+      assert status.success?, output
+      assert_equal "hwcap #{hwcap} hwcap2\n", output, words.inspect
+    end
+  end
+
   def test_forbidden_features_are_refused_when_the_cpu_has_them
     assert_empty refused(ALL)
     assert_empty refused(%w[ffffffffffffffff ffffffffffffffff ffffffffffffffff 7777777777777777 ffffffffffffffff])
@@ -110,34 +138,42 @@ class CpuFeaturesTest < Minitest::Test
   end
 
   # CPUID would have a program read MIDR_EL1 from user mode (OpenSSL's armcap.c does), which
-  # the stopgap does not emulate: decode always finds it, and it is never claimed.
+  # the stopgap does not emulate: no field gives it, and it is never claimed.
   def test_cpuid_is_never_claimed
     [ALL, %w[0 0 0 0 0], %w[ffffffffffffffff ffffffffffffffff ffffffffffffffff 7777777777777777 ffffffffffffffff]].each do |words|
       refute_includes features(words).first, 'CPUID', words.inspect
     end
   end
 
-  # Seeded fault: CPUID let through the allowlist must be caught.
-  def test_an_allowlist_that_admits_cpuid_is_caught
-    driver = seeded('(HWCAP_CPUID | HWCAP_FP | ')
+  # Seeded fault: a row that claims CPUID must be caught.
+  def test_a_row_that_claims_cpuid_is_caught
+    driver = seeded(name: 'cpuid', row: '{ 0, 0, { .hwcap = HWCAP_CPUID } },')
     assert_raises(Minitest::Assertion) { refute_includes features(ALL, driver: driver).first, 'CPUID' }
     assert_equal %w[CPUID], refused(%w[0 0 0 0 0], driver: driver)
   end
 
-  # Seeded fault: SVE let through the allowlist must be caught.
-  def test_an_allowlist_that_admits_sve_is_caught
-    assert_equal %w[SVE], refused(ALL, driver: seeded('(HWCAP_SVE | HWCAP_FP | '))
+  # Seeded fault: a row that claims SVE must be caught.
+  def test_a_row_that_claims_sve_is_caught
+    row = '{ erx_sysreg_id_aa64pfr0_el1_sve_get(pfr0), 1, { .hwcap = HWCAP_SVE } },'
+    assert_equal %w[SVE], refused(ALL, driver: seeded(name: 'sve', row: row))
+  end
+
+  # Seeded fault: a row that claims an AT_HWCAP2 bit, BTI, must be caught, so the table's
+  # second word is checked too.
+  def test_a_row_that_claims_bti_is_caught
+    row = '{ erx_sysreg_id_aa64pfr1_el1_bt_get(id[ERX_CPU_ID_WORD_AA64PFR1]), 1, { .hwcap2 = HWCAP2_BTI } },'
+    assert_equal %w[BTI], refused(ALL, driver: seeded(name: 'bti', row: row))
   end
 
   private
 
-  # A driver over the core with CLAIMED_HWCAP opening with head instead of "(HWCAP_FP | ".
-  def seeded(head)
+  # A driver over the core with row added to its table, before the FP row.
+  def seeded(name:, row:)
     source = File.read(File.join(ROOT, CORE))
-    original = "#define CLAIMED_HWCAP\t(HWCAP_FP | "
-    assert_includes source, original
-    path = File.join(@directory, "seeded-#{head.scan(/[A-Z]+/)[1].downcase}.c")
-    File.write(path, source.sub(original) { "#define CLAIMED_HWCAP\t#{head}" })
+    anchor = "\t\t{ signed_field(erx_sysreg_id_aa64pfr0_el1_fp_get(pfr0)), 0, { .hwcap = HWCAP_FP } },\n"
+    assert_includes source, anchor
+    path = File.join(@directory, "seeded-#{name}.c")
+    File.write(path, source.sub(anchor) { "\t\t#{row}\n#{anchor}" })
     build(path, name: File.basename(path, '.c'))
   end
 end

@@ -4,6 +4,7 @@
 
 require 'json'
 require 'minitest/autorun'
+require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/manifest'
 require_relative '../fixtures/manifest_context'
 
@@ -46,7 +47,7 @@ class ManifestDomainsTest < Minitest::Test
     root = File.expand_path('../..', __dir__)
     @codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)))
     # The tests write their own session templates, of the manifest's session profile.
-    @plain = ManifestContextFixture.sessionless(File.binread(File.join(root, 'config/manifest/qemu-virt-development.txt')))
+    @plain = ManifestContextFixture.sessionless(Erx::Platform.load(root: root, name: 'qemu-virt').manifest_source(root))
     @platform = JSON.parse(File.read(File.join(root, 'config/platforms/qemu-virt.json')))
     @source = with_domains(self.class.domain('alpha'), self.class.domain('beta', flags: 'rescue'))
     @context = Erx::Manifest::Context.new(**ManifestContextFixture.domain_arguments(@codec).merge(platform: @platform))

@@ -103,7 +103,7 @@ class MediumBootTest < Minitest::Test
   end
 
   # The medium manifest gives the system principal room for two more domains, drops its
-  # session template, appends the configured one, and leaves every other line of the site
+  # session template, appends the configured one, and leaves every other field of the site
   # manifest as it was.
   def test_the_medium_manifest_has_room_for_two_domains_and_changes_nothing_else
     site = site_manifest

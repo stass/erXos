@@ -17,7 +17,7 @@ class DisplayDomainTest < Minitest::Test
   DEVELOPMENT = PLATFORM.manifest_source(ROOT)
 
   def figure(text, key) = Integer(text[/^  #{key} ([0-9]+)$/, 1], 10)
-  def field(text, record, key) = Erx::ManifestText.value(text, record: record, field: key)
+  def field(text, record, key) = Erx::Manifest::Edit.value(text, record: record, field: key)
   def record(text, header) = text[/^#{header}\n(?:  .*\n)*/]
 
   # The suite boots the development manifest's own display records: the site manifest with

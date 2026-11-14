@@ -11,13 +11,15 @@ has one holder at a time: kept by a queued connection, released at `abandon` and
 refused adoption, which hands the interface its RST; that a queued connection pushes nothing
 and keeps the peer's bytes until its socket process's first message; that its
 listener's exit aborts it with a RST; that a `bind` from any process but its listener, or a
-second one, ends it; and that a `bind` to a socket process already gone aborts it with a
-RST and an end at once.
+second one, ends it; that a `bind` to a socket process already gone aborts it with a
+RST and an end at once; and that the segment completing the handshake is its first event,
+so it sends the peer no second SYN-ACK.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("erx_ip4_wire.hrl").
 -include("erx_tcp_wire.hrl").
+-include("erx_tcp.hrl").
 
 -define(OURS, <<10, 0, 2, 15>>).
 -define(PEER, <<10, 0, 2, 2>>).
@@ -47,7 +49,9 @@ accept_test_() ->
        fun bind_from_another_process_ends_the_connection/0},
       {"a second bind ends the connection", fun second_bind_ends_the_connection/0},
       {"a bind to a socket process already gone sends no bound and aborts",
-       fun bind_to_a_gone_socket_process_aborts/0}]].
+       fun bind_to_a_gone_socket_process_aborts/0},
+      {"the completing segment is stepped before the buffers, so no second SYN-ACK goes out",
+       fun no_second_syn_ack/0}]].
 
 %% --- The stand-ins ---------------------------------------------------------------
 
@@ -131,6 +135,20 @@ listener() ->
     spawn(fun Loop() -> receive Msg -> Test ! {listener, Msg}, Loop() end end).
 
 %% --- Cases -----------------------------------------------------------------------
+
+%% The control block starts in SYN-RECEIVED, whose output carries SYN and ACK
+%% (tcp_output.c:432-443, :700-702), and every step ends in output. So its first event is
+%% the segment that completed the handshake, as tcp_input hands that segment to
+%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160), and the buffer
+%% sizes accepted/3 rounds to the MSS are stepped only after it. A pure ACK completes this
+%% handshake: the connection is established at the rounded sizes, 23 and 45 segments of
+%% 1460 bytes, and has sent nothing.
+no_second_syn_ack() ->
+    Conn = queued(),
+    #tcb{state = State, snd_hiwat = Snd, rcv_hiwat = Rcv} = element(2, sys:get_state(Conn)),
+    ?assertEqual({established, 33580, 65700}, {State, Snd, Rcv}),
+    ?assertEqual(none, receive {transmit, Frames} -> [decode(iolist_to_binary(F)) || F <- Frames]
+                       after 200 -> none end).
 
 queued_connection_waits_for_the_first_contact() ->
     Unit = erx_net_credit:new(2),

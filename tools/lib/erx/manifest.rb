@@ -184,11 +184,18 @@ module Erx
       IDENTIFIER = /\A[a-z0-9][a-z0-9_-]{0,62}\z/.freeze
       module_function
 
-      def parse(bytes, version:)
+      # The manifest bytes declare, refused unless it is version.
+      def parse(bytes, version:) = read(bytes, version: version)
+
+      # The manifest bytes declare. With version, a header naming another is refused
+      # before any record is read; without, the header names it: what a harness edits
+      # (Manifest::Edit) before the edited text is admitted, which checks it (parse).
+      def read(bytes, version: nil)
         declarations = ABI::Syntax.parse(bytes, path: 'config/manifest')
         headers = declarations.select { |item| item.kind == 'manifest' }
-        unless headers.size == 1 && headers.first.args.size == 1 && headers.first.members.empty? &&
-               ABI::Syntax.integer(headers.first.args.first, line: headers.first.line) == version
+        header = headers.first if headers.size == 1 && headers.first.args.size == 1 && headers.first.members.empty?
+        declared = header && ABI::Syntax.integer(header.args.first, line: header.line)
+        unless declared && (version.nil? || declared == version)
           raise Invalid.new('one supported manifest version is required', property: 'source', field: 'version')
         end
         records = Hash.new { |hash, key| hash[key] = [] }
@@ -238,9 +245,46 @@ module Erx
           end
         end
         machine = records.delete('machine').first
-        Source.new(version: version, machine: machine,
+        Source.new(version: declared, machine: machine,
                    records: records.to_h.transform_values { |list| list.freeze }.freeze).freeze
       end
+
+      # The manifest text of source, which read reads back to the same records: the
+      # header, the machine, then every other record, kind by kind in the order read
+      # found them, each with its properties and then its facet parameters. Comments are
+      # not kept; the encoder sorts every table, so the order of records is not the
+      # manifest's either.
+      def render(source)
+        ["manifest #{source.version}\n", record_text(source.machine),
+         *source.records.values.flatten.map { |record| record_text(record) }].join
+      end
+
+      def record_text(record)
+        return "#{[record.kind, *record.properties.fetch('targets').map { |token| token_text(token) }].join(' ')}\n" if
+          DIRECTIVES.key?(record.kind)
+
+        members = [*record.properties.map { |key, tokens| [key, *tokens] },
+                   *record.parameters.map { |tokens| ['parameter', *tokens] }]
+        lines = [[record.kind, record.name].compact.join(' '),
+                 *members.map { |key, *tokens| "  #{[key, *tokens.map { |token| token_text(token) }].join(' ')}" }]
+        "#{lines.join("\n")}\n"
+      end
+
+      # A token as ABI::Syntax reads it back: a quoted one with its quote and backslash
+      # escaped, and any byte outside printable ASCII as \xNN.
+      def token_text(token)
+        return token.value unless token.quoted
+
+        escaped = token.value.each_byte.map do |byte|
+          case byte
+          when 34, 92 then "\\#{byte.chr}"
+          when 32..126 then byte.chr
+          else format('\\x%02x', byte)
+          end
+        end
+        "\"#{escaped.join}\""
+      end
+      private_class_method :record_text, :token_text
     end
 
     # Structural fixtures exercise canonical bytes without claiming that an

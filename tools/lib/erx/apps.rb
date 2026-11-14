@@ -6,7 +6,7 @@ require 'fileutils'
 
 require_relative 'error'
 require_relative 'fiasco'
-require_relative 'manifest_text'
+require_relative 'manifest_edit'
 require_relative 'medium_boot'
 require_relative 'output_directory'
 require_relative 'production_image'
@@ -249,7 +249,7 @@ module Erx
     # The development manifest source with clock's principal, template and data grant,
     # the start row of boot (START), and the machine grown to hold clock's sessions.
     def manifest(source, boot:)
-      ManifestText.grow(source, GROWTH) + APP + START.fetch(boot)
+      Manifest::Edit.grow(source, GROWTH) + APP + START.fetch(boot)
     end
 
     # The production checkpoints to the system's command shell, then, in every boot,
