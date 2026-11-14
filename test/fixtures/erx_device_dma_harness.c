@@ -226,6 +226,43 @@ device_write(uint64_t offset, uint32_t value)
 	}
 }
 
+/* virtio-mmio's transport has no 8- or 16-bit register. */
+uint8_t
+erx_device_access_load8(volatile uint8_t *at, uint64_t offset)
+{
+	(void)at;
+	(void)offset;
+	CHECK(false);
+	return (0);
+}
+
+void
+erx_device_access_store8(volatile uint8_t *at, uint64_t offset, uint8_t value)
+{
+	(void)at;
+	(void)offset;
+	(void)value;
+	CHECK(false);
+}
+
+uint16_t
+erx_device_access_load16(volatile uint8_t *at, uint64_t offset)
+{
+	(void)at;
+	(void)offset;
+	CHECK(false);
+	return (0);
+}
+
+void
+erx_device_access_store16(volatile uint8_t *at, uint64_t offset, uint16_t value)
+{
+	(void)at;
+	(void)offset;
+	(void)value;
+	CHECK(false);
+}
+
 uint32_t
 erx_device_access_load32(volatile uint8_t *at, uint64_t offset)
 {
