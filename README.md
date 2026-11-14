@@ -49,8 +49,8 @@ The [architecture](docs/design.md), the [roadmap](docs/plan.md) and the
 * **Simple by design.** A few concepts, used everywhere. The build
   enforces the rules, not the reviewer. Where a declarative description
   is simpler than code, it replaces the code.
-* **Cross-platform.** AArch64 on QEMU `virt` comes first, then the
-  Raspberry Pi 4 and 5. Other architectures are ports, not redesigns.
+* **Cross-platform.** AArch64 comes first, on QEMU `virt` and the
+  Raspberry Pi 4; the Raspberry Pi 5 follows. Other architectures are ports, not redesigns.
 
 ## Architecture
 
@@ -165,344 +165,107 @@ pixels. The [overview](docs/overview.md) tells the longer story.
 
 ## Current status
 
-erXos is in Phase 1 of the [roadmap](docs/plan.md), which brings the
-system up on the stopgap Fiasco kernel. Its Phase 1b, which moves the
-user-facing parts into domains of their own, is under way. `tools/erx
-boot` builds a development image and boots it in QEMU. Below, it boots
-under HVF on one CPU, into the command shell. There a
-few commands list the root, write a file to `/tmp`, read it back and
-count the processes; then `erl` starts the Erlang shell, which catches a
-crash with a monitor and passes a token around a ring of 5,000
-processes. Lines starting `% ` in the Erlang shell are notes added here.
+erXos is in Phase 1 of the [roadmap](docs/plan.md): the system is up on the
+stopgap Fiasco kernel, and Phase 1b moves the user-facing parts into
+domains of their own. Every build is a development build and prints
+`development build: trusted code only`. `tools/erx boot` builds an image
+and boots it in QEMU to the command shell:
 
 ```
-             __  __
-   ___  _ __ \ \/ /  ___   ___
-  / _ \| '__| \  /  / _ \ / __|
- |  __/| |    /  \ | (_) |\__ \
-  \___||_|   /_/\_\ \___/ |___/
-
-erXos
-L4Re Microkernel on arm-64
-Rev: Unknown version compiled with gcc 16.2.0 for Generic Platform
-Build: #1 No date
-
 development build: trusted code only
-erx: boot image build df85638cc0daa5ea index 97622c2ebb3940e67f01874bc45165c42c9d636437029447b0e279a1e1dbccc0 flags 0x1 archive 0x4022c000+0x17b4000 bootargs 0
-[... Fiasco's own start-up lines ...]
-erx: entropy: quality: low, from the counter alone
-erx: root task: build df85638cc0daa5ea index 97622c2ebb3940e67f01874bc45165c42c9d636437029447b0e279a1e1dbccc0 entries 377
-erx: root task: manifest root_memory 100663296 baseline 81788928 units 3 pool pages 29575
-erx: root task: watchdog 1,5,60
 erx: erts: erl_start runs, 40 arguments
-erx: erts: 1 schedulers and 1 dirty CPU schedulers hold executor slots
 Erlang/OTP 29 [erts-17.1.1] [source] [64-bit] [smp:1:1] [ds:1:1:10] [async-threads:1]
 
 rc: the command shell; erl starts the Erlang shell
-% # The command shell runs rc's language, written in Erlang.
-% ls -1 /
-NOTICES
-bin
-data
-lib
-manifest
-proc
-releases
-root
-tmp
 % echo hello from erXos > /tmp/hi
 % cat /tmp/hi
 hello from erXos
-% # How many processes run? Each is an Erlang process.
-% ps | wc -l
-      62
 % erl
 Eshell V17.1.1 (type help(). for help)
-
-% Crash a process that divides by zero, and catch it
-% with a monitor. The shell carries on.
-1> {_, R} = spawn_monitor(fun() -> 1 / list_to_integer("0") end).
-=ERROR REPORT==== 1-Jan-1970::00:00:02.651025 ===
-Error in process <0.150.0> with exit value:
-{badarith,[{erlang,'/',[1,0],[{error_info,#{module => erl_erts_errors}}]}]}
-
-{<0.150.0>,#Ref<0.3910384898.1.60465>}
-2> receive {'DOWN', R, _, _, {E, _}} -> {crashed, E} end.
-{crashed,badarith}
-
-% A ring of N processes passes a token round it Laps times.
-3> Ring = fun(N, Laps) ->
-..     Last = lists:foldl(fun(_, Next) ->
-..         spawn(fun Loop() -> receive 0 -> Next ! 0;
-..                   T -> Next ! T - 1, Loop() end end)
-..       end, self(), lists:seq(1, N)),
-..     Alive = erlang:system_info(process_count),
-..     Last ! N * Laps,
-..     (fun Wait() -> receive 0 -> ok;
-..                    T -> Last ! T - 1, Wait() end end)(),
-..     {Alive, N * Laps}
-..   end.
-#Fun<erl_eval.41.130099583>
-
-% 5,000 processes alive at once, 100,000 messages.
-4> Ring(5000, 20).
-{5061,100000}
+1>
 ```
 
-* **It boots to the command shell** on QEMU `virt` (AArch64), under HVF and
-  TCG, with 1 to 8 CPUs. The QEMU suites run under HVF; TCG runs the
-  deterministic-mode transcript and a boot smoke, and at the landing gate
-  `tools/erx check-qemu --remote DEST` may move the multi-CPU cells of
-  long suites to a second host under TCG while this one is busy. The
-  development machine has 512 MiB of RAM.
-* **ERTS runs in user mode** as the system domain, on `liberx`'s Fiasco
-  backend. OTP 29.1.2 and musl live in the tree, modified. musl's start
-  gives a program `AT_RANDOM`, 16 bytes of the entropy source, and
-  `AT_HWCAP` and `AT_HWCAP2`: the boot CPU's features that the kernel
-  enables and saves for user mode, the same in every domain and in a
-  session's native programs. OpenSSL 3.5.9 lives in
-  the tree too and builds `libcrypto.a` for `erxos-aarch64`
-  (`tools/erx build openssl`); no runtime links it yet.
-* **The serial console's driver** (PL011) is an Erlang process.
-* **Files work.** The file protocol, per-domain namespaces and `/tmp` all
-  run, `/tmp` on a RAM file system written in Erlang. `prim_file` reaches
-  file servers through grants, and that works across domains: a file
-  server in one domain serves a client in another over their connection.
-* **Storage works**: M6's demo of the [roadmap](docs/plan.md) runs. A
-  virtio block driver in Erlang (`erx_blk`) serves the partitions of an
-  MBR with extended boot records as windows. It runs in the storage
-  domain, an interpreter service domain that holds the block device, which the
-  development manifest configures and the domain service starts at boot.
-  littlefs serves `/data` there; a file synced there survives a kill of the
-  machine, and a littlefs failure ends the domain, whose restart mounts
-  `/data` afresh, both checked under HVF. The block driver is a transport
-  contract (read, write, flush, info) over its virtio transport, and
-  littlefs's `fsync` reaches the device as a virtio flush, so a synced file
-  is on the device and not only in its write cache; a failed flush fails
-  the `fsync`. The system shell and root's session
-  both read and write `/data` through the storage domain's `data` facet,
-  and both reach it again once the storage domain has restarted. Under HVF,
-  root's session writes a file, the system shell reads it, and the file is
-  read again after the storage domain restarts. The system shell restarts the
-  block driver through the storage domain's driver-control facet, at
-  `erl`: `erx_driver_ctl:restart(erx:cap(storage_ctl), block)`, or by
-  writing `reset` to the block device's `/dev/N-virtio,mmio/ctl`, beside
-  its `status`: in the system shell, `/dev` lists the block device, shows
-  its status and takes the control words `stop`, `start` and `reset`. An EROFS
-  reader in Erlang (`erx_erofs`), behind its funnel `erx_verity`, mounts
-  images in the namespace. CRC-32C is the first per-byte primitive.
-  `make pack` (`tools/erx pack --medium`) writes a QEMU disk image into
-  `build/production-image/qemu-virt/`; the QEMU
-  harness boots one built the same way, playing the firmware, which reads the
-  boot-selection record and boots the slot it names. The harness then
-  reads the release's files from that slot's EROFS image at the storage
-  domain; the image is not yet served to the system domain.
-  The funnel does not check image hashes yet; that is M11.
-* **The command shell works at the console.** The console's first shell
-  is an rc-language command shell, written in Erlang, and `erl` in it
-  starts the Erlang shell; `q()` there returns to the command shell.
-  The language has variables, lists, `for`, `if`, functions, pipelines,
-  redirections, `cd` and `pwd`, with `Ctrl-C` ending the running line.
-  Its commands are Erlang commands (`echo`, `cat`, `ls`, `wc`, `grep`,
-  `sort`, `mkdir`, `rm`, `mv`, `cp`, `ps`, `top`, `mount`, `uname`, `dmesg`, `ifconfig`,
-  `ping`, `host`, `erl`, `true` and `false`); every pipe carries text, and `ls`, `ps`, `grep`, `sort` and
-  `wc` print what FreeBSD's do for the options they offer; `uname` takes
-  FreeBSD's flags and layout, and `uname -v` names the build. `dmesg` prints
-  the kernel log from `/proc/kernel/log`, which reads the log without taking
-  it from the console and marks the records it cannot show, overwritten or
-  unreadable, as `[missing N]`. The system log's service runs in the system
-  domain: it takes the kernel's records and the system domain's own, renders
-  each as one escaped line, holds each domain to a rate of stored bytes and
-  feeds the console; other domains do not write to it yet, and no store keeps
-  its lines. `top` shows
-  the process table under a header of uptime, memory and run queue, read
-  from the one tree of system values that `/proc` also serves. Every
-  runtime's `/proc`, `top` and `dmesg` read through the inspect facet, and
-  the kernel log's old `log` facet is gone. A figure
-  the stopgap kernel measures only in part says so and names its source.
-  Its language is checked against
-  plan9port's rc, built on the host as the oracle. Job control works for
-  Erlang commands: `&`, `Ctrl-Z`, `jobs`, `fg`, `bg` and `kill`. Running
-  programs is not on master yet.
-* **Programs have pipes, and a session process can start one.** A
-  program has a descriptor table and pipe ends set up from its startup
-  message, and a read or write on a pipe end waits until the other side
-  is ready. A session process starts a native program through the
-  program's handler, `erx_prog_handler`, handing it pipe ends it holds
-  and a window buffer; it is told how the program ended, and the program
-  stops when the session process exits. The shell does not start
-  programs yet, and the musl seam that lets a C program use pipes is not
-  built, so no C program uses them yet.
-* **The start table runs.** The start service merges the manifest's
-  `start` rows with `/apps/rc.conf` and keeps each enabled row's session
-  under a supervisor of its own. `service` enables, disables, starts and
-  stops rows as FreeBSD's does, `service -e` lists what starts, and
-  `/proc/apps` shows each row's state.
-* **The Raspberry Pi 4 boots on QEMU's `raspi4b` model.** TF-A BL31 hands
-  off to Fiasco, and the system boots to the serial shell on the mini
-  UART. It runs under TCG only, because QEMU cannot run this model under
-  HVF. On a 4 GB Raspberry Pi 4 the card `make pack PLATFORM=raspi4b`
-  builds boots from the firmware through
-  BL31, Fiasco and the root task to the command shell's `%` prompt on
-  the serial console ([the record](docs/research-rpi4-board-pass.md)).
-  On the model the storage domain drives the SD card through EMMC2
-  (`erx_blk_sd`, interrupt-driven): it identifies the card, the block
-  service admits its partition table and littlefs mounts its volume, and
-  blocks written over the driver reach the card image; `/data` is that
-  volume, and a file written there reaches the card image too. On the
-  board the driver identifies the card (4-bit bus at 25 MHz), littlefs
-  mounts `/data`, and a file written there survives a power cycle. The manifest configures a network domain
-  that runs the stack over the Ethernet driver (`erx_genet`, as
-  `genet0`); the model has no Ethernet, so there the domain's first
-  register read faults and the domain is left down after its restarts.
-  On the board the driver brings `genet0` up at 1000 Mb/s, DHCP gives
-  it an address, and `ping` and `host` reach the internet; unplugging
-  and replugging the cable takes the link down and back up.
-  A display domain drives the firmware's framebuffer (`erx_firmware_fb`):
-  the driver keeps the screen image in its own memory and copies changed
-  rectangles into the framebuffer. The model has no firmware to set one up,
-  so there the domain starts without a screen; the board is checked by hand.
-* **The machine is an object** (M4). A host link over the second serial
-  line lets `tools/erx load` and `watch` replace modules in the running
-  system, and `tools/erx files` read the guest's files over 9P2000.L; `tools/erx boot
-  --hostlink` boots the guest with that link on a UNIX socket and a fresh
-  copy of the release disk, so `/data` starts empty. At
-  the Erlang shell, `erx:i()` shows processes and kernel objects, `source(Pid)` shows the source line a process is at, and
-  `erx:trace/1` streams trace events; `/proc` serves the same records as
-  read-only files. Values the stopgap kernel cannot measure show as
-  unsupported or partial, never invented.
-* **Domains work on the stopgap** (1b-A). Each runs its own ERTS, as the
-  interpreter or as BeamAsm, in an address space of its own, on
-  `liberx`'s Fiasco backend and its domain library. In the booted system
-  the domain service, `erx_domain`, starts the manifest's configured
-  domains and creates others on request; only the BeamAsm image, whose
-  manifest marks it, gets a space that can hold generated code.
-  `erx_domain:introduce/2` connects two domains, whose processes then
-  message and call each other as Erlang nodes do; when either end goes,
-  both are told `noconnection`, and a crashed domain leaves a crash
-  record. A message from another domain is acted on only by its protocol's
-  owner. Root's session domain runs at boot and takes the UART. The
-  configured domains serve facets that the domain service mints from the
-  manifest and makes anew when a domain restarts. A device's holder
-  domain binds its interrupt line and opens the device in the form it was
-  given. Devices that share an interrupt line, as the Pi's UARTs (the
-  console and the host link among them) do, each get their interrupts: one
-  owner per line acknowledges it once every driver on it has answered. A
-  domain mounts a facet only where the manifest grants it, so an ungranted
-  domain's `/data` is an empty directory, as FreeBSD shows an empty mount
-  point; a release holds such mount points as empty directory entries. A
-  connection between domains costs about 132 KiB.
-* **Hosted mode** runs the runtime as a macOS process, on Apple Silicon
-  and on x86_64 Macs. There, OTP's
-  compiler, stdlib, kernel and emulator suite groups are compared case by
-  case with stock OTP against tables of known differences, each with its
-  cause (`test/oracle/hosted_known_differences/`). On QEMU the system domain
-  runs all four groups whole against stock (`make check-oracle`), with
-  every difference classified or tracked in TODO.md.
-* **The system release** carries kernel, stdlib, compiler and
-  runtime_tools (the last two loaded, not started) and the erXos
-  applications the system domain runs. The storage applications
-  (`erx_blk`, `erx_storage`) and the network ones (`erx_net`,
-  `erx_net_client`) ship only in the domain release, so the system
-  domain holds no driver or network code.
-* **A demo runs in the browser**, on an AArch64 emulator built from v86,
-  with a disk that keeps its files across a power cut and a menu of
-  hardware faults (dead, corrupt or hung disk, corrupt RAM, an interrupt
-  storm, a frozen CPU, a power cut) that shows how the system meets each.
-  When the machine goes down it prints a picture and its crash record.
-  The website's Downloads section offers the Raspberry Pi 4 card
-  (`sdcard-<digest>.img.xz`, with its build record and a recipe for writing
-  it) and a QEMU `virt` image (`image-<digest>.boot.gz`, with the QEMU
-  command line that boots it), each with its size, SHA-256 and a link to
-  the source commit it was built from.
-* **The build checks itself.** Generated ABI and hardware layers,
-  reproducible boot images, fuzzing, ASan, UBSan, TSan, TLA+ models (of
-  the lane, the connection and links among others) and herd7 litmus tests
-  of memory ordering all run as build gates.
-* **erXos's own kernel has begun** as host-built C17 cores: the object
-  store, the capability table, budgets, the grace tracker and the page
-  funnel, with host tests, fuzzing and a CBMC model-checking gate. None
-  of it boots yet; the modified Fiasco is still the running kernel.
-* **The network stack is growing on the host** as an Erlang translation
-  of FreeBSD's logic (`erx_net`), tested there: Ethernet, ARP and one
-  neighbour table shared with IPv6 neighbour discovery and its duplicate
-  address detection, IPv4 and IPv6 with fragment reassembly, ICMP and
-  ICMPv6 with their rate limits, the loopback interface `lo0` with
-  127.0.0.1/8, which always runs over the loop interface, UDP, and for TCP its wire format, RTT,
-  MSS, initial sequence numbers, ECN, SACK blocks and the RFC 6675
-  scoreboard with duplicate-ACK loss detection. TCP's connection now runs
-  as a pure step from SYN to TIME-WAIT, with its timers, the syncache,
-  ICMP errors and path MTU, and an explorer that walks its states,
-  across sequence-number wrap too, checking RFC 9293's rules. Frames are
-  classified on input and framed on output, and DHCP for IPv4 is decided.
-  The Internet checksum and SipHash-2-4 are its per-byte primitives. On
-  stock OTP it runs as processes against QEMU's user networking: it takes
-  a DHCP lease, answers ARP and ping, echoes UDP, and opens TCP
-  connections through `gen_tcp`'s calls, echoing 1 MiB each way off a
-  host server. On FreeBSD it also runs over a tap device through its tap
-  transport, where a vnet jail resolves and pings it. On erXos under QEMU it
-  runs in a network domain of its own over its virtio-net driver, takes a
-  DHCP lease and answers ARP and ping; root's session reaches it through
-  its `net` grant, and the system domain holds neither the network device
-  nor the stack, so the system shell refuses `ifconfig`, `ping` and `host`
-  and they work in root's session. There `ifconfig` and
-  `ping` show its interface and ping slirp's gateway in FreeBSD's layout,
-  and names resolve: the lease's name servers and domain reach `inet_db`
-  through the grant, `gen_udp` and `gen_tcp` go through the grant by
-  default, and the `host` command looks names and addresses up in
-  FreeBSD's lines. TCP, UDP and ICMP sockets work over a per-client
-  grant that admits every message. Root's Erlang shell connects out with
-  `gen_tcp` and also listens: it accepts a connection the host makes
-  through QEMU's host forward and echoes it until the host's end. Its fast path (checksums folded into the copy, whole runs of
-  segments sent and merged on receive) was measured on the FreeBSD
-  x86-64 test host, over a native FreeBSD tap, with erXos running in
-  hosted mode (the medians of 5 runs). Bulk send reaches about 2,470
-  Mbit/s and bulk receive about 3,600 Mbit/s. A request and reply of 64
-  bytes does about 15,000 transactions a second, and about 87,000 with 16
-  in flight. For scale, lwIP, a small stack that stands as the baseline,
-  on the same tap (its 64 KiB window variant) reaches 6,537 Mbit/s
-  sending and 6,809 Mbit/s receiving, so bulk transfer is still well
-  behind it. The raw data lives outside this repository.
-* **The display's window stack works on QEMU `virt`.** Once a display is
-  up, its session starts; the session's client opens a window with
-  `erx_win:open/2`, draws into the window's buffer and presents it, and
-  the `display_domain` suite compares the screen with a reference
-  picture. The window server (`erx_winfs`) serves each window as files and
-  takes its display's name from its domain's environment. The virtio-input
-  driver's event parser is a pure, fuzzed core, and the input router
-  (`erx_input`) delivers a driver's records to windows' `mouse` and `kbd`
-  files under the single policy; the virtio-input driver process is not
-  built yet. Evdev's key and button codes have one home,
-  `abi/formats/evdev.txt`, and the US keymap is generated from
-  `abi/keymaps/us.txt`. Host-built parts around it: the screen's composition
-  (`erx_screen_core`), the single-window policy with its reserved chord
-  and `wctl`, the widget model's deltas, `ui.txt` with its generated
-  schema and binary form in Erlang, C and TypeScript, presentation types
-  generated from the inspection schema, LVGL built on the host, and the
-  web client's protocol and connection core. A connection can carry a pixel
-  area that its reader maps and `erx_memdraw` draws into, the manifest has a
-  display record for the windows service, the development manifest runs a
-  display domain over virtio-gpu (no development boot attaches a gpu, so it
-  shows its empty layout's background), `erx-lvgl` draws into its
-  window's buffer in LVGL's direct mode, and the virtio-gpu driver's
-  decisions are written; the virtio-input driver sends a keyboard's and a
-  tablet's records to the window system, and the QEMU harness adds a
-  virtio-gpu, keyboard and tablet, compares screenshots, and types a key
-  and moves the pointer into a client's window.
-* **A browser shows the machine's records:** run `make web` first,
-  which builds the client offline from pinned packages; boot with
-  `tools/erx boot --hostlink`, run the `tools/erx web --socket PATH`
-  line it prints once root's session has started, and open the URL
-  that prints. The page
-  shows the machine's record, attribute by attribute with each value's
-  reporter, and its children as links; on the stopgap kernel every
-  value reads `[unsupported]`. A `/proc/...` address shows the record
-  of that path as root's session sees it, such as `/proc/processes`,
-  the session's own processes, each a link to its record; a path the
-  session cannot see ends with `scope`. Records are the only view so far.
-* **Designed but not built yet:** the rest of erXos's own kernel, the
-  rest of the command shell, the rest of the browser client, and the POSIX-lite layer. Each has a design document in
-  [docs/](docs/).
+**Platforms**
+
+* QEMU `virt` (AArch64) boots to the command shell on 1 to 8 CPUs, under
+  HVF and TCG.
+* The Raspberry Pi 4 boots on QEMU's `raspi4b` model (TCG only) and on a
+  real 4 GB board from an SD card that `make pack PLATFORM=raspi4b`
+  builds. On the board the serial console, the SD card (`/data` survives a
+  power cycle) and Ethernet (1000 Mb/s, DHCP, `ping`, `host`) work; the
+  card's [manual checklist](docs/design-platforms.md#the-sd-card-and-ethernet-on-a-board)
+  and the [first pass](docs/research-rpi4-board-pass.md) record what was
+  tried. The board needs a bootloader dated 2022-12-01 or later.
+* Boot images are reproducible, for the QEMU disk image and the Pi 4's
+  SD card alike.
+
+**Kernel and domains**
+
+* ERTS runs in user mode as the system domain on the stopgap Fiasco, behind
+  `liberx`; OTP 29.1.2 and musl live in the tree, modified.
+* Domains each run their own ERTS (interpreter or BeamAsm) in an address
+  space of their own. The domain service starts the manifest's domains
+  and creates others on request; domains message each other as Erlang
+  nodes do.
+* erXos's own kernel has begun as host-built C17 cores (object store,
+  capability table, budgets, page funnel). None of it boots yet.
+
+**Erlang runtime and tools**
+
+* The Erlang shell, `erx:i()`, `source(Pid)`, `erx:trace/1` and `/proc`
+  show processes and kernel objects; a value the stopgap cannot measure
+  reads as unsupported or partial.
+* A host link lets `tools/erx load`, `watch` and `files` replace modules in
+  the running system and read its files; `tools/erx web` shows the
+  machine's records in a browser.
+* Hosted mode runs the runtime as a macOS process for fast iteration.
+
+**Shell and commands**
+
+* The console's shell is rc, written in Erlang, with job control. Its
+  commands (`ls`, `cat`, `grep`, `ps`, `top`, `mount`, `dmesg`, `uname`,
+  `ping`, `host` and others) are Erlang commands that follow FreeBSD's
+  output, and pipes carry text.
+* The start table runs services; `service` enables and stops them as
+  FreeBSD's does.
+* Programs have pipes and a session process can start one. The shell does
+  not start programs yet.
+
+**Files and storage**
+
+* Per-domain namespaces, file servers across domains and `/tmp` on a RAM
+  file system in Erlang.
+* A storage domain serves `/data` from littlefs over a virtio block driver
+  on QEMU and an SD driver on the Pi 4, and restarts cleanly after a
+  failure. An EROFS reader mounts read-only images.
+
+**Networking**
+
+* The network stack is `erx_net`, an Erlang redesign of FreeBSD's:
+  Ethernet, ARP, IPv4, IPv6 neighbour discovery, ICMP, UDP, TCP and DHCP.
+  It runs in a network domain over the virtio-net driver on QEMU and the
+  GENET driver on the Pi 4. `ifconfig`, `ping`, `host`, and `gen_tcp`
+  connections out and in work in root's session.
+
+**Display and input**
+
+* A window server serves windows as files; clients draw into window buffers
+  with `erx_win`, and the virtio-gpu, virtio-input (keyboard and tablet)
+  and Pi firmware-framebuffer drivers are Erlang processes. A QEMU suite
+  compares screenshots; the Pi's screen is checked by hand.
+
+**Web demo and checks**
+
+* The website runs a demo in the browser on an AArch64 emulator, with a
+  menu of hardware faults, and offers the Pi 4 card and a QEMU image for
+  download.
+* The checks are described under [Correctness and testing](#correctness-and-testing).
+
+**Not built yet**
+
+* The rest of erXos's own kernel, programs started from the shell and
+  the musl seam for C programs' pipes, the rest of the browser client, and
+  the POSIX-lite layer. Each has a design document in [docs/](docs/).
 
 ## Correctness and testing
 
@@ -523,9 +286,9 @@ for what counts as evidence.
   one that no longer occurs, fails the gate. The same gate runs musl's
   `libc-test` against erXos's C library.
 * **Weak memory under herd7** (`make check-litmus`). herd7 simulates how a
-  processor may reorder memory accesses. The ten litmus tests (small
+  processor may reorder memory accesses. The litmus tests (small
   programs with a stated bad outcome) in `test/litmus/` cover the lane's
-  wake handshake and ring positions, under Arm's AArch64 memory model and,
+  wake handshake and ring positions and the pipe's lock, under Arm's AArch64 memory model and,
   for the C11 form, RC11 (the repaired C11 model). Each protocol with its
   fences or acquire loads must never reach the bad outcome. Its twin
   without them must reach it, or the test would pass whatever the fences
@@ -539,14 +302,14 @@ for what counts as evidence.
   process sent, and a link two processes make towards each other is
   never left with one half). Each model has seeded defects, such as a
   dropped fence or an answer sent early, that must fail on the property
-  or the deadlock check they name. The roster has 34 configurations,
-  four of them fixtures that test the runner itself. The models for the
+  or the deadlock check they name. The models for the
   host link's sessions, the update protocol and the scheduler's
   cross-CPU protocol are planned and not written.
-* **CBMC, a bounded model checker for C** (`make check-cbmc`). Six
-  harnesses check the budget arithmetic and the capability table's lookup,
-  rights and slot-closing code for every input within stated bounds. Nine
-  seeded defects must each make a harness fail.
+* **CBMC, a bounded model checker for C** (`make check-cbmc`). The
+  harnesses in `test/cbmc/` check the budget arithmetic, the capability
+  table's lookup, rights and slot-closing code, the grace tracker and the
+  page funnel for every input within stated bounds. Each seeded defect
+  must make its harness fail.
 * **Fuzzing** (`make check-fuzz`). The rule is that every parser of
   untrusted input gets a fuzz target when it lands; the known gaps are in
   `TODO.md`. The host fuzz targets include the boot image and its
@@ -600,6 +363,7 @@ Apple Silicon macOS is the primary host. You need:
   fsimg, the tool that writes and verifies the EROFS images (`make setup`
   builds it);
 * QEMU 11.1, with its `virt-11.1` machine;
+* Node.js and pnpm, for `make web` (the browser client);
 * xz (XZ Utils), which compresses the website's Raspberry Pi 4 download;
 * a Homebrew JVM;
 * Docker, a local engine or context, for the full stock OTP suites only.
