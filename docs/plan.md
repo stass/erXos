@@ -138,7 +138,7 @@ names; the table's order is the order.
 | 1b-D Track P, the first part | a UNIX program recompiled unchanged makes pipes, spawns children with inherited descriptors and waits for them, on the stopgap | 10,000 to 15,000 lines of C for the track | 1b-B's session domain, sub-space ports and pipes, not toybox's applets | GP, provisionally; the G6 baseline |
 | 1b-E M9 on the stopgap | a block transfer runs while the block driver process is killed; the kill ends the storage domain, whose restart resets the device and mounts `/data` again with every synced file present ([design-stopgap.md](design-stopgap.md#littlefs-in-the-storage-domain)); drivers run in the storage and network domains over virtio-mmio, unconfined | 3,000 lines of C17, 5,000 of Erlang for M9, of which the PCIe enumerator and the MSI frame's driver are its kernel part's | 1b-A | G9's measurements, deciding nothing |
 | Track A, part 2 | an app built outside the tree with the SDK alone, added to an image with `tools/erx pack --app`, boots into its session with exactly the `apps` row's services its declaration names, its code read from its package at `/app` | estimated before it starts | part 1 | |
-| Track A, part 3 | the same package copied into `/apps` on a running machine shows there as a directory, starts from the start table once enabled, survives a reboot, and is removed with `rm -r`, its data kept | estimated before it starts | part 2, M6's data partition and 1b-E | |
+| Track A, part 3 | the same package copied into `/apps` on a running machine is admitted there, its image readable through `mount`, starts at `service NAME start` once enabled, survives a reboot, and is removed with `rm`, its data kept | estimated before it starts | part 2, M6's data partition and 1b-E | |
 | 1b-F Track D, parts 6 to 8 | a QEMU `virt` desktop whose terminal windows run the shell, the same user interface term as on the web, and acme and sam editing a file | estimated per part before it starts | 1b-C's part 3; part 8 also 1b-D | |
 | 1b-G Networking on QEMU | the network domain carries UDP echo and a TCP bulk transfer to a Linux peer through the packet-path prototype, on QEMU under HVF | estimated in the network service's design document | Phase 1: the network driver and stack run in the system domain, as M6's block driver does, until 1b-E moves them into the network domain | GN-QEMU's baseline, deciding nothing |
 | M14 erXos's network stack, on QEMU | TLS, SSH and distribution sessions run over erXos's own TCP/IP stack, written in Erlang from FreeBSD's, on QEMU in 1b-G; the boards follow with M12 | estimated in its design document | 1b-G's prototype | G14 |
@@ -1715,8 +1715,9 @@ holding exactly its template's grants, and one with none to the
 console's alone; a session killed is started again, and past the row's
 intensity the row is `down` at `/proc/apps`;
 `service enable` and `disable` edit `/etc/rc.conf` and survive a
-reboot, and an edit of the file changes nothing until the next
-`service` command; a session whose template holds no `start` grant
+reboot, and an edit of the file changes nothing at a command for
+another row, only at the row's own `service` command or the next
+boot; a session whose template holds no `start` grant
 cannot reach `/etc/start`, `/etc/rc.conf` or `/apps`;
 `rc.conf`'s and `ctl`'s fuzz targets run their budgets clean; each seeded violation of property
 17 fails the manifest check; each chokepoint check catches its seeded
@@ -1747,8 +1748,9 @@ check` needs no `examples/doom`.
 **Exit criteria, installing at run time.** In a development build,
 `cp` of a package into `/apps` shows it `admitted` at
 `/proc/packages`, with its signer `unchecked`, and its image readable
-through `mount /apps/NAME.app DIR`; `service NAME enable` starts it, and
-a reboot keeps it; a newer build copied over it runs with the app's files
+through `mount /apps/NAME.app DIR`; `service NAME enable` starts
+nothing and `service NAME start` then starts it, and a reboot keeps it;
+a newer build copied over it runs with the app's files
 kept, and one cut short fails its `cp` and leaves the old one running;
 `rm` of it leaves no package or row, no session of it once the
 publication has answered, and the app's directory; a copy cut short

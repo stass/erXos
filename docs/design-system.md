@@ -1193,7 +1193,8 @@ in place before anyone can connect to it.
   core's deadline the read finds the machine's settings before any row
   starts. On one whose storage domain is down, ends before it reports
   ready, or misses the deadline, the read fails and the manifest's rows
-  start alone, as a session does not wait for a restart either
+  start alone, as a session does not wait for a restart either, and
+  each row takes its local settings at its own command or the next boot
   ([design-apps.md](design-apps.md#failure-handling-diagnostics-and-debuggability)).
 * **A display's row.** The start table starts a row that names a
   display only once that display's server has settled, by the same rule
@@ -1210,8 +1211,8 @@ in place before anyone can connect to it.
   system domain's namespace, so the wait is bounded by the display row's
   boot timeout, and a display that is down never holds a row: the row
   starts all the same, its session's windows grant is installed when the
-  server reports after a restart, as any grant is, and the start table
-  asks again for each start of the row
+  server reports after a restart, as any grant is, and the row's keeper
+  asks again before each start of its session
   ([design-apps.md](design-apps.md#keeping-a-session)).
 * **Why it holds by construction.** The wait reads only state the mint
   core already keeps, the grant of each `files` service to the session,

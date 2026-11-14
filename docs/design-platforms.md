@@ -1657,8 +1657,8 @@ typed right after it: it holds the drivers' lines (`erx_blk`,
 system's line `erx_domain: configured domain NAME (domain N) ended,
 REASON; restarting it`. While the storage domain serves no volume,
 `/data` answers `eio`, so the start service's lines
-`erx_starter: rc.conf cannot be read (failure N): eio` follow, at
-failures 1, 2, 4, 8 and so on; they are a symptom of step 3's failure,
+`erx_starter: rc.conf cannot be read: eio` follow, one at boot and one
+at each `service` start, stop or restart; they are a symptom of step 3's failure,
 not a fault of their own. Name the card's make and size, and for an
 Ethernet step the switch or router the cable goes to.
 

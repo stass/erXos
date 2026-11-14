@@ -658,26 +658,36 @@ it; git history is the record of completed work.
 * [Medium] apps, `/etc/start/ctl` and `/etc/rc.conf` ([design-apps.md](docs/design-apps.md#the-start-table)):
   `/apps` holds apps alone, so the tree that `erx_starter_fs` serves at `/apps` becomes the service `start`,
   mounted at `/etc/start`, holding only `ctl`, whose `enable` and `disable` go and which gains `restart`; and
-  `rc.conf` becomes an ordinary file of the data partition's `etc` tree, a service directory with a facet
-  `etc` (read-only to the system domain, read-write to the templates that hold `start`, rows the build
-  derives, and an entry of the facet table), mounted at `/etc`. Code to change: `erx_starter_fs` loses its
-  read-only `rc.conf` node; `erx_starter_rc` only reads, from the `etc` grant, and its write path and the
-  `superseded` rule go; `erx_starter` reads `rc.conf` before every `ctl` command and writes nothing;
-  `erx_cmd_service`'s `enable` and `disable` edit `/etc/rc.conf` with `erx_start_table:set/3` (moved where a
-  session can call it), by a new file and a rename, and write nothing to `ctl`; `ctl` gains `onestart`,
-  `onestop` and `onerestart`, and `erx_start_table:command/3` judges every command after the read
-  (design-apps.md, "How a command is judged"), replacing `apply_ctl/4`'s check, with the errnos `enoent`,
-  `enotsup`, `ealready` and `esrch`; `erx_cmd_service` drops its decisions from `/proc/apps` (`plan/3` and
-  `act/4`, `erlang/apps/erx_shell/src/erx_cmd_service.erl:236-290`, which refuse a start from the cached
-  `enabled` and `state`) and answers from the write's errno, and its `service -e` reads `/etc/rc.conf`
-  itself with the rows' `declared_enable`; the development manifests'
-  `service apps` and `facet apps` rows, the session's mount of the facet, the chokepoint that the start
-  service writes no file on `etc`, and the QEMU checkpoints that read `/apps/rc.conf` or write `/apps/ctl`.
-  The manifest check gains property 17's clause that every writable grant of `etc` in the resolved manifest
-  belongs to a template holding `start` ([design-system.md](docs/design-system.md#the-manifest)), and a
-  program's handler joins the session's export and its grant at `/etc` and `/dev`
-  ([design-files.md](docs/design-files.md#narrowing-for-a-program)), so a native editor reaches `rc.conf`.
-  This removes the A5c residual of an `enable` interrupted during its write.
+  `rc.conf` becomes an ordinary file of the data partition's `etc` tree, a service directory with a facet `etc`
+  (read-only to the system domain, read-write to the templates that hold `start`, rows the build derives, and an
+  entry of the facet table), mounted at `/etc`. Code to change: `erx_starter_fs` loses its read-only `rc.conf`
+  node; `erx_starter_rc` only reads, from the `etc` grant, and its write path and the `superseded` rule go;
+  `erx_starter` reads `rc.conf` before every `ctl` command and writes nothing; a command applies the file to its
+  own row alone, and the whole file applies only at boot (design-apps.md, "When the file is read"), so
+  `erx_start_table:reconcile/3`, the stopped marks, the recorded `rc.conf` text, the restart of a running row whose
+  settings changed, the comparison `erx_starter:kept/1` serves, and the failed read's retry with backoff all go;
+  the records process holds each row's applied record instead; the display rule judges a row against the rows kept
+  (a live row supervisor) rather than the rows the file enables, so `merge/3` takes the rows kept as `merge/4`; a
+  failed read counts as a file with no settings; a publication applies the file to the rows it adds; a restarted
+  table reads `rc.conf` only for a row it holds no record for; the keeper, not the table, waits on
+  `erx_domain:display_settled/1`, before each start of its session; and a row runs while its kept or its `onestart`
+  session stands, so a `start` after `onestart` and `enable` answers `ealready` rather than leaving a
+  `{once, Name}` keeper beside the row's supervisor (the A5c residual); `erx_cmd_service`'s `enable` and `disable` edit
+  `/etc/rc.conf` with `erx_start_table:set/3` (moved where a session can call it), by a new file and a rename, and
+  write nothing to `ctl`; `ctl` gains `onestart`, `onestop` and `onerestart`, and `erx_start_table:command/3`
+  judges every command after the read (design-apps.md, "How a command is judged"), returning the answer, the action
+  and the row's new record, and replacing `apply_ctl/4`, with the errnos `enoent`, `enotsup`, `ealready` and
+  `esrch`; `erx_cmd_service` drops its decisions from `/proc/apps` (`plan/3` and `act/4`,
+  `erlang/apps/erx_shell/src/erx_cmd_service.erl:236-290`, which refuse a start from the cached `enabled` and
+  `state`) and answers from the write's errno, and its `service -e` reads `/etc/rc.conf` itself with the rows'
+  `declared_enable`; the development manifests' `service apps` and `facet apps` rows, the session's mount of the
+  facet, the chokepoint that the start service writes no file on `etc`, and the QEMU checkpoints that read
+  `/apps/rc.conf` or write `/apps/ctl`. The manifest check gains property 17's clause that every writable grant of
+  `etc` in the resolved manifest belongs to a template holding `start`
+  ([design-system.md](docs/design-system.md#the-manifest)), and a program's handler joins the session's export and
+  its grant at `/etc` and `/dev` ([design-files.md](docs/design-files.md#narrowing-for-a-program)), so a native
+  editor reaches `rc.conf`. This removes the A5c residuals of an `enable` interrupted during its write and of the
+  stopped mark.
 * [Low] The start table's first `rc.conf` read waits for the system domain's namespace to be in place
   (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint
   deadline, settles that wait as failed: the read answers an error and the manifest's enabled rows start before
@@ -688,6 +698,10 @@ it; git history is the record of completed work.
   the ended domain's budget is apparently not back when the keeper retries (`erlang/apps/erx_starter`, the domain
   service's budget release). Unverified whether the keeper should wait for the ended domain's exit record, or the
   principal needs headroom; reproduce with a session that crashes at start.
+  (`erx_domain:system_namespace/0`), but a storage domain that ends once during boot, or misses the mint deadline,
+  settles that wait as failed: the read answers an error, the boot applies the declared defaults, and a row
+  `rc.conf` disables runs until its own `service` command or the next boot. Waiting through a storage restart
+  within its intensity would close it (`erlang/apps/erx_starter/src/erx_starter.erl`).
 * [Low] The `apps` tree (`erx_starter_fs`) is served once `erx_starter` starts, after `erx_domain`, whose start
   has the console ask for root's session: root's session gets `/apps` only because its boot outlasts the next
   application's start. A session that reported ready before then has no `/apps` until it restarts. Serving the
@@ -747,19 +761,8 @@ it; git history is the record of completed work.
   keeper already passes a map built elsewhere). Make it hold by construction: a separate entry for a start at a
   display (`start_session/3`, or `start_display_session`) that only the keeper calls, and `start_session/2`
   refusing both keys; start-display then becomes a call-site rule like start-callers.
-* [Medium] `erx_starter` review residuals (A5b): whether a held row changed rests on `erx_starter:kept/1` undoing
-    `row/2` exactly, and no process test has a row with a display; comparing the stored `erx_starter_row:row()`
-    with the one the table would start would make it hold by construction and delete both `kept/1`s.
-* [Low] `erx_starter` review residuals (A5b): an enabled row with no record shows as `starting` (a crash between
-    recording rc.conf's text and starting the row leaves one until the read answers); `enable` starting its row
-    and `stop` recording a stopped row are decided in the process, not returned by `apply_ctl/4`; the rename over
-    rc.conf is not followed by a sync of its directory; the process tests make their rc.conf directories in the
-    current directory and the failed-read case races its retry by a few microseconds.
-* [Low] `erx_starter` review residuals (A5c): a table killed while an `enable`'s write of `rc.conf` is in progress
-    leaves the row's stopped mark, so the row stays stopped though the written `rc.conf` enables it, and
-    `/apps/ctl` answered `eio`; another `enable` or a `start` runs it (clearing the mark before the write would
-    instead let a failed `enable` unmark the row). A `start` of a row not enabled followed by `enable`
-    leaves its `{once, Name}` keeper beside the row's supervisor, two sessions for one principal.
+* [Low] `erx_starter` review residuals (A5b): the rename over rc.conf is not followed by a sync of its directory;
+    the process tests make their rc.conf directories in the current directory.
 * [Low] `/proc/apps` and `service` (A7) leave out what the start service's read API does not expose: a row's
   `domain` and its `ends` within the period are `unsupported`, a down row's `reason` (its session's last end) is
   `unknown`, a session `onestart` started (an `{once, Name}` keeper) shows nowhere, so `onestatus` of a row that
@@ -771,11 +774,11 @@ it; git history is the record of completed work.
   as running that the domain service does not list"; a failed read of the manifest shows an empty, known table and
   boot order; and no test reads `manifest_table/1`'s boot order from a packed manifest, which the QEMU
   `service -e` checkpoint checks only by its exit status.
-* [Low] `erx_starter_rc:read/1` treats `enoent` as a machine with no `rc.conf`. If the storage domain being down
-  answers `enoent` under `/data` rather than another error, the first read finds no settings and is not tried
-  again, so the manifest's rows stand until the next boot, and the read counts as answered, so a later `enable`
-  or `disable` writes a file made from no settings over the real one once storage is back, losing its other
-  settings. An absent `data` grant answers `eio` (`erx_path`), which is retried; check what a live but failing
+* [Low] `erx_starter_rc:read/1` treats `enoent` as a machine with no `rc.conf`. If a storage domain that is down
+  answers `enoent` under `/data` rather than another error, the boot's read finds no settings, as a failed read
+  would, but `/proc/apps` shows `rc_conf` as `read` rather than `failed`; and the shell's `enable` or `disable`,
+  reading the same answer, would write a file of its one line over the real one if its write then succeeded,
+  losing the other settings. An absent `data` grant answers `eio` (`erx_path`); check what a live but failing
   storage domain answers.
 * [High] [design-display.md](docs/design-display.md): the code the design asks for that the tree does not have, in the
   order [Track D](docs/plan.md#track-d-windows-widgets-and-the-web) builds it. Nothing below is built; the cores named

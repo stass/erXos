@@ -126,8 +126,9 @@ Decisions every reader of this document needs:
   sessions have ended; an update then publishes the set with the new
   package, and the app's row starts again. Nothing starts because it was
   installed: the image builder enables a row of the image's packages,
-  and the administrator an installed one with `service NAME enable`, as
-  on FreeBSD.
+  and the administrator an installed one with `service NAME enable`,
+  which starts it at the next boot, and `service NAME start`, which
+  starts it now, as on FreeBSD.
 * **An app's data belongs to its name and its signer.** An app's
   directory is named for both, so two signers' apps of one name never
   share data, and removing a package keeps the directory for the next
@@ -1152,7 +1153,8 @@ listing of `packages/` and acts on it:
    names stay binaries until a registration, which takes one of the
    `max` entries;
 5. the package process publishes the package set; the start service
-   reconciles.
+   applies `rc.conf` to each row the set adds, as the boot applies it,
+   and ends the sessions of each row it drops.
 
 The recovery reads at most `pkg_scan_max` names and headers of at most
 64 KiB each, one at a time, and keeps one record for each entry it
@@ -1171,12 +1173,16 @@ argument gives, for each row's principal, the `windows` services its
 sessions will hold: a manifest principal's template's, and for an app
 the `windows` services its admission kept, never the whole of the `apps`
 row. So the merge refuses a display an app did not name with
-`{no_grant, D}` and a display another enabled row holds, whether the
-setting came from `service NAME enable display=D` or from an edit of
-`/etc/rc.conf`; an installed app never takes a display from a row of the
-manifest or of the image, whose rows come first. Each publication of the
-package set changes the rows, and the table reconciles as it does when
-it reads `rc.conf`.
+`{no_grant, D}` and a display a kept row holds, whether the setting
+came from `service NAME enable display=D` or from an edit of
+`/etc/rc.conf`; at boot an installed app never takes a display from a
+row of the manifest or of the image, whose rows come first, and at run
+time it takes none that a kept row holds. A publication changes only
+the rows it adds and drops: it applies `rc.conf` to each row it adds, as
+the boot applies it to every row
+([design-apps.md](design-apps.md#the-start-table)), and ends the
+sessions of each row it drops; every other row stays as it was
+applied.
 
 ## The SDK
 
@@ -1389,7 +1395,8 @@ app stopped only until the recovery's publication, which brings it back
 on whichever package its name then holds.
 A crash of the start service's table process loses nothing the package
 process holds: on its restart it asks the package process for the set,
-as it reads `rc.conf`. The registry of app principals belongs to the
+and applies `rc.conf` only to a row of it that it holds no record for.
+The registry of app principals belongs to the
 principal service and only grows within a boot, and the package process
 writes a record only for a committed package, so a crash leaves no
 record of a package that was never committed.
@@ -1427,7 +1434,7 @@ with `{not_offered, S}`, and its data stays.
 | an inode of a layout the reader lacks, compressed or chunked | `erx_erofs` in the reading session | that file answers `enotsup` where it is reached; in the app's session as any failed load or read |
 | a package removed or replaced under an open or a mount | the `apps` tree, by the open's recorded package | reads answer `eio` until the file is closed or the mount ended; a new open or mount reaches the new package |
 | a missing application or a refused program | `erx_app` | `erx_app` ends with the application's start error or `{program, Reason}`, and the session with it |
-| the storage domain is down at boot | the package process's read through `packages` | the image's packages wait for it, as `rc.conf` does, as do the installed ones; their rows are absent until the recovery runs; on the stopgap the image's packages, in the release, do not wait |
+| the storage domain is down at boot | the package process's read through `packages` | the image's packages wait for it, as do the installed ones; their rows are absent until the recovery runs; on the stopgap the image's packages, in the release, do not wait |
 | a failed publication, rename, deletion or checkpoint | `erx_pkg_io`'s or the start service's answer | the request answers `eio`, the lifetime ends, and the recovery reconciles the directory, the registry and the set; an app stopped for an update starts again on the package its name holds |
 | a crash of the package process | its supervisor | open copies answer `eio` at their next write or close and publish nothing; the recovery deletes their temporary files and publishes the set; past the supervisor's intensity the package process stays down and `/apps` answers `eio` |
 | an end of `erx_pkg_io` | the start service's application | the system domain ends and the machine resets; the boot's recovery follows |

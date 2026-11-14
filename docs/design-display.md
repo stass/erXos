@@ -3369,8 +3369,8 @@ on a display edits nothing of the board's:
   ([design-apps.md](design-apps.md#the-start-table)): an app's for a
   kiosk, and a person's for a desktop that needs no login. The manifest
   declares every row, and the machine's `rc.conf` enables, disables or
-  moves one among the displays its template is granted. The table holds
-  at most one enabled row for each display. The row's keeper starts the
+  moves one among the displays its template is granted. At most one
+  row is kept on each display. The row's keeper starts the
   session with the display named in its start; the domain service then
   sets the session's `display` variable to that display, and fixes the
   session mark in its record of the session's grant on it, which every
@@ -3613,7 +3613,7 @@ counts it once for each session the principal's `domains` quota
 allows, here one. The row leaves `snarf` off, so the kiosk shares no
 clipboard. Where the manifest declares the row with `enable NO`,
 `service thermostat enable display=display` on the running machine
-turns it on.
+turns it on in `/etc/rc.conf`, and `service thermostat start` starts it.
 
 At boot the domain service starts the display domain, and the row's
 keeper starts `thermostat`'s session on `display`, whose grant is
@@ -5069,14 +5069,15 @@ Decisions:
     that draws in Erlang
     ([plan.md](plan.md#track-d-windows-widgets-and-the-web)).
 22. **The display takes its session from the start table.** One start
-    row holds a display at a time: the table refuses a second enabled
-    row that names a display another enabled row names, so `service APP
-    enable display=D` answers with the row that holds `D` until that row
-    is disabled, and refuses a display the app's template is not
-    granted. Enabling a row starts its session at once, and disabling
-    it stops the session; an edit of `/etc/rc.conf` made by other means
-    takes effect at the next `service` command or the next boot, where a
-    setting the merge refuses leaves its row `refused` at `/proc/apps`. A board's manifest closes
+    row holds a display at a time, the row kept on it: the table admits
+    a row only when no kept row names its display and its template is
+    granted the display, so `service APP start` of a row that
+    `service APP enable display=D` set answers `ebusy` while another
+    row is kept on `D`, and `eperm` for a display the app's template is
+    not granted. Enabling or disabling a row, by `service` or by an
+    edit of `/etc/rc.conf`, starts and stops nothing: the row takes its
+    settings at its own `service` command, which answers a refusal, or
+    at the next boot, which shows one as `refused` at `/proc/apps`. A board's manifest closes
     a display to apps by granting it to no app's template, and decides
     which rows exist; the machine's `rc.conf` only sets them
     ([design-apps.md](design-apps.md#the-start-table)).
