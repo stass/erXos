@@ -25,14 +25,16 @@ holds, so both rings wrapped.
 
 -export([run/0]).
 
+-include("generated/erx_abi.hrl").
+
 -define(ME, {10, 0, 3, 2}).
 -define(FAR, {10, 0, 3, 9}).
 -define(FAR_MAC, <<16#02, 0, 0, 0, 0, 16#09>>).
 -define(ECHO_PORT, 7).
 -define(WAIT_MS, 10000).
 -define(ISS, 16#10000).
-%% The descriptors of each GENET ring (erx_device_genet.h's ERX_DEVICE_GENET_SIZE).
--define(RING, 256).
+%% The descriptors of each GENET ring.
+-define(RING_SIZE, ?ERX_GENET_RING_SIZE).
 %% The TCP run's pieces: 160,000 bytes, about 300 segments of the far end's default MSS.
 -define(TCP_PIECE, 8000).
 -define(TCP_PIECES, 20).
@@ -51,7 +53,7 @@ run() ->
     Wire ! {counts, self()},
     Counts = receive {counts, C} -> C end,
     io:format("wire ~p~n", [Counts]),
-    Wrapped = maps:get(sent, Counts) > ?RING andalso maps:get(received, Counts) > ?RING,
+    Wrapped = maps:get(sent, Counts) > ?RING_SIZE andalso maps:get(received, Counts) > ?RING_SIZE,
     case {Udp, Tcp, Wrapped} of
         {ok, ok, true} -> io:format("ok~n");
         _ -> io:format("failed~n")

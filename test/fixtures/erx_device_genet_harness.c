@@ -40,7 +40,7 @@
 #define MEMORIES_MAX	8u
 #define WINDOW_BYTES	65536u
 #define BUFFER		2048u
-#define SIZE		ERX_DEVICE_GENET_SIZE
+#define SIZE		ERX_GENET_RING_SIZE
 /* Both pools of a device, each 256 buffers of BUFFER. */
 #define DEVICE_MEMORY	(2u * SIZE * BUFFER)
 /* Each memory object's device addresses: its own 256 MiB slot, from 1 << 28 or from 1 << 40. */

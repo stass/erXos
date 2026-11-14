@@ -9,7 +9,10 @@
 
 #include "erx_device_genet.h"
 
-#define MASK	(ERX_DEVICE_GENET_SIZE - 1u)
+#define MASK	(ERX_GENET_RING_SIZE - 1u)
+_Static_assert((ERX_GENET_RING_SIZE & MASK) == 0 && ERX_GENET_RING_SIZE <= 65536u,
+    "the 16-bit free-running indexes wrap on a power-of-two ring");
+_Static_assert(ERX_GENET_RING < 32u, "the ring's bit fits a 32-bit register");
 
 /*
  * The faults test/host/erx_device_genet_test.rb plants: the receive length's bound removed, a
@@ -105,7 +108,7 @@ erx_device_genet_registers(const erx_device_peripheral_t *genet, erx_device_gene
 	status = named(genet, control_names[direction][1]);
 	/* Descriptors: 256 elements of one stride, the three registers of one descriptor within it. */
 	for (uint32_t at = 0; at < 3; at++) {
-		if (found[at] == NULL || found[at]->count != ERX_DEVICE_GENET_SIZE || found[at]->stride != found[0]->stride)
+		if (found[at] == NULL || found[at]->count != ERX_GENET_RING_SIZE || found[at]->stride != found[0]->stride)
 			return (false);
 	}
 	if (!offset_of(found[0], 0, &regs->desc_status) || !offset_of(found[1], 0, &regs->desc_addr_lo) ||
@@ -116,7 +119,7 @@ erx_device_genet_registers(const erx_device_peripheral_t *genet, erx_device_gene
 	    regs->desc_stride != 12u)
 		return (false);
 	for (uint32_t at = 0; at < 12; at++) {
-		if (!offset_of(found[3 + at], ERX_DEVICE_GENET_RING, ring[at]))
+		if (!offset_of(found[3 + at], ERX_GENET_RING, ring[at]))
 			return (false);
 	}
 	if (!offset_of(ctrl, 0, &regs->dma_ctrl) || !offset_of(status, 0, &regs->dma_status))
@@ -200,7 +203,7 @@ erx_device_genet_init(erx_device_genet_queue_t *queue, const erx_device_genet_re
 	    buffer_size > field_max(regs->buf_length))
 		return (false);
 	stride = ((uint64_t)buffer_size + granule - 1) & ~(uint64_t)(granule - 1);
-	bytes = stride * ERX_DEVICE_GENET_SIZE;
+	bytes = stride * ERX_GENET_RING_SIZE;
 	/* The last byte the device may reach lies below the width. */
 	if (pool_addr >> ERX_DEVICE_GENET_ADDRESS_BITS != 0 ||
 	    bytes > (UINT64_C(1) << ERX_DEVICE_GENET_ADDRESS_BITS) - pool_addr)
@@ -215,7 +218,7 @@ erx_device_genet_init(erx_device_genet_queue_t *queue, const erx_device_genet_re
 uint64_t
 erx_device_genet_bytes(const erx_device_genet_queue_t *queue)
 {
-	return ((uint64_t)queue->stride * ERX_DEVICE_GENET_SIZE);
+	return ((uint64_t)queue->stride * ERX_GENET_RING_SIZE);
 }
 
 void
@@ -230,7 +233,7 @@ erx_device_genet_form(const erx_device_genet_queue_t *queue, const erx_device_ge
 	context->owned = regs->owned;
 	context->descriptor_count = 0;
 	context->reg_descriptors = regs->desc_status;
-	context->reg_descriptor_count = ERX_DEVICE_GENET_SIZE;
+	context->reg_descriptor_count = ERX_GENET_RING_SIZE;
 	context->reg_descriptor_size = regs->desc_stride;
 	context->reg_address_field = regs->desc_addr_lo - regs->desc_status;
 	context->reg_address_high_field = regs->desc_addr_hi - regs->desc_status;
@@ -251,8 +254,8 @@ in_slots(uint32_t buffer, uint16_t first, uint32_t count)
 void
 erx_device_genet_view(const erx_device_genet_queue_t *queue, uint64_t pool_offset, erx_dma_state_t *state)
 {
-	state->count = ERX_DEVICE_GENET_SIZE;
-	for (uint32_t buffer = 0; buffer < ERX_DEVICE_GENET_SIZE; buffer++) {
+	state->count = ERX_GENET_RING_SIZE;
+	for (uint32_t buffer = 0; buffer < ERX_GENET_RING_SIZE; buffer++) {
 		const bool device = queue->direction == ERX_DEVICE_GENET_RX ?
 		    queue->installed && !in_slots(buffer, queue->software, queue->taken) :
 		    in_slots(buffer, queue->hardware, queue->in_flight);
@@ -290,7 +293,7 @@ erx_device_genet_idle_report(const erx_device_genet_registers_t *regs, erx_dma_s
 bool
 erx_device_genet_idle(const erx_device_genet_registers_t *regs, uint64_t status)
 {
-	const uint32_t idle = regs->dma_disabled | ring_bit(regs->dma_ring_disabled, ERX_DEVICE_GENET_RING);
+	const uint32_t idle = regs->dma_disabled | ring_bit(regs->dma_ring_disabled, ERX_GENET_RING);
 
 	return ((status & idle) == idle);
 }
@@ -322,13 +325,13 @@ erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const erx_device
     uint64_t pool_addr, erx_dma_step_t *steps)
 {
 	/* Start, end and the pointers count 32-bit words into the descriptors (the facts record, "Layout of a DMA block"). */
-	const uint32_t last_word = ERX_DEVICE_GENET_SIZE * (regs->desc_stride / 4u) - 1u;
-	const uint32_t ring_enable = ring_bit(regs->dma_ring_enable, ERX_DEVICE_GENET_RING);
+	const uint32_t last_word = ERX_GENET_RING_SIZE * (regs->desc_stride / 4u) - 1u;
+	const uint32_t ring_enable = ring_bit(regs->dma_ring_enable, ERX_GENET_RING);
 	uint32_t count = 0;
 
 	if (queue->installed)
 		return (0);
-	for (uint32_t desc = 0; desc < ERX_DEVICE_GENET_SIZE; desc++) {
+	for (uint32_t desc = 0; desc < ERX_GENET_RING_SIZE; desc++) {
 		steps[count++] = (erx_dma_step_t){ .kind = ERX_DMA_PUBLISH, .target = ERX_DMA_REGISTER,
 		    .source = ERX_DMA_ADDRESS, .width = 8, .reg = regs->desc_addr_lo + desc * regs->desc_stride,
 		    .reg_high = regs->desc_addr_hi + desc * regs->desc_stride,
@@ -336,7 +339,7 @@ erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const erx_device
 	}
 	steps[count++] = register_value(regs->hardware_index, 0);
 	steps[count++] = register_value(regs->software_index, 0);
-	steps[count++] = register_value(regs->buf_size, field_put(regs->desc_count, ERX_DEVICE_GENET_SIZE) |
+	steps[count++] = register_value(regs->buf_size, field_put(regs->desc_count, ERX_GENET_RING_SIZE) |
 	    field_put(regs->buf_length, queue->buffer_size));
 	steps[count++] = register_value(regs->start[0], 0);
 	steps[count++] = register_value(regs->start[1], 0);
@@ -346,7 +349,7 @@ erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const erx_device
 	steps[count++] = register_value(regs->hardware_ptr[1], 0);
 	steps[count++] = register_value(regs->software_ptr[0], 0);
 	steps[count++] = register_value(regs->software_ptr[1], 0);
-	steps[count++] = register_value(regs->ring_cfg, ring_bit(regs->ring_enable, ERX_DEVICE_GENET_RING));
+	steps[count++] = register_value(regs->ring_cfg, ring_bit(regs->ring_enable, ERX_GENET_RING));
 	steps[count++] = register_value(regs->dma_ctrl, ring_enable);
 	queue->installed = true;
 	return (count);
@@ -355,7 +358,7 @@ erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const erx_device
 void
 erx_device_genet_start(const erx_device_genet_registers_t *regs, erx_dma_step_t *step)
 {
-	*step = register_value(regs->dma_ctrl, ring_bit(regs->dma_ring_enable, ERX_DEVICE_GENET_RING) |
+	*step = register_value(regs->dma_ctrl, ring_bit(regs->dma_ring_enable, ERX_GENET_RING) |
 	    (SEED_NO_DMA_ENABLE ? 0 : regs->dma_enable));
 }
 
@@ -374,7 +377,7 @@ erx_device_genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_re
 
 	*full = false;
 	if (queue->direction != ERX_DEVICE_GENET_TX || queue->broken || !queue->installed || count == 0 ||
-	    count > ERX_DEVICE_GENET_PIECES_MAX)
+	    count > ERX_GENET_PIECES_MAX)
 		return (false);
 	for (uint32_t piece = 0; piece < count; piece++) {
 		if (pieces[piece].length == 0 || pieces[piece].bytes == NULL ||
@@ -382,7 +385,7 @@ erx_device_genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_re
 			return (false);
 		length += pieces[piece].length;
 	}
-	if (queue->in_flight == ERX_DEVICE_GENET_SIZE) {
+	if (queue->in_flight == ERX_GENET_RING_SIZE) {
 		*full = true;
 		return (false);
 	}
@@ -456,7 +459,7 @@ erx_device_genet_rx_reports(erx_device_genet_queue_t *queue, const erx_device_ge
 		return (false);
 	/* The register's upper half counts discarded frames (the facts record, "Layout of a DMA block"); INDEX is the low. */
 	fresh = advance(regs, index_register, queue->software);
-	if (fresh > ERX_DEVICE_GENET_SIZE) {
+	if (fresh > ERX_GENET_RING_SIZE) {
 		queue->broken = true;
 		return (false);
 	}
@@ -599,7 +602,7 @@ genet_post(erx_device_genet_queue_t *queue, const erx_device_genet_registers_t *
 		erx_dma_round_end(round, ERX_OK);
 		return;
 	}
-	if (queue->direction != ERX_DEVICE_GENET_TX || request->count > ERX_DEVICE_GENET_PIECES_MAX) {
+	if (queue->direction != ERX_DEVICE_GENET_TX || request->count > ERX_GENET_PIECES_MAX) {
 		erx_dma_round_end(round, ERX_EINVAL);
 		return;
 	}

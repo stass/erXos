@@ -50,7 +50,7 @@
 #define STOP_READS	3u		/* the DMA status reads a stop takes to show */
 #define STEPS_MAX	(ERX_DEVICE_GENET_INSTALL_STEPS + 8u)
 #define EFFECTS_MAX	ERX_DMA_EFFECTS_BOUND(ERX_DMA_REGIONS_MAX, STEPS_MAX)
-#define SIZE		ERX_DEVICE_GENET_SIZE
+#define SIZE		ERX_GENET_RING_SIZE
 #define CRC_ERROR	0x2u		/* receive status bit 1 (docs/design-device-dma.md, The register ring) */
 
 typedef struct direction {

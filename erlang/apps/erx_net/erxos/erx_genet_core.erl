@@ -48,14 +48,15 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 -export([negotiate_retry/1, frames/2, pieces/1]).
 -export_type([step/0, controller_mac/0]).
 
+-include("generated/erx_abi.hrl").
+
 -define(REV_MAJOR_V5, 6).
 -define(PORT_MODE_EXT_GPHY, 3).
 -define(MAX_FRAME_LEN, 1536).
 -define(TBUF_SIZE, 1).
 -define(ALL_IRQS, 16#ffffffff).
-%% The ring the device NIF drives, FreeBSD's default queue (if_genetreg.h:118;
-%% ERX_DEVICE_GENET_RING, otp/erts/emulator/nifs/erxos/erx_device_genet.h).
--define(RING, 16).
+%% The ring the device NIF drives, FreeBSD's default queue (if_genetreg.h:118).
+-define(RING, ?ERX_GENET_RING).
 %% The ring settings FreeBSD writes at start (if_genet.c:738, 752-753, 784, 798-799),
 %% taken as its values: no source read gives their units or meaning beyond the
 %% register names (hw/svd/genet/genet.svd).
@@ -63,15 +64,14 @@ The sequences follow FreeBSD 975e3605ebb1, `sys/arm64/broadcom/genet/if_genet.c`
 -define(TX_MBUF_DONE_THRES, 1).
 -define(TX_FLOW_PERIOD, 0).
 -define(RX_XON_XOFF_LO, 5).
-%% FreeBSD's RX_DESC_COUNT >> 4: its 256 receive descriptors (if_genet.c:89,
-%% if_genetreg.h:116) over 16.
--define(RX_XON_XOFF_HI, (256 bsr 4)).
+%% FreeBSD's RX_DESC_COUNT >> 4: the ring's receive descriptors, 256 in FreeBSD as
+%% here (if_genet.c:89, if_genetreg.h:116), over 16.
+-define(RX_XON_XOFF_HI, (?ERX_GENET_RING_SIZE bsr 4)).
 -define(RESET_US, 10).
 %% An Ethernet header: destination, source and type.
 -define(ETHER_HDR_LEN, 14).
-%% The device NIF's limit on a transmit post's pieces (ERX_DEVICE_GENET_PIECES_MAX,
-%% otp/erts/emulator/nifs/erxos/erx_device_genet.h).
--define(MAX_PIECES, 4).
+%% The device NIF's limit on a transmit post's pieces.
+-define(MAX_PIECES, ?ERX_GENET_PIECES_MAX).
 -define(OWN_PIECES, (?MAX_PIECES - 1)).
 %% The shortest frame on the wire without its FCS (IEEE 802.3's 64 bytes less 4).
 -define(MIN_FRAME, 60).

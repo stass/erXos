@@ -84,6 +84,7 @@ class RuntimeGenetTest < Minitest::Test
       copy = File.join(work, "#{name}.erl")
       File.write(copy, source)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', File.join(ROOT, 'erlang/apps/erx_net/include'),
+                                       '-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT),
                                        '-o', work, copy, stdin_data: '')
       assert status.success?, output
       [File.binread(File.join(work, "#{name}.beam"))].pack('m0')

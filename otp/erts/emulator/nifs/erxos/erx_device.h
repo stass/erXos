@@ -204,7 +204,7 @@ typedef uint8_t	*erx_device_sink_t(void *context, uint64_t tag, uint32_t length)
  * again, posted buffers and all, so a restarted driver finds it, and the same index with
  * another geometry is ERX_EBUSY. A device that is neither virtio-mmio version 2 nor GENET is
  * ERX_ENOTSUP. GENET has two queues, its register ring's two directions: 0 receives and 1
- * transmits, each of ERX_DEVICE_GENET_SIZE buffers, any other index or size ERX_EINVAL, and a
+ * transmits, each of ERX_GENET_RING_SIZE buffers, any other index or size ERX_EINVAL, and a
  * pool whose device addresses reach past the form's 40 bits ERX_ERANGE. A
  * given device's queue takes the next pages of its memory, and one they do not fit, or a
  * given device with no memory, is ERX_ERANGE with nothing taken. A new queue is not on the

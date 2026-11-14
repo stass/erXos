@@ -641,7 +641,7 @@ stand_in_used_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 }
 
 /* The engine sends at most a ring's worth, which `terms` holds. */
-_Static_assert(ERX_DEVICE_GENET_SIZE <= ERX_DEVICE_QUEUE_SIZE_MAX, "a GENET ring's frames fit completions_t");
+_Static_assert(ERX_GENET_RING_SIZE <= ERX_DEVICE_QUEUE_SIZE_MAX, "a GENET ring's frames fit completions_t");
 
 /* A fresh binary for each frame a stand-in GENET sends, so no term aliases the queue memory. */
 static uint8_t *
@@ -694,12 +694,12 @@ stand_in_receive_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	(void)argc;
 	if (device == NULL)
 		return (enif_make_badarg(env));
-	while (count < ERX_DEVICE_GENET_SIZE && enif_get_list_cell(env, list, &head, &list)) {
+	while (count < ERX_GENET_RING_SIZE && enif_get_list_cell(env, list, &head, &list)) {
 		if (!enif_inspect_binary(env, head, &binary) || binary.size > UINT32_MAX)
 			return (enif_make_badarg(env));
 		frames[count++] = (erx_device_frame_t){ .bytes = binary.data, .length = (uint32_t)binary.size };
 	}
-	if (count < ERX_DEVICE_GENET_SIZE && !enif_is_empty_list(env, list))
+	if (count < ERX_GENET_RING_SIZE && !enif_is_empty_list(env, list))
 		return (enif_make_badarg(env));
 	enif_mutex_lock(device_lock);
 	status = erx_device_stand_in_receive(device, frames, count, &taken);

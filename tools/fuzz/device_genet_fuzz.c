@@ -35,7 +35,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 #define FUZZ_BASE	UINT64_C(0xfff0000000)	/* near the top of the 40 bits */
 #define GRANULE		64u
-#define SIZE		ERX_DEVICE_GENET_SIZE
+#define SIZE		ERX_GENET_RING_SIZE
 
 typedef struct script {
 	const uint8_t	*bytes;

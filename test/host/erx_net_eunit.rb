@@ -77,6 +77,9 @@ module ErxNetEunit
   def run_erx_net_eunit(modules, extra:, pkt:, tap:, fault:, c_fault:, sources: [])
     Dir.mktmpdir('erx-net-eunit') do |work|
       ebin = Erx::ErxNetHost.lay_out(work, erl: ENV.fetch('ERX_ERL'), tap: tap, c_src: faulty_c_src(work, c_fault))
+      # The generated headers (the ABI's limits, the GENET register table), regenerated when
+      # stale, so the modules compile against the checked-in abi/ and hw/ sources.
+      Erx::Generated.ensure(root: ROOT)
       includes = ['-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT), '-I', INCLUDE]
       if pkt
         tree = Erx::Dependencies.new(root: ROOT, runner: nil).fetched_tree('pkt')

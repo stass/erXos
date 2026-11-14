@@ -19,10 +19,6 @@ class ErxGenetCoresTest < Minitest::Test
                erlang/apps/erx_net/erxos/erx_phy_c22.erl erlang/apps/erx_net/erxos/erx_genet_core.erl].freeze
   TESTS = %i[erx_genet_rx_tests erx_phy_c22_tests erx_genet_core_tests].freeze
   SVD = File.expand_path('../../hw/svd/genet/genet.svd', __dir__)
-  # The ring the device NIF drives, which the transport's ring settings must name.
-  NIF_HEADER = File.expand_path('../../otp/erts/emulator/nifs/erxos/erx_device_genet.h', __dir__)
-  NIF_RING = File.read(NIF_HEADER)[/^#define\s+ERX_DEVICE_GENET_RING\s+(\d+)u$/, 1] or
-    raise "no ERX_DEVICE_GENET_RING in #{NIF_HEADER}"
   EXTRA = %w[erx_phy_bcm54213_model].freeze
 
   # Each seeded fault: the module, the exact text it replaces and the faulty text.
@@ -47,7 +43,6 @@ class ErxGenetCoresTest < Minitest::Test
 
   def setup
     ENV['ERX_GENET_SVD'] = SVD
-    ENV['ERX_GENET_RING'] = NIF_RING
   end
 
   def test_genet_core_cases_pass_under_eunit

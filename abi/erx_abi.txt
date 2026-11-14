@@ -103,6 +103,17 @@ limit budget_depth_max u32 16
 # interrupt lines (docs/design-kernel.md, "Resources, DMA windows and consoles").
 limit device_ranges_max u32 8
 limit device_irqs_max u32 8
+# GENET's register ring, which the device NIF and the Ethernet driver share
+# (docs/design-device-dma.md, "The register ring (GENET)"), from FreeBSD
+# 975e3605ebb1's sys/arm64/broadcom/genet/if_genetreg.h.
+# genet_ring: the index of the one ring both drive, FreeBSD's default queue
+# (:118), below 32.
+# genet_ring_size: its descriptors per direction, every one the controller has
+# (:116), a power of two that the NIF also checks against the SVD's arrays.
+# genet_pieces_max: the most pieces of one transmit post.
+limit genet_ring u32 16
+limit genet_ring_size u32 256
+limit genet_pieces_max u32 4
 limit log_ring_bytes u32 65536
 # Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
 limit log_text_max u32 2112

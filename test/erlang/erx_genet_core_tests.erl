@@ -12,6 +12,7 @@
 -module(erx_genet_core_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("xmerl/include/xmerl.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(SOP, (1 bsl 13)).
 -define(EOP, (1 bsl 14)).
@@ -75,19 +76,18 @@ lookup(Reg, Svd) ->
 
 %% The ring settings FreeBSD writes in gen_init_txring and gen_init_rxring that are the
 %% driver's, not the NIF's (if_genet.c:738, 752-753, 784, 798-799), with FreeBSD's
-%% values, for the ring the NIF drives: ERX_DEVICE_GENET_RING, which
-%% test/host/erx_genet_cores_test.rb reads from the NIF's header and passes as
-%% ERX_GENET_RING, so the two cannot drift apart unnoticed.
+%% values, for the ring the NIF drives, the ABI's ERX_GENET_RING, and the receive
+%% XON/XOFF high threshold FreeBSD derives from its descriptor count, RX_DESC_COUNT >> 4.
 configure_writes_freebsds_ring_settings_for_the_nifs_ring_test() ->
     Steps = erx_genet_core:configure(<<2, 0, 0, 0, 0, 1>>),
-    Ring = list_to_integer(os:getenv("ERX_GENET_RING")),
+    Ring = ?ERX_GENET_RING,
     [?assertEqual({S, true}, {S, lists:member(S, Steps)})
      || S <- [{write, tx_scb_burst_size, 8},
               {write, {tx_ring_mbuf_done_thres, Ring}, 1},
               {write, {tx_ring_flow_period, Ring}, 0},
               {write, rx_scb_burst_size, 8},
               {field, {rx_ring_xon_xoff_thres, Ring}, lo, 5},
-              {field, {rx_ring_xon_xoff_thres, Ring}, hi, 256 bsr 4}]].
+              {field, {rx_ring_xon_xoff_thres, Ring}, hi, ?ERX_GENET_RING_SIZE bsr 4}]].
 
 %% FreeBSD's gen_reset order: the flush pulse, the MAC held in reset and released, the MIB
 %% cleared; CRC forward is never set, so no FCS is counted in a receive length.

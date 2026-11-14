@@ -39,21 +39,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
+
 #include "erx_device_core.h"
 #include "erx_device_dma.h"
 
-/* The ring the form uses, FreeBSD's default queue (if_genetreg.h:118), and its descriptors: every one of the direction's. */
-#define ERX_DEVICE_GENET_RING		16u
-#define ERX_DEVICE_GENET_SIZE		256u
+/*
+ * The ring the form uses (ERX_GENET_RING), its descriptors (ERX_GENET_RING_SIZE) and the most
+ * pieces of one transmit post (ERX_GENET_PIECES_MAX) are ABI limits, from abi/erx_abi.txt, which
+ * the Ethernet driver's Erlang shares.
+ */
 /* The form's address width: the controller's DMA reaches 40 bits (FreeBSD's if_genet.c:618). */
 #define ERX_DEVICE_GENET_ADDRESS_BITS	40u
 /* The ring registers a direction's plans publish, which the context lists as owned; the descriptors are owned whole besides. */
 #define ERX_DEVICE_GENET_OWNED		13u
-/* The most bytes pieces of one transmit post. */
-#define ERX_DEVICE_GENET_PIECES_MAX	4u
 /* The most steps of an install (an address per descriptor and the ring's registers), and of a post. */
-#define ERX_DEVICE_GENET_INSTALL_STEPS	(ERX_DEVICE_GENET_SIZE + ERX_DEVICE_GENET_OWNED)
-#define ERX_DEVICE_GENET_POST_STEPS	(ERX_DEVICE_GENET_PIECES_MAX + 2u)
+#define ERX_DEVICE_GENET_INSTALL_STEPS	(ERX_GENET_RING_SIZE + ERX_DEVICE_GENET_OWNED)
+#define ERX_DEVICE_GENET_POST_STEPS	(ERX_GENET_PIECES_MAX + 2u)
 
 typedef enum erx_device_genet_direction {
 	ERX_DEVICE_GENET_RX,
@@ -109,7 +111,7 @@ typedef struct erx_device_genet_queue {
 	uint32_t	reported;		/* RX: the statuses the last erx_device_genet_rx_reports asked for */
 	bool		installed;
 	bool		broken;
-	uint64_t	tags[ERX_DEVICE_GENET_SIZE];	/* TX: each posted buffer's tag */
+	uint64_t	tags[ERX_GENET_RING_SIZE];	/* TX: each posted buffer's tag */
 } erx_device_genet_queue_t;
 
 /* A completed descriptor: its buffer, the bytes to copy (0 for transmit) and its tag. */
@@ -174,7 +176,7 @@ uint32_t	erx_device_genet_install_steps(erx_device_genet_queue_t *queue, const e
 void	erx_device_genet_start(const erx_device_genet_registers_t *regs, erx_dma_step_t *step);
 
 /*
- * A transmit post of `count` pieces, 1..ERX_DEVICE_GENET_PIECES_MAX, laid end to end in the
+ * A transmit post of `count` pieces, 1..ERX_GENET_PIECES_MAX, laid end to end in the
  * buffer of the descriptor the producer index names, at most the buffer size in all: the
  * pieces' bytes, the descriptor's status (the length, start and end of packet and the appended
  * CRC), then the producer index. False, changing nothing, for a receive or broken queue, no

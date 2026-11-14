@@ -879,9 +879,9 @@ register_ring_device(const erx_device_t *device)
  * leaves unchanged.
  */
 _Static_assert((uint64_t)ERX_DEVICE_QUEUE_SIZE_MAX * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
-    (uint64_t)ERX_DEVICE_GENET_SIZE * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
+    (uint64_t)ERX_GENET_RING_SIZE * ERX_DEVICE_BUFFER_MAX <= ERX_MEM_CONTIGUOUS_MAX &&
     ERX_DEVICE_BUFFER_MAX % ERX_PAGE_SIZE == 0, "a queue's pool fits one contiguous object");
-_Static_assert(ERX_DEVICE_GENET_SIZE <= ERX_DMA_REGIONS_MAX, "a register ring's buffers fit a state");
+_Static_assert(ERX_GENET_RING_SIZE <= ERX_DMA_REGIONS_MAX, "a register ring's buffers fit a state");
 
 /* `bytes` rounded up to a power of two `granule`; neither is near UINT32_MAX here. */
 static uint32_t
@@ -1075,7 +1075,7 @@ register_ring_create(queue_record_t *record, uint32_t size, uint32_t buffer_size
 static uint32_t
 queue_size(const queue_record_t *record)
 {
-	return (record->form == QUEUE_SPLIT_RING ? record->split.core.size : ERX_DEVICE_GENET_SIZE);
+	return (record->form == QUEUE_SPLIT_RING ? record->split.core.size : ERX_GENET_RING_SIZE);
 }
 
 static uint32_t
@@ -1114,7 +1114,7 @@ erx_device_queue_create(const erx_device_t *device, uint32_t index, uint32_t siz
 	if (device->form == ERX_DEVICE_FORM_PHYSICAL)
 		return (ERX_ENOTSUP);
 	if (buffer_size == 0 || buffer_size > ERX_DEVICE_BUFFER_MAX || (form == QUEUE_REGISTER_RING ?
-	    index > GENET_QUEUE_TX || size != ERX_DEVICE_GENET_SIZE : !erx_device_queue_layout(size, granule, &layout)))
+	    index > GENET_QUEUE_TX || size != ERX_GENET_RING_SIZE : !erx_device_queue_layout(size, granule, &layout)))
 		return (ERX_EINVAL);
 	for (uint32_t open = 0; open < queues_open; open++) {
 		const queue_record_t *const other = &queues[open];

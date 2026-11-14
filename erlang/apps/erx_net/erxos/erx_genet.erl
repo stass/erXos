@@ -54,11 +54,12 @@ drives it.
 -export([init/1, event/2, transmit/2]).
 -export([device/1]).
 
+-include("generated/erx_abi.hrl").
 -include("erx_net_frame.hrl").
 
 -define(RXQ, 0).
 -define(TXQ, 1).
--define(QUEUE_SIZE, 256).
+-define(QUEUE_SIZE, ?ERX_GENET_RING_SIZE).
 -define(BUFFER, 2048).
 -define(IRQ_LINE, 0).
 -define(PHY_ADDRESS, 1).

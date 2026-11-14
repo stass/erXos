@@ -155,7 +155,7 @@ bool
 erx_device_genet_model_running(const erx_device_genet_model_t *model, erx_device_genet_direction_t direction)
 {
 	const erx_device_genet_registers_t *const regs = &model->regs[direction];
-	const uint32_t ring = UINT32_C(1) << ERX_DEVICE_GENET_RING;
+	const uint32_t ring = UINT32_C(1) << ERX_GENET_RING;
 	const uint32_t ctrl = load(model, regs->dma_ctrl);
 
 	return ((ctrl & regs->dma_enable) != 0 && (ctrl & place(regs->dma_ring_enable, ring)) != 0 &&
@@ -195,11 +195,11 @@ erx_device_genet_model_transmit(erx_device_genet_model_t *model, const erx_devic
 	consumer = bits(regs->index, load(model, regs->hardware_index));
 	producer = bits(regs->index, load(model, regs->software_index));
 	/* A producer more than a ring ahead has written over descriptors not yet sent. */
-	if (bits(regs->index, producer - consumer) > ERX_DEVICE_GENET_SIZE)
+	if (bits(regs->index, producer - consumer) > ERX_GENET_RING_SIZE)
 		return (ERX_ECORRUPT);
 	atomic_thread_fence(memory_order_acquire);
 	for (; consumer != producer; (*sent)++) {
-		const uint32_t desc = consumer % ERX_DEVICE_GENET_SIZE;
+		const uint32_t desc = consumer % ERX_GENET_RING_SIZE;
 		const uint32_t status = load(model, regs->desc_status + desc * regs->desc_stride);
 		const uint32_t length = bits(regs->buflen, status);
 
@@ -231,14 +231,14 @@ erx_device_genet_model_receive(erx_device_genet_model_t *model, const erx_device
 	producer = bits(regs->index, load(model, regs->hardware_index));
 	consumer = bits(regs->index, load(model, regs->software_index));
 	/* The ring full is no fault: the frame waits for a buffer the driver hands back. */
-	if (bits(regs->index, producer - consumer) >= ERX_DEVICE_GENET_SIZE)
+	if (bits(regs->index, producer - consumer) >= ERX_GENET_RING_SIZE)
 		return (ERX_OK);
 	/* BUF_SIZE is 16 bits, as BUFLEN is, so a frame within the buffer has a length its status holds. */
 	if (frame->written > frame->length || frame->length > reach || reach - frame->length < pad ||
 	    bits(regs->buflen, place(regs->buflen, frame->length + pad)) != frame->length + pad)
 		return (ERX_EINVAL);
 	atomic_thread_fence(memory_order_acquire);
-	desc = producer % ERX_DEVICE_GENET_SIZE;
+	desc = producer % ERX_GENET_RING_SIZE;
 	addr = descriptor_addr(model, regs, desc);
 	length = pad + frame->length;
 	if (addr > UINT64_MAX - pad || !memory->write(memory->context, addr, zeros, pad) ||
