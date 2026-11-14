@@ -304,7 +304,7 @@ Every piece of protocol state belongs to exactly one process:
 | --- | --- | --- |
 | an interface | `erx_net_if`, one per network interface | its addresses, its neighbour cache (ARP and IPv6 neighbour discovery) and the packets waiting on it, its routers and prefixes, its IP reassembly queues, its share of the syncache, its rate limiters |
 | a TCP connection | `erx_tcp_conn` | the connection's control block (FreeBSD's `struct tcpcb`), its send and receive buffers, its reassembly queue, its socket process and the credit that process granted |
-| a listening socket | `erx_tcp_listen` | its accept queue and its waiting `accept` requests |
+| a listening socket | `erx_tcp_listen` | its socket process, its accept credit, the connections queued for `accept`, each on a unit of that credit, and its waiting `accept` requests ([The listener](#the-listener)) |
 | a UDP socket | `erx_udp_sock` | its receive queue, its options, its socket process and the credit that process granted |
 | an ICMP echo socket | `erx_icmp_sock` | its echo identifier, its queue of echo replies, its owner |
 | a socket as a program sees it | the socket process, `erx_gen_tcp` or `erx_gen_udp`, in the owner's domain ([The socket process](#the-socket-process)) | its owner, its active mode and presentation options, the bytes or datagrams it holds, the credit it granted, its requests in flight |
@@ -2275,15 +2275,14 @@ no other process and creates no process:
   the completing segment, and inserts the four-tuple into the
   demultiplexing table before it handles its next frame, so no later
   segment of the connection finds neither the syncache entry nor the
-  connection. The connection links itself to the listener's grant and
-  tells the listener it is ready. With no credit left, the interface
-  answers with a RST, FreeBSD's default when a completed handshake finds
-  no room (`tcp_sc_rst_sock_fail`, `tcp_syncache.c:215`;
+  connection. With no credit left, the interface answers with a RST,
+  FreeBSD's default when a completed handshake finds no room
+  (`tcp_sc_rst_sock_fail`, `tcp_syncache.c:215`;
   `tcp_input.c:1115-1135`).
 
-The listener holds connections ready to be accepted and the callers
-waiting in `accept`. Closing the listener aborts the connections it still
-holds, with a RST, as BSD sockets do.
+The connection then joins its listener's queue, and an `accept` takes it
+from there; closing the listener aborts every connection still queued,
+with a RST, as FreeBSD's `soclose` does ([The listener](#the-listener)).
 
 ### TIME-WAIT
 
@@ -3635,7 +3634,7 @@ next_deadline(core()) -> integer() | infinity.
     | {link, up | down}
     | {dhcp, erx_dhcp4_core:action()}                % from the interface's erx_dhcp4
     | {ifid, Ref :: reference(), {ok, binary()} | unavailable}
-    | {accept_refused, Conn :: term(), erx_tcp:segment()}
+    | {accept_refused, Conn :: term(), erx_tcp:segment()} % the loop's, or a refused adoption's
     | {admin, Request :: term(), From :: term()}     % netadmin's requests
     | {drop, Reason :: atom()}                       % the loop dropped a frame: counted
     | {expired, Now :: integer()}.
@@ -3711,11 +3710,221 @@ its limit ([Connection setup](#connection-setup)). Granted, the loop
 makes the connection's receive credit, spawns the connection with
 `proc_lib:spawn/3`, so the interface never waits on it, and inserts the
 four-tuple through `erx_net_bind` with the new pid and credit before it
-takes the next frame. The connection's first message is the interface's
-verdict on that insertion: `go`, or `abandon` when the key was already
-held, on which it ends without sending anything and the loop releases
-the accept unit. Here the interface, not the receiver, makes the
-receiver's counter, so that the entry exists before the connection runs.
+takes the next frame. The connection is spawned with the listener's
+entry, the four-tuple, the handshake, the completing segment, the
+generator the action carries, its receive credit, and the interface's
+pid and sender credit. Its first message is the interface's verdict on
+the insertion: `abandon` when the key was already held, on which it
+ends without sending anything and the loop releases the accept unit; or
+`go`, after which the loop sends the listener `{queued, Conn}` under
+the unit it reserved (`erx_net_credit:send/2`). Here the interface, not
+the receiver, makes the receiver's counter, so that the entry exists
+before the connection runs. What the connection and the listener do
+next is [The listener](#the-listener)'s.
+
+### The listener
+
+A listening socket is an `erx_tcp_listen` process, which its grant
+starts and links to, around a pure step, `erx_tcp_listen_core`. It holds
+its socket process, its accept credit, the connections queued for
+`accept` and the `accept` calls waiting for one. One rule keeps its
+accounting:
+
+**A unit of the accept credit is a connection on the listener's
+queue.** The interface reserves the unit before it spawns the
+connection; the `{queued, Conn}` notice that brings the connection to
+the listener carries the unit; and the listener takes the unit back
+when the connection leaves its queue, which happens in two ways only: an
+`accept` takes it, or it ends while queued. No other party holds or
+frees a unit, so whatever ends a connection, and in whatever order the
+messages about it arrive, the backlog neither loses a place nor holds
+more than its limit. FreeBSD's `sol_qlen` is the same count, raised as
+`solisten_enqueue` queues a connection and lowered as
+`solisten_dequeue` hands one out (`uipc_socket.c:1271`, `:1614`).
+
+**Its limit.** The listener makes its accept credit at its start, with
+the limit `3 * Backlog div 2 + 1`: FreeBSD refuses a new connection
+once `sol_qlen > 3 * sol_qlimit / 2` (`solisten_clone`,
+`uipc_socket.c:1032`; the same test at the pin), so a queue holds that
+many and one more. `Backlog` is `gen_tcp:listen`'s `{backlog, N}`, 5
+by default as on stock (`inet_int.hrl:279`); one below zero or above
+128 is taken as 128, as `solisten_proto` clamps it to `somaxconn`
+(`uipc_socket.c:1542-1544`; `SOMAXCONN`, `socket.h:434`).
+
+**Its entry.** The listener's key in the demultiplexing table holds,
+besides its pid and accept credit, what the interface needs to answer a
+SYN and start a connection, all fixed at `listen`:
+
+```erlang
+-type entry() :: #{pid := pid(), credit := erx_net_credit:credit(),
+                   listener := erx_tcp_syncache:listener(),  % the SYN-ACK's part
+                   grant := pid(),
+                   origin := erx_net_admit:origin(),         % the grantee's
+                   reuseport := boolean(),                   % for explicit binds
+                   accept := accept_init()}.
+%% erx_tcp_user:listener_init() without family, local, remote and gen,
+%% which the four-tuple and the interface's split supply.
+-type accept_init() :: map().
+```
+
+`accept` is what an accepted connection inherits from its listener, as
+`solisten_clone` copies the listener's socket options and buffer sizes
+(`uipc_socket.c:1183-1186`, `:1207`) and `syncache_socket` its TCP
+flags (`tcp_syncache.c:909`): the congestion and loss modules,
+`nodelay`, `linger`, the keepalive times, and `snd_hiwat` and
+`rcv_hiwat`, the sizes `listen`'s `sndbuf` and `recbuf` set, or
+FreeBSD's `tcp_sendspace` and `tcp_recvspace`. The syncache's
+`rcv_buf` is the same `rcv_hiwat`. The listener holds no buffer itself:
+FreeBSD's `solisten_proto` frees a listening socket's buffers and keeps
+only their sizes for the connections it clones
+(`uipc_socket.c:1509-1526`), so the grant reserves nothing for a
+listener.
+
+**An accepted connection's start.** The connection, spawned by the
+interface, does in order:
+
+1. It traps exits, links to its grant, as every socket does first, and
+   monitors the interface.
+2. It waits for the verdict alone. At `abandon` it ends, holding
+   nothing. At the interface's `'DOWN'` it exits with
+   `{shutdown, interface_ended}`, and its grant deletes any entry the
+   interface inserted for it. At `go` it drops the monitor.
+3. It links to its listener.
+4. It asks its grant to adopt it, `erx_net_grant:adopt(Grant, #{snd :=
+   SndHiwat, rcv := RcvHiwat})`, a local call with the entry's sizes.
+   The grant counts the caller as one of its sockets, reserves its two
+   buffers, as `soreserve` reserves an accepted socket's from its
+   listener's sizes (`uipc_socket.c:1207`), and answers `{ok, Token}`
+   with the token every later buffer call names; past its `sockets` or
+   `buffers` limit it records nothing and answers `{error, emfile}` or
+   `{error, enobufs}`. The socket adopted is the caller, so nothing is
+   reserved on the word of a pid in a message. Refused, or with its
+   grant gone, the connection hands its interface `{accept_refused,
+   FourTuple, Segment}` under the sender credit it was given, so the
+   interface sends the RST FreeBSD sends when `solisten_clone` fails
+   (`uipc_socket.c:1207-1212`, `tcp_sc_rst_sock_fail`); then it deletes
+   its key and ends.
+5. It makes its control block with `erx_tcp_user:accepted/3` from the
+   handshake and `accept`, steps the completing segment, asking its
+   grant under its token for the buffers its steps ask for, and enters
+   its loop with `gen_server:enter_loop/3`, **queued**: its owner is
+   `{listener, Listener}`.
+
+While queued the connection runs as any connection does, as FreeBSD
+runs a socket on its listen queue: it acknowledges, takes bytes into its
+receive buffer until the window closes and keeps its timers, and it
+pushes nothing, having no socket process. Its listener's exit is its
+`soabort` (`uipc_socket.c:2012`): it steps `abort`, which sends a RST
+as `tcp_usr_abort`'s `tcp_drop` does (`tcp_usrreq.c:1265`,
+`tcp_subr.c:2400-2404`), and ends. Any other end, a peer's RST, a
+keepalive timeout, a raise, ends it as it ends any connection, and the
+listener sees the exit through their link.
+
+**The messages.** Three messages are added between the interface, the
+listener and its connections; the listener and its socket process speak
+the socket protocol.
+
+| Message | From | To | Meaning |
+| --- | --- | --- | --- |
+| `{queued, Conn}` | the interface, after `go`, under the unit it reserved | the listener | `Conn` holds a unit; the listener links to it and queues it |
+| `{bind, SockProc}` | the listener | a queued connection | an `accept` takes the connection for `SockProc` |
+| `{bound, Conn}` | the connection | its listener | `Conn` has linked to `SockProc`, unlinked the listener and taken `SockProc` as its owner |
+
+The listener's step takes these, the `accept` calls, the exits of its
+links and its deadlines:
+
+* `{queued, Conn}`: it links to `Conn` and appends it to the queue.
+  Linking to a connection that has already ended delivers its exit at
+  once, so an exit that arrived before the notice, ignored then as no
+  queued connection's, is never lost.
+* `{call, N, {accept, SockProc, Timeout}}` from its socket process: it
+  links to `SockProc`, the acceptor's socket process, and keeps the call
+  with its deadline on the stack's clock behind any that wait. While a
+  call waits and a connection is queued, the oldest of each are paired:
+  the listener takes the connection off the queue, takes its unit back,
+  sends it `{bind, SockProc}` and holds the call.
+* `{bound, Conn}`: it unlinks `SockProc` and answers the call
+  `{reply, N, {ok, Conn}}`.
+* the exit of a queued connection: removed, its unit taken back. Of a
+  connection sent `bind` and not yet bound: its call goes back to the
+  head of the waiting calls and is paired again, so a connection that
+  ends before it is bound never costs a caller an error. Of an
+  acceptor's socket process: its call is dropped, so the next
+  connection goes to the next caller, as FreeBSD dequeues nothing for
+  an `accept` whose sleep is interrupted (`solisten_dequeue`,
+  `uipc_socket.c:1590-1596`); a `{bound, Conn}` that then finds no call
+  answers nothing, and that connection closes at its link to the ended
+  socket process. Of its own socket process or its grant: the listener
+  ends. Any other exit changes nothing.
+* a deadline: a waiting call is answered `{reply, N, {error, timeout}}`
+  and its `SockProc` unlinked. A call whose connection was sent `bind`
+  is answered by the bind's outcome instead, however late.
+
+The listener never waits on a connection, on its grant or on its socket
+process. A connection takes `{bind, SockProc}` from its own listener
+while queued: it links to `SockProc`, unlinks the listener, takes
+`SockProc` as its owner and sends `{bound, self()}`; a `bind` from any
+other process, or once bound, is a programming error that ends it. From
+then on it ignores its listener's exit, one of which may already wait in
+its mailbox, and waits for its socket process's first message as every
+socket does (**Nothing crosses before the first contact**, in
+[The socket process](#the-socket-process)); the bytes it took while
+queued are pushed within that first credit. A `SockProc` already gone
+answers the link with `noproc`, and the connection closes as at its
+socket process's exit. The listener answers the `accept` only after
+`{bound, Conn}`, so the connection knows its socket process before that
+process, which learns of the connection only from the answer, can send
+it anything.
+
+**Its start and its end.** `gen_tcp:listen/2` opens as every socket
+opens (**Opening**, in [The socket process](#the-socket-process)), with
+`{tcp_listen, Family, Local, Port, Opts, SockProc}`. The grant checks it
+against its `listen`, `ports`, `addresses` and `sockets` limits,
+answering `{error, eacces}` or `{error, emfile}`, and starts the
+listener with `proc_lib:start_link/3`. The listener links to
+`SockProc`, makes its accept credit and claims its key by an explicit
+bind ([Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)),
+whose refusal is its start's and the grant's answer. Of `listen`'s
+options the listener takes `backlog`, `reuseaddr`, `reuseport` and
+those of `accept`; the socket process keeps the rest, the presentation
+options, and starts every acceptor's socket process with them, as
+stock's `accept` starts the new socket's server with the listening
+socket's options (`gen_tcp_socket.erl:530-543`).
+
+The listener ends when its socket process ends (`close/1`, its owner's
+exit, a kill), when its grant ends or when its step raises; it deletes
+its key when it ends normally, and its grant otherwise, as for every
+socket. Its exit reaches every queued connection through their links,
+and each aborts with a RST, as FreeBSD's `soclose` aborts every
+connection on a closing listener's queues (`uipc_socket.c:1988-2015`);
+a connection already bound has unlinked and goes on. Its accept credit
+goes with its entry: a handshake that read the entry just before spawns
+a connection whose link to the ended listener aborts it at once. Its
+socket process sees the exit too and answers the waiting `accept` calls
+`{error, closed}`; their socket processes, still in `opening`, stop at
+the listener's exit through their links.
+
+**Who waits on whom.** The interface waits on no one, and neither does
+a running listener. A connection waits on its grant for its adoption, as
+for every buffer reservation. The grant waits only for a socket it
+starts to finish starting, and a starting listener waits only on
+`erx_net_tables` for its bind, which waits on no one. So no wait closes
+a cycle.
+
+**Departures from FreeBSD.**
+
+* FreeBSD leaves a connection dropped while queued on the queue, holding
+  its place, until an `accept` takes it and fails with `ECONNABORTED`:
+  `tcp_close` leaves the queued socket where it is
+  (`tcp_subr.c:2555-2561`), and `tcp_usr_accept` refuses it
+  (`tcp_usrreq.c:734-737`). The listener drops it at its exit, so
+  `accept` never answers for a connection its caller cannot have, and a
+  burst of resets does not fill the backlog.
+* A queued connection is one of its grant's sockets from its adoption,
+  and one past the limit is reset at its handshake; FreeBSD counts a
+  descriptor only at `accept`, which answers `EMFILE` and leaves the
+  connection queued (`kern_accept4`, `uipc_syscalls.c:358-370`). See
+  [Open decisions](#open-decisions), 3.
 
 ### Credits
 
@@ -3751,7 +3960,7 @@ message is sent. Each credit's unit and limit:
 | an interface's receive credit | the interface | a frame of a batch, or a link notice |
 | an interface's sender credit | the interface | a handed message |
 | a connection's or datagram socket's credit | the socket, or the interface for a connection it starts | a segment, datagram or ICMP report; a merged segment takes one for each segment it holds |
-| a listener's accept credit | the listener | a connection, its limit the backlog |
+| a listener's accept credit | the listener | a connection on its queue, its limit `3 * Backlog div 2 + 1` ([The listener](#the-listener)) |
 
 The limits are keys of the `erx_net` application's environment, whose
 defaults the flood measurements of plan.md's network gates settle, as
@@ -3866,8 +4075,9 @@ the runtime seam nor the facet machinery changes them:
   admitted request comes back with its caller, and the caller is the
   owner of what the request opens: no request names an owner of its own,
   so no request can make a socket serve a process of another domain. The
-  stack's own calls of a grant (a connection's reservation and release of
-  its buffers, and the grant's counts) are admitted only without an
+  stack's own calls of a grant (an accepted connection's adoption, a
+  connection's reservation and release of its buffers, and the grant's
+  counts) are admitted only without an
   envelope and from a process of the grant's node. The mint has the same
   path, `erx_net_admit:mint/2`, which takes only `{erx_facet_mint, Tag,
   net, Grantee, Principal, Limits}` in the system domain's envelope
@@ -3979,6 +4189,7 @@ modules are marked P; process modules E.
 | `erx_net_if_core` | composes the interface's sub-cores | the interface's step | P |
 | `erx_dhcp4_wire`, `erx_dhcp4_core` | `parse_options`, `parse_option_buffer`, `check_classless_option`, `res_hnok`, `check_search`, `option_as_string` of `sbin/dhclient`; RFC 2131, RFC 2132, RFC 3396, RFC 3442 | DHCP message codec; DHCP client state machine | P |
 | `erx_net_grant_core` | none | the grant's limits, account and buffer reservations | P |
+| `erx_tcp_listen_core` | `sys/kern/uipc_socket.c` (`solisten_proto`, `solisten_clone`'s queue limit, `solisten_dequeue`, `soclose`'s abort of the queues) | the listener's step: its queue, its waiting `accept` calls and their pairing | P |
 | `erx_net_credit` | none | credited hand-over | funnel |
 | `erx_net_tx` | none | the sockets' transmit edge: packets to the driver against its credit, or to the interface to resolve | E |
 | `erx_net_clock` | none | the time, the one timer and the entropy of every process | funnel |
@@ -4207,11 +4418,13 @@ socket process, as any process of a node may use a stock socket it
 knows. What it gives is that nothing reaches a socket around its socket
 process, so the ordering of [Ordering](#ordering) holds.
 
-A connection waiting in a listener's backlog counts toward that
-listener's backlog, which is bounded. It becomes one of the grant's
-sockets at `accept`, and `accept` answers `{error, emfile}` while the
-grant has no socket left, leaving the connection queued, as UNIX's
-`accept` does.
+A connection waiting in a listener's queue holds a unit of the
+listener's accept credit, which the backlog bounds, and is one of the
+grant's sockets from its adoption, when the grant also reserves its
+buffers ([The listener](#the-listener)). One the grant cannot count or
+give buffers is reset at its handshake, so every connection the network
+domain holds for a client is within the client's limits, and `accept`
+never answers `{error, emfile}`.
 
 **The grant's account.** Every reduction a socket spends, on its
 socket process's requests and on the packets that arrive for it, is charged to
@@ -4261,12 +4474,13 @@ Buffer space is reserved at the grant: a socket asks its grant, with a
 local call, before it grows a buffer by autosizing or by a `sndbuf` or
 `recbuf` option, and the grant refuses past its `buffers` limit. Each
 call names a token the grant made for that socket alone and handed it
-at its start, so a reservation is never charged to a socket on the word
-of a pid in a message. A connection the grant starts reserves its
-initial buffers first and, refused, is answered `{error, enobufs}`; a
-connection the interface process starts reserves them as it starts and,
-refused, ends with a RST, as FreeBSD answers a completed handshake it
-cannot give a socket. The grant holds each socket's reservation and
+at its start, or in the answer to its adoption, so a reservation is
+never charged to a socket on the word of a pid in a message. A
+connection the grant starts reserves its initial buffers first and,
+refused, is answered `{error, enobufs}`; a connection the interface
+process starts reserves them in its adoption, its listener's sizes,
+and, refused, ends with a RST, as FreeBSD answers a completed handshake
+it cannot give a socket ([The listener](#the-listener)). The grant holds each socket's reservation and
 releases it when the socket exits, by whatever means, or earlier, when
 a connection reaches TIME-WAIT with its socket process gone: then its
 send buffer is empty, since the peer acknowledged our FIN, its receive
@@ -4288,17 +4502,21 @@ key to the socket that receives for it, its entry `#{pid, credit}`:
 * `{tcp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
   connection;
 * `{tcp_listen, Family, LocalAddr | any, LocalPort}`: a listener, whose
-  entry also holds its grant and its options for accepted connections
-  (`erx_tcp_syncache:listener()`), and whose credit is its accept credit;
+  entry also holds its grant, its grantee, its `reuseport` and what it
+  passes to the connections it accepts ([The listener](#the-listener)),
+  and whose credit is its accept credit;
 * `{udp, Family, LocalAddr, LocalPort, RemoteAddr, RemotePort}`: a
   connected datagram socket;
-* `{udp, Family, LocalAddr | any, LocalPort}`: a bound one.
+* `{udp, Family, LocalAddr | any, LocalPort}`: a bound one, whose entry
+  also holds its grant and its `reuseport`.
 
 Lookup goes from the most specific key to the wildcard, as
 `in_pcblookup_hash` does ([Classifying a frame](#classifying-a-frame)). Every insertion goes through `erx_net_bind`,
 with `ets:insert_new/2`, so a key is held by exactly one socket by
-construction and a race between two binders is decided by ERTS. A
-chokepoint check fails the build on any other insertion into the table.
+construction and a race between two binders of one key is decided by
+ERTS; an explicit bind also runs its conflict check in the same step
+(**Explicit binds**, below). A chokepoint check fails the build on any
+other insertion into the table.
 
 `erx_net_bind` translates FreeBSD's port rules: ephemeral ports from
 10,000 to 65,535, chosen at random (`ipport_firstauto`,
@@ -4308,10 +4526,45 @@ each port after it in turn, wrapping at the end of the range, until one
 is free or the range is spent (`in_pcb.c:830-842`). The binding socket's
 step draws the start from its generator with `uniform/2` and returns it
 in its bind action, and the funnel walks the range from there with
-`ets:insert_new/2`; `{reuseaddr, true}`
-as `SO_REUSEADDR`; and `{reuseport, true}` sharing a port only between
-sockets of the same grant, where FreeBSD requires the same user
-(`in_pcbbind_avail`, `in_pcb.c:912`).
+`ets:insert_new/2`. A connection's claim checks only its four-tuple,
+as `in_pcb_lport_dest` does (`in_pcb.c:843-857`), and so does the
+interface's insertion of an accepted connection.
+
+**Explicit binds.** A listener's key and a bound datagram socket's key
+are claimed by an explicit bind, whose conflicts depend on keys other
+than the one inserted, so its check and its insertion are one step of
+one process: `erx_net_bind:bind/2` makes a call to `erx_net_tables`,
+the table's owner, which runs both, and two explicit binds are ordered
+by their calls. The check is a pure function, `erx_net_bind:avail/2`,
+of the request (family, address or `any`, port, `reuseaddr`,
+`reuseport`, grant) and the keys held on that port with their entries;
+it translates `in_pcbbind_avail` (`in_pcb.c:912-998`), each family on
+its own, since an IPv6 socket is IPv6-only:
+
+1. the address must be one of the machine's, or `any` (`:940-956`),
+   else `{error, eaddrnotavail}`;
+2. a key without a remote end that another grant holds, on the same
+   address or with either address `any`, refuses with `{error,
+   eaddrinuse}` whatever the reuse options, as a socket of another
+   user does (`:963-983`), so one domain never takes a port, or one
+   address of it, from under another domain's listener (for a datagram
+   socket, another grant's connected keys count too, as there);
+3. without `reuseaddr` and `reuseport`, any key on the port whose local
+   address is the same, or either of them `any`, refuses, connections
+   included, since `in_pcbbind_setup` then looks up with
+   `INPLOOKUP_WILDCARD` (`:1031-1032`) and that lookup matches
+   connected sockets (`in_pcblookup_local`, `:2035-2085`);
+4. with either option, only a key without a remote end on exactly the
+   same address refuses (`:2000-2027`), and not when both carry
+   `reuseport` (`:985-995`).
+
+Port 0 walks the ephemeral range from a random start, as
+`in_pcb_lport` does without a remote end, and takes the first port
+`avail/2` allows. A connection's claim can race an explicit bind of its
+port under rule 3; either way the result is a state FreeBSD reaches
+when the listener binds first, since a connect never checks listeners.
+Ports below 1,024 are the grant's `ports` limit, checked before the
+bind, as `in_pcbbind_avail` checks privilege for them (`:961-964`).
 
 A socket removes its own entries when it ends normally. When a socket
 exits abnormally, its grant, which traps the exit, deletes every entry
@@ -4718,7 +4971,7 @@ watch list holds that wait ([todo-performance.md](todo-performance.md)).
 | --- | --- | --- | --- |
 | `opening` | its owner, the opener; for an accepted connection, the listener's socket process that started it | the hand-over of its socket, from its opener or from the listener's socket process; the exit of its owner and of that process; postpones calls of its own domain; stops with `econnaborted` at any message or exit from the network domain; drops and counts any other message, as in every state | `open` or `listening` with its socket, sending its first message; on a refused open its opener stops it |
 | `open` | a connection or datagram socket: its owner, its active mode and presentation options, the bytes or datagrams it holds, the receive credit it granted, a connection's send credit and the sends whose bytes wait for it, each with its deadline, the end reason its sends have not yet been shown, a waiting `recv`, its calls in flight and the calls waiting behind them | every call, push and exit | `closed` |
-| `listening` | a listener: its owner, its `accept` calls in flight, each with the socket process it started for its caller, and the calls waiting behind them | every call, push and exit | `closed` |
+| `listening` | a listener: its owner, the presentation options each accepted socket starts with, its `accept` calls in flight, each with the socket process it started for its caller, and the calls waiting behind them | every call, push and exit | `closed` |
 | `closed` | the bytes still held and the end its owner has not been shown, which wait for the owner in passive mode | `recv`, which takes what is held and then meets the end; `setopts` while the end waits, so the owner can be shown it in active mode; `close/1`, which answers `ok`, and its owner's exit; every other call answers as stock's closed socket does | stops |
 | `{transfer, NewOwner, State}` | `controlling_process/2` under way, and what `State` holds | the owner's second call and the owner's exit; every push, exit and deadline, stepped as in `State` with nothing presented to the owner, so the core holds what arrives as in passive mode, within the credit it granted; postpones the other calls of its own domain | `State`, with `NewOwner` as owner, presenting what was held |
 
@@ -4776,11 +5029,16 @@ that the socket is gone. A socket that exits without a last push, killed
 or ended with its domain, is taken as `{error, econnaborted}`; a push
 after the socket process has closed is ignored.
 
-**Accepting.** `gen_tcp:accept/2` calls the listener's socket process,
-which starts a socket process for the caller, owned by it, and sends its
+**Accepting.** `gen_tcp:listen/2` opens a listener as every socket
+opens, and its socket process enters `listening`, which sends nothing
+until its first `accept`. `gen_tcp:accept/1`, whose timeout is
+`infinity`, and `accept/2` call the listener's socket process,
+which starts a socket process for the caller, owned by it and with the
+listening socket's presentation options, and sends its
 listener `{accept, SockProc, Timeout}` naming the new one. The listener
 binds the connection it hands out to that socket process, and the
-connection links to it, before the listener answers, and the listener's
+connection links to it, before the listener answers
+([The listener](#the-listener)), and the listener's
 socket process hands the new one its socket
 and answers the caller with the new socket; on an error or a timeout it
 stops the new socket process and answers the error. Many callers may
@@ -4791,7 +5049,9 @@ send credit included, until that credit arrives (**Nothing crosses
 before the first contact**, above). A connection that ends before then
 ends by its exit, which stops the new socket process in `opening`; the
 hand-over meets a dead process, and the caller's `accept` is answered
-`{error, econnaborted}`.
+`{error, econnaborted}`. `controlling_process/2` moves a listening
+socket's owner as any socket's; the listener takes no part, and each
+accepted socket keeps the owner its `accept` gave it.
 
 **Ordering.** One lane carries everything between a socket and its
 socket process, in send order (D9 of
@@ -5697,7 +5957,8 @@ order the socket process made them; `inet:setopts(S, [{active, false}])`
 and `controlling_process` are local to the owner's domain and need
 nothing from the network domain to keep that order
 ([The socket process](#the-socket-process)). Two binders of one key are
-ordered by `ets:insert_new/2`. The interface and the driver never send
+ordered by `ets:insert_new/2`, and two explicit binds by their calls to
+`erx_net_tables`. The interface and the driver never send
 to another domain, so no client can stall packet input, and a socket's
 pushes are bounded by its socket process's credit, so a client that
 stops reading stalls only its own sockets.
@@ -5717,6 +5978,10 @@ stops reading stalls only its own sockets.
 | a socket is killed or crashes outside a step | its grant, which deletes its entries; its socket process, by their link | everything else | the socket: the peer times out or meets a RST later; the socket process presents the end as `{error, econnaborted}` |
 | a socket's owner exits | its socket process, which monitors it and stops | everything else | the socket process; its socket, by their link, closes as `close/1` does: a connection sends FIN, or RST if `linger` is zero |
 | a socket process crashes or is killed | its socket, by their link | everything else | the socket, closed as on its owner's exit; the owner's next call gets `{error, closed}`, and in active mode the owner is told nothing, as with stock's `gen_tcp_socket` |
+| a listener ends: its socket process ends, its grant ends, or its step raises | its queued connections and its acceptors' socket processes, by their links; its socket process, by theirs | the connections it has handed out | each queued connection, with a RST, its backlog with it; the waiting `accept` calls, answered `{error, closed}` ([The listener](#the-listener)) |
+| a queued connection ends: a peer's RST, a timeout, a raise | its listener, by their link | the listener and the rest of its queue | that connection, whose backlog place is free at once; an `accept` it was sent to is paired with the next connection |
+| a grant refuses an accepted connection's adoption, or has ended | the connection | the listener, which never hands it out | the connection, with FreeBSD's RST for a handshake it cannot give a socket |
+| the interface ends before its verdict on a connection it spawned | the connection, by its monitor | everything else | the connection; its grant deletes any entry inserted for it |
 | a socket process's step raises (a bug) | the socket process, which presents the end as `{error, econnaborted}` from its state before the event, then exits with the exception | everything else | the socket process and, by their link, its socket |
 | a push breaks the socket protocol | the socket process, through `erx_sock_admit` | everything else | the socket, aborted ([Untrusted input](#untrusted-input)) |
 | the grant ends (revocation, its domain ends) | its sockets, by the link: each connection sends RST and exits | other grants | the domain's sockets and registrations; each socket process presents its socket's end |
@@ -5771,20 +6036,20 @@ client domain is affected beyond its sockets.
 | Result | When |
 | --- | --- |
 | `{error, eacces}` | the domain holds no `net` grant; the grant does not allow the port, address or `listen` |
-| `{error, emfile}` | the grant's `sockets` limit is reached |
+| `{error, emfile}` | the grant's `sockets` limit is reached at an open; an accepted connection past it is reset at its handshake instead ([The listener](#the-listener)) |
 | `{error, enobufs}` | a buffer reservation exceeds the grant's `buffers` limit; every call of an operation, a socket's open or `interfaces` among them, whose floor for `max_frame`, `max_message_heap` or `funnel_depth` the caller's own runtime is below, answered by the client side before any request is sent ([Message sizes](#message-sizes)) |
-| `{error, eaddrinuse}` | the key is held, under FreeBSD's reuse rules |
+| `{error, eaddrinuse}` | the key is held, under FreeBSD's reuse rules, or another grant holds the port unconnected (**Explicit binds**, in [Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)) |
 | `{error, eaddrnotavail}` | the local address is not the machine's, no usable source address leaves through the route's interface, or no ephemeral port is free |
 | `{error, econnrefused}` | a RST answered the SYN |
 | `{error, etimedout}` | connection setup or retransmission exceeded FreeBSD's limits |
 | `{error, enetunreach}` | `connect`, or a datagram sent without a local address, finds no route (`in_pcbladdr`) |
 | `{error, ehostunreach}` | a datagram's route has gone (`ip_output`); a synchronized connection's soft error at its timeout; an unreachable report in SYN-SENT |
 | `{error, econnreset}` | a RST in a synchronized state, under `show_econnreset` as on stock; under `show_econnreset`, the first `send` waiting when a reset or an abort ends the socket or, when none waits, the first `send` after it, and the first `send` that meets its write side shut, as the socket backend curates them |
-| `{error, econnaborted}` | the socket protocol broken either way, and the socket aborted: by the connection, on bytes past its send credit or after its write side's `shutdown` or `close`; by the socket process, on a push that fails `erx_sock_admit`, a grant past 2 MiB among them; a socket that exits without a last push; a connection step that raises |
+| `{error, econnaborted}` | the socket protocol broken either way, and the socket aborted: by the connection, on bytes past its send credit or after its write side's `shutdown` or `close`; by the socket process, on a push that fails `erx_sock_admit`, a grant past 2 MiB among them; a socket that exits without a last push; a connection step that raises; an `accept` whose connection ended between its hand-over and its first contact |
 | `{error, enoprotoopt}` | an ICMP parameter problem answered the SYN, as FreeBSD's `icmp_errmap` maps it |
 | `{error, closed}` | the socket is closed, as on stock; a `recv` that the peer's FIN leaves short, as on stock; a `send` waiting at `close/1`; every `send` waiting behind the one the socket's end or a shut write side is shown to; without `show_econnreset`, each `send` the `econnreset` row lists |
 | `{error, enotconn}` | a `recv` after one the peer's FIN left short, or one answered the socket's error, as on stock |
-| `{error, timeout}` | an Erlang call's own timeout, as on stock; a `send` still waiting at its `send_timeout` under `send_timeout_close`, which then closes the socket |
+| `{error, timeout}` | an Erlang call's own timeout, as on stock; an `accept` whose timeout passed before a connection was paired with it; a `send` still waiting at its `send_timeout` under `send_timeout_close`, which then closes the socket |
 | `{error, {timeout, Rest}}` | a `send` still waiting at its `send_timeout` without `send_timeout_close`; `Rest` is the bytes it did not send, as the socket backend returns them |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
 | `{error, einval}` | an option value out of range; a socket used from a domain other than its socket process's |
@@ -6346,6 +6611,84 @@ time against properties written from FreeBSD's rules:
 which the first property's one-rotation case must catch; an overflow
 window measured with `=<` where FreeBSD uses `<`; a pause held through
 the second it ends.
+
+### The listener: exploration, the backlog and binds
+
+**The core, explored.** `erx_tcp_listen_core` is a protocol state
+machine, explored exhaustively over three connections and three
+acceptors: every interleaving of `{queued, C}`, a connection's exit
+before or after its notice, an `accept`, `{bound, C}`, an acceptor's
+exit, a deadline and the listener's end, with the shell's rule that a
+link to an ended connection delivers its exit. In every reachable
+state:
+
+* the units taken back equal the connections that have left the queue,
+  each once;
+* every call is answered at most once, `{ok, C}` only after `{bound,
+  C}`, and no connection is sent `bind` twice;
+* a call sent to a connection that ends is paired again, and no call
+  waits while a live connection is queued;
+* a waiting call with no `bind` outstanding is answered `{error,
+  timeout}` at its deadline and not before;
+* calls and connections pair oldest first.
+
+*Seeded failures:* a unit also taken back at `{bound, C}`, which the
+first property catches; a call answered at its pairing rather than at
+`{bound, C}`, the second; the link at `{queued, C}` left out, under
+which a connection that ended before its notice is paired and its call
+waits for ever, the third.
+
+**The backlog and the hand-over, on a development host.** With the
+stack under virtual time ([The stack on a development host](#the-stack-on-a-development-host)),
+a scripted peer completes handshakes against a listener of backlog 1
+that does not accept: the first two complete and the third's ACK draws
+a RST. *Seeded failure:* a credit limit equal to the backlog, under
+which the second draws it. Then, each with the seeded failure that
+proves the case ran:
+
+* bytes the peer sends before `accept` arrive after it, byte for byte;
+  seeded: a queued connection that drops its receive queue for want of
+  an owner, as one whose socket process has closed does;
+* a queued connection that the peer resets is skipped, the next
+  `accept` returns the next connection, and a new handshake finds the
+  freed place; seeded: no unit taken back at a queued connection's
+  exit, under which the new handshake draws a RST;
+* closing the listener with two connections queued draws a RST to each
+  peer; seeded: a queued connection that ignores its listener's exit;
+* a grant whose `buffers` limit cannot hold one more connection resets
+  its handshake, while the waiting `accept` goes on waiting and is
+  answered by the next connection that fits; seeded: a connection that
+  carries on after a refused adoption, whose peer then gets an ACK
+  instead;
+* an acceptor killed while its `accept` waits leaves the next
+  connection to the next acceptor; seeded: a listener that ignores its
+  acceptors' exits, under which the connection goes to the dead one and
+  its peer sees a FIN;
+* an `accept` with a timeout of 100 ms and no connection answers
+  `{error, timeout}`, and a connection that arrives later goes to the
+  next `accept`; seeded: a listener that arms no timer for an `accept`'s
+  deadline, under which the call waits on;
+* a four-tuple already held when the interface inserts makes the
+  connection abandon, and the place in the backlog is free again;
+  seeded: no release at `abandon`.
+
+**Against FreeBSD.** A packet script for a listener of backlog 1 that
+never accepts draws, at the third handshake's ACK, the same RST from
+the stack as from the FreeBSD test host
+([Packet scripts against FreeBSD](#packet-scripts-against-freebsd));
+seeded as above.
+
+**Explicit binds.** `erx_net_bind:avail/2` is checked case by case
+against the four rules of
+[Ports and the demultiplexing table](#ports-and-the-demultiplexing-table):
+a wildcard and a specific listener on one port, in both orders, with
+and without `reuseaddr`; `reuseport` on both or on one; a connection
+holding the port; and each of these with the second bind from another
+grant. The cases within one grant run on the FreeBSD test host too,
+through stock OTP's `gen_tcp:listen/2`, whose answers they must match.
+*Seeded failure:* rule 2 left out, under which a second grant's
+`reuseaddr` listener on a specific address beside the first grant's
+wildcard listener is allowed.
 
 ### The send log, loss and congestion: properties and a FreeBSD oracle
 
@@ -7353,6 +7696,21 @@ These are settled. One question remains open
    use `netadmin` from their sessions. It costs nothing today; the
    alternative keeps `netadmin` available to the system shell for an
    operator whose only line is the system shell's.
+3. **When a queued connection counts toward `sockets`.** The design
+   counts an accepted connection from its adoption, in the same call
+   that reserves its buffers, so a grant at its limit has its new
+   connections reset at their handshakes and `accept` never answers
+   `emfile` ([The listener](#the-listener)). The recommendation is to
+   keep this: the limit bounds what the network domain holds for a
+   client, and a queued connection is held there, with a process and
+   buffers, whether accepted or not; the grant is involved once per
+   connection, and the listener never calls it. The alternative is
+   FreeBSD's: count at `accept`, which answers `emfile` while the grant
+   is full and leaves the connection queued (`kern_accept4`,
+   `uipc_syscalls.c:358-370`). It costs a call from the listener to the
+   grant at every `accept`, and a client at its limit then holds up to
+   `3 * Backlog div 2 + 1` uncounted connections per listener, bounded
+   only by `buffers`.
 
 ## Alternatives considered
 
@@ -7579,7 +7937,15 @@ missing, into a stack that otherwise believes nothing a device says
   the pin; and `release/15.1.0-p6`, commit
   `95719d8a895bf8170851e9844d9b4092b1d2b6fe`, the tree the translation
   and this document's line references were read from: `sys/netinet`,
-  `sys/netinet6`, `sys/net`, `sys/netinet/cc`, `sys/netinet/tcp_stacks`.
+  `sys/netinet6`, `sys/net`, `sys/netinet/cc`, `sys/netinet/tcp_stacks`,
+  and for the listen queue `sys/kern/uipc_socket.c` (SHA-256
+  `e178d225e66edd22a8e248c66a5fb9a02de5a337460040afd892bcf15bf6d185`),
+  `sys/kern/uipc_syscalls.c` (`8e9649f4bcb55e021986afa3af48b65bb0fa68f5c13e018cb778ff2a3b8ec002`)
+  and `sys/sys/socket.h` (`7123131ae818863971cc91c7723a187ba79fc24f8b91384d40c5a2e0b2d60789`);
+  at the pin, `uipc_socket.c`
+  (`be9f6f6b0751fee819d38ec1c165b82bb39abd25e85970247b341cf0fa0a5ee6`)
+  keeps the queue limit (`:1089`) and the accepted socket's
+  reservation from its listener's sizes (`soattach`, `:967-970`).
 * FreeBSD tcp-testsuite, https://github.com/freebsd-net/tcp-testsuite;
   packetdrill (nplab), https://github.com/nplab/packetdrill.
 * N. Cardwell et al., "packetdrill: Scriptable Network Stack Testing,
@@ -7603,4 +7969,4 @@ missing, into a stack that otherwise believes nothing a device says
   and [the assessment of aloha](research-aloha.md).
 * pkt, https://github.com/msantos/pkt.
 * Erlang/OTP 29.1.2: `lib/kernel/src/gen_tcp.erl`, `inet.erl`,
-  `gen_tcp_socket.erl`, `erl_epmd.erl`.
+  `inet_int.hrl`, `gen_tcp_socket.erl`, `erl_epmd.erl`.
