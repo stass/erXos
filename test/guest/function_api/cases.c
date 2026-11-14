@@ -1193,6 +1193,53 @@ case_entropy_refusals(void)
 	    erx_entropy_add(0, 8, ERX_ENTROPY_CREDIT) == ERX_ENOTSUP);
 }
 
+/* Sets every byte of bytes[0, size) to ENTROPY_FILL's low byte. */
+static void
+bytes_fill(uint8_t *bytes, size_t size)
+{
+	for (size_t at = 0; at < size; at++)
+		bytes[at] = (uint8_t)ENTROPY_FILL;
+}
+
+/* Whether every byte of bytes[from, to) is ENTROPY_FILL's low byte. */
+static bool
+bytes_filled(const uint8_t *bytes, size_t from, size_t to)
+{
+	for (size_t at = from; at < to; at++) {
+		if (bytes[at] != (uint8_t)ENTROPY_FILL)
+			return (false);
+	}
+	return (true);
+}
+
+/*
+ * A take leaves the read's bytes in out and nowhere else: out holds them and no byte past
+ * len, every mr word that held them is zero and the next is untouched, and a refused length
+ * changes neither out nor mr.
+ */
+static bool
+case_entropy_take(void)
+{
+	erx_utcb_t *const utcb = erx_utcb_self();
+	const uint32_t last = ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t) - 1;
+	uint8_t out[ERX_ENTROPY_BYTES_MAX + 1];
+
+	bytes_fill(out, sizeof(out));
+	for (uint32_t word = 0; word <= last; word++)
+		atomic_store(&utcb->mr[word], ENTROPY_FILL);
+	if (erx_entropy_take(out, 13) != ERX_OK || bytes_filled(out, 0, 13) || !bytes_filled(out, 13, sizeof(out)) ||
+	    atomic_load(&utcb->mr[0]) != 0 || atomic_load(&utcb->mr[1]) != 0 || atomic_load(&utcb->mr[2]) != ENTROPY_FILL)
+		return (false);
+	bytes_fill(out, sizeof(out));
+	if (erx_entropy_take(out, ERX_ENTROPY_BYTES_MAX) != ERX_OK ||
+	    !bytes_filled(out, ERX_ENTROPY_BYTES_MAX, sizeof(out)) || atomic_load(&utcb->mr[last]) != 0)
+		return (false);
+	bytes_fill(out, sizeof(out));
+	atomic_store(&utcb->mr[0], ENTROPY_FILL);
+	return (erx_entropy_take(out, ERX_ENTROPY_BYTES_MAX + 1) == ERX_EINVAL && bytes_filled(out, 0, sizeof(out)) &&
+	    atomic_load(&utcb->mr[0]) == ENTROPY_FILL);
+}
+
 /* What is wrong with a request before any device comes into it. */
 static bool
 case_mem_device_refusals(void)
@@ -1252,6 +1299,7 @@ static const function_api_case_t shared_cases[] = {
 	{ "entropy_read", case_entropy_read },
 	{ "entropy_add", case_entropy_add },
 	{ "entropy_refusals", case_entropy_refusals },
+	{ "entropy_take", case_entropy_take },
 	{ "mem_device_refusals", case_mem_device_refusals },
 };
 

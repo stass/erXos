@@ -23,7 +23,6 @@
  * so a start whose generator refuses the bytes does not run the program at all.
  */
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,15 +71,13 @@ extern const erx_elf64_ehdr_t __ehdr_start;
 
 int	__libc_start_main(int (*)(int, char **, char **), int, char **, void (*)(void), void (*)(void), void (*)(void));
 
-static bool	random_fill(uint64_t words[RANDOM_WORDS]);
-
 static char program_name[] = "erxos";
 static start_block_t start_block;
 
 int64_t
 erx_fiasco_libc_start(int (*program)(int, char **, char **), erx_fiasco_cpu_features_t features)
 {
-	if (!random_fill(start_block.random))
+	if (erx_entropy_take(start_block.random, sizeof(start_block.random)) != ERX_OK)
 		return (ERX_FIASCO_TASK_STATUS_ENTROPY);
 	start_block.argv[0] = program_name;
 	start_block.aux_phdr = (aux_entry_t){ ERX_ELF_AT_PHDR,
@@ -94,24 +91,4 @@ erx_fiasco_libc_start(int (*program)(int, char **, char **), erx_fiasco_cpu_feat
 	start_block.aux_null = (aux_entry_t){ ERX_ELF_AT_NULL, 0 };
 	(void)__libc_start_main(program, 1, start_block.argv, NULL, NULL, NULL);
 	return (ERX_FIASCO_TASK_STATUS_LIBC);
-}
-
-/*
- * One generator read of AT_RANDOM's bytes, taken out of this thread's UTCB mr and each word
- * zeroed there as it is taken, as the getrandom row of musl's seam does, so only the block
- * holds them. false when the generator refused them; erx_entropy_read then left mr zeroed,
- * and words is untouched.
- */
-static bool
-random_fill(uint64_t words[RANDOM_WORDS])
-{
-	erx_utcb_t *const utcb = erx_utcb_self();
-
-	if (erx_entropy_read(RANDOM_WORDS * sizeof(uint64_t)) != ERX_OK)
-		return (false);
-	for (uint32_t word = 0; word < RANDOM_WORDS; word++) {
-		(void)erx_utcb_mr_load(utcb, word, &words[word]);
-		(void)erx_utcb_mr_store(utcb, word, 0);
-	}
-	return (true);
 }

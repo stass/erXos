@@ -351,27 +351,6 @@ sigprocmask_call(sigset_t *old, size_t size)
 #define GRND_KNOWN	(GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE)
 
 /*
- * Moves the length bytes one erx_entropy_read left at the head of this thread's UTCB mr,
- * each word's bytes from its low byte, into bytes, zeroing each word in mr as it is taken
- * and the stack copy after, as erx_bytes:entropy/1's BIF does, so no copy of them stays
- * behind in the UTCB or on the stack. length is at most ERX_ENTROPY_BYTES_MAX.
- */
-static void
-entropy_take(unsigned char *bytes, uint32_t length)
-{
-	uint64_t words[ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t)] = { 0 };
-	erx_utcb_t *const utcb = erx_utcb_self();
-	const uint32_t count = (length + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-
-	for (uint32_t word = 0; word < count; word++) {
-		(void)erx_utcb_mr_load(utcb, word, &words[word]);
-		(void)erx_utcb_mr_store(utcb, word, 0);
-	}
-	bcopy(words, bytes, length);
-	erx_explicit_bzero(words, sizeof(words));
-}
-
-/*
  * getrandom: the generator's bytes, ERX_ENTROPY_BYTES_MAX at most a read. The generator
  * never waits to be seeded, so no known flag changes anything, as GRND_RANDOM changes
  * nothing on FreeBSD. Another flag is EINVAL, as FreeBSD's sys_getrandom.c refuses it, and
@@ -388,11 +367,10 @@ getrandom_call(unsigned char *buffer, size_t length, unsigned flags)
 		const uint32_t piece = length - done < ERX_ENTROPY_BYTES_MAX ? (uint32_t)(length - done) :
 		    ERX_ENTROPY_BYTES_MAX;
 
-		if (erx_entropy_read(piece) != ERX_OK) {
+		if (erx_entropy_take(buffer + done, piece) != ERX_OK) {
 			erx_explicit_bzero(buffer, done);
 			return (-EIO);
 		}
-		entropy_take(buffer + done, piece);
 		done += piece;
 	}
 	return ((long)length);

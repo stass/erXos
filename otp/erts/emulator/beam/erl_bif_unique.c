@@ -36,7 +36,6 @@
 #include "hash.h"
 #include "erl_binary.h"
 
-#include "erx/explicit_bzero.h"
 #include "liberx/backend/api.h"
 #include "erx_alias.h"
 #include "erx_ref.h"
@@ -68,31 +67,20 @@ static erts_mtx_t ref_shared_lock;
 static void init_magic_ref_tables(void);
 
 /*
- * The domain's reference key, from one erx_entropy_read, taken and zeroed out of the UTCB at
- * once, as erx_bytes:entropy/1's BIF does (nifs/erxos/erx_bytes_bif.c). Without it no reference
- * this runtime makes could be unguessable, so the runtime refuses to start.
+ * The domain's reference key, from one erx_entropy_take, which leaves no copy of it in this
+ * thread's mr. Without it no reference this runtime makes could be unguessable, so the runtime refuses
+ * to start.
  */
 static void
 read_ref_key(uint8_t key[ERX_REF_KEY_BYTES])
 {
-    uint64_t words[ERX_REF_KEY_BYTES / sizeof(uint64_t)];
-    erx_utcb_t *utcb;
-    unsigned int i;
     int status;
 
-    ERTS_CT_ASSERT(ERX_REF_KEY_BYTES % sizeof(uint64_t) == 0);
     ERTS_CT_ASSERT(ERX_REF_KEY_BYTES <= ERX_ENTROPY_BYTES_MAX);
-    status = erx_entropy_read(ERX_REF_KEY_BYTES);
+    status = erx_entropy_take(key, ERX_REF_KEY_BYTES);
     if (status != ERX_OK)
         erts_exit(ERTS_ERROR_EXIT, "references: no entropy for the reference key (status %d)\n",
                   status);
-    utcb = erx_utcb_self();
-    for (i = 0; i < ERX_REF_KEY_BYTES / sizeof(uint64_t); i++) {
-        (void) erx_utcb_mr_load(utcb, i, &words[i]);
-        (void) erx_utcb_mr_store(utcb, i, 0);
-    }
-    sys_memcpy(key, words, ERX_REF_KEY_BYTES);
-    erx_explicit_bzero(words, sizeof(words));
 }
 
 static void

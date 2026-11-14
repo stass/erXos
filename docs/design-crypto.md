@@ -298,7 +298,7 @@ OpenSSL's one seed path is `getrandom`, in musl, over the seam's
   no weak reference is left to resolve to null and fall through to
   `ENOSYS` (`rand_unix.c:401-403`).
 * **The seam's `SYS_getrandom` row** fills the caller's buffer with
-  `erx_entropy_read` in pieces of at most 256 bytes (`entropy_bytes_max`),
+  `erx_entropy_take` in pieces of at most 256 bytes (`entropy_bytes_max`),
   returns the full length, and on any failed piece returns `-EIO`, so musl
   sets `errno` to `EIO`. It never returns a short count and never fills
   from another source. It answers the same in a program

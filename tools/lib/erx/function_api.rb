@@ -26,7 +26,7 @@ module Erx
       umtx_word_differs umtx_past_deadline umtx_timeout_not_early umtx_wake_counts umtx_ping_pong
       umtx_timeout_races_wake memory_from_threads affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake many_threads machine_end_refused
-      entropy_read entropy_add entropy_refusals mem_device_refusals
+      entropy_read entropy_add entropy_refusals entropy_take mem_device_refusals
     ].freeze
     # The IRQ row: what both backends pass, and what holds only hosted (irq_cases.c).
     IRQ_CASES = %w[irq_refusals irq_ack_unbound irq_wakes_parked irq_objects_run_out].freeze

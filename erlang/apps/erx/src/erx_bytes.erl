@@ -138,7 +138,7 @@ sha256_final(_State) ->
     erlang:nif_error(undef).
 
 -doc """
-`N` bytes from the kernel's generator, read by one `erx_entropy_read` (docs/design-runtime.md,
+`N` bytes from the kernel's generator, read by one `erx_entropy_take` (docs/design-runtime.md,
 "Per-byte primitives", the entropy entry). Keys, secrets and identifiers an attacker must not
 guess come from here, directly or through a generator keyed from here, never from `rand`. It
 is a synchronous kernel call, on the stopgap a request to the root's generator service. Fails

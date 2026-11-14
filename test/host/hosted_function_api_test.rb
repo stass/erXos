@@ -20,8 +20,8 @@ require_relative '../fixtures/generated_tree'
 # tools/lib/erx/qemu_suites/function_api.rb. Each seed must make a case fail, so a green
 # run says the set reaches the backend: liberx/backend/hosted/vm.c,
 # liberx/backend/hosted/thread.c, liberx/backend/hosted/wait.c,
-# liberx/backend/hosted/group.c, liberx/backend/core/vm_table.c and
-# liberx/backend/core/park_table.c are its cores.
+# liberx/backend/hosted/group.c, liberx/backend/core/vm_table.c,
+# liberx/backend/core/park_table.c and liberx/backend/core/entropy_take.c are its cores.
 class HostedFunctionApiTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = Erx::FunctionApi::HOSTED_SOURCES
@@ -50,7 +50,8 @@ class HostedFunctionApiTest < Minitest::Test
     'a wake reports nobody' => ['liberx/backend/hosted/wait.c', "\t\twoken++;\n", "\t\tbreak;\n", 'umtx_wake_counts'],
     'a worker may park' => ['liberx/backend/hosted/group.c', "\tif (slot == ERX_NO_EXECUTOR_SLOT)\n\t\treturn (ERX_ETYPE);\n\treturn (erx_backend_park_wait", "\treturn (erx_backend_park_wait", 'park_refusals'],
     'a line is created' => ['liberx/backend/hosted/group.c', 'if (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)', 'if (kind == ERX_IRQ_MSI)', 'irq_line_refused'],
-    'an MSI is created' => ['liberx/backend/hosted/group.c', 'if (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)', 'if (kind == ERX_IRQ_LINE)', 'irq_refusals']
+    'an MSI is created' => ['liberx/backend/hosted/group.c', 'if (kind == ERX_IRQ_LINE || kind == ERX_IRQ_MSI)', 'if (kind == ERX_IRQ_LINE)', 'irq_refusals'],
+    'a take leaves its bytes in mr' => ['liberx/backend/core/entropy_take.c', "\t\t\t(void)erx_utcb_mr_store(utcb, at / sizeof(uint64_t), 0);\n", '', 'entropy_take']
   }.freeze
 
   def setup

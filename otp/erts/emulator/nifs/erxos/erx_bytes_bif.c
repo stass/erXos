@@ -569,27 +569,24 @@ erx_bytes_sha256_final_1(BIF_ALIST_1)
 }
 
 /*
- * entropy(N): N bytes, 1 to ERX_ENTROPY_BYTES_MAX, from one erx_entropy_read, which leaves
- * them at the head of this thread's UTCB mr, each word's bytes from its low byte. A failed read
- * raises {entropy, Status}, Status the ABI file's name of the status, or its integer for a value
- * no status names; nothing stands in for the bytes. The words are taken and zeroed right after
- * the read, before anything else can run on this thread (the binary's allocation included), so
- * no later store to mr can pass for entropy and no key stays behind in the UTCB or on the stack.
+ * entropy(N): N bytes, 1 to ERX_ENTROPY_BYTES_MAX, from one erx_entropy_take straight into the
+ * new binary, so no copy of them stays behind in this thread's mr or on the stack. A failed read raises
+ * {entropy, Status}, Status the ABI file's name of the status, or its integer for a value no
+ * status names; nothing stands in for the bytes, and the binary, never filled, is garbage.
  */
 BIF_RETTYPE
 erx_bytes_entropy_1(BIF_ALIST_1)
 {
-	uint64_t words[ERX_ENTROPY_BYTES_MAX / sizeof(uint64_t)] = { 0 };
 	const char *name;
-	erx_utcb_t *utcb;
 	Eterm bytes, status_term, *hp;
 	byte *data;
-	Uint len, count;
+	Uint len;
 	int status;
 
 	if (!get_small_upto(BIF_ARG_1, ERX_ENTROPY_BYTES_MAX, &len) || len < 1)
 		BIF_ERROR(BIF_P, BADARG);
-	status = erx_entropy_read((uint32_t)len);
+	bytes = erts_new_binary(BIF_P, len, &data);
+	status = erx_entropy_take(data, (uint32_t)len);
 	if (status != ERX_OK) {
 		name = erx_status_name(status);
 		status_term = name != NULL ?
@@ -599,14 +596,5 @@ erx_bytes_entropy_1(BIF_ALIST_1)
 		BIF_P->fvalue = TUPLE2(hp, am_entropy, status_term);
 		BIF_ERROR(BIF_P, EXC_ERROR);
 	}
-	utcb = erx_utcb_self();
-	count = (len + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-	for (Uint i = 0; i < count; i++) {
-		(void)erx_utcb_mr_load(utcb, (unsigned int)i, &words[i]);
-		(void)erx_utcb_mr_store(utcb, (unsigned int)i, 0);
-	}
-	bytes = erts_new_binary(BIF_P, len, &data);
-	memcpy(data, words, len);
-	erx_explicit_bzero(words, sizeof(words));
 	BIF_RET(bytes);
 }

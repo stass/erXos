@@ -2915,7 +2915,7 @@ around them.
   kernel call, on the stopgap a request to the root's generator service,
   so the never-blocking rule above does not cover it. For an
   integer `N` from 1 to 256 (`entropy_bytes_max` of the ABI file) it
-  returns exactly `N` bytes from one `erx_entropy_read`; any other `N`
+  returns exactly `N` bytes from one `erx_entropy_take`; any other `N`
   raises `badarg`. A read the kernel or the backend does not complete
   raises `erlang:error({entropy, Status})`, `Status` being the returned
   status's name in the ABI file as an atom (its integer for a value no
@@ -3126,7 +3126,7 @@ runtime and native program. It reaches the kernel only through `liberx`:
 | threads | `erx_thread_create`, `erx_thread_exit`, umtx; the descriptor found from the thread pointer |
 | locks | umtx waits on private memory |
 | clocks | the time page |
-| entropy (`getrandom`, and `AT_RANDOM`'s 16 bytes, read at start, for musl's stack guard and mallocng's secret) | `erx_entropy_read` |
+| entropy (`getrandom`, and `AT_RANDOM`'s 16 bytes, read at start, for musl's stack guard and mallocng's secret) | `erx_entropy_take` |
 | standard output and error | descriptors 1 and 2: in a runtime, `erx_output_write`, for C output and for a process with no tty owner, which waits on that owner otherwise ([The console](#the-console-and-standard-io)); in a program, the opens it was started with |
 | files and descriptors (`open`, `read`, `write`, `stat`, `getdents`, `getcwd`, `chdir`, `mkdir`, `unlink`, `rename`) | in a program, the descriptor table over pipes and files, each operation a request on the channel to the handler and its bytes in the program's data area ([design-programs.md](design-programs.md#descriptors-and-files)) |
 | arguments, environment and working directory | in a runtime, the boot information page; in a program, the startup message |

@@ -638,6 +638,14 @@ callers as it says.
 | `erx_vcpu_control`, `erx_vcpu_resume`; `erx_irq_bind` to a thread | `liberx`'s signals in programs (Track P) | carried only if [the source check](#open-decisions) passes: [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco) | otherwise `ERX_ENOTSUP`, and programs take default signal actions only | the subset of [vCPU upcalls](design-kernel.md#vcpu-upcalls) |
 | messages through gates, rendezvous passing, `erx_mem_child`, `erx_mem_own`, `erx_mem_dirty`, `erx_dma_*`, `erx_resource_carve`, `erx_space_pause`, `_resume`, `_quiesce`, `_clear_caps`, `_copy` | none | none | `ERX_ENOTSUP` | supported |
 
+`erx_entropy_read` leaves the generator's bytes in the caller's UTCB, where the next call that writes the
+message words, or anything that reads them, would find them. So no caller calls it but one:
+`erx_entropy_take(out, len)` (`liberx/backend/core/entropy_take.c`, the same on every backend) makes the read,
+moves the bytes into `out` and zeroes each message word that held them, and the `entropy-take` chokepoint keeps
+`erx_entropy_read` to it, the backends that define it and the function-API set that tests it. musl's
+`getrandom` row, `AT_RANDOM`'s bytes, the runtime's reference key and `erx_bytes:entropy/1` all take their bytes
+through it.
+
 ### Reporting kernel objects
 
 `erx_object_info` is a request on the root's service gate, answered from the service's own tables, except its
@@ -1132,7 +1140,7 @@ the `SYS_` names, so that a call not ported fails at link rather than at run tim
 | `set_tid_address`, `gettid` | `erx_fiasco_thread_set_clear_word`, the index plus one | |
 | `getpid`, `getppid`, the user and group identifiers | 1, 0 and 0 | fixed values: Phase 1 has no processes and no users, so every task reads the same |
 | `sched_yield` | `erx_yield` | |
-| `getrandom` | `erx_entropy_read`, at most 256 bytes a read, each read's words taken out of the UTCB and zeroed there | the whole length or a failure, never a short count: a read the generator does not complete fails the call with `EIO` and leaves zeros where the call wrote; `GRND_NONBLOCK`, `GRND_RANDOM` and `GRND_INSECURE` change nothing, since the generator never waits to be seeded, another flag is `EINVAL`, as FreeBSD's `sys_getrandom.c` refuses it, and so is a length past `SSIZE_MAX`, which the count returned could not hold; musl's `getentropy` over it keeps its own 256-byte limit, `EIO` past it |
+| `getrandom` | `erx_entropy_take`, at most 256 bytes a read | the whole length or a failure, never a short count: a read the generator does not complete fails the call with `EIO` and leaves zeros where the call wrote; `GRND_NONBLOCK`, `GRND_RANDOM` and `GRND_INSECURE` change nothing, since the generator never waits to be seeded, another flag is `EINVAL`, as FreeBSD's `sys_getrandom.c` refuses it, and so is a length past `SSIZE_MAX`, which the count returned could not hold; musl's `getentropy` over it keeps its own 256-byte limit, `EIO` past it |
 | `set_robust_list`, `get_robust_list` | the calling thread's list head, kept in musl's `struct pthread` | kept and never walked: musl walks the list itself at thread exit, and only a task's death would need a kernel's help; a size other than Linux's three-word head is `EINVAL`; another thread's list is not offered: `ENOSYS` |
 | `rt_sigprocmask`, `tkill` of `SIGCANCEL` | answered with no effect | the signal mask reads empty |
 
@@ -1144,7 +1152,7 @@ vector of the ELF headers, which `root.ld` and `task.ld` load first so that musl
 CPU feature words as `AT_HWCAP` and `AT_HWCAP2`, and `AT_RANDOM`. The feature words are the boot information page's in
 a runtime's root or domain, a program's are its session's from the registers `program_arg`'s `hwcap` and `hwcap2` name,
 and 0 where an entry has neither. `AT_RANDOM` names 16 bytes of one
-`erx_entropy_read`, kept in the start block for the program's life, from which musl takes its stack guard and mallocng
+`erx_entropy_take`, kept in the start block for the program's life, from which musl takes its stack guard and mallocng
 its secret; a start whose generator refuses them never runs the program, and stops the task with
 `ERX_FIASCO_TASK_STATUS_ENTROPY` or, in the root, says so and ends the machine. The vector's keys are `abi/formats/elf64.txt`'s,
 which a host test checks against musl's `elf.h`. On a root, `libc_root_start.c` first moves off the image's

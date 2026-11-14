@@ -45,7 +45,7 @@ typedef struct erx_fiasco_cpu_features {
 
 /*
  * Runs program as main through musl's start, with features in the auxiliary vector and
- * AT_RANDOM's 16 bytes from erx_entropy_read. exit() ends the program, so this returns
+ * AT_RANDOM's 16 bytes from erx_entropy_take. exit() ends the program, so this returns
  * only when it cannot start: ERX_FIASCO_TASK_STATUS_ENTROPY (task_start.h) when the
  * generator refused AT_RANDOM's bytes, and musl's start never ran, or
  * ERX_FIASCO_TASK_STATUS_LIBC when musl's start came back, which is a bug.

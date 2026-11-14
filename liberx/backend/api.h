@@ -205,6 +205,13 @@ int	erx_vm_map(uint64_t space, uint64_t addr, uint64_t size, uint64_t mem, uint6
  * banner line says. res is ignored.
  */
 int	erx_entropy_read(uint32_t len) ERX_WARN_UNUSED_RESULT;
+/*
+ * The one way to the generator's bytes (liberx/backend/core/entropy_take.c): len bytes from
+ * one erx_entropy_read, moved into out, with every mr word that held them zeroed, so no copy
+ * stays in this thread's mr. Only it calls erx_entropy_read, a build check. A read that fails
+ * returns its status and leaves out untouched.
+ */
+int	erx_entropy_take(void *out, uint32_t len) ERX_WARN_UNUSED_RESULT;
 int	erx_entropy_add(uint64_t res, uint32_t len, uint32_t flags) ERX_WARN_UNUSED_RESULT;
 
 /*
