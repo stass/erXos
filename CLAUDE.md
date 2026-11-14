@@ -50,6 +50,15 @@ These shape every design and change; the rules below apply them.
 * Flag uncertainty explicitly. If you are not confident about an approach or
   technical detail, say so before proceeding. Confidence without certainty
   causes more damage than admitting a gap.
+* **Two advisors before me.** Put a technical question first to two
+  advisors: a Claude Opus 5.5 subagent at `max` effort and a Codex
+  `gpt-6-astra` pass at `high` reasoning effort in a read-only sandbox.
+  Give both the options, the code and the documents, without your own
+  conclusion. When they agree with each other and with you, decide, and
+  report the decision afterwards. Ask me only what you still cannot settle,
+  with each advisor's recommendation and yours. Scope, priorities,
+  licenses, pushes, board settings, changes to what I have accepted, any
+  weakening of a security commitment, and edits to this file stay mine.
 * **Read the source, not your memory.** Download the code, specification or
   data a design, plan or change relies on (FreeBSD, Linux, QEMU, a vendor's
   documentation, whatever applies) and work from what you read, citing file
