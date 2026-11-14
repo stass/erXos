@@ -14,7 +14,7 @@
  * BLAKE3 1.8.7, https://github.com/BLAKE3-team/BLAKE3, is offered by its
  * authors under CC0-1.0, Apache-2.0 or Apache-2.0 WITH LLVM-exception.
  * erXos takes it under Apache-2.0 WITH LLVM-exception (LICENSE_A2LLVM
- * beside this file), and erXos's changes are under the same licence.
+ * beside this file), and erXos's changes are under the same license.
  * ORIGIN.md records what was imported.
  */
 #ifndef ERX_CRYPTO_BLAKE3_H

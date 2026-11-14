@@ -1957,7 +1957,7 @@ The step's rules, by input:
   A down that went to a window and types a rune becomes that window's
   repeating key, in place of the one before, at its time plus the delay;
   FreeBSD's evdev starts repeat at every down too, for its device
-  (`sys/dev/evdev/evdev.c`, release/14.1.0, lines 692-698).
+  (`sys/dev/evdev/evdev.c`, release/15.1.0, lines 707-713).
 * **A key's up** of a key its source does not hold is dropped and
   counted. Otherwise the key leaves the source's state and its up goes
   to the window its down went to, whatever that window's state or which
@@ -3245,8 +3245,8 @@ on a display edits nothing of the board's:
   key is held before it repeats and the time between repeats, each a
   positive number of milliseconds, 500 and 126 unless the entry says
   otherwise, the `normal` rate of FreeBSD's kbdcontrol(1)
-  (`usr.sbin/kbdcontrol/kbdcontrol.1`, release/14.1.0, lines 115-121;
-  `kbdcontrol.c`, lines 1064-1068); the domain's own manifest row sets
+  (`usr.sbin/kbdcontrol/kbdcontrol.1`, release/15.1.0, lines 115-121;
+  `kbdcontrol.c`, lines 1066-1070); the domain's own manifest row sets
   none of them. It names
   no session, no application and no renderer.
 * **Facet rows say who may draw there, and how much.** A facet row of
@@ -5017,18 +5017,20 @@ Decisions:
   (`547c06986e3c7fc77d1ed8b253ab86d6fab423771938a6abe3c26f6adf9a0c08`)
   and `man/man3/mouse.3`
   (`5e1f4c8913ca17a71490e1da2a210c994e09dad13ce0da5e9071338b332216db`).
-  FreeBSD at release/14.1.0: `sys/dev/evdev/evdev.c`
-  (`de9e1ad9079711abee07710642c612f07fefa40c7a3eace9f267d8a22a44e0ed`),
+  FreeBSD at release/15.1.0: `sys/dev/evdev/evdev.c`
+  (`a261a373deb6eb224d9437a9fd1c34d4bcf78ebb98541f3b4567d34c6b8f3b5a`),
   `sys/dev/evdev/input.h`
-  (`ff625eb9908e977a7ec3bb8a6b78d47753c0f2068d3d847127356aad1e7a9b0a`)
-  and `sys/dev/virtio/virtio_ids.h`
-  (`7def4e9c654b6d568a350d6c54ed7fbf24895e3739f318c15621762384f463bf`),
+  (`cd30f12e285f849dbff83f097118b5f3ab9cd3cc2f26d303ede0a4cfcf623a9b`),
+  `sys/dev/virtio/virtio_ids.h`
+  (`1287e190b1f2be17eab9370f642574fd61389a9a5fafe39f53f2d7cae07bc37e`)
+  and `sys/dev/virtio/gpu/virtio_gpu.h`
+  (`fe2a91547ba04bae7ac6b804e14596245084f32b5997e976b0f7ae44d48160dd`),
   which `abi/formats/virtio.txt` cites,
   `usr.sbin/kbdcontrol/kbdcontrol.1`
-  (`e0988b793caf7c61a70ba2a3eec207074cc56612af914a88962679be8a76a47c`)
+  (`4ca1bc86d7cbb57b361a6d1183c7a1177ed216bd565852b0e602db38a682fe7b`)
   and `usr.sbin/kbdcontrol/kbdcontrol.c`
-  (`c9f993353564a2681ee2eb359eb2af1b267048bce3356cf8f9fe0a68c1bdd025`).
-  FreeBSD at release/15.1.0, under the BSD-2-Clause license, for
+  (`0114fcacff4abc9e66efbfea63acfce9d722c829a625f7cccf83011cdc563270`).
+  Also at release/15.1.0, under the BSD-2-Clause license, for
   `abi/formats/evdev.txt`: `sys/dev/evdev/input-event-codes.h`
   (`fc9c4946818cefcec359ad3a619d448c4cafffa4f8f9571894516fb980b26142`)
   and `sys/dev/evdev/evdev_private.h`

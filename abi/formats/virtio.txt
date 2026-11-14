@@ -88,7 +88,7 @@ layout erx_virtio_blk_req_header wire_le 8 16
   field sector u64 8
 
 # The 2D GPU device (section 5.7), its values and layouts as FreeBSD's
-# sys/dev/virtio/gpu/virtio_gpu.h and sys/dev/virtio/virtio_ids.h at release/14.1.0 give
+# sys/dev/virtio/gpu/virtio_gpu.h and sys/dev/virtio/virtio_ids.h at release/15.1.0 give
 # them (device ID 16). Its control queue is queue 0; every request starts with
 # erx_virtio_gpu_ctrl_hdr and every response is one, followed by its data. The answer to a
 # request with the FENCE flag carries the flag and the request's fence_id.
@@ -180,7 +180,7 @@ layout erx_virtio_gpu_mem_entry wire_le 8 16
   field padding u32 12
 
 # The input device (section 5.8), device ID 18 as FreeBSD's sys/dev/virtio/virtio_ids.h
-# at release/14.1.0 gives it. The driver posts each buffer of its event queue, queue 0, at
+# at release/15.1.0 gives it. The driver posts each buffer of its event queue, queue 0, at
 # exactly the size of one erx_virtio_input_event (section 5.8.6.1 asks for at least that),
 # so the device writes one event into each; queue 1 carries status the driver sends, such as keyboard
 # LEDs. Its configuration space is one erx_virtio_input_config: the driver writes select
@@ -200,7 +200,7 @@ limit virtio_input_config_data_max u32 128
 
 # One event (section 5.8.6): an evdev type, code and value, little-endian. The value is
 # signed, as evdev's struct input_event holds it (FreeBSD sys/dev/evdev/input.h at
-# release/14.1.0), so a relative axis moves either way.
+# release/15.1.0), so a relative axis moves either way.
 layout erx_virtio_input_event wire_le 4 8
   field type u16 0
   field code u16 2

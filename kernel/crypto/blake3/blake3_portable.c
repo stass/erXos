@@ -8,7 +8,7 @@
  *
  * BLAKE3 1.8.7, https://github.com/BLAKE3-team/BLAKE3, taken under
  * Apache-2.0 WITH LLVM-exception (LICENSE_A2LLVM beside this file);
- * erXos's changes are under the same licence.
+ * erXos's changes are under the same license.
  */
 #include "blake3_impl.h"
 

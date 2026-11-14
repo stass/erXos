@@ -7131,10 +7131,10 @@ other than the CPU's, where a physical address would be wrong
   the CPU's; a level without it below a non-empty one makes the device's
   windows malformed, and the device gets none, rather than one of two
   readings the specification does not choose between. FreeBSD
-  14.1.0 reads no `dma-ranges`; its translation of `reg` through
+  15.1.0 reads no `dma-ranges`; its translation of `reg` through
   `ranges` takes a missing property as unchanged addresses, more
   liberally than the specification, which says a bus without `ranges`
-  maps nothing (`sys/dev/ofw/ofw_subr.c:120-170`, comment at `:123-130`).
+  maps nothing (`sys/dev/ofw/ofw_subr.c:119-169`, comment at `:122-129`).
   It keeps only windows that RAM backs at least in part, whole, so a
   bridge's loopback and MSI windows drop out while a window through
   which the device sees RAM keeps its true extent, and it cuts every
@@ -9801,8 +9801,8 @@ records a call in progress keeps, which [Security](#security) bounds
 * seL4, https://github.com/seL4/seL4, master:
   `include/object/structures.h` (read 2026-10-30).
 * FreeBSD `_umtx_op(2)` and `sys/kern/kern_umtx.c`, for the umtx
-  interface; FreeBSD 14.1.0 (`release/14.1.0`) `sys/dev/ofw/ofw_subr.c`
-  (SHA-256 `aba7bd8742f3dcf5f04d7c4d4435d50571a0a4a28ff4a83050fa9b7d337b1b0c`),
+  interface; FreeBSD 15.1.0 (`release/15.1.0`) `sys/dev/ofw/ofw_subr.c`
+  (SHA-256 `f5aeadbf79236e45fbed7aac60c58029f636c74e6f0d8a19836f597abbae852f`),
   for the translation of `reg` through `ranges`.
 * Devicetree Specification, release v0.4
   (`https://github.com/devicetree-org/devicetree-specification/releases/download/v0.4/devicetree-specification-v0.4.pdf`,
