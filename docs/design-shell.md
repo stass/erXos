@@ -330,7 +330,10 @@ shell and for `erx:` functions that run commands:
    host(1) over erXos's own stack, reading interfaces through
    `erx_net:interfaces/0`, echo replies through `erx_icmp_sock` and
    names through `inet_res`
-   ([design-network-stack.md](design-network-stack.md)); and erXos's own `i`, `domains`, `source`, `trace`,
+   ([design-network-stack.md](design-network-stack.md)); `reboot` and
+   `halt`, which follow FreeBSD's reboot(8), need the `machine` grant and
+   in a session write one end to `/machine/ctl`
+   ([design-system.md](design-system.md#a-sessions-request)); and erXos's own `i`, `domains`, `source`, `trace`,
    `attach`, `bind`, `mount` and `unmount`, which have no FreeBSD
    counterpart;
 3. a **program command**: one of toybox's applets or another program of
