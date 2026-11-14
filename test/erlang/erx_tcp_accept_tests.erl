@@ -38,7 +38,12 @@ accept_test_() ->
        fun refused_adoption_resets/0},
       {"the listener's exit aborts a queued connection with a RST",
        fun listener_exit_aborts_a_queued_connection/0},
-      {"a full accept credit starts nothing", fun full_credit_starts_nothing/0}]].
+      {"a full accept credit starts nothing", fun full_credit_starts_nothing/0},
+      {"a bind that does not name its listener ends the connection",
+       fun bind_from_another_process_ends_the_connection/0},
+      {"a second bind ends the connection", fun second_bind_ends_the_connection/0},
+      {"a bind to a socket process already gone sends no bound and closes",
+       fun bind_to_a_gone_socket_process_closes/0}]].
 
 %% --- The stand-ins ---------------------------------------------------------------
 
@@ -115,7 +120,7 @@ queued_connection_waits_for_the_first_contact() ->
     ?assertEqual(1, erx_net_credit:free(Unit)),
     ?assertMatch([#{pid := Conn}], erx_net_tables:demux(?KEY)),
     #{owner := {listener, _}} = owner(Conn),
-    Conn ! {bind, self()},
+    Conn ! {bind, self(), self()},
     receive {bound, Conn} -> ok after ?WAIT -> error(not_bound) end,
     %% Bound, but nothing crosses before the socket process's first message.
     receive {erx_net, Conn, Early} -> error({pushed_before_contact, Early}) after 100 -> ok end,
@@ -173,16 +178,59 @@ full_credit_starts_nothing() ->
     ?assertEqual(full, erx_tcp_conn:accept(accept(self(), Unit, <<>>))),
     ?assertEqual([], erx_net_tables:demux(?KEY)).
 
+bind_from_another_process_ends_the_connection() ->
+    Conn = queued(),
+    Ref = monitor(process, Conn),
+    Other = spawn(fun() -> receive stop -> ok end end),
+    Conn ! {bind, Other, self()},
+    receive {'DOWN', Ref, process, Conn, Reason} -> ?assertMatch({unexpected, {bind, _, _}}, Reason)
+    after ?WAIT -> error(still_running)
+    end,
+    receive {bound, Conn} -> error(bound) after 0 -> ok end,
+    Other ! stop.
+
+second_bind_ends_the_connection() ->
+    Conn = queued(),
+    Ref = monitor(process, Conn),
+    Conn ! {bind, self(), self()},
+    receive {bound, Conn} -> ok after ?WAIT -> error(not_bound) end,
+    Conn ! {bind, self(), self()},
+    receive {'DOWN', Ref, process, Conn, Reason} -> ?assertMatch({unexpected, {bind, _, _}}, Reason)
+    after ?WAIT -> error(still_running)
+    end.
+
+%% The socket process an accept names has ended before the bind: the connection's link
+%% meets `noproc`, so it answers nothing and closes as at its socket process's exit, and
+%% its listener answers the accept at the connection's own exit.
+bind_to_a_gone_socket_process_closes() ->
+    Conn = queued(),
+    Gone = spawn(fun() -> ok end),
+    Ref = monitor(process, Gone),
+    receive {'DOWN', Ref, process, Gone, _} -> ok end,
+    Conn ! {bind, self(), Gone},
+    await_flag(?TH_FIN),
+    receive {bound, Conn} -> error(bound) after 0 -> ok end,
+    ?assertMatch(#{owner := none}, owner(Conn)).
+
+%% A connection queued on the test process as its listener, with its unit.
+queued() ->
+    Unit = erx_net_credit:new(2),
+    ok = erx_tcp_conn:accept(accept(self(), Unit, <<>>)),
+    receive {queued, C} -> C after ?WAIT -> error(not_queued) end.
+
 %% Waits for the RST the connection hands the driver, past the ACKs before it.
-await_rst() ->
+await_rst() -> await_flag(?TH_RST).
+
+%% Waits for a segment carrying Flag among the frames the connection hands the driver.
+await_flag(Flag) ->
     receive
         {transmit, Frames} ->
             Flags = [Tcp#tcp.flags || F <- Frames, {Tcp, _} <- [decode(iolist_to_binary(F))]],
-            case lists:any(fun(Fl) -> Fl band ?TH_RST =/= 0 end, Flags) of
+            case lists:any(fun(Fl) -> Fl band Flag =/= 0 end, Flags) of
                 true -> ok;
-                false -> await_rst()
+                false -> await_flag(Flag)
             end
-    after ?WAIT -> error(no_rst)
+    after ?WAIT -> error({no_segment_with, Flag})
     end.
 
 decode(<<_Eth:14/binary, Packet/binary>>) ->

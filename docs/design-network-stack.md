@@ -3950,7 +3950,12 @@ queued are pushed within that first credit. A `SockProc` already gone
 answers the link with `noproc`, which the connection looks for at once,
 before it answers: finding it, it sends no `{bound, self()}` and closes
 as at its socket process's exit, and that exit answers the call
-`{error, econnaborted}`, never `{ok, Conn}`.
+`{error, econnaborted}`. ERTS queues the `noproc` before `link/1`
+returns once the process has left its process table (`bif.c`,
+`link_opt`); a `SockProc` still in its exit phases answers later, after
+the `bound`, so the call may be answered `{ok, Conn}` for a socket
+process that is ending, whose exit then closes the connection as any
+owner's does.
 The listener answers the `accept` only after `{bound, Conn}`, so the
 connection knows its socket process before that process, which learns
 of the connection only from the answer, can send it anything.

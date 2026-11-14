@@ -96,10 +96,13 @@ its RST, deletes the key and ends.
 Its owner moves through three phases. **Queued**, `{listener, L}`: it runs as any
 connection does, acknowledging and taking bytes into its receive buffer, but pushes
 nothing and admits no request; its listener's exit is its abort, a RST and its end. At
-`{bind, SockProc}` from its listener it links to `SockProc` and answers `{bound, self()}`:
-**bound**, `{bound, SockProc}`, it still sends nothing, since nothing crosses to a socket
-process before that process's first message; from that first admitted message on the
-owner is `SockProc`, as an active open's is. An accepted connection traps exits: its
+`{bind, Listener, SockProc}` naming its listener it links to `SockProc` and answers
+`{bound, self()}`: **bound**, `{bound, SockProc}`, it still sends nothing, since nothing
+crosses to a socket process before that process's first message; from that first admitted
+message on the owner is `SockProc`, as an active open's is. A `SockProc` already gone
+answers the link with `noproc`, which the connection looks for at once: it then answers
+nothing and closes as at its owner's exit. A bind naming another listener, or one once
+bound, ends the connection. An accepted connection traps exits: its
 grant's exit ends it without a step, its owner's closes it as the owner's `'DOWN'` closes an
 active open, and any other exit, its listener's once bound among them, changes nothing.
 """.
@@ -376,13 +379,26 @@ handle_info({'EXIT', Owner, _}, #state{owner = Owner} = S) when is_pid(Owner) ->
 handle_info({'EXIT', _, _}, S) ->
     {noreply, S};
 %% An accept takes the queued connection for SockProc: linked, it answers its listener, and
-%% sends SockProc nothing until SockProc's first message. A SockProc already gone answers
-%% the link with its exit. A bind once bound is a programming error that ends it.
-handle_info({bind, SockProc}, #state{owner = {listener, Listener}} = S) when is_pid(SockProc) ->
+%% sends SockProc nothing until SockProc's first message.
+%%
+%% A SockProc that has left the process table answers the link of this trapping process
+%% with `{'EXIT', SockProc, noproc}`, queued before link/1 returns (bif.c, link_opt): found
+%% at once, the connection answers nothing and closes as at its socket process's exit, so
+%% its own exit answers the accept `{error, econnaborted}`. One still in its exit phases
+%% answers the link later; the connection is bound by then, and that exit closes it in turn.
+%%
+%% A bind that does not name its listener, or one once bound, is a programming error that
+%% ends it.
+handle_info({bind, Listener, SockProc}, #state{owner = {listener, Listener}} = S) when is_pid(SockProc) ->
     true = link(SockProc),
-    Listener ! {bound, self()},
-    settle(S#state{owner = {bound, SockProc}});
-handle_info({bind, _} = Bind, _S) ->
+    receive
+        {'EXIT', SockProc, noproc} ->
+            settle(owner_closed(S))
+    after 0 ->
+        Listener ! {bound, self()},
+        settle(S#state{owner = {bound, SockProc}})
+    end;
+handle_info({bind, _, _} = Bind, _S) ->
     exit({unexpected, Bind});
 handle_info(_Msg, #state{owner = {listener, _}} = S) ->
     %% Queued: there is no socket process whose request could be admitted.

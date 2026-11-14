@@ -82,39 +82,44 @@ class ErxNetEffectTest < Minitest::Test
     end
   end
 
-def test_accepted_connection_passes_under_eunit
-  assert_erx_net_eunit(:erx_tcp_accept_tests)
-end
-
-# The accepted connection's seeded failures (docs/design-network-stack.md, "The backlog
-# and the hand-over, on a development host"), each failing its own case.
-ACCEPT_FAULTS = {
-  # No release at `abandon`: the place in the backlog never comes back.
-  abandon_releases_the_unit: [
-    "        abandon ->\n            ok = erx_net_credit:release(Unit, 1);",
-    "        abandon ->\n            _ = Unit;"
-  ],
-  # A connection that carries on after a refused adoption: no RST, and it is queued.
-  refused_adoption_resets: [
-    '{{error, _}, _} ->', '{{error, _}, Path1} when Path1 =:= x ->'
-  ],
-  # A queued connection that ignores its listener's exit: no RST to the peer.
-  listener_exit_aborts_a_queued_connection: [
-    'settle(step({user, abort}, S));', '{noreply, S};'
-  ],
-  # A bound connection that pushes before its socket process's first message.
-  queued_connection_waits_for_the_first_contact: [
-    "hand_over(#state{owner = {_Phase, _}} = S) ->\n    %% Queued or bound before the first contact: the bytes wait for the socket process.\n    S;\n",
-    "hand_over(#state{owner = {bound, P}} = S) ->\n    hand_over(S#state{owner = P, push_credit = 65536});\n"
-  ]
-}.freeze
-
-ACCEPT_FAULTS.each do |name, fault|
-  define_method("test_seeded_fault_fails_#{name}") do
-    output = refute_erx_net_eunit(:erx_tcp_accept_tests, fault: { 'erx_tcp_conn' => fault })
-    assert_match(/#{name}/, output)
+  def test_accepted_connection_passes_under_eunit
+    assert_erx_net_eunit(:erx_tcp_accept_tests)
   end
-end
+
+  # The accepted connection's seeded failures (docs/design-network-stack.md, "The backlog
+  # and the hand-over, on a development host"), each failing its own case.
+  ACCEPT_FAULTS = {
+    # No release at `abandon`: the place in the backlog never comes back.
+    abandon_releases_the_unit: [
+      "        abandon ->\n            ok = erx_net_credit:release(Unit, 1);",
+      "        abandon ->\n            _ = Unit;"
+    ],
+    # A connection that carries on after a refused adoption: no RST, and it is queued.
+    refused_adoption_resets: [
+      '{{error, _}, _} ->', '{{error, _}, Path1} when Path1 =:= x ->'
+    ],
+    # A queued connection that ignores its listener's exit: no RST to the peer.
+    listener_exit_aborts_a_queued_connection: [
+      'settle(step({user, abort}, S));', '{noreply, S};'
+    ],
+    # A bound connection that pushes before its socket process's first message.
+    queued_connection_waits_for_the_first_contact: [
+      "hand_over(#state{owner = {_Phase, _}} = S) ->\n    %% Queued or bound before the first contact: the bytes wait for the socket process.\n    S;\n",
+      "hand_over(#state{owner = {bound, P}} = S) ->\n    hand_over(S#state{owner = P, push_credit = 65536});\n"
+    ],
+    # A bind that never looks for its socket process's noproc: the listener is told bound
+    # for a socket process already gone, and would answer the accept {ok, Conn}.
+    bind_to_a_gone_socket_process_closes: [
+      "{'EXIT', SockProc, noproc} ->", "{'EXIT', SockProc, noproc_seeded} ->"
+    ]
+  }.freeze
+
+  ACCEPT_FAULTS.each do |name, fault|
+    define_method("test_seeded_fault_fails_#{name}") do
+      output = refute_erx_net_eunit(:erx_tcp_accept_tests, fault: { 'erx_tcp_conn' => fault })
+      assert_match(/#{name}/, output)
+    end
+  end
 
   # A failed check that keeps the token it spent starves the interface of its bucket.
   def test_core_that_keeps_a_failed_frames_token_fails
