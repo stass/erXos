@@ -256,11 +256,11 @@ p.95) 6.4 s.
 **Choosing the transport.** `erx_blk:start_link/0` reads the domain's
 device records (`erx_device_record`) and starts the device process of
 the one record whose role is `block`, chosen by the record's CMSIS-SVD
-peripheral from a two-row table: `virtio_mmio` starts `erx_blk_virtio`,
+peripheral from a two-row table: `virtio_blk` starts `erx_blk_virtio`,
 `sdhci` starts `erx_blk_sd`. A new controller is one row and one module.
 The record's peripheral comes from the device-kinds table
 (`include/erx/device_kinds.h`), which maps a manifest device's role and
-compatible string to its record: `virtio,mmio` to `block virtio_mmio`,
+compatible string to its record: `virtio,mmio` to `block virtio_blk`,
 and `brcm,bcm2711-emmc2` to `block sdhci`. A domain with no block record
 has no device process and no line in the log, since a machine without a
 disk is a configuration, not a fault. A domain with more than one is
@@ -1793,7 +1793,7 @@ domain service restarts the domain, and the clients' windows return.
 
 The transport split: QEMU `virt`'s block suites pass unchanged on
 `erx_blk_virtio`, and fail with a seeded fault that swaps the
-`virtio_mmio` and `sdhci` rows of the transport table, which leaves the
+`virtio_blk` and `sdhci` rows of the transport table, which leaves the
 virtio disk undriven; a virtio flush posts a flush request through
 `erx_blk_write`, and the block suite's start fails on a device that does
 not offer the flush feature.

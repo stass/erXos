@@ -5929,6 +5929,12 @@ to the corpus and follow rc
   construction. The display domain holds its keyboard and tablet only once the unit
   is the transport page; QEMU virt's four transport pages are the spare's, the display's, the network
   device's and the disks'.
+* [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a spec's `peripheral` is the
+  caller's, so a driver can open a window as any table peripheral whose block fits it, such as a virtio-mmio
+  transport as `sdhci`, and reach the transport's owned offsets through that peripheral's writable registers,
+  past `ownedByNif` and the per-kind configuration registers of
+  [Registers by name](docs/design-runtime.md#the-device-nif). Take the peripheral from the record the system
+  domain wrote, with the fix for `window` and `memory` below.
 * [Medium] device NIF, `otp/erts/emulator/nifs/erxos/erx_device_nif.c`, `open/1`: a device spec's `window` and
   `memory` are `{object, Handle, ...}` terms Erlang supplies, and the NIF maps whatever handle they name. The
   framebuffer's window handle is readable from Erlang (`erx_device_record:framebuffers/0`), so display-domain

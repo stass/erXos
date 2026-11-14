@@ -230,12 +230,6 @@
           </fields>
         </register>
         <register>
-          <name>MAX_VIRTQUEUE_PAIRS</name><ownedByNif>false</ownedByNif><size>16</size>
-          <description>The most receive and transmit queue pairs, valid when VIRTIO_NET_F_MQ or VIRTIO_NET_F_RSS is offered</description>
-          <addressOffset>0x108</addressOffset><access>read-only</access>
-          <fields><field><name>VALUE</name><bitOffset>0</bitOffset><bitWidth>16</bitWidth></field></fields>
-        </register>
-        <register>
           <name>MTU</name><ownedByNif>false</ownedByNif><size>16</size>
           <description>The largest MTU the driver should use, valid when VIRTIO_NET_F_MTU is offered</description>
           <addressOffset>0x10a</addressOffset><access>read-only</access>

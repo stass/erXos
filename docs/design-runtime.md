@@ -2564,7 +2564,7 @@ peripheral, each declared at its field's width and access, read and written by
 name like every other register: the kind's peripheral copies the transport's
 registers and adds the configuration fields its driver uses
 ([design-hardware-generation.md](design-hardware-generation.md#register-inputs)),
-and the device kinds table names that peripheral for the kind's records. A field
+and the device kinds table names that peripheral for the kind's records, which the NIF opens as that peripheral and no other. A field
 the peripheral does not declare cannot be reached, and a read-only one cannot be
 written, so the input driver can write only `select` and `subsel`, each one
 byte, as virtio 1.2 sections 4.2.2.2 and 5.8.5.1 require. Every

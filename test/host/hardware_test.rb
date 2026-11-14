@@ -237,20 +237,31 @@ class HardwareTest < Minitest::Test
     derived = '<cluster derivedFrom="BASE.TRANSPORT"><name>TRANSPORT</name><description>shared</description>' \
               '<addressOffset>0</addressOffset></cluster>'
     select = '<size>8</size><addressOffset>0x10</addressOffset>'
-    [KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="NONE.TRANSPORT"'),
-     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="BASE.OTHER"'),
-     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="TRANSPORT"'),
-     KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="KIND.TRANSPORT"'),
-     KINDS.sub("#{derived}\n", '').sub('</registers>', "#{derived}</registers>"),
-     KINDS.sub('<addressOffset>0</addressOffset></cluster>', '<addressOffset>8</addressOffset></cluster>'),
-     KINDS.sub('</addressOffset></cluster>', '</addressOffset><register/></cluster>'),
-     KINDS.sub(select, '<size>8</size><addressOffset>0x4</addressOffset>'),
-     KINDS.sub('<size>16</size><addressOffset>0x12</addressOffset>', '<size>16</size><addressOffset>0x13</addressOffset>'),
-     KINDS.sub(select, '<size>24</size><addressOffset>0x10</addressOffset>'),
-     KINDS.sub('<bitWidth>8</bitWidth>', '<bitWidth>9</bitWidth>'),
-     KINDS.sub('<size>0x20</size>', '<size>0x4</size>')].each_with_index do |bytes, index|
+    # The last match: KIND's element, where the first would be BASE's.
+    last = ->(text, old, new) { text.sub(/\A(.*)#{Regexp.escape(old)}/m) { "#{Regexp.last_match(1)}#{new}" } }
+    # KIND with nothing but its copy of the cluster, in a block too small for the copy.
+    copy_only = last.call(KINDS.sub(%r{\s*<register><name>SELECT.*</register>}m, ''), '<size>0x20</size>', '<size>0x4</size>')
+    extra = '<register><name>EXTRA</name><ownedByNif>true</ownedByNif><addressOffset>8</addressOffset>' \
+            '<access>read-write</access><fields><field><name>VALUE</name><bitOffset>0</bitOffset>' \
+            '<bitWidth>32</bitWidth></field></fields></register>'
+    {
+      KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="NONE.TRANSPORT"') => /no earlier peripheral/,
+      KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="BASE.OTHER"') => /no leading cluster/,
+      KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="TRANSPORT"') => /no earlier peripheral/,
+      KINDS.sub('derivedFrom="BASE.TRANSPORT"', 'derivedFrom="KIND.TRANSPORT"') => /no earlier peripheral/,
+      last.call(KINDS.sub("#{derived}\n", ''), '</registers>', "#{derived}</registers>") => /first element/,
+      KINDS.sub('<addressOffset>0</addressOffset></cluster>', '<addressOffset>8</addressOffset></cluster>') => /no leading cluster/,
+      KINDS.sub('</addressOffset></cluster>', '</addressOffset><register/></cluster>') => /unsupported SVD element/,
+      KINDS.sub(%r{</cluster>(\s*</registers>)}) { "</cluster>#{extra}#{Regexp.last_match(1)}" } => /whole table/,
+      copy_only => /outside its aligned block/,
+      KINDS.sub(select, '<size>8</size><addressOffset>0x4</addressOffset>') => /overlap/,
+      KINDS.sub('<size>16</size><addressOffset>0x12</addressOffset>', '<size>16</size><addressOffset>0x13</addressOffset>') => /aligned block/,
+      KINDS.sub(select, '<size>24</size><addressOffset>0x10</addressOffset>') => /8, 16, 32 or 64/,
+      KINDS.sub('<bitWidth>8</bitWidth>', '<bitWidth>9</bitWidth>') => /exceeds its width/
+    }.each_with_index do |(bytes, reason), index|
       refute_equal KINDS, bytes, "case #{index} changed nothing"
-      assert_raises(Erx::Error, "case #{index}") { Erx::Hardware.parse_peripherals(bytes) }
+      error = assert_raises(Erx::Error, "case #{index}") { Erx::Hardware.parse_peripherals(bytes) }
+      assert_match reason, error.message, "case #{index}"
     end
   end
 

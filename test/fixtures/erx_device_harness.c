@@ -577,6 +577,49 @@ check_open(const char *name, uint64_t block_bytes)
 
 #ifndef ERX_DEVICE_FIXTURE
 /*
+ * Each virtio kind's table begins with virtio_mmio's registers, the same at the same
+ * indices, so the NIF's owned indices name the same register in every kind, and the
+ * kind's own configuration fields follow at their declared widths and access.
+ */
+static void
+check_virtio_kinds(void)
+{
+	static const char *const kinds[] = { "virtio_blk", "virtio_net", "virtio_input" };
+	const erx_device_peripheral_t *const virtio = erx_device_peripheral_find("virtio_mmio", 11);
+
+	CHECK(virtio != NULL && erx_device_peripheral_is(virtio, "virtio_mmio"));
+	CHECK(!erx_device_peripheral_is(erx_device_peripheral_find("pl011", 5), "virtio_mmio"));
+	CHECK(!erx_device_peripheral_is(NULL, "virtio_mmio"));
+	check_every_entry(virtio);
+	for (size_t at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
+		const erx_device_peripheral_t *const kind = erx_device_peripheral_find(kinds[at], strlen(kinds[at]));
+
+		CHECK(kind != NULL && erx_device_peripheral_is(kind, "virtio_mmio") && !erx_device_peripheral_is(kind, "pl011"));
+		CHECK(kind->register_count > virtio->register_count && kind->window_size == virtio->window_size);
+		check_every_entry(kind);
+		for (uint32_t index = 0; index < virtio->register_count; index++) {
+			const erx_device_register_t *const own = &kind->registers[index], *const base = &virtio->registers[index];
+
+			CHECK(strcmp(own->name, base->name) == 0 && own->offset == base->offset && own->width == base->width &&
+			    own->access == base->access && own->owned_by_nif == base->owned_by_nif);
+		}
+		CHECK(erx_device_register_named(kind, "status") == erx_device_register_named(virtio, "status"));
+	}
+
+	/* The input kind's select and subsel are one read-write byte each; size and the axis bounds are read-only. */
+	const erx_device_peripheral_t *const input = erx_device_peripheral_find("virtio_input", 12);
+	const erx_device_register_t *const select = register_of(input, "select"), *const size = register_of(input, "size");
+	const erx_device_register_t *const subsel = register_of(input, "subsel"), *const abs_min = register_of(input, "abs_min");
+
+	CHECK(select->offset == 0x100 && select->width == 8 && erx_device_write_allowed(select, 0x12));
+	CHECK(!erx_device_write_allowed(select, 0x100));
+	CHECK(subsel->offset == 0x101 && subsel->width == 8 && erx_device_write_allowed(subsel, 1));
+	CHECK(size->offset == 0x102 && size->width == 8 && !erx_device_write_allowed(size, 0));
+	CHECK(abs_min->offset == 0x108 && abs_min->width == 32 && !erx_device_write_allowed(abs_min, 0));
+	CHECK(register_of(input, "status")->owned_by_nif && !erx_device_write_allowed(register_of(input, "status"), 0));
+}
+
+/*
  * RSR is read-write in the table, and any write to it clears all four errors, so no
  * field of it is written alone. The window holds a non-zero word that must survive.
  */
@@ -747,6 +790,9 @@ main(void)
 	CHECK(erx_device_peripheral_find("no_such_peripheral", 18) == NULL);
 	check_keys();
 	check_window_pages();
+#ifndef ERX_DEVICE_FIXTURE
+	check_virtio_kinds();
+#endif
 	check_every_entry(peripheral);
 	device = check_open(name, block_bytes);
 	check_peripheral(peripheral, erx_device_get(device));

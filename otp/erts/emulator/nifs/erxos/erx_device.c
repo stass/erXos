@@ -464,9 +464,9 @@ load(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offs
 	}
 }
 
-/* The one store to a register; a hosted stand-in's device then acts on it, as a device would. */
+/* One volatile store of the register's declared width at `offset` of its window. */
 static void
-store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset, uint64_t value)
+store_width(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset, uint64_t value)
 {
 	volatile uint8_t *const window = device->windows[reg->window];
 
@@ -484,6 +484,13 @@ store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t off
 		erx_device_access_store32(window, offset, (uint32_t)value);
 		break;
 	}
+}
+
+/* The one store to a register; a hosted stand-in's device then acts on it, as a device would. */
+static void
+store(const erx_device_t *device, const erx_device_register_t *reg, uint64_t offset, uint64_t value)
+{
+	store_width(device, reg, offset, value);
 #ifdef ERX_DEVICE_STAND_IN
 	if (device->form == ERX_DEVICE_FORM_STAND_IN)
 		stand_in_stored(device, reg, offset, value);
@@ -507,7 +514,7 @@ stand_in_virtio(const erx_device_t *device)
 }
 
 /*
- * A register's word of the stand-in's memory, set as its device would set it: straight to the
+ * A register of the stand-in's memory, set at its width as its device would set it: straight to the
  * memory, not through store(), so the model never acts on its own stores. A name the table
  * does not have sets nothing.
  */
@@ -518,8 +525,7 @@ stand_in_set(const erx_device_t *device, const char *name, uint32_t value)
 	const uint32_t found = erx_device_register_named(peripheral, name);
 
 	if (found < peripheral->register_count)
-		erx_device_access_store32(device->windows[peripheral->registers[found].window],
-		    peripheral->registers[found].offset, value);
+		store_width(device, &peripheral->registers[found], peripheral->registers[found].offset, value);
 }
 
 static bool

@@ -180,41 +180,59 @@ module Erx
       size = number(text(block, 'size'), maximum: 1024 * 1024)
       registers = child(peripheral, 'registers')
       known_elements(registers, allowed: %w[register cluster])
-      derived_from, leading, list = peripheral_registers(registers.children, default_width: default_width, block_size: size,
-                                                                   earlier: earlier)
+      parsed = peripheral_registers(registers.children, default_width: default_width, block_size: size, earlier: earlier)
+      list = parsed.list
       raise Error, 'SVD requires 1..4096 registers' unless list.size.between?(1, 4096)
       names = list.map { |register| register.name.downcase }
       raise Error, 'SVD register names collide' unless names.uniq == names
-      element_ranges(list).each_cons(2) do |left, right|
+      ranges = element_ranges(list)
+      ranges.each_cons(2) do |left, right|
         raise Error, 'SVD register ranges overlap' if left.end > right.begin
       end
+      # Every register, a copied one included, lies inside this peripheral's own block.
+      raise Error, 'SVD register is outside its aligned block' if ranges.map(&:end).max > size
+
       Device.new(name: identifier(text(peripheral, 'name')), size: size, registers: list.freeze,
-                 derived_from: derived_from, leading: leading).freeze.then do |device|
+                 derived_from: parsed.derived_from, leading: parsed.leading).freeze.then do |device|
         validate_symbols(device)
         device
       end
     end
 
-    # A peripheral's registers in order, a cluster's flattened in its place with their own
-    # names; the peripheral its first cluster derives from, or nil; and its own first cluster
-    # when that is not derived, which a later peripheral may derive from.
+    # What a peripheral's register list holds: its registers in order, a cluster's flattened in
+    # its place under their own names; the peripheral whose cluster it copies, or nil; and its
+    # own leading cluster, which a later peripheral may copy, or nil.
+    Registers = Data.define(:list, :derived_from, :leading)
+
+    # Only the first element may be a derived cluster or the leading cluster a later
+    # peripheral copies; the rest are registers and plain clusters.
     def peripheral_registers(nodes, default_width:, block_size:, earlier:)
-      derived_from = leading = nil
-      list = nodes.each_with_index.flat_map do |node, index|
-        next [parse_register(node, default_width: default_width, block_size: block_size)] if node.name == 'register'
+      raise Error, 'SVD requires 1..4096 registers' if nodes.empty?
 
-        if node.attributes.key?('derivedFrom')
-          raise Error, 'an SVD derived cluster must be its peripheral\'s first element' unless index.zero?
+      head, *rest = nodes
+      shape = { default_width: default_width, block_size: block_size }
+      tail = rest.flat_map do |node|
+        raise Error, "an SVD derived cluster must be its peripheral's first element" if node.attributes.key?('derivedFrom')
 
-          derived_from, copied = derived_cluster(node, earlier: earlier)
-          next copied
-        end
-        cluster_registers(node, default_width: default_width, block_size: block_size).tap do |members|
-          leading = Leading.new(name: text(node, 'name'), offset: number(text(node, 'addressOffset')),
-                                count: members.size) if index.zero?
-        end
+        element_registers(node, **shape)
       end
-      [derived_from, leading, list]
+      case head
+      in { name: 'cluster', attributes: } if attributes.key?('derivedFrom')
+        source, copied = derived_cluster(head, earlier: earlier)
+        Registers.new(list: copied + tail, derived_from: source, leading: nil)
+      in { name: 'cluster' }
+        members = cluster_registers(head, **shape)
+        leading = Leading.new(name: text(head, 'name'), offset: number(text(head, 'addressOffset')), count: members.size)
+        Registers.new(list: members + tail, derived_from: nil, leading: leading)
+      else
+        Registers.new(list: element_registers(head, **shape) + tail, derived_from: nil, leading: nil)
+      end
+    end
+
+    def element_registers(node, default_width:, block_size:)
+      return cluster_registers(node, default_width: default_width, block_size: block_size) if node.name == 'cluster'
+
+      [parse_register(node, default_width: default_width, block_size: block_size)]
     end
 
     # A cluster of the profile: one level, no array, its registers at offsets from its own.
@@ -232,9 +250,10 @@ module Erx
     # derivation copies a section, and adds nothing: elements a derived section restates
     # override what it inherits, and the specification defines no merge of a register list
     # (svd-spec v1.3.9, doxygen/src/svd_schema.txt, cluster and peripheral derivedFrom). The
-    # cluster it names leads an earlier peripheral of the file and derives from none, and
-    # the copy is the first element of its own peripheral at the same offset, so the copied
-    # registers keep their indices in both tables, which the device NIF relies on.
+    # cluster it names leads an earlier peripheral of the file, derives from none and is that
+    # peripheral's whole register list, and the copy is the first element of its own
+    # peripheral at the same offset, so every register of the source keeps its index in the
+    # copy's table, which the device NIF relies on for the registers it owns.
     def derived_cluster(node, earlier:)
       known_elements(node, allowed: %w[name description addressOffset])
       identifier(text(node, 'name'))
@@ -247,6 +266,8 @@ module Erx
       unless leading&.name == path.last && leading.offset == number(text(node, 'addressOffset'))
         raise Error, 'SVD derived cluster names no leading cluster at its offset'
       end
+      raise Error, "SVD derived cluster is not its source peripheral's whole table" unless leading.count == source.registers.size
+
       [source.name, source.registers.first(leading.count)]
     end
 
