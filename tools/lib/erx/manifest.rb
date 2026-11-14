@@ -509,6 +509,9 @@ module Erx
       # it takes must carry.
       FRAMEBUFFER_PATH = '/chosen'
       FRAMEBUFFER_COMPATIBLE = 'simple-framebuffer'
+      # A device-tree node path as erx_boot_node_path_valid (include/erx/core/boot_handoff.h)
+      # has it: '/' and the characters the specification allows in names.
+      NODE_PATH = %r{\A/[A-Za-z0-9,._+@/-]*\z}
 
       def initialize(source, codec:, context:, planner:, consumers:)
         @source = source
@@ -939,8 +942,17 @@ module Erx
         missing = fields.reject { |field| device[field].is_a?(Integer) }
         invalid("device-tree device lacks #{missing.join(', ')}", 'context', 'platform.devices') unless missing.empty?
         invalid('device-tree device has an empty window', 'context', 'platform.devices') if device.fetch('size').zero?
+        unless device_path?(device['path'])
+          invalid("device-tree device's path is not a node path of at most #{@codec.constant('device_path_max')} bytes",
+                  'context', 'platform.devices')
+        end
         device.slice(*fields)
       end
+
+      # A device-tree row's path, which its device record carries as PATH, the device's name
+      # to its driver (docs/design-stopgap.md, "Device records"): a node path of at most the
+      # ABI's device_path_max bytes, as erx_boot_device_path_valid admits it.
+      def device_path?(path) = path.is_a?(String) && path.match?(NODE_PATH) && path.bytesize <= @codec.constant('device_path_max')
 
       # The frequency in hertz of the clock a device's driver divides rates from, the first
       # entry of its device-tree node's `clocks` (docs/design-abi.md, "Devices and partition

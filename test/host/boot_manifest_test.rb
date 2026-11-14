@@ -120,8 +120,20 @@ class BootManifestTest < Minitest::Test
     assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
     assert_includes output, "devices 1\n"
     assert_includes output, "device hostlink pl011 151257088 4096 40 direct 0 24000000 " \
-                            "words-erx device hostlink pl011 151257088 4096 40 direct 24000000 exact 1 short 0\n"
+                            "words-erx device hostlink pl011 /pl011@9040000 151257088 4096 40 direct 24000000 exact 1 short 0\n"
     refute_match(/^device (?:block|net) /, output)
+  end
+
+  # A record's PATH is its device's device-tree path, which reaches its driver and may be
+  # printed, so the root refuses a manifest whose recorded device has a path that is not a
+  # node path: the manifest check admits none, and these bytes are the admitted ones with the
+  # host link's path given a byte no node name holds.
+  def test_a_recorded_device_s_path_must_be_a_node_path
+    bytes = admitted
+    refute_empty bytes.scan('/pl011@9040000')
+    output, status = read(bytes.gsub('/pl011@9040000', "/pl011@9040#00"))
+    assert_equal 1, status.exitstatus, output
+    assert_equal "refused device_path\n", output
   end
 
   # With the net unit held by the system domain, its record follows the host link's. Net is
@@ -137,7 +149,7 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "devices 2\n"
     assert_includes output, "device net virtio_mmio 167783936 512 71 direct 262144 0 window 167780352 4096 3584 " \
-                            "words-erx given net virtio_mmio 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
+                            "words-erx given net virtio_mmio /virtio_mmio@a002e00 11 3584 512 12 direct 13 262144 0 0 0 exact 1 short 0\n"
   end
 
   # A given device's window object covers whole pages from the one that holds its first
@@ -147,7 +159,7 @@ class BootManifestTest < Minitest::Test
   # names no memory object, whatever handle the root holds.
   def test_a_given_device_s_window_covers_the_pages_of_its_registers
     given = lambda do |window, offset, size|
-      "window #{window} #{offset} words-erx given block virtio_mmio 11 #{offset} #{size} 12 direct 0 0 0 0 0 exact 1 short 0\n"
+      "window #{window} #{offset} words-erx given block virtio_mmio /virtio_mmio@a003e00 11 #{offset} #{size} 12 direct 0 0 0 0 0 exact 1 short 0\n"
     end
     {
       %w[0xa003e00 0x200] => given.call('167784448 4096', 3584, 512),
@@ -293,13 +305,13 @@ class BootManifestTest < Minitest::Test
   def test_the_device_step_gives_memory_only_inside_the_tree_s_range
     all = 0xffff_ffff_ffff_ffff
     window = 'window 167784448 4096 3584 words-erx given'
-    assert_equal "asks 1 before none after none #{window} net virtio_mmio 11 3584 512 12 direct 13 65536 0 1 0 " \
+    assert_equal "asks 1 before none after none #{window} net virtio_mmio /virtio_mmio@a003e00 11 3584 512 12 direct 13 65536 0 1 0 " \
                  "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 1 range 0x0 0x0 " \
                  "0xffffffffffffffff mac absent\n",
                  dma('net', 0x10000, 0, 1, 0, 0, all, 0, 0x4800_0000, 0x10000)
     # The Pi model's EMMC2, whose first GiB of CPU addresses it sees from bus address
     # 0xc0000000: memory at CPU 0x10000000 has device address 0xd0000000 and is inside.
-    assert_equal "asks 1 before none after none #{window} block virtio_mmio 11 3584 512 12 direct 13 65536 0 0 0 " \
+    assert_equal "asks 1 before none after none #{window} block virtio_mmio /virtio_mmio@a003e00 11 3584 512 12 direct 13 65536 0 0 0 " \
                  "exact 1 short 0\nline erx: device tree: /virtio_mmio@a003e00: coherent 0 range 0x0 0xc0000000 " \
                  "0x3fffffff\n",
                  dma('block', 0x10000, 0, 0, 0, 0xc000_0000, 0x3fff_ffff, 0, 0xd000_0000, 0x10000)
@@ -368,13 +380,13 @@ class BootManifestTest < Minitest::Test
     assert status.success?, output
     assert_includes output, "console_uart 150994944 4096 33 direct 24000000\n"
     assert_includes output, "console_words-erx console_uart 150994944 4096 33 direct 24000000 exact 1 short 0\n"
-    assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx device hostlink pl011 \d+ \d+ 40 direct \d+ exact 1/, output)
+    assert_match(/^device hostlink pl011 \d+ \d+ 40 direct .*words-erx device hostlink pl011 \/pl011@9040000 \d+ \d+ 40 direct \d+ exact 1/, output)
     pi = File.binread(File.join(ROOT, 'config/manifest/raspi4b-development.txt'))
     output, status = read(admitted(pi, platform: 'raspi4b'), stdout_path: '/soc/serial@7e215040')
     assert status.success?, output
     assert_match(/^console_uart #{0xfe215040} 64 125 shared \d+\n/, output)
     assert_match(/^console_words-erx console_uart #{0xfe215040} 64 125 shared \d+ exact 1 short 0\n/, output)
-    assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \d+ \d+ 153 shared \d+ exact 1/,
+    assert_match(/^device hostlink pl011 \d+ \d+ 153 shared .*words-erx device hostlink pl011 \/\S+ \d+ \d+ 153 shared \d+ exact 1/,
                  output)
   end
 

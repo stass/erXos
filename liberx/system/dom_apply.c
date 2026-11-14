@@ -482,7 +482,7 @@ apply_line_installed(const apply_t *apply, uint32_t at)
  * catalogue entry, COHERENT and, for a network row, MAC, or for a
  * framebuffer row its -erx framebuffer record (erx_boot_framebuffer_words)
  * over the window it installed; and its length, or 0 when the words do not
- * fit, which the view's names rule out. A device of no kind has no role
+ * fit, which the view's names and paths rule out. A device of no kind has no role
  * word to write, so apply_given_words answers 0 for one; apply_args asks
  * only of a driven entry (erx_dom_entry_driven), so never for one.
  */
@@ -497,7 +497,8 @@ apply_given_words(apply_t *apply, uint32_t at)
 	    installed[ERX_DOM_OBJ_DEV_MEMORY] : installed[ERX_DOM_OBJ_DEV_KEPT];
 	const bool memory = entry->memory != 0 && apply_memory_inside(apply, at);
 	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
-	    .window = installed[ERX_DOM_OBJ_DEV_WINDOW], .offset = entry->offset, .size = entry->size,
+	    .path = { entry->path, entry->path_len }, .window = installed[ERX_DOM_OBJ_DEV_WINDOW],
+	    .offset = entry->offset, .size = entry->size,
 	    .line = apply_line_installed(apply, at), .line_shared = give->lines[0].shared,
 	    .memory = memory ? held : ERX_CAP_NULL, .memory_size = memory ? entry->memory : 0, .clock = entry->clock,
 	    .coherent = erx_boot_coherent(facts, entry->memory),

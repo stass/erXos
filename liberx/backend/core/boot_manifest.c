@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "erx/abi.h"
 #include "erx/abi_reader.h"
 #include "erx/core/boot_handoff.h"
 #include "erx/core/boot_pair.h"
@@ -191,6 +192,9 @@ devices_read(const erx_manifest_view_t *view, bool hostlink, erx_boot_manifest_t
 				.path = { (const char *)string_at(view, &device.path), device.path.length },
 				.index = index,
 			};
+			/* Its path is its record's PATH, so the record is never refused for it. */
+			if (!erx_boot_device_path_valid(result->devices[result->device_count - 1].path))
+				return ("device_path");
 		}
 	}
 	return (NULL);
@@ -323,6 +327,28 @@ number_put(char *words, size_t capacity, size_t *used, uint64_t value)
 	return (word_put(words, capacity, used, decimal_digits(digits, value)));
 }
 
+bool
+erx_boot_device_path_valid(erx_boot_words_t path)
+{
+	return (path.length != 0 && path.length <= ERX_DEVICE_PATH_MAX &&
+	    erx_boot_node_path_valid((const uint8_t *)path.bytes, path.length));
+}
+
+/*
+ * A device's path and its NUL as one word, as word_put writes text, or false, writing
+ * nothing, for a path erx_boot_device_path_valid refuses or one that does not fit.
+ */
+static bool
+path_put(char *words, size_t capacity, size_t *used, erx_boot_words_t path)
+{
+	if (!erx_boot_device_path_valid(path) || path.length >= capacity - *used)
+		return (false);
+	for (size_t at = 0; at < path.length; at++)
+		words[(*used)++] = path.bytes[at];
+	words[(*used)++] = '\0';
+	return (true);
+}
+
 /*
  * The word a record writes after its line (docs/design-shared-devices.md, "Lines inside a
  * domain"): shared when another device of the line's unit names it too, direct otherwise.
@@ -356,7 +382,8 @@ erx_boot_device_words(const erx_boot_device_t *device, char *words, size_t capac
 	size_t used = 0;
 
 	if (!device->framebuffer && word_put(words, capacity, &used, "-erx") &&
-	    word_put(words, capacity, &used, "device") && word_put(words, capacity, &used, device->role) && word_put(words, capacity, &used, device->peripheral) &&
+	    word_put(words, capacity, &used, "device") && word_put(words, capacity, &used, device->role) &&
+	    word_put(words, capacity, &used, device->peripheral) && path_put(words, capacity, &used, device->path) &&
 	    number_put(words, capacity, &used, device->base) && number_put(words, capacity, &used, device->size) &&
 	    number_put(words, capacity, &used, device->line) &&
 	    word_put(words, capacity, &used, line_mark(device->line_shared)) &&
@@ -409,7 +436,8 @@ erx_boot_device_given(const erx_boot_device_t *device, const erx_boot_window_t *
 {
 	const bool memory = device->dma_memory != 0 && memory_handle != ERX_CAP_NULL;
 
-	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .window = window_handle,
+	return ((erx_boot_given_t){ .role = device->role, .peripheral = device->peripheral, .path = device->path,
+	    .window = window_handle,
 	    .offset = window->offset, .size = device->size, .line = line_handle, .line_shared = device->line_shared,
 	    .memory = memory ? memory_handle : ERX_CAP_NULL, .memory_size = memory ? device->dma_memory : 0,
 	    .clock = device->clock, .coherent = erx_boot_coherent(facts, device->dma_memory),
@@ -519,7 +547,8 @@ erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity
 
 	if (word_put(words, capacity, &used, "-erx") && word_put(words, capacity, &used, "given") &&
 	    word_put(words, capacity, &used, given->role) && word_put(words, capacity, &used, given->peripheral) &&
-	    number_put(words, capacity, &used, given->window) && number_put(words, capacity, &used, given->offset) &&
+	    path_put(words, capacity, &used, given->path) && number_put(words, capacity, &used, given->window) &&
+	    number_put(words, capacity, &used, given->offset) &&
 	    number_put(words, capacity, &used, given->size) && number_put(words, capacity, &used, given->line) &&
 	    word_put(words, capacity, &used, line_mark(given->line_shared)) &&
 	    number_put(words, capacity, &used, given->memory) && number_put(words, capacity, &used, given->memory_size) &&

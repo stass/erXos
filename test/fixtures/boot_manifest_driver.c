@@ -74,7 +74,8 @@ main(int argc, char **argv)
 
 	if (argc == 4 && strcmp(argv[1], "window") == 0) {
 		const erx_boot_device_t device = { .role = "block", .peripheral = "virtio_mmio", .given = true,
-		    .base = strtoull(argv[2], NULL, 0), .size = strtoull(argv[3], NULL, 0) };
+		    .base = strtoull(argv[2], NULL, 0), .size = strtoull(argv[3], NULL, 0),
+		    .path = { "/virtio_mmio@a003e00", 20 } };
 
 		given_print(&device, NULL, MEMORY_HANDLE);
 		return (0);

@@ -1188,7 +1188,7 @@ one form the policy and a window see.
                 | {wheel, Steps :: -128..127}
                 | release.
 
--type input() :: #{device := binary(),        % the device's name in the device table
+-type input() :: #{device := binary(),        % the device's name, its record's PATH
                    at := integer(),           % milliseconds, the runtime's monotonic clock
                    event := {pointer, X :: coord(), Y :: coord(), Buttons :: 0..255}
                           | {touch, Slot :: 0..9, down | move | up, X :: coord(), Y :: coord()}
@@ -1956,7 +1956,9 @@ times and chord:
 * the **screen**, the last rectangle `erx_winfs` was given, or none
   before the first, and the **pointer**, one position for the display,
   none while there is no screen;
-* for each source, its device's name and what it holds: each key with
+* for each source, its device's name, the device-tree path its
+  device record carries
+  ([design-stopgap.md](design-stopgap.md#device-records)), and what it holds: each key with
   the runes and the modifiers of its down and the window its down went
   to, or none; each button; each touch slot;
 * the **gesture**, while any source holds a button or a touch: its

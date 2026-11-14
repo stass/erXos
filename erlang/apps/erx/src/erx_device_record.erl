@@ -5,13 +5,13 @@
 %% "Device records"), one per device the domain drives, in one of two forms, each with its
 %% own word so neither is told from the other by counting:
 %%
-%% - `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`,
+%% - `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`,
 %%   a given device: the handles of the window, line and memory objects the domain library
 %%   installed when it created the domain, or the root made for itself at boot for a device
 %%   the system domain holds, the transport's offset and size in the window object, the
 %%   memory's bytes, 0 for a device that does no DMA, and the firmware tree's coherence mark
 %%   and hardware address;
-%% - `-erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK`, the system domain's physical record
+%% - `-erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, the system domain's physical record
 %%   of its host link's UART, which does no DMA, built by liberx/backend/core/boot_manifest.c
 %%   from the system manifest.
 %%
@@ -21,6 +21,13 @@
 %% framebuffer's offset in them and its bytes, its geometry and its format's name, all from
 %% the firmware's device tree. The root writes it only for a framebuffer the tree placed in
 %% its row's window, so a domain whose firmware set none up finds `{ok, []}`.
+%%
+%% In both device forms PATH is the device's device-tree path from its manifest row, its name
+%% (docs/design-system.md, "Devices"): a node path of the characters a device tree allows in
+%% names, `/` first, of at most ERX_DEVICE_PATH_MAX bytes, as the writer
+%% (erx_boot_device_path_valid) has it; any other word refuses the record, so a name a driver
+%% shows holds no control or escape, and it reaches a display only through that sink's
+%% escaping function.
 %%
 %% In both device forms CLOCK is the device's clock in hertz from its manifest row, 0 for a device
 %% whose driver reads none, so a driver reads its clock the same way whichever form it gets.
@@ -36,17 +43,19 @@
 
 -module(erx_device_record).
 
+-include("generated/erx_abi.hrl").
+
 -export([find/2, find/3, framebuffers/0, framebuffers/1]).
 -export_type([spec/0, framebuffer/0, format/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
 %% line, each with its clock for its driver.
--type spec() :: #{peripheral := atom(),
+-type spec() :: #{peripheral := atom(), path := binary(),
                   window := {object, non_neg_integer(), non_neg_integer(), non_neg_integer()},
                   lines := [{object, non_neg_integer()} | {shared, {object, non_neg_integer()}}],
                   memory => {object, non_neg_integer(), pos_integer()}, clock := non_neg_integer(),
                   coherent := boolean(), mac => 1..16#ffffffffffff}
-              | #{peripheral := atom(), window := {physical, non_neg_integer(), non_neg_integer()},
+              | #{peripheral := atom(), path := binary(), window := {physical, non_neg_integer(), non_neg_integer()},
                   lines := [non_neg_integer() | {shared, non_neg_integer()}], clock := non_neg_integer()}.
 
 %% A framebuffer record as its display driver takes it: the window object and the
@@ -135,35 +144,56 @@ format(_Word) -> error.
 
 %% COHERENT is the firmware tree's coherence mark, 0 or 1, and MAC its hardware address,
 %% 48 bits, 0 for none (docs/design-device-tree.md, "Facts into records").
-spec(Peripheral, {"given", [Window, Offset, Size, Line, Mark, Memory, MemorySize, Clock, Coherent, Mac | _]}) ->
+spec(Peripheral, {"given", [Path, Window, Offset, Size, Line, Mark, Memory, MemorySize, Clock, Coherent, Mac | _]}) ->
     case {numbers([Window, Offset, Size, Line, Memory, MemorySize]), number(Clock, 32), mark(Mark),
-          coherent(Coherent), number(Mac, 48)} of
-        {{ok, [W, O, S, L, M, MS]}, {ok, C}, {ok, Sharing}, {ok, Co}, {ok, A}} ->
-            Spec = #{peripheral => Peripheral, window => {object, W, O, S},
+          coherent(Coherent), number(Mac, 48), path(Path)} of
+        {{ok, [W, O, S, L, M, MS]}, {ok, C}, {ok, Sharing}, {ok, Co}, {ok, A}, {ok, P}} ->
+            Spec = #{peripheral => Peripheral, path => P, window => {object, W, O, S},
                      lines => [marked(Sharing, {object, L})], clock => C, coherent => Co},
             {ok, with_mac(with_memory(Spec, M, MS), A)};
-        {{ok, _}, {ok, _}, error, _, _} ->
+        {{ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, error} ->
+            bad("a given device record's path is not a node path of at most "
+                ++ integer_to_list(?ERX_DEVICE_PATH_MAX) ++ " bytes");
+        {{ok, _}, {ok, _}, error, _, _, _} ->
             bad("a given device record's line mark is neither direct nor shared");
-        {{ok, _}, {ok, _}, {ok, _}, error, _} ->
+        {{ok, _}, {ok, _}, {ok, _}, error, _, _} ->
             bad("a given device record's coherence is neither 0 nor 1");
         _ ->
             bad("a given device record's handle, offset, size, clock or address is not a decimal number "
                 "of its field's width")
     end;
 spec(_Peripheral, {"given", _}) ->
-    bad("a given device record has fewer than nine numbers and a line mark");
-spec(Peripheral, {"device", [Base, Size, Line, Mark, Clock | _]}) ->
-    case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark)} of
-        {{ok, B}, {ok, S}, {ok, L}, {ok, C}, {ok, Sharing}} ->
-            {ok, #{peripheral => Peripheral, window => {physical, B, S}, lines => [marked(Sharing, L)],
+    bad("a given device record has fewer than a path, nine numbers and a line mark");
+spec(Peripheral, {"device", [Path, Base, Size, Line, Mark, Clock | _]}) ->
+    case {number(Base, 64), number(Size, 64), number(Line, 32), number(Clock, 32), mark(Mark), path(Path)} of
+        {{ok, B}, {ok, S}, {ok, L}, {ok, C}, {ok, Sharing}, {ok, P}} ->
+            {ok, #{peripheral => Peripheral, path => P, window => {physical, B, S}, lines => [marked(Sharing, L)],
                    clock => C}};
-        {{ok, _}, {ok, _}, {ok, _}, {ok, _}, error} ->
+        {{ok, _}, {ok, _}, {ok, _}, {ok, _}, {ok, _}, error} ->
+            bad("a device record's path is not a node path of at most "
+                ++ integer_to_list(?ERX_DEVICE_PATH_MAX) ++ " bytes");
+        {{ok, _}, {ok, _}, {ok, _}, {ok, _}, error, _} ->
             bad("a device record's line mark is neither direct nor shared");
         _ ->
             bad("a device record's base, size, line or clock is not a decimal number of its field's width")
     end;
 spec(_Peripheral, {"device", _}) ->
-    bad("a device record has fewer than four numbers and a line mark").
+    bad("a device record has fewer than a path, four numbers and a line mark").
+
+%% A device record's PATH as erx_boot_device_path_valid admits it: `/` and the characters a
+%% device tree allows in names, at most ERX_DEVICE_PATH_MAX bytes, so with its NUL it fits
+%% the word the writer reserves. The length is checked before the characters, so no word
+%% longer than the bound is copied.
+path([$/ | _] = Word) when length(Word) =< ?ERX_DEVICE_PATH_MAX ->
+    case lists:all(fun node_char/1, Word) of
+        true -> {ok, list_to_binary(Word)};
+        false -> error
+    end;
+path(_Word) ->
+    error.
+
+node_char(C) when C >= $a, C =< $z; C >= $A, C =< $Z; C >= $0, C =< $9 -> true;
+node_char(C) -> lists:member(C, ",._+-@/").
 
 coherent("0") -> {ok, false};
 coherent("1") -> {ok, true};

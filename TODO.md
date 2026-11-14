@@ -1823,6 +1823,13 @@ it; git history is the record of completed work.
   asserts, and the 64-key bound of a map or union (`ERX_PROFILE_KEYS_MAX`) has no model rule, so a protocol
   past it fails as a C compile error rather than at its declaration. Give the bounds one source and add the
   keys rule to the model.
+* [Medium] ABI generator, the node-path character class (`abi/erx_abi.txt`, `device_path_max`): the characters a
+  device-tree node path may hold, `/` then `A-Za-z0-9,._+@/-`, are written four times, in
+  `erx_boot_node_path_valid` (`include/erx/core/boot_handoff.h`), `NODE_PATH` (`tools/lib/erx/manifest.rb`),
+  `alias_source` (`tools/lib/erx/board_tree.rb`) and `node_char/1` (`erlang/apps/erx/src/erx_device_record.erl`),
+  and the manifest grammar's `dt_path` class is a different rule (clean UTF-8, no empty or dot components). The
+  bound has one source; the class does not. Declare the class in the ABI file, generate its C, Ruby and Erlang
+  predicates, and make the grammar's `dt_path` the same rule, so every reader of a device's path checks one rule.
 * [Low] tests, `test/fixtures/prog_profile_mutations.rb`: the rule helpers pass `[rule, value, reason]`
   triples and `places` passes `[kind, value, path]` triples; name them with `Data.define`.
 * [Low] ERTS start-up (`otp/erts/emulator/beam/erl_process.c`, the "hold executor slots" line): the scheduler

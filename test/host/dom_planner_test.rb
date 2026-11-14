@@ -565,6 +565,17 @@ class DomPlannerTest < Minitest::Test
                                       "\\0unit framebuffer\n  placement \"framebuffer\"\n  holder @domain.alpha\n")
   end
 
+  # A driven device's path is the PATH of the record its holder's creation writes, so the
+  # view refuses one that is not a node path the record holds, and no creation fails for
+  # it. The manifest check admits no such path, so the bytes are the development
+  # manifest's with the block device's path given a byte no node name holds.
+  def test_a_driven_device_s_path_that_is_no_node_path_is_refused
+    bytes = development_manifest
+    refute_empty bytes.scan('/virtio_mmio@a003e00')
+    assert_equal ["refused manifest: a driven device's path is not a node path its record holds"],
+                 view_lines(bytes.gsub('/virtio_mmio@a003e00', "/virtio_mmio@a003#00"), 'device-path')
+  end
+
   # What /dev and the domain service read of the root's view of the development
   # manifest as it ships (test/fixtures/dom_view_driver.c): each device's unit name,
   # its kind's compatible string (none for the UARTs, which no runtime drives), its

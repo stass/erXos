@@ -5,6 +5,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/generated'
 
 # The fuzz target of erx_device_record:find/3 and framebuffers/1, the parses of the device and
 # framebuffer records that the boot information carries to init's arguments, compiled from source and run alone on stock's
@@ -29,7 +30,9 @@ module ErxDeviceRecordFuzz
     'reading a hardware address as 64 bits wide' => ['number(Mac, 48)', 'number(Mac, 64)'],
     'taking a stride short of a row' => ['R * 8 >= X * Bits', 'R * 8 + 8 >= X * Bits'],
     'taking rows past the bytes' => ['R * Y =< S', 'R * (Y - 1) =< S'],
-    'reading r8g8b8 as 16 bits a pixel' => ['{ok, r8g8b8, 24}', '{ok, r8g8b8, 16}']
+    'reading r8g8b8 as 16 bits a pixel' => ['{ok, r8g8b8, 24}', '{ok, r8g8b8, 16}'],
+    'taking a path a byte over the bound' => ['length(Word) =< ?ERX_DEVICE_PATH_MAX', 'length(Word) =< ?ERX_DEVICE_PATH_MAX + 1'],
+    'taking a space in a path' => ['lists:member(C, ",._+-@/")', 'lists:member(C, ",._+-@/ ")']
   }.freeze
   DEADLINE_SECONDS = '120'
 
@@ -53,7 +56,10 @@ module ErxDeviceRecordFuzz
     Dir.mktmpdir('erx-device-record-fuzz') do |work|
       module_path = File.join(work, 'erx_device_record.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
+      # The generated erx_abi.hrl both modules include, which build/gen holds once ensured.
+      Erx::Generated.ensure(root: ROOT)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', Erx::Generated.path('erlang/apps/erx/include', root: ROOT),
+                                       '-o', work, module_path, TARGET_SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

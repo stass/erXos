@@ -2251,7 +2251,9 @@ case_undo(uint32_t program)
 #define GIVEN_LINE	48u			/* transport 0's line, every device's */
 #define GIVEN_SIZE	UINT64_C(0x200)		/* one transport */
 #define GIVEN_MEMORY	(UINT64_C(16) * ERX_PAGE_SIZE)
-#define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0"
+/* Every given device's device-tree path, the PATH word of its record. */
+#define GIVEN_PATH	"/virtio_mmio@a000000"
+#define GIVEN_RECORD	"-erx\0given\0block\0virtio_mmio\0" GIVEN_PATH "\0"
 #define GIVEN_PAIR	"-erx\0boot\0normal\0a\0"
 #define GIVEN_NUMBERS	9u			/* WINDOW_H OFFSET SIZE LINE_H MEM_H MEM_SIZE CLOCK COHERENT MAC */
 #define GIVEN_MARK	"shared"		/* after LINE_H: every device of the unit names the line */
@@ -2282,7 +2284,8 @@ given_view(uint32_t program)
 	    .lane = ERX_LANE_MIN, .name = "holder", .name_len = 6, .kind = ERX_MF_SERVICE,
 	    .args = holder_args, .args_len = sizeof(holder_args) };
 	catalogue[GIVEN_KEPT] = (erx_dom_device_entry_t){ .unit = 0, .row = 0, .role = ERX_MF_DEVICE_ROLE_BLOCK,
-	    .role_word = "block", .peripheral = "virtio_mmio", .offset = 0, .size = GIVEN_SIZE,
+	    .role_word = "block", .peripheral = "virtio_mmio", .path = GIVEN_PATH,
+	    .path_len = sizeof(GIVEN_PATH) - 1, .offset = 0, .size = GIVEN_SIZE,
 	    .lines = { GIVEN_LINE }, .nranges = 1, .nlines = 1,
 	    .ranges = { { .base = GIVEN_PAGE_1, .size = ERX_PAGE_SIZE } }, .memory = GIVEN_MEMORY, .asked = true,
 	    .facts = { .dma = ERX_DT_DMA_OK, .cpu = 0, .bus = 0, .last = UINT64_MAX } };
@@ -2339,8 +2342,9 @@ given_decimal(const char **at, const char *end, uint64_t *value)
 
 /*
  * The -erx given record at *at, before end, into numbers, and *at past it.
- * False for a record whose numbers are not GIVEN_NUMBERS decimals with
- * GIVEN_MARK after LINE_H.
+ * False for a record that does not open with GIVEN_RECORD, its words to
+ * PATH, or whose numbers are not GIVEN_NUMBERS decimals with GIVEN_MARK
+ * after LINE_H.
  */
 static bool
 given_record(const char **at, const char *end, uint64_t *numbers)

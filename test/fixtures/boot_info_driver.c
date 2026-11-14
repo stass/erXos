@@ -348,24 +348,36 @@ test_header_corruption(void)
 /*
  * A holder domain's records (docs/design-stopgap.md, "Boot information"): -erx given per
  * device and -erx boot, as the domain library writes them, travel through a domain's page
- * and its vector unchanged; and the longest of each, names at 15 bytes and every number at
- * UINT64_MAX, takes exactly the room erx/boot_words.h states and the boot view reserves,
- * so a record never outgrows its reserve.
+ * and its vector unchanged; and the longest of each, names at 15 bytes, the path at
+ * ERX_DEVICE_PATH_MAX bytes and every number at UINT64_MAX, takes exactly the room
+ * erx/boot_words.h states and the boot view reserves, so a record never outgrows its
+ * reserve. A path one byte longer, an empty one, or one that is not a node path is refused.
  */
+#define PATH_WORDS(text)	((erx_boot_words_t){ (text), sizeof(text) - 1 })
+/* A node path of ERX_DEVICE_PATH_MAX bytes, and one of a byte more. */
+#define LONGEST_PATH		"/virtio_mmio@a003e00/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+#define LONG_PATH		LONGEST_PATH "a"
+_Static_assert(sizeof(LONGEST_PATH) == ERX_BOOT_PATH_WORD_MAX, "the longest path fills its word");
+
 static void
 test_holder_records(void)
 {
-	static const char record[] = "-erx\0given\0block\0virtio_mmio\0" "7\0" "3584\0" "512\0" "8\0" "direct\0" "9\0" "65536\0"
-	    "24000000\0" "1\0" "90520731923542\0" "-erx\0boot\0trial\0b\0";
-	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio", .window = 7, .offset = 3584,
+	static const char record[] = "-erx\0given\0block\0virtio_mmio\0/virtio_mmio@a003e00\0" "7\0" "3584\0" "512\0" "8\0"
+	    "direct\0" "9\0" "65536\0" "24000000\0" "1\0" "90520731923542\0" "-erx\0boot\0trial\0b\0";
+	const erx_boot_given_t given = { .role = "block", .peripheral = "virtio_mmio",
+	    .path = PATH_WORDS("/virtio_mmio@a003e00"), .window = 7, .offset = 3584,
 	    .size = 512, .line = 8, .memory = 9, .memory_size = 65536, .clock = 24000000,
 	    .coherent = true, .mac = 0x525400123456 };
-	const erx_boot_given_t longest = { .role = "ROLEROLEROLEROL", .peripheral = "PERIPHERALPERIP", .window = UINT64_MAX,
+	erx_boot_given_t longest = { .role = "ROLEROLEROLEROL", .peripheral = "PERIPHERALPERIP",
+	    .path = PATH_WORDS(LONGEST_PATH), .window = UINT64_MAX,
 	    .offset = UINT64_MAX, .size = UINT64_MAX, .line = UINT64_MAX, .line_shared = true, .memory = UINT64_MAX,
 	    .memory_size = UINT64_MAX, .clock = UINT64_MAX, .coherent = true, .mac = UINT64_MAX };
-	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0" "1\0" "0\0" "512\0" "2\0" "shared\0" "0\0" "0\0" "0\0" "0\0" "0\0";
-	const erx_boot_given_t shared_given = { .role = "net", .peripheral = "virtio_mmio", .window = 1, .size = 512,
-	    .line = 2, .line_shared = true };
+	static const char shared[] = "-erx\0given\0net\0virtio_mmio\0/virtio_mmio@a003c00\0" "1\0" "0\0" "512\0" "2\0"
+	    "shared\0" "0\0" "0\0" "0\0" "0\0" "0\0";
+	const erx_boot_given_t shared_given = { .role = "net", .peripheral = "virtio_mmio",
+	    .path = PATH_WORDS("/virtio_mmio@a003c00"), .window = 1, .size = 512, .line = 2, .line_shared = true };
+	const erx_boot_words_t refused[] = { PATH_WORDS(LONG_PATH), PATH_WORDS(""), PATH_WORDS("virtio_mmio@a003e00"),
+	    PATH_WORDS("/virtio_mmio@a003e00\033[2J"), PATH_WORDS("/virtio\0mmio"), { NULL, 0 } };
 	char words[ERX_BOOT_GIVEN_WORDS_MAX + ERX_BOOT_PAIR_WORDS_MAX];
 	erx_boot_inputs_t inputs = good_inputs();
 	erx_boot_words_t args[2];
@@ -396,6 +408,10 @@ test_holder_records(void)
 	used = erx_boot_given_words(&longest, words, sizeof(words));
 	CHECK(used == ERX_BOOT_GIVEN_WORDS_MAX, "holder: the longest given record is %zu bytes", used);
 	CHECK(erx_boot_given_words(&longest, words, used - 1) == 0, "holder: a given record past its room is written");
+	for (size_t at = 0; at < COUNT(refused); at++) {
+		longest.path = refused[at];
+		CHECK(erx_boot_given_words(&longest, words, sizeof(words)) == 0, "holder: refused path %zu is written", at);
+	}
 	used = erx_boot_given_words(&shared_given, words, sizeof(words));
 	CHECK(used == sizeof(shared) - 1 && memcmp(words, shared, used) == 0, "holder: a shared line's record");
 	used = erx_boot_pair_words(ERX_BOOT_VALUE_UNKNOWN, ERX_BOOT_SLOT_NONE, words, sizeof(words));

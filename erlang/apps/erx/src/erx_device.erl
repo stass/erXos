@@ -51,7 +51,7 @@
 -type line() :: {object, Irq :: non_neg_integer()} | non_neg_integer().
 %% A line another device of the unit names too, marked by the record's writer.
 -type marked_line() :: line() | {shared, line()}.
--type spec() :: #{peripheral := atom(), window := window(), lines := [marked_line()],
+-type spec() :: #{peripheral := atom(), path => binary(), window := window(), lines := [marked_line()],
                   memory => {object, Memory :: non_neg_integer(), Bytes :: pos_integer()},
                   clock => Hertz :: non_neg_integer(), coherent => boolean()}.
 -opaque queue() :: non_neg_integer().
@@ -75,9 +75,9 @@ init() ->
 %% `memory => {object, Memory, Bytes}` for a device that does DMA, whose queues are carved
 %% from that one memory, `{error, erange}` past its end) or a physical device's window and
 %% line selectors, a UART's, which has no queue (`{error, enotsup}` from queue_create/4).
-%% A record's `clock`, the device's clock in hertz, is for its driver: open/1 does
-%% not read it. `coherent => true` marks a device whose DMA is cache-coherent, as the device
-%% tree says; without it the device is taken as not coherent and has no region/3. Every device that does DMA is given, in the system domain too, whose root gives itself
+%% A record's `path`, the device's device-tree path that names it, and its `clock`, the
+%% device's clock in hertz, are for its driver: open/1 reads neither. `coherent => true`
+%% marks a device whose DMA is cache-coherent, as the device tree says; without it the device is taken as not coherent and has no region/3. Every device that does DMA is given, in the system domain too, whose root gives itself
 %% the devices it holds. A hosted runtime has no devices, so either form is an
 %% error there, and `stand_in` gives plain memory and software lines for tests; natively
 %% `stand_in` is `{error, enotsup}`.

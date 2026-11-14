@@ -7,34 +7,37 @@
 
 -module(erx_device_record_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(U64_MAX, "18446744073709551615").
 -define(U32_MAX, "4294967295").
+%% QEMU virt's block transport, the device every record below names.
+-define(PATH, "/virtio_mmio@a003e00").
 
 find(Arguments) ->
     erx_device_record:find(block, virtio_mmio, Arguments).
 
 spec(Base, Size, Line, Clock) ->
-    #{peripheral => virtio_mmio, window => {physical, Base, Size}, lines => [Line], clock => Clock}.
+    #{peripheral => virtio_mmio, path => <<?PATH>>, window => {physical, Base, Size}, lines => [Line], clock => Clock}.
 
 %% A physical record of Base, Size, Line and Clock, its line marked direct, as on QEMU virt.
 record([Base, Size, Line, Clock | Words]) ->
-    ["device", "block", "virtio_mmio", Base, Size, Line, "direct", Clock | Words];
+    ["device", "block", "virtio_mmio", ?PATH, Base, Size, Line, "direct", Clock | Words];
 record(Words) ->
-    ["device", "block", "virtio_mmio" | Words].
+    ["device", "block", "virtio_mmio", ?PATH | Words].
 
 %% The words the root writes for QEMU virt's host link UART, its one physical record.
 the_root_s_record_test() ->
-    ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 151257088, 4096}, lines => [40], clock => 24000000}]},
-                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "151257088", "4096", "40",
+    ?assertEqual({ok, [#{peripheral => pl011, path => <<"/pl011@9040000">>, window => {physical, 151257088, 4096}, lines => [40], clock => 24000000}]},
+                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "/pl011@9040000", "151257088", "4096", "40",
                                                            "direct", "24000000"]])).
 
 %% The Raspberry Pi 4's host link UART shares line 153 with the other PL011s, and its
 %% record says so; erx_device:open/1 takes the line marked.
 a_shared_line_is_marked_test() ->
-    ?assertEqual({ok, [#{peripheral => pl011, window => {physical, 4263515648, 512}, lines => [{shared, 153}],
+    ?assertEqual({ok, [#{peripheral => pl011, path => <<"/soc/serial@7e201600">>, window => {physical, 4263515648, 512}, lines => [{shared, 153}],
                          clock => 48000000}]},
-                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "4263515648", "512", "153",
+                 erx_device_record:find(hostlink, pl011, [["device", "hostlink", "pl011", "/soc/serial@7e201600", "4263515648", "512", "153",
                                                            "shared", "48000000"]])),
     ?assertEqual({ok, [(given_spec(12, 0, 512, 13, 0))#{lines => [{shared, {object, 13}}]}]},
                  find([given_marked(["12", "0", "512", "13", "shared", "0", "0", "0", "0", "0"])])).
@@ -43,7 +46,7 @@ a_shared_line_is_marked_test() ->
 %% it as one mark or the other.
 a_bad_mark_refuses_test() ->
     [?assertMatch({error, {bad_device_record, "a device record's line mark" ++ _}},
-                  find([["device", "block", "virtio_mmio", "1", "2", "3", Mark, "4"]]))
+                  find([["device", "block", "virtio_mmio", ?PATH, "1", "2", "3", Mark, "4"]]))
      || Mark <- bad_marks()],
     [?assertMatch({error, {bad_device_record, "a given device record's line mark" ++ _}},
                   find([given_marked(["1", "0", "2", "3", Mark, "0", "0", "0", "0", "0"])]))
@@ -92,10 +95,10 @@ given(Words) ->
     given_marked(Words).
 
 given_marked(Words) ->
-    ["given", "block", "virtio_mmio" | Words].
+    ["given", "block", "virtio_mmio", ?PATH | Words].
 
 given_spec(Window, Offset, Size, Line, Clock) ->
-    #{peripheral => virtio_mmio, window => {object, Window, Offset, Size}, lines => [{object, Line}],
+    #{peripheral => virtio_mmio, path => <<?PATH>>, window => {object, Window, Offset, Size}, lines => [{object, Line}],
       clock => Clock, coherent => false}.
 
 %% The words the domain library writes for a holder of QEMU virt's block transport: the
@@ -107,9 +110,9 @@ a_holder_s_record_test() ->
 
 %% A given PL011 carries its clock as the physical record does.
 a_given_uart_s_clock_test() ->
-    ?assertEqual({ok, [#{peripheral => pl011, window => {object, 12, 0, 4096}, lines => [{object, 13}],
+    ?assertEqual({ok, [#{peripheral => pl011, path => <<"/pl011@9040000">>, window => {object, 12, 0, 4096}, lines => [{object, 13}],
                          clock => 24000000, coherent => false}]},
-                 erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "12", "0", "4096", "13", "direct",
+                 erx_device_record:find(uart, pl011, [["given", "uart", "pl011", "/pl011@9040000", "12", "0", "4096", "13", "direct",
                                                        "0", "0", "24000000", "0", "0"]])).
 
 a_given_record_of_no_memory_has_no_memory_key_test() ->
@@ -196,3 +199,28 @@ a_malformed_framebuffer_record_refuses_test() ->
 
 setelement_list(At, List, Value) ->
     lists:sublist(List, At - 1) ++ [Value | lists:nthtail(At, List)].
+
+%% PATH is the device's device-tree path, its name: a node path of the characters a device
+%% tree allows in names of at most ERX_DEVICE_PATH_MAX bytes. The longest passes
+%% in either form; one a byte longer, an empty, a relative, or one holding an escape, a
+%% space or a byte outside ASCII refuses the record, so no name a driver shows carries a
+%% control.
+a_record_s_path_names_its_device_test() ->
+    Longest = "/virtio_mmio@a003e00/" ++ lists:duplicate(?ERX_DEVICE_PATH_MAX - 21, $a),
+    ?assertEqual(?ERX_DEVICE_PATH_MAX, length(Longest)),
+    ?assertEqual({ok, [(spec(1, 2, 3, 4))#{path => list_to_binary(Longest)}]},
+                 find([["device", "block", "virtio_mmio", Longest, "1", "2", "3", "direct", "4"]])),
+    ?assertEqual({ok, [(given_spec(1, 0, 2, 3, 0))#{path => list_to_binary(Longest)}]},
+                 find([["given", "block", "virtio_mmio", Longest, "1", "0", "2", "3", "direct", "0", "0", "0", "0",
+                        "0"]])),
+    [?assertMatch({error, {bad_device_record, "a device record's path" ++ _}},
+                  find([["device", "block", "virtio_mmio", Path, "1", "2", "3", "direct", "4"]]))
+     || Path <- bad_paths(Longest)],
+    [?assertMatch({error, {bad_device_record, "a given device record's path" ++ _}},
+                  find([["given", "block", "virtio_mmio", Path, "1", "0", "2", "3", "direct", "0", "0", "0", "0",
+                         "0"]]))
+     || Path <- bad_paths(Longest)].
+
+bad_paths(Longest) ->
+    [Longest ++ "a", "", "virtio_mmio@a003e00", "/virtio_mmio@a003e00\e[2J", "/virtio mmio", "/virtio_mmio\n",
+     [$/, 16#661], "/virtio_mmio@a003e00:0", [$/, 0]].

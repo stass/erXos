@@ -41,8 +41,9 @@ typedef struct erx_boot_console {
  * window, line and memory objects at boot, as a holder's creation makes them, and hands
  * their handles as -erx given (erx_boot_given_words), so a device that does DMA has one
  * form in every domain. The host link's UART, which does no DMA, is the one physical
- * record, -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK (erx_boot_device_words). role
- * and peripheral point at a row's names, and the numbers are the manifest's device entry.
+ * record, -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK (erx_boot_device_words).
+ * role and peripheral point at a row's names, PATH is the device's device-tree path, which
+ * names it to its driver, and the numbers are the manifest's device entry.
  * MARK, in every form, is shared when another device of the unit names the line and direct
  * otherwise (docs/design-shared-devices.md, "Lines inside a domain"), so no driver decides
  * whether its line is shared. A manifest whose units hold no such device has no record: a
@@ -116,10 +117,11 @@ bool	erx_boot_console_matches(const erx_boot_manifest_t *manifest, const char *s
 uint64_t	erx_boot_console_page(const erx_boot_manifest_t *manifest);
 
 /*
- * Writes a physical record's words, -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK with
- * the numbers in decimal and MARK direct or shared by line_shared, each word ended by NUL,
- * into words, and returns their whole length. Returns 0, having written nothing past
- * capacity, when they do not fit, or for a framebuffer row, which has no role or peripheral.
+ * Writes a physical record's words, -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK
+ * with the numbers in decimal and MARK direct or shared by line_shared, each word ended by
+ * NUL, into words, and returns their whole length. Returns 0, having written nothing past
+ * capacity, when they do not fit, for a path erx_boot_device_path_valid refuses, or for a
+ * framebuffer row, which has no role or peripheral.
  * Only a device that is not given has this record; a given one's is -erx given
  * (erx_boot_device_given), and a framebuffer's the framebuffer record
  * (erx_boot_framebuffer_words).
@@ -151,6 +153,7 @@ bool	erx_boot_device_window(const erx_boot_device_t *device, erx_boot_window_t *
 typedef struct erx_boot_given {
 	const char	*role;		/* erx/device_kinds.h's role word */
 	const char	*peripheral;	/* and its CMSIS-SVD peripheral */
+	erx_boot_words_t path;		/* its device-tree path, its name (erx_boot_device_path_valid) */
 	uint64_t	window;
 	uint64_t	offset;
 	uint64_t	size;
@@ -179,13 +182,24 @@ erx_boot_given_t	erx_boot_device_given(const erx_boot_device_t *device, const er
 	    const erx_dt_device_t *facts, uint64_t window_handle, uint64_t line_handle, uint64_t memory_handle);
 
 /*
- * Writes -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT
- * MAC, the numbers in decimal, COHERENT 1 or 0, MARK direct or shared by line_shared, and each word ended by NUL, into
- * words, and returns their whole length; 0, having written nothing past capacity, when they
- * do not fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes (erx/boot_words.h) always do for names
- * within ERX_BOOT_NAME_WORD_MAX.
+ * Writes -erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK
+ * COHERENT MAC, the numbers in decimal, COHERENT 1 or 0, MARK direct or shared by line_shared,
+ * and each word ended by NUL, into words, and returns their whole length; 0, having written
+ * nothing past capacity, for a path erx_boot_device_path_valid refuses or when they do not
+ * fit, which ERX_BOOT_GIVEN_WORDS_MAX bytes (erx/boot_words.h) always do for names within
+ * ERX_BOOT_NAME_WORD_MAX.
  */
 size_t	erx_boot_given_words(const erx_boot_given_t *given, char *words, size_t capacity);
+
+/*
+ * Whether path may be the PATH word of a device record: a device-tree node path
+ * (erx_boot_node_path_valid) that is not empty and is at most ERX_DEVICE_PATH_MAX bytes,
+ * the bound the manifest grammar holds devices[].path to (abi/manifest.txt), so its word
+ * with its NUL fits ERX_BOOT_PATH_WORD_MAX.
+ * The record writers write no other path, and the domain library's view admits no driven
+ * device with another, so no creation fails for its device's name.
+ */
+bool	erx_boot_device_path_valid(erx_boot_words_t path);
 
 /*
  * Whether the root asks the firmware's tree for a driven device row's facts

@@ -432,8 +432,9 @@ entry admits DMA memory, and 0 for a row that gets none, so no record calls
 a device coherent that has no range to use; and it
 gains a last number, `MAC`, the hardware address as a 48-bit decimal, 0
 when absent or when the row asks for none:
-`-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-CLOCK COHERENT MAC`. `erx_device_record:find/3` reads it, refusing a `MAC`
+`-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+MEM_SIZE CLOCK COHERENT MAC`, PATH the row's device-tree path
+([design-stopgap.md](design-stopgap.md#device-records)). `erx_device_record:find/3` reads it, refusing a `MAC`
 above `2^48 - 1`, and returns it as `mac => Address` for a nonzero value;
 the record sizes of `include/erx/boot_words.h` grow by its longest form.
 The device's contiguous object is made only when the entry's DMA range is

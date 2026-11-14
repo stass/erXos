@@ -2506,7 +2506,9 @@ of its register windows, IRQ objects and DMA window or contiguous memory,
 for each line whether another device of its unit names it too, which
 makes the line shared
 ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
-its peripheral's name in the CMSIS-SVD source, whether it is
+its peripheral's name in the CMSIS-SVD source, its device-tree path,
+the name its driver gives it and the NIF does not read
+([design-stopgap.md](design-stopgap.md#device-records)), whether it is
 coherent, and which descriptor forms of the ABI file it uses
 ([design-device-dma.md](design-device-dma.md#device-addresses-and-reach)).
 

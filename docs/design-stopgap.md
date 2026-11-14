@@ -325,12 +325,12 @@ function and maps it read-only.
 task's first thread as its argument. Its `flags` carry `ERX_BOOT_DET` when the system's page does. Its strings hold the
 domain's node name and the system node's, its `args` and `env`, and the words the library adds to its `args`, after
 the row's own: `-erx build ID` with the boot image's build identifier, as the root's own page carries it, so
-every domain names the same build; one record per device it was given that has one, `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+every domain names the same build; one record per device it was given that has one, `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
 MEM_SIZE CLOCK COHERENT MAC`, the same record the root writes into the system domain's page for each device of a kind it holds ([Device records](#device-records)), or, for a framebuffer the root placed, `-erx framebuffer WINDOW_H OFFSET SIZE WIDTH HEIGHT STRIDE FORMAT` ([design-device-tree.md](design-device-tree.md#facts-into-records)), and, when it holds a
 block device, `-erx boot VALUE SLOT` with the boot's pair, as the root's own page carries it ([Image
 windows](#image-windows)). A device of no kind has no record and no window, only the IRQ object of a line that a
 device of a kind in its unit also names, when it is first on that line
-([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
+([design-shared-devices.md](design-shared-devices.md#the-unit-rule)). PATH is the device-tree path of its manifest row, the name its driver gives it (`erx_device_record` returns it as `path`), a node path of at most `device_path_max` bytes (`abi/erx_abi.txt`), which the manifest grammar holds `devices[].path` to; the record writers, the root's reader and the domain library's view refuse any other path (`erx_boot_device_path_valid`), and `erx_device_record` any other PATH word, so a name a driver shows holds no control or escape, and reaches a display only through that sink's escaping function; WINDOW_H, LINE_H and MEM_H are the installed objects' values in the holder's own handle
 table, OFFSET and SIZE place the registers in the window page, MEM_H and MEM_SIZE are 0 for a device with no
 memory, CLOCK is the device's clock in hertz from its manifest row, 0 for a device whose driver reads none, and
 COHERENT is 1 when the device tree the firmware handed over marks the device coherent, else 0, and MAC is the
@@ -1590,17 +1590,18 @@ over each run of pages the unit's registers cover and one IRQ object with `erx_i
 distinct line its devices name, so the records of devices that share a page or a line name one handle
 ([design-shared-devices.md](design-shared-devices.md#the-unit-rule)), and, for a device with DMA memory, the
 device's one contiguous object of that size with `erx_mem_create_contiguous`, each in its own
-table, and adds the same `-erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-CLOCK COHERENT MAC` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
+table, and adds the same `-erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+MEM_SIZE CLOCK COHERENT MAC` record a holder's page carries, below (`liberx/backend/fiasco/runtime_entry.c`, `device_give`;
 `erx_boot_device_window` computes the pages and OFFSET). ROLE and PERIPHERAL are the row's names,
-PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as; the
+PERIPHERAL the peripheral's name in the CMSIS-SVD source that `erx_device` opens it as, PATH
+the device-tree path of the row, which names the device to its driver; the
 pages, SIZE, the line and MEM_SIZE come from the manifest's device entry: its register window,
 its interrupt line and the DMA memory the platform reserves for it. So a device that does DMA
 has one form in every domain: its queues are carved from its one memory, and the system domain's
 driver opens it exactly as a holder's does. Nothing deletes these objects, since the system
 domain holds the device for the boot and its fault resets the machine; an object the backend
 refuses refuses the boot, naming the record. The host link's UART, which does no DMA, is the one
-physical record, `-erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK`. The record also names, after CLOCK, the base and length
+physical record, `-erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK`, PATH as in the given record. The record also names, after CLOCK, the base and length
 of the run of pages its unit's registers cover around its own, so the device NIF maps that run once, at the first open of any record in
 it, as it maps a window object once, and two physical records in one page share one mapping; `-erx console_uart` names its run the same way. CLOCK is the device entry's
 clock in hertz, which the driver reads and the NIF does not. The record's window and line the device
@@ -1713,7 +1714,8 @@ device is behind it. A manifest with no such unit has no record, and a machine w
 device boots the same, with nothing for its driver to drive.
 
 A given record, a holder domain's or the root's own, has a word of its own, `-erx given ROLE
-PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`: the handles of the window, line and
+PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE CLOCK COHERENT MAC`: the device's
+device-tree path, as the `device` form carries it, the handles of the window, line and
 memory objects the domain library installed when it created the domain, or the root made for
 itself, the transport's offset and size in the window object, the memory's bytes, 0 for a
 device that does no DMA, the device's clock, as the `device` form carries it, so a

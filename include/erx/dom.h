@@ -258,9 +258,10 @@ typedef struct erx_dom_device_entry {
 	const char	*compatible;
 	const char	*unit_name;
 	uint32_t	unit_name_len;
-	/* Its device-tree path in the manifest's strings, path_len bytes, which
-	 * the reader has not checked as a node path; 0 bytes for a row of
-	 * another selector. */
+	/* Its device-tree path in the manifest's strings, path_len bytes, the
+	 * PATH of its record: the reader checks a driven row's as a node path
+	 * the record holds (erx_boot_device_path_valid) and no other row's; 0
+	 * bytes for a row of another selector. */
 	const char	*path;
 	uint32_t	path_len;
 	uint64_t	offset;		/* its registers' offset into ranges[0] */

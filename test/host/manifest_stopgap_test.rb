@@ -86,6 +86,28 @@ class ManifestStopgapTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 'context', 'platform.devices', @source, context(platform: platform), message: /empty window/)
   end
 
+  # A device's path is the PATH of its device record, its name to its driver
+  # (docs/design-stopgap.md, "Device records"): a node path of at most
+  # device_path_max bytes. A path at the bound passes and one a byte longer, empty, relative or
+  # holding an escape is refused.
+  def test_a_device_tree_row_s_path_is_a_node_path_its_record_holds
+    longest = '/extra@0/' + ('a' * (@codec.constant('device_path_max') - 9))
+    assert_equal @codec.constant('device_path_max'), longest.bytesize
+    admit(*with_extra_device(path: longest))
+    [longest + 'a', '', 'extra@0', "/extra@0\e[2J", nil].each do |path|
+      source, against = with_extra_device(path: path)
+      refused(Erx::Manifest::Invalid, 'context', 'platform.devices', source, against, message: /path is not a node path/)
+    end
+  end
+
+  # A device is one unit's (docs/design-system.md, "Devices"), so a device-tree path two
+  # units' devices name is refused.
+  def test_a_device_in_two_units_is_refused
+    first = @platform.fetch('units').first.fetch('devices').first
+    source, against = with_extra_device(path: first.fetch('path'))
+    refused(Erx::Manifest::Invalid, 1, 'devices.path', source, against, message: /more than one unit/)
+  end
+
   # A PL011's driver times characters and divides its baud rate from the UART's clock, which
   # only the board knows, so a PL011 row without a clock of at least one hertz is wrong.
   def test_a_pl011_row_must_carry_its_clock

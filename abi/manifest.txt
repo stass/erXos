@@ -452,7 +452,7 @@ reader manifest erx_manifest @manifest_bytes_max
   choice devices[].selector mf_selector devices[].path,devices[].bridge,devices[].bus,devices[].device,devices[].function
     case dt devices[].path
     case pci devices[].bridge,devices[].bus,devices[].device,devices[].function
-  string devices[].path.offset devices[].path.length strings dt_path 4096 empty no when devices[].selector dt
+  string devices[].path.offset devices[].path.length strings dt_path @device_path_max empty no when devices[].selector dt
   string devices[].bridge.offset devices[].bridge.length strings dt_path 4096 empty no when devices[].selector pci
   string devices[].compatible.offset devices[].compatible.length strings utf8 4096 empty no
   string devices[].placement_key.offset devices[].placement_key.length strings utf8 4096 empty no

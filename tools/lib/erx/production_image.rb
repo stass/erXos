@@ -719,12 +719,12 @@ module Erx
 
       # Every word of ERTS's arguments that the manifest's own words do not add.
       def self.arguments_always(root) = ARGUMENTS_FIXED + allocator_words(root).size
-      # The words of -erx given ROLE PERIPHERAL WINDOW_H OFFSET SIZE LINE_H MARK MEM_H MEM_SIZE
-      # CLOCK COHERENT MAC, which the root adds for each device of a kind in a unit the system domain holds,
-      # and of -erx device ROLE PERIPHERAL BASE SIZE LINE MARK CLOCK, the host link's UART's physical record
-      # (docs/design-stopgap.md, "Device records"; record_words).
-      GIVEN_RECORD_WORDS = 14
-      DEVICE_RECORD_WORDS = 9
+      # The words of -erx given ROLE PERIPHERAL PATH WINDOW_H OFFSET SIZE LINE_H MARK MEM_H
+      # MEM_SIZE CLOCK COHERENT MAC, which the root adds for each device of a kind in a unit the system
+      # domain holds, and of -erx device ROLE PERIPHERAL PATH BASE SIZE LINE MARK CLOCK, the host
+      # link's UART's physical record (docs/design-stopgap.md, "Device records"; record_words).
+      GIVEN_RECORD_WORDS = 15
+      DEVICE_RECORD_WORDS = 10
       # The table of the kinds of device a runtime drives, which the root reads to give a
       # device of a held unit its -erx given record.
       DEVICE_KINDS = 'include/erx/device_kinds.h'

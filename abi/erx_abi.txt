@@ -103,6 +103,12 @@ limit budget_depth_max u32 16
 # interrupt lines (docs/design-kernel.md, "Resources, DMA windows and consoles").
 limit device_ranges_max u32 8
 limit device_irqs_max u32 8
+# The longest device-tree path of a manifest device, in bytes without its NUL:
+# the PATH word of its device record (docs/design-stopgap.md, "Device
+# records"). The manifest grammar bounds devices[].path by it
+# (abi/manifest.txt), and the manifest check holds every device-tree row of the
+# platform to it.
+limit device_path_max u32 63
 # GENET's register ring, which the device NIF and the Ethernet driver share
 # (docs/design-device-dma.md, "The register ring (GENET)"), from FreeBSD
 # 975e3605ebb1's sys/arm64/broadcom/genet/if_genetreg.h.

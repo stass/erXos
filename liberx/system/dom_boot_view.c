@@ -412,6 +412,9 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 			/* A device of no kind is held, not driven, so no give makes its memory. */
 			if (kind == NULL && entry->memory != 0)
 				return ("manifest: a device of a kind no runtime drives has DMA memory");
+			/* A driven device's path is its record's PATH, so its give never fails for it. */
+			if (kind != NULL && !erx_boot_device_path_valid((erx_boot_words_t){ entry->path, entry->path_len }))
+				return ("manifest: a driven device's path is not a node path its record holds");
 			if (kind != NULL) {
 				entry->role_word = kind->role_word;
 				entry->peripheral = kind->peripheral;

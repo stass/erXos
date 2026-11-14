@@ -10,7 +10,7 @@
 
 %% A given block record of Peripheral, as the domain library writes it.
 record(Peripheral) ->
-    ["given", "block", atom_to_list(Peripheral), "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"].
+    ["given", "block", atom_to_list(Peripheral), "/virtio_mmio@a003e00", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"].
 
 %% erx_blk:start_link/0's lookup over Arguments in place of init's.
 choose(Arguments) ->
@@ -23,7 +23,7 @@ virtio_record_starts_the_virtio_process_test() ->
 
 no_block_record_starts_nothing_test_() ->
     [?_assertEqual(none, choose([])),
-     ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
+     ?_assertEqual(none, choose([["given", "net", "virtio_mmio", "/virtio_mmio@a003c00", "5", "0", "512", "6", "direct", "7", "65536", "0", "0", "0"]]))].
 
 sdhci_record_starts_the_sd_process_test() ->
     ?assertMatch({ok, erx_blk_sd, #{peripheral := sdhci, window := {object, 5, 0, 512}}},
@@ -32,7 +32,7 @@ sdhci_record_starts_the_sd_process_test() ->
 %% erx_blk_sup starts an owner for each shared line of the chosen record before the device
 %% process, and none for a direct line.
 shared_line_owner_test_() ->
-    Shared = ["given", "block", "sdhci", "5", "0", "512", "6", "shared", "7", "65536", "0", "0", "0"],
+    Shared = ["given", "block", "sdhci", "/emmc2bus/mmc@7e340000", "5", "0", "512", "6", "shared", "7", "65536", "0", "0", "0"],
     [?_assertMatch([{#{peripheral := sdhci}, 0}], owners(choose([Shared]))),
      ?_assertEqual([], owners(choose([record(sdhci)])))].
 

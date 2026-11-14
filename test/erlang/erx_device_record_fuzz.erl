@@ -10,6 +10,7 @@
 %% records and bad numbers are common. The seed comes from make check-fuzz.
 
 -module(erx_device_record_fuzz).
+-include("generated/erx_abi.hrl").
 -export([run/1]).
 
 -define(ROUNDS, 20000).
@@ -80,14 +81,15 @@ reference(Arguments) ->
         false -> {error, bad_device_record}
     end.
 
-spec("given", [Window, Offset, Size, Line, Mark, Memory, Bytes, Clock, Coherent, Mac | _]) ->
+spec("given", [Path, Window, Offset, Size, Line, Mark, Memory, Bytes, Clock, Coherent, Mac | _]) ->
     case {[decimal(Word, ?U64) || Word <- [Window, Offset, Size, Line, Memory, Bytes]], decimal(Clock, ?U32),
-          decimal(Mac, ?U48)} of
-        {[W, O, S, L, M, B], C, A} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
+          decimal(Mac, ?U48), node_path(Path)} of
+        {[W, O, S, L, M, B], C, A, P} when is_integer(W), is_integer(O), is_integer(S), is_integer(L), is_integer(M),
                                         is_integer(B), is_integer(C), is_integer(A),
                                         (Mark =:= "direct" orelse Mark =:= "shared"),
-                                        (Coherent =:= "0" orelse Coherent =:= "1") ->
-            Spec = #{peripheral => virtio_mmio, window => {object, W, O, S}, lines => [marked({object, L}, Mark)],
+                                        (Coherent =:= "0" orelse Coherent =:= "1"),
+                                        is_binary(P) ->
+            Spec = #{peripheral => virtio_mmio, path => P, window => {object, W, O, S}, lines => [marked({object, L}, Mark)],
                      clock => C, coherent => Coherent =:= "1"},
             WithMemory = case B of
                              0 -> Spec;
@@ -100,16 +102,30 @@ spec("given", [Window, Offset, Size, Line, Mark, Memory, Bytes, Clock, Coherent,
         _ ->
             bad
     end;
-spec("device", [Base, Size, Line, Mark, Clock | _]) ->
-    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Clock, ?U32)} of
-        {B, S, L, C} when is_integer(B), is_integer(S), is_integer(L), is_integer(C),
-                          (Mark =:= "direct" orelse Mark =:= "shared") ->
-            #{peripheral => virtio_mmio, window => {physical, B, S}, lines => [marked(L, Mark)], clock => C};
+spec("device", [Path, Base, Size, Line, Mark, Clock | _]) ->
+    case {decimal(Base, ?U64), decimal(Size, ?U64), decimal(Line, ?U32), decimal(Clock, ?U32), node_path(Path)} of
+        {B, S, L, C, P} when is_integer(B), is_integer(S), is_integer(L), is_integer(C), is_binary(P),
+                             (Mark =:= "direct" orelse Mark =:= "shared") ->
+            #{peripheral => virtio_mmio, path => P, window => {physical, B, S}, lines => [marked(L, Mark)], clock => C};
         _ ->
             bad
     end;
 spec(_Form, _Words) ->
     bad.
+
+%% The reference's PATH: '/' then only the characters a device tree allows in names, at
+%% most ERX_DEVICE_PATH_MAX bytes, as a binary; bad otherwise.
+node_path(Word) ->
+    Allowed = lists:seq($a, $z) ++ lists:seq($A, $Z) ++ lists:seq($0, $9) ++ ",._+-@/",
+    case Word of
+        [$/ | Rest] when length(Word) =< ?ERX_DEVICE_PATH_MAX ->
+            case [C || C <- Rest, not lists:member(C, Allowed)] of
+                [] -> list_to_binary(Word);
+                _ -> bad
+            end;
+        _ ->
+            bad
+    end.
 
 framebuffer_reference(Arguments) ->
     Specs = [framebuffer_spec(Words) || ["framebuffer" | Words] <- Arguments],
@@ -167,10 +183,23 @@ entry() ->
     case rand:uniform(5) of
         5 -> framebuffer_entry(Words);
         1 -> [Form, "block", "virtio_mmio" | Words];
-        2 -> [Form, "block", "virtio_mmio" | Numbers(Before) ++ [mark() | Numbers(After)] ++ Words];
+        2 -> [Form, "block", "virtio_mmio", path() | Numbers(Before) ++ [mark() | Numbers(After)] ++ Words];
         3 -> [Pick(["device", "given", "console_uart"]), Pick(["block", "network", ""]),
               Pick(["virtio_mmio", "sdhci", "virtio_mmio "]) | Words];
         4 -> Words
+    end.
+
+%% A record's PATH: nine times in ten a node path, short or at the bound, so records are
+%% still accepted often; otherwise, half of those times, a path a byte past the bound, so
+%% the bound is reached often, and the other half one with a byte no node name holds or any
+%% word.
+path() ->
+    Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
+    Longest = "/" ++ lists:duplicate(?ERX_DEVICE_PATH_MAX - 1, $a),
+    case rand:uniform(20) of
+        1 -> Longest ++ "a";
+        2 -> Pick(["", "virtio_mmio", "/virtio mmio", "/a\e[2J", [$/, 16#661], "/a:b", word()]);
+        _ -> Pick(["/virtio_mmio@a003e00", Longest])
     end.
 
 %% A framebuffer record, most with a geometry at the reader's bounds: a stride of a whole
