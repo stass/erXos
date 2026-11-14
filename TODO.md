@@ -654,7 +654,13 @@ it; git history is the record of completed work.
   display started once that display's server has settled (`erx_domain:display_settled/1`).
   Not built: the session's default display handed on with the ready answer and its `display` variable
   (design-apps.md, "Starting a session", step 3), which the domain service keeps in the session's record and
-  hands to nothing; the reset count cleared by the first kept session.
+  hands to nothing; the reset count cleared by the first kept session; and start flags (design-apps.md,
+  "Start flags"): `limit start_flags_max u32 1024` in `abi/manifest.txt` and a string field for the default in
+  `erx_mf_start`, under a name other than `flags`, which the layout gives its `mf_start_flags` bits, with the
+  packer and the manifest reader holding it to the bound; `NAME_flags` in `rc.conf`'s parser; `flags` in
+  `erx_domain:start_session/2`'s `Start` and `ERX_START_FLAGS` in the session's environment; and the boot view's
+  refusal of a session template whose environment sets the key, with the variable at its longest in its strings
+  reserve (`boot_strings_fit` in `liberx/system/dom_boot_view.c`).
 * [Medium] apps, `/etc/start/ctl` and `/etc/rc.conf` ([design-apps.md](docs/design-apps.md#the-start-table)):
   `/apps` holds apps alone, so the tree that `erx_starter_fs` serves at `/apps` becomes the service `start`,
   mounted at `/etc/start`, holding only `ctl`, whose `enable` and `disable` go and which gains `restart`; and

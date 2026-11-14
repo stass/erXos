@@ -591,7 +591,8 @@ that wants the LVGL renderer says so where it opens its UI, with
 Every admitted package has a start row named for its app, disabled
 until the image builder or the administrator enables it, on its one
 `windows` need if it has exactly one and on none otherwise, with the
-start table's default intensity. `rc.conf` sets it as it sets any row
+start table's default intensity and no start flags. `rc.conf` sets it,
+its `NAME_flags` included, as it sets any row
 ([design-apps.md](design-apps.md#the-start-table)), so the declaration
 carries no start settings.
 

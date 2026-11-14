@@ -29,7 +29,9 @@ Decisions every reader of this document needs:
   the session of the person who started it.
 * **The start table is the one place that says what starts without a
   person.** Each row names a principal, whether the row is enabled,
-  optionally a display, and a restart intensity. The manifest's `start`
+  optionally a display, a restart intensity, and the start flags its
+  session is handed, text only the app reads, as a daemon reads
+  FreeBSD's `NAME_flags`. The manifest's `start`
   rows declare what may start and give each row's defaults, as
   FreeBSD's `rc.d` scripts and `/etc/defaults/rc.conf` do;
   `/etc/rc.conf`, an ordinary file the administrator edits, holds the
@@ -179,9 +181,9 @@ supervisor starts the keeper again within the row's intensity.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display and an intensity, and no limit, grant, device, service or code; the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter` reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:system_namespace/0` (the wait before its first read of `rc.conf`) and `erx_domain:display_settled/1` (the wait a keeper makes before it asks for a session on a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
+| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display, an intensity and start flags, and no limit, grant, device, service or code; the start flags are opaque data, bounded printable bytes that reach the session only as the value of one environment variable, `ERX_START_FLAGS`, which no shell, runtime or ERTS option parser reads ([The start table](#the-start-table)); the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; start flags delivered as runtime arguments or in a variable ERTS parses, such as `ERL_FLAGS`; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter` reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:system_namespace/0` (the wait before its first read of `rc.conf`) and `erx_domain:display_settled/1` (the wait a keeper makes before it asks for a session on a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
 | **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_starter` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for a row the boot or the row's own `start` or `restart` admitted, or for one `onestart`; a publication of the package set after the boot's admits no row ([When the file is read](#the-start-table)) | another boot-time starter | a source check that only `erx_console`, the web login and `erx_starter_keeper` call `erx_domain:start_session/2`, with a seeded call from another module; the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
-| **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition, the `etc` grant and the `start` grant only enable, disable or set the display and intensity of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
+| **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); an `rc.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition, the `etc` grant and the `start` grant only enable, disable or set the display, intensity and start flags of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
 | **AP4.** A display's session is the session of the row kept on it, and no other, across a restart of either domain | at most one kept row names each display: a row's supervisor starts only after the one admission ([The start table](#the-start-table)) finds no other kept row on its display, and the table's process admits one row at a time; only a row's keeper names a display with `display`; the domain service fixes the session mark in the record of that session's grant on the display and every mint of the record carries it ([design-system.md](design-system.md#facets-a-configured-domain-serves)) | an admission judged against the rows the file enables rather than the rows kept; a mark set by whichever session opens a window first; a re-mint that drops the mark | the merge's host test with two enabled rows on one display, the second refused; the judgement's test of a `start` on a kept row's display, refused, and on a stopped row's, admitted; the kiosk tests of [Verification and testing](#verification-and-testing), the display domain's restart among them |
 | **AP5.** A row whose display its principal cannot draw on never starts | the admission refuses a row whose display is not a `windows` service granted to its principal's template: at boot with `{no_grant, Display}` at `/proc/apps`, and at a `start` of a row a local setting gave such a display with `eperm`; the manifest check refuses such a manifest row (property 17) | a reserved display that stays blank because its session holds no grant there | the merge's host test; the judgement's host test; the QEMU test of a local line naming such a display |
 
@@ -257,6 +259,7 @@ person:
 | `enable` | whether the row starts at boot | `YES` |
 | `display` | the display the session starts on, whose session it becomes ([design-display.md](design-display.md#a-displays-session)); a `windows` service granted to the principal's template | none |
 | `restarts`, `restart_period_s` | the intensity: more ends than `restarts` within the period leave the row down; at most `start_restarts_max`, 100, within at most `start_period_max_s`, a day (`abi/manifest.txt`), which the packer, the manifest reader and the table's parser each hold to | 5 in 600 s |
+| `flags` | the start flags, opaque text the session reads from the environment variable `ERX_START_FLAGS` ([Start flags](#start-flags)); at most `start_flags_max`, 1,024, bytes from 0x20 to 0x7e other than `"` and `\` (`abi/manifest.txt`), which the packer, the manifest reader and the table's parser each hold to | empty |
 
 The manifest's `start` rows declare every row the table can hold, with
 its defaults; this one declares `clock` and leaves it off:
@@ -280,9 +283,10 @@ clock_period="600"
 ```
 
 A variable's name is a row's principal, `_`, and one of `enable`,
-`display`, `restarts` and `period`, split at its last `_`. A setting
-replaces the manifest's default for that field of that row, and
-`NAME_display=""` clears the row's display. A line for a principal that
+`display`, `restarts`, `period` and `flags`, split at its last `_`. A setting
+replaces the manifest's default for that field of that row,
+`NAME_display=""` clears the row's display, and `NAME_flags=""` its
+flags. A line for a principal that
 has no row, or that does not parse, is skipped and
 reported, and the rest of the file stands, so the file sets what the
 manifest declared and adds nothing.
@@ -450,19 +454,64 @@ itself, their order is computed, and their place is the manifest alone.
 `service -e` prints both, the configured domains in boot order and then
 the table, so one command shows everything that starts.
 
+### Start flags
+
+A row's `flags` hand its app the administrator's own settings, as
+FreeBSD's `NAME_flags` hands a daemon its arguments; network time's
+servers are `ntpd_flags`
+([design-time.md](design-time.md#configuration)). They are data for the
+app and nothing else:
+
+* **Bounded.** At most `start_flags_max`, 1,024, bytes from 0x20 to
+  0x7e other than `"` and `\`, so an `rc.conf` line holds them with no
+  escapes. An `rc.conf` line whose value breaks the rule does not
+  parse, and is skipped and reported as any other; a manifest `start`
+  row whose `flags` break it is refused by the packer and the manifest
+  reader. A package's row has none
+  ([design-packaging.md](design-packaging.md#the-declaration)).
+* **Opaque.** The start table never splits or reads them. A keeper
+  passes its row's flags to `erx_domain:start_session/2` as `Start`'s
+  `flags`, and so does `onestart`, and the session's environment is
+  its template's with `ERX_START_FLAGS` set to them, empty for a row
+  with none; no other session has the variable. They are never shell
+  input, never a runtime argument, and never a variable that ERTS
+  parses as options, such as `ERL_FLAGS`, `ERL_AFLAGS`, `ERL_ZFLAGS`
+  and `ERL_OTP29_FLAGS` (`otp/erts/etc/common/erlexec.c`,
+  `build_args_from_env`). They carry no limit, grant or code, so they
+  change nothing the manifest check proved (AP1).
+* **One source.** The domain library's boot view refuses a session
+  template whose environment sets `ERX_START_FLAGS`, as it refuses a
+  display domain's row that sets a key of its display record, so the
+  value a session reads is its row's alone. It admits a session
+  template only when its arguments and environment leave room in the
+  boot page's strings for the variable at its longest, its key,
+  `start_flags_max` bytes and a NUL, beside what it reserves there
+  already ([design-stopgap.md](design-stopgap.md#boot-information)),
+  so no session's start fails on its flags.
+* **Read at start.** A session sees the flags of its row as the row was
+  last applied, by the boot or the row's own command, and a restart
+  within the intensity starts it with the same; an edit of
+  `NAME_flags` takes effect at the row's next command or the next boot,
+  as every setting does, and as on FreeBSD, where an `rc.d` script
+  takes `NAME_flags` from the `rc.conf` it loaded when it runs
+  (`rc.subr:1193-1197`).
+
 ## Algorithms and behavior
 
 ### Starting a session
 
 Every session a row keeps is started by a **keeper**, a process of
 `erx_starter`, with `erx_domain:start_session(Principal, Start)`. `Start`
-names the display in one of two ways: `#{display => D}` from an enabled
+gives the row's start flags as `flags` ([Start flags](#start-flags)),
+and names the display in one of two ways: `#{display => D}` from an enabled
 row's keeper, which makes the session the display's session, or
 `#{default_display => D}` from `onestart NAME display=D` on a row that
 is not enabled, which only sets the session's `display` variable. The domain service:
 
 1. plans the session from the principal's template, with the name
-   `<principal>_<n>`, as it plans any session; the library charges the
+   `<principal>_<n>`, as it plans any session, and with
+   `ERX_START_FLAGS` set to `Start`'s `flags` in its environment; the
+   library charges the
    principal, and refuses the start with `quota` or `no_memory` when the
    principal has no room;
 2. at the session's ready report, starts the facets of the system
@@ -690,11 +739,15 @@ shown. An app's sessions are domains like any other at
 are in `abi/manifest.txt`. The start service reads the `start` rows,
 the session templates and their `windows` grants through `erx_manifest`.
 
-**The ABI source**: the limits `start_rows_max`, `start_restarts_max`
-and `start_period_max_s`.
+**The ABI source**: the limits `start_rows_max`, `start_restarts_max`,
+`start_period_max_s` and `start_flags_max`, and the `start` row's
+default flags in its packed record.
 
 **Erlang**: `erx_domain:start_session/2`, whose second argument may
-name a display.
+name a display and give start flags.
+
+**The session's environment**: `ERX_START_FLAGS`, a row's start flags,
+in every session a row or a `onestart` starts.
 
 ### Other subsystems
 
@@ -873,8 +926,9 @@ and no more; the data partition, and so `rc.conf`; the storage domain.
   whichever row gave it, and no app may need `etc` (property 19).
 * **A crafted data partition, or a storage domain it has taken over,**
   can rewrite `rc.conf` to enable or disable rows the manifest declares,
-  and to move a display between rows whose templates are granted it,
-  and read or destroy every app's data. It cannot start a principal
+  to move a display between rows whose templates are granted it, and to
+  change a row's start flags, which reach only that row's session, as
+  data its app checks; and it can read or destroy every app's data. It cannot start a principal
   that has no `start` row, widen a grant, or put a session on a display
   its template cannot draw on.
 * **Who may start without a person** is the image builder's to say: a
@@ -907,6 +961,8 @@ it guards.
 | --- | --- | --- |
 | the merge | settings replace defaults; `NO` disables; a bad line and a line for an undeclared name are skipped and reported; a second enabled row on one display is refused with the first's name; a row whose display its template is not granted is refused with `{no_grant, D}` | a merge that adds a row for an undeclared principal; the display rule dropped; the grant check dropped |
 | `rc.conf`'s names | `a_b_enable` sets `enable` of the row `a_b` | a split at the first `_` |
+| `rc.conf`'s flags | `ntpd_flags` of 1,024 bytes with spaces and `=` sets the row's flags byte for byte, and `ntpd_flags=""` clears them; a value of 1,025 bytes, one holding `\` and one holding a tab are each skipped and reported, and the row keeps its declared flags | an off-by-one bound, which accepts the 1,025-byte value; a parser that splits the value at spaces, which changes the 1,024-byte value |
+| a keeper's flags | with a stub domain service: a row's keeper passes its applied flags as `Start`'s `flags` at its first start and at a restart within its intensity, and a `onestart` passes the row's flags read at that command; a row with none passes the empty string | a keeper that passes `flags` only at the first start, which the stub sees start the restarted session without them |
 | the edit, `erx_start_table:set/3` | a file with comments, a variable set on two lines and one set nowhere: both lines are replaced, the missing one appended, and every other byte kept | an edit that replaces only the first line that sets the variable, which leaves the later one standing |
 | one row for each command, through the real start service over a fixture `etc` tree | `clock` and `kiosk` enabled and running, and the file edited to disable `clock` and enable `dash`, declared `enable NO`: the edit alone starts and stops nothing; `service kiosk restart` restarts `kiosk` alone, while `clock` runs on and `dash` stays disabled; `service clock stop` then ends `clock` and leaves it disabled, and `service dash start` starts `dash` | a command that applies the whole file, which ends `clock` and starts `dash` at `kiosk`'s restart; a command that acts without reading the file, which answers `enotsup` to `dash`'s start |
 | a row's supervisor | with a stub domain service: an ended session is started again; one end more than the intensity leaves the row down and the other rows up; a keeper on a display asks the stub's `display_settled/1` before each start of its session, its first and every restart | a keeper that does not link to its session; a keeper that waits only before its first start, which the stub sees start a session unasked |
@@ -926,7 +982,14 @@ template is not granted; enabled rows whose sessions do not fit beside
 the configured domains; a board source granting `etc` read-write to a
 template that holds no `start`; and an `apps` row naming `etc` under a
 property 19 without its exclusion, whose derived grant this clause
-still refuses.
+still refuses. For start flags: a `start` row whose `flags` hold 1,025
+bytes, or a `"`, which the packer and the manifest reader refuse; a
+session template whose environment sets `ERX_START_FLAGS`; and one
+whose arguments and environment leave room for every word the boot
+view reserved before but not for the variable at its longest, which the
+boot view refuses; seeded: a boot view that does not
+look for the key in a template's environment, which admits the second, and the
+variable left out of the reserve, which admits the third.
 
 **QEMU tests**, in the suites of the tracks that bring the parts:
 
@@ -986,7 +1049,7 @@ and `rc.conf`'s grammar.
 
 * `erx_starter` reaches the domain service only through the calls
   AP1 lists;
-* only `erx_starter` passes `display` or `default_display` to
+* only `erx_starter` passes `display`, `default_display` or `flags` to
   `start_session/2`;
 * only `erx_console`, the web login and `erx_starter_keeper` call
   `start_session/2` (AP2);

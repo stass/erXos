@@ -32,7 +32,7 @@ Decisions every reader needs:
   samples, never packets ([Who does what](#who-does-what)).
 * **Off unless enabled, as on FreeBSD, and no default server.** The
   manifest's `start ntpd` row says `enable NO` and names no server;
-  `ntpd_enable="YES"` and `ntpd_flags="SERVER ..."` in `/apps/rc.conf`
+  `ntpd_enable="YES"` and `ntpd_flags="SERVER ..."` in `/etc/rc.conf`
   start it at boot against the operator's servers
   ([Configuration](#configuration)).
 * **One unrestricted step per boot, then steps above 128 ms.** While the
@@ -204,8 +204,8 @@ read for this design.
   decision 19; [design-system.md](design-system.md#the-network-domain)).
 * **Apps and the start table.** An app is a principal with a session
   template; a manifest `start` row declares that it may start and its
-  defaults, and `/apps/rc.conf` sets `NAME_enable`, `NAME_display`,
-  `NAME_restarts` and `NAME_period` over it
+  defaults, and `/etc/rc.conf` sets `NAME_enable`, `NAME_display`,
+  `NAME_restarts`, `NAME_period` and `NAME_flags` over it
   ([design-apps.md](design-apps.md#the-start-table)).
 
 ## Requirements
@@ -636,7 +636,7 @@ start ntpd
   enable NO
 ```
 
-The operator names the servers and enables the app in `/apps/rc.conf`,
+The operator names the servers and enables the app in `/etc/rc.conf`,
 as FreeBSD's `ntpd_flags` and `ntpd_enable` do:
 
 ```text
@@ -648,24 +648,10 @@ ntpd_flags="0.pool.example ntp.example.net"
 the session, through the start table alone. The facet row is the only
 way a domain gets `clock`; root's session does not hold it.
 
-**`NAME_flags`** is a start-row field of every app, beside `enable`,
-`display`, `restarts` and `period`:
-
-* **Bounded.** At most `start_flags_max`, 1,024, bytes from 0x20 to 0x7e
-  other than `"` and `\`, so the `rc.conf` line needs no escapes; a value
-  outside this is a line that does not parse, skipped and reported as
-  any other. The manifest's `start` row may give a default, and gives
-  none for ntpd.
-* **Opaque data.** The start table never splits or reads it. It reaches
-  the session as the value of one environment variable,
-  `ERX_START_FLAGS`, beside the template's environment, and is never
-  shell input, never a runtime argument, and never a variable that ERTS
-  parses as options, such as `ERL_FLAGS`, `ERL_AFLAGS` and `ERL_ZFLAGS`
-  (`otp/erts/etc/common/erlexec.c`, `build_args_from_env`). It carries no
-  limit, grant or code, so it changes nothing the manifest check proved.
-* **Read at start.** A session sees the flags of the row as its start
-  read them; a change takes effect at the session's next start, as on
-  FreeBSD.
+`ntpd_flags` is the row's start flags, which
+[design-apps.md](design-apps.md#start-flags) bounds and delivers: the
+start table never reads them, and the session finds them, as they were
+when it started, in the environment variable `ERX_START_FLAGS`.
 
 `erx_ntpd` reads `ERX_START_FLAGS` once, splits it at spaces into at most
 8 entries and checks each against the server-list rule above. Empty
@@ -673,15 +659,6 @@ flags, or flags that break the rule, end the session at start with `no
 servers` or `bad flags` in its log and its row's last reason at
 `/proc/apps`, and the start table's intensity leaves it down. Because no
 manifest ships a server, enabling ntpd without naming one does this.
-
-[design-apps.md](design-apps.md#the-start-table) states the start
-table's fields and `rc.conf`'s grammar; the field above is an edit to
-make there. That document's rewrite is on its own branch, which names
-the file `/etc/rc.conf`; when it lands, its start-row table gains
-`flags`, its `rc.conf` variables gain `NAME_flags` with the bounds and
-delivery above, `abi/manifest.txt` gains `start_flags_max`, AP1's row
-says the field carries only opaque data, and the paths here follow its
-name for the file.
 
 ## What /proc shows
 
