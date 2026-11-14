@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: the optional callbacks kex_cookie/1, verify_user/6 and sign/3,
+%% and host_key/2 may answer {ok, {ssh2_pubkey, Blob}}.
 
 -module(ssh_server_key_api).
 -moduledoc """
@@ -56,12 +58,17 @@ is available with the key `key_cb_private`.
 %%%****************************************************************
 %%% Fetch the host's private key that is of type Algorithm.
 
--doc "Fetches the private key of the host.".
+-doc """
+Fetches the private key of the host, or the public key blob of a host key the
+callback module holds and signs with in [`Module:sign/3`](`c:sign/3`).
+""".
 -doc(#{since => <<"OTP R16B">>}).
 -callback host_key(Algorithm :: ssh:pubkey_alg(),
 		   DaemonOptions :: daemon_key_cb_options(any())
                   ) ->
-    {ok, PrivateKey :: public_key:private_key()} | {error, term()}.
+    {ok, PrivateKey :: public_key:private_key()} |
+    {ok, {ssh2_pubkey, PubKeyBlob :: binary()}} |
+    {error, term()}.
 
 %%%****************************************************************
 %%% Check that PublicKey is known to be a public key for the User
@@ -73,3 +80,42 @@ is available with the key `key_cb_private`.
 		      DaemonOptions :: daemon_key_cb_options(any())
                      ) ->
     boolean().
+
+%%%****************************************************************
+%%% erXos's hooks: a host key the module holds, and a login decided
+%%% outside the daemon from the first key exchange it did itself.
+
+-doc """
+Signs the exchange hash `SigData` with the _private_ key of the host key whose
+public blob [`Module:host_key/2`](`c:host_key/2`) answered, and returns the
+bare signature.
+""".
+-callback sign(PubKeyBlob :: binary(),
+               SigData :: binary(),
+               DaemonOptions :: daemon_key_cb_options(any())) ->
+    Signature :: binary().
+
+-doc """
+Answers the 16-byte cookie of the server's first `SSH_MSG_KEXINIT` on a
+connection. Any other answer, or an exception, ends the connection before its
+key exchange. A rekeying takes a random cookie without asking.
+""".
+-callback kex_cookie(DaemonOptions :: daemon_key_cb_options(any())) ->
+    Cookie :: <<_:128>>.
+
+-doc """
+Checks a `publickey` signature that the daemon's own check has accepted.
+`KexInput` is the hash input of the connection's first key exchange, whose
+hash is the session identifier, and `SigBlob` the signature blob of RFC 4252,
+the algorithm name and the signature, each a length-prefixed string. Only
+`true` admits the attempt.
+""".
+-callback verify_user(User :: string(),
+                      Algorithm :: string(),
+                      PubKeyBlob :: binary(),
+                      KexInput :: binary(),
+                      SigBlob :: binary(),
+                      DaemonOptions :: daemon_key_cb_options(any())) ->
+    boolean().
+
+-optional_callbacks([sign/3, kex_cookie/1, verify_user/6]).

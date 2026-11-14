@@ -19,6 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: the daemon option max_auth_tries.
 
 %%
 
@@ -611,6 +612,12 @@ default(server) ->
             class => user_option
            },
 
+      max_auth_tries =>
+          #{default => infinity,
+            chk => fun(V) -> check_max_auth_tries(V) end,
+            class => user_option
+           },
+
       minimal_remote_max_packet_size =>
           #{default => 0,
             chk => fun(V) -> check_pos_integer(V) end,
@@ -998,6 +1005,9 @@ check_max_sessions(I) -> check_pos_integer(I).
 %%%----------------------------------------------------------------
 check_max_channels(infinity) -> true;
 check_max_channels(I) -> check_pos_integer(I).
+
+check_max_auth_tries(infinity) -> true;
+check_max_auth_tries(I) -> check_pos_integer(I).
 
 %%%----------------------------------------------------------------
 check_pos_integer(I) -> is_integer(I) andalso I>0.

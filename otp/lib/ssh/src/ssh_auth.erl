@@ -19,6 +19,8 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: a key callback's verify_user/6 also checks a publickey signature,
+%% and a server disconnects past max_auth_tries failed attempts.
 
 %%
 
@@ -228,12 +230,15 @@ init_userauth_request_msg(#ssh{opts = Opts} = Ssh) ->
 
 %%%----------------------------------------------------------------
 %%% called by server
-handle_userauth_request(#ssh_msg_service_request{name = Name = "ssh-userauth"},
+handle_userauth_request(Msg, SessionId, Ssh) ->
+    count_failure(Msg, userauth_request(Msg, SessionId, Ssh)).
+
+userauth_request(#ssh_msg_service_request{name = Name = "ssh-userauth"},
 			_, Ssh) ->
     {ok, {#ssh_msg_service_accept{name = Name},
           Ssh#ssh{service = "ssh-connection"}}};
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "password",
 						  data = <<?FALSE, ?UINT32(Sz), Password:Sz/binary>>}, _, 
@@ -250,7 +255,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
             }
     end;
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "password",
 						  data = <<?TRUE,
@@ -271,7 +276,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
                                 partial_success = false}, Ssh}
     };
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "none"}, _,
 			#ssh{userauth_supported_methods = Methods,
@@ -290,7 +295,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
             }
     end;
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "publickey",
 						  data = <<?BYTE(?FALSE),
@@ -322,7 +327,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
             }
     end;
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "publickey",
 						  data = <<?BYTE(?TRUE),
@@ -351,7 +356,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
             }
     end;
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = "keyboard-interactive",
 						  data = _},
@@ -412,7 +417,7 @@ handle_userauth_request(#ssh_msg_userauth_request{user = User,
             }
     end;
 
-handle_userauth_request(#ssh_msg_userauth_request{user = User,
+userauth_request(#ssh_msg_userauth_request{user = User,
 						  service = "ssh-connection",
 						  method = Other}, _,
 			#ssh{userauth_supported_methods = Methods} = Ssh) ->
@@ -442,7 +447,10 @@ handle_userauth_info_request(#ssh_msg_userauth_info_request{name = Name,
 
 %%%----------------------------------------------------------------
 %%% keyboard-interactive server
-handle_userauth_info_response(#ssh_msg_userauth_info_response{num_responses = 1,
+handle_userauth_info_response(Msg, Ssh) ->
+    count_failure(Msg, userauth_info_response(Msg, Ssh)).
+
+userauth_info_response(#ssh_msg_userauth_info_response{num_responses = 1,
 							      data = <<?UINT32(Sz), Password:Sz/binary>>},
 			      #ssh{opts = Opts,
 				   kb_tries_left = KbTriesLeft,
@@ -475,12 +483,12 @@ handle_userauth_info_response(#ssh_msg_userauth_info_response{num_responses = 1,
               Ssh1#ssh{kb_tries_left = max(KbTriesLeft-1, 0)}}}
     end;
 
-handle_userauth_info_response({extra,#ssh_msg_userauth_info_response{}},
+userauth_info_response({extra,#ssh_msg_userauth_info_response{}},
 			      #ssh{user = User} = Ssh) ->
     {authorized, User,
      {#ssh_msg_userauth_success{}, Ssh}};
 
-handle_userauth_info_response(#ssh_msg_userauth_info_response{},
+userauth_info_response(#ssh_msg_userauth_info_response{},
 			      _Auth) ->
     ?DISCONNECT(?SSH_DISCONNECT_SERVICE_NOT_AVAILABLE,
                 "Server does not support keyboard-interactive").
@@ -488,6 +496,29 @@ handle_userauth_info_response(#ssh_msg_userauth_info_response{},
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+%% max_auth_tries: a server counts each attempt that fails, and answers the
+%% attempt that fails past the option's count with a disconnect instead of
+%% SSH_MSG_USERAUTH_FAILURE. A "none" request, which a client sends to learn
+%% the methods, is no attempt. Every server result passes through here, so an
+%% attempt counts whichever method it used.
+count_failure(#ssh_msg_userauth_request{method = "none"}, Result) ->
+    Result;
+count_failure(_Msg, {not_authorized, Who, {#ssh_msg_userauth_failure{} = Reply,
+                                         #ssh{auth_failures = Failures0, opts = Opts} = Ssh}}) ->
+    Failures = Failures0 + 1,
+    case past_max_auth_tries(Failures, ?GET_OPT(max_auth_tries, Opts)) of
+        true ->
+            ?DISCONNECT(?SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE,
+                        "Too many authentication failures");
+        false ->
+            {not_authorized, Who, {Reply, Ssh#ssh{auth_failures = Failures}}}
+    end;
+count_failure(_Msg, Result) ->
+    Result.
+
+past_max_auth_tries(_Failures, infinity) -> false;
+past_max_auth_tries(Failures, Max) -> Failures > Max.
+
 method_preference(SigKeyAlgs) ->
     %% PubKeyAlgs: List of user (client) public key algorithms to try to use.
     %% All of the acceptable algorithms is the default values.
@@ -574,10 +605,27 @@ verify_sig(SessionId, User, Service, AlgBin, KeyBlob, SigWLen, #ssh{opts=Opts} =
         <<?UINT32(AlgSigLen), AlgSig:AlgSigLen/binary>> = SigWLen,
         <<?UINT32(AlgLen), _Alg:AlgLen/binary,
           ?UINT32(SigLen), Sig:SigLen/binary>> = AlgSig,
-        ssh_transport:verify(PlainText, list_to_existing_atom(Alg), Sig, Key, Ssh)
+        %% A false answer from either check is a badmatch here, which the catch
+        %% below makes the false that fails the attempt.
+        true = ssh_transport:verify(PlainText, list_to_existing_atom(Alg), Sig, Key, Ssh),
+        key_cb_verify_user(User, Alg, KeyBlob, AlgSig, Ssh)
     catch
 	_:_ ->
 	    false
+    end.
+
+%% The key callback's own check of a publickey signature, after OTP's: its
+%% verify_user/6 gets the first exchange's hash input (kex_input), from which
+%% it derives the session identifier itself, and the whole signature blob, the
+%% algorithm name and the signature. Only `true` admits. A module without the
+%% hook leaves the decision to OTP's check.
+key_cb_verify_user(User, Alg, KeyBlob, AlgSig, #ssh{opts = Opts, kex_input = Input}) ->
+    case ssh_transport:key_cb_exports(verify_user, 6, Opts) of
+        true ->
+            is_binary(Input) andalso
+                ssh_transport:call_KeyCb(verify_user, [User, Alg, KeyBlob, Input, AlgSig], Opts) =:= true;
+        false ->
+            true
     end.
 
 build_sig_data(SessionId, User, Service, KeyBlob, Alg) ->

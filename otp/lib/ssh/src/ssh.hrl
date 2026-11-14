@@ -19,6 +19,9 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: #ssh{} keeps the first key exchange's hash input, kex_input, until
+%% authentication succeeds, and counts failed authentication attempts for the daemon
+%% option max_auth_tries, whose type and documentation are here.
 
 %%
 
@@ -1295,6 +1298,17 @@ in the User's Guide chapter.
   > firewall configuration. If set to `true` when `max_sessions` is set to
   > `infinity` there is no protection against DOS attacks.
 
+- **`max_auth_tries`{: #hardening_daemon_options-max_auth_tries }** - The maximum
+  number of failed authentication attempts of one connection. The attempt that
+  fails past it is answered with a disconnect
+  (`SSH_DISCONNECT_NO_MORE_AUTH_METHODS_AVAILABLE`) instead of a failure. A
+  `none` request is not an attempt; a `publickey` query for a key that is not
+  authorized, a wrong password and a wrong keyboard-interactive answer are. A
+  request for a method the daemon does not offer is answered as a `none`
+  request, and is no attempt either.
+
+  By default there is no limit (`infinity`).
+
 - **`minimal_remote_max_packet_size`{:
   #hardening_daemon_options-minimal_remote_max_packet_size }** - The least
   maximum packet size that the daemon will accept in channel open requests from
@@ -1305,6 +1319,7 @@ in the User's Guide chapter.
         {max_sessions, pos_integer() | infinity}
       | {max_channels, pos_integer() | infinity}
       | {parallel_login, boolean()}
+      | {max_auth_tries, pos_integer() | infinity}
       | {minimal_remote_max_packet_size, pos_integer()}.
 
 -doc """
@@ -1401,6 +1416,7 @@ Experimental options that should not to be used in products.
 	  shared_secret,        %% K from key exchange
 	  exchanged_hash,       %% H from key exchange
 	  session_id,           %% same as FIRST exchanged_hash
+	  kex_input,            %% the FIRST exchange's hash input, until authentication succeeds
 	  
 	  opts = [],
 	  send_sequence = 0,
@@ -1417,6 +1433,7 @@ Experimental options that should not to be used in products.
 	  userauth_supported_methods,       %  string() eg "keyboard-interactive,password"
           userauth_pubkeys,
 	  kb_tries_left = 0,                %  integer(), num tries left for "keyboard-interactive"
+	  auth_failures = 0,                %  integer(), failed attempts, for max_auth_tries
 	  userauth_preference,
 	  available_host_keys,
 	  pwdfun_user_state,

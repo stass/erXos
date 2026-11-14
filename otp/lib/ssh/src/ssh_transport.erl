@@ -19,6 +19,9 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: a server's first SSH_MSG_KEXINIT takes its cookie from the key
+%% callback's kex_cookie/1, the first exchange's hash input is kept in kex_input, and a
+%% host key callback may hold its key, answering {ssh2_pubkey, Blob} and signing in sign/3.
 
 %%
 
@@ -58,6 +61,7 @@
          verify/5,
 	 sha/1,
          get_host_key/2,
+         key_cb_exports/3,
          call_KeyCb/3,
          public_algo/1,
          finish_packet_discard/2]).
@@ -350,9 +354,34 @@ key_exchange_init_msg(Ssh0) ->
     {Msg, SshPacket, Ssh}.
 
 kex_init(#ssh{role = Role, opts = Opts, available_host_keys = HostKeyAlgs} = Ssh) ->
-    Random = ssh_bits:random(16),
+    Random = kexinit_cookie(Ssh),
     PrefAlgs = adjust_algs_for_peer_version(Role, ?GET_OPT(preferred_algorithms, Opts), Ssh),
     kexinit_message(Role, Random, PrefAlgs, HostKeyAlgs, Opts).
+
+%% The cookie of an SSH_MSG_KEXINIT. A server's first exchange, the one before
+%% session_id is set, takes it from the key callback's kex_cookie/1 when the
+%% module exports it, so that the callback can find it again in that exchange's
+%% hash input (kex_input). An answer that is not 16 bytes, or a failure of the
+%% callback, ends the connection before the exchange. A rekeying, a client and a
+%% module without the hook take OTP's own random cookie.
+kexinit_cookie(#ssh{role = server, session_id = undefined, opts = Opts}) ->
+    case key_cb_exports(kex_cookie, 1, Opts) of
+        true -> callback_cookie(Opts);
+        false -> ssh_bits:random(16)
+    end;
+kexinit_cookie(#ssh{}) ->
+    ssh_bits:random(16).
+
+callback_cookie(Opts) ->
+    try call_KeyCb(kex_cookie, [], Opts) of
+        <<_:16/binary>> = Cookie -> Cookie;
+        _ -> refuse_cookie()
+    catch
+        _:_ -> refuse_cookie()
+    end.
+
+refuse_cookie() ->
+    ?DISCONNECT(?SSH_DISCONNECT_KEY_EXCHANGE_FAILED, "Key exchange cookie refused").
 
 key_init(client, Ssh, Value) ->
     Ssh#ssh{c_keyinit = Value};
@@ -631,10 +660,10 @@ handle_kexdh_init(#ssh_msg_kexdh_init{e = E},
 	    K = compute_key(dh, E, Private, [P,G]),
             if
                 1<K, K<(P-1) ->
-                    MyPrivHostKey = get_host_key(SignAlg, Opts),
-                    MyPubHostKey = ssh_file:extract_public_key(MyPrivHostKey),
-                    H = kex_hash(Ssh0, MyPubHostKey, sha(Kex), {E,Public,K}),
-                    case sign(H, SignAlg, MyPrivHostKey, Ssh0) of
+                    MyHostKey = get_host_key(SignAlg, Opts),
+                    MyPubHostKey = host_public_key(MyHostKey),
+                    {H, PlainText} = server_kex_hash(Ssh0, MyPubHostKey, sha(Kex), {E,Public,K}),
+                    case sign(H, SignAlg, MyHostKey, Ssh0) of
                         {ok,H_SIG} ->
                             {SshPacket, Ssh1} =
                                 ssh_packet(#ssh_msg_kexdh_reply{public_host_key = {MyPubHostKey,SignAlg},
@@ -644,7 +673,8 @@ handle_kexdh_init(#ssh_msg_kexdh_init{e = E},
                             {ok, SshPacket, Ssh1#ssh{keyex_key = {{Private, Public}, {G, P}},
                                                      shared_secret = ssh_bits:mpint(K),
                                                      exchanged_hash = H,
-                                                     session_id = sid(Ssh1, H)}};
+                                                     session_id = sid(Ssh1, H),
+                                                     kex_input = first_input(Ssh1, PlainText)}};
                         {error,unsupported_sign_alg} ->
                             ?DISCONNECT(?SSH_DISCONNECT_KEY_EXCHANGE_FAILED,
                                         io_lib:format("Unsupported algorithm ~p", [SignAlg],
@@ -807,10 +837,10 @@ handle_kex_dh_gex_init(#ssh_msg_kex_dh_gex_init{e = E},
 	    K = compute_key(dh, E, Private, [P,G]),
 	    if
 		1<K, K<(P-1) ->
-		    MyPrivHostKey = get_host_key(SignAlg, Opts),
-		    MyPubHostKey = ssh_file:extract_public_key(MyPrivHostKey),
-                    H = kex_hash(Ssh0, MyPubHostKey, sha(Kex), {Min,NBits,Max,P,G,E,Public,K}),
-                    case sign(H, SignAlg, MyPrivHostKey, Ssh0) of
+		    MyHostKey = get_host_key(SignAlg, Opts),
+		    MyPubHostKey = host_public_key(MyHostKey),
+                    {H, PlainText} = server_kex_hash(Ssh0, MyPubHostKey, sha(Kex), {Min,NBits,Max,P,G,E,Public,K}),
+                    case sign(H, SignAlg, MyHostKey, Ssh0) of
                         {ok,H_SIG} ->
                             {SshPacket, Ssh} =
                                 ssh_packet(#ssh_msg_kex_dh_gex_reply{public_host_key = {MyPubHostKey,SignAlg},
@@ -818,7 +848,8 @@ handle_kex_dh_gex_init(#ssh_msg_kex_dh_gex_init{e = E},
                                                                      h_sig = H_SIG}, Ssh0),
                             {ok, SshPacket, Ssh#ssh{shared_secret = ssh_bits:mpint(K),
                                                     exchanged_hash = H,
-                                                    session_id = sid(Ssh, H)
+                                                    session_id = sid(Ssh, H),
+                                                    kex_input = first_input(Ssh, PlainText)
                                                    }};
                         {error,unsupported_sign_alg} ->
                             ?DISCONNECT(?SSH_DISCONNECT_KEY_EXCHANGE_FAILED,
@@ -891,10 +922,10 @@ handle_kex_ecdh_init(#ssh_msg_kex_ecdh_init{q_c = PeerPublic},
 	compute_key(ecdh, PeerPublic, MyPrivate, Curve)
     of
 	K ->
-	    MyPrivHostKey = get_host_key(SignAlg, Opts),
-	    MyPubHostKey = ssh_file:extract_public_key(MyPrivHostKey),
-            H = kex_hash(Ssh0, MyPubHostKey, sha(Curve), {PeerPublic, MyPublic, K}),
-            case sign(H, SignAlg, MyPrivHostKey, Ssh0) of
+	    MyHostKey = get_host_key(SignAlg, Opts),
+	    MyPubHostKey = host_public_key(MyHostKey),
+            {H, PlainText} = server_kex_hash(Ssh0, MyPubHostKey, sha(Curve), {PeerPublic, MyPublic, K}),
+            case sign(H, SignAlg, MyHostKey, Ssh0) of
                 {ok,H_SIG} ->
                     {SshPacket, Ssh1} =
                         ssh_packet(#ssh_msg_kex_ecdh_reply{public_host_key = {MyPubHostKey,SignAlg},
@@ -904,7 +935,8 @@ handle_kex_ecdh_init(#ssh_msg_kex_ecdh_init{q_c = PeerPublic},
                     {ok, SshPacket, Ssh1#ssh{keyex_key = {{MyPublic,MyPrivate},Curve},
                                              shared_secret = ssh_bits:mpint(K),
                                              exchanged_hash = H,
-                                             session_id = sid(Ssh1, H)}};
+                                             session_id = sid(Ssh1, H),
+                                             kex_input = first_input(Ssh1, PlainText)}};
                 {error,unsupported_sign_alg} ->
                     ?DISCONNECT(?SSH_DISCONNECT_KEY_EXCHANGE_FAILED,
                                 io_lib:format("Unsupported algorithm ~p", [SignAlg],
@@ -970,12 +1002,12 @@ handle_kex_hybrid_init(#ssh_msg_kex_hybrid_init{c_init = C_init},
         compute_key(hybrid_server, C_init, S_privkey1, Curve)
     of
         {S_ciphertext2, K_enc} ->
-            MyPrivHostKey = get_host_key(SignAlg, Opts),
-            MyPubHostKey = ssh_file:extract_public_key(MyPrivHostKey),
+            MyHostKey = get_host_key(SignAlg, Opts),
+            MyPubHostKey = host_public_key(MyHostKey),
             S_reply = <<S_ciphertext2/binary, S_publickey1/binary>>,
-            H = kex_hash(Ssh0, MyPubHostKey, sha(Curve),
+            {H, PlainText} = server_kex_hash(Ssh0, MyPubHostKey, sha(Curve),
                          {mlkem, C_init, S_reply, K_enc}),
-            case sign(H, SignAlg, MyPrivHostKey, Ssh0) of
+            case sign(H, SignAlg, MyHostKey, Ssh0) of
                 {ok, H_SIG} ->
                     {SshPacket, Ssh1} =
                         ssh_packet(#ssh_msg_kex_hybrid_reply{
@@ -987,7 +1019,8 @@ handle_kex_hybrid_init(#ssh_msg_kex_hybrid_init{c_init = C_init},
                     {ok, SshPacket, Ssh1#ssh{
                                       shared_secret = K_enc,
                                       exchanged_hash = H,
-                                      session_id = sid(Ssh1, H)}};
+                                      session_id = sid(Ssh1, H),
+                                      kex_input = first_input(Ssh1, PlainText)}};
                 {error, unsupported_sign_alg} ->
                     ?DISCONNECT(?SSH_DISCONNECT_KEY_EXCHANGE_FAILED,
                                 io_lib:format("Unsupported algorithm ~p", [SignAlg],
@@ -1105,11 +1138,21 @@ ext_info_message(Ssh0) ->
 sid(#ssh{session_id = undefined}, H) ->  H;
 sid(#ssh{session_id = Id},        _) -> Id.
 
+%% The hash input a server keeps beside the session id: the first exchange's,
+%% never a rekeying's, until authentication succeeds (ssh_fsm_userauth_server).
+first_input(#ssh{session_id = undefined}, PlainText) -> PlainText;
+first_input(#ssh{kex_input = Input}, _PlainText) -> Input.
+
 %%
 %% The host key should be read from storage
 %%
 get_host_key(SignAlg, Opts) ->
     case call_KeyCb(host_key, [SignAlg], Opts) of
+        {ok, {ssh2_pubkey, Blob}} ->
+            case is_held_host_key(Blob, SignAlg, Opts) of
+                true -> {ssh2_pubkey, Blob};
+                false -> exit({error, bad_hostkey})
+            end;
 	{ok, PrivHostKey} ->
             %% Check the key - the KeyCb may be a buggy plugin
             case valid_key_sha_alg(private, PrivHostKey, SignAlg) of
@@ -1119,6 +1162,32 @@ get_host_key(SignAlg, Opts) ->
 	Result ->
             exit({error, {Result, unsupported_key_type}})
     end.
+
+%% A host key the callback holds and signs with in sign/3, named by its public
+%% blob: usable when the module exports sign/3 and the blob is the one encoding
+%% of a public key of SignAlg, so the key the exchange hashes is the blob.
+is_held_host_key(Blob, SignAlg, Opts) when is_binary(Blob) ->
+    key_cb_exports(sign, 3, Opts) andalso
+        try ssh_message:ssh2_pubkey_decode(Blob) of
+            Key ->
+                ssh_message:ssh2_pubkey_encode(Key) =:= Blob andalso
+                    valid_key_sha_alg(public, Key, SignAlg)
+        catch
+            _:_ -> false
+        end;
+is_held_host_key(_Blob, _SignAlg, _Opts) ->
+    false.
+
+%% The public half of what get_host_key/2 answers.
+host_public_key({ssh2_pubkey, Blob}) -> ssh_message:ssh2_pubkey_decode(Blob);
+host_public_key(PrivHostKey) -> ssh_file:extract_public_key(PrivHostKey).
+
+%% Whether the key callback module exports F/Arity. erXos's hooks are optional
+%% callbacks, and a module written for stock OTP exports none of them.
+key_cb_exports(F, Arity, Opts) ->
+    {KeyCb, _KeyCbOpts} = ?GET_OPT(key_cb, Opts),
+    _ = code:ensure_loaded(KeyCb),
+    erlang:function_exported(KeyCb, F, Arity).
 
 call_KeyCb(F, Args, Opts) ->
     {KeyCb,KeyCbOpts} = ?GET_OPT(key_cb, Opts),
@@ -1766,10 +1835,16 @@ sign(SigData, SignAlg, Key, #ssh{opts=Opts}) when is_atom(SignAlg) ->
                       proplists:get_value(public_key,
                                           ?GET_OPT(preferred_algorithms,Opts,[]))) of
         true ->
-            {ok, sign(SigData, sha(SignAlg), Key)};
+            {ok, sign_with(SigData, SignAlg, Key, Opts)};
         false ->
             {error, unsupported_sign_alg}
     end.
+
+%% A key the callback holds signs in its sign/3; any other is a private key.
+sign_with(SigData, _SignAlg, {ssh2_pubkey, Blob}, Opts) ->
+    call_KeyCb(sign, [Blob, SigData], Opts);
+sign_with(SigData, SignAlg, Key, _Opts) ->
+    sign(SigData, sha(SignAlg), Key).
 
 sign(SigData, HashAlg, #{algorithm:=dss} = Key) ->
     mk_dss_sig(crypto:sign(dss, HashAlg, SigData, Key));
@@ -2313,6 +2388,11 @@ hash(K, H, Ki, N, HashAlg) ->
 %%%----------------------------------------------------------------
 kex_hash(SSH, Key, HashAlg, Args) ->
     crypto:hash(HashAlg, kex_plaintext(SSH,Key,Args)).
+
+%% A server's exchange hash and the input it hashed, computed once.
+server_kex_hash(SSH, Key, HashAlg, Args) ->
+    PlainText = kex_plaintext(SSH, Key, Args),
+    {crypto:hash(HashAlg, PlainText), PlainText}.
 
 
 kex_plaintext(SSH, Key, Args) ->

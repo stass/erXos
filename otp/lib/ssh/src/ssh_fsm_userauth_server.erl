@@ -19,6 +19,7 @@
 %%
 %% %CopyrightEnd%
 %%
+%% Modified by erXos: connected_state/5 drops the first exchange's hash input.
 %%
 %%----------------------------------------------------------------------
 %% Purpose: Handles an ssh connection, e.i. both the
@@ -178,7 +179,9 @@ connected_state(Reply, Ssh1, User, Method, D0) ->
     D1#data{auth_user=User,
             %% Note: authenticated=true MUST NOT be sent
             %% before send_msg!
-            ssh_params = Ssh#ssh{authenticated = true}}.
+            %% The first exchange's hash input, kept for the key callback's
+            %% verify_user/6, holds that exchange's shared secret: it ends here.
+            ssh_params = Ssh#ssh{authenticated = true, kex_input = undefined}}.
 
 set_alive_timeout(#data{ssh_params = #ssh{opts=Opts}}) ->
     {_AliveCount, AliveInterval} = ?GET_ALIVE_OPT(Opts),
