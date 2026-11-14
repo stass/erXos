@@ -3,11 +3,13 @@
 
 -module(erx_pattern_test).
 -moduledoc """
-The display suite's client (tools/lib/erx/display_domain.rb): the session a
-start row keeps on the display, granted to it as `screen`, which opens a window with
-`erx_win:open/2`, draws a known pattern into its buffer and presents it, so
-a screenshot of the display shows the pattern (docs/design-display.md,
-"Erlang clients" and "A display's session").
+The display suite's client (tools/lib/erx/display_domain.rb): a session the
+start row keeps on the display. It opens a window with `erx_win:open/2` on
+the grant its registry holds under the display's service name, `display`
+(docs/design-system.md, "Facets a configured domain serves"), draws a known
+pattern into the window's buffer and presents it, so a screenshot of the
+display shows the pattern (docs/design-display.md, "Erlang clients" and
+"A display's session").
 
 show/0 logs `erx_pattern_test: started`, then opens the window, retrying
 while the session holds no grant of the display or no pixel area to it,
@@ -26,7 +28,7 @@ ends when its holder does.
 
 -export([show/0, pattern/0]).
 
--define(DISPLAY, screen).
+-define(DISPLAY, display).
 -define(POLLS, 240).
 -define(POLL_MS, 500).
 %% The fill's three constants are erx_screen's (erlang/apps/erx_display/src/erx_screen.erl).

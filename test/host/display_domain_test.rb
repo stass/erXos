@@ -46,18 +46,30 @@ class DisplayDomainTest < Minitest::Test
     assert_equal before.lines.size + Suite::CLIENT.lines.size, ours.lines.size
   end
 
-  # Property 18's sum for screen, the client template's one grant of the display for each
-  # session its domains quota allows, is what the display's outer budget gains; the start
-  # row, enabled, names the display, and the template boots the client's test script.
+  # Property 18's sum for the client template's one grant of the display for each session
+  # its domains quota allows is what the display's outer budget gains; the start row,
+  # enabled, names the display, and the template boots the client's test script.
   def test_the_display_s_grants_fit_its_outer_budget
     assert_equal Suite::CLIENT_SESSIONS * (Suite::PIXELS + Suite::LANE), Suite::CLIENT_AREAS
     assert_equal Suite::CLIENT_SESSIONS, figure(Suite::CLIENT, 'domains')
     assert_equal Suite::PIXELS, Integer(Suite::CLIENT[/^  parameter pixels ([0-9]+)$/, 1], 10)
-    assert_match(/^facet screen\n  grantee @session\.client\n  service @service\.display\n/, Suite::CLIENT)
+    assert_match(/^facet display\n  grantee @session\.client\n  service @service\.display\n/, Suite::CLIENT)
     assert_match(/^start client\n  enable YES\n  display @service\.display\n/, Suite::CLIENT)
     assert_match(/^  release @artifact\.pattern$/, Suite::CLIENT)
     assert Suite::BOOT.test
     assert_includes Suite::BOOT.applications, 'erx_pattern_test'
+  end
+
+  # A domain's registry holds each facet under its service's name, the service record's
+  # name field or else the record's own name, never under the facet record's name
+  # (docs/design-system.md, "Facets a configured domain serves"). The name
+  # erx_pattern_test opens is the display service's in the manifest the suite boots; any
+  # other name finds no grant, and the client polls until the suite's wait runs out.
+  def test_the_client_opens_the_display_by_its_service_name
+    service = record(Suite.manifest(KEPT), "service #{Suite::SERVICE}")
+    registry_name = service[/^  name "?([a-z_]+)"?$/, 1] || Suite::SERVICE
+    source = File.read(File.join(ROOT, 'test/erlang/apps/erx_pattern_test/src/erx_pattern_test.erl'))
+    assert_equal registry_name, source[/^-define\(DISPLAY, ([a-z_]+)\)\.$/, 1]
   end
 
   # The manifest check admits the suite's manifest, properties 4 and 18 among its own,

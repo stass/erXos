@@ -64,10 +64,12 @@ module Erx
     DOMAIN = 'display'
     SERVICE = 'display'
     # The display's client (docs/design-display.md, "A display's session"): principal
-    # client, whose session template is granted the display's window tree as screen, the
-    # name erx_pattern_test opens, with a pixel area of PIXELS bytes, enough for a 1920 by
-    # 1080 screen of 32-bit pixels (8,294,400 bytes). Its domains quota, CLIENT_SESSIONS,
-    # is how many sessions of the template can live at once, each a grant the display pays for.
+    # client, whose session template is granted the display's window tree with a pixel
+    # area of PIXELS bytes, enough for a 1920 by 1080 screen of 32-bit pixels (8,294,400
+    # bytes). The session's registry holds the grant under the service's name, SERVICE,
+    # which erx_pattern_test opens (docs/design-system.md, "Facets a configured domain
+    # serves"). Its domains quota, CLIENT_SESSIONS, is how many sessions of the template
+    # can live at once, each a grant the display pays for.
     PIXELS = 8 << 20
     CLIENT_SESSIONS = 1
     LANE = 4096
@@ -79,14 +81,14 @@ module Erx
     # its memory and its outer budget, on the users share.
     CLIENT_MEMORY = (36 << 20) + MediumBoot::DOMAIN_OUTER
     # The client: its principal and session template, whose release is BOOT's, the
-    # session's grant of the display, named screen, and its start row, enabled, which names the
-    # display as the session's, so the session the row keeps is the display's.
+    # session's grant of the display, and its start row, enabled, which names the display
+    # as the session's, so the session the row keeps is the display's.
     CLIENT = "principal client\n  memory #{CLIENT_MEMORY}\n  grant @share.users\n  domains #{CLIENT_SESSIONS}\n" \
              "  names 1\n  default_limits @limits.native\n  ceiling_limits @limits.native\n" \
              "session client\n  limits @limits.session\n  runtime @artifact.emu\n  release @artifact.#{BOOT.name}\n" \
              "  args \"-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx " \
              "-eval ok=application:start(erx_session)\"\n" \
-             "facet screen\n  grantee @session.client\n  service @service.#{SERVICE}\n  operations none\n" \
+             "facet #{SERVICE}\n  grantee @session.client\n  service @service.#{SERVICE}\n  operations none\n" \
              "  max_request 131072\n  in_flight 16\n  reductions 100000\n  period_ns 1000000000\n" \
              "  max_heap_size 262144\n  parameter pixels #{PIXELS}\n" \
              "start client\n  enable YES\n  display @service.#{SERVICE}\n"
