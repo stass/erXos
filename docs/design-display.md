@@ -1734,8 +1734,13 @@ A device in another domain, such as a touch controller on a bus the
 devices domain holds, is served by its driver there as a file of
 records, in the binary form `abi/formats/input.txt` declares, in a tree
 of that domain which the manifest grants the display domain read-only,
-an instance of `files`. The display's reader of that file is the
-source of its records: it holds each to the bounds of `record()`,
+an instance of `files`. A granted tree may hold several such files, as
+a USB controller's domain serves one for each of its input numbers
+([design-usb.md](design-usb.md#hid-reaches-the-display)); the display
+starts one reader for each file the tree holds when the grant arrives,
+and the set does not change while the serving domain lives, so the
+router's sources stay fixed by the manifest. Each reader is the
+source of its file's records: it holds each to the bounds of `record()`,
 drops and counts one outside them, and ends when the file ends or a
 read fails, so the router releases what that device held. It has one
 read outstanding, of at most the file protocol's 64 KiB, and makes the

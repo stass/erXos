@@ -2483,18 +2483,24 @@ the VL805's internal hub types into the kiosk.
   and a display domain that reads input files
   ([design-usb.md](design-usb.md#open-decisions), decision 2).
 * **(c) The BCM2711 bridge and the VL805 on the Pi 4, on the stopgap.**
-  The bridge driver translated from FreeBSD's `bcm2838_pci.c`, the
-  board probes B1 to B7, the VL805's firmware check and its INTx line
-  ([design-usb.md](design-usb.md#the-bcm2711-bridge); decisions 1 and
-  3), beside [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)'s board
-  work. The bridge driver and the probes proceed beside (b); the
-  controller is (b)'s code.
+  The bridge driver with the vendor's bring-up from the clean-room facts
+  record, its link check, its keep-or-reset decision and its clean
+  turn-off, the board probes B1 to B8, the VL805's firmware check and
+  its INTx line ([design-usb.md](design-usb.md#the-bcm2711-bridge);
+  decisions 1 and 3), beside
+  [1b-I](#1b-i-the-raspberry-pi-4-on-the-stopgap)'s board work. The
+  bridge driver and the probes proceed beside (b); the controller is
+  (b)'s code. The part is complete only with its dependencies in
+  place: 1b-I's board boot and display, the binary form of input
+  records and a display domain that reads input files, (b)'s TRB form
+  and controller, and the device NIF's non-coherent DMA verified on the
+  board.
 * **(d) On erXos's kernel.** QEMU `virt` at
   [M9's kernel part](#m9-a-driver-is-an-erlang-process), with the
   kernel's MSI frame and the IOMMU window; the Pi 4 at
   [M12](#m12-storage-networking-boards).
 * **(e) DWC2 on QEMU `raspi4b`.** Later and optional
-  ([design-usb.md](design-usb.md#deferred-dwc2); decision 6).
+  ([design-usb.md](design-usb.md#deferred-dwc2); decision 5).
 
 Mass storage's files on a stick also need the FAT server, which
 [Beyond the plan](#beyond-the-plan) places after M13; until then (b)
@@ -2504,11 +2510,15 @@ and (c) test drives with a raw window client.
 targets pass their budgets, each with its seeded fault failing them;
 its QEMU suite passes with its seeded fault failing it, or, for (c),
 the board's checklist passes; a malformed report or status block ends
-at most its function; and a device unplugged in every state leaves no
-slot, place or window behind. On the stopgap, a case that checks
-isolation between domains, a bound on memory or CPU, or a neighbour's
-latency reports `unsupported`, as
-[design-usb.md](design-usb.md#on-the-stopgap) records.
+at most its function; a device unplugged in every state leaves no
+slot, place or window behind; and the stack's own bounds, its queue,
+block, process and backlog capacities and its per-call work, hold
+under the storm cases on both phases. On the stopgap, only a case that
+checks a guarantee the kernel enforces, isolation between domains, a
+domain held to its budget or a neighbour's latency, reports
+`unsupported`, as [design-usb.md](design-usb.md#on-the-stopgap)
+records. For (c), the board checklist includes writing, flushing and
+reading back a stick and removing it during writes.
 
 ## M10: Users without a container runtime
 

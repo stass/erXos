@@ -7113,9 +7113,11 @@ other than the CPU's, where a physical address would be wrong
   addresses, in the node's own `#address-cells`, to its parent bus's
   addresses, in the parent's `#address-cells`, over a length in the
   node's own `#size-cells` (section 2.3.5, p. 14, for the cells and
-  their defaults of 2 and 1); a count other than 1 or 2, a PCI bus's
-  three among them, whose meaning the specification leaves to the PCI
-  bus binding (section 2.4.4, p. 22), gives the device no windows. The
+  their defaults of 2 and 1); a count other than 1 or 2 gives the device
+  no windows, except a PCIe function's host bridge's three, whose meaning
+  the specification leaves to the PCI bus binding (section 2.4.4, p. 22)
+  and which the reader takes as FreeBSD takes a bridge's `ranges`
+  ([design-device-tree.md](design-device-tree.md#the-reader)). The
   walk goes up from the device's bus, the parent of its node or, for a
   PCIe function, its host bridge's node, whose own `dma-ranges` is the
   first level, to the root, and carries the device's windows through

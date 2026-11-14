@@ -291,11 +291,20 @@ A count other than 1 or 2, read for a non-empty `dma-ranges`, gives the
 DMA facts the status `cells`, and read for a framebuffer's `reg`, the
 framebuffer `malformed`, so every address and length read fits 64 bits,
 and every sum is checked for overflow. A PCI host
-bridge's `dma-ranges` are among them: its child addresses take three
-cells, whose meaning the specification leaves to the PCI bus binding
-(section 2.4.4, p. 22), which no source read for this design gives, so
-an unconfined PCIe function whose walk crosses such a level gets no DMA
-range. No device the manifests give DMA memory is one.
+bridge's `dma-ranges` are the one exception: its child addresses take
+three cells, whose meaning the specification leaves to the PCI bus
+binding (section 2.4.4, p. 22). The reader takes them as FreeBSD's
+generic host driver takes a bridge's `ranges`
+(`parse_pci_mem_ranges`, `sys/dev/pci/pci_host_generic_fdt.c:179-230`,
+FreeBSD `release/15.1.0-p6`, SHA-256
+`054d4c979103b417cbe5d427aa45fb05ffd62757e2ca280fe18bc9fbe2333994`):
+the first cell carries the space code at bits 24 and 25, and the next
+two are the 64-bit PCI address. An entry whose space code names I/O
+space is skipped, since no DMA goes there. Three cells are accepted only
+at the level the row names as a PCIe function's host bridge (The DMA
+facts, below), and elsewhere give `cells`. The Raspberry Pi 4's PCIe bridge
+is such a node, and its one entry maps PCI address 0 to physical 0 for
+3 GiB ([design-usb.md](design-usb.md#the-bcm2711-bridge)).
 
 **Walking up.** A walk from a node to the root takes the node's path from
 the root in one pass of `fdt_next_node` from the tree's start, keeping the
@@ -517,10 +526,12 @@ ran.
   node, each give `coherence`; `dma-coherent = <0>` gives `malformed`; a
   bus without `dma-ranges` between the device and a non-empty level
   gives `malformed`; a device with no non-empty level over two separate
-  memory ranges gives the one window `0`, `0`, `2^64 - 1`; a PCI host
-  bridge whose `dma-ranges` take three cells gives its function `cells`;
-  a PCIe function under a host bridge with two-cell `dma-ranges` is
-  translated by them; 1,024 child entries onto one parent range under a
+  memory ranges gives the one window `0`, `0`, `2^64 - 1`; a PCIe
+  function under a host bridge whose three-cell `dma-ranges` holds one
+  memory entry and one I/O entry is translated by the memory entry
+  alone; a three-cell child count on a level that is not the function's host
+  bridge gives `cells`; a PCIe function under a host bridge with
+  two-cell `dma-ranges` is translated by them; 1,024 child entries onto one parent range under a
   level that splits it 1,024 ways gives `ranges`. Seeds: the reader
   takes the nearest marked ancestor's coherence, and the parent-bus
   fixture reads as coherent; the marks tested for presence only, and
