@@ -2293,8 +2293,20 @@ TIME-WAIT is a state of the connection process, as FreeBSD 15 keeps it a
 state of the full control block (`tcp_twstart`, `tcp_timewait.c:148`).
 The process hibernates for the 2MSL period, 60 s, or 20 ms when the peer
 is one of the machine's own addresses (`tcp_eff_msl`'s `TCPTV_MSL_LOCAL`,
-which the control block's `local_peer` selects, set by whoever makes it),
-so it holds only its smallest heap. `erx_tcp_timewait` keeps FreeBSD's
+`tcp_timewait.c:115-135`, `tcp_timer.h:77`), so it holds only its
+smallest heap. The control block's `local_peer` selects the lifetime: the
+connection's process sets it when it makes the block, at a connect or an
+adoption, from the configuration it reads then
+(`erx_net_frame:is_own/2`, the test of `in_localip` and `in6_localip`,
+`in.c:154-166`, `in6.c:1844-1859`), where FreeBSD asks at TIME-WAIT's
+start and again when a retransmitted FIN restarts it
+(`tcp_timewait.c:184`, `:332`); an address added or removed during the
+connection is not seen.
+Until the period ends the connection's key holds its port against a
+listen without `reuseaddr` (rule 4 of **Explicit binds**, in
+[Ports and the demultiplexing table](#ports-and-the-demultiplexing-table)),
+so a loopback connection's port is free again 20 ms after its TIME-WAIT
+starts, as on FreeBSD. `erx_tcp_timewait` keeps FreeBSD's
 rules (`tcp_twcheck`, `tcp_timewait.c:197`), and the step hands it every
 segment that reaches the connection in TIME-WAIT in place of the
 pipeline: a RST is dropped (RFC 1337); a new SYN that RFC 6191 allows, by
@@ -4730,7 +4742,8 @@ since an IPv6 socket is IPv6-only:
    socket, another grant's connected keys count too, as there);
 4. without `reuseaddr` and `reuseport`, any key on the port whose local
    address is the same, or either of them `any`, refuses, connections
-   included, since `in_pcbbind_setup` then looks up with
+   included, one in TIME-WAIT until its 2MSL period ends
+   ([TIME-WAIT](#time-wait)), since `in_pcbbind_setup` then looks up with
    `INPLOOKUP_WILDCARD` (`:1031-1032`) and that lookup matches
    connected sockets (`in_pcblookup_local`, `:2035-2085`);
 5. with either option, a key without a remote end on exactly the same
@@ -6969,6 +6982,27 @@ returns the error. The case is a documented difference: it fails when
 erXos's answer changes, or when stock's stops differing from it.
 *Seeded failure:* a listener that keeps an ended connection queued,
 under which erXos's `accept` returns it.
+
+**`listen`, `accept` and `controlling_process`, against stock.** One
+scenario runs on stock OTP's `gen_tcp` over the host's loopback and on
+`erx_gen_tcp` over the stack's `lo0`, and every step must answer the
+same on both, on every development host: a listening socket's options
+and refusals, `accept`'s timeout, the options an accepted socket starts
+with, `controlling_process`'s answers and the messages that move with
+it, a close under a waiting `accept`, and `listen`'s answers for a port
+another listener holds, a local address, a bad port and the defaults. A
+port held only by a loopback connection in TIME-WAIT is checked against
+FreeBSD's rule instead ([TIME-WAIT](#time-wait)): with each side closing
+first once, a `listen` on that side's port without `reuseaddr`
+succeeds once the 20 ms have passed (the test polls for up to 5 s), and
+stock is compared on a
+FreeBSD host only, since on macOS stock OTP 29.1.2 is refused for
+longer than the test waits (its MSL, `net.inet.tcp.msl`, is 15 s, and it
+has no shorter local lifetime as a sysctl; its source is not read here).
+The case checks that the port comes free, not that it was held before:
+a refusal right after the close would race the 20 ms. *Seeded failure:* a control block
+made with `local_peer` false, under which the `listen` is refused for
+60 s.
 
 **Against FreeBSD.** A packet script for a listener of backlog 1 that
 never accepts draws, at the third handshake's ACK, the same RST from

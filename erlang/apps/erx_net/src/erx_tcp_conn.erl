@@ -220,6 +220,7 @@ init(#{owner := Owner, origin := Origin, from := From, remote := {Raddr, Rport},
                                                              grant => Grant}, Now),
         {TcbGen, Rand} = erx_net_rand:split(Rand1),
         Tcb = erx_tcp_user:new(#{family => inet, local => {Src, Port}, remote => {Raddr, Rport},
+                                 local_peer => erx_net_frame:is_own(Raddr, Snap),
                                  iss => Iss, ts_offset => TsOffset,
                                  cc => erx_tcp_cc_cubic, loss => erx_tcp_loss_dupack,
                                  snd_hiwat => SndBuf, rcv_hiwat => RcvBuf, gen => TcbGen,
@@ -294,7 +295,8 @@ adopt(#{entry := #{credit := Unit, grant := Grant, accept := Init}, conn := Conn
               end,
     case Adopted of
         {{ok, Token}, Path1} ->
-            queue(Accept, Token, Path1, ConfigGen);
+            LocalPeer = erx_net_frame:is_own(Remote, Snap),
+            queue(Accept, Token, Path1, ConfigGen, LocalPeer);
         {{error, _}, _} ->
             ok = erx_net_credit:release(Unit, 1),
             %% A full sender credit drops the RST, as a full queue drops any; the peer's
@@ -311,11 +313,12 @@ grant_adopt(Grant, Sizes) ->
     end.
 
 %% Adopted: linked to the listener and queued on it under the unit, then the control block
-%% made from the handshake and the completing segment stepped, and the loop entered queued.
+%% made from the handshake, with LocalPeer whether the peer is one of the stack's addresses,
+%% and the completing segment stepped, and the loop entered queued.
 %% A listener already gone answers the link with its exit, which the loop takes as an abort.
 queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init}, conn := Conn,
         handshake := Handshake, segment := Segment, gen := Rand0, credit := Credit},
-      Token, #{mtu := Mtu, iface := #{driver_credit := Tx}} = Path, ConfigGen) ->
+      Token, #{mtu := Mtu, iface := #{driver_credit := Tx}} = Path, ConfigGen, LocalPeer) ->
     ok = (erx_net_sup:runtime()):serve(?MAX_IN_FLIGHT + 2),
     true = link(Listener),
     ok = erx_net_credit:send(Listener, {queued, self()}),
@@ -325,7 +328,8 @@ queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := 
                    route = ok},
     {Tcb, Actions} = erx_tcp_user:accepted(Handshake,
                                            Init#{family => family(Local), local => {Local, Lport},
-                                                 remote => {Remote, Rport}, gen => TcbGen},
+                                                 remote => {Remote, Rport}, local_peer => LocalPeer,
+                                                 gen => TcbGen},
                                            Ctx),
     S0 =#state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
                 owner_ref = none, origin = Origin, grant = Grant, token = Token, connect = none,

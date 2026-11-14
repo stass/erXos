@@ -18,7 +18,12 @@ socket's options at the time of the accept; controlling_process's answers to its
 another process, a dead process and the new owner's messages, which move with it; the new
 owner's exit closing the socket; a listening socket moved to another owner; an accept
 waiting when its listening socket closes, and the calls after the close; and the
-listen-time answers of a port in use, a local address, a bad port and the defaults.
+listen-time answers of a port another listener holds, a local address, a bad port and the
+defaults.
+
+A port held only by a loopback connection in TIME-WAIT is a case of its own, against
+FreeBSD's rule: free 20 ms after the close, where macOS holds it for the full 2MSL, so
+stock is its oracle on a FreeBSD host only.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -90,13 +95,73 @@ scenario(#{listen := Listen, connect := Connect}) ->
         [{waiting_accept_at_close, receive {pending, Pending} -> Pending after ?WAIT -> none end},
          {accept_after_close, gen_tcp:accept(L2, 0)},
          {cp_after_close, gen_tcp:controlling_process(L2, self())}],
+    %% The port of a listener still open: the port L had is held now only by the accepted
+    %% connection's TIME-WAIT, whose length differs between hosts (time_wait_test_/0).
+    {ok, L4} = Listen(0, []),
+    {ok, {_, Port4}} = inet:sockname(L4),
     ListenTime =
-        [{port_in_use, Listen(Port, [])},
+        [{port_in_use, Listen(Port4, [])},
          {local_address, address(Listen(0, [{ip, ?LOOPBACK}]))},
          {bad_port, try Listen(70000, []) catch exit:Reason -> {exit, Reason} end},
          {default_opts, (fun() -> {ok, L3} = Listen(0, []), inet:getopts(L3, [active, mode]) end)()}],
-    _ = [gen_tcp:close(S) || S <- [C, L]],
+    _ = [gen_tcp:close(S) || S <- [C, L, L4]],
     lists:append([Listening, Accepted, Moved, MovedListener, Closed, ListenTime]).
+
+%% A port that only a connection in TIME-WAIT holds, its peer one of the machine's own
+%% addresses, is free once 2 * TCPTV_MSL_LOCAL, 20 ms, has passed (tcp_eff_msl and
+%% tcp_twstart, sys/netinet/tcp_timewait.c:115-135 and :147-186; tcp_timer.h:77), so a
+%% listen on it without reuseaddr answers ok, as in_pcbbind_avail finds nothing on the port
+%% (in_pcb.c:958-998). Each side closes first once: the accepted connection, whose TIME-WAIT
+%% holds the listening port, and the connecting one, whose TIME-WAIT holds its ephemeral
+%% port. Stock answers the same on a FreeBSD host; on macOS it is refused for longer than
+%% this waits (an MSL, net.inet.tcp.msl, of 15 s and no local one as a sysctl), so stock is
+%% compared on FreeBSD only.
+time_wait_test_() ->
+    {setup, fun start_stack/0, fun stop_stack/1,
+     {timeout, 60,
+      fun() ->
+              Erx = time_wait(fun erx_gen_tcp:listen/2, connect(erx_gen_tcp)),
+              ?assertEqual([{accepted_closes_first, ok}, {connecting_closes_first, ok}], Erx),
+              case os:type() of
+                  {unix, freebsd} ->
+                      ?assertEqual(Erx, time_wait(fun gen_tcp:listen/2, connect(gen_tcp)));
+                  _ ->
+                      ok
+              end
+      end}}.
+
+time_wait(Listen, Connect) ->
+    [{accepted_closes_first, closed_first(accepted, Listen, Connect)},
+     {connecting_closes_first, closed_first(connecting, Listen, Connect)}].
+
+%% Whether the port of the side that closes first takes a listener again within ?WAIT ms:
+%% ok, or the last refusal.
+closed_first(Side, Listen, Connect) ->
+    {ok, L} = Listen(0, [{active, false}]),
+    {ok, {_, Port}} = inet:sockname(L),
+    {ok, C} = Connect(Port, [{active, false}]),
+    {ok, A} = gen_tcp:accept(L, ?WAIT),
+    ok = gen_tcp:close(L),
+    {First, Second} = case Side of
+                          accepted -> {A, C};
+                          connecting -> {C, A}
+                      end,
+    {ok, {_, Held}} = inet:sockname(First),
+    ok = gen_tcp:close(First),
+    {error, closed} = gen_tcp:recv(Second, 0, ?WAIT),
+    ok = gen_tcp:close(Second),
+    relisten(Listen, Held, erlang:monotonic_time(millisecond) + ?WAIT).
+
+relisten(Listen, Port, Deadline) ->
+    case Listen(Port, []) of
+        {ok, S} ->
+            gen_tcp:close(S);
+        {error, _} = Refused ->
+            case erlang:monotonic_time(millisecond) < Deadline of
+                true -> timer:sleep(20), relisten(Listen, Port, Deadline);
+                false -> Refused
+            end
+    end.
 
 %% What F answers in a process of its own.
 elsewhere(F) ->

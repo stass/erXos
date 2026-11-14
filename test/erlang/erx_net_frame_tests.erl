@@ -97,6 +97,19 @@ loopback_for_an_address_of_the_stack_test() ->
                  via(path({v6("fe80::5"), eth1}))),
     #{iface := #{mtu := 16384}} = path(v4("127.0.0.1")).
 
+%% The peer test of tcp_eff_msl: an address of the stack, compared with its zone.
+own_addresses_test() ->
+    Snap = config(),
+    ?assert(erx_net_frame:is_own(v4("127.0.0.1"), Snap)),
+    ?assert(erx_net_frame:is_own(v4("10.1.0.5"), Snap)),
+    ?assert(erx_net_frame:is_own({v6("fe80::5"), eth0}, Snap)),
+    ?assert(erx_net_frame:is_own(v6("2001:db8::5"), Snap)),
+    ?assertNot(erx_net_frame:is_own(v6("2001:db8::9"), Snap)),
+    ?assertNot(erx_net_frame:is_own(v4("127.0.0.2"), Snap)),
+    ?assertNot(erx_net_frame:is_own(v4("10.0.0.9"), Snap)),
+    ?assertNot(erx_net_frame:is_own({v6("fe80::5"), eth1}, Snap)),
+    ?assertNot(erx_net_frame:is_own(v6("fe80::5"), Snap)).
+
 zoned_destinations_take_their_zone_test() ->
     ?assertEqual({eth1, v6("fe80::9"), neighbour, v6("fe80::15")}, via(path({v6("fe80::9"), eth1}))),
     ?assertEqual({eth0, v6("fe80::9"), neighbour, v6("fe80::5")}, via(path({v6("fe80::9"), eth0}))),

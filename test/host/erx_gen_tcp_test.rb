@@ -9,12 +9,21 @@ require_relative 'erx_net_eunit'
 # test/erlang/erx_gen_tcp_tests.erl: the calls it does not offer, and a host name
 # resolved before the grant is asked; and listen, accept and controlling_process against
 # stock's gen_tcp, over the stack's lo0 and the host's loopback
-# (test/erlang/erx_gen_tcp_listen_tests.erl).
+# (test/erlang/erx_gen_tcp_listen_tests.erl), with a loopback connection's TIME-WAIT
+# checked against FreeBSD's 20 ms and a seeded fault in its lifetime.
 class ErxGenTcpTest < Minitest::Test
   include ErxNetEunit
 
   def test_listen_accept_and_controlling_process_answer_as_stock_does
     assert_erx_net_eunit(:erx_gen_tcp_listen_tests)
+  end
+
+  # Every control block made with a remote peer's TIME-WAIT lifetime: a loopback
+  # connection's port stays held for 60 s instead of 20 ms.
+  def test_seeded_full_time_wait_on_loopback_is_caught
+    fault = ['local_peer = maps:get(local_peer, Init, false),', 'local_peer = false,']
+    output = refute_erx_net_eunit(:erx_gen_tcp_listen_tests, fault: { 'erx_tcp_user' => fault })
+    assert_match(/time_wait_test_/, output)
   end
 
   def test_unsupported_calls_and_host_names_pass_under_eunit

@@ -217,7 +217,7 @@ holds the pseudo-header's sum, not complemented. The transport's copy finishes i
 -include("erx_tcp_wire.hrl").
 -include("erx_udp_wire.hrl").
 
--export([snapshot/3, addresses/1, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1,
+-export([snapshot/3, addresses/1, is_own/2, path/3, tcp/3, tcp/4, no_template/0, template/2, cut/1,
          run_tail/2, frames/1, units/1, udp/5, ip/4, address/3, link/3, finish/1,
          finishable/2]).
 
@@ -352,6 +352,18 @@ model of `ip_input` accepts a packet to on any interface (`ip_input.c:696-720`, 
 -spec addresses(snapshot()) -> [erx_net_addr:addr()].
 addresses(#{addrs := Addrs}) ->
     [Addr || #{addr := Addr} <- Addrs].
+
+-doc """
+Whether Addr, zoned as a key holds it, is one of the stack's addresses in the snapshot,
+compared with its zone, as `in_localip` and `in6_localip` decide it (`in.c:154-166`,
+`in6.c:1844-1859`): the addresses a path reaches through the loopback interface.
+""".
+-spec is_own(zoned(), snapshot()) -> boolean().
+is_own(Addr, #{addrs := Addrs} = Snap) ->
+    case destination(Addr, #{}, Snap) of
+        {ok, Dst, Zone} -> own(Dst, Zone, Addrs) =/= none;
+        {error, _} -> false
+    end.
 
 %% --- Paths --------------------------------------------------------------------
 

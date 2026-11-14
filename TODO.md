@@ -2047,12 +2047,15 @@ it; git history is the record of completed work.
   pending frames, on `lo0` local traffic, reach the log; `erx_net_loop:transmit/2` raises on a
   zone whose bytes are not iodata where its doc says `malformed`. Mark the driver `sensitive` or
   keep the loop's queue in its state, and drop a bad list as `malformed`.
-* [Low] erx_net TCP connection process: `erx_tcp_timewait` gives a peer on one of the
-  machine's own addresses the 20 ms TIME-WAIT of `tcp_eff_msl` when the control block's
-  `local_peer` is set, but nothing sets it yet: whoever builds the control block
-  (`erx_tcp_user:new/1` for a connect, the syncache's completion for an accept) must
-  pass `local_peer => true` when the route goes through the loopback interface, or
-  loopback connections wear down the grant's `time_wait` limit.
+* [Low] erx_net TCP connection process: TIME-WAIT's lifetime rests on every maker of a
+  control block passing `local_peer` (`erx_tcp_conn` `init/1` and `adopt/1`, through
+  `erx_net_frame:is_own/2`), and `erx_tcp_user:new/1` defaults a missing key to false, so a
+  new maker (the IPv6 connect) that forgets it holds loopback TIME-WAIT for 60 s without a
+  sign. Derive it instead: keep `way/4`'s `loopback` in `erx_net_frame:path()`, carry it into
+  `#tcp_ctx{}`, which `step_once/1` builds from the path that `configured/1` rebuilds at each
+  configuration change, have `erx_tcp_timewait:msl2/2` read it there, as `tcp_eff_msl` asks
+  `in_localip` at `tcp_twstart` and at a FIN's restart (`tcp_timewait.c:184`, `:332`), and
+  delete `#tcb.local_peer` and `is_own/2`.
 * [Low] erx_net TCP ICMP (`erx_tcp_icmp`, `erx_tcp_input:tcp_mss`): an MTU a too-big
   report gives in SYN-SENT lowers the MSS until the SYN-ACK, which recomputes it from the
   path, so the first full-size segment is lost again; FreeBSD keeps it in the host cache
@@ -2278,8 +2281,7 @@ handing call's socket process exit and its connection's, is not yet looked for. 
   holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed
   stays open until its owner closes it), the packet modes,
-  `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; `local_peer`
-  is never set, so a connection to one of the machine's own addresses keeps the full MSL; the
+  `getstat` and every option but `binary`, `list`, `mode`, `active` and `nodelay`; the
   connection's credit limit and buffer sizes are fixed defines, not application keys.
 * [Medium] network, `erx_tcp_conn` (`guarded/2`): a raising step must end the connection
   ([design-network-stack.md](docs/design-network-stack.md#decisions), 15): from its
