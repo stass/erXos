@@ -350,7 +350,12 @@ hardware address that tree gives a network device, as a 48-bit number, 0 for non
 domain library's boot view admits a configured row or a session template only when its own words leave room within
 `ERX_BOOT_STRINGS_MAX` for all of those at their longest (`ERX_DOM_NODE_MAX` per node name, and the record sizes of
 `include/erx/boot_words.h`), and refuses the manifest with a reason naming that reserve otherwise, so a creation never
-fails on its strings and the manifest check refuses such a row at build time. The domain runtime image's
+fails on its strings and the manifest check refuses such a row at build time. A session template's reserve
+also holds the word the library adds to the environment of every session a start row or a `onestart` starts,
+`ERX_START_FLAGS=` with `start_flags_max` bytes of start flags and its NUL
+([design-apps.md](design-apps.md#start-flags)), in the same check (`boot_strings_fit`); and the view refuses a
+session template whose own environment sets `ERX_START_FLAGS`, as it refuses a display domain's row that sets a key
+of its display record, so the value a session reads is its row's alone. The domain runtime image's
 entry, `domain_entry.c`, copies the page into its own memory and reads the copy with the same reader
 before musl's start runs, so every later read sees the page it checked; a page the reader refuses, or an argument that names no page, ends the task with the reason on the
 console and the status `ERX_FIASCO_TASK_STATUS_BOOT_PAGE` (-4), which the library's fault gate

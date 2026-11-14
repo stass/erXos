@@ -603,14 +603,25 @@ violation fails the build with the property, the record and the field:
     other than read-only is granted to a session template that a facet
     row also grants the start service's tree, `start`, so only who may
     command the start table may rewrite its settings
-    ([design-apps.md](design-apps.md#the-start-table)). Seeded
+    ([design-apps.md](design-apps.md#the-start-table)). No session
+    template's environment sets `ERX_START_FLAGS`, and every session
+    template's arguments and environment leave room in its boot page's
+    strings for that variable at its longest, `start_flags_max` bytes,
+    beside the boot view's other reserve, since the library adds it to
+    every session a start row starts
+    ([design-apps.md](design-apps.md#start-flags),
+    [Boot information](design-stopgap.md#boot-information)). Seeded
     violations: a check that plans the enabled rows alone, which admits
     a system principal whose memory holds its start row but not root's
     console session beside it; a board source that grants `etc`
-    read-write to a session template holding no `start`; and an `apps`
+    read-write to a session template holding no `start`; an `apps`
     row naming `etc` in `services` under a build whose property 19 lacks
     its `etc` exclusion, so the derived row grants `etc` to the app
-    template, which this clause still refuses.
+    template, which this clause still refuses; a boot view that does not
+    look for `ERX_START_FLAGS` in a template's environment, which admits
+    a template that sets it; and a reserve that leaves the variable out,
+    which admits a template with room for every other word but not for
+    it.
 18. **A display's pixel areas fit its budget:** every service of the
     `windows` interface has exactly one `display` record and every
     `display` record names such a service, so no grant of a display
