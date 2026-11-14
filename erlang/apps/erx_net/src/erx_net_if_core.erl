@@ -412,24 +412,8 @@ listener(#{src := Src, dst := Dst} = Head,
         Flags band ?TH_ACK =/= 0 ->
             {count(listen_syn_ack, Core0), []};
         true ->
-            MssOpt = synack_mssopt(Head, Core0),
-            {Cache, Actions} = erx_tcp_syncache:add(Conn, Tcp, Listener, MssOpt, CacheCtx, Cache0),
+            {Cache, Actions} = erx_tcp_syncache:add(Conn, Tcp, Listener, CacheCtx, Cache0),
             syncache_actions(Actions, Core0#core{syncache = Cache}, Now)
-    end.
-
-%% The MSS option a SYN-ACK to the segment's source offers (erx_tcp_mss:synack_mssopt/2):
-%% from the MTU of the route back to the peer, or the family's default without a route or
-%% configuration, as tcp_maxmtu answers 0 then. The listener's entry holds no MSS, so a
-%% wildcard listener offers each peer its own route's.
-synack_mssopt(#{family := Family, src := Peer, dst := Ours}, #core{snapshot = Snapshot}) ->
-    erx_tcp_mss:synack_mssopt(Family, path_mtu(Peer, Ours, Snapshot)).
-
-path_mtu(_Peer, _Ours, none) ->
-    0;
-path_mtu(Peer, Ours, Snapshot) ->
-    case erx_net_frame:path(Peer, #{src => Ours}, Snapshot) of
-        {ok, #{mtu := Mtu}} -> Mtu;
-        {error, _} -> 0
     end.
 
 %% syncache_expand's result (tcp_input.c:1081-1135): a handshake becomes the connection,
@@ -448,24 +432,35 @@ expanded(reset, {Ours, _, Peer, _}, {Tcp, Payload, _Ecn, _Link}, _Entry, Core, N
 %% end over the path to its foreign end; a challenge ACK charges the RST limit and is sent
 %% whatever it answers (tcp_challenge_ack_check), and charge_rst only charges it. The flow
 %% label is IPv6's and has no use over IPv4.
+%%
+%% A SYN-ACK is given its MSS option here, from the path it leaves by: tcp_mssopt over that
+%% path's MTU (erx_tcp_mss:synack_mssopt/2), as syncache_respond computes it at each send
+%% (tcp_syncache.c:1823-1827). So a wildcard listener offers each peer its own route's, and
+%% a retransmission after the route's MTU changes offers the new one.
 syncache_actions(Actions, Core0, Now) ->
     lists:foldl(fun(Action, {Core, Acc}) ->
                         {Core1, More} = syncache_action(Action, Core, Now),
                         {Core1, Acc ++ More}
                 end, {Core0, []}, Actions).
 
-syncache_action({send, Conn, Tcp, _FlowLabel}, Core, Now) ->
-    send_tcp(Conn, Tcp, Core, Now);
+syncache_action({send, Conn, #tcp{opts = Opts} = Tcp, _FlowLabel}, Core, Now) ->
+    WithMss = fun(#{family := Family, mtu := Mtu}) ->
+                      Tcp#tcp{opts = Opts#tcp_opts{mss = erx_tcp_mss:synack_mssopt(Family, Mtu)}}
+              end,
+    send_tcp(Conn, WithMss, Core, Now);
 syncache_action({challenge_ack, Conn, Tcp, _FlowLabel}, Core0, Now) ->
     {_, Core} = rst_allowed(Core0, Now),
-    send_tcp(Conn, Tcp, Core, Now);
+    send_tcp(Conn, fun(_Path) -> Tcp end, Core, Now);
 syncache_action(charge_rst, Core0, Now) ->
     {_, Core} = rst_allowed(Core0, Now),
     {Core, []}.
 
-send_tcp({Ours, _, Peer, _}, Tcp, Core, Now) ->
+%% SegmentFor is a function of the path the segment leaves by, which makes the segment.
+send_tcp({Ours, _, Peer, _}, SegmentFor, Core, Now) ->
     with_path(Peer, Ours, Core,
-              fun(Path, Gen) -> erx_net_frame:tcp(Path, [{Tcp, #{ecn => 0, df => true}, []}], Gen) end,
+              fun(Path, Gen) ->
+                      erx_net_frame:tcp(Path, [{SegmentFor(Path), #{ecn => 0, df => true}, []}], Gen)
+              end,
               Now).
 
 icmp_ctx(Now) ->

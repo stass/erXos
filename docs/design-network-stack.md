@@ -2200,7 +2200,7 @@ no other process and creates no process:
   512 buckets of 30 (`tcp_syncache.c:162-163`), with SYN-ACK
   retransmission under FreeBSD's limit and backoff, driven by the
   interface's deadlines.
-* Before it looks the SYN up, `erx_tcp_syncache:add/6` drops a SYN to
+* Before it looks the SYN up, `erx_tcp_syncache:add/5` drops a SYN to
   or from itself, from or to a multicast address or from the limited
   broadcast, the checks `tcp_input` makes before `syncache_add`
   (`tcp_input.c:1295-1338`) that read the four-tuple alone. A SYN to a
@@ -3794,10 +3794,12 @@ offered as the window, and the window shift it asks for. The MSS the
 SYN-ACK offers is not the listener's but the connection's: the
 interface computes it for each SYN-ACK from its route to the peer, with
 `erx_tcp_mss`'s translation of `tcp_mssopt`, as `syncache_respond` does
-for each connection (`tcp_syncache.c:1823-1827`), and keeps it with the
-connection's syncache entry, so a wildcard listener reached over routes
+for each SYN-ACK it sends (`tcp_syncache.c:1823-1827`): the syncache
+leaves the option for the interface to fill in as the SYN-ACK leaves,
+from the path it leaves by. So a wildcard listener reached over routes
 of different MTUs offers each peer its own route's, and a route that
-changes after `listen` changes what later SYN-ACKs offer.
+changes after `listen`, or during a handshake, changes what later
+SYN-ACKs and retransmissions offer.
 
 `accept` is what an accepted connection inherits from its listener, as
 `solisten_clone` copies the listener's socket options and buffer sizes
@@ -6870,6 +6872,9 @@ proves the case ran:
 * a wildcard listener reached through two interfaces of MTU 1,500 and
   9,000 offers MSS 1,460 in one SYN-ACK and 8,960 in the other; seeded:
   the MSS taken from the listener's entry.
+* a SYN-ACK retransmitted after its route's MTU falls from 9,000 to
+  1,500 offers MSS 1,460; seeded: the MSS its SYN found kept with the
+  syncache entry.
 
 **A connection reset before `accept`, against stock.** A peer completes
 a handshake with a listener and resets the connection before any

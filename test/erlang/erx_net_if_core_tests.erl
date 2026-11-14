@@ -359,6 +359,21 @@ syn_ack_offers_the_mss_of_the_route_to_the_peer_test() ->
     ?assertEqual(536, erx_tcp_mss:synack_mssopt(inet, 0)),
     ?assertEqual(216, erx_tcp_mss:synack_mssopt(inet, 68)).
 
+%% Each SYN-ACK is given its MSS as it leaves, from the path it leaves by, as FreeBSD's
+%% syncache_respond computes it at each send: a retransmission after the route's MTU
+%% falls from 9,000 to 1,500 offers 1,460, not the 8,960 its SYN found.
+retransmitted_syn_ack_offers_the_mss_of_the_route_it_leaves_by_test() ->
+    {Core0, [{publish, #{iface := Iface} = Rows} | _]} =
+        step(start, core(static(), (link())#{mtu := 9000})),
+    Core1 = configured(Rows, Core0),
+    {Core2, _} = step(local(who_has_me(), Core1), Core1),
+    {Core3, Out1} = to_listener(syn_frame(100), Core2),
+    ?assertMatch(#tcp{opts = #tcp_opts{mss = 8960}}, syn_ack_of(Out1)),
+    Core4 = configured(Rows#{iface := Iface#{mtu := 1500}}, Core3),
+    Deadline = erx_net_if_core:next_deadline(Core4),
+    {_, Out2} = step({expired, Deadline}, Core4, Deadline),
+    ?assertMatch(#tcp{opts = #tcp_opts{mss = 1460}}, syn_ack_of(Out2)).
+
 syn_draws_a_syn_ack_and_its_ack_completes_the_handshake_test() ->
     {Core1, Out1} = to_listener(syn_frame(100), resolved()),
     #tcp{sport = 80, dport = 4000, seq = Iss, ack = 101, opts = #tcp_opts{mss = 1460}} = syn_ack_of(Out1),

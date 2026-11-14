@@ -2180,10 +2180,8 @@ the grant's `tcp_listen` and explicit binds (`erx_net_bind:avail/2`, `update/2`,
 `erx_gen_tcp`'s `listen`, `accept` and `controlling_process`, and the QEMU case are missing; the
 grant's `sockets` limit is not built, so `adopt/2` refuses only past `buffers`; and an ICMP error quoting a SYN-ACK reaches the core as `unsupported` rather than
   `erx_tcp_syncache:unreach/3`. A SYN-ACK whose route leaves by another interface is counted `other_interface` and
-  never sent, as the closed-port RST already is. A retransmitted SYN-ACK offers the MSS its SYN found
-  (`erx_tcp_syncache` keeps it in the entry), where FreeBSD's `syncache_respond` recomputes it at each
-  send, so an MTU that drops during a handshake leaves the peer an MSS too large; filling the option
-  in at the send from the path it leaves by would remove the entry's copy. Not yet: a SYN reinjected from
+  never sent, as the closed-port RST already is.
+  Not yet: a SYN reinjected from
   TIME-WAIT (E3, counted `reinject`); the grant's limits other than `buffers`, and its account (`erx_net_grant_core`
   holds only the buffer reservations); receive-buffer autosizing (`tcp_do_autorcvbuf`, a
   `reserve_buffer` for the receive side like the send side's); `exit_on_close` (a socket whose peer closed

@@ -272,7 +272,7 @@ mssopt(Family, PathMtu, CachedMtu)
 
 -doc """
 The MSS option a SYN-ACK of the syncache carries (`syncache_respond`,
-tcp_syncache.c:1823-1827): `tcp_mssopt` over the path MTU (0 when there is no route), raised
+tcp_syncache.c:1823-1827): `tcp_mssopt` over the MTU of the path the SYN-ACK leaves by, raised
 to `tcp_minmss`, so a tiny MTU never makes us ask a peer for segments below it, and within
 the option's 16 bits.
 """.

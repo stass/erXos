@@ -121,7 +121,7 @@ Every function is pure.
 
 -include("erx_tcp_wire.hrl").
 
--export([new/0, new/1, secrets/3, rotate/2, add/6, expand/5, chkrst/4, unreach/3, expired/2,
+-export([new/0, new/1, secrets/3, rotate/2, add/5, expand/5, chkrst/4, unreach/3, expired/2,
          next_deadline/1, size/1, cookies_only/2]).
 
 -export_type([syncache/0, secrets/0, conn/0, listener/0, context/0, action/0, handshake/0,
@@ -163,8 +163,8 @@ Every function is pure.
 -doc """
 What the listener contributes to a SYN-ACK: its receive buffer (`sol_sbrcv_hiwat`, offered
 as the unscaled window up to 65,535) and the window shift it requests (the smallest that
-reaches the largest socket buffer). The MSS option is not the listener's: add/6 takes it
-for each SYN, from the route to that peer.
+reaches the largest socket buffer). The MSS option is not the listener's, nor the
+syncache's: see action().
 """.
 -type listener() :: #{rcv_buf := non_neg_integer(), rcv_scale := 0..14}.
 
@@ -176,7 +176,10 @@ A segment to transmit from `conn()`'s local end, with the IPv6 flow label, the l
 of the cookie (`syncache_add`). A `challenge_ack` also charges the RST rate limit, as
 `tcp_challenge_ack_check` charges `BANDLIM_TCP_RST`, and is sent whatever that answers;
 `charge_rst` charges it for a challenge ACK the per-entry limit suppressed, so the limit's
-count moves alike whether or not the four-tuple has an entry.
+count moves alike whether or not the four-tuple has an entry. A `send` leaves its MSS
+option `none` for the caller to fill in as it sends it, from the path it leaves by, as
+`syncache_respond` computes `tcp_mssopt` for each SYN-ACK it sends
+(tcp_syncache.c:1823-1827).
 """.
 -type action() :: {send | challenge_ack, conn(), #tcp{}, FlowLabel :: 0..16#fffff} | charge_rst.
 
@@ -216,7 +219,6 @@ four-tuple either.
 -record(entry, {irs :: erx_tcp_seq:wire(),
                 iss :: erx_tcp_seq:wire(),
                 rcv_wnd :: 0..16#ffff,
-                mss_opt :: 0..16#ffff,
                 peer_mss :: 0..16#ffff,
                 wscale :: none | {0..14, 0..14},
                 sack :: boolean(),
@@ -281,24 +283,20 @@ four-tuple already in the table updates its timestamp and may withdraw ECN, but 
 it, and draws the same SYN-ACK again with the retransmission count reset. Otherwise the SYN
 draws a SYN-ACK whose sequence number is a cookie, and makes an entry if the table is not
 paused and has room. A SYN that finds the table full pauses it (`pause/2`) and makes no
-entry. `MssOpt` is the MSS option a new entry's SYN-ACKs offer, which the caller computes
-from its route to the peer (`tcp_mssopt`), as `syncache_respond` does for each connection
-(tcp_syncache.c:1823-1827); the entry keeps it for its retransmissions, and a repeated
-SYN replaces it.
+entry.
 """.
--spec add(conn(), #tcp{}, listener(), 0..16#ffff, context(), syncache()) ->
+-spec add(conn(), #tcp{}, listener(), context(), syncache()) ->
           {syncache(), [action()]}.
-add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Listener, MssOpt,
-    #{now := Now, secrets := Secrets}, #syncache{} = Cache)
-  when ?IS_CONN(Conn), is_integer(MssOpt), MssOpt >= 0, MssOpt =< 16#ffff ->
+add(Conn, #tcp{opts = #tcp_opts{signature = Signed}} = Syn, Listener,
+    #{now := Now, secrets := Secrets}, #syncache{} = Cache) when ?IS_CONN(Conn) ->
     case not Signed andalso admissible(Conn) of
         false ->
             {Cache, []};
         true ->
             %% A paused table looks no entry up, as FreeBSD's cookiesonly path does (:1510).
             case cookies_only(Now, Cache) orelse Cache#syncache.entries of
-                #{Conn := Entry} -> repeat_syn(Conn, Entry, Syn, MssOpt, Now, Cache);
-                _ -> first_syn(Conn, Syn, Listener, MssOpt, Now, Secrets, Cache)
+                #{Conn := Entry} -> repeat_syn(Conn, Entry, Syn, Now, Cache);
+                _ -> first_syn(Conn, Syn, Listener, Now, Secrets, Cache)
             end
     end.
 
@@ -313,22 +311,20 @@ admissible({Local, _, Foreign, _}) ->
 
 %% The ECN of an entry may be withdrawn by a SYN without it, never granted.
 repeat_syn(Conn, #entry{ts = Ts0, ecn = Ecn0} = Entry0,
-           #tcp{flags = Flags, opts = #tcp_opts{ts = SynTs}}, MssOpt, Now, Cache) ->
+           #tcp{flags = Flags, opts = #tcp_opts{ts = SynTs}}, Now, Cache) ->
     Ts = case {Ts0, SynTs} of
              {{_, TsOffset}, {TsVal, _}} -> {TsVal, TsOffset};
              _ -> none
          end,
     Entry = Entry0#entry{ts = Ts, ecn = Ecn0 andalso erx_tcp_ecn:syncache_add(Flags),
-                         mss_opt = MssOpt, rxmits = 0},
+                         rxmits = 0},
     {arm(Conn, Entry, Now, Cache), [synack(Conn, Entry, Now)]}.
 
-first_syn(Conn, #tcp{seq = Irs, flags = Flags, opts = Opts}, Listener, MssOpt, Now, Secrets,
-          Cache) ->
+first_syn(Conn, #tcp{seq = Irs, flags = Flags, opts = Opts}, Listener, Now, Secrets, Cache) ->
     #{rcv_buf := RcvBuf, rcv_scale := RcvScale} = Listener,
     #tcp_opts{mss = PeerMss, wscale = SndScale, sack_permitted = Sack, ts = SynTs} = Opts,
     Entry0 = #entry{irs = Irs,
                     rcv_wnd = min(RcvBuf, ?TCP_MAXWIN),
-                    mss_opt = MssOpt,
                     peer_mss = case PeerMss of none -> 0; _ -> PeerMss end,
                     wscale = case SndScale of none -> none; _ -> {SndScale, RcvScale} end,
                     sack = Sack,
@@ -350,7 +346,7 @@ first_syn(Conn, #tcp{seq = Irs, flags = Flags, opts = Opts}, Listener, MssOpt, N
 %% entry, inserts the new one and pauses; while paused it looks no entry up and its timer
 %% drops every entry without answering. Every entry's next deadline is at most 8.2 s away
 %% and a pause lasts at least 15 s, so all are dropped within the pause, and here the pause
-%% drops them all at once and makes no entry. Only first_syn/7 makes a new entry and it
+%% drops them all at once and makes no entry. Only first_syn/6 makes a new entry and it
 %% makes none while paused, so the table stays empty until the pause ends. A pause that
 %% starts within the last pause's own length after that one ended doubles it, at most
 %% TCP_SYNCACHE_MAX_BACKOFF times; any other lasts 15 s.
@@ -631,10 +627,11 @@ challenge_ack(Conn, #entry{ack_war = War} = Entry, Now, Cache) ->
 
 synack(Conn, Entry, Now) -> respond(send, Conn, Entry, Now).
 
-%% syncache_respond: a SYN-ACK carries the MSS, window-scale, SACK-permitted and timestamp
-%% options the entry negotiated; a challenge ACK carries only the timestamp.
+%% syncache_respond: a SYN-ACK carries the window-scale, SACK-permitted and timestamp
+%% options the entry negotiated, and the MSS its sender fills in (action()); a challenge ACK
+%% carries only the timestamp.
 respond(Tag, {_, LPort, _, FPort} = Conn,
-        #entry{irs = Irs, iss = Iss, rcv_wnd = Wnd, mss_opt = MssOpt, wscale = Wscale,
+        #entry{irs = Irs, iss = Iss, rcv_wnd = Wnd, wscale = Wscale,
                sack = Sack, ts = Ts, ecn = Ecn}, Now) ->
     TsOpt = case Ts of
                 none -> none;
@@ -644,7 +641,7 @@ respond(Tag, {_, LPort, _, FPort} = Conn,
         case Tag of
             send ->
                 {Iss, erx_tcp_ecn:syncache_respond(?TH_SYN bor ?TH_ACK, Ecn),
-                 #tcp_opts{mss = MssOpt,
+                 #tcp_opts{mss = none,
                            wscale = case Wscale of none -> none; {_, RcvScale} -> RcvScale end,
                            sack_permitted = Sack, ts = TsOpt}};
             challenge_ack ->
