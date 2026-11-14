@@ -109,7 +109,9 @@ These shape every design and change; the rules below apply them.
 * **Development builds** run only trusted code until the security closure
   milestone of [docs/plan.md](docs/plan.md). Their boot banner says
   `development build: trusted code only`. Every other rule here applies to
-  them as written. That milestone is reached on erXos's own kernel: the
+  them as written, with one exception: a development build may boot a
+  platform whose DMA handover evidence is not yet recorded; the gap is a
+  security residual in `TODO.md` that blocks release. That milestone is reached on erXos's own kernel: the
   stopgap Fiasco is never hardened, though bugs found in it are fixed as
   anywhere else.
 * **Two phases.** Phase 1 of [docs/plan.md](docs/plan.md) brings the
