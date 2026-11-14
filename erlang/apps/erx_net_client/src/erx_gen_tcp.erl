@@ -58,7 +58,10 @@ Only IPv4 is taken: a host name given to `connect/4` resolves through inet's own
 tried in order within the one timeout, each by a socket process of its own. The options
 taken are the socket process's own (`binary`, `list`, `mode`, `active`, `{packet, raw}`)
 and the connection's `nodelay`; `listen/2` also takes the local address (`ip` or
-`ifaddr`) and the listener's `backlog`, `reuseaddr` and `reuseport`. What the backend
+`ifaddr`) and the listener's `backlog`, `reuseaddr` and `reuseport`. `listen/2` and
+`connect/4` first check the options as stock's gen_tcp does, with inet's own parser, so an
+option stock does not know, or a value it does not take, raises `badarg` as on stock; one
+stock takes and this backend does not is answered `{error, einval}`. What the backend
 does not offer fails with `enotsup`: `fdopen/2` and `connect/3` with a socket-address
 map.
 """.
@@ -107,6 +110,7 @@ connect_each([], _Port, _Opts, _Timer, Last) ->
 %% A socket process for one address, owned by the caller; it ends by itself when the
 %% connect fails.
 connect_one(Address, Port, Opts, Timeout) ->
+    ok = stock_takes(connect, Opts),
     {ok, Pid} = gen_statem:start(?MODULE, self(), []),
     case call(Pid, {connect, Address, Port, Opts, Timeout}) of
         ok -> {ok, {'$inet', ?MODULE, Pid}};
@@ -124,6 +128,7 @@ outside 0 to 65535 raises `badarg`, as stock's does.
 """.
 -spec listen(inet:port_number(), [term()]) -> {ok, socket()} | {error, term()}.
 listen(Port, Opts) when is_integer(Port), Port >= 0, Port =< 16#ffff, is_list(Opts) ->
+    ok = stock_takes(listen, Opts),
     maybe
         {ok, Local, Rest} ?= erx_gen_tcp_core:local(Opts),
         {ok, Own, Listener} ?= erx_gen_tcp_core:listen_options(Rest),
@@ -133,6 +138,22 @@ listen(Port, Opts) when is_integer(Port), Port >= 0, Port =< 16#ffff, is_list(Op
     end;
 listen(_Port, _Opts) ->
     exit(badarg).
+
+%% `ok` when stock's gen_tcp takes every option of Opts for a connect or a listen; else
+%% the exit stock's own backend raises for it (inet_tcp:connect/4 and listen/2), badarg.
+%% inet's parser decides, over the options without the family and the module, which
+%% gen_tcp takes out before its backend sees them (inet:tcp_module/1), so the options
+%% stock knows are never listed here.
+stock_takes(Call, Opts) ->
+    {_Module, Rest} = inet:tcp_module(Opts),
+    Parsed = case Call of
+                 connect -> inet:connect_options(Rest, inet_tcp);
+                 listen -> inet:listen_options(Rest, inet_tcp)
+             end,
+    case Parsed of
+        {ok, _} -> ok;
+        {error, Reason} -> exit(Reason)
+    end.
 
 -doc "Accepts a connection on a listening socket, waiting at most `Timeout` milliseconds.".
 -spec accept(socket(), timeout()) -> {ok, socket()} | {error, term()}.

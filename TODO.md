@@ -1946,8 +1946,11 @@ it; git history is the record of completed work.
   socket stays passive; only the first waiting recv gets a passive error's reason, the rest
   `closed` (stock's `async_error_am_all` gives all the reason); and re-arming after a recv
   met the end answers `{error, closed}` where stock sends `{tcp_closed, S}`. `listen/2` and
-  `connect/4` answer an option the backend does not take `{error, einval}`, where stock raises
-  `badarg` for one it does not know either.
+  `connect/4` answer `{error, einval}` for an option stock takes and the backend does not,
+  and for an `ip`, `ifaddr` or `port` value inet's parser takes and inet_tcp then refuses
+  (`{ip, foo}`, `{port, 70000}`), where stock raises `badarg`; stock's `connect/4` also turns
+  every `einval` of its backend into `badarg` (gen_tcp.erl:595), so erx_gen_tcp's connect
+  should raise `badarg` for each.
   The listening socket (`erx_gen_tcp`, `erx_gen_tcp_core`): it is a `listening` state of the
   connection's `#core{}`, so a listener core can hold connection fields and its protocol is
   spread over the connection's helpers; give it its own record and step sharing only the

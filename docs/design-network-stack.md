@@ -6281,7 +6281,7 @@ client domain is affected beyond its sockets.
 | `{error, timeout}` | an Erlang call's own timeout, as on stock; an `accept` whose timeout passed before a connection was paired with it; a `send` still waiting at its `send_timeout` under `send_timeout_close`, which then closes the socket |
 | `{error, {timeout, Rest}}` | a `send` still waiting at its `send_timeout` without `send_timeout_close`; `Rest` is the bytes it did not send, as the socket backend returns them |
 | `{error, emsgsize}` | a datagram larger than IP allows, or a packet over `packet_size` |
-| `{error, einval}` | an option value out of range; a socket used from a domain other than its socket process's |
+| `{error, einval}` | an option value out of range; a socket used from a domain other than its socket process's. At `listen` and `connect` an option stock does not know, or a value stock's own parser (`inet:listen_options/2`, `inet:connect_options/2`) refuses, raises `badarg` as on stock instead |
 | `{error, not_owner}` | `controlling_process/2` called by a process other than the owner, as on stock |
 | `{error, enotsup}` | `fd`, `netns`, `bind_to_device`, unknown `raw` options, SCTP |
 | `{error, badarg}` | a request the admission path refuses: wrong origin, schema or size, or past the socket protocol's requests in flight; a grant's answer that fails `erx_sock_admit`, an open's socket of another node among them; `controlling_process/2` to a process of another domain, as stock refuses one of another node |

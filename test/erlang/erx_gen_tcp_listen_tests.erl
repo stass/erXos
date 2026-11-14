@@ -19,7 +19,8 @@ another process, a dead process and the new owner's messages, which move with it
 owner's exit closing the socket; a listening socket moved to another owner; an accept
 waiting when its listening socket closes, and the calls after the close; and the
 listen-time answers of a port another listener holds, a local address, a bad port and the
-defaults.
+defaults; and what `listen` and `connect` raise for an option stock does not know and for
+a value it does not take.
 
 A port held only by a loopback connection in TIME-WAIT is a case of its own, against
 FreeBSD's rule: free 20 ms after the close, where macOS holds it for the full 2MSL, so
@@ -103,6 +104,12 @@ scenario(#{listen := Listen, connect := Connect}) ->
         [{port_in_use, Listen(Port4, [])},
          {local_address, address(Listen(0, [{ip, ?LOOPBACK}]))},
          {bad_port, try Listen(70000, []) catch exit:Reason -> {exit, Reason} end},
+         {unknown_option, raised(fun() -> Listen(0, [no_such_option]) end)},
+         {unknown_pair_option, raised(fun() -> Listen(0, [{no_such_option, true}]) end)},
+         {bad_option_value, raised(fun() -> Listen(0, [{nodelay, 2}]) end)},
+         {connect_unknown_option, raised(fun() -> Connect(Port4, [no_such_option]) end)},
+         {connect_unknown_pair_option, raised(fun() -> Connect(Port4, [{no_such_option, true}]) end)},
+         {connect_bad_option_value, raised(fun() -> Connect(Port4, [{nodelay, 2}]) end)},
          {default_opts, (fun() -> {ok, L3} = Listen(0, []), inet:getopts(L3, [active, mode]) end)()}],
     _ = [gen_tcp:close(S) || S <- [C, L, L4]],
     lists:append([Listening, Accepted, Moved, MovedListener, Closed, ListenTime]).
@@ -162,6 +169,10 @@ relisten(Listen, Port, Deadline) ->
                 false -> Refused
             end
     end.
+
+%% What F raises, as `{Class, Reason}`, or what it answers.
+raised(F) ->
+    try F() catch Class:Reason -> {Class, Reason} end.
 
 %% What F answers in a process of its own.
 elsewhere(F) ->
