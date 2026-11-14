@@ -5,11 +5,14 @@
 -moduledoc """
 EUnit cases of erx_gen_tcp's calls outside an open connection
 (docs/design-network-stack.md, "The backend"): the calls the backend does not offer
-answer `{error, enotsup}`, and a host name given to `connect/4` resolves through inet's
-own path before the grant is asked. The grant is a stand-in process, named by the
-`erx_net_client` application's `grant` key, that reports each request to the test and
-refuses it; the host name comes from inet_db's own hosts table, with `file` the only
-lookup method, so the case needs no network.
+answer `{error, enotsup}`, a host name given to `connect/4` resolves through inet's own
+path before the grant is asked, and a listener of another domain than its socket
+process's, which can link only to a process that exported `link` to it, takes an accept.
+Each grant is a stand-in process named by the `erx_net_client` application's `grant`
+key: for the connects, one that reports each request to the test and refuses it; for the
+listener, one of another domain with a stand-in listener. The host name comes from
+inet_db's own hosts table, with `file` the only lookup method, so the case needs no
+network.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -104,6 +107,102 @@ connect_unknown() ->
 connect_unknown_case() ->
     ?assertEqual({error, nxdomain}, erx_gen_tcp:connect("absent.erxos.test", 80, [], 1000)),
     receive {grant, Request} -> ?assertEqual(none, Request) after 0 -> ok end.
+
+%% --- A listener in another domain --------------------------------------------------------
+
+%% On erXos a domain holds only `send` on a pid it was handed, so its link to that pid fails
+%% as a link to a dead process does (docs/design-domains.md, "Exports"), and a listener whose
+%% link to its socket process fails ends at the `noproc`. The stand-in network domain, of id
+%% ?NET, links where the funnel would let it, to a process that exported `send` and `link`
+%% to ?NET, and, beyond the funnel, only where the export came after the process trapped
+%% exits, as the design requires of a socket process (docs/design-network-stack.md, "Two
+%% places, four seams"). A link it would not make ends its listener. So the
+%% listening socket's process, before the grant starts its listener, and each accept's
+%% socket process, before the listener takes the accept, must expose themselves to the
+%% grant's domain, or the accept answers `{error, closed}` at once.
+-define(NET, 7).
+
+listener_in_another_domain_test() ->
+    with_erx_exports(fun() -> with_net_grant(fun listener_in_another_domain/0) end).
+
+listener_in_another_domain() ->
+    {ok, L} = erx_gen_tcp:listen(0, [binary, {active, false}]),
+    ?assertEqual({error, timeout}, erx_gen_tcp:accept(L, 100)),
+    ?assertEqual(ok, erx_gen_tcp:close(L)).
+
+%% Runs Fun with a stand-in of erx whose export/3 records what each name exports to whom,
+%% and whether the name trapped exits then, in the table erx_exports.
+with_erx_exports(Fun) ->
+    Text = ["-module(erx).", "-export([export/3]).",
+            "export(Name, Rights, Peer) ->"
+            "    {trap_exit, Traps} = erlang:process_info(Name, trap_exit),"
+            "    true = ets:insert(erx_exports, {{Name, Peer}, Rights, Traps}),"
+            "    ok."],
+    {ok, erx, Beam} = compile:forms(lists:map(fun parse_form/1, Text)),
+    {module, erx} = code:load_binary(erx, "erx.erl", Beam),
+    erx_exports = ets:new(erx_exports, [named_table, public]),
+    try Fun()
+    after
+        ets:delete(erx_exports),
+        code:purge(erx),
+        code:delete(erx)
+    end.
+
+parse_form(Text) ->
+    {ok, Tokens, _} = erl_scan:string(Text),
+    {ok, Form} = erl_parse:parse_form(Tokens),
+    Form.
+
+%% Whether the stand-in network domain links to Pid.
+linkable(Pid) ->
+    case ets:lookup(erx_exports, {Pid, ?NET}) of
+        [{_, Rights, true}] -> lists:member(send, Rights) andalso lists:member(link, Rights);
+        _ -> false
+    end.
+
+%% Runs Case with the grant key naming a stand-in grant of the domain ?NET, which starts a
+%% stand-in listener for each listen.
+with_net_grant(Case) ->
+    Grant = spawn(fun net_grant/0),
+    ok = application:set_env(erx_net_client, grant, {erlang, apply, [fun() -> {ok, Grant, ?NET} end, []]}),
+    try Case()
+    after
+        exit(Grant, kill),
+        ok = application:unset_env(erx_net_client, grant)
+    end.
+
+net_grant() ->
+    receive
+        {'$gen_call', {Socket, _} = From, {tcp_listen, inet, any, 0, _Opts}} ->
+            gen_server:reply(From, {ok, spawn(fun() -> net_listener(Socket) end)}),
+            net_grant()
+    end.
+
+%% A listener that links to its socket process as erx_tcp_listen does, answers an accept,
+%% once linked to its socket process, with the deadline, and answers close.
+net_listener(Socket) ->
+    case linkable(Socket) of
+        true -> true = link(Socket), net_listening(Socket);
+        false -> exit(normal)
+    end.
+
+net_listening(Socket) ->
+    receive
+        {erx_net, Socket, {call, N, {accept, Acceptor, _Timeout}}} ->
+            case linkable(Acceptor) of
+                true ->
+                    true = link(Acceptor),
+                    net_reply(Socket, N, {error, timeout}),
+                    net_listening(Socket);
+                false ->
+                    exit(normal)
+            end;
+        {erx_net, Socket, {call, N, close}} ->
+            net_reply(Socket, N, ok)
+    end.
+
+net_reply(Socket, N, Reply) ->
+    Socket ! {erx_origin, ?NET, {erx_net, self(), {reply, N, Reply}}}.
 
 %% --- Stock's end of a stream ----------------------------------------------------------
 

@@ -8,7 +8,7 @@ places, four seams"), built only into erXos's images: the one module of erx_net_
 that calls into erXos, so the modules in src/ stay portable.
 """.
 
--export([grant/0]).
+-export([grant/0, expose/2]).
 
 -doc """
 The grant of a domain whose network service runs in another domain, for the `grant` key
@@ -23,3 +23,15 @@ grant() ->
         undefined -> {error, enotconn};
         Grant -> {ok, Grant, erx:owner(Grant)}
     end.
+
+-doc """
+Exposes `SockProc`, a socket process trapping exits, to `Origin`, the domain of its grant,
+before its socket links to it: `Origin` comes to hold exactly `send` and `link` on it
+(erx:export/3), so the socket can push to it and link to it, where a pid only handed out
+holds `send` alone and a link to it fails as one to a dead process does
+(docs/design-domains.md, "Exports"). Both rights are named, since erx:export/3 sets a
+holder's rights to exactly the list given. Answers erx:export/3's refusal otherwise.
+""".
+-spec expose(pid(), pos_integer()) -> ok | {error, badarg | noconnection | system_limit}.
+expose(SockProc, Origin) ->
+    erx:export(SockProc, [send, link], Origin).

@@ -31,19 +31,24 @@ What to send, present and answer is decided by erx_gen_tcp_core's pure step; thi
 module performs its actions in order and arms its one timer, a waiting recv's deadline.
 It monitors its owner, whose exit closes the socket, and its socket, whose exit without
 a last push is `econnaborted`. It traps exits, since a listener and an accepted
-connection link to it so that its end ends them: the exit of its socket is left to the
-monitor, and any other is dropped and counted. It is started without `{erx_serve,
-any}`, so no call from another domain reaches it.
+connection link to it so that its end ends them; the exit of its socket is left to the
+monitor, and any other is dropped and counted. A listening socket's process and an
+accept's are exposed to the network domain (erx_inet:expose/1) before their socket links
+to them; a connection's is not, since a connection only monitors it. It is started
+without `{erx_serve, any}`, so no call from another domain reaches it.
 
 **Accepting.** `accept/2` calls the listening socket's socket process, which starts a
 socket process for the caller, owned by it and watching its starter, and sends the
-listener `{accept, SockProc, Timeout}` naming it. The listener binds a connection to it
-and answers `{ok, Conn}`; the listening socket's process hands the new one its
-connection, its origin and the listening socket's presentation options, and answers the
-caller with the new socket, or `{error, econnaborted}` when the new one has ended. On an
-error it ends the new one and answers the error. In `opening` the new socket process
-ends at its owner's or its starter's exit and at any exit signal, the listener's or the
-connection's, so nothing it was not handed lives on.
+listener `{accept, SockProc, Timeout}` naming it. The new one is started with the
+listening socket's origin and exposes itself to the listener's domain as it starts,
+since the listener and the connection it binds link to it; a refused export is the
+accept's answer. The listener binds a connection to it and answers `{ok, Conn}`; the
+listening socket's process hands the new one its connection and the listening socket's
+presentation options, and answers the caller with the new socket, or `{error,
+econnaborted}` when the new one has ended. On an error it ends the new one and answers
+the error. In `opening` the new socket process ends at its owner's or its starter's exit
+and at any exit signal, the listener's or the connection's, so nothing it was not handed
+lives on.
 
 **controlling_process.** As `gen_tcp_socket` does: the owner's first call moves the
 socket process to `{transfer, NewOwner, State}`, in which the core presents nothing
@@ -277,12 +282,19 @@ callback_mode() ->
 
 %% A socket process for an opener, its owner, or for an accept's caller, its owner, started
 %% by the listening socket's process, which it watches until that process hands it its
-%% connection.
+%% connection. The accept's exposes itself to the listener's domain, Origin, before its
+%% start returns, so before the listener can link to it; a refused export is its start's
+%% answer, which a `shutdown` reason keeps out of the crash reports.
 -doc false.
-init({accepted, Owner, Starter}) when is_pid(Owner), is_pid(Starter) ->
+init({accepted, Owner, Starter, Origin}) when is_pid(Owner), is_pid(Starter) ->
     process_flag(trap_exit, true),
-    {ok, opening, #data{owner = Owner, owner_ref = erlang:monitor(process, Owner),
-                        starter_ref = erlang:monitor(process, Starter)}};
+    case erx_inet:expose(Origin) of
+        ok ->
+            {ok, opening, #data{owner = Owner, owner_ref = erlang:monitor(process, Owner),
+                                starter_ref = erlang:monitor(process, Starter), origin = Origin}};
+        {error, Reason} ->
+            {stop, {shutdown, Reason}}
+    end;
 init(Owner) when is_pid(Owner) ->
     process_flag(trap_exit, true),
     {ok, opening, #data{owner = Owner, owner_ref = erlang:monitor(process, Owner)}}.
@@ -297,7 +309,7 @@ handle_event({call, From}, {open, Request, Own}, opening, #data{starter_ref = no
         {ok, Sock, Origin} -> take(Sock, Origin, Becomes, Own, From, D);
         {error, _} = Error -> {stop_and_reply, normal, [{reply, From, Error}]}
     end;
-handle_event({call, From}, {hand_over, Conn, Origin, Own}, opening, #data{starter_ref = Ref} = D)
+handle_event({call, From}, {hand_over, Conn, Own}, opening, #data{starter_ref = Ref, origin = Origin} = D)
   when is_reference(Ref) ->
     true = erlang:demonitor(Ref, [flush]),
     take(Conn, Origin, connection, Own, From, D#data{starter_ref = none});
@@ -314,9 +326,11 @@ handle_event({call, {Owner, _} = From}, controlling_process, {transfer, NewOwner
     enter(State, perform(Actions, D1, []));
 handle_event({call, _From}, _Request, {transfer, _, _}, _D) ->
     {keep_state_and_data, [postpone]};
-handle_event({call, {Caller, _} = From}, {accept, Timeout}, listening, D) ->
-    {ok, SockProc} = gen_statem:start(?MODULE, {accepted, Caller, self()}, []),
-    step({call, From, {accept, SockProc, Timeout}}, D);
+handle_event({call, {Caller, _} = From}, {accept, Timeout}, listening, #data{origin = Origin} = D) ->
+    case gen_statem:start(?MODULE, {accepted, Caller, self(), Origin}, []) of
+        {ok, SockProc} -> step({call, From, {accept, SockProc, Timeout}}, D);
+        {error, {shutdown, Reason}} -> {keep_state_and_data, [{reply, From, {error, Reason}}]}
+    end;
 handle_event({call, From}, Request, _State, D) ->
     step({call, From, Request}, D);
 handle_event(cast, discard, opening, _D) ->
@@ -446,7 +460,7 @@ perform([{recv_timer, cancel} | Rest], D, Timers) ->
 perform([{recv_timer, Ms} | Rest], D, Timers) ->
     perform(Rest, D, [{{timeout, recv}, Ms, expired} | Timers]);
 perform([{hand_over, From, SockProc, Conn, Own} | Rest], D, Timers) ->
-    gen_statem:reply(From, hand_over(SockProc, Conn, Own, D)),
+    gen_statem:reply(From, hand_over(SockProc, Conn, Own)),
     perform(Rest, D, Timers);
 perform([{discard, SockProc} | Rest], D, Timers) ->
     gen_statem:cast(SockProc, discard),
@@ -458,8 +472,8 @@ perform([{count, Check} | Rest], D, Timers) ->
 %% An accepted connection handed to the socket process started for its caller, which is
 %% in `opening` and answers at once; one that has ended answers as a connection aborted
 %% before it was handed out.
-hand_over(SockProc, Conn, Own, #data{origin = Origin}) ->
-    try gen_statem:call(SockProc, {hand_over, Conn, Origin, Own}, infinity) of
+hand_over(SockProc, Conn, Own) ->
+    try gen_statem:call(SockProc, {hand_over, Conn, Own}, infinity) of
         ok -> {ok, {'$inet', ?MODULE, SockProc}}
     catch
         exit:_ -> {error, econnaborted}

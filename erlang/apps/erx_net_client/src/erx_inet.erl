@@ -17,6 +17,12 @@ open's own timeout is the socket's to enforce. An answer that fails the check is
 `{error, badarg}` and one line in the log naming the operation and the check, never
 the term.
 
+**Exposing.** A socket the network domain starts may link to its socket process, which
+a pid handed to another domain does not allow (docs/design-domains.md, "Exports"), so
+expose/1 exposes the calling socket process to the grant's domain with `send` and `link`,
+trapping its exits first: open/1 calls it for the opener of a listener, before the grant
+starts the listener, and an accept's socket process calls it as it starts (erx_gen_tcp).
+
 **Loading.** The loader, the process that keeps inet_db's name servers and search list
 those of the grant's `resolver` operation as dhclient-script keeps resolv.conf the
 lease's, sends the grant `watch_resolver` through the same path. The grant answers its
@@ -49,7 +55,7 @@ servers included, is loaded. A name that passes holds no byte a terminal acts on
 
 -behaviour(gen_server).
 
--export([call/1, open/1, start_link/0, resolver_config/1, load/1]).
+-export([call/1, open/1, expose/1, start_link/0, resolver_config/1, load/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -export_type([request/0, resolver/0]).
@@ -87,18 +93,43 @@ call(Request) ->
 -doc """
 Opens a socket as call/1 does, and answers with the socket's pid the origin its grant
 was found with (erx_sock_admit:origin()), against which the socket's pushes are checked.
+A listener links to its socket process, the caller, as it starts, so a listen first
+exposes the caller to the grant's domain (expose/1), and a refused export is the listen's
+answer; a connection, a datagram and an echo socket only monitor their socket processes,
+and their opens expose nothing.
 """.
 -spec open(request()) -> {ok, pid(), erx_sock_admit:origin()} | {error, term()}.
 open(Request) ->
-    case find() of
-        {ok, Grant, Origin} ->
-            case ask(Grant, Request) of
-                {ok, Socket} when is_pid(Socket) -> {ok, Socket, Origin};
-                {error, _} = Error -> Error
-            end;
-        {error, _} = Error ->
-            Error
+    maybe
+        {ok, Grant, Origin} ?= find(),
+        ok ?= expose_opener(Request, Origin),
+        {ok, Socket} ?= ask(Grant, Request),
+        {ok, Socket, Origin}
     end.
+
+-doc """
+Exposes the calling socket process to `Origin`, the domain its grant's messages arrive
+from, so that its socket can link to it (erx_net_client_erxos:expose/2). It sets
+`trap_exit` first, so a link from that domain can never end the caller, whoever calls
+this. Within one domain, `Origin` `local`, a link needs no export: nothing is exposed and
+no module of erXos is called. A grant's domain with no connection to this one answers as
+a closed socket, as a grant that has ended does (ask/2).
+""".
+-spec expose(erx_sock_admit:origin()) -> ok | {error, closed | badarg | system_limit}.
+expose(local) ->
+    ok;
+expose(Origin) ->
+    process_flag(trap_exit, true),
+    case erx_net_client_erxos:expose(self(), Origin) of
+        {error, noconnection} -> {error, closed};
+        Answer -> Answer
+    end.
+
+%% The opens whose socket links to its socket process, the caller: a listener's, as it
+%% starts (erx_tcp_listen). This list widens with every socket of the network side that
+%% comes to link to its socket process.
+expose_opener({tcp_listen, _Family, _Local, _Port, _Opts}, Origin) -> expose(Origin);
+expose_opener(_Request, _Origin) -> ok.
 
 %% The grant and its origin, from the one reader of the `grant` key.
 find() ->
