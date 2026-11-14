@@ -314,6 +314,12 @@ grant_adopt(Grant, Sizes) ->
 %% Adopted: linked to the listener and queued on it under the unit, then the control block
 %% made from the handshake and the completing segment stepped, and the loop entered queued.
 %% A listener already gone answers the link with its exit, which the loop takes as an abort.
+%%
+%% The completing segment is the control block's first event, as tcp_input hands it to
+%% tcp_do_segment straight after syncache_expand (tcp_input.c:1081-1160); the buffers
+%% accepted/3 sizes are asked of the grant only after it. Every step ends in output, and
+%% output in SYN-RECEIVED sends the SYN-ACK again (tcp_output.c:432-443, :700-702), which
+%% FreeBSD does not send once the handshake is complete.
 queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := Init}, conn := Conn,
         handshake := Handshake, segment := Segment, gen := Rand0, credit := Credit},
       Token, Path, ConfigGen) ->
@@ -329,9 +335,10 @@ queue(#{entry := #{pid := Listener, grant := Grant, origin := Origin, accept := 
     S0 =#state{tcb = Tcb, key = key(Conn), credit = Credit, owner = {listener, Listener},
                 owner_ref = none, origin = Origin, grant = Grant, token = Token, connect = none,
                 path = Path, config_gen = ConfigGen, gen = Rand},
-    {S1a, Reserves} = perform_actions(Actions, S0),
-    S1 = ask_grant(Reserves, S1a),
-    case settle(guarded({segments, [Segment]}, S1)) of
+    {S1, Reserves} = perform_actions(Actions, S0),
+    Completed = guarded({segments, [Segment]}, S1),
+    Sized = ask_grant(Reserves, Completed),
+    case settle(Sized) of
         {noreply, S} -> gen_server:enter_loop(?MODULE, [], S);
         {stop, normal, _} -> ok
     end.

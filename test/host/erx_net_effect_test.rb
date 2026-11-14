@@ -111,6 +111,12 @@ class ErxNetEffectTest < Minitest::Test
     # for a socket process already gone, and would answer the accept {ok, Conn}.
     bind_to_a_gone_socket_process_aborts: [
       "{'EXIT', SockProc, noproc} ->", "{'EXIT', SockProc, noproc_seeded} ->"
+    ],
+    # The buffer sizes stepped before the completing segment: each answer's output, in
+    # SYN-RECEIVED, sends the peer the SYN-ACK again.
+    no_second_syn_ack: [
+      "    Completed = guarded({segments, [Segment]}, S1),\n    Sized = ask_grant(Reserves, Completed),\n",
+      "    Sized0 = ask_grant(Reserves, S1),\n    Sized = guarded({segments, [Segment]}, Sized0),\n"
     ]
   }.freeze
 
