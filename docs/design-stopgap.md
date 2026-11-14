@@ -314,9 +314,10 @@ Erlang and Ruby. The flag names no application: OTP's application controller rea
 application as that application's environment, every word a term
 (`otp/lib/kernel/src/application_controller.erl`, `get_cmd_env`), and a record's PATH is not one. So no record
 word becomes environment, and init hands the records, as words, only to `erx_device_record:records/0`,
-which every record's parser reads. One record word becomes an atom: the module `console_driver` names,
-which the console starts, from the manifest or the hosted entry. A test holds every application's name
-apart from the flag's.
+which every record's parser reads. No record word becomes an atom: the console matches the word
+`console_driver` names against its closed set of drivers and refuses any other, and the readers of
+the other records match their words against names of their own. A test holds every application's
+name apart from the flag's.
 
 A reader, `erx_boot_info_read(page, size, view)`, checks the version, the ABI version, the flags, the
 reserved words and every string against the page and `ERX_BOOT_STRINGS_MAX`, and `sys/erxos`'s

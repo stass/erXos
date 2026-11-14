@@ -1,9 +1,10 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The console's choice of its first shell, what follows that shell's end, and which
-%% group shell:whereis/0 reports (erx_console:first_shell/1,
-%% erx_console:after_first_shell/2, erx_console:erlang_shell_group/1).
+%% The console's choice of its first shell, what follows that shell's end, which group
+%% shell:whereis/0 reports, and which driver the boot records name
+%% (erx_console:first_shell/1, erx_console:after_first_shell/2,
+%% erx_console:erlang_shell_group/1, erx_console:console_driver/1).
 -module(erx_console_shell_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -45,3 +46,35 @@ the_erlang_shell_in_front_is_reported_test() ->
                                                  shell_entry(Command, {erx_shell, console, []})])).
 
 shell_entry({Group, Tag}, Shell) -> {Group, {self(), Tag}, Shell}.
+
+%% -- The console's driver, from `-erx_record console_driver Module` -----------------
+
+the_last_naming_of_a_driver_wins_test() ->
+    ?assertEqual({ok, erx_stdio},
+                 erx_console:console_driver([["console_driver", "erx_pl011"], ["build", "7"],
+                                             ["console_driver", "erx_stdio"]])),
+    ?assertEqual({ok, erx_mini_uart},
+                 erx_console:console_driver([["console_driver", "erx_mini_uart", "quiet"]])).
+
+no_console_driver_record_is_refused_test() ->
+    ?assertMatch({error, {no_console_driver, _}}, erx_console:console_driver([["build", "7"]])),
+    ?assertMatch({error, {no_console_driver, _}}, erx_console:console_driver([["console_driver"]])).
+
+%% A word that names no console driver is refused, and becomes no atom: the system
+%% domain's atom table grows only within bounds its own policy sets.
+an_unknown_driver_is_refused_and_makes_no_atom_test() ->
+    Word = "erx_no_console_driver_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ?assertError(badarg, list_to_existing_atom(Word)),
+    ?assertMatch({error, {bad_console_driver, _}},
+                 erx_console:console_driver([["console_driver", "erx_pl011"], ["console_driver", Word]])),
+    ?assertError(badarg, list_to_existing_atom(Word)).
+
+%% A word longer than any atom is refused as any other unknown word is.
+a_word_no_atom_can_hold_is_refused_test() ->
+    ?assertMatch({error, {bad_console_driver, _}},
+                 erx_console:console_driver([["console_driver", lists:duplicate(256, $a)]])).
+
+%% A module that is no console driver is refused, though its atom exists.
+a_module_that_is_no_driver_is_refused_test() ->
+    ?assertMatch({error, {bad_console_driver, _}},
+                 erx_console:console_driver([["console_driver", "erlang"]])).

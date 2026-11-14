@@ -2418,7 +2418,9 @@ the terminal again.
 It assumes 80 by 24 until a driver reports a size, and a UART driver reports none.
 `-erx_record console_driver Module`, an ordinary argument of the boot information page,
 names the driver, and the last naming wins: the manifest names the console UART's driver,
-`erx_pl011`, and the hosted entry adds `erx_stdio` after it.
+`erx_pl011`, and the hosted entry adds `erx_stdio` after it. The name is one of the
+console's closed set of drivers: the console refuses any other word and the boot fails
+with the reason, so no record word becomes an atom.
 
 **Which input bytes mean something.** `erx_console` takes three bytes out of the
 stream, which no UTF-8 sequence contains: `Ctrl-C` becomes `exit(Group, interrupt)`,

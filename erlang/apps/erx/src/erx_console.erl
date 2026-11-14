@@ -39,7 +39,8 @@
 %% shell and stops, never halting the runtime. A shell holds its console as a terminal (terminal/1),
 %% so neither the shell nor its commands name the console they run on.
 %%
-%% The system console's driver is the module `-erx_record console_driver Module` names. It implements
+%% The system console's driver is the module `-erx_record console_driver Module` names, one of the
+%% closed set ?DRIVERS lists (console_driver/1). It implements
 %% `Module:console_records() -> [erx_device:spec()]`, the device records it drives, and
 %% `Module:start_link(Console) -> {ok, pid(), Terminal}`, where Terminal says whether a
 %% person's terminal is on the line, and exchanges these messages:
@@ -108,7 +109,7 @@
 
 -export([start_link/0, start_link/1, run_shell/1, run_shell/2, write/1, write/2, terminal/0, terminal/1]).
 -export([facet/0, add_session/2, login/0, login_session/0, connect/1, detach/0, first_group/0]).
--export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1]).
+-export([input/2, first_shell/1, after_first_shell/2, erlang_shell_group/1, console_driver/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -export_type([input_event/0, first_shell/0, after_first_shell/0, shell/0, config/0, terminal/0]).
@@ -157,6 +158,8 @@
 %% How long the console waits to ask again when the log service is not running.
 -define(LOG_ASK_MS, 1000).
 -define(ESC, 16#1B).
+%% The system console's drivers: the console UARTs' and hosted mode's.
+-define(DRIVERS, [erx_pl011, erx_mini_uart, erx_stdio]).
 
 -record(state, {role :: system | session,
                 name :: atom(),
@@ -742,11 +745,33 @@ from_group(_Message, State) ->
 line_owners(Module) ->
     erx_irq_line:start_owners([{Module, Module:console_records()}]).
 
-%% The driver's module, from the argument the boot information page carries. The last naming
-%% wins, since the hosted entry adds its driver after the manifest's arguments, and a plain
-%% word of the command line may have joined it.
+%% The driver's module, from the records the boot information page carries. A record that
+%% names no driver stops the console with console_driver/1's reason.
 driver_module() ->
-    list_to_atom(lists:last([Word || ["console_driver", Word | _] <- erx_device_record:records()])).
+    case console_driver(erx_device_record:records()) of
+        {ok, Module} -> Module;
+        {error, Reason} -> exit(Reason)
+    end.
+
+-doc """
+The system console's driver among boot records as erx_device_record:records/0 returns
+them: the module the last `-erx_record console_driver Module` names, since the hosted
+entry adds its driver after the manifest's arguments, and a plain word of the command
+line may follow the name. The name is matched against the console's drivers, so no word
+becomes an atom, and one that names none of them is refused. Pure, for its tests.
+""".
+-spec console_driver([[string()]]) -> {ok, module()} | {error, {atom(), string()}}.
+console_driver(Records) ->
+    case [Word || ["console_driver", Word | _] <- Records] of
+        [] ->
+            {error, {no_console_driver, "no -erx_record console_driver names a driver"}};
+        Words ->
+            Word = lists:last(Words),
+            case [Module || Module <- ?DRIVERS, atom_to_list(Module) =:= Word] of
+                [Driver] -> {ok, Driver};
+                [] -> {error, {bad_console_driver, "-erx_record console_driver names no console driver"}}
+            end
+    end.
 
 encoding(true) -> unicode;
 encoding(false) -> latin1.
