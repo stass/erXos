@@ -88,6 +88,18 @@ class ErxTtyTest < Minitest::Test
     erase_removes_the_loss: Fault.new(text: 'losses = lists:usort([min(L, Keep) || L <- Losses])}.',
                                       broken: 'losses = [L || L <- Losses, L < Keep]}.',
                                       property: /a_cooked_line_keeps_its_loss/),
+    # An erase or kill that finds no byte drops the line's loss.
+    bare_edit_drops_the_loss: Fault.new(text: "rub(Actions, #tty{line = #units{bytes = <<>>}} = Tty) ->\n" \
+                                              '    {empty, Actions, Tty};',
+                                        broken: "rub(Actions, #tty{line = #units{bytes = <<>>}} = Tty) ->\n" \
+                                                '    {empty, Actions, Tty#tty{line = #units{}}};',
+                                        property: /an_edit_that_removes_no_byte_keeps_the_loss/),
+    # A word erase that finds no byte drops the line's loss.
+    bare_word_erase_drops_the_loss: Fault.new(text: "none ->\n" \
+                                                    "            %% No byte to remove: the line, and any loss it holds, stays.\n" \
+                                                    '            {Actions, Tty};',
+                                              broken: "none ->\n            {Actions, Tty#tty{line = #units{}}};",
+                                              property: /an_edit_that_removes_no_byte_keeps_the_loss/),
     # A flush that keeps the losses: the exploration's reads meet them.
     flush_keeps_losses: Fault.new(text: "{Reported, Tty#tty{ready = #units{}, line = #units{}, reprintpos = 0,",
                                   broken: "{Reported, Tty#tty{ready = #units{losses = Dropped}, line = #units{}, reprintpos = 0,",
@@ -144,6 +156,11 @@ class ErxTtyTest < Minitest::Test
   def test_a_drop_not_marked_fails = assert_fault_fails(:drop_not_marked)
 
   def test_an_erase_that_removes_the_loss_fails = assert_fault_fails(:erase_removes_the_loss)
+
+  def test_an_edit_that_removes_no_byte_dropping_the_loss_fails = assert_fault_fails(:bare_edit_drops_the_loss)
+
+  def test_a_word_erase_that_removes_no_byte_dropping_the_loss_fails =
+    assert_fault_fails(:bare_word_erase_drops_the_loss)
 
   def test_a_flush_that_keeps_the_losses_fails = assert_fault_fails(:flush_keeps_losses)
 

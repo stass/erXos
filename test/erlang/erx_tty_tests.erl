@@ -357,8 +357,9 @@ a_byte_dropped_for_room_is_a_loss_test() ->
     ?assertEqual(<<(binary:copy(<<"a">>, 4096))/binary, 0>>, Read).
 
 %% In a cooked line a loss is a unit of the line: an erase removes the
-%% bytes before it and keeps it at the line's new end, and only a kill, or
-%% an erase that leaves no byte, drops it; a loss and VEOF read as one NUL.
+%% bytes before it and keeps it at the line's new end, and only an edit
+%% that removes the line's last byte drops it; a loss and VEOF read as one
+%% NUL.
 a_cooked_line_keeps_its_loss_test() ->
     {_, Typed} = input(<<"cd">>, erx_tty:new()),
     {[], Lost} = erx_tty:lost(Typed),
@@ -380,6 +381,21 @@ a_cooked_line_keeps_its_loss_test() ->
     {_, Line} = input(<<"b">>, element(2, erx_tty:lost(element(2, input(<<"a">>, erx_tty:new()))))),
     {ok, _, Raw} = erx_tty:set(erx_tty:termios(raw(1, 0)), Line),
     ?assertMatch({{ok, <<"a", 0, "b">>}, _}, erx_tty:read(r, 64, Raw)).
+
+%% A loss goes only with the last byte an edit removes: on a line holding a
+%% loss and no byte, VERASE, VWERASE and VKILL find nothing and end
+%% nothing, as a key that leaves edlin's empty buffer empty clears no damage;
+%% erasing a byte typed after the loss takes it.
+an_edit_that_removes_no_byte_keeps_the_loss_test() ->
+    {[], Lost} = erx_tty:lost(erx_tty:new()),
+    Line = fun(Key) ->
+                   {_, Edited} = input(<<Key, "\n">>, Lost),
+                   {element(1, erx_tty:read(r, 64, Edited)), Key}
+           end,
+    ?assertEqual([{{ok, <<0, "\n">>}, Key} || Key <- [127, $\^W, $\^U]],
+                 [Line(Key) || Key <- [127, $\^W, $\^U]]),
+    {_, Erased} = input(<<"x", 127, "\n">>, Lost),
+    ?assertMatch({{ok, <<"\n">>}, _}, erx_tty:read(r, 64, Erased)).
 
 %% A signal's flush drops the losses with the bytes, and reports that it
 %% dropped one ahead of the signal; a flush that drops none reports nothing.
@@ -681,8 +697,11 @@ spec_edit(C, #spec{ready = Ready, line = Line} = Spec, Tm) ->
     Kill = Cooked andalso cc(vkill, C, Tm),
     Word = Ext andalso cc(vwerase, C, Tm),
     Reprint = Ext andalso cc(vreprint, C, Tm),
+    %% An edit that finds no byte changes nothing, a loss included.
+    Bare = spec_bytes(Line) =:= [],
     if
-        Erase -> Spec#spec{line = spec_truncate(Line, max(0, length(spec_bytes(Line)) - 1))};
+        (Erase orelse Kill orelse Word) andalso Bare -> Spec;
+        Erase -> Spec#spec{line = spec_truncate(Line, length(spec_bytes(Line)) - 1)};
         Kill -> Spec#spec{line = []};
         Word -> Spec#spec{line = spec_truncate(Line, length(spec_word(spec_bytes(Line), Tm)))};
         Reprint -> Spec;

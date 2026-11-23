@@ -32,10 +32,11 @@ special character, echoes nothing and takes no byte of room, and losses
 with no byte between them are one, so the tty holds at most one loss more
 than it holds bytes. Readiness counts it as one unit wherever it counts a
 byte. read/3 gives each loss as one NUL at its place and read_input/2 as
-`lost`, both through one consuming step. An erase never removes a loss:
-it removes the bytes before it and keeps it at the line's new end, and
-only a kill, or an erase that leaves the line no byte, drops it. A
-signal's flush drops losses with the bytes, and reports `flushed_loss`,
+`lost`, both through one consuming step. An erase never removes a loss
+alone: it removes the bytes before it and keeps it at the line's new end,
+and a loss goes only with the last byte an edit removes, so an edit that
+finds no byte changes nothing, as a key that leaves edlin's empty buffer
+empty clears no damage. A signal's flush drops losses with the bytes, and reports `flushed_loss`,
 ahead of the signal, when it drops one; a hangup drops them unreported,
 since it ends every read. Echo goes to the master with a program's output,
 so it takes the room the owner has for the master, which input/3 is given
@@ -578,8 +579,8 @@ rub_line(Actions, Tty) ->
 rub_word(Actions, Tty) ->
     case last(Tty) of
         none ->
-            %% A line with no byte left holds no loss.
-            {Actions, Tty#tty{line = #units{}}};
+            %% No byte to remove: the line, and any loss it holds, stays.
+            {Actions, Tty};
         Char ->
             case white(Char) of
                 true ->
@@ -608,7 +609,7 @@ rub_word(Alnum, Actions, Tty) ->
 %% ECHOE's visual erase, or else by echoing VERASE. The line's losses stay
 %% at its new end, and go with its last byte.
 rub(Actions, #tty{line = #units{bytes = <<>>}} = Tty) ->
-    {empty, Actions, Tty#tty{line = #units{}}};
+    {empty, Actions, Tty};
 rub(Actions, #tty{line = #units{bytes = Line}} = Tty0) ->
     Keep = byte_size(Line) - 1,
     <<_:Keep/binary, Char>> = Line,
