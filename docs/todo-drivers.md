@@ -69,10 +69,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] erx_uart, `erx_pl011:console_uart/1` and `erx_mini_uart:console_uart/1`: the parse of
   `-erx_record console` is copied in each driver, as are their fuzz targets. One parse of the four
   numbers, with each driver checking only its clock rule, and one fuzz target.
-* [Low] erx_uart, `erx_pl011`: one drain reads while the receive FIFO says it holds a byte, with no
-  bound, so a wedged device grows the binary until the system domain runs out of memory; cap it at a few
-  FIFO depths, as `erx_mini_uart`'s `?DRAIN_MAX` does. `erx_mini_uart` does not check LCR.DLAB, with which
-  its IER writes would change the divisor; refuse to start with DLAB set.
+* [Medium] erx_uart, `erx_pl011`, a line's driver (the host link's, a Bluetooth controller's): a drain
+  stopped at its 64-word bound is continued at once, and a line's driver hands each drain up as read, so a
+  device whose `RXFE` never sets, or a line faster than its owner, puts 64-byte messages in the owner's
+  mailbox without bound; pace a line's continued drains by its owner's consumption, as the console's store
+  does. The continuation in `send/2`'s full-FIFO wait has no test, since QEMU never sets `TXFF`.
+* [Low] erx_uart, `erx_mini_uart` does not check LCR.DLAB, with which its IER writes would change the
+  divisor; refuse to start with DLAB set.
 * [Medium] 1b-I's stage (a) (docs/research-rpi4-board-pass.md), the board pass, the framebuffer
   (`liberx/backend/fiasco/runtime_entry.c`, `framebuffer_give`): unverified is whether sigma0 grants the
   VideoCore's memory, the `framebuffer` row's window in `config/platforms/raspi4b.json`, as I/O memory, which

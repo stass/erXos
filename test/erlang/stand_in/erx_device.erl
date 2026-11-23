@@ -8,7 +8,8 @@
 %% Everything lives in the calling process's dictionary, so tests do not share state.
 %%
 %% A device the test process plays instead, for host tests of a process that calls the NIF
-%% from its own process (test/erlang/erx_xhci_tests.erl, test/erlang/erx_mini_uart_tests.erl):
+%% from its own process (test/erlang/erx_xhci_tests.erl, test/erlang/erx_mini_uart_tests.erl,
+%% test/erlang/erx_pl011_tests.erl):
 %% open(#{stand_in => Player}) answers {stand_in, Player}, and every call on that device, the TRB ring form's post/4,
 %% complete/2, negotiate/2 and queue_state/2 among them, is sent to Player as
 %% {erx_device, Caller, Call}, the call returning the Answer Player sends back as
@@ -55,6 +56,8 @@ read(_Dev, Register) ->
     record({read, Register}),
     answer(Register).
 
+read_field({stand_in, Player}, Register, Field) ->
+    play(Player, {read_field, Register, Field});
 read_field(_Dev, Register, Field) ->
     record({read_field, Register, Field}),
     answer({Register, Field}).

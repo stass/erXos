@@ -1269,8 +1269,20 @@ whole.
 
 A drain is finite: the mini UART's reads at most 32 bytes, four FIFO
 depths, and the PL011's at most 64 words, two FIFO depths, so a device
-that never reports its FIFO empty holds neither driver; the interrupt
-line, still raised, delivers again.
+that never reports its FIFO empty holds neither driver. The mini UART's
+interrupt is a level, raised while its FIFO holds a byte, so the line,
+still raised, delivers again. The PL011's is raised when its FIFO reaches
+its level, and the driver clears it before the drain (Arm DDI 0183G,
+3-17), so the words a drain stopped at its bound leaves cross no level
+again: QEMU's model raises the interrupt only when the FIFO goes from
+empty to one word and takes no byte into a full FIFO (`hw/char/pl011.c`,
+`pl011_fifo_rx_put`, `pl011_can_receive`), and silicon raises at most
+the receive timeout once the line is idle. The PL011's driver therefore
+continues a stopped drain itself, with no delivery to acknowledge, once
+the messages already waiting are served and its pending store (below)
+has room for a whole drain; until then the words wait in the FIFO, which
+QEMU's model holds back and silicon's marks with `OE` if it overruns, so
+a continued drain never makes a loss of bytes the line did not lose.
 
 **One input message outstanding per driver.** A driver has at most one
 input message the console has not taken. The console answers each
@@ -1588,6 +1600,8 @@ fail, so the case proves the code under it ran.
 | the same, a fake device whose `DATA_READY` never clears | each drain sends at most 32 bytes and returns; the line delivers again | the drain bound removed |
 | `erx_pl011_tests`: a data word with `OE` set | `erx_console_lost` before that word's byte | the loss sent after the byte |
 | the same, a fake device whose `RXFE` never sets | each drain reads at most 64 words and returns | the drain bound removed |
+| the same, a played line's driver whose FIFO, after the start's drain, holds a 150-byte paste and reads empty only after it | every byte goes up after one delivery, with one acknowledgement | the stopped drain left for an interrupt; the continued drain acknowledging the line |
+| the same paste on a played console's driver, each message taken only once the driver is quiet | every byte goes up, with no `erx_console_lost` | the stopped drain continued into a store without room for a drain |
 | `erx_console_master_tests`, the system line through the real group and `edlin`: `ab`, a loss, `c` and Enter | no line is returned; the bell rings | the console answering an ask with the loss after the next byte |
 | the same, a loss after the first byte of a two-byte UTF-8 character | that byte is dropped and the loss answered | the cut byte answered as a character |
 | the same, a group that asks nothing while 10 KiB, then a loss, then more arrive | the console holds one tty's bound; what it dropped is one loss, which the next read meets before the later bytes | the store's drop not marked as a loss |

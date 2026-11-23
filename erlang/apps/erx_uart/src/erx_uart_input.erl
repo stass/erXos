@@ -21,7 +21,7 @@
 
 -module(erx_uart_input).
 
--export([new/1, add/2, next/1, taken/1]).
+-export([new/1, add/2, room/1, next/1, taken/1]).
 -export_type([input/0, unit/0]).
 
 -type unit() :: byte() | lost.
@@ -41,6 +41,11 @@
 -spec new(pos_integer()) -> input().
 new(Max) ->
     #input{max = Max}.
+
+-doc "How many more bytes the store holds before a byte becomes a loss.".
+-spec room(input()) -> non_neg_integer().
+room(#input{bytes = Bytes, max = Max}) ->
+    Max - Bytes.
 
 -doc "The store after the units a drain read, in order.".
 -spec add([unit()], input()) -> input().

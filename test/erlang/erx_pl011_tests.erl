@@ -188,25 +188,131 @@ format_status_shows_only_the_reasons_name_test() ->
 %% damaged line out whole (docs/design-live.md, "Lost input").
 overrun_is_placed_before_the_byte_after_the_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual([$a, $b, lost, $c, $\n], erx_pl011:drain(dev, mark)).
+    ?assertEqual({[$a, $b, lost, $c, $\n], drained}, erx_pl011:drain(dev, mark)).
 
 %% A framing, parity or break bit is no loss: the byte goes up as read, a break's NUL a byte.
 other_errors_are_no_loss_test() ->
     script_receive([?ERX_HW_PL011_DR_FE_MASK bor $a, ?ERX_HW_PL011_DR_PE_MASK bor $b,
                     ?ERX_HW_PL011_DR_BE_MASK, $\n]),
-    ?assertEqual([$a, $b, 0, $\n], erx_pl011:drain(dev, mark)).
+    ?assertEqual({[$a, $b, 0, $\n], drained}, erx_pl011:drain(dev, mark)).
 
 %% A line's driver, the host link's or a Bluetooth controller's, makes no loss: its bytes
 %% are a protocol's, which checks its own frames.
 a_line_s_driver_makes_no_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual([$a, $b, $c, $\n], erx_pl011:drain(dev, pass)).
+    ?assertEqual({[$a, $b, $c, $\n], drained}, erx_pl011:drain(dev, pass)).
 
 %% A device whose RXFE never sets: a drain reads at most 64 words, two FIFO depths, and
-%% returns, so the driver serves its mailbox; the line, still raised, delivers again.
+%% returns, saying it stopped, so the driver serves its mailbox before it drains again.
 a_wedged_receive_is_drained_a_bounded_amount_test() ->
     erx_device:script(#{{fr, rxfe} => [0], dr => [$x]}),
-    ?assertEqual(lists:duplicate(64, $x), erx_pl011:drain(dev, pass)).
+    ?assertEqual({lists:duplicate(64, $x), stopped}, erx_pl011:drain(dev, pass)).
+
+%% A paste longer than a drain, its bytes arriving as the drain reads, so the FIFO never
+%% reads empty: the delivery's drain stops at its bound and the words left raise no
+%% interrupt, as QEMU's model raises one only when the FIFO goes from empty to one word
+%% (hw/char/pl011.c, pl011_fifo_rx_put). A line's driver drains the rest without another
+%% delivery and acknowledges the line once, for its one delivery.
+a_drain_stopped_at_its_bound_is_continued_without_an_interrupt_test() ->
+    Spec = (spec(16#9000000, 16#1000, 1, 48000000))#{stand_in => self()},
+    {Input, Acks} = played(Spec),
+    ?assertEqual([{erx_console_input, list_to_binary(paste())}], joined(Input)),
+    ?assertEqual(1, Acks).
+
+%% The same paste on the console's line, the console taking each message only once the
+%% driver is quiet: the driver continues a stopped drain only into a store with room for
+%% a whole drain, leaving the words in the FIFO until the console's answer, so every byte
+%% goes up and none becomes a loss.
+a_console_s_stopped_drain_waits_for_room_test() ->
+    Spec = (spec(16#9000000, 16#1000, 1, 48000000))#{stand_in => self()},
+    {Input, Acks} = played({console, Spec}),
+    ?assertEqual([{erx_console_input, list_to_binary(paste())}], joined(Input)),
+    ?assertEqual(1, Acks).
+
+paste() ->
+    [$a + N rem 26 || N <- lists:seq(0, 149)].
+
+%% The input messages, each run of bytes joined into one.
+joined([{erx_console_input, A}, {erx_console_input, B} | Rest]) ->
+    joined([{erx_console_input, <<A/binary, B/binary>>} | Rest]);
+joined([Message | Rest]) ->
+    [Message | joined(Rest)];
+joined([]) ->
+    [].
+
+%% Starts the driver of Record over a played device (test/erlang/stand_in/erx_device.erl)
+%% whose receive FIFO is empty until the start unmasks its interrupts and for the start's
+%% drain, then holds paste() and delivers the
+%% line once. This process is the driver's owner too: it answers each input message with
+%% erx_console_taken only once the driver has been quiet for 100 ms. Returns the input
+%% messages, in order, and how many times the driver acknowledged the line.
+played(Record) ->
+    Driver = proc_lib:spawn_link(erx_pl011, init, [Record, self()]),
+    try
+        play(Driver, {before_start, paste()}, {[], 0, false})
+    after
+        unlink(Driver),
+        exit(Driver, kill)
+    end.
+
+play(Driver, Fifo, Seen = {Input, Acks, Unanswered}) ->
+    receive
+        {erx_device, Driver, {write, imsc, Unmasked}} when Unmasked =/= 0 ->
+            {before_start, Paste} = Fifo,
+            answer(Driver, ok),
+            play(Driver, {started, Paste}, Seen);
+        {erx_device, Driver, {read_field, fr, rxfe}} ->
+            case Fifo of
+                {started, Paste} ->
+                    answer(Driver, 1),
+                    Driver ! {erx_irq, {stand_in, self()}, 0},
+                    play(Driver, Paste, Seen);
+                {before_start, _} ->
+                    answer(Driver, 1),
+                    play(Driver, Fifo, Seen);
+                [] ->
+                    answer(Driver, 1),
+                    play(Driver, Fifo, Seen);
+                [_ | _] ->
+                    answer(Driver, 0),
+                    play(Driver, Fifo, Seen)
+            end;
+        {erx_device, Driver, {read, dr}} ->
+            [Byte | Rest] = Fifo,
+            answer(Driver, Byte),
+            play(Driver, Rest, Seen);
+        {erx_device, Driver, {read_field, ibrd, baud_divint}} ->
+            answer(Driver, 26),
+            play(Driver, Fifo, Seen);
+        {erx_device, Driver, {read_field, fbrd, baud_divfrac}} ->
+            answer(Driver, 3),
+            play(Driver, Fifo, Seen);
+        {erx_device, Driver, {ack, 0}} ->
+            answer(Driver, ok),
+            play(Driver, Fifo, {Input, Acks + 1, Unanswered});
+        {erx_device, Driver, {read, _Register}} ->
+            answer(Driver, 0),
+            play(Driver, Fifo, Seen);
+        {erx_device, Driver, {read_field, _Register, _Field}} ->
+            answer(Driver, 0),
+            play(Driver, Fifo, Seen);
+        {erx_device, Driver, _Write} ->
+            answer(Driver, ok),
+            play(Driver, Fifo, Seen);
+        Message when element(1, Message) =:= erx_console_input; Message =:= erx_console_lost ->
+            play(Driver, Fifo, {[Message | Input], Acks, true})
+    after 100 ->
+            case Unanswered of
+                true ->
+                    Driver ! erx_console_taken,
+                    play(Driver, Fifo, {Input, Acks, false});
+                false ->
+                    {lists:reverse(Input), Acks}
+            end
+    end.
+
+answer(Driver, Answer) ->
+    Driver ! {erx_device, Answer}.
 
 %% The console stalled, its driver's one input message not yet taken, while 200 bytes
 %% arrive in drains of at most 64: the store holds one drain's bytes and one loss for the
