@@ -17,9 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: NUL, the mark a console UART puts where input was lost, is a
-%% character to insert, not a key, and ends any escape sequence it arrives in; a
-%% character that cannot continue a CSI sequence ends it and is read again.
+%% Modified by erXos: a character that cannot continue a CSI sequence ends it and is
+%% read again, and a sequence cut after a CSI digit waits for its next character.
 %%
 %% %CopyrightEnd%
 %%
@@ -61,18 +60,9 @@ get_valid_escape_key([], Res) ->
         meta_csi -> {escape_prefix, meta_csi};
         meta_left_sq_bracket -> {escape_prefix, meta_left_sq_bracket}
     end;
-%% erXos: NUL, the mark a console UART puts where input was lost, ends any sequence it
-%% arrives in, which is dropped as an invalid key, and is read again from scratch, so
-%% it enters the line and the damaged line is never finished.
-get_valid_escape_key([$\^@|_] = Rest, Mode) when is_atom(Mode), Mode =/= none;
-                                                 element(1, Mode) =:= csi ->
-    {invalid, [], Rest};
 get_valid_escape_key([C|Rest], none) ->
     case C of
         $\e -> get_valid_escape_key(Rest,meta);
-        %% erXos: NUL is the mark a console UART puts where input was lost; it is part
-        %% of the line, not a key, so that edlin can refuse to finish the line.
-        $\^@ -> {insert, C, Rest};
         C when $\^@ =< C, C =< $\^_; C =:= $\^? -> {key, [C], Rest};
         _ -> {insert, C, Rest}
     end;

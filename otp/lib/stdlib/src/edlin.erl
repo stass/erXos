@@ -17,9 +17,11 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: a line that holds NUL, the mark a console UART puts where input
-%% was lost, is never finished (finish/4): Enter holds it until the user edits it
-%% (hold/5), and the end of input drops it; NUL joins a search term.
+%% Modified by erXos: every editing call takes the read's damage and returns it
+%% (edit_line/3), and a loss of input, the input lost, damages the read; no line of a
+%% damaged read is finished (finish/5), the end of input drops it, and an edit that
+%% empties the buffer ends the damage (damage/4). Edits 80 and 81 of
+%% docs/design-runtime.md.
 %%
 %% %CopyrightEnd%
 %%
@@ -188,17 +190,20 @@ supports multiple lines.
 %% A simple Emacs-like line editor.
 %% About Latin-1 characters: see the beginning of erl_scan.erl.
 
--export([init/0,init/1,start/1,start/2,edit_line/2]).
+-export([init/0,init/1,start/1,start/2,edit_line/3]).
 -export([erase_line/0,erase_inp/1,redraw_line/1]).
 -export([length_before/1,length_after/1,prompt/1]).
 -export([current_line/1, current_chars/1]).
 
--export([edit_line1/2]).
+-export([edit_line1/3]).
 -export([keymap/0]).
 -import(lists, [reverse/1, reverse/2]).
 
+%% erXos: the buffer that holds no text.
+-define(EMPTY_BUFFER, {[],{[],[]},[]}).
+
 -export([over_word/3]).
--export([finish_line/2, marked/1]).
+-export([finish_line/3]).
 
 -doc "A map of maps for each shell mode containing key, action pairs.".
 -type keymap() :: #{atom() => #{string()|default => atom()}}.
@@ -268,7 +273,12 @@ keymap() ->
 
 -type continuation() :: {line, _, _, _} | {_, _, _}.
 -doc false.
--spec edit_line(unicode:chardata() | eof, continuation()) ->
+%% erXos: Input is characters, the end of input or a loss of input, and Damage whether
+%% the read lost input; the result comes back with the read's damage after it.
+-spec edit_line(Input, continuation(), Damage) -> {Result, Damage} when
+      Input :: unicode:chardata() | eof | lost,
+      Damage :: boolean(),
+      Result ::
           {done, continuation(), Rest :: unicode:chardata() | eof, [user_drv:request()]} |
           {open_editor | format_expression | history_up | history_down | search,
            Cs :: unicode:chardata(), continuation(), [user_drv:request()]} |
@@ -279,37 +289,36 @@ keymap() ->
           {search_found | search_quit | search_cancel,
            Cs :: unicode:chardata(), [user_drv:request()]} |
           {blink | more_chars, continuation(), [user_drv:request()]}.
-edit_line(Cs, {line,P,L,{blink,N_Rs}}) ->
-    edit(Cs, P, L, {normal, none}, N_Rs);
-edit_line(Cs, {line,P,L,M}) ->
-    edit(Cs, P, L, M, []).
+edit_line(Cs, {line,P,L,{blink,N_Rs}}, D) ->
+    edit(Cs, P, L, {normal, none}, N_Rs, D);
+edit_line(Cs, {line,P,L,M}, D) ->
+    edit(Cs, P, L, M, [], D).
 
 %% Called when in search mode
 -doc false.
-edit_line1(Cs, {line,P,L,{blink,N_Rs}}) ->
-    edit(Cs, P, L, {normal, none}, N_Rs);
-edit_line1(Cs, {line,P,{B,{[],[]},A},{normal,none}}) ->
+edit_line1(Cs, {line,P,L,{blink,N_Rs}}, D) ->
+    edit(Cs, P, L, {normal, none}, N_Rs, D);
+edit_line1(Cs, {line,P,{B,{[],[]},A},{normal,none}}, D) ->
     [CurrentLine|Lines] = [string:to_graphemes(Line) || Line <- reverse(string:split(Cs, "\n",all))],
     Cont = {Lines ++ B,{reverse(CurrentLine),[]},A},
     Rs = redraw(P, Cont, []),
-    {more_chars, {line,P,Cont,{normal,none}},[delete_line|Rs]};
-edit_line1(Cs, {line,P,L,M}) ->
-    edit(Cs, P, L, M, []).
+    {{more_chars, {line,P,Cont,{normal,none}},[delete_line|Rs]}, D};
+edit_line1(Cs, {line,P,L,M}, D) ->
+    edit(Cs, P, L, M, [], D).
 
-edit([C|Cs], P, Line, {blink,_}, [_|Rs]) ->	%Remove blink here
-    edit([C|Cs], P, Line, {normal,none}, Rs);
-edit([], P, L, {blink,N}, Rs) ->
-    {blink,{line,P,L, {blink,N}},reverse(Rs)};
-edit([], P, L, EditState, Rs) ->
-    {more_chars,{line,P,L,EditState},reverse(Rs)};
-edit(eof, P, L, EditState, Rs) ->
-    finish(eof, {line,P,L,EditState}, [], Rs);
-%% erXos: besides a shell mode, a pair of modes or blink, the edit state can be held, a
-%% line finish/4 refused; this clause stays above the next, which would look the state
-%% up as a mode.
-edit(Buf, P, MultiLine, {held, EscapePrefix}, Rs) ->
-    hold(Buf, P, MultiLine, EscapePrefix, Rs);
-edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0) ->
+edit([C|Cs], P, Line, {blink,_}, [_|Rs], D) ->	%Remove blink here
+    edit([C|Cs], P, Line, {normal,none}, Rs, D);
+edit([], P, L, {blink,N}, Rs, D) ->
+    {{blink,{line,P,L, {blink,N}},reverse(Rs)}, D};
+edit([], P, L, EditState, Rs, D) ->
+    {{more_chars,{line,P,L,EditState},reverse(Rs)}, D};
+edit(eof, P, L, EditState, Rs, D) ->
+    finish(eof, {line,P,L,EditState}, [], Rs, D);
+%% erXos: a loss of input drops the escape sequence under way, rings the bell and
+%% damages the read (edit 80).
+edit(lost, P, L, {Mode, _EscapePrefix}, Rs, _D) ->
+    {{more_chars,{line,P,L,{Mode,none}},reverse(Rs, [beep])}, true};
+edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) ->
     {ShellMode, NextMode} = case ShellMode1 of
         {_, _}=M -> M;
         Mode -> {Mode, Mode}
@@ -317,11 +326,11 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0) ->
     case edlin_key:get_valid_escape_key(Buf, EscapePrefix) of
         {escape_prefix, EscapePrefix1} ->
             case ShellMode of
-                tab_expand -> edit(Buf, P, MultiLine, {normal, none}, Rs0);
-                _ -> edit([], P, MultiLine, {NextMode, EscapePrefix1}, Rs0)
+                tab_expand -> edit(Buf, P, MultiLine, {normal, none}, Rs0, D);
+                _ -> edit([], P, MultiLine, {NextMode, EscapePrefix1}, Rs0, D)
             end;
         {invalid, _I, Rest} ->
-            edit(Rest, P, MultiLine, {NextMode, none}, Rs0);
+            edit(Rest, P, MultiLine, {NextMode, none}, Rs0, D);
         {insert, C1, Cs2} ->
             %% If its a printable character
             %% we could in theory override it in the keymap,
@@ -335,25 +344,23 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0) ->
                     {blink,$},${};
                 normal -> {insert, C1};
                 search when $\s =< C1 ->{insert_search, C1};
-                %% erXos: the lost-input mark joins the term, which then matches no line.
-                search when C1 =:= $\^@ -> {insert_search, C1};
                 search -> search_quit;
                 tab_expand -> tab_expand_quit;
                 help -> tab_expand_quit
             end,
             case Op of
                 tab_expand_quit ->
-                    edit(Buf, P, MultiLine, {normal,none}, Rs0);
+                    edit(Buf, P, MultiLine, {normal,none}, Rs0, D);
                 search_quit ->
-                    {search_quit,Cs2,{line,P,MultiLine,{normal, none}},reverse(Rs0)};
+                    {{search_quit,Cs2,{line,P,MultiLine,{normal, none}},reverse(Rs0)}, D};
                 _ ->
                     case do_op(Op, MultiLine, Rs0) of
                         {blink,N,MultiLine1,Rs} ->
-                            edit(Cs2, P, MultiLine1, {blink,N}, Rs);
+                            edit(Cs2, P, MultiLine1, {blink,N}, Rs, D);
                         {redraw, {_LB1, {_Bef1, _Aft1}, _LA1}=MultiLine1, Rs} ->
-                            edit(Cs2, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs));
+                            edit(Cs2, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs), D);
                         {{_LB1, {_Bef1, _Aft1}, _LA1}=MultiLine1,Rs} ->
-                            edit(Cs2, P, MultiLine1, {NextMode, none}, Rs)
+                            edit(Cs2, P, MultiLine1, {NextMode, none}, Rs, D)
                     end
             end;
         {key, Key, Cs} ->
@@ -361,46 +368,46 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0) ->
             Cont = {line,P,MultiLine,{NextMode, none}},
             case Value of
                 {mode, Mode1} ->
-                    edit(Buf, P, MultiLine, {{Mode1, ShellMode}, none}, Rs0);
-                none -> edit(Cs, P, MultiLine, {NextMode,none}, Rs0);
-                search -> {search,Cs,Cont,reverse(Rs0)};
-                search_found -> {search_found,Cs,Cont,reverse(Rs0)};
-                search_cancel -> {search_cancel,Cs,Cont,reverse(Rs0)};
-                search_quit -> {search_quit,Cs,Cont,reverse(Rs0)};
-                format_expression -> {format_expression,Cs,Cont,reverse(Rs0)};
-                open_editor -> {open_editor,Cs,Cont,reverse(Rs0)};
-                history_up -> {history_up,Cs,Cont,reverse(Rs0)};
-                history_down -> {history_down,Cs,Cont,reverse(Rs0)};
+                    edit(Buf, P, MultiLine, {{Mode1, ShellMode}, none}, Rs0, D);
+                none -> edit(Cs, P, MultiLine, {NextMode,none}, Rs0, D);
+                search -> {{search,Cs,Cont,reverse(Rs0)}, D};
+                search_found -> {{search_found,Cs,Cont,reverse(Rs0)}, D};
+                search_cancel -> {{search_cancel,Cs,Cont,reverse(Rs0)}, D};
+                search_quit -> {{search_quit,Cs,Cont,reverse(Rs0)}, D};
+                format_expression -> {{format_expression,Cs,Cont,reverse(Rs0)}, D};
+                open_editor -> {{open_editor,Cs,Cont,reverse(Rs0)}, D};
+                history_up -> {{history_up,Cs,Cont,reverse(Rs0)}, D};
+                history_down -> {{history_down,Cs,Cont,reverse(Rs0)}, D};
                 new_line ->
                     MultiLine1 = {[lists:reverse(Bef)|LB],{[],Aft},LA},
-                    edit(Cs, P, MultiLine1, {NextMode, none}, reverse(redraw(P, MultiLine1, Rs0)));
+                    edit(Cs, P, MultiLine1, {NextMode, none}, reverse(redraw(P, MultiLine1, Rs0)), D);
                 new_line_finish ->
-                    finish(enter, Cont, Cs, Rs0);
+                    finish(enter, Cont, Cs, Rs0, D);
                 redraw_line ->
                     Rs1 = erase_line(Rs0),
                     Rs = redraw(P, MultiLine, Rs1),
-                    edit(Cs, P, MultiLine, {NextMode, none}, Rs);
+                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, D);
                 clear ->
                     Rs = redraw(P, MultiLine, [clear|Rs0]),
-                    edit(Cs, P, MultiLine, {NextMode, none}, Rs);
+                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, D);
                 help ->
-                    {help, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
-                    reverse(Rs0)};
+                    {{help, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
+                    reverse(Rs0)}, D};
                 help_full ->
-                    {help_full, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
-                    reverse(Rs0)};
+                    {{help_full, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
+                    reverse(Rs0)}, D};
                 tab_expand ->
-                    {expand, chars_before(MultiLine), Cs,
+                    {{expand, chars_before(MultiLine), Cs,
                      {line, P, MultiLine, {tab_expand, none}},
-                     reverse(Rs0)};
+                     reverse(Rs0)}, D};
                 tab_expand_full ->
-                    {expand_full, chars_before(MultiLine), Cs,
+                    {{expand_full, chars_before(MultiLine), Cs,
                      {line, P, MultiLine, {tab_expand, none}},
-                     reverse(Rs0)};
+                     reverse(Rs0)}, D};
                 tab_expand_quit ->
                     %% When exiting tab expand mode, we want to evaluate the key in normal mode
                     %% we send a {move_rel, 0} event to make sure the paging area is cleared
-                    edit(Buf, P, MultiLine, {normal,none}, [{move_rel, 0}|Rs0]);
+                    edit(Buf, P, MultiLine, {normal,none}, [{move_rel, 0}|Rs0], D);
                 Op ->
                     Op1 = case ShellMode of
                         search ->
@@ -409,11 +416,13 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0) ->
                     end,
                     case do_op(Op1, MultiLine, Rs0) of
                         {blink,N,MultiLine1,Rs} ->
-                            edit(Cs, P, MultiLine1, {blink,N}, Rs);
+                            edit(Cs, P, MultiLine1, {blink,N}, Rs, D);
                         {redraw, MultiLine1, Rs} ->
-                            edit(Cs, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs));
+                            edit(Cs, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs),
+                                 damage(D, ShellMode, MultiLine, MultiLine1));
                         {MultiLine1,Rs} ->
-                            edit(Cs, P, MultiLine1, {NextMode, none}, Rs)
+                            edit(Cs, P, MultiLine1, {NextMode, none}, Rs,
+                                 damage(D, ShellMode, MultiLine, MultiLine1))
                     end
             end
     end.
@@ -902,51 +911,26 @@ key_action(ShellMode, Key) ->
 
 %% erXos: every line the editor finishes leaves it here: on Enter, at the end of its
 %% input, and on an accepted history search, which group hands back (finish_line/3).
-%% A line that holds NUL, the mark a console UART's driver puts where received input
-%% was lost (docs/design-live.md, "The console"), is not finished, and the bell rings.
-%% At the end of input the line is dropped, shown moved to its end as a finished line
-%% is, and the end handed on as Rest, which group reads as the end of input, so the read
-%% ends rather than waiting for an end the console sends only once. Otherwise the line
-%% stays in the editor, held (hold/5), and Rest, the input delivered after the key, is
-%% read under the hold. Stock finishes every line.
-finish(How, {line,P,MultiLine,_EditState}, Rest, Rs0) ->
-    case {marked(MultiLine), How} of
-        {false, _} ->
-            finished(How, MultiLine, Rest, Rs0);
-        {true, eof} ->
-            {done, _Dropped, [], Rs} = finished(eof, MultiLine, [], [beep|Rs0]),
-            {done, {[],{[],[]},[]}, eof, Rs};
-        {true, _} ->
-            edit(Rest, P, MultiLine, {held, none}, [beep|Rs0])
-    end.
+%% While the read is damaged no line is finished (edit 81): the bell rings and editing
+%% goes on with Rest, the input delivered after the key, in the mode the key left. At
+%% the end of input a damaged line is dropped, shown moved to its end as a finished line
+%% is, and the end handed on as Rest, which group gives the reader in place of a line, so
+%% the read ends rather than waiting for an end the console sends only once. Stock
+%% finishes every line.
+finish(How, {line,_P,MultiLine,_EditState}, Rest, Rs, false) ->
+    {finished(How, MultiLine, Rest, Rs), false};
+finish(eof, {line,_P,MultiLine,_EditState}, _Rest, Rs0, true) ->
+    {done, _Dropped, [], Rs} = finished(eof, MultiLine, [], [beep|Rs0]),
+    {{done, ?EMPTY_BUFFER, eof, Rs}, true};
+finish(_How, {line,P,MultiLine,EditState}, Rest, Rs, true) ->
+    edit(Rest, P, MultiLine, EditState, [beep|Rs], true).
 
-%% erXos: a held line takes no input until the user edits it. Each later line of input
-%% is dropped through its newline, a line cut by the end of a delivery included, and the
-%% bell rings at each dropped newline, so no text of a damaged paste that arrives after
-%% the refused Enter, in this delivery or a later one, can join the line. Keys are read
-%% by their action in the normal keymap, the mode a held line returns to. Text, a key
-%% bound to nothing and one bound to completion (Tab), which pasted text holds, are part
-%% of a dropped line, and one bound to finishing the line (Enter) ends one, so CR LF ends
-%% two, as it finishes two lines unheld. Any other key is the user's edit: it ends the
-%% hold and is read again, with the escape prefix it began with, as usual. A held line
-%% stays marked, since only an edit removes the mark.
-hold(Buf, P, MultiLine, EscapePrefix, Rs) ->
-    Held = fun(Cs, Rs1) -> edit(Cs, P, MultiLine, {held, none}, Rs1) end,
-    case edlin_key:get_valid_escape_key(Buf, EscapePrefix) of
-        {escape_prefix, EscapePrefix1} ->
-            edit([], P, MultiLine, {held, EscapePrefix1}, Rs);
-        {invalid, _, Rest} ->
-            Held(Rest, Rs);
-        {insert, _, Rest} ->
-            Held(Rest, Rs);
-        {key, Key, Rest} ->
-            case key_action(normal, Key) of
-                new_line_finish -> Held(Rest, [beep|Rs]);
-                Dropped when Dropped =:= none; Dropped =:= tab_expand;
-                             Dropped =:= tab_expand_full -> Held(Rest, Rs);
-                _Edit -> edit(Buf, P, MultiLine, {normal, EscapePrefix}, Rs)
-            end
-    end.
+%% erXos: the read's damage after an operation in ShellMode took the buffer from Before
+%% to After. An edit in the normal mode that empties the whole buffer, every line of a
+%% multi-line edit together, discards it (edit 81); a key that leaves an empty buffer
+%% empty keeps it, and so does an edit of a search term.
+damage(true, normal, Before, ?EMPTY_BUFFER) when Before =/= ?EMPTY_BUFFER -> false;
+damage(D, _ShellMode, _Before, _After) -> D.
 
 %% The finished line and the requests that show it so: Enter moves to the line's end and
 %% starts a new one, the end of input moves to the end, and an accepted search has shown
@@ -964,19 +948,11 @@ finished(found, L, [], Rs) ->
     {done,L,"\n",reverse(Rs)}.
 
 %% erXos: group's accepted history search, Cont the found line, finished through
-%% finish/4 with Rs the requests to send with it. No input follows the line: finished
-%% hands group stock's newline after it, and a held line reads nothing.
+%% finish/5 with Rs the requests to send with it and D the read's damage. No input
+%% follows the line: finished hands group stock's newline after it.
 -doc false.
-finish_line(Cont, Rs) ->
-    finish(found, Cont, [], reverse(Rs)).
-
-%% erXos: whether a line, as characters or as the editor's lines, holds the mark a
-%% console UART's driver puts where received input was lost.
--doc false.
-marked(Chars) when is_list(Chars) ->
-    lists:member($\^@, Chars);
-marked(MultiLine) ->
-    marked(current_line(MultiLine)).
+finish_line(Cont, Rs, D) ->
+    finish(found, Cont, [], reverse(Rs), D).
 
 %% Grapheme length in codepoints
 gc_len(CP) when is_integer(CP) -> 1;

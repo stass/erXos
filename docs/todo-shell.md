@@ -769,16 +769,16 @@ to the corpus and follow rc
   two or more CSI digits waits for the rest, but the rest is stock. A delivery that ends after one CSI digit takes `ESC [ 3` as a whole key and inserts
   the `~` that follows. Digits accumulate without the 15-character bound, a complete key takes one more `~`, and
   no line bound is kept: a line has no 65,536-codepoint limit and no count beside it, so a paste grows the group
-  without end, and the scan for the lost-input mark each time a line is finished (edit 81) costs the length of
-  the line until the loss event below replaces it. Build the rest of edit 73 with its tests, beside
-  `test/host/edlin_marker_test.rb`.
+  without end,. Build the rest of edit 73 with its tests, beside
+  `test/host/edlin_lost_test.rb`.
 * [High] shell and console, the input-loss event ([design-live.md](design-live.md#lost-input), edits 73, 80
   and 81 of [design-runtime.md](design-runtime.md)): a line that lost input can still run today. A
   character `edlin`'s bounds drop is lost silently, and a loss reaches a session's tty from the console only
   as a NUL byte; and the system console pushes input into a group that may not read, with no bound.
   The console's drivers, and only they, send `erx_console_lost` in order with their bytes and keep one input message
   outstanding until `erx_console_taken` (`erx_uart_input`), which `erx_console` answers at once, handing the
-  group a loss as NUL, which `edlin`'s NUL rule refuses; step 4 replaces that. `erx_tty` holds its input as units
+  group a loss as NUL, which `edlin` now reads as any NUL, a key bound to nothing, so until step 4 lands a
+  console's loss is dropped unmarked: steps 4 and 5 land together. `erx_tty` holds its input as units
   of bytes and losses (`lost/1`, `read_input/2`, `flushed_loss`), every master numbers `tty_input` and `tty_lost`,
   `erx_tty_link` takes a gap as a loss, the relay serves `tty_read_input` and sends `lost` only while the
   console holds, and a cooked edit that removes no byte keeps the line's loss; `erx_console` does not yet call
@@ -790,13 +790,14 @@ to the corpus and follow rc
      loss drops a cut character and resets `erx_console_keys`; every `erx_tty_event` is handled by name, with no
      catch-all, and the system console takes its own tty's signals and `flushed_loss` through the same handler,
      with one action-to-event mapping, the relay core's `event_name/1` and `lost`, exported rather than
-     copied. Until
-     step 5 gives `group` `lost` as an input, the console's one function that damages a group's read can only
-     answer its ask with a NUL, which `edlin`'s NUL rule refuses; step 5 changes that function alone;
-  5. `group` and `edlin`: the damage in each input request's state, a loss damaging every unfinished request, `edlin:edit_line/3`, `lost` as an input,
-     refused bounds as losses, refusal through `finish/4` until the buffer is emptied, a request starting with the group's derived damage, dumb mode; delete
-     the hold, the NUL scan, `edlin_key`'s NUL rule and `group`'s history rule; `test/host/edlin_marker_test.rb`
-     becomes `edlin_lost_test.rb`.
+     copied. `group` takes the
+     ask's answer `{read, Ref, lost}`, which the console's one function that damages a group's read sends;
+  5. `edlin`: a character edit 73's bounds refuse damages the read, once those bounds are built (`edlin.erl`
+     has none). The rest of step 5 is built: the damage in each request (`edlin:edit_line/3`, `group`'s
+     `lose/1` and `fail/2`), the NUL rule, the hold and the NUL scan deleted, dumb mode, and
+     `test/host/edlin_lost_test.rb`. `group`'s history rule is kept, keyed on the damage rather than on a NUL:
+     without it a damaged line left by Up comes back by Down after the recalled line was emptied, which ended
+     the damage, and runs (edit 81 of design-runtime.md).
 * [Low] UART lines other than the console, a full receiver (`erx_pl011`, `erx_hostlink`, `erx_line`): a PL011
   serving the host link or Bluetooth sends its bytes as they come, so its receiver's mailbox is the only bound. If a
   bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the
@@ -819,7 +820,7 @@ to the corpus and follow rc
   ends at the end of input, even on an empty line, and the console sends `eof` once. Only a line of a read that lost input, which `edlin` drops, ends the read (edit 81
   of [design-runtime.md](design-runtime.md)). Decide whether every line should: `edlin` would hand the end on
   after any line, and `group` would read the line, if it has text, and then the end, as its dumb mode does, with a
-  test beside `test/host/edlin_marker_test.rb`'s end-of-input case.
+  test beside `test/host/edlin_lost_test.rb`'s end-of-input case.
 * [Low] shell, the console's group's line history (`otp/lib/kernel/src/group.erl` `save_line_buffer`, `:1294-1305`):
   the group keeps every line its editor returns, so a long session, or a paste or peer that sends many lines, grows
   the group without end, though edit 73 of [design-runtime.md](design-runtime.md) bounds each line. Keep the

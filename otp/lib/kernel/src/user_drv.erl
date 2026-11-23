@@ -743,7 +743,7 @@ switch_loop(internal, {line, Line}, State) ->
              {next_event, internal, line}}
     end;
 switch_loop(info,{ReadHandle,{data,Cs}}, {Cont, #state{ read = ReadHandle } = State}) ->
-    case edlin:edit_line(unicode:characters_to_list(Cs), Cont) of
+    case element(1, edlin:edit_line(unicode:characters_to_list(Cs), Cont, false)) of
         {done,{[Line],_,_},_Rest, Rs} ->
             {keep_state, State#state{ tty = io_requests(Rs, State#state.tty) },
              {next_event, internal, {line, Line}}};

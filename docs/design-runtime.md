@@ -684,7 +684,9 @@ the end of input on, which `group` gives the reader in place of a line, so the r
 rather than waiting for an end the console sends only once. The damage ends only when an
 explicit discard, or an edit that removes text, empties the whole edited buffer, every
 line of a multi-line edit together, or when the read ends; a key that leaves an empty
-buffer empty, a history move and a search keep it. `group` keeps it in each input
+buffer empty, a history move and a search keep it, and while the read is damaged a history move
+keeps no line to come back to, so a damaged line never returns once emptying a recalled line has ended
+the damage. `group` keeps it in each input
 request's state, and a loss damages every unfinished request, the current one
 and each one set aside, since the group's one ask may be answered to a request
 other than the one the lost bytes were meant for, and a request starts damaged while

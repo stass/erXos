@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../fixtures/erlang_build'
+require_relative '../fixtures/line_editor'
 
 # Runs test/erlang/erx_session_tty_tests.erl, the EUnit cases of a session's ttys
 # (erx_session_tty), each driven by a terminal relay of its own, with the command shell
@@ -22,10 +23,9 @@ class ErxSessionTtyTest < Minitest::Test
   SHELL = File.join(ROOT, 'erlang/apps/erx_shell/src')
   # The applications the suite exercises, compiled whole (ErlangBuild), and the suite.
   APPLICATIONS = %w[erx erx_shell erx_session].freeze
-  TESTS = %w[test/erlang/erx_test_user.erl test/erlang/erx_session_tty_tests.erl
-             otp/lib/kernel/src/group.erl].freeze
+  TESTS = (%w[test/erlang/erx_test_user.erl test/erlang/erx_session_tty_tests.erl] + LineEditor::SOURCES).freeze
   EVAL = 'logger:set_primary_config(level, none), ' \
-         'code:unstick_mod(group), {module, group} = code:load_abs("group"), ' \
+         "#{LineEditor::LOAD}" \
          'halt(case eunit:test(erx_session_tty_tests, [verbose]) of ok -> 0; _ -> 1 end).'
 
   def test_relay_cases_pass_under_eunit
