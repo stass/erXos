@@ -84,6 +84,7 @@ master() ->
     a_grantees_calls_reach_nothing(Facet),
     held_until_connected(Facet),
     input_goes_to_the_session(),
+    a_loss_goes_to_the_session(),
     output_and_repeats(Facet),
     a_lost_output_is_logged(Facet),
     a_terminal_reply_stays_with_the_session(),
@@ -122,6 +123,14 @@ held_until_connected(Facet) ->
 input_goes_to_the_session() ->
     type(<<"ls\r">>),
     ?assertEqual({tty_input, <<"ls\r">>}, from_console()),
+    nothing_on_the_line().
+
+%% A loss the driver placed among its bytes reaches the connected session's tty as a
+%% loss, numbered in the input's sequence, never as a byte (docs/design-live.md, "Lost
+%% input").
+a_loss_goes_to_the_session() ->
+    erx_console ! erx_console_lost,
+    ?assertEqual(tty_lost, from_console()),
     nothing_on_the_line().
 
 output_and_repeats(Facet) ->
@@ -416,6 +425,7 @@ from_console() ->
     receive
         {tty_taken, _} = M -> M;
         {tty_input, _, Bytes} -> {tty_input, Bytes};
+        {tty_lost, _} -> tty_lost;
         {tty_size, _, _} = M -> M;
         tty_hangup = M -> M
     after ?WAIT_MS -> none

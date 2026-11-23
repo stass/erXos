@@ -262,16 +262,18 @@
                 %% The console's reads of its terminal, made only for its groups' asks,
                 %% when its driver is a terminal relay; none when its driver
                 %% sends the input as it arrives.
-                reader = none :: none | reader()}).
+                reader = none :: none | reader(),
+                %% Each group's outstanding ask for input, or `lost` while a loss waits
+                %% for its next one (damage/2); a group that is neither has no entry.
+                asks = #{} :: #{pid() => reference() | lost}}).
 
 %% The console of a session's tty reads its relay as libedit reads a tty
 %% (docs/design-shell.md, "The console reads on demand"): through its one open, a
-%% byte at a time and only for an ask of its current group. It keeps the relay, each group's
-%% outstanding ask, the leading bytes of a character it holds for that group, and
+%% byte at a time and only for an ask of its current group. It keeps the relay, the leading bytes of a character it holds for that group, and
 %% whether a watch of the open waits for its report. One watch or one read is
 %% outstanding at most; a read is a call, so only the watch outlives a step.
--type reader() :: #{relay := pid(), open := erx_session_relay:open(), asks := #{pid() => reference()},
-                    held := #{pid() => binary()}, watching := boolean()}.
+-type reader() :: #{relay := pid(), open := erx_session_relay:open(), held := #{pid() => binary()},
+                    watching := boolean()}.
 
 %% A session: its tty, name, principal and domain pid with the pid's monitor, once
 %% add_session/2 names them; the monitor of its console facet, once the facet has
@@ -489,7 +491,7 @@ reader(none) ->
     none;
 reader(Relay) ->
     {ok, Open} = erx_session_relay:open_reader(Relay, console),
-    #{relay => Relay, open => Open, asks => #{}, held => #{}, watching => false}.
+    #{relay => Relay, open => Open, held => #{}, watching => false}.
 
 %% The line's principal as the console starts: the one Config names, as a host test's
 %% does, or unknown. The system domain's line takes the system principal from the domain
@@ -668,11 +670,8 @@ info({erx_console_input, Bytes}, State = #state{driver = Driver}) when is_binary
     Driver ! erx_console_taken,
     {noreply, typed(Bytes, State)};
 info(erx_console_lost, State = #state{driver = Driver}) ->
-    %% A loss the driver placed among its bytes reaches the group as NUL, at its place:
-    %% edlin finishes no line that holds one and drops the lines after it until the user
-    %% edits (otp/lib/stdlib/src/edlin.erl, finish/4 and hold/5).
     Driver ! erx_console_taken,
-    {noreply, typed(<<0>>, State)};
+    {noreply, driver_lost(State)};
 info(erx_console_eof, State = #state{role = session}) ->
     hang_up(State);
 info({ready, Open, [{read, 1}], N}, State = #state{reader = Reader = #{open := Open}}) ->
@@ -685,9 +684,19 @@ info({erx_tty_event, Group, Event}, State = #state{reader = #{held := _}})
     State1 = drop_held(Group, State),
     [signal(Event, Group, State1) || is_pid(Group), is_group(Group, State1)],
     {noreply, State1};
-info({erx_tty_event, _Group, _Event}, State) ->
-    %% `winch` comes with the size report, which carries it to the current group;
-    %% `info` at the prompt writes nothing, and an event naming no group reaches none.
+info({erx_tty_event, Group, lost}, State = #state{reader = #{held := _}}) ->
+    %% A loss the flush of a signal dropped, told ahead of that signal: it damages the
+    %% read the signal leaves going (docs/design-live.md, "Lost input").
+    {noreply, damage(Group, State)};
+info({erx_tty_event, none, _Event}, State) ->
+    %% An event naming no group, made while no group of the console's was current,
+    %% reaches none.
+    {noreply, State};
+info({erx_tty_event, _Group, winch}, State) ->
+    %% A size change comes with the size report, which carries it to the current group.
+    {noreply, State};
+info({erx_tty_event, _Group, info}, State) ->
+    %% VSTATUS at the prompt writes nothing: no job runs.
     {noreply, State};
 info(erx_console_eof, State = #state{pending = Pending}) ->
     %% What began a character will never end it, so it reads as stock reads a bad byte.
@@ -896,10 +905,17 @@ from_group({Pid, set_unicode_state, Unicode}, State = #state{tty = TTY}) ->
     ok = io:setopts(standard_error, [{encoding, encoding(Unicode)}]),
     Pid ! {self(), set_unicode_state, prim_tty:unicode(TTY)},
     State#state{tty = prim_tty:unicode(TTY, Unicode)};
-from_group({Pid, read, Ref}, State = #state{reader = Reader = #{asks := Asks}}) when is_reference(Ref) ->
-    watch(State#state{reader = Reader#{asks := Asks#{Pid => Ref}}});
+from_group({Pid, read, Ref}, State = #state{asks = Asks}) when is_reference(Ref) ->
+    %% A loss that waits for Pid's ask answers it at once; any other ask is kept, and a
+    %% driver that sends the input as it arrives answers it only with a loss.
+    case Asks of
+        #{Pid := lost} ->
+            Pid ! {self(), {read, Ref, lost}},
+            State#state{asks = maps:remove(Pid, Asks)};
+        #{} ->
+            watch(State#state{asks = Asks#{Pid => Ref}})
+    end;
 from_group({_Pid, read, _Ask}, State) ->
-    %% A driver that sends the input as it arrives leaves every ask unanswered.
     State;
 from_group({Pid, Request}, State) ->
     group_request(Request, Pid, State);
@@ -1020,6 +1036,22 @@ redraw_if_listed(Domain, State = #state{line = {menu, Menu}, principal = Princip
     end;
 redraw_if_listed(_Domain, State) ->
     State.
+
+%% A loss the driver placed among its bytes: the escape state and the start of a
+%% character it fell among go with it, and the loss goes where the bytes would have
+%% gone: to the session that has the line, to the current group, or, while the menu
+%% has the line, nowhere, since the menu runs no line.
+driver_lost(State0 = #state{line = Line, sessions = Sessions}) ->
+    State = State0#state{keys = erx_console_keys:new(), pending = <<>>},
+    case Line of
+        {session, Domain} ->
+            #{Domain := #{master := Master}} = Sessions,
+            carry_out(Domain, erx_tty_master:lost(Master), State);
+        {menu, _Menu} ->
+            State;
+        system ->
+            damage(current(State), State)
+    end.
 
 %% Bytes typed at the line, for Domain's session, which has it.
 to_session(Domain, Bytes, State = #state{sessions = Sessions}) ->
@@ -1458,18 +1490,21 @@ control($\^Z) -> suspend.
 %% The current group changed, or may have: the relay is told, so the events made from
 %% now on carry it; what the console kept for a group that has ended is forgotten; and
 %% the open is watched if the current group has an ask outstanding.
-reader_follows(_Group, State = #state{reader = none}) ->
-    State;
-reader_follows(Group, State = #state{user = User, base = Base, shells = Shells,
-                                     reader = Reader = #{relay := Relay, asks := Asks, held := Held}}) ->
-    ok = erx_session_relay:console_group(Relay, Group),
+reader_follows(Group, State = #state{user = User, base = Base, shells = Shells, asks = Asks}) ->
     Live = [User, Base | [G || {G, _Caller, _Shell} <- Shells]],
-    watch(State#state{reader = Reader#{asks := maps:with(Live, Asks), held := maps:with(Live, Held)}}).
+    State1 = State#state{asks = maps:with(Live, Asks)},
+    case State1#state.reader of
+        none ->
+            State1;
+        Reader = #{relay := Relay, held := Held} ->
+            ok = erx_session_relay:console_group(Relay, Group),
+            watch(State1#state{reader = Reader#{held := maps:with(Live, Held)}})
+    end.
 
 %% A watch of one byte, made only when none waits for its report and the current group
 %% has an ask outstanding.
-watch(State = #state{reader = Reader = #{open := Open, asks := Asks, watching := false}}) ->
-    case is_map_key(current(State), Asks) of
+watch(State = #state{reader = Reader = #{open := Open, watching := false}}) ->
+    case is_reference(ask(current(State), State)) of
         true ->
             ok = erx_session_relay:watch(Open, {read, 1}),
             State#state{reader = Reader#{watching := true}};
@@ -1479,28 +1514,56 @@ watch(State = #state{reader = Reader = #{open := Open, asks := Asks, watching :=
 watch(State) ->
     State.
 
-%% The watch's report, numbered N: one byte is read for the current group's ask, if it
-%% has one; otherwise the byte stays in the tty until a group asks. An end of file, VEOF
+%% The watch's report, numbered N: one unit of input, a byte or a loss, is read for the
+%% current group's ask, if it has one; otherwise it stays in the tty until a group asks.
+%% A loss damages the read (damage/2). An end of file, VEOF
 %% at a line's start while a background program left ICANON set, is that read's end and
 %% never the hangup, which the relay tells with erx_console_eof: it is a read that found
 %% nothing, so the ask stays outstanding and the bytes held for the group go.
-read_for_ask(N, State = #state{reader = #{open := Open, asks := Asks}}) ->
+read_for_ask(N, State = #state{reader = #{open := Open}}) ->
     Group = current(State),
-    case is_map_key(Group, Asks) andalso erx_session_relay:read(Open, 1, N) of
+    case is_reference(ask(Group, State)) andalso erx_session_relay:read_input(Open, N) of
         false -> {noreply, State};
         {ok, <<Byte>>} -> {noreply, watch(answer(Group, Byte, State))};
+        lost -> {noreply, watch(damage(Group, State))};
         eagain -> {noreply, watch(State)};
         eof -> {noreply, watch(drop_held(Group, State))}
     end.
 
-%% The bytes held for Group go: a signal flushed the input typed with them, or a read
-%% found the end of file.
+%% The one way a loss reaches a group, so no loss is silent and none reaches a process
+%% that is not one of the console's groups: Group's outstanding ask is answered `lost`,
+%% which damages every request Group has unfinished, or, while it has none, its next ask
+%% will be (from_group/2). The leading bytes of a character held for Group go, since
+%% the loss fell among them (docs/design-live.md, "Lost input").
+damage(Group, State0 = #state{asks = Asks}) ->
+    State = drop_held(Group, State0),
+    case is_group(Group, State) andalso ask(Group, State) of
+        false ->
+            State;
+        none ->
+            State#state{asks = Asks#{Group => lost}};
+        Ref ->
+            Group ! {self(), {read, Ref, lost}},
+            State#state{asks = maps:remove(Group, Asks)}
+    end.
+
+%% Group's outstanding ask for input, or none.
+ask(Group, #state{asks = Asks}) ->
+    case Asks of
+        #{Group := Ref} when is_reference(Ref) -> Ref;
+        #{} -> none
+    end.
+
+%% The bytes held for Group go: a signal flushed the input typed with them, a loss fell
+%% among them, or a read found the end of file.
+drop_held(_Group, State = #state{reader = none}) ->
+    State;
 drop_held(Group, State = #state{reader = Reader = #{held := Held}}) ->
     State#state{reader = Reader#{held := maps:remove(Group, Held)}}.
 
 %% Byte, read for Group's ask, joins the bytes held for Group: what they complete ends
 %% the ask, and what they leave incomplete stays held for Group's next ask.
-answer(Group, Byte, State = #state{reader = Reader = #{asks := Asks, held := Held}}) ->
+answer(Group, Byte, State = #state{asks = Asks, reader = Reader = #{held := Held}}) ->
     {Events, Left} = text(<<(maps:get(Group, Held, <<>>))/binary, Byte>>),
     Reader1 = Reader#{held := Held#{Group => Left}},
     case << <<Utf8/binary>> || {data, Utf8} <- Events >> of
@@ -1508,7 +1571,7 @@ answer(Group, Byte, State = #state{reader = Reader = #{asks := Asks, held := Hel
             State#state{reader = Reader1};
         Chars ->
             Group ! {self(), {read, map_get(Group, Asks), Chars}},
-            State#state{reader = Reader1#{asks := maps:remove(Group, Asks)}}
+            State#state{reader = Reader1, asks = maps:remove(Group, Asks)}
     end.
 
 %% A signal key typed while Group was the console's current group, as deliver/2 passes

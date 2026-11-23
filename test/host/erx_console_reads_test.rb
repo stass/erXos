@@ -53,7 +53,27 @@ class ErxConsoleReadsTest < Minitest::Test
     assert_match(/an_end_of_file_on_a_read_ends_no_shell_test\S*\.\.\.\*failed\*/, output)
   end
 
+  def test_a_console_that_drops_a_reads_loss_fails
+    assert_seed_fails('lost -> {noreply, watch(damage(Group, State))};', 'lost -> {noreply, watch(State)};',
+                      'a_loss_runs_no_line_test')
+  end
+
+  def test_a_console_that_drops_the_relays_loss_event_fails
+    assert_seed_fails("    {noreply, damage(Group, State)};\ninfo({erx_tty_event, none, _Event}, State) ->",
+                      "    {noreply, State};\ninfo({erx_tty_event, none, _Event}, State) ->",
+                      'a_flushed_loss_damages_the_read_test')
+  end
+
   private
+
+  # The cases, with the console's Anchor replaced, must fail Case.
+  def assert_seed_fails(anchor, replacement, kase)
+    source = File.binread(File.join(ErlangBuild::ROOT, CONSOLE))
+    assert_equal 1, source.scan(anchor).size, "#{CONSOLE} no longer holds #{anchor.inspect} once"
+    output, status = eunit(LOAD_GROUP, replaced: { CONSOLE => source.sub(anchor) { replacement } })
+    refute status.success?, output
+    assert_match(/#{Regexp.escape(kase)}\S*\.\.\.\*failed\*/, output)
+  end
 
   def eunit(load, replaced: {})
     Dir.mktmpdir('erx-console-reads-test') do |work|

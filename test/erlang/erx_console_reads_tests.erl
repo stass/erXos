@@ -109,6 +109,34 @@ an_end_of_file_on_a_read_ends_no_shell_test() ->
                          ?assert(is_process_alive(Console))
                  end).
 
+%% A loss the master reports among its input reaches the group as a loss at its place, so
+%% the line it falls in finishes only once the user has emptied it (docs/design-live.md,
+%% "Lost input").
+a_loss_runs_no_line_test() ->
+    with_console(fun(Relay, Shell) ->
+                         Shell ! {get_line, self()},
+                         type(Relay, <<"cd ">>),
+                         lose(Relay),
+                         type(Relay, <<"/tmp\r">>),
+                         ?assertEqual(timeout, line()),
+                         type(Relay, <<21, "pwd\r">>),
+                         ?assertEqual("pwd\n", line())
+                 end).
+
+%% A loss that a signal's flush drops reaches the console as the relay's `lost` event,
+%% ahead of the signal, and damages the read the signal leaves going: Ctrl-\ at the
+%% prompt does nothing more, so the line typed on after it does not finish.
+a_flushed_loss_damages_the_read_test() ->
+    with_console(fun(Relay, Shell) ->
+                         Shell ! {get_line, self()},
+                         type(Relay, <<"ls">>),
+                         drawn($s),
+                         lose(Relay),
+                         type(Relay, <<28>>),
+                         type(Relay, <<"x\r">>),
+                         ?assertEqual(timeout, line())
+                 end).
+
 %%% The console, the relay and the stand-in shell
 
 with_console(Case) ->
@@ -135,6 +163,12 @@ type(Relay, Bytes) ->
     N = case get({typed, Relay}) of undefined -> 0; Typed -> Typed end,
     put({typed, Relay}, N + 1),
     Relay ! {tty_input, N, Bytes}.
+
+%% A loss of the master's input, numbered in the same sequence.
+lose(Relay) ->
+    N = case get({typed, Relay}) of undefined -> 0; Typed -> Typed end,
+    put({typed, Relay}, N + 1),
+    Relay ! {tty_lost, N}.
 
 relay() -> whereis(erx_tty_owner).
 
