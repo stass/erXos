@@ -9,13 +9,13 @@ require_relative '../fixtures/erlang_build'
 
 # Runs test/erlang/otp_report_status_tests.erl, the cases of edit 75 of
 # docs/design-runtime.md (docs/design-log.md, "Reports carry no term"), on stock's
-# emulator (ERX_ERL and ERX_ERLC) with the tree's proc_lib, gen, gen_server, gen_statem
-# and group compiled into the work directory and loaded over stock's at boot. Then each
+# emulator (ERX_ERL and ERX_ERLC) with the tree's proc_lib, gen, gen_server, gen_statem, sys,
+# edlin, edlin_key and group compiled into the work directory and loaded over stock's at boot. Then each
 # seeded fault, applied to a copy of the tree's module, must fail the case named for it.
 class OtpReportStatusTest < Minitest::Test
   STDLIB = 'otp/lib/stdlib'
   KERNEL = 'otp/lib/kernel'
-  OTP_MODULES = (%w[proc_lib gen gen_server gen_statem].map { |name| "#{STDLIB}/src/#{name}.erl" } +
+  OTP_MODULES = (%w[proc_lib gen gen_server gen_statem sys edlin edlin_key].map { |name| "#{STDLIB}/src/#{name}.erl" } +
                  ["#{KERNEL}/src/group.erl"]).freeze
   TESTS = %w[otp_report_status_tests otp_report_status_hiding otp_report_status_crashing
              otp_report_status_crashing_server otp_report_status_changing]
@@ -65,7 +65,11 @@ class OtpReportStatusTest < Minitest::Test
     Seed.new(fault: "the group's postponed input kept", source: "#{KERNEL}/src/group.erl",
              anchor: '                   [hidden_event(Event) || Event <- Events];',
              replacement: '                   Events;',
-             catching_case: 'group_status_hides_the_input_test')
+             catching_case: 'group_status_hides_the_input_test'),
+    Seed.new(fault: "a hiding process's status dictionary kept", source: "#{STDLIB}/src/sys.erl",
+             anchor: '                true -> [];',
+             replacement: '                true -> get();',
+             catching_case: 'group_status_hides_the_kill_buffer_test')
   ].freeze
 
   def test_report_cases_pass_under_eunit

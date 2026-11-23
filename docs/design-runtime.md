@@ -702,8 +702,8 @@ it, and the end of one request clears only its own. A damaged request that ends
 with an error, rather than by `Ctrl-C` or at the end of input, leaves its loss held
 for the group's next ask, beside the ask, so the next request takes it first: every request ends
 through `pop_state/2`, which takes how it ended and holds the loss at every ending but those two;
-input an error drops with its request, and a loss that answers no outstanding ask, are held the same
-way. In dumb mode a damaged read returns no line
+input an error drops with its request is held the same way, and an answer to no outstanding ask, a
+loss or characters the group cannot place, damages every unfinished request and is held as well. In dumb mode a damaged read returns no line
 until `Ctrl-C` or the end of input ends it, and `erx_console` puts no group in raw mode. So
 every character a group takes after a loss lands in a damaged request until the user
 discards one, and no shell that edits with `edlin`, the Erlang shell
@@ -845,13 +845,13 @@ terms it holds out of its reports when the module that speaks for it, its
 initial module or the callback module `gen_statem` last changed to, exports
 `format_status/1`: its crash report passes the reason through that function,
 shows the mailbox and dictionary empty, as stock shows a `sensitive`
-process's, and the crash and terminate reports show each stack frame with its
+process's, its `sys:get_status` shows the dictionary empty too, and the crash and terminate reports show each stack frame with its
 arity alone. A process that does not hide its terms is reported as stock
 reports it, except when its `format_status/2` crashes: then `gen_statem`'s
 terminate report shows `gen`'s text for its state, data and reason, and
 `gen_server`'s an empty sys log, where stock shows them raw. `group`'s
 `format_status/1` hides the shell history, the line being typed, the driver's
-waiting input and the sys log; stock's crashes on every call. The
+waiting input and the sys log, and the empty dictionary hides `edlin`'s kill buffer; stock's crashes on every call. The
 `gen_statem` and `group` failures are upstream bugs.
 
 Nothing changes in `erl_ptab.c`: processes take their pids as stock ERTS

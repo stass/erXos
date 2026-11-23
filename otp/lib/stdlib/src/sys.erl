@@ -16,7 +16,11 @@
 %% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
-%% 
+%%
+%% Modified by erXos: get_status/1,2 shows the dictionary of a process that keeps
+%% its terms out of its reports (gen:hides_terms/1) empty, as proc_lib's crash
+%% report does (edit 75).
+%%
 %% %CopyrightEnd%
 %%
 -module(sys).
@@ -1003,7 +1007,7 @@ do_replace_state(StateFun, Mod, Misc) ->
     end.
 
 get_status(SysState, Parent, Mod, Debug, Misc) ->
-    PDict = get(),
+    PDict = status_dictionary(),
     FmtMisc =
         case erlang:function_exported(Mod, format_status, 2) of
             true ->
@@ -1014,6 +1018,22 @@ get_status(SysState, Parent, Mod, Debug, Misc) ->
         end,
     {status, self(), {module, Mod},
      [PDict, SysState, Parent, Debug, FmtMisc]}.
+
+%% erXos, edit 75: the dictionary a status shows. A process that keeps its terms
+%% out of its reports, decided by its initial module as proc_lib decides it for the
+%% crash report, may hold what a user typed there, such as the line editor's kill
+%% buffer in a group, so its status shows the dictionary empty. Any other process,
+%% and one whose initial call is unknown, shows it whole, as stock OTP does.
+status_dictionary() ->
+    case get('$initial_call') of
+        {Mod, _, _} when is_atom(Mod) ->
+            case gen:hides_terms(Mod) of
+                true -> [];
+                false -> get()
+            end;
+        _ ->
+            get()
+    end.
 
 %%-----------------------------------------------------------------
 %% These are the system debug commands.

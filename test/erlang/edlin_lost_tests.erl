@@ -219,19 +219,41 @@ a_group_keeps_the_damage_of_killed_text_test() ->
         ?assertEqual(none, answer(Next))
     end).
 
-%% Through a group: an answer with a loss to an ask that is not outstanding is not
-%% dropped: its loss is held for the next request, here the one set aside, which
-%% takes it when it resumes.
-a_group_holds_a_stray_loss_for_the_resumed_request_test() ->
+%% Through a group: an answer with a loss to an ask that is not outstanding damages every
+%% unfinished request, the current one and the one set aside, and is held for the next
+%% request as well, since the lost bytes may have been meant for any of them.
+a_group_damages_with_a_stray_loss_test() ->
     with_group(fun(Group, Driver) ->
         Outer = reader(Group),
         feed(Group, Driver, ["cd "]),
         Inner = reader(Group),
         Group ! {Driver, {read, make_ref(), lost}},
         feed(Group, Driver, ["y\r"]),
-        ?assertEqual("y\n", answer(Inner)),
+        ?assertEqual(none, answer(Inner)),
+        feed(Group, Driver, ["\^U", "z\r"]),
+        ?assertEqual("z\n", answer(Inner)),
         feed(Group, Driver, ["\r"]),
         ?assertEqual(none, answer(Outer))
+    end).
+
+%% Through a group: a stray loss while no request reads waits for the next one, which it
+%% damages.
+a_group_damages_the_next_request_with_a_stray_loss_test() ->
+    with_group(fun(Group, Driver) ->
+        Group ! {Driver, {read, make_ref(), lost}},
+        Reader = reader(Group),
+        feed(Group, Driver, ["ls\r"]),
+        ?assertEqual(none, answer(Reader))
+    end).
+
+%% Through a group: an answer with characters to an ask that is not outstanding is input
+%% the group cannot place, so it damages as a stray loss does rather than being dropped.
+a_group_damages_with_stray_characters_test() ->
+    with_group(fun(Group, Driver) ->
+        Reader = reader(Group),
+        Group ! {Driver, {read, make_ref(), "/tmp"}},
+        feed(Group, Driver, ["ls\r"]),
+        ?assertEqual(none, answer(Reader))
     end).
 
 %% Through a group: a delivery that empties a damaged buffer and finishes a new line

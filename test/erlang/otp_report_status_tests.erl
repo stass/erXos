@@ -1,8 +1,8 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% Edit 75 of docs/design-runtime.md, run on the tree's proc_lib, gen, gen_server,
-%% gen_statem and group loaded over stock's: a process that hides its terms
+%% Edit 75 of docs/design-runtime.md, run on the tree's proc_lib, gen, gen_server, sys,
+%% gen_statem, edlin, edlin_key and group loaded over stock's: a process that hides its terms
 %% (gen:hides_terms/1) keeps every term it holds out of its terminate report and its
 %% crash report (docs/design-log.md, "Reports carry no term"). Each server holds a secret
 %% in its state, its dictionary, a message to itself and the arguments of the frame that
@@ -33,7 +33,7 @@ log(_Event, _Config) ->
 tree_modules_are_loaded_test() ->
     {ok, Work} = file:get_cwd(),
     [?assertEqual(filename:basename(Work), filename:basename(filename:dirname(code:which(M))))
-     || M <- [proc_lib, gen, gen_server, gen_statem, group]].
+     || M <- [proc_lib, gen, gen_server, gen_statem, sys, edlin, edlin_key, group]].
 
 %% The plain server, this module, has no format_status/1, and its reports quote the
 %% secret, as stock OTP's do.
@@ -114,6 +114,25 @@ group_status_hides_the_input_test() ->
         Pushed = sys:get_status(Group),
         ?assertNot(holds(Ahead, Pushed)),
         ?assertNot(holds(Typed, Pushed))
+    after
+        [exit(Pid, kill) || Pid <- [Reader, Group, Driver]]
+    end.
+
+%% A group's status does not show the text the user killed, which the line editor keeps
+%% in the group's process dictionary: sys:get_status shows a hiding process's dictionary
+%% empty, as its crash report does.
+group_status_hides_the_kill_buffer_test() ->
+    Killed = secret(),
+    Test = self(),
+    Driver = spawn(fun() -> driver(Test) end),
+    Group = group:start(Driver, noshell, [{dumb, false}]),
+    Reader = spawn(fun() -> io:get_line(Group, "> ") end),
+    try
+        Ref = receive {asked, Group, R} -> R after 5000 -> error(no_ask) end,
+        Group ! {Driver, {read, Ref, binary_to_list(Killed) ++ "\^U"}},
+        Again = receive {asked, Group, R2} -> R2 after 5000 -> error(no_ask) end,
+        ?assert(is_reference(Again)),
+        ?assertNot(holds(Killed, sys:get_status(Group)))
     after
         [exit(Pid, kill) || Pid <- [Reader, Group, Driver]]
     end.

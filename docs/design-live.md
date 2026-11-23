@@ -1239,8 +1239,11 @@ takes that loss first, as a held flushed loss is taken. `pop_state/2`
 holds the loss at every ending but the user's discard and the end of
 input, so an ending that does not say how it ended damages too much,
 never too little. Input an error drops with its request is input lost,
-and is held as a loss the same way, and so is a loss that answers no
-outstanding ask. No other ending
+and is held as a loss the same way. An answer to no outstanding ask, a
+loss or characters the group cannot place, is input lost too: it
+damages every unfinished request and is held for the next one, which
+starts damaged even after the user discards those: an answer to no ask is
+a driver's fault, and nothing tells which request its bytes were for. No other ending
 exists: `group` does not watch the process that asked, so a reader's
 exit leaves its request unfinished until it ends one of these ways, and
 the I/O protocol has no timeout or cancellation on the group's side. So
@@ -1728,7 +1731,9 @@ fail, so the case proves the code under it ran.
 | the same: a loss, then more text, Enter and a pasted password in one delivery, then text in the next | no line finishes; the bell rings once at Enter; the password is dropped and the next delivery's text joins the line | the refused Enter keeping the rest of its delivery |
 | the same: `rm -rf /tmp/bu`, a loss, `Ctrl-U`, `Ctrl-Y`, Enter; the kill, `Ctrl-C`, and a yank and Enter in the next request; and a yank and Enter in a process whose `edlin:init/1` copied the kill buffer | no line finishes in any | a kill storing its text without the damage; a yank ignoring the damage |
 | the same: a damaged read's history search, accepted with Enter, left with `Ctrl-A` to edit, or cancelled, then Enter | no line finishes | a search's ending rebuilding the line state without the damage |
-| the same: read A undamaged, read B from another process, a loss answering no outstanding ask, B's line and Enter, then A resumes and Enter | B returns its line; A finishes no line | the stray loss dropped |
+| the same: read A undamaged, read B from another process, a loss answering no outstanding ask, B's line and Enter; B's buffer emptied, a new line and Enter; then A resumes and Enter | B finishes no line until its buffer is emptied, then returns the new line; A finishes no line | the stray loss dropped, or only held for the next request |
+| the same: a stray loss while no request reads, then a read, a line and Enter | no line finishes | the stray loss dropped |
+| the same: a read, an answer with characters to no outstanding ask, a line and Enter | no line finishes | the stray characters dropped as an unknown message |
 | the same: a loss, then `Ctrl-U`, a new line and Enter in one delivery, then the next request's line | both lines finish | the ending reading the damage from before the edit |
 | the same, dumb mode: a read in latin1 that a pasted line fails, with more lines pasted after it, then the next read's line | the first read fails; the next returns no line | the input the error drops not held as a loss |
 | the same, nested edited reads: read A damaged, then read B from another process, B's line and Enter; B's buffer emptied, a new line and Enter; then A resumes and Enter | B starts damaged and finishes no line until its buffer is emptied, then returns the new line; A finishes no line | B starting undamaged |

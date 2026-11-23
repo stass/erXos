@@ -428,7 +428,7 @@ callback leaves it when handed `#{reason => Reason}`; both show each
 stack frame as module, function and arity alone, and the crash report
 shows an empty mailbox and dictionary, as stock OTP shows those of a
 process that set `process_flag(sensitive, true)`, with the queue's
-length. Such a callback must never crash: a total function over the
+length; its `sys:get_status` shows the dictionary empty too. Such a callback must never crash: a total function over the
 map it is handed, answering every key, `reason` included, with a term
 that holds none of those bytes. When it crashes, `gen_statem`'s report
 shows `gen`'s text for the crash and nothing of what the callback was

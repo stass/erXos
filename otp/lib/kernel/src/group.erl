@@ -27,8 +27,9 @@
 %% (lose/1); each request keeps its damage and passes it into every edlin call; a
 %% request starts damaged while any unfinished one is. Only the user's Ctrl-C and the
 %% end of input end a damaged request's loss: any other ending holds it for the next
-%% request (pop_state/2), and so does input an error drops (fail/3) and a loss that
-%% answers no outstanding ask. An accepted history search is finished by edlin, a
+%% request (pop_state/2), and so does input an error drops (fail/3). An answer to no
+%% outstanding ask, a loss or characters, damages every unfinished request and is held
+%% for the next one too. An accepted history search is finished by edlin, a
 %% damaged read's line is not kept in the history (keep_line/3), and the end of input
 %% edlin hands on after dropping a damaged line ends the read.
 %%
@@ -571,10 +572,12 @@ handle_info(State, {Drv, {read, Ref, Chars}}, Data = #state{ driver = Drv, ask =
 handle_info(State, {Drv, {read, Ref, lost}}, Data = #state{ driver = Drv, ask = Ref }) ->
     %% erXos: the ask's answer where input was lost.
     ?MODULE:State(data, lost, lose(Data#state{ ask = none }));
-handle_info(_State, {Drv, {read, _Stale, lost}}, Data = #state{ driver = Drv }) ->
-    %% erXos: a loss that answers no outstanding ask is held for the next request,
-    %% never dropped, so no loss is silent.
-    {keep_state, Data#state{ held_loss = true }};
+handle_info(_State, {Drv, {read, _Stray, Answer}}, Data = #state{ driver = Drv })
+  when Answer =:= lost; is_list(Answer); is_binary(Answer) ->
+    %% erXos: an answer to no outstanding ask, a loss or characters the group cannot
+    %% place, is input lost: it damages every unfinished request and is held for the
+    %% next one, so no loss is silent (edit 81).
+    {keep_state, lose(Data#state{ held_loss = true })};
 handle_info(State, {Drv, {data, Buf}}, Data = #state{ driver = Drv }) ->
     ?MODULE:State(data, Buf, Data);
 handle_info(State, {Drv, eof}, Data = #state{ driver = Drv }) ->

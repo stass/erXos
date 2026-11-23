@@ -798,6 +798,13 @@ to the corpus and follow rc
      `test/host/edlin_lost_test.rb`. `group`'s history rule is kept, keyed on the damage rather than on a NUL:
      without it a damaged line left by Up comes back by Down after the recalled line was emptied, which ended
      the damage, and runs (edit 81 of design-runtime.md).
+* [Medium] group and sys, typed text in a group's status (`otp/lib/stdlib/src/sys.erl`, `get_status/5`;
+  `otp/lib/stdlib/src/edlin.erl`, the kill buffer): with `sys:log` on, `sys:get_status` returns the raw
+  sys debug list, which holds the group's events with what was typed; and the kill buffer lives in the
+  group's process dictionary, which `process_info/2` shows to any process of the runtime. Keep the kill
+  buffer in the group's state, where `format_status/1` hides it, and let one function of `gen` decide
+  for the calling process whether it hides its terms, for both `proc_lib` and `sys` (they test
+  `'$initial_call'` differently today), hiding the debug list too.
 * [Medium] group, the rest of a delivery in the history search and the external editor
   (`otp/lib/kernel/src/group.erl`, `get_line_edlin/3`): as on stock, the clauses for `search_found`,
   `search_quit` and `search_cancel` drop the input `edlin` hands back after the key (`_Cs`), and
