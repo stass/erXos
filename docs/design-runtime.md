@@ -686,7 +686,11 @@ explicit discard, or an edit that removes text, empties the whole edited buffer,
 line of a multi-line edit together, or when the read ends; a key that leaves an empty
 buffer empty, a history move and a search keep it, and while the read is damaged a history move
 keeps no line to come back to, so a damaged line never returns once emptying a recalled line has ended
-the damage. `group` keeps it in each input
+the damage. Text keeps the damage of the read it came from: the kill buffer holds it beside the text, so
+a yank of text killed in a damaged read damages the read it lands in, whether the same request, a later
+one or another group's that `edlin:init/1` copied the kill buffer into. A refused Enter drops the rest of
+the delivery that carried it, with its one bell, so the rest of a damaged paste, a password meant for a
+later read with echo off among it, is not echoed into the line. `group` keeps the damage in each input
 request's state, and a loss damages every unfinished request, the current one
 and each one set aside, since the group's one ask may be answered to a request
 other than the one the lost bytes were meant for, and a request starts damaged while
@@ -696,7 +700,10 @@ fact and stored nowhere; the damage is saved and restored with its request when
 answer, and passes it into every `edlin` call, so no line state `group` rebuilds can lose
 it, and the end of one request clears only its own. A damaged request that ends
 with an error, rather than by `Ctrl-C` or at the end of input, leaves its loss held
-for the group's next ask, beside the ask, so the next request takes it first. In dumb mode a damaged read returns no line
+for the group's next ask, beside the ask, so the next request takes it first: every request ends
+through `pop_state/2`, which takes how it ended and holds the loss at every ending but those two;
+input an error drops with its request, and a loss that answers no outstanding ask, are held the same
+way. In dumb mode a damaged read returns no line
 until `Ctrl-C` or the end of input ends it, and `erx_console` puts no group in raw mode. So
 every character a group takes after a loss lands in a damaged request until the user
 discards one, and no shell that edits with `edlin`, the Erlang shell

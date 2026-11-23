@@ -1228,13 +1228,19 @@ damaged. A request loses its damage only by the user's discard of it or
 at the end of input; while one damaged request is still unfinished,
 every new one starts damaged again. The premise that closes the
 argument is about endings: `group` ends every request through one
-function, `pop_state/1` (`otp/lib/kernel/src/group.erl:621`), and a
+function, `pop_state/2` (`otp/lib/kernel/src/group.erl:691`), which
+takes how the request ended, and a
 damaged request reaches it only by the user's discard (`Ctrl-C`), by
 the end of input, or by an error (a driver's `{error, _}`, a failed
 translation or collection), since it returns no line. An error is
 neither the user's act nor the end, so a damaged request that ends with
 one leaves its loss held for the group's next ask, and the next request
-takes that loss first, as a held flushed loss is taken. No other ending
+takes that loss first, as a held flushed loss is taken. `pop_state/2`
+holds the loss at every ending but the user's discard and the end of
+input, so an ending that does not say how it ended damages too much,
+never too little. Input an error drops with its request is input lost,
+and is held as a loss the same way, and so is a loss that answers no
+outstanding ask. No other ending
 exists: `group` does not watch the process that asked, so a reader's
 exit leaves its request unfinished until it ends one of these ways, and
 the I/O protocol has no timeout or cancellation on the group's side. So
@@ -1566,9 +1572,17 @@ nothing. Each of the group's modes then does one thing:
   or a loss before the first character, keeps the damage until text typed
   after it is emptied again. Moving through the history or searching it
   keeps the damage, since the line it shows replaces what the user sees,
-  not what the read lost. The rest of a damaged paste joins the line, and
-  each newline in it rings the bell, but nothing runs until the user has
-  emptied the buffer.
+  not what the read lost. Text keeps the damage of the read it came from
+  wherever `edlin` stores it: a kill in a damaged read stores its text
+  damaged, and a yank of damaged text damages the read it lands in, the
+  same read, a later one, or another group's that copied the kill buffer,
+  so `Ctrl-U` then `Ctrl-Y` cannot bring a damaged line back undamaged;
+  the history stack, whose lines a search reads as text, does not keep a
+  damaged read's line at all. A refused Enter drops the rest of the
+  delivery that carried it, with its one bell, so the rest of a damaged
+  paste, a password meant for a later read with echo off among it, is
+  not echoed into the line; later deliveries edit the line as usual, and
+  nothing runs until the user has emptied the buffer.
 * **Dumb** (no editing, cooked collection): a damaged read returns no
   line: each line it collects is dropped through its newline, with the
   bell, until the read ends, by `Ctrl-C` or at the end of input. Dumb
@@ -1709,6 +1723,12 @@ fail, so the case proves the code under it ran.
 | the same: a loss before the first character, `Ctrl-U` on the empty buffer, text, Enter | no line finishes | a key that leaves an empty buffer empty clearing the damage |
 | the same, a multi-line edit: a loss in its second line, that line emptied, Enter | no line finishes until the first line is emptied too | the current line's emptiness taken for the buffer's |
 | the same: a loss, a history move, Enter | no line finishes | the history move rebuilding the line state without the damage |
+| the same: a loss, then more text, Enter and a pasted password in one delivery, then text in the next | no line finishes; the bell rings once at Enter; the password is dropped and the next delivery's text joins the line | the refused Enter keeping the rest of its delivery |
+| the same: `rm -rf /tmp/bu`, a loss, `Ctrl-U`, `Ctrl-Y`, Enter; the kill, `Ctrl-C`, and a yank and Enter in the next request; and a yank and Enter in a process whose `edlin:init/1` copied the kill buffer | no line finishes in any | a kill storing its text without the damage; a yank ignoring the damage |
+| the same: a damaged read's history search, accepted with Enter, left with `Ctrl-A` to edit, or cancelled, then Enter | no line finishes | a search's ending rebuilding the line state without the damage |
+| the same: read A undamaged, read B from another process, a loss answering no outstanding ask, B's line and Enter, then A resumes and Enter | B returns its line; A finishes no line | the stray loss dropped |
+| the same: a loss, then `Ctrl-U`, a new line and Enter in one delivery, then the next request's line | both lines finish | the ending reading the damage from before the edit |
+| the same, dumb mode: a read in latin1 that a pasted line fails, with more lines pasted after it, then the next read's line | the first read fails; the next returns no line | the input the error drops not held as a loss |
 | the same, nested edited reads: read A damaged, then read B from another process, B's line and Enter; B's buffer emptied, a new line and Enter; then A resumes and Enter | B starts damaged and finishes no line until its buffer is emptied, then returns the new line; A finishes no line | B starting undamaged |
 | the same, the reversed nesting: a helper's `io:get_line/1` A takes a loss of `% ` from a pasted `% file:delete("important").`, the evaluation ends and the shell's command read B starts, then `file:delete("important").` and Enter | B finishes no line | B starting undamaged while A is damaged |
 | the same, an error ending: the only request A damaged by a loss, the driver's `{error, x}` ending A, then the shell's next read B, a line and Enter | A answers `{error, x}`; B takes the held loss first and finishes no line | the error ending dropping A's loss, so B starts undamaged |

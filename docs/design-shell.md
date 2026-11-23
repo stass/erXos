@@ -2860,7 +2860,7 @@ seeded fault list none.
     passed over and the shell gets `ls\n`;
   * a group that asks at every `more_chars` and `blink`, and one that
     forgets its ask at an interrupt;
-  * a property test of `edlin:edit_line/2` in each mode, over keymap
+  * a property test of `edlin:edit_line/3` in each mode, over keymap
     sequences, prefixes and text given whole, a character per call and
     cut at random, which must give the same line and actions. Seeded,
     each restoring one of stock's answers that edit 72 removes: the key

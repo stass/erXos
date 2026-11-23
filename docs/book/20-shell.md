@@ -528,7 +528,8 @@ line editor between the keys typed before and after it
 editor then finishes no line of that read, nor of any read started while
 it is unfinished, ringing the bell at Enter,
 until the user empties the line, so a command that lost bytes never
-runs; a program reading the terminal gets a NUL where the input was
+runs, not even killed and yanked back, since killed text keeps the
+damage of the read it came from; a program reading the terminal gets a NUL where the input was
 lost, the byte FreeBSD gives there, and nothing for a loss a signal key
 flushes before the program reads it, so a program that edits its own
 line in raw mode is no better protected than on FreeBSD. Every other

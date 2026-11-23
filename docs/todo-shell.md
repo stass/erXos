@@ -318,7 +318,7 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
   apart from the line's principal, once the domain service has named it.
 * [Low] shell, `erlang/apps/erx_shell/src/erx_shell.erl:177`: the console's shell waits for the boot in `booted()`
   before `init/3` traps exits (`:192`), so a console `Ctrl-C` during that wait, which the shell's group passes on as
-  the exit signal `interrupt` while it serves no request (`otp/lib/kernel/src/group.erl:519-522`), ends the shell
+  the exit signal `interrupt` while it serves no request (`otp/lib/kernel/src/group.erl:623-626`), ends the shell
   before its banner. Trap exits before the wait.
 * [Low] `erlang/apps/erx_shell/src/erx_render.erl`, `erlang/apps/erx_web_line/src/erx_web_value.erl`: neither shows a
   record's `entries`, so `erx:i([kernel, log])` prints an empty record and the web's log view
@@ -769,7 +769,7 @@ to the corpus and follow rc
   two or more CSI digits waits for the rest, but the rest is stock. A delivery that ends after one CSI digit takes `ESC [ 3` as a whole key and inserts
   the `~` that follows. Digits accumulate without the 15-character bound, a complete key takes one more `~`, and
   no line bound is kept: a line has no 65,536-codepoint limit and no count beside it, so a paste grows the group
-  without end,. Build the rest of edit 73 with its tests, beside
+  without end. Build the rest of edit 73 with its tests, beside
   `test/host/edlin_lost_test.rb`.
 * [High] shell and console, the input-loss event ([design-live.md](design-live.md#lost-input), edits 73, 80
   and 81 of [design-runtime.md](design-runtime.md)): a line that lost input can still run today. A
@@ -794,10 +794,17 @@ to the corpus and follow rc
      ask's answer `{read, Ref, lost}`, which the console's one function that damages a group's read sends;
   5. `edlin`: a character edit 73's bounds refuse damages the read, once those bounds are built (`edlin.erl`
      has none). The rest of step 5 is built: the damage in each request (`edlin:edit_line/3`, `group`'s
-     `lose/1` and `fail/2`), the NUL rule, the hold and the NUL scan deleted, dumb mode, and
+     `lose/1`, `pop_state/2` and `fail/3`), the kill buffer keeping the damage, the NUL rule, the hold and the NUL scan deleted, dumb mode, and
      `test/host/edlin_lost_test.rb`. `group`'s history rule is kept, keyed on the damage rather than on a NUL:
      without it a damaged line left by Up comes back by Down after the recalled line was emptied, which ended
      the damage, and runs (edit 81 of design-runtime.md).
+* [Medium] group, the rest of a delivery in the history search and the external editor
+  (`otp/lib/kernel/src/group.erl`, `get_line_edlin/3`): as on stock, the clauses for `search_found`,
+  `search_quit` and `search_cancel` drop the input `edlin` hands back after the key (`_Cs`), and
+  `open_editor` replaces it with the editor's text, so keys pasted after the key that leaves a search, or
+  while the editor opens, are dropped without a loss, against the rule of
+  [design-live.md](design-live.md#lost-input) that every place that drops input makes one. Hand the rest
+  back to `edlin:edit_line/3` in the line state the mode leaves, as the other modes do.
 * [Low] UART lines other than the console, a full receiver (`erx_pl011`, `erx_hostlink`, `erx_line`): a PL011
   serving the host link or Bluetooth sends its bytes as they come, so its receiver's mailbox is the only bound. If a
   bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the
