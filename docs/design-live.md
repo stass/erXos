@@ -1303,8 +1303,9 @@ while its FIFO holds a byte, so its line, still raised, would deliver
 again; it continues a stopped drain the same way, and both drivers keep
 one rule.
 
-**One input message outstanding per driver.** A driver has at most one
-input message the console has not taken. The console answers each
+**One input message outstanding per console driver.** A driver that
+feeds the console has at most one input message the console has not
+taken. The console answers each
 `{erx_console_input, Bytes}` and each `erx_console_lost` with
 `erx_console_taken`, as `erx_console_written` answers output, and a driver
 sends its next input message only after that answer, so the console's
@@ -1357,10 +1358,16 @@ both UART drivers' lines are, it answers a driver's input message as soon as it 
 a paused driver resumes as soon as the console runs, whatever its groups
 and sessions do.
 
-A driver of another line, the host link's or a Bluetooth controller's,
-makes no loss, since its protocol checks its own frames, and the host
-link's console line makes none, since a frame that fails its CRC or
-sequence ends the link's session
+The rule binds only the drivers that feed the console. A driver of
+another UART line, the PL011 serving the host link or a Bluetooth
+controller, feeding `erx_hostlink` or `erx_line`, sends its bytes as they
+come and makes no loss: a store that dropped bytes there would drop them
+silently, since not every such protocol checks its frames (H4, the
+Bluetooth UART transport, has no checksum), and draining into a store
+regardless of the answer would defeat RTS/CTS on a line that has it,
+whose sender a full receiver is meant to hold off. The host link's
+console line makes no loss of its own, since a frame that fails its CRC
+or sequence ends the link's session
 ([Failure handling](#failure-handling-diagnostics-and-debuggability)).
 A terminal on a display, `erx_term`, and an SSH channel lose no input of
 their own.
@@ -1584,7 +1591,7 @@ after it, however the input was cut into deliveries.
   open may not read or `N` is not the relay's signal number.
 * Storage is finite at every hop: a drain reads at most 32 bytes or 64
   words, and no more bytes than its driver's store has room for; a
-  driver has one input message outstanding and holds at most
+  console driver has one input message outstanding and holds at most
   one drain's bytes, with at most one loss between two of them, while it
   waits for `erx_console_taken`, so the console's mailbox holds at most one
   input message from its driver however long the console is delayed; a
@@ -1633,8 +1640,8 @@ obligations are these, each with one owner:
   through suspension and every
   `edlin` call (`group`), and `edlin`'s one finishing function refuses a
   damaged read;
-* both consoles read on demand through one reader, and every driver has one
-  input message outstanding, answered as output is: at once for a person's
+* both consoles read on demand through one reader, and every driver that
+  feeds the console has one input message outstanding, answered as output is: at once for a person's
   terminal, which overflows into a loss, and once there is room for a pipe,
   which waits;
 * a flush never drops a loss unseen: it reports `flushed_loss`, and the
@@ -1678,7 +1685,7 @@ fail, so the case proves the code under it ran.
 | the same with `Ctrl-Z` in frame 2, and with `Ctrl-C` | `Ctrl-Z`: no line is returned; `Ctrl-C`: the read ends, and the next read is undamaged | the ended read's damage passed on to the next read |
 | `erx_tty_tests`, raw: 4 KiB waiting, then three bytes | one loss after the 4 KiB, kept though no byte of room is left | the drop not marked |
 | `erx_tty_tests`, cooked: `cd`, a loss, `/`, then `VERASE`, then `VKILL`; a loss then `VEOF`; `ICANON` cleared over a line with a loss | the loss stays after the erase and is gone after the kill; the second line reads as one NUL; the loss moves to the readable input in its place | an erase that removes the loss |
-| `erx_tty_modes_tests` exploration and `erx_tty_fuzz` | `lost` is in the event alphabet; every reachable state keeps losses within the held bytes, one at most between two bytes | losses not dropped by a signal's flush |
+| `erx_tty_tests`' exploration and `erx_tty_fuzz` | `lost` is in the event alphabet; every reachable state keeps losses within the held bytes, one at most between two bytes | losses not dropped by a signal's flush |
 | `erx_session_relay_core_tests`: `tty_read_input` on a read open, a write-only open, and with a stale signal number | `lost` at a loss; `{error, ebadf}`; `eagain` with the unit still held | the request served with a stale number |
 | `edlin_lost_tests` (replacing `edlin_marker_tests`), through `edlin` and a group: a loss, more text, Enter | no line finishes; the bell rings at the loss and at Enter | the finishing function ignoring the damage |
 | the same: a loss, `Ctrl-U` at the end, new text, Enter | the new line finishes | the damage cleared by any edit key |

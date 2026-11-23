@@ -774,17 +774,15 @@ to the corpus and follow rc
   `test/host/edlin_marker_test.rb`.
 * [High] shell and console, the input-loss event ([design-live.md](design-live.md#lost-input), edits 73, 80
   and 81 of [design-runtime.md](design-runtime.md)): a line that lost input can still run today. A
-  `tty_input` the system domain's peer drops, a byte the tty drops for room and a character `edlin`'s bounds
-  drop are lost silently; and the system console pushes input into a group that may not read, with no bound.
-  The console's drivers send `erx_console_lost` in order with their bytes and keep one input message
+  character `edlin`'s bounds drop is lost silently, and a loss reaches a session's tty from the console only
+  as a NUL byte; and the system console pushes input into a group that may not read, with no bound.
+  The console's drivers, and only they, send `erx_console_lost` in order with their bytes and keep one input message
   outstanding until `erx_console_taken` (`erx_uart_input`), which `erx_console` answers at once, handing the
-  group a loss as NUL, which `edlin`'s NUL rule refuses; step 4 replaces that. Build the rest of the design's event in
+  group a loss as NUL, which `edlin`'s NUL rule refuses; step 4 replaces that. `erx_tty` holds its input as units
+  of bytes and losses (`lost/1`, `read_input/2`, `flushed_loss`), every master numbers `tty_input` and `tty_lost`,
+  `erx_tty_link` takes a gap as a loss, and the relay serves `tty_read_input`; `erx_console` does not yet call
+  `erx_tty_master:lost/1` or read with `tty_read_input`, which step 4 does. Build the rest of the design's event in
   steps, each with its rows of the design's verification table:
-  2. `erx_tty`: held input as units, `lost/1`, a loss where `input/3` drops for room, settlement over units, one
-     consuming step for `read/3` and `read_input/2`, `flushed_loss` from a flush that drops a loss, with `lost` in `erx_tty_modes_tests` and `erx_tty_fuzz`;
-  3. the console interface: `{tty_input, N, Bytes}` and `{tty_lost, N}` in `abi/services/console.txt`, numbered by
-     every master (`erx_tty_master`, `erx_term`, `erx_ssh_dev_channel`) and checked by `erx_tty_link`, a gap taken
-     as a loss; the relay serves `{tty_read_input, Open, N}`;
   4. `erx_console`: both roles read on demand, the system role from its own `erx_tty` with a terminal's or a
      pipe's settings as `Terminal` says, deleting `input/2` and the push; the console answers a terminal's input
      at once and a pipe's once there is room; a loss, and the relay's `lost` event, damage the group's read, and a
@@ -793,6 +791,11 @@ to the corpus and follow rc
      refused bounds as losses, refusal through `finish/4` until the buffer is emptied, a request starting with the group's derived damage, dumb mode; delete
      the hold, the NUL scan, `edlin_key`'s NUL rule and `group`'s history rule; `test/host/edlin_marker_test.rb`
      becomes `edlin_lost_test.rb`.
+* [Low] UART lines other than the console, a full receiver (`erx_pl011`, `erx_hostlink`, `erx_line`): a PL011
+  serving the host link or Bluetooth sends its bytes as they come, so its receiver's mailbox is the only bound. If a
+  bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the
+  receiver answers, so RTS/CTS holds the sender off on a line that has it, and on a line without flow control the
+  FIFO overruns and the overrun placement of [design-live.md](design-live.md#lost-input) marks the loss.
 * [Medium] console, crash reports (`erlang/apps/erx/src/erx_console.erl`): the console exports no
   `format_status/1`, so a crash while it handles `{erx_console_input, Bytes}` reports the message and the state,
   which can hold a typed passphrase. Hide its terms as `erx_pl011` and `erx_mini_uart` do, with a case like
