@@ -16,15 +16,28 @@ signals, start and stop, CR and NL mapping, line editing, storing, echo),
 and echo and output share ttydisc_echo_force's and ttydisc_write_oproc's
 rendering and the output column they keep.
 
-The input the tty holds is two binaries: `ready`, the bytes a read can
-take, and `line`, the cooked line being edited. A byte in raw mode goes
-straight to `ready`; in cooked mode a line moves to `ready` at its end, a
-newline, VEOF or VEOL. Together they hold at most ?MAX_INPUT bytes, and a
-cooked line keeps one byte free for its end, so a line holds at most 4,095
-bytes and its end. A byte that does not fit is dropped and counted, with a
-bell when IMAXBEL is set, as ttydisc_rint drops a byte when nothing can be
-read (tty_ttydisc.c:1220-1236); the relay cannot hold back its master, so
-it drops in every case. Echo goes to the master with a program's output,
+The input the tty holds is two sequences of units, each unit a byte or a
+loss of input (docs/design-live.md, "Lost input"): `ready`, the units a
+read can take, and `line`, the cooked line being edited. A byte in raw mode
+goes straight to `ready`; in cooked mode a line moves to `ready` at its
+end, a newline, VEOF or VEOL. Together they hold at most ?MAX_INPUT bytes,
+and a cooked line keeps one byte free for its end, so a line holds at most
+4,095 bytes and its end. A byte that does not fit is dropped and counted,
+with a bell when IMAXBEL is set, as ttydisc_rint drops a byte when nothing
+can be read (tty_ttydisc.c:1220-1236); the relay cannot hold back its
+master, so it drops in every case, and the drop is a loss at its place.
+
+A loss, from lost/1 or a drop, is no byte the terminal sent: it matches no
+special character, echoes nothing and takes no byte of room, and losses
+with no byte between them are one, so the tty holds at most one loss more
+than it holds bytes. Readiness counts it as one unit wherever it counts a
+byte. read/3 gives each loss as one NUL at its place and read_input/2 as
+`lost`, both through one consuming step. An erase never removes a loss:
+it removes the bytes before it and keeps it at the line's new end, and
+only a kill, or an erase that leaves the line no byte, drops it. A
+signal's flush drops losses with the bytes, and reports `flushed_loss`,
+ahead of the signal, when it drops one; a hangup drops them unreported,
+since it ends every read. Echo goes to the master with a program's output,
 so it takes the room the owner has for the master, which input/3 is given
 as output/3 is: a piece of echo that does not fit what is left is dropped
 whole, as FreeBSD's ttydisc_echo_force puts echo in the output queue
@@ -62,8 +75,8 @@ have nothing to act on, since a master reports no breaks or parity errors
 and takes no flow control.
 """.
 
--export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3, output/3,
-         read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, status/3,
+-export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3, lost/1,
+         output/3, read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, read_input/2, status/3,
          hangup/1, waiting/1, dropped/1]).
 -export_type([tty/0, termios/0, open/0, timer/0, room/0, action/0]).
 
@@ -107,23 +120,30 @@ and echo still fill the room and nothing goes to the master.
                 | {signal, sigint | sigquit | sigtstp} % for the foreground group
                 | info                           % VSTATUS: the foreground job's status
                 | flush_output                   % drop output not yet at the master
+                | flushed_loss                   % the flush dropped a loss
                 | stop_output | start_output     % IXON's VSTOP and VSTART
                 | {ready, open()}                % the waiter may read now
                 | {timer_start, timer(), pos_integer()} % milliseconds
                 | {timer_cancel, timer()}
                 | winch.                         % the window size changed
-%% A read waits for its count, a poll for one byte of input.
+%% Held input: its bytes, and each loss named by the number of bytes
+%% before it, ascending, no two the same, since losses with no byte
+%% between them are one. A loss named N comes before the byte at offset N.
+-record(units, {bytes = <<>> :: binary(), losses = [] :: [non_neg_integer()]}).
+
+%% A read waits for its count, a poll for one unit of input.
 -type kind() :: {read, pos_integer()} | poll.
 -type waiter() :: {read, pos_integer(), timer() | none} | poll.
 
 -record(tty, {
     termios :: termios(),
     size = {24, 80} :: erx_console:size(),
-    ready = <<>> :: binary(),
-    line = <<>> :: binary(),
+    ready = #units{} :: #units{},
+    line = #units{} :: #units{},
     %% The output column, the column after the last write, and how much of
     %% the line was echoed before it (FreeBSD's t_column, t_writepos and
-    %% reprint position), which erase and the status line read.
+    %% reprint position), which erase and the status line read, counted
+    %% in the line's bytes.
     column = 0 :: non_neg_integer(),
     writepos = 0 :: non_neg_integer(),
     reprintpos = 0 :: non_neg_integer(),
@@ -238,13 +258,16 @@ waiter is ready, and from now on every read that finds no bytes returns
 """.
 -spec hangup(tty()) -> {[action()], tty()}.
 hangup(Tty) ->
-    rewait(Tty#tty{hungup = true, ready = <<>>, line = <<>>, reprintpos = 0}).
+    rewait(Tty#tty{hungup = true, ready = #units{}, line = #units{}, reprintpos = 0}).
 
--doc "The bytes a read can take now, FreeBSD's FIONREAD (ttydisc_bytesavail).".
+-doc """
+The units a read can take now, FreeBSD's FIONREAD (ttydisc_bytesavail),
+each loss counted as the NUL a read gives for it.
+""".
 -spec waiting(tty()) -> non_neg_integer().
 waiting(#tty{ready = Ready} = Tty) ->
     case on(icanon, Tty) of
-        false -> byte_size(Ready);
+        false -> count(Ready);
         true ->
             case line_end(Tty) of
                 none -> 0;
@@ -317,13 +340,15 @@ retermios(New, #tty{termios = Old} = Tty0) ->
 %% Moves into `ready` what the mode counts as complete: in raw mode the whole
 %% line, in cooked mode the line up to its last end (ttydisc_canonicalize).
 canonicalize(#tty{ready = Ready, line = Line, reprintpos = Shown} = Tty) ->
-    Cut = case on(icanon, Tty) of
-              false -> byte_size(Line);
-              true -> last_end(Line, Tty)
-          end,
-    <<Done:Cut/binary, Rest/binary>> = Line,
-    Tty#tty{ready = <<Ready/binary, Done/binary>>, line = Rest,
-            reprintpos = max(0, Shown - Cut)}.
+    case on(icanon, Tty) of
+        false ->
+            Tty#tty{ready = join(Ready, Line), line = #units{}, reprintpos = 0};
+        true ->
+            Cut = last_end(Line#units.bytes, Tty),
+            {Done, Rest} = split(Line, Cut),
+            Tty#tty{ready = join(Ready, Done), line = Rest,
+                    reprintpos = max(0, Shown - Cut)}
+    end.
 
 last_end(Line, Tty) ->
     {_, Cut} = lists:foldl(fun(Byte, {Position, Cut}) ->
@@ -364,6 +389,28 @@ input(Bytes, {Free, Kept, Stopped}, #tty{received = Before} = Tty0)
                                                out_stopped = false}),
     {merge(lists:reverse(Keyed)) ++ Settled, Rest,
      {Tty1#tty.echo_room, Kept, Tty1#tty.out_stopped}, Tty2}.
+
+-doc """
+Input was lost here (docs/design-live.md, "Lost input"): a loss goes where
+the next byte would, at the end of the cooked line or of the readable raw
+input, unless the input already ends with one. It returns the actions
+input/3 returns for one byte that ends no line and makes no signal: the
+waiters it readies, and the timer it starts as a first unit.
+""".
+-spec lost(tty()) -> {[action()], tty()}.
+lost(Tty) ->
+    settle(true, add_loss(Tty)).
+
+add_loss(#tty{ready = Ready, line = Line} = Tty) ->
+    Last = case Line of
+               #units{bytes = <<>>, losses = []} -> Ready;
+               _ -> Line
+           end,
+    case {ends_lost(Last), on(icanon, Tty)} of
+        {true, _} -> Tty;
+        {false, true} -> Tty#tty{line = append_loss(Line)};
+        {false, false} -> Tty#tty{ready = append_loss(Ready)}
+    end.
 
 %% The keys up to and including the first that makes a signal.
 keys(<<Byte, Rest/binary>>, Actions0, Tty0) ->
@@ -429,9 +476,14 @@ start(Actions, Tty) ->
 flush(Actions, Tty) ->
     case on(noflsh, Tty) of
         true -> {Actions, Tty};
-        false -> {[flush_output | Actions],
-                  Tty#tty{ready = <<>>, line = <<>>, reprintpos = 0,
-                          echo_room = ?MASTER_ROOM - Tty#tty.echo_kept}}
+        false ->
+            Dropped = (Tty#tty.ready)#units.losses ++ (Tty#tty.line)#units.losses,
+            Reported = case Dropped of
+                           [] -> [flush_output | Actions];
+                           _ -> [flushed_loss, flush_output | Actions]
+                       end,
+            {Reported, Tty#tty{ready = #units{}, line = #units{}, reprintpos = 0,
+                               echo_room = ?MASTER_ROOM - Tty#tty.echo_kept}}
     end.
 
 %% IXON: VSTOP stops output and VSTART starts it; with both the same
@@ -486,25 +538,24 @@ store(Char, Actions, #tty{ready = Ready, line = Line} = Tty) ->
                   true -> 1;
                   false -> 0
               end,
-    Held = byte_size(Ready) + byte_size(Line) + byte_size(Bytes) + Reserve,
+    Held = byte_size(Ready#units.bytes) + byte_size(Line#units.bytes) + byte_size(Bytes) + Reserve,
     Received = Tty#tty.received + byte_size(Bytes),
     if
         Held > ?MAX_INPUT ->
             full(Actions, Tty);
         not Cooked ->
-            echo(Char, Actions, Tty#tty{ready = <<Ready/binary, Bytes/binary>>,
-                                        received = Received});
+            echo(Char, Actions, Tty#tty{ready = append(Ready, Bytes), received = Received});
         End ->
             echo(Char, Actions,
-                 Tty#tty{ready = <<Ready/binary, Line/binary, Bytes/binary>>,
-                         line = <<>>, reprintpos = 0, received = Received});
+                 Tty#tty{ready = join(Ready, append(Line, Bytes)),
+                         line = #units{}, reprintpos = 0, received = Received});
         true ->
-            echo(Char, Actions, Tty#tty{line = <<Line/binary, Bytes/binary>>,
-                                        received = Received})
+            echo(Char, Actions, Tty#tty{line = append(Line, Bytes), received = Received})
     end.
 
+%% A byte with no room is dropped, counted and lost at its place.
 full(Actions, #tty{dropped = Dropped} = Tty) ->
-    Counted = Tty#tty{dropped = Dropped + 1},
+    Counted = add_loss(Tty#tty{dropped = Dropped + 1}),
     case on(imaxbel, Tty) of
         true -> emit(<<?BELL>>, Actions, Counted);
         false -> {Actions, Counted}
@@ -527,7 +578,8 @@ rub_line(Actions, Tty) ->
 rub_word(Actions, Tty) ->
     case last(Tty) of
         none ->
-            {Actions, Tty};
+            %% A line with no byte left holds no loss.
+            {Actions, Tty#tty{line = #units{}}};
         Char ->
             case white(Char) of
                 true ->
@@ -553,13 +605,14 @@ rub_word(Alnum, Actions, Tty) ->
 
 %% Removes the last character of the line and, with ECHO, from the screen:
 %% by retyping the line when output has been written over it since, by
-%% ECHOE's visual erase, or else by echoing VERASE.
-rub(Actions, #tty{line = <<>>} = Tty) ->
-    {empty, Actions, Tty};
-rub(Actions, #tty{line = Line} = Tty0) ->
+%% ECHOE's visual erase, or else by echoing VERASE. The line's losses stay
+%% at its new end, and go with its last byte.
+rub(Actions, #tty{line = #units{bytes = <<>>}} = Tty) ->
+    {empty, Actions, Tty#tty{line = #units{}}};
+rub(Actions, #tty{line = #units{bytes = Line}} = Tty0) ->
     Keep = byte_size(Line) - 1,
-    <<Rest:Keep/binary, Char>> = Line,
-    Tty = shorten(Rest, Tty0),
+    <<_:Keep/binary, Char>> = Line,
+    Tty = shorten(Keep, Tty0),
     Echo = on(echo, Tty),
     Covered = Tty#tty.writepos >= Tty#tty.column,
     if
@@ -600,11 +653,9 @@ erase_visually(Char, Actions, Tty) ->
             emit(binary:copy(<<$\b>>, Width), Actions, Tty#tty{column = Before});
         false when Utf8 ->
             %% The rest of a UTF-8 character goes with its last byte.
-            Line = Tty#tty.line,
+            #units{bytes = Line} = Tty#tty.line,
             More = utf8_tail(<<Line/binary, Char>>) - 1,
-            Keep = byte_size(Line) - More,
-            <<Rest:Keep/binary, _/binary>> = Line,
-            emit(<<"\b \b">>, Actions, back(1, shorten(Rest, Tty)));
+            emit(<<"\b \b">>, Actions, back(1, shorten(byte_size(Line) - More, Tty)));
         false ->
             emit(<<"\b \b">>, Actions, back(1, Tty))
     end.
@@ -640,7 +691,7 @@ reprint(Actions, Tty) ->
            end,
     {Fit, Ended, Tty1} = retype(Keys, Actions, Tty),
     Line = case Fit andalso on(echo, Tty) of
-               true -> binary_to_list(Tty1#tty.line);
+               true -> binary_to_list((Tty1#tty.line)#units.bytes);
                false -> []
            end,
     {_, Retyped, Tty2} = retype(Line, Ended, Tty1#tty{reprintpos = 0}),
@@ -660,7 +711,7 @@ retype([Char | Rest], Actions, Tty) ->
 
 %% Where the column was before the line's last character: the column of
 %% the last write plus the width of what was echoed since.
-line_width(#tty{line = Line, reprintpos = Shown, writepos = Start} = Tty) ->
+line_width(#tty{line = #units{bytes = Line}, reprintpos = Shown, writepos = Start} = Tty) ->
     <<_:Shown/binary, Echoed/binary>> = Line,
     Caret = case on(echoctl, Tty) of
                 true -> 2;
@@ -674,14 +725,15 @@ line_width(#tty{line = Line, reprintpos = Shown, writepos = Start} = Tty) ->
                         end
                 end, Start, binary_to_list(Echoed)).
 
-shorten(Rest, #tty{reprintpos = Shown} = Tty) ->
-    Tty#tty{line = Rest, reprintpos = min(Shown, byte_size(Rest))}.
+%% The line cut to its first Keep bytes.
+shorten(Keep, #tty{line = Line, reprintpos = Shown} = Tty) ->
+    Tty#tty{line = truncate(Line, Keep), reprintpos = min(Shown, Keep)}.
 
 back(Width, #tty{column = Column} = Tty) ->
     Tty#tty{column = max(0, Column - Width)}.
 
-last(#tty{line = <<>>}) -> none;
-last(#tty{line = Line}) -> binary:last(Line).
+last(#tty{line = #units{bytes = <<>>}}) -> none;
+last(#tty{line = #units{bytes = Line}}) -> binary:last(Line).
 
 white(Char) -> Char =:= $\s orelse Char =:= $\t.
 
@@ -784,11 +836,11 @@ post(Char, Tty) ->
 forward(Width, #tty{column = Column} = Tty) ->
     Tty#tty{column = Column + Width}.
 
-line_start(#tty{line = Line} = Tty) ->
+line_start(#tty{line = #units{bytes = Line}} = Tty) ->
     Tty#tty{column = 0, writepos = 0, reprintpos = byte_size(Line)}.
 
 %% After a write: the line echoed so far is behind it.
-written(#tty{column = Column, line = Line} = Tty) ->
+written(#tty{column = Column, line = #units{bytes = Line}} = Tty) ->
     Tty#tty{writepos = Column, reprintpos = byte_size(Line)}.
 
 -doc """
@@ -900,21 +952,42 @@ timer({Open, _} = Timer, #tty{waiters = Waiters, expired = Expired} = Tty) ->
     end.
 
 -doc """
-Open reads at most Max bytes, at once. In cooked mode it gets the first
-line, or as much of it as fits, with its newline or VEOL and without its
-VEOF, so VEOF at the start of a line is `eof`, an end of file
-(ttydisc_read_canonical). In raw mode it gets what waits, up to Max. A
-read that finds nothing gets `eof` once the tty has hung up, and no bytes
-in raw mode with VMIN 0 when VTIME is 0 or its timer ended; otherwise
-`eagain`. The end of file and an empty raw read stay apart because an
-Erlang command's read returns `eof` for one and `<<>>` for the other.
+Open reads at most Max units, at once, each loss given as one NUL at its
+place. In cooked mode it gets the first line, or as much of it as fits,
+with its newline or VEOL and without its VEOF, so VEOF at the start of a
+line is `eof`, an end of file (ttydisc_read_canonical), and a loss and
+VEOF are one NUL. In raw mode it gets what waits, up to Max. A read that
+finds nothing gets `eof` once the tty has hung up, and no bytes in raw
+mode with VMIN 0 when VTIME is 0 or its timer ended; otherwise `eagain`.
+The end of file and an empty raw read stay apart because an Erlang
+command's read returns `eof` for one and `<<>>` for the other.
 """.
 -spec read(open(), non_neg_integer(), tty()) ->
           {{ok, binary()} | eof | eagain, tty()}.
 read(_Open, 0, Tty) ->
     {{ok, <<>>}, Tty};
-read(Open, Max, #tty{expired = Expired} = Tty0)
-  when is_integer(Max), Max > 0 ->
+read(Open, Max, Tty) when is_integer(Max), Max > 0 ->
+    case consume(Open, Max, Tty) of
+        {{ok, Units}, Tty1} -> {{ok, with_nuls(Units)}, Tty1};
+        Other -> Other
+    end.
+
+-doc """
+Open reads one unit, as read/3 reads one byte, but a loss is `lost`
+rather than a NUL: the read of a line editor, which refuses a line that
+lost input (docs/design-live.md, "Lost input").
+""".
+-spec read_input(open(), tty()) -> {{ok, binary()} | lost | eof | eagain, tty()}.
+read_input(Open, Tty) ->
+    case consume(Open, 1, Tty) of
+        {{ok, #units{losses = [_]}}, Tty1} -> {lost, Tty1};
+        {{ok, #units{bytes = Bytes}}, Tty1} -> {{ok, Bytes}, Tty1};
+        Other -> Other
+    end.
+
+%% The one step both reads take input by: at most Max units from the front
+%% of what a read can take, up to the first line's end when cooked.
+consume(Open, Max, #tty{expired = Expired} = Tty0) ->
     Tty = Tty0#tty{expired = lists:delete(Open, Expired)},
     case on(icanon, Tty) of
         true -> read_line(Max, Tty);
@@ -937,10 +1010,10 @@ read_line(Max, #tty{ready = Ready, hungup = Hungup} = Tty) ->
                            true -> Length;
                            false -> Taken
                        end,
-            <<Got:Taken/binary, _:(Consumed - Taken)/binary, Rest/binary>> =
-                Ready,
-            Answer = case Got of
-                         <<>> -> eof;
+            {Got, Behind} = take(Ready, Taken),
+            {_, Rest} = take(Behind, Consumed - Taken),
+            Answer = case count(Got) of
+                         0 -> eof;
                          _ -> {ok, Got}
                      end,
             {Answer, Tty#tty{ready = Rest}}
@@ -948,15 +1021,15 @@ read_line(Max, #tty{ready = Ready, hungup = Hungup} = Tty) ->
 
 read_raw(Max, Expired, #tty{ready = Ready, hungup = Hungup} = Tty) ->
     Empty = char(vmin, Tty) =:= 0 andalso (char(vtime, Tty) =:= 0 orelse Expired),
-    case min(Max, byte_size(Ready)) of
+    case min(Max, count(Ready)) of
         0 when Hungup ->
             {eof, Tty};
         0 when Empty ->
-            {{ok, <<>>}, Tty};
+            {{ok, #units{}}, Tty};
         0 ->
             {eagain, Tty};
         Taken ->
-            <<Got:Taken/binary, Rest/binary>> = Ready,
+            {Got, Rest} = take(Ready, Taken),
             {{ok, Got}, Tty#tty{ready = Rest}}
     end.
 
@@ -984,7 +1057,7 @@ arm(Open, poll, #tty{waiters = Waiters} = Tty) ->
     {[], Tty#tty{waiters = Waiters#{Open => poll}}};
 arm(Open, {read, Count}, #tty{waiters = Waiters, ready = Ready} = Tty) ->
     Timed = raw_timer(Tty) andalso
-        (char(vmin, Tty) =:= 0 orelse byte_size(Ready) > 0),
+        (char(vmin, Tty) =:= 0 orelse count(Ready) > 0),
     case Timed of
         true -> start_timer(Open, Count, Tty);
         false -> {[], Tty#tty{waiters = Waiters#{Open => {read, Count, none}}}}
@@ -998,7 +1071,7 @@ start_timer(Open, Count, #tty{serial = Serial, waiters = Waiters} = Tty) ->
 raw_timer(Tty) ->
     not on(icanon, Tty) andalso char(vtime, Tty) > 0.
 
-%% POSIX's four cases for a read, at most its count, one byte for a poll, a
+%% POSIX's four cases for a read, at most its count, one unit for a poll, a
 %% line when cooked.
 -spec ready_for(kind(), tty()) -> boolean().
 ready_for(_, #tty{hungup = true}) ->
@@ -1006,7 +1079,7 @@ ready_for(_, #tty{hungup = true}) ->
 ready_for(Kind, #tty{ready = Ready} = Tty) ->
     case on(icanon, Tty) of
         true -> line_end(Tty) =/= none;
-        false -> byte_size(Ready) >= wanted(Kind, Tty)
+        false -> count(Ready) >= wanted(Kind, Tty)
     end.
 
 wanted(poll, _) ->
@@ -1032,13 +1105,14 @@ settle(Arrived, #tty{waiters = Waiters} = Tty0) ->
 settle(Open, Waiter, Arrived, #tty{ready = Ready} = Tty) ->
     Kind = kind(Waiter),
     Interbyte = Kind =/= poll andalso raw_timer(Tty) andalso char(vmin, Tty) > 0,
+    Held = count(Ready) > 0,
     case ready_for(Kind, Tty) of
         true ->
             {Cancelled, Tty1} = unwait(Open, Tty),
             {Cancelled ++ [{ready, Open}], Tty1};
-        false when Interbyte, Arrived, Ready =/= <<>>, element(3, Waiter) =:= none ->
+        false when Interbyte, Arrived, Held, element(3, Waiter) =:= none ->
             start_timer(Open, element(2, Waiter), Tty);
-        false when Interbyte, Ready =:= <<>>, element(3, Waiter) =/= none ->
+        false when Interbyte, not Held, element(3, Waiter) =/= none ->
             {Cancelled, Tty1} = unwait(Open, Tty),
             Untimed = (Tty1#tty.waiters)#{Open => setelement(3, Waiter, none)},
             {Cancelled, Tty1#tty{waiters = Untimed}};
@@ -1077,18 +1151,86 @@ is_char(Name, Char, Tty) ->
 is_end(Char, Tty) ->
     Char =:= $\n orelse is_char(veof, Char, Tty) orelse is_char(veol, Char, Tty).
 
-%% The first line in `ready`: its length with its end, and whether the end
-%% is VEOF.
-line_end(#tty{ready = Ready} = Tty) ->
-    line_end(Ready, 0, Tty).
+%% The first line in `ready`: its length in units with its end, and
+%% whether the end is VEOF. The losses before its end byte are its own.
+line_end(#tty{ready = #units{bytes = Bytes, losses = Losses}} = Tty) ->
+    case first_end(Bytes, 0, Tty) of
+        none ->
+            none;
+        At ->
+            {At + 1 + length([L || L <- Losses, L =< At]),
+             is_char(veof, binary:at(Bytes, At), Tty)}
+    end.
 
-line_end(<<Char, Rest/binary>>, Position, Tty) ->
+first_end(<<Char, Rest/binary>>, Position, Tty) ->
     case is_end(Char, Tty) of
-        true -> {Position + 1, is_char(veof, Char, Tty)};
-        false -> line_end(Rest, Position + 1, Tty)
+        true -> Position;
+        false -> first_end(Rest, Position + 1, Tty)
     end;
-line_end(<<>>, _, _) ->
+first_end(<<>>, _, _) ->
     none.
+
+%%% Held input as units: bytes and the losses among them
+
+count(#units{bytes = Bytes, losses = Losses}) ->
+    byte_size(Bytes) + length(Losses).
+
+append(#units{bytes = Held} = Units, Bytes) ->
+    Units#units{bytes = <<Held/binary, Bytes/binary>>}.
+
+append_loss(#units{bytes = Bytes, losses = Losses} = Units) ->
+    Units#units{losses = Losses ++ [byte_size(Bytes)]}.
+
+ends_lost(#units{bytes = Bytes, losses = Losses}) ->
+    Losses =/= [] andalso lists:last(Losses) =:= byte_size(Bytes).
+
+%% A then B: a loss that ends A and one that starts B are one.
+join(#units{bytes = A, losses = LossesA}, #units{bytes = B, losses = LossesB}) ->
+    Size = byte_size(A),
+    #units{bytes = <<A/binary, B/binary>>,
+           losses = lists:usort(LossesA ++ [L + Size || L <- LossesB])}.
+
+%% Split before the byte at Cut; a loss there is the second part's.
+split(#units{bytes = Bytes, losses = Losses}, Cut) ->
+    {Before, After} = lists:splitwith(fun(L) -> L < Cut end, Losses),
+    <<Front:Cut/binary, Back/binary>> = Bytes,
+    {#units{bytes = Front, losses = Before},
+     #units{bytes = Back, losses = [L - Cut || L <- After]}}.
+
+%% The first N units, N at most count(Units), and the rest, each loss
+%% named from the rest's own start.
+take(#units{bytes = Bytes, losses = Losses}, N) ->
+    {Size, Lost} = units_in(Losses, 0, 0, N),
+    {Taken, Kept} = lists:split(Lost, Losses),
+    <<Front:Size/binary, Back/binary>> = Bytes,
+    {#units{bytes = Front, losses = Taken},
+     #units{bytes = Back, losses = [L - Size || L <- Kept]}}.
+
+%% How many bytes and losses the first N units hold, Size bytes and Lost
+%% losses counted so far.
+units_in(_, Size, Lost, 0) ->
+    {Size, Lost};
+units_in([Size | Losses], Size, Lost, N) ->
+    units_in(Losses, Size, Lost + 1, N - 1);
+units_in([Next | _] = Losses, Size, Lost, N) ->
+    Step = min(N, Next - Size),
+    units_in(Losses, Size + Step, Lost, N - Step);
+units_in([], Size, Lost, N) ->
+    {Size + N, Lost}.
+
+%% The first Keep bytes, the losses after them kept as one at the new end;
+%% nothing when no byte is kept.
+truncate(_, 0) ->
+    #units{};
+truncate(#units{bytes = Bytes, losses = Losses}, Keep) ->
+    <<Front:Keep/binary, _/binary>> = Bytes,
+    #units{bytes = Front, losses = lists:usort([min(L, Keep) || L <- Losses])}.
+
+%% The units as a read gives them, each loss one NUL.
+with_nuls(#units{bytes = Bytes, losses = Losses}) ->
+    {Pieces, Last} = lists:mapfoldl(fun(L, From) -> {[binary:part(Bytes, From, L - From), 0], L} end,
+                                    0, Losses),
+    iolist_to_binary([Pieces, binary:part(Bytes, Last, byte_size(Bytes) - Last)]).
 
 merge([{echo, <<>>} | Rest]) -> merge(Rest);
 merge([{echo, A}, {echo, B} | Rest]) -> merge([{echo, <<A/binary, B/binary>>} | Rest]);

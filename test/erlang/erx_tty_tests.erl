@@ -215,17 +215,19 @@ echo_at_its_bound_test() ->
     ?assertEqual(<<"\b \b">>, binary:part(Echo, ?ROOM - 3, 3)),
     {_, Ended} = input(<<"\n">>, Tty),
     {{ok, Line}, _} = erx_tty:read(r, 8192, Ended),
-    ?assertEqual(<<(binary:copy(<<"a">>, 2731))/binary, "b\n">>, Line).
+    %% The four bytes dropped for room are a loss, which the erases keep.
+    ?assertEqual(<<(binary:copy(<<"a">>, 2731))/binary, 0, "b\n">>, Line).
 
 input_beyond_its_bound_is_dropped_and_counted_test() ->
     {Actions, Raw} = input(binary:copy(<<"a">>, 5000), raw(1, 0)),
     ?assertEqual([], Actions),
-    ?assertEqual({4096, 904}, {erx_tty:waiting(Raw), erx_tty:dropped(Raw)}),
+    %% The bytes and one loss for every byte dropped after them.
+    ?assertEqual({4097, 904}, {erx_tty:waiting(Raw), erx_tty:dropped(Raw)}),
     Quiet = with([], [echo], erx_tty:new()),
     {Bells, Full} = input(binary:copy(<<"a">>, 4096), Quiet),
     ?assertEqual([{echo, <<7>>}], Bells),
     {[], Ended} = input(<<"\n">>, Full),
-    ?assertEqual(4096, erx_tty:waiting(Ended)).
+    ?assertEqual(4097, erx_tty:waiting(Ended)).
 
 utf8_tab_and_covered_erase_test() ->
     {_, Utf8} = input(<<"x", 16#c3, 16#a9>>, erx_tty:new()),
@@ -313,6 +315,85 @@ hangup_drops_the_input_test() ->
     eof = element(1, erx_tty:read(r, 64, H)),
     eof = element(1, erx_tty:read(r, 64, element(3, erx_tty:set(erx_tty:termios(raw(1, 0)), H)))).
 
+%%% Lost input (docs/design-live.md, "Lost input")
+
+%% A loss is one unit among the bytes: a read gives it as one NUL at its
+%% place, read_input/2 as `lost`, and a short read leaves the rest in order.
+a_raw_loss_is_one_unit_at_its_place_test() ->
+    {[], W0} = erx_tty:read_wait(r, 4096, raw(5, 0)),
+    {[], W1} = input(<<"ab">>, W0),
+    {[], W2} = erx_tty:lost(W1),
+    {[], W3} = input(<<"c">>, W2),
+    {[{ready, r}], W4} = input(<<"d">>, W3),
+    ?assertEqual(5, erx_tty:waiting(W4)),
+    ?assertMatch({{ok, <<"ab", 0, "cd">>}, _}, erx_tty:read(r, 5, W4)),
+    {{ok, <<"ab">>}, Short} = erx_tty:read(r, 2, W4),
+    ?assertMatch({{ok, <<0, "cd">>}, _}, erx_tty:read(r, 5, Short)),
+    {Units, _} = lists:mapfoldl(fun(_, T) -> erx_tty:read_input(r, T) end, W4, lists:seq(1, 6)),
+    ?assertEqual([{ok, <<"a">>}, {ok, <<"b">>}, lost, {ok, <<"c">>}, {ok, <<"d">>}, eagain], Units).
+
+%% A loss alone readies what one byte readies, and starts the timer one
+%% byte starts: lost/1 returns what input/3 returns for a byte that ends no
+%% line and makes no signal.
+a_loss_alone_is_ready_as_a_byte_is_test() ->
+    {[], R} = erx_tty:read_wait(r, 4096, raw(1, 0)),
+    ?assertMatch({[{ready, r}], _}, erx_tty:lost(R)),
+    {[], P} = erx_tty:poll_wait(p, raw(0, 0)),
+    {[{ready, p}], Polled} = erx_tty:lost(P),
+    ?assertMatch({lost, _}, erx_tty:read_input(r, Polled)),
+    {[], T} = erx_tty:read_wait(r, 4096, raw(2, 1)),
+    {[{timer_start, _, 100}], _} = erx_tty:lost(T),
+    ?assertEqual(element(1, input(<<"a">>, T)), element(1, erx_tty:lost(T))),
+    %% Losses with no byte between them are one.
+    {_, Twice} = erx_tty:lost(element(2, erx_tty:lost(raw(1, 0)))),
+    ?assertMatch({{ok, <<0>>}, _}, erx_tty:read(r, 64, Twice)).
+
+%% A byte dropped for room is a loss at its place, kept though the bytes
+%% fill the bound, and the drops after it are the same loss.
+a_byte_dropped_for_room_is_a_loss_test() ->
+    {[], Full} = input(<<(binary:copy(<<"a">>, 4096))/binary, "xyz">>, raw(1, 0)),
+    ?assertEqual({4097, 3}, {erx_tty:waiting(Full), erx_tty:dropped(Full)}),
+    {{ok, Read}, _} = erx_tty:read(r, 4097, Full),
+    ?assertEqual(<<(binary:copy(<<"a">>, 4096))/binary, 0>>, Read).
+
+%% In a cooked line a loss is a unit of the line: an erase removes the
+%% bytes before it and keeps it at the line's new end, and only a kill, or
+%% an erase that leaves no byte, drops it; a loss and VEOF read as one NUL.
+a_cooked_line_keeps_its_loss_test() ->
+    {_, Typed} = input(<<"cd">>, erx_tty:new()),
+    {[], Lost} = erx_tty:lost(Typed),
+    {_, Slash} = input(<<"/">>, Lost),
+    {_, Erased} = input(<<127>>, Slash),
+    {_, Ended} = input(<<"\n">>, Erased),
+    ?assertMatch({{ok, <<"cd", 0, "\n">>}, _}, erx_tty:read(r, 64, Ended)),
+    {_, Erased2} = input(<<127, 127>>, Erased),
+    ?assertMatch({{ok, <<"\n">>}, _}, erx_tty:read(r, 64, element(2, input(<<"\n">>, Erased2)))),
+    {_, Killed} = input(<<21, "\n">>, Erased),
+    ?assertMatch({{ok, <<"\n">>}, _}, erx_tty:read(r, 64, Killed)),
+    %% "ab", a loss, VERASE and a newline read as "a", NUL and a newline.
+    {_, Ab} = input(<<"ab">>, erx_tty:new()),
+    {_, AbErased} = input(<<127, "\n">>, element(2, erx_tty:lost(Ab))),
+    ?assertMatch({{ok, <<"a", 0, "\n">>}, _}, erx_tty:read(r, 64, AbErased)),
+    {_, Eof} = input(<<4>>, element(2, erx_tty:lost(erx_tty:new()))),
+    ?assertMatch({{ok, <<0>>}, _}, erx_tty:read(r, 64, Eof)),
+    %% ICANON cleared over a line with a loss: the loss is readable in its place.
+    {_, Line} = input(<<"b">>, element(2, erx_tty:lost(element(2, input(<<"a">>, erx_tty:new()))))),
+    {ok, _, Raw} = erx_tty:set(erx_tty:termios(raw(1, 0)), Line),
+    ?assertMatch({{ok, <<"a", 0, "b">>}, _}, erx_tty:read(r, 64, Raw)).
+
+%% A signal's flush drops the losses with the bytes, and reports that it
+%% dropped one ahead of the signal; a flush that drops none reports nothing.
+a_flush_reports_the_loss_it_drops_test() ->
+    {_, Typed} = input(<<"rm ">>, erx_tty:new()),
+    {[], Lost} = erx_tty:lost(Typed),
+    {Actions, Flushed} = input(<<28>>, Lost),
+    ?assertMatch([flush_output, flushed_loss, {echo, _}, {signal, sigquit}], Actions),
+    ?assertMatch({{ok, <<"\n">>}, _}, erx_tty:read(r, 64, element(2, input(<<"\n">>, Flushed)))),
+    {Clean, _} = input(<<28>>, Typed),
+    ?assertNot(lists:member(flushed_loss, Clean)),
+    {Kept, _} = input(<<28>>, element(2, erx_tty:lost(with([noflsh], [], erx_tty:new())))),
+    ?assertNot(lists:member(flushed_loss, Kept)).
+
 %% All of Bytes, as an owner feeds them with Room for the master: input/3
 %% again on what a signal key left untaken, with the room it returned,
 %% the actions joined in order.
@@ -388,7 +469,7 @@ explore(Model, Keys, Depth, Path) ->
 events(#model{armed = Armed, stale = Stale}, Keys) ->
     [{input, <<Key>>} || Key <- Keys] ++
         [{read_wait, r, 4096}, {read_wait, s, 1}, {poll_wait, p}, {cancel, r},
-         {read, r, 1}, {read, s, 64}, {output, <<"a\n\tb">>, 3}, toggle, hangup] ++
+         {read, r, 1}, {read, s, 64}, {output, <<"a\n\tb">>, 3}, toggle, hangup, lost] ++
         [{timer, Timer} || Timer <- lists:sort(maps:keys(Armed))] ++
         [{timer, Timer} || Timer <- lists:sublist(Stale, 1)].
 
@@ -397,7 +478,13 @@ step({input, <<Key>> = Bytes}, #model{tty = Tty, spec = Spec} = M, Path) ->
     property(Rest =:= <<>>, one_byte_left_untaken, Path),
     Spec1 = spec_key(Key, Spec, erx_tty:termios(Tty)),
     check_keyed(Key, Actions, erx_tty:termios(Tty), Spec#spec.stopped, Path),
+    check_flushed_loss(Actions, Spec, Path),
     M1 = acted(Actions, input, M#model{tty = Tty1, spec = Spec1}, Path),
+    check_interbyte(M, M1, Actions, Path),
+    M1;
+step(lost, #model{tty = Tty, spec = Spec} = M, Path) ->
+    {Actions, Tty1} = erx_tty:lost(Tty),
+    M1 = acted(Actions, input, M#model{tty = Tty1, spec = spec_lost(Spec, erx_tty:termios(Tty))}, Path),
     check_interbyte(M, M1, Actions, Path),
     M1;
 step({read_wait, Open, Count}, #model{tty = Tty} = M, Path) ->
@@ -514,6 +601,14 @@ check_keyed(Key, Actions, Termios, Stopped, Path) ->
     property(not (Stopped andalso Signals =/= []) orelse lists:member(start_output, Actions),
              signal_left_output_stopped, Path).
 
+%% A signal's flush reports flushed_loss, ahead of the signal, exactly
+%% when the input it drops holds a loss.
+check_flushed_loss(Actions, #spec{ready = Ready, line = Line}, Path) ->
+    Dropped = lists:member(flush_output, Actions) andalso lists:member(lost, Ready ++ Line),
+    property(lists:member(flushed_loss, Actions) =:= Dropped, flushed_loss, Path),
+    Ahead = lists:dropwhile(fun(A) -> A =/= flushed_loss end, Actions),
+    property(not Dropped orelse lists:keymember(signal, 1, Ahead), flushed_loss_order, Path).
+
 %% Bytes that arrive for a raw read with VMIN and VTIME above 0 start its
 %% timer when it has none and leave a running one alone: one deadline after
 %% the first byte, as FreeBSD's interbyte timer sets it.
@@ -587,10 +682,9 @@ spec_edit(C, #spec{ready = Ready, line = Line} = Spec, Tm) ->
     Word = Ext andalso cc(vwerase, C, Tm),
     Reprint = Ext andalso cc(vreprint, C, Tm),
     if
-        Erase, Line =:= [] -> Spec;
-        Erase -> Spec#spec{line = lists:droplast(Line)};
+        Erase -> Spec#spec{line = spec_truncate(Line, max(0, length(spec_bytes(Line)) - 1))};
         Kill -> Spec#spec{line = []};
-        Word -> Spec#spec{line = spec_word(Line, Tm)};
+        Word -> Spec#spec{line = spec_truncate(Line, length(spec_word(spec_bytes(Line), Tm)))};
         Reprint -> Spec;
         not Cooked -> Spec#spec{ready = Ready ++ [C]};
         true ->
@@ -610,6 +704,29 @@ spec_word(Line, Tm) ->
             Same = fun(X) -> not White(X) andalso (not Alt orelse alnum(X) =:= alnum(Last)) end,
             lists:reverse(lists:dropwhile(Same, Reversed))
     end.
+
+%% A loss at the end of the held input, where the next byte would go,
+%% unless the input ends with one: losses with no byte between are one.
+spec_lost(#spec{ready = Ready, line = Line} = Spec, Tm) ->
+    case {lists:reverse(Ready ++ Line), has(icanon, Tm)} of
+        {[lost | _], _} -> Spec;
+        {_, true} -> Spec#spec{line = Line ++ [lost]};
+        {_, false} -> Spec#spec{ready = Ready ++ [lost]}
+    end.
+
+spec_bytes(Units) -> [U || U <- Units, U =/= lost].
+
+%% A read's bytes: each loss one NUL.
+spec_nuls(Units) -> list_to_binary([case U of lost -> 0; _ -> U end || U <- Units]).
+
+%% The line's first Keep bytes with the losses among them, and one loss at
+%% its end for those after them; nothing when no byte is kept.
+spec_truncate(_, 0) -> [];
+spec_truncate(Line, Keep) -> spec_truncate(Line, Keep, []).
+
+spec_truncate(Rest, 0, Acc) -> lists:reverse(Acc) ++ [lost || lists:member(lost, Rest)];
+spec_truncate([lost | Rest], Keep, Acc) -> spec_truncate(Rest, Keep, [lost | Acc]);
+spec_truncate([C | Rest], Keep, Acc) -> spec_truncate(Rest, Keep - 1, [C | Acc]).
 
 alnum(X) -> (X >= $0 andalso X =< $9) orelse (X >= $a andalso X =< $z) orelse (X >= $A andalso X =< $Z).
 
@@ -681,7 +798,7 @@ spec_read(Max, Expired, #spec{ready = Ready, hungup = Hungup} = Spec,
                                true -> length(Got) + 1;
                                false -> length(Got)
                            end,
-                    {{ok, list_to_binary(Got)}, Spec#spec{ready = lists:nthtail(Gone, Ready)}}
+                    {{ok, spec_nuls(Got)}, Spec#spec{ready = lists:nthtail(Gone, Ready)}}
             end;
         false when Ready =:= [], Hungup ->
             {eof, Spec};
@@ -692,7 +809,7 @@ spec_read(Max, Expired, #spec{ready = Ready, hungup = Hungup} = Spec,
             end;
         false ->
             Got = lists:sublist(Ready, Max),
-            {{ok, list_to_binary(Got)}, Spec#spec{ready = lists:nthtail(length(Got), Ready)}}
+            {{ok, spec_nuls(Got)}, Spec#spec{ready = lists:nthtail(length(Got), Ready)}}
     end.
 
 %%% Helpers

@@ -1,20 +1,23 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% The fuzz target of erx_tty's set/2, size/3 and input/3, the line
+%% The fuzz target of erx_tty's set/2, size/3, input/3 and lost/1, the line
 %% discipline's readers of untrusted values, and of erx_abi_termios's
 %% decode/1, which reads a program's struct termios (docs/design-live.md,
 %% "The tty" and "Verification and testing"): random termios and structs,
 %% valid and broken one way at a time; random window sizes; and random
-%% bytes in random chunks, up to past the input bound, and runs of VREPRINT
+%% bytes in random chunks, up to past the input bound, losses of input
+%% among them, and runs of VREPRINT
 %% after a long line, under random termios, between random reads, waits and
 %% writes. Whatever arrives, nothing crashes, a valid termios is kept as
-%% given and a broken one refused, what waits stays within 4 KiB, every
+%% given and a broken one refused, what waits stays within 4 KiB and one loss, every
 %% action is one of erx_tty's, nothing is echoed without ECHO or ECHONL but
 %% a bell, echo fits the room the owner gives, input fed back until none is
 %% left with the room its echo left does what input a byte at a time does,
 %% and in raw mode with no flag that changes or takes bytes, every byte is
-%% read, still waits or was counted as dropped. The seed comes from
+%% read, still waits or was counted as dropped, beside at most one unit
+%% for each loss, a lost/1 or a drop, and a flushed_loss follows its
+%% flush_output. The seed comes from
 %% make check-fuzz; a failure is error({fuzz_failure, Property, Detail}).
 
 -module(erx_tty_fuzz).
@@ -93,15 +96,18 @@ input_round() ->
     Termios = random_termios(),
     {ok, _, Tty} = erx_tty:set(Termios, erx_tty:new()),
     Counted = [] =:= [F || F <- ?TAKERS, has(F, Termios)],
-    steps(rand:uniform(12), Termios, Counted, Tty, {0, 0}).
+    %% In half the rounds no byte reads as NUL, so every NUL read is a loss.
+    put(nul_free, rand:uniform(2) =:= 1),
+    steps(rand:uniform(12), Termios, Counted, Tty, {0, 0, 0}).
 
-%% Read and In count the bytes read and received, for the conservation check.
+%% Read and In count the bytes read, NULs aside, and the bytes received,
+%% and Lost the calls of lost/1, for the conservation check.
 steps(0, _, _, _, _) ->
     ok;
-steps(N, Termios, Counted, Tty, {Read, In}) ->
-    case rand:uniform(4) of
+steps(N, Termios, Counted, Tty, {Read, In, Lost}) ->
+    case rand:uniform(5) of
         1 ->
-            Bytes = random_input(Termios),
+            Bytes = nul_free(random_input(Termios)),
             Kept = pick([0, 0, 1, 4000, 4096, rand:uniform(4097) - 1]),
             Room = {min(4096 - Kept, pick([0, 1, 7, 256, 4096, rand:uniform(4097) - 1])), Kept,
                     pick([false, true])},
@@ -109,21 +115,24 @@ steps(N, Termios, Counted, Tty, {Read, In}) ->
             Taken = byte_size(Bytes) - byte_size(Rest),
             check_input(Actions, Rest, {Room, Left}, {Termios, Tty, Tty1}, Bytes),
             check_chunked(Bytes, Room, Termios, Tty),
-            check(not Counted orelse
-                      Read + erx_tty:waiting(Tty1) + erx_tty:dropped(Tty1) =:= In + Taken,
-                  bytes_lost, {Termios, Bytes}),
-            steps(N - 1, Termios, Counted, Tty1, {Read, In + Taken});
+            check_conserved(Counted, {Read, In + Taken, Lost}, Tty1, {Termios, Bytes}),
+            steps(N - 1, Termios, Counted, Tty1, {Read, In + Taken, Lost});
         2 ->
             {Got, Tty1} = erx_tty:read(r, rand:uniform(5000), Tty),
-            Taken = case Got of
-                        {ok, Bin} -> byte_size(Bin);
-                        _ -> 0
-                    end,
-            steps(N - 1, Termios, Counted, Tty1, {Read + Taken, In});
+            Bin = case Got of
+                      {ok, Bytes} -> Bytes;
+                      _ -> <<>>
+                  end,
+            %% With no NUL typed, two NULs in a row are two losses with no
+            %% byte between them, which are one.
+            check(not get(nul_free) orelse binary:match(Bin, <<0, 0>>) =:= nomatch,
+                  losses_not_one, Bin),
+            Taken = byte_size(Bin) - length(binary:matches(Bin, <<0>>)),
+            steps(N - 1, Termios, Counted, Tty1, {Read + Taken, In, Lost});
         3 ->
             {Actions, Tty1} = erx_tty:read_wait(pick([r, s]), rand:uniform(4096), Tty),
             check_actions(Actions),
-            steps(N - 1, Termios, Counted, Tty1, {Read, In});
+            steps(N - 1, Termios, Counted, Tty1, {Read, In, Lost});
         4 ->
             Widest = erx_tty:widest_rendering(),
             Room = pick([rand:uniform(300) - 1, Widest - 1, Widest]),
@@ -133,7 +142,32 @@ steps(N, Termios, Counted, Tty, {Read, In}) ->
             %% The relay reports an out watch at this room: the write it lets go
             %% must take a byte.
             check(Taken > 0 orelse Room < Widest, output_none_with_room, {Room, Bytes}),
-            steps(N - 1, Termios, Counted, Tty1, {Read, In})
+            steps(N - 1, Termios, Counted, Tty1, {Read, In, Lost});
+        5 ->
+            {Actions, Tty1} = erx_tty:lost(Tty),
+            check_actions(Actions),
+            check([A || A <- Actions, not lists:member(element(1, A), [ready, timer_start, timer_cancel])] =:= [],
+                  loss_did_more_than_settle, Actions),
+            check_conserved(Counted, {Read, In, Lost + 1}, Tty1, Termios),
+            steps(N - 1, Termios, Counted, Tty1, {Read, In, Lost + 1})
+    end.
+
+check_conserved(false, _, _, _) ->
+    ok;
+check_conserved(true, {Read, In, Lost}, Tty, Detail) ->
+    case get(nul_free) of
+        true ->
+            %% Every byte received was read, still waits or was dropped, the
+            %% bytes held stay within the bound, and the rest of what waits are
+            %% losses, at most one for each, and one more than the bytes.
+            Dropped = erx_tty:dropped(Tty),
+            Held = In - Read - Dropped,
+            Losses = erx_tty:waiting(Tty) - Held,
+            check(Held >= 0 andalso Held =< ?MAX_INPUT, input_over_bound, {Detail, Held}),
+            check(Losses >= 0 andalso Losses =< Lost + Dropped andalso Losses =< Held + 1,
+                  units_not_conserved, {Detail, Held, Losses});
+        false ->
+            ok
     end.
 
 %% Input stops only after a signal key, and returns a tail of its bytes;
@@ -154,7 +188,8 @@ check_input(Actions, Rest, {Room, Left}, {Termios, Before, After}, Bytes) ->
               not signals(binary:part(Bytes, 0, Taken - 1), Room, Before),
           went_past_a_signal, {Termios, Bytes}),
     Raw = not has(icanon, Termios),
-    check(not Raw orelse erx_tty:waiting(After) =< ?MAX_INPUT, input_over_bound,
+    %% The bytes, and at most one loss more than the bytes.
+    check(not Raw orelse erx_tty:waiting(After) =< 2 * ?MAX_INPUT + 1, input_over_bound,
           {erx_tty:waiting(After), byte_size(Bytes)}),
     check(erx_tty:dropped(After) >= erx_tty:dropped(Before), dropped_went_back, Bytes),
     Quiet = not has(echo, Termios) andalso not has(echonl, Termios),
@@ -226,14 +261,20 @@ joined([Action | Rest]) -> [Action | joined(Rest)];
 joined([]) -> [].
 
 check_actions(Actions) ->
-    lists:foreach(fun(Action) -> check(action(Action), unknown_action, Action) end, Actions).
+    lists:foreach(fun(Action) -> check(action(Action), unknown_action, Action) end, Actions),
+    check(flushes_report(Actions), flushed_loss_alone, Actions).
+
+flushes_report([flush_output, flushed_loss | Rest]) -> flushes_report(Rest);
+flushes_report([flushed_loss | _]) -> false;
+flushes_report([_ | Rest]) -> flushes_report(Rest);
+flushes_report([]) -> true.
 
 action({echo, Bytes}) -> is_binary(Bytes) andalso Bytes =/= <<>>;
 action({signal, S}) -> lists:member(S, [sigint, sigquit, sigtstp]);
 action({ready, _}) -> true;
 action({timer_start, {_, N}, Ms}) -> is_integer(N) andalso Ms >= 100 andalso Ms =< 25500;
 action({timer_cancel, {_, N}}) -> is_integer(N);
-action(A) -> lists:member(A, [info, flush_output, stop_output, start_output]).
+action(A) -> lists:member(A, [info, flush_output, flushed_loss, stop_output, start_output]).
 
 %%% Termios, valid and broken
 
@@ -314,6 +355,13 @@ random_input(#{cc := #{vreprint := Reprint}}) ->
         1 -> <<(binary:copy(<<$a>>, 1000))/binary,
                (binary:copy(<<Reprint>>, 40))/binary>>;
         _ -> random_bytes()
+    end.
+
+%% With nul_free, no byte that ISTRIP could make a NUL.
+nul_free(Bytes) ->
+    case get(nul_free) of
+        true -> << <<(case B band 16#7f of 0 -> B + 1; _ -> B end)>> || <<B>> <= Bytes >>;
+        _ -> Bytes
     end.
 
 random_bytes() ->

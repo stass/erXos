@@ -25,7 +25,7 @@ class ErxTtyTest < Minitest::Test
     # Input that goes on past a signal key reports a reader the bytes after it.
     signal_not_stopping: Fault.new(text: '{[{signal, _} | _] = Actions, Tty} -> {Actions, Rest, Tty};',
                                    broken: '', property: /a_signal_key_stops_input_and_returns_the_rest/),
-    eof_as_empty: Fault.new(text: '<<>> -> eof;', broken: '<<>> -> {ok, <<>>};', property: /read_differs/),
+    eof_as_empty: Fault.new(text: '0 -> eof;', broken: '0 -> {ok, Got};', property: /read_differs/),
     echo_without_echo: Fault.new(text: 'case on(echo, Tty) orelse (Char =:= $\n andalso on(echonl, Tty)) of',
                                  broken: 'case true of', property: /echo_without_echo/),
     onlcr_without_opost: Fault.new(text: 'case on(opost, Tty) of', broken: 'case true of',
@@ -36,9 +36,9 @@ class ErxTtyTest < Minitest::Test
                               broken: "echo(Char, [info | Started], Tty1);",
                               property: /vstatus_echoed/),
     # POSIX's reading, a restart at each byte, in place of FreeBSD's one deadline.
-    interbyte_restarted: Fault.new(text: "Ready =/= <<>>, element(3, Waiter) =:= none ->\n" \
+    interbyte_restarted: Fault.new(text: "Held, element(3, Waiter) =:= none ->\n" \
                                          "            start_timer(Open, element(2, Waiter), Tty);",
-                                   broken: "Ready =/= <<>> ->\n            {Cancelled, Tty1} = unwait(Open, Tty),\n" \
+                                   broken: "Held ->\n            {Cancelled, Tty1} = unwait(Open, Tty),\n" \
                                            "            {Started, Tty2} = start_timer(Open, element(2, Waiter), Tty1),\n" \
                                            "            {Cancelled ++ Started, Tty2};",
                                    property: /interbyte_deadline/),
@@ -73,7 +73,28 @@ class ErxTtyTest < Minitest::Test
     # FreeBSD's walk: every piece of the retyped line is tried.
     reprint_walks_on: Fault.new(text: '{false, _, _} = Cut -> Cut',
                                 broken: '{false, Echoed, Tty2} -> retype(Rest, Echoed, Tty2)',
-                                property: /a_reprint_ends_at_its_first_dropped_piece/)
+                                property: /a_reprint_ends_at_its_first_dropped_piece/),
+    # Lost input (docs/design-live.md, "Lost input"), the seeded faults of
+    # its verification table.
+    losses_not_shifted: Fault.new(text: "#units{bytes = Back, losses = [L - Size || L <- Kept]}}.",
+                                  broken: "#units{bytes = Back, losses = Kept}}.",
+                                  property: /a_raw_loss_is_one_unit_at_its_place/),
+    readiness_counts_bytes: Fault.new(text: 'false -> count(Ready) >= wanted(Kind, Tty)',
+                                      broken: 'false -> byte_size(Ready#units.bytes) >= wanted(Kind, Tty)',
+                                      property: /a_loss_alone_is_ready_as_a_byte_is/),
+    drop_not_marked: Fault.new(text: 'Counted = add_loss(Tty#tty{dropped = Dropped + 1}),',
+                               broken: 'Counted = Tty#tty{dropped = Dropped + 1},',
+                               property: /a_byte_dropped_for_room_is_a_loss/),
+    erase_removes_the_loss: Fault.new(text: 'losses = lists:usort([min(L, Keep) || L <- Losses])}.',
+                                      broken: 'losses = [L || L <- Losses, L < Keep]}.',
+                                      property: /a_cooked_line_keeps_its_loss/),
+    # A flush that keeps the losses: the exploration's reads meet them.
+    flush_keeps_losses: Fault.new(text: "{Reported, Tty#tty{ready = #units{}, line = #units{}, reprintpos = 0,",
+                                  broken: "{Reported, Tty#tty{ready = #units{losses = Dropped}, line = #units{}, reprintpos = 0,",
+                                  property: /waiting_differs|read_differs|a_flush_reports_the_loss_it_drops/),
+    flushed_loss_unreported: Fault.new(text: '_ -> [flushed_loss, flush_output | Actions]',
+                                       broken: '_ -> [flush_output | Actions]',
+                                       property: /a_flush_reports_the_loss_it_drops/)
   }.freeze
 
   def test_the_cases_and_the_exploration_pass
@@ -115,6 +136,18 @@ class ErxTtyTest < Minitest::Test
   def test_echo_dropped_after_a_drop_fails = assert_fault_fails(:echo_dropped_after_a_drop)
 
   def test_a_restarted_interbyte_timer_fails = assert_fault_fails(:interbyte_restarted)
+
+  def test_a_read_that_does_not_shift_the_losses_fails = assert_fault_fails(:losses_not_shifted)
+
+  def test_readiness_counting_bytes_only_fails = assert_fault_fails(:readiness_counts_bytes)
+
+  def test_a_drop_not_marked_fails = assert_fault_fails(:drop_not_marked)
+
+  def test_an_erase_that_removes_the_loss_fails = assert_fault_fails(:erase_removes_the_loss)
+
+  def test_a_flush_that_keeps_the_losses_fails = assert_fault_fails(:flush_keeps_losses)
+
+  def test_a_flush_that_drops_a_loss_unreported_fails = assert_fault_fails(:flushed_loss_unreported)
 
   private
 

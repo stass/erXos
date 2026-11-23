@@ -520,6 +520,7 @@ carry_one({signal, Signal}, Core) -> signal(Signal, Core);
 carry_one(info, Core) -> {notify(info, Core), Core};
 carry_one(winch, Core) -> {notify(winch, Core), Core};
 carry_one(flush_output, Core) -> flush(Core);
+carry_one(flushed_loss, Core) -> {notify(lost, Core), Core};
 carry_one(stop_output, #core{link = Link} = Core) ->
     {[], Core#core{link = erx_tty_link:stop(Link)}};
 carry_one(start_output, #core{link = Link} = Core) ->

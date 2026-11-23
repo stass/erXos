@@ -8,7 +8,7 @@ require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
 
-# The fuzz target of erx_tty's set/2, size/3 and input/3, the line discipline's
+# The fuzz target of erx_tty's set/2, size/3, input/3 and lost/1, the line discipline's
 # readers of a program's termios, a master's window size and its bytes, and of
 # erx_abi_termios's decode/1, the program protocol's reader of a struct termios
 # (docs/design-live.md, "The tty"). The two modules are compiled from source,
@@ -72,6 +72,12 @@ module ErxTtyFuzz
     'the widest rendering of a byte' => Seed.new(module_file: 'erx_tty.erl', text: 'widest_rendering() -> ?TAB_WIDTH.',
                                                  broken: 'widest_rendering() -> ?TAB_WIDTH - 1.',
                                                  property: 'output_none_with_room'),
+    # Losses with no byte between them kept apart, so drops past the bound
+    # pile up losses.
+    'one loss between two bytes' => Seed.new(module_file: 'erx_tty.erl',
+                                             text: '{true, _} -> Tty;',
+                                             broken: '{true, _} -> Tty#tty{ready = append_loss(Ready)};',
+                                             property: 'losses_not_one'),
     "the codec's byte range" => Seed.new(module_file: 'erx_abi_termios.erl', text: 'Value =< 16#ff.',
                                          broken: 'Value =< 16#fff.', property: 'codec_invalid_accepted')
   }.freeze
