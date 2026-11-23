@@ -127,9 +127,9 @@ tty_loop(Channel, Ref, Notify, N) ->
         {tty_size, Rows, Columns} ->
             Channel ! {tty_output, N, iolist_to_binary(io_lib:format("size ~b ~b\r\n", [Rows, Columns]))},
             tty_loop(Channel, Ref, Notify, N + 1);
-        {tty_input, <<3>>} -> Notify({signaled, sigint});
-        {tty_input, <<"exit ", Status/binary>>} -> Notify({exited, binary_to_integer(Status)});
-        {tty_input, Bytes} ->
+        {tty_input, _, <<3>>} -> Notify({signaled, sigint});
+        {tty_input, _, <<"exit ", Status/binary>>} -> Notify({exited, binary_to_integer(Status)});
+        {tty_input, _, Bytes} ->
             Channel ! {tty_output, N, Bytes},
             tty_loop(Channel, Ref, Notify, N + 1)
     end.

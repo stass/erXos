@@ -410,11 +410,12 @@ tty_output(Facet, N, Bytes) ->
 type(Bytes) ->
     erx_console ! {erx_console_input, Bytes}.
 
-%% The next of the console's messages to the session's tty, the test.
+%% The next of the console's messages to the session's tty, the test, an
+%% input without its number, which erx_tty_master_tests checks.
 from_console() ->
     receive
         {tty_taken, _} = M -> M;
-        {tty_input, _} = M -> M;
+        {tty_input, _, Bytes} -> {tty_input, Bytes};
         {tty_size, _, _} = M -> M;
         tty_hangup = M -> M
     after ?WAIT_MS -> none
@@ -423,7 +424,7 @@ from_console() ->
 nothing_from_the_console() ->
     ?assertEqual(none, receive
                            {tty_taken, _} = M -> M;
-                           {tty_input, _} = M -> M;
+                           {tty_input, _, _} = M -> M;
                            {tty_size, _, _} = M -> M
                        after ?QUIET_MS -> none
                        end).

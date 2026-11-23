@@ -85,7 +85,11 @@ next() ->
     receive Message -> Message after ?WAIT_MS -> error(nothing_received) end.
 
 %% Bytes typed at the master.
-type(Relay, Bytes) -> Relay ! {tty_input, Bytes}.
+%% The master's input, numbered for each relay from 0.
+type(Relay, Bytes) ->
+    N = case get({typed, Relay}) of undefined -> 0; Typed -> Typed end,
+    put({typed, Relay}, N + 1),
+    Relay ! {tty_input, N, Bytes}.
 
 %% A process that stands for a shell's group until it is killed.
 group() -> spawn(fun() -> receive stop -> ok end end).
@@ -236,7 +240,9 @@ malformed_messages_are_refused_test() ->
         Relay ! {tty_drain, self(), not_a_ref},
         Relay ! {erx_console_output, from, {not_iodata}},
         Relay ! {'DOWN', make_ref(), process, self(), forged},
-        Relay ! {erx_origin, 7, {tty_input, <<"z">>}},
+        Relay ! {erx_origin, 7, {tty_input, 0, <<"z">>}},
+        %% A loss from another domain than the master's is not taken.
+        Relay ! {erx_origin, 7, {tty_lost, 0}},
         ?assertEqual({error, einval}, ?RELAY:console_group(Relay, not_a_pid)),
         ?assertEqual({error, einval}, ?RELAY:foreground(Relay, job_a, cooked, {not_a_pid, 0})),
         ?assertEqual({error, einval}, ?RELAY:foreground(Relay, console, {not_a_pid, 0})),
@@ -274,10 +280,10 @@ a_master_in_another_domain_test() ->
         {tty_open, Relay} = next(),
         {ok, Open} = ?RELAY:open_reader(Relay, console),
         ok = ?RELAY:watch(Open, in),
-        Relay ! {tty_input, <<"p">>},
-        Relay ! {erx_origin, 8, {tty_input, <<"q">>}},
+        Relay ! {tty_input, 0, <<"p">>},
+        Relay ! {erx_origin, 8, {tty_input, 0, <<"q">>}},
         nothing_after(fun() -> ?RELAY:tty(Open, winsize) end),
-        Relay ! {erx_origin, 7, {tty_input, <<"r">>}},
+        Relay ! {erx_origin, 7, {tty_input, 0, <<"r">>}},
         ?assertMatch({ready, Open, [in], 0}, next())
     after
         stop(Relay)

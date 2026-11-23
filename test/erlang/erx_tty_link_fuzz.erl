@@ -154,6 +154,8 @@ action({input, Bytes}, Run) when is_binary(Bytes), byte_size(Bytes) >= 1, byte_s
     Run;
 action({input, Bytes}, Run) ->
     fail(input_over_bound, {Bytes, history(Run)});
+action(lost, Run) ->
+    Run;
 action({size, Rows, Columns}, Run) when is_integer(Rows), Rows >= 1, Rows =< ?MAX_SIDE,
                                         is_integer(Columns), Columns >= 1, Columns =< ?MAX_SIDE ->
     Run;
@@ -216,17 +218,22 @@ bytes(3) -> rand:bytes(rand:uniform(3 * ?MAX_HELD)).
 %% arbitrary terms that only look like them.
 message() ->
     case rand:uniform(9) of
-        1 -> {tty_input, rand:bytes(pick([0, 1, ?MAX_INPUT - 1, ?MAX_INPUT, ?MAX_INPUT + 1,
+        1 -> {tty_input, number(), rand:bytes(pick([0, 1, ?MAX_INPUT - 1, ?MAX_INPUT, ?MAX_INPUT + 1,
                                           rand:uniform(2 * ?MAX_INPUT)]))};
-        2 -> {tty_input, pick([[], "text", 42, <<1:3>>, {<<"a">>}])};
+        2 -> pick([{tty_input, number(), pick([[], "text", 42, <<1:3>>, {<<"a">>}])},
+                   {tty_input, pick([-1, 1.5, x]), <<"a">>}, {tty_lost, number()},
+                   {tty_lost, pick([-1, 1.5, x, <<>>])}, {tty_lost, 0, <<>>}]);
         3 -> {tty_size, side(), side()};
         4 -> {tty_size, pick([1.0, "24", undefined, -1]), side()};
         5 -> tty_hangup;
         6 -> {tty_taken, pick([-1, 1.5, undefined, 1 bsl 70])};
-        7 -> pick([{tty_input}, {tty_input, <<"a">>, <<"b">>}, {tty_size, 24}, tty_open, {tty_open, self()}]);
+        7 -> pick([{tty_input}, {tty_input, <<"a">>}, {tty_input, <<"a">>, <<"b">>}, {tty_lost}, {tty_size, 24}, tty_open, {tty_open, self()}]);
         8 -> {tty_output, rand:uniform(5), rand:bytes(8)};
         9 -> pick([ok, <<"tty_hangup">>, {tty_hangup}, [tty_hangup], make_ref()])
     end.
+
+%% An input number: the next ones, a repeat or a gap.
+number() -> pick([0, 1, 2, rand:uniform(20)]).
 
 side() -> pick([0, 1, 2, 24, 80, ?MAX_SIDE - 1, ?MAX_SIDE, ?MAX_SIDE + 1, -1, 1 bsl 64]).
 

@@ -47,7 +47,7 @@ The relay is its console's line and ends with it.
 """.
 
 -export([start_link/3]).
--export([open_reader/2, open_writer/2, close/1, tty/2, watch/2, read/3, write/2,
+-export([open_reader/2, open_writer/2, close/1, tty/2, watch/2, read/3, read_input/2, write/2,
          console_group/2, status/2, foreground/3, foreground/4]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 -export_type([open/0]).
@@ -126,6 +126,13 @@ watch(Open, Kind) -> call(Open, {watch, Open, [Kind]}).
 -doc "Reads at most Max bytes from Open, after the report numbered N.".
 -spec read(open(), 0..4096, integer()) -> erx_session_relay_core:answer().
 read(Open, Max, N) -> call(Open, {tty_read, Open, Max, N}).
+
+-doc """
+Open reads one unit of input, as read/3 reads one byte, but a loss of input
+is `lost` rather than a NUL (docs/design-live.md, "Lost input").
+""".
+-spec read_input(open(), integer()) -> erx_session_relay_core:answer().
+read_input(Open, N) -> call(Open, {tty_read_input, Open, N}).
 
 -doc "Writes Bytes, at most 4 KiB, through Open.".
 -spec write(open(), binary()) -> {ok, non_neg_integer()} | eagain | {error, einval | ebadf}.

@@ -184,16 +184,35 @@ resend_timer_test() ->
 
 input_and_size_checks_test() ->
     L = erx_tty_link:new(present),
-    ?assertMatch({[{input, <<"ab">>}], _}, erx_tty_link:master({tty_input, <<"ab">>}, L)),
-    {[], L1} = erx_tty_link:master({tty_input, binary:copy(<<"x">>, 4097)}, L),
-    {[], L2} = erx_tty_link:master({tty_input, "ab"}, L1),
+    ?assertMatch({[{input, <<"ab">>}], _}, erx_tty_link:master({tty_input, 0, <<"ab">>}, L)),
+    {[], L1} = erx_tty_link:master({tty_input, 0, binary:copy(<<"x">>, 4097)}, L),
+    {[], L2} = erx_tty_link:master({tty_input, 0, "ab"}, L1),
     {[], L3} = erx_tty_link:master({tty_size, 24, 0}, L2),
     {[], L4} = erx_tty_link:master({tty_size, 65536, 80}, L3),
-    ?assertEqual(#{output_dropped => 0, input_dropped => 2, size_refused => 2},
+    ?assertEqual(#{output_dropped => 0, input_dropped => 2, input_refused => 0, size_refused => 2},
                  erx_tty_link:counts(L4)),
     {[{size, 24, 80}], L5} = erx_tty_link:master({tty_size, 24, 80}, L4),
     ?assertMatch({[], _}, erx_tty_link:master({tty_size, 24, 80}, L5)),
     ?assertMatch({[], _}, erx_tty_link:master({tty_output, 0, <<>>}, L5)).
+
+%% The master's input is one numbered sequence (docs/design-live.md, "One
+%% input sequence across domains"): a gap is a loss at its place, a number
+%% not past the last taken is refused, a bad shape dropped, and after a
+%% hangup a loss is ignored.
+input_numbers_test() ->
+    Steps = [{tty_input, 0, <<"a">>}, {tty_input, 1, <<"b">>}, {tty_input, 3, <<"d">>},
+             {tty_input, 2, <<"c">>}, {tty_lost, x}, {tty_lost, 4}, {tty_lost, 6},
+             {tty_input, 7, <<>>}, {tty_input, 9, <<>>}],
+    {Actions, L} = lists:foldl(fun(Message, {Acc, L0}) ->
+                                       {More, L1} = erx_tty_link:master(Message, L0),
+                                       {Acc ++ [More], L1}
+                               end, {[], erx_tty_link:new(present)}, Steps),
+    ?assertEqual([[{input, <<"a">>}], [{input, <<"b">>}], [lost, {input, <<"d">>}],
+                  [], [], [lost], [lost], [], [lost]], Actions),
+    ?assertMatch(#{input_refused := 1, input_dropped := 1}, erx_tty_link:counts(L)),
+    {[hangup], Hung} = erx_tty_link:master(tty_hangup, L),
+    ?assertMatch({[], _}, erx_tty_link:master({tty_lost, 10}, Hung)),
+    ?assertMatch({[], _}, erx_tty_link:master({tty_input, 10, <<"e">>}, Hung)).
 
 writes_nobody_waits_on_are_bounded_test() ->
     %% Nothing is taken: the first 4 KiB is held, 64 KiB more may wait, and the
@@ -213,7 +232,8 @@ no_master_test() ->
     ?assertEqual({4096, 1, false}, {erx_tty_link:held(L2), erx_tty_link:waiting(L2),
                                     erx_tty_link:flowing(L2)}),
     ?assertMatch({[], _}, erx_tty_link:timeout(0, L2)),
-    ?assertMatch({[], _}, erx_tty_link:master({tty_input, <<"ab">>}, L2)),
+    ?assertMatch({[], _}, erx_tty_link:master({tty_input, 0, <<"ab">>}, L2)),
+    ?assertMatch({[], _}, erx_tty_link:master({tty_lost, 0}, L2)),
     ?assertMatch({[], _}, erx_tty_link:master(tty_hangup, L2)).
 
 a_hangup_ends_every_wait_test() ->

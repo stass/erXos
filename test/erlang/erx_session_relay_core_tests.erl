@@ -25,7 +25,8 @@
 %%% A test relay: the core and the messages it sent, per receiver, not yet
 %%% taken by the test.
 
--record(t, {core, inbox = #{} :: #{term() => [term()]}}).
+%% typed: the number of the master's next input message.
+-record(t, {core, inbox = #{} :: #{term() => [term()]}, typed = 0 :: non_neg_integer()}).
 
 new() -> #t{core = ?CORE:new(console, #{master => present})}.
 
@@ -45,7 +46,9 @@ ev(Event, #t{core = Core} = T) ->
     {Core1, Actions} = ?CORE:event(Event, Core),
     deliver(Actions, T#t{core = Core1}).
 
-type(Bytes, T) -> ev({master, {tty_input, Bytes}}, T).
+type(Bytes, #t{typed = N} = T) -> ev({master, {tty_input, N, Bytes}}, T#t{typed = N + 1}).
+
+lose(#t{typed = N} = T) -> ev({master, {tty_lost, N}}, T#t{typed = N + 1}).
 
 deliver(Actions, #t{inbox = Inbox} = T) ->
     T#t{inbox = lists:foldl(fun({send, To, Message}, Acc) ->
@@ -129,6 +132,19 @@ the_console_during_a_job_test() ->
     T4 = no_report(console, fg(s1, console, {g1, 0}, T3)),
     {_, N2, T5} = report(console, c, type(<<"k">>, T4)),
     ?assertMatch({{ok, <<"k">>}, _}, do(console, {tty_read, c, 1, N2}, T5)).
+
+%% A read of one unit: a loss is `lost`, not a NUL; a write-only open may
+%% not read; a stale signal number leaves the unit held.
+read_input_test() ->
+    T0 = type(<<"b">>, lose(type(<<"a">>, opened()))),
+    T1 = ok(console, {watch, c, [{read, 1}]}, T0),
+    {_, N, T2} = report(console, c, T1),
+    {{ok, <<"a">>}, T3} = do(console, {tty_read_input, c, N}, T2),
+    {eagain, T4} = do(console, {tty_read_input, c, N + 1}, T3),
+    {lost, T5} = do(console, {tty_read_input, c, N}, T4),
+    ?assertMatch({{ok, <<"b">>}, _}, do(console, {tty_read_input, c, N}, T5)),
+    T6 = ok(pw, {open, console, write, w}, T5),
+    ?assertMatch({{error, ebadf}, _}, do(pw, {tty_read_input, w, N}, T6)).
 
 %% Input on demand: nothing reaches the console unasked, it reads a byte at
 %% a time, and the rest stays in the tty for the next holder.

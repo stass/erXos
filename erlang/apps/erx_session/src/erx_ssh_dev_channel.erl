@@ -83,6 +83,9 @@ channel.
                 channel :: ssh:channel_id() | undefined,
                 pty = none :: none | erx_session_tty:channel(),
                 tty = none :: none | pid(),
+                %% The number of the tty's next input message, counted from 0
+                %% (docs/design-live.md, "One input sequence across domains").
+                typed = 0 :: non_neg_integer(),
                 relay = none :: none | pid(),
                 alias = none :: none | erx_ssh_job:tag(),
                 watched :: reference() | undefined,
@@ -170,10 +173,12 @@ event({window_change, _Channel, Columns, Rows, _, _}, #state{tty = Tty} = State)
     {ok, State};
 %% On a tty the client's data is the tty's input, and the window opens by what the
 %% channel hands the tty.
-event({data, Channel, 0, Data}, #state{connection = Connection, tty = Tty} = State) when is_pid(Tty) ->
-    _ = [Tty ! {tty_input, Piece} || Piece <- pieces(Data, erx_tty_link:input_max())],
+event({data, Channel, 0, Data}, #state{connection = Connection, tty = Tty, typed = Typed} = State)
+  when is_pid(Tty) ->
+    Pieces = pieces(Data, erx_tty_link:input_max()),
+    _ = [Tty ! {tty_input, Typed + I, Piece} || {I, Piece} <- lists:enumerate(0, Pieces)],
     ssh_connection:adjust_window(Connection, Channel, byte_size(Data)),
-    {ok, State};
+    {ok, State#state{typed = Typed + length(Pieces)}};
 %% Otherwise it is a job's input, or goes nowhere (erx_ssh_job_core:channel_step/2);
 %% extended data from the client goes nowhere.
 event({data, _Channel, 0, Data}, State) ->

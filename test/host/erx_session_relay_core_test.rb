@@ -34,7 +34,7 @@ class ErxSessionRelayCoreTest < Minitest::Test
     console_never_parked: Fault.new(text: 'holds(#open{holder = console}, #core{holder = console}) -> true;',
                                     broken: 'holds(#open{holder = console}, #core{}) -> true;',
                                     case_name: /the_console_during_a_job_test/),
-    max_ignored: Fault.new(text: 'erx_tty:read({Open, read}, Max, Tty)', broken: 'erx_tty:read({Open, read}, ?MAX_BYTES, Tty)',
+    max_ignored: Fault.new(text: 'erx_tty:read(Key, Max, Tty)', broken: 'erx_tty:read(Key, ?MAX_BYTES, Tty)',
                            case_name: /input_on_demand_test/),
     console_event_untagged: Fault.new(text: '[{send, Console, {erx_tty_event, Group, Event}}]',
                                       broken: '[{send, Console, {erx_tty_event, none, Event}}]',

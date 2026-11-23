@@ -3,7 +3,7 @@
 
 -module(erx_tty_link).
 -moduledoc """
-The tty's side of the six messages between a session's tty and its master
+The tty's side of the seven messages between a session's tty and its master
 (docs/design-live.md, "Between domains", "A lost answer does not stop a
 tty" and "A stopped tty"), as a pure state machine: each call takes one
 event and returns the actions it decides, in order, and the next state.
@@ -40,8 +40,14 @@ that state, and nothing piles up.
 The master's other messages are states, so a repeat is harmless: a size
 is reported only when it changes, and the hangup once, after which every
 write is done at once and its bytes dropped, as a hung-up line's are.
-Input is passed on as it came. Each receiver check is the one the design's
-table gives; a message that fails it is dropped and counted.
+Input is passed on as it came, in one numbered sequence of the master's
+`{tty_input, N, Bytes}` and `{tty_lost, N}` (docs/design-live.md, "One
+input sequence across domains"): N one above the last taken is the next
+message, a higher N a gap, the messages between lost on the way, taken as
+a loss at its place before the message, and an N not above the last is
+refused, dropped and counted. So a dropped message is a loss, never a
+silent one. Each receiver check is the one the design's table gives; a
+message that fails it is dropped and counted.
 
 The line discipline's actions on output reach it as calls: flush/1 drops
 what it holds but the outstanding output, which the master already has,
@@ -76,7 +82,8 @@ anywhere, so an owner waits for output to drain only while it does.
 %% Who waits on a write: a term the relay hands back, or none.
 -type writer() :: term().
 -type master_message() :: {tty_taken, non_neg_integer()}
-                        | {tty_input, binary()}
+                        | {tty_input, non_neg_integer(), binary()}
+                        | {tty_lost, non_neg_integer()}
                         | {tty_size, pos_integer(), pos_integer()}
                         | tty_hangup.
 -type action() :: {output, non_neg_integer(), binary()}   % send {tty_output, N, Bytes}
@@ -84,6 +91,7 @@ anywhere, so an owner waits for output to drain only while it does.
                 | {resend_after, non_neg_integer()}       % call timeout(N) in 1 s
                 | {done, writer()}                        % all its bytes are held
                 | {input, binary()}                       % typed input, as it came
+                | lost                                    % input lost, at its place
                 | {size, pos_integer(), pos_integer()}    % Rows, Columns
                 | hangup.
 
@@ -92,6 +100,8 @@ anywhere, so an owner waits for output to drain only while it does.
           master :: none | present,
           %% The number the next new output gets.
           next = 0 :: non_neg_integer(),
+          %% The number the master's next input message carries.
+          input = 0 :: non_neg_integer(),
           %% The output sent and not yet taken, and its size, which counts as held.
           outstanding = none :: none | {non_neg_integer(), non_neg_integer()},
           %% Bytes held and not yet sent.
@@ -105,12 +115,12 @@ anywhere, so an owner waits for output to drain only while it does.
           hung_up = false :: boolean(),
           %% Output stopped by VSTOP: held bytes wait and none is sent.
           stopped = false :: boolean(),
-          counts = #{output_dropped => 0, input_dropped => 0, size_refused => 0}
+          counts = #{output_dropped => 0, input_dropped => 0, input_refused => 0, size_refused => 0}
             :: #{atom() => non_neg_integer()}}).
 
 -opaque link() :: #link{}.
 
--doc "The most bytes one `{tty_input, Bytes}` carries; a longer one is dropped.".
+-doc "The most bytes one `{tty_input, N, Bytes}` carries; a longer one is dropped.".
 -spec input_max() -> pos_integer().
 input_max() -> ?MAX_INPUT.
 
@@ -145,12 +155,12 @@ master({tty_taken, N}, L = #link{outstanding = {N, _Size}, hung_up = false}) ->
     fill(L#link{outstanding = none});
 master({tty_taken, _N}, L) ->
     {[], L};
-master({tty_input, Bytes}, L = #link{hung_up = false})
-  when is_binary(Bytes), byte_size(Bytes) =< ?MAX_INPUT ->
-    {[{input, Bytes} || Bytes =/= <<>>], L};
-master({tty_input, _Bytes}, L = #link{hung_up = true}) ->
-    {[], L};
-master({tty_input, _Bytes}, L = #link{counts = Counts}) ->
+master({tty_input, N, Bytes}, L) when is_binary(Bytes), byte_size(Bytes) =< ?MAX_INPUT ->
+    numbered(N, [{input, Bytes} || Bytes =/= <<>>], L);
+master({tty_lost, N}, L) ->
+    numbered(N, [lost], L);
+master(Input, L = #link{hung_up = false, counts = Counts})
+  when element(1, Input) =:= tty_input; element(1, Input) =:= tty_lost ->
     {[], L#link{counts = bump(input_dropped, Counts)}};
 master({tty_size, Rows, Columns}, L = #link{size = {Rows, Columns}}) ->
     {[], L};
@@ -168,6 +178,19 @@ master(tty_hangup, L = #link{waiting = Waiting}) ->
                              unowned = 0, hung_up = true}};
 master(_Other, L) ->
     {[], L}.
+
+%% An input message numbered N, taking Taken: ignored after a hangup; past
+%% a gap, the messages between were lost on the way, a loss before Taken
+%% (one with the message's own loss); not past the last taken, refused.
+numbered(_N, _Taken, L = #link{hung_up = true}) ->
+    {[], L};
+numbered(N, Taken, L = #link{input = Next}) when is_integer(N), N >= Next ->
+    Gap = [lost || N > Next, Taken =/= [lost]],
+    {Gap ++ Taken, L#link{input = N + 1}};
+numbered(N, _Taken, L = #link{counts = Counts}) when is_integer(N) ->
+    {[], L#link{counts = bump(input_refused, Counts)}};
+numbered(_N, _Taken, L = #link{counts = Counts}) ->
+    {[], L#link{counts = bump(input_dropped, Counts)}}.
 
 -doc """
 The timer for output N has fired: if N is still outstanding, the tty names

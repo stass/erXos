@@ -3,7 +3,7 @@
 
 -module(erx_tty_master).
 -moduledoc """
-The master's side of the six messages between a session's tty and the console
+The master's side of the seven messages between a session's tty and the console
 (docs/design-live.md, "Between domains", "A lost answer does not stop a tty" and
 "A stopped tty"), as a pure state machine, the twin of the tty's own core,
 erx_tty_link: each call takes one event and returns the actions it decides, in
@@ -28,9 +28,14 @@ are lost, as a line's overrun loses them, and the action `{lost, N}` has the
 console log the loss. Anything else refuses the tty, with the
 action `detach`: the console detaches it, and the master takes nothing from it,
 answers nothing and is never connected again.
+
+The master numbers its input messages, `{tty_input, N, Bytes}` and
+`{tty_lost, N}` alike, from 0, in the order it sends them, so the tty takes a
+gap in the numbers as input lost on the way (docs/design-live.md, "One input
+sequence across domains").
 """.
 
--export([new/0, output/2, written/2, connect/2, disconnect/1, input/2, size/2]).
+-export([new/0, output/2, written/2, connect/2, disconnect/1, input/2, lost/1, size/2]).
 -export([is_refused/1, max_message/0]).
 
 -export_type([master/0, action/0]).
@@ -42,7 +47,8 @@ answers nothing and is never connected again.
 
 -type action() :: {write, non_neg_integer(), binary()}   % write the bytes, then written(N)
                 | {send, {tty_taken, non_neg_integer()}  % to the tty
-                       | {tty_input, binary()}
+                       | {tty_input, non_neg_integer(), binary()}
+                       | {tty_lost, non_neg_integer()}
                        | {tty_size, pos_integer(), pos_integer()}}
                 | {lost, non_neg_integer()}              % log that output N's bytes were lost
                 | detach.                                % the tty failed a check
@@ -50,6 +56,8 @@ answers nothing and is never connected again.
 -record(master, {
           %% The number the tty's next new output carries.
           next = 0 :: non_neg_integer(),
+          %% The number the next input message to the tty carries.
+          input = 0 :: non_neg_integer(),
           %% The output in the console: none, held while not connected, or being written.
           output = none :: none | {held, non_neg_integer(), binary()} | {writing, non_neg_integer()},
           connected = false :: boolean(),
@@ -127,9 +135,18 @@ disconnect(M) -> M#master{connected = false}.
 
 -doc "Bytes typed at the line, sent to a connected tty in parts of at most 4 KiB.".
 -spec input(binary(), master()) -> {[action()], master()}.
-input(Bytes, M = #master{connected = true}) ->
-    {[{send, {tty_input, Part}} || Part <- parts(Bytes)], M};
+input(Bytes, M = #master{connected = true, input = N}) ->
+    Parts = parts(Bytes),
+    {[{send, {tty_input, N + I, Part}} || {I, Part} <- lists:enumerate(0, Parts)],
+     M#master{input = N + length(Parts)}};
 input(_Bytes, M) ->
+    {[], M}.
+
+-doc "Input was lost at the line, here among its bytes: a connected tty is told so.".
+-spec lost(master()) -> {[action()], master()}.
+lost(M = #master{connected = true, input = N}) ->
+    {[{send, {tty_lost, N}}], M#master{input = N + 1}};
+lost(M) ->
     {[], M}.
 
 -doc "The line's size, sent to a connected tty when it changes.".

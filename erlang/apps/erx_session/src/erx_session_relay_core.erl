@@ -55,6 +55,7 @@ and names in actions.
                  | {tty, open(), {tcsetattr, erx_tty:termios(), sigttou_ignored}}
                  | {watch, open(), [spec()]}
                  | {tty_read, open(), 0..?MAX_BYTES, integer()}
+                 | {tty_read_input, open(), integer()}
                  | {write, open(), binary()}
                  | {console_group, term()}
                  | {status, binary()}
@@ -66,7 +67,7 @@ and names in actions.
                | {write, done(), binary()}               % a writer's message
                | {drain, done()}                         % a normal halt waits for output
                | {down, term()}.                         % a monitored process ended
--type answer() :: ok | {ok, term()} | {ok, term(), non_neg_integer()} | eof | eagain
+-type answer() :: ok | {ok, term()} | {ok, term(), non_neg_integer()} | lost | eof | eagain
                 | {background, false} | {error, einval | ebadf}.
 -type action() :: {send, To :: term(), Message :: term()}
                 | {monitor, term()}
@@ -197,6 +198,7 @@ named({watch, Open, [{read, Count}]})
 named({watch, Open, [Kind]}) when Kind =:= in; Kind =:= out -> {ok, Open};
 named({tty_read, Open, Max, N})
   when is_integer(Max), Max >= 0, Max =< ?MAX_BYTES, is_integer(N) -> {ok, Open};
+named({tty_read_input, Open, N}) when is_integer(N) -> {ok, Open};
 named({write, Open, Bytes}) when is_binary(Bytes), byte_size(Bytes) =< ?MAX_BYTES -> {ok, Open};
 named(_) -> error.
 
@@ -221,7 +223,11 @@ on_open(Caller, {watch, Open, [Spec]}, _Made, Core) ->
 on_open(_Caller, {tty_read, _, _, _}, #open{mode = write}, Core) ->
     {{error, ebadf}, [], Core};
 on_open(_Caller, {tty_read, Open, Max, N}, Made, Core) ->
-    tty_read(Open, Max, N, Made, Core);
+    tty_read(Open, fun(Key, Tty) -> erx_tty:read(Key, Max, Tty) end, N, Made, Core);
+on_open(_Caller, {tty_read_input, _, _}, #open{mode = write}, Core) ->
+    {{error, ebadf}, [], Core};
+on_open(_Caller, {tty_read_input, Open, N}, Made, Core) ->
+    tty_read(Open, fun erx_tty:read_input/2, N, Made, Core);
 on_open(_Caller, {write, _, Bytes}, _Made, Core) ->
     write(Bytes, Core).
 
@@ -260,13 +266,14 @@ kind({read, _}) -> read;
 kind(in) -> in;
 kind(out) -> out.
 
-%% A read takes bytes only while its open may read and only with the
-%% signal number of the moment; a read of 0 bytes is erx_tty's {ok, <<>>}
-%% and never waits, so it needs no wait of its own.
-tty_read(Open, Max, N, Made, #core{tty = Tty, signal = Signal} = Core) ->
+%% A read, Read being erx_tty's read/3 of a count or its read_input/2,
+%% takes input only while its open may read and only with the signal
+%% number of the moment; a read of 0 bytes is erx_tty's {ok, <<>>} and
+%% never waits, so it needs no wait of its own.
+tty_read(Open, Read, N, Made, #core{tty = Tty, signal = Signal} = Core) ->
     case may_read(Made, Core) andalso N =:= Signal of
         true ->
-            {Answer, Tty1} = erx_tty:read({Open, read}, Max, Tty),
+            {Answer, Tty1} = Read({Open, read}, Tty),
             {Answer, [], Core#core{tty = Tty1}};
         false ->
             {eagain, [], Core}
@@ -484,6 +491,9 @@ link_action(open, Core) -> {[open], Core};
 link_action({resend_after, _} = Resend, Core) -> {[Resend], Core};
 link_action({done, _Writer}, Core) -> {[], Core};
 link_action({input, Bytes}, Core) -> typed(Bytes, Core);
+link_action(lost, #core{tty = Tty} = Core) ->
+    {Actions, Tty1} = erx_tty:lost(Tty),
+    carry(Actions, Core#core{tty = Tty1});
 link_action({size, Rows, Columns}, Core) -> resize(Rows, Columns, Core);
 %% The hangup is the permanent end of the console's line, told at once whether or
 %% not a read waits (erx_tty_link emits hangup at most once), before the waits it readies.

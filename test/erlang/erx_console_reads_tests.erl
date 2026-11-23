@@ -130,7 +130,11 @@ with_console(Case) ->
         flush()
     end.
 
-type(Relay, Bytes) -> Relay ! {tty_input, Bytes}.
+%% The master's input, numbered for each relay from 0.
+type(Relay, Bytes) ->
+    N = case get({typed, Relay}) of undefined -> 0; Typed -> Typed end,
+    put({typed, Relay}, N + 1),
+    Relay ! {tty_input, N, Bytes}.
 
 relay() -> whereis(erx_tty_owner).
 

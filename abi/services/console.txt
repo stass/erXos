@@ -1,9 +1,10 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
-# The console interface (docs/design-live.md, "The tty"): the six messages a
+# The console interface (docs/design-live.md, "The tty"): the seven messages a
 # tty and its master exchange, each heard through the other's domain envelope and
 # checked by its receiver as that section's table says. A tty sends tty_open and
-# tty_output; its master sends tty_taken, tty_input, tty_size and tty_hangup.
+# tty_output; its master sends tty_taken, tty_input, tty_size, tty_hangup and
+# tty_lost, tty_input and tty_lost numbered in one sequence ("Lost input").
 service console 11
   served_as message
   operation tty_open 1
@@ -12,6 +13,7 @@ service console 11
   operation tty_input 4
   operation tty_size 5
   operation tty_hangup 6
+  operation tty_lost 7
 # A tty's window size is Rows then Columns, the order of POSIX's struct winsize, in
 # tty_size and wherever erXos holds a size; each side is 1 to console_side_max
 # (docs/design-live.md, "Between domains"). Only OTP's own code takes {Columns, Rows}:
