@@ -22,19 +22,28 @@
 %%
 %% Overruns: the receive FIFO holds eight bytes, about 0.7 ms of input at 115200 baud, and
 %% the line has no flow control, so a delivery later than that loses the bytes the FIFO
-%% had no room for. The loss is marked in the input with one NUL, as FreeBSD's uart(4)
-%% marks it (sys/dev/uart/uart_core.c, uart_intr_overrun), at its place: the read of LSR
-%% that shows the overrun finds the FIFO full of the bytes that came before the loss, so
-%% the marker goes after the next ?FIFO_BYTES bytes the driver reads, or where the FIFO
-%% reads empty if that comes first (received/2). A newline read later in the same drain then
-%% never sends the damaged line out unmarked, and the line editor refuses to run a line
-%% that holds the marker (docs/design-live.md, "The console"). FreeBSD's flush of the
-%% receiver after an overrun, which spaces overruns out for a multiport card's other
-%% lines, is not done. Every read of LSR, the receive side's and the send side's alike,
-%% goes through read_lsr/1, because the read clears RX_OVERRUN: overrun_seen/2 counts each
-%% overrun a read shows (count_overrun/2) and keeps its mark until the drain places it,
-%% so an overrun a send's read shows is marked by the drain that follows. It logs a warning only
-%% when its mailbox is empty, after a delivery has been drained and acknowledged or a send
+%% had no room for. The driver sends each loss as erx_console_lost, in order with its
+%% bytes (docs/design-live.md, "Lost input"), and places it conservatively, before every
+%% byte that might have arrived after it. A read of LSR that shows an overrun says the loss
+%% came after the previous read of LSR, when the FIFO held eight bytes from before it, of
+%% which the driver has read P since that previous read: one when a data read came between
+%% the two, as in a drain, and none when none did, as in a send's poll. So the loss goes after
+%% the next ?FIFO_BYTES - P bytes the driver reads, or where the FIFO reads empty if that
+%% comes first (add_mark/2, received/2), and a newline that arrived after the loss is read
+%% after it. FreeBSD's flush of the receiver after an overrun, which spaces overruns out for
+%% a multiport card's other lines, is not done. Every read of LSR, the receive side's and the
+%% send side's alike, goes through read_lsr/1, because the read clears RX_OVERRUN:
+%% overrun_seen/2 counts each overrun a read shows (count_overrun/2) and keeps its mark until
+%% the drain places it, so an overrun a send's read shows is placed by the drain that
+%% follows.
+%%
+%% One input message outstanding: the driver sends its next input message only after the
+%% console's erx_console_taken answers the last, and drains meanwhile into a store of one
+%% drain's bytes, where a byte that finds it full becomes a loss (erx_uart_input). A send
+%% takes a waiting answer between its bytes, so output never waits on input being taken, nor
+%% input on output.
+%%
+%% Logging: the driver logs a warning only when its mailbox is empty, after a delivery has been drained and acknowledged or a send
 %% has finished, so a pending interrupt is always served before the log call; a byte that
 %% arrives during the call still waits for it. It warns of the first overrun and then of
 %% each count at least double the last one it logged (to_report/2), so a flood writes only
@@ -56,13 +65,12 @@
 -module(erx_mini_uart).
 
 -export([start_link/1]).
--export([init/2]).
+-export([init/2, format_status/1]).
 -export([console_records/0, console_uart/1]).
 %% Exported for its tests.
--export([count_overrun/2, to_report/2, send_step/1, received/2, add_mark/1]).
+-export([count_overrun/2, to_report/2, send_step/1, received/2, add_mark/2]).
 
 -include("generated/erx_hw_mini_uart.hrl").
--include("erx_uart_marker.hrl").
 
 %% The spec's one line.
 -define(RX_LINE, 0).
@@ -73,14 +81,17 @@
 
 %% The driver's state: its device, its line, the console it serves, how many reads of LSR
 %% have shown an overrun since it started, the overrun count the last warning logged (0
-%% before any), and a mark for each place of lost input not yet marked, the bytes still to
-%% read before its marker, in the order the losses were seen (add_mark/1).
+%% before any), a mark for each loss not yet placed, the bytes still to read before it, in
+%% the order the losses were seen (add_mark/2), how many data reads came since the last read
+%% of LSR, and the input not yet sent (erx_uart_input).
 -record(driver, {dev :: erx_device:device(),
                  irq :: erx_irq_line:handle(),
                  console :: pid(),
                  overruns = 0 :: non_neg_integer(),
                  reported = 0 :: non_neg_integer(),
-                 marks = [] :: [pos_integer()]}).
+                 marks = [] :: [pos_integer()],
+                 data_reads = 0 :: 0..1,
+                 input = erx_uart_input:new(?DRAIN_MAX) :: erx_uart_input:input()}).
 
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->
@@ -97,6 +108,16 @@ init(Console, Spec) ->
     ok = erx_device:write_field(Dev, ier, rxie, 1),
     proc_lib:init_ack({ok, self(), true}),
     loop(deliver_input(#driver{dev = Dev, irq = Irq, console = Console})).
+
+-doc """
+Its existence is what makes proc_lib's crash report of this process hide its terms
+(gen:hides_terms/1), as erx_pl011's does: neither the mailbox, which holds the bytes the
+console sent to write, nor a stack frame's arguments, whose driver state holds typed bytes
+not yet taken, are shown.
+""".
+-spec format_status(#{atom() => term()}) -> #{atom() => term()}.
+format_status(Status) ->
+    erx_report:status(Status, #{}).
 
 %% The console's record, for the console to start its line's owner before the driver.
 -spec console_records() -> [erx_device:spec()].
@@ -177,6 +198,8 @@ idle(S) ->
 
 handle({erx_irq, Dev, ?RX_LINE}, S = #driver{dev = Dev}) ->
     take_input(S);
+handle(erx_console_taken, S) ->
+    taken(S);
 handle({erx_console_output, From, Bytes}, S = #driver{console = Console}) ->
     Next = send(S, iolist_to_binary(Bytes)),
     Console ! {erx_console_written, From},
@@ -187,7 +210,7 @@ handle(_Other, S) ->
 send(S, <<>>) ->
     S;
 send(S0 = #driver{dev = Dev}, Bytes = <<Byte, Rest/binary>>) ->
-    {Lsr, S1} = read_lsr(S0),
+    {Lsr, S1} = read_lsr(answer_in_send(S0)),
     {Receive, Transmit} = send_step(Lsr),
     S = case Receive of
             drain -> drain_in_send(S1);
@@ -220,6 +243,14 @@ send_step(Lsr) ->
                end,
     {Receive, Transmit}.
 
+%% The console's answer to the input message last sent, taken between two bytes of a send.
+answer_in_send(S) ->
+    receive
+        erx_console_taken -> taken(S)
+    after 0 ->
+            S
+    end.
+
 %% A drain between two bytes of a send, which takes a delivery already waiting with it.
 drain_in_send(S = #driver{dev = Dev}) ->
     receive
@@ -233,68 +264,80 @@ take_input(S = #driver{irq = Irq}) ->
     ok = erx_irq_line:ack(Irq),
     Next.
 
-deliver_input(S = #driver{console = Console}) ->
-    {Bytes, Next} = drain(S, <<>>),
-    case Bytes of
-        <<>> -> ok;
-        _ -> Console ! {erx_console_input, Bytes}
-    end,
-    Next.
+%% One drain's units into the store, and the next message sent if none waits.
+deliver_input(S0) ->
+    {Units, S = #driver{input = Input}} = drain(S0, [], 0),
+    send_next(S#driver{input = erx_uart_input:add(Units, Input)}).
 
-drain(S, Bytes) when byte_size(Bytes) >= ?DRAIN_MAX ->
-    {Bytes, S};
-drain(S0 = #driver{dev = Dev}, Bytes) ->
-    {Lsr, S = #driver{marks = Marks}} = read_lsr(S0),
-    Read = case ?ERX_HW_MINI_UART_LSR_DATA_READY_GET(Lsr) of
-               0 -> empty;
-               1 -> ?ERX_HW_MINI_UART_IO_DATA_GET(erx_device:read(Dev, io))
-           end,
-    {Received, Left} = received(Read, Marks),
-    Next = S#driver{marks = Left},
-    case Read of
-        empty -> {<<Bytes/binary, Received/binary>>, Next};
-        _ -> drain(Next, <<Bytes/binary, Received/binary>>)
+taken(S = #driver{input = Input}) ->
+    send_next(S#driver{input = erx_uart_input:taken(Input)}).
+
+send_next(S = #driver{console = Console, input = Input}) ->
+    case erx_uart_input:next(Input) of
+        {none, Next} -> S#driver{input = Next};
+        {Message, Next} -> Console ! Message, S#driver{input = Next}
     end.
 
-%% What a drain appends, and the marks left, after the byte Byte it read or after a read
-%% of LSR that found the FIFO `empty`: the byte, followed by a marker for each mark it was
-%% the last byte before, or, from an empty FIFO, a marker for every mark, since no byte that
-%% came before those losses is left in it.
--spec received(byte() | empty, [pos_integer()]) -> {binary(), [pos_integer()]}.
-received(empty, Marks) ->
-    {markers(length(Marks)), []};
-received(Byte, Marks) ->
-    {Due, Left} = lists:partition(fun(Count) -> Count =:= 1 end, Marks),
-    {<<Byte, (markers(length(Due)))/binary>>, [Count - 1 || Count <- Left]}.
+%% The units the receive FIFO gives, in order, until it reads empty or ?DRAIN_MAX bytes
+%% are read.
+drain(S, Units, ?DRAIN_MAX) ->
+    {lists:append(lists:reverse(Units)), S};
+drain(S0 = #driver{dev = Dev}, Units, Count) ->
+    {Lsr, S = #driver{marks = Marks}} = read_lsr(S0),
+    case ?ERX_HW_MINI_UART_LSR_DATA_READY_GET(Lsr) of
+        0 ->
+            {Received, Left} = received(empty, Marks),
+            {lists:append(lists:reverse([Received | Units])), S#driver{marks = Left}};
+        1 ->
+            Byte = ?ERX_HW_MINI_UART_IO_DATA_GET(erx_device:read(Dev, io)),
+            {Received, Left} = received(Byte, Marks),
+            drain(S#driver{marks = Left, data_reads = 1}, [Received | Units], Count + 1)
+    end.
 
-markers(N) ->
-    binary:copy(<<?MARKER>>, N).
+%% The units a drain appends, and the marks left, after the byte Byte it read or after a
+%% read of LSR that found the FIFO `empty`: the byte, followed by the loss when it was the
+%% last byte before a mark, or, from an empty FIFO, the loss of every mark, since no byte
+%% that came before those losses is left in it. Marks are distinct, so at most one is due
+%% at a byte, and losses with no byte between them are one.
+-spec received(byte() | empty, [pos_integer()]) -> {[erx_uart_input:unit()], [pos_integer()]}.
+received(empty, []) ->
+    {[], []};
+received(empty, _Marks) ->
+    {[lost], []};
+received(Byte, Marks) ->
+    Left = [Count - 1 || Count <- Marks, Count > 1],
+    case length(Left) < length(Marks) of
+        true -> {[Byte, lost], Left};
+        false -> {[Byte], Left}
+    end.
 
 %% LSR's word, read once, and the driver once it has seen the overrun the word shows
-%% (overrun_seen/2): the read clears RX_OVERRUN, so the overrun is seen here or never.
-%% Nothing is logged here, in the middle of a drain.
+%% (overrun_seen/2): the read clears RX_OVERRUN, so the overrun is seen here or never. The
+%% data reads since this read start again at none. Nothing is logged here, in the middle of
+%% a drain.
 read_lsr(S = #driver{dev = Dev}) ->
     Lsr = erx_device:read(Dev, lsr),
-    {Lsr, overrun_seen(Lsr, S)}.
+    {Lsr, (overrun_seen(Lsr, S))#driver{data_reads = 0}}.
 
 %% The driver after a read of LSR that returned Lsr: an overrun it shows counted, for the
-%% log, and marked, its marker waiting for the FIFO's bytes, the ones that came before
-%% the loss.
-overrun_seen(Lsr, S = #driver{overruns = Seen, marks = Marks}) ->
+%% log, and its mark added, waiting for the FIFO's bytes that came before the loss.
+overrun_seen(Lsr, S = #driver{overruns = Seen, marks = Marks, data_reads = Read}) ->
     case ?ERX_HW_MINI_UART_LSR_RX_OVERRUN_GET(Lsr) of
         0 -> S;
-        1 -> S#driver{overruns = count_overrun(Lsr, Seen), marks = add_mark(Marks)}
+        1 -> S#driver{overruns = count_overrun(Lsr, Seen), marks = add_mark(Read, Marks)}
     end.
 
-%% The marks after an overrun: one more, for the ?FIFO_BYTES bytes the full FIFO holds,
-%% unless no byte has been read since the last overrun, whose loss is then at the same
-%% place. So the marks are distinct counts from 1 to ?FIFO_BYTES, at most ?FIFO_BYTES of
-%% them, however many reads show RX_OVERRUN while none reads a byte.
--spec add_mark([pos_integer()]) -> [pos_integer()].
-add_mark(Marks) ->
-    case lists:member(?FIFO_BYTES, Marks) of
+%% The marks after an overrun shown by a read of LSR with Read data reads since the previous
+%% one: the loss goes after the ?FIFO_BYTES - Read bytes of the full FIFO still to read,
+%% unless a mark is already there, the same place, since no byte lies between them. The
+%% marks are distinct counts from 1 to ?FIFO_BYTES, at most ?FIFO_BYTES of them, however
+%% many reads show RX_OVERRUN.
+-spec add_mark(0..1, [pos_integer()]) -> [pos_integer()].
+add_mark(Read, Marks) ->
+    Count = ?FIFO_BYTES - Read,
+    case lists:member(Count, Marks) of
         true -> Marks;
-        false -> Marks ++ [?FIFO_BYTES]
+        false -> Marks ++ [Count]
     end.
 
 %% Logs a warning if to_report/2 says the count is due, and returns S with the logged count

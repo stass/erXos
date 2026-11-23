@@ -184,23 +184,61 @@ format_status_shows_only_the_reasons_name_test() ->
 %% shows a byte waiting four times, then the FIFO empty, and DR gives the words. The word
 %% whose OE bit is set is the first byte pushed after the loss, since the receive FIFO
 %% stores the overrun status with the character that follows it (BCM2711 ARM Peripherals,
-%% 11.5, DR), so the marker, a NUL as FreeBSD's uart(4) puts it, goes before that byte and
-%% the newline after it does not send the damaged line out unmarked.
-overrun_is_marked_before_the_byte_after_the_loss_test() ->
+%% 11.5, DR), so the loss goes before that byte and the newline after it does not send the
+%% damaged line out whole (docs/design-live.md, "Lost input").
+overrun_is_placed_before_the_byte_after_the_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual(<<"ab", 0, "c\n">>, erx_pl011:drain(dev, mark)).
+    ?assertEqual([$a, $b, lost, $c, $\n], erx_pl011:drain(dev, mark)).
 
-%% A framing, parity or break bit is no loss: the byte goes up as read, unmarked.
-other_errors_are_not_marked_test() ->
+%% A framing, parity or break bit is no loss: the byte goes up as read, a break's NUL a byte.
+other_errors_are_no_loss_test() ->
     script_receive([?ERX_HW_PL011_DR_FE_MASK bor $a, ?ERX_HW_PL011_DR_PE_MASK bor $b,
                     ?ERX_HW_PL011_DR_BE_MASK, $\n]),
-    ?assertEqual(<<"ab", 0, "\n">>, erx_pl011:drain(dev, mark)).
+    ?assertEqual([$a, $b, 0, $\n], erx_pl011:drain(dev, mark)).
 
-%% A line's driver, the host link's or a Bluetooth controller's, passes its bytes as read:
-%% they are a protocol's, which the marker would corrupt, not a person's line.
-a_line_s_driver_does_not_mark_test() ->
+%% A line's driver, the host link's or a Bluetooth controller's, makes no loss: its bytes
+%% are a protocol's, which checks its own frames.
+a_line_s_driver_makes_no_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual(<<"abc\n">>, erx_pl011:drain(dev, pass)).
+    ?assertEqual([$a, $b, $c, $\n], erx_pl011:drain(dev, pass)).
+
+%% A device whose RXFE never sets: a drain reads at most 64 words, two FIFO depths, and
+%% returns, so the driver serves its mailbox; the line, still raised, delivers again.
+a_wedged_receive_is_drained_a_bounded_amount_test() ->
+    erx_device:script(#{{fr, rxfe} => [0], dr => [$x]}),
+    ?assertEqual(lists:duplicate(64, $x), erx_pl011:drain(dev, pass)).
+
+%% The console stalled, its driver's one input message not yet taken, while 200 bytes
+%% arrive in drains of at most 64: the store holds one drain's bytes and one loss for the
+%% rest, kept though its bytes fill it, and sends them in order, one per answer.
+a_stalled_console_holds_one_drain_and_one_loss_test() ->
+    Paste = [$a + N rem 26 || N <- lists:seq(0, 199)],
+    {First, Rest} = lists:split(64, Paste),
+    {Sent, Waiting} = erx_uart_input:next(erx_uart_input:add(First, erx_uart_input:new(64))),
+    ?assertEqual({erx_console_input, list_to_binary(First)}, Sent),
+    Stalled = lists:foldl(fun erx_uart_input:add/2, Waiting, chunks(Rest, 64)),
+    ?assertMatch({none, _}, erx_uart_input:next(Stalled)),
+    ?assertEqual([{erx_console_input, list_to_binary(lists:sublist(Rest, 64))}, erx_console_lost],
+                 answered(Stalled)).
+
+%% Losses with no byte between them are one, in the store and against the loss last sent.
+losses_with_no_byte_between_are_one_test() ->
+    Store = erx_uart_input:add([lost, lost, $a, lost], erx_uart_input:new(64)),
+    {erx_console_lost, Waiting} = erx_uart_input:next(Store),
+    ?assertEqual([{erx_console_input, <<"a">>}, erx_console_lost], answered(Waiting)),
+    {erx_console_lost, Again} = erx_uart_input:next(erx_uart_input:add([lost], erx_uart_input:new(64))),
+    ?assertEqual([], answered(erx_uart_input:add([lost], Again))).
+
+%% The messages a waiting store sends, one per answer, until it holds none.
+answered(Store) ->
+    case erx_uart_input:next(erx_uart_input:taken(Store)) of
+        {none, _} -> [];
+        {Message, Next} -> [Message | answered(Next)]
+    end.
+
+chunks([], _Size) -> [];
+chunks(List, Size) when length(List) =< Size -> [List];
+chunks(List, Size) -> {Chunk, Rest} = lists:split(Size, List), [Chunk | chunks(Rest, Size)].
 
 script_receive(Words) ->
     erx_device:script(#{{fr, rxfe} => lists:duplicate(length(Words), 0) ++ [1], dr => Words}).

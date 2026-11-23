@@ -39,7 +39,15 @@ class ErxPl011Test < Minitest::Test
     Seed.new(fault: 'RTS set under flow none, so the controller powers up in download mode',
              anchor: "flow_enables(none) ->\n    0;\n",
              replacement: "flow_enables(none) ->\n    ?ERX_HW_PL011_CR_RTS_PUT(1);\n",
-             catching_case: 'fresh_without_flow_test')
+             catching_case: 'fresh_without_flow_test'),
+    Seed.new(fault: 'the loss sent after the byte whose word has OE set',
+             anchor: '{mark, 1} -> [lost, Byte];',
+             replacement: '{mark, 1} -> [Byte, lost];',
+             catching_case: 'overrun_is_placed_before_the_byte_after_the_loss_test'),
+    Seed.new(fault: 'the drain reading past two FIFO depths',
+             anchor: 'drain(Dev, OnOverrun, ?DRAIN_WORDS, []).',
+             replacement: 'drain(Dev, OnOverrun, 2 * ?DRAIN_WORDS, []).',
+             catching_case: 'a_wedged_receive_is_drained_a_bounded_amount_test')
   ].freeze
 
   def test_console_uart_cases_pass_under_eunit

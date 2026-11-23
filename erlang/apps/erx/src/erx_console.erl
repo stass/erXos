@@ -49,10 +49,16 @@
 %% person's terminal is on the line, and exchanges these messages:
 %%
 %%   to the driver:   {erx_console_output, From, Bytes}, written whole and in order
+%%                    erx_console_taken, once the input message last sent is taken
 %%   from the driver: {erx_console_written, From}, once those bytes are written
 %%                    {erx_console_input, Bytes}, the bytes as they were read
+%%                    erx_console_lost, where input was lost, in order with the bytes
 %%                    {erx_console_size, Rows, Columns}, when the line's size changes
 %%                    erx_console_eof, after every byte read before the end
+%%
+%% A driver sends its next input message, bytes or a loss, only after erx_console_taken
+%% answers the last, so the console's mailbox holds at most one input message from it
+%% (docs/design-live.md, "Lost input"). It serves output while it waits.
 %%
 %% Before the driver the console starts the owners of the shared lines its records name
 %% (erx_irq_line:start_owners/1), linked to it as the driver is, and takes an owner's end
@@ -656,16 +662,17 @@ handle_info(Message, State = #state{log = {asked, Request}}) ->
 handle_info(Message, State) ->
     info(Message, State).
 
-info({erx_console_input, Bytes}, State = #state{keys = Keys, line = {menu, Menu}}) when is_binary(Bytes) ->
-    {Action, Next} = erx_console_menu:key(Bytes, Keys, Menu),
-    {noreply, menu_action(Action, Menu, State#state{keys = Next})};
-info({erx_console_input, Bytes}, State = #state{menu = true, keys = Keys}) when is_binary(Bytes) ->
-    {Pieces, Next} = erx_console_keys:split(Bytes, Keys),
-    {noreply, read(Pieces, State#state{keys = Next})};
-info({erx_console_input, Bytes}, State) when is_binary(Bytes) ->
-    %% A raw driver's console with no menu reads a BEL as a raw tty does: as a byte. A
-    %% relay's console gets no input this way; it reads on demand (reader()).
-    {noreply, read([Bytes], State)};
+info({erx_console_input, Bytes}, State = #state{driver = Driver}) when is_binary(Bytes) ->
+    %% A driver keeps one input message outstanding until its answer (docs/design-live.md,
+    %% "One input message outstanding per driver"), which comes at once.
+    Driver ! erx_console_taken,
+    {noreply, typed(Bytes, State)};
+info(erx_console_lost, State = #state{driver = Driver}) ->
+    %% A loss the driver placed among its bytes reaches the group as NUL, at its place:
+    %% edlin finishes no line that holds one and drops the lines after it until the user
+    %% edits (otp/lib/stdlib/src/edlin.erl, finish/4 and hold/5).
+    Driver ! erx_console_taken,
+    {noreply, typed(<<0>>, State)};
 info(erx_console_eof, State = #state{role = session}) ->
     hang_up(State);
 info({ready, Open, [{read, 1}], N}, State = #state{reader = Reader = #{open := Open}}) ->
@@ -1143,6 +1150,19 @@ how_ended(Reason) ->
     <<"an error in the system domain">>.
 
 %% -- The Ctrl-G menu ------------------------------------------------------------------
+
+%% The bytes a driver read, to the menu while it has the line, else split by
+%% erx_console_keys where the console runs the menu. A raw driver's console with no menu
+%% reads a BEL as a raw tty does: as a byte. A relay's console gets no input this way; it
+%% reads on demand (reader()).
+typed(Bytes, State = #state{keys = Keys, line = {menu, Menu}}) ->
+    {Action, Next} = erx_console_menu:key(Bytes, Keys, Menu),
+    menu_action(Action, Menu, State#state{keys = Next});
+typed(Bytes, State = #state{menu = true, keys = Keys}) ->
+    {Pieces, Next} = erx_console_keys:split(Bytes, Keys),
+    read(Pieces, State#state{keys = Next});
+typed(Bytes, State) ->
+    read([Bytes], State).
 
 %% A read of the line's input, as erx_console_keys split it, while the groups or a session
 %% have the line. A typed Ctrl-G reaches neither: it opens the menu, and the rest of the

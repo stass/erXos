@@ -6,6 +6,11 @@
 %% driver's messages that erx_console documents. Input arrives as a software IRQ through
 %% the event table, the path a device's interrupt takes, so nothing polls in a scheduler.
 %% Natively this module is present and never started.
+%%
+%% The driver keeps one input message outstanding (docs/design-live.md, "One input message
+%% outstanding per driver"): standard input can wait, so after sending bytes it reads no
+%% more until the console's erx_console_taken, holding a readiness that came meanwhile, and
+%% it serves output while it waits.
 
 -module(erx_stdio).
 
@@ -28,29 +33,41 @@ init(Console) ->
     ok = erlang:load_nif(atom_to_list(?MODULE), #{}),
     {ok, Terminal} = start_nif(),
     proc_lib:init_ack({ok, self(), Terminal}),
-    loop(Console).
+    loop(Console, idle).
 
-loop(Console) ->
+%% Input is `idle`, `waiting` for the answer to the bytes last sent, or `ready` once
+%% standard input became readable while it waited.
+loop(Console, Input) ->
     receive
+        erx_stdio_ready when Input =:= idle ->
+            loop(Console, deliver(take_nif(), Console));
         erx_stdio_ready ->
-            deliver(take_nif(), Console),
-            loop(Console);
+            loop(Console, ready);
+        erx_console_taken when Input =:= ready ->
+            loop(Console, deliver(take_nif(), Console));
+        erx_console_taken ->
+            loop(Console, idle);
         {erx_console_output, From, Bytes} ->
             %% A write that fails has no reader to tell, as on a hung-up Unix terminal:
             %% the bytes go, and no writer waits on a line that is gone.
             _ = write_nif(Bytes),
             Console ! {erx_console_written, From},
-            loop(Console);
+            loop(Console, Input);
         _Other ->
-            loop(Console)
+            loop(Console, Input)
     end.
 
 %% In the order they happened: the size may have changed at any time, and the end of
-%% input comes after every byte read before it.
+%% input comes after every byte read before it. The input then waits for its answer if
+%% bytes were sent.
 deliver({Bytes, Size, End}, Console) ->
     size_changed(Size, Console),
     [Console ! {erx_console_input, Bytes} || Bytes =/= <<>>],
-    input_ended(End, Console).
+    input_ended(End, Console),
+    case Bytes of
+        <<>> -> idle;
+        _ -> waiting
+    end.
 
 size_changed(unchanged, _Console) -> ok;
 size_changed({Rows, Columns}, Console) -> Console ! {erx_console_size, Rows, Columns}.

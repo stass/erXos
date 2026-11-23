@@ -17,14 +17,22 @@
 %% drains the FIFO once after unmasking. Interrupts are cleared before the drain and the
 %% line acknowledged after it, so a byte that arrives during the drain fires the line
 %% again. A framing, parity, break or overrun bit on a byte is not a reason to drop it:
-%% the byte goes up as read. The console's driver marks a loss as FreeBSD's uart(4) does
-%% (sys/dev/uart/uart_core.c, uart_intr_overrun), with one NUL at its place: the receive
-%% FIFO stores the overrun status with each character it pushes (BCM2711 ARM Peripherals,
-%% 11.5, DR), which is read here, unverified on silicon, as OE riding on the first
-%% character pushed after the loss, so the marker goes before a byte whose word has OE set
-%% (received/2), and the line editor refuses to run a line that holds it (docs/design-live.md,
-%% "The console"). Another line's driver passes the byte unmarked: the host link's and a
-%% Bluetooth controller's bytes are a protocol's, which a marker would corrupt.
+%% the byte goes up as read. The console's driver sends a loss as erx_console_lost, in order
+%% with its bytes (docs/design-live.md, "Lost input"): the receive FIFO stores the overrun
+%% status with each character it pushes (BCM2711 ARM Peripherals, 11.5, DR), so the loss
+%% goes before the byte whose word has OE set (received/2), unverified on silicon, since
+%% QEMU's model sets no OE. If OE rides on the first
+%% character pushed after the loss, that is the loss's place; if on the last one the full
+%% FIFO held, the loss goes one byte early; either way no byte that came after the loss is
+%% sent before it. Another line's driver makes no loss: the host link's and a Bluetooth
+%% controller's bytes are a protocol's, which checks its own frames. A drain reads at most
+%% ?DRAIN_WORDS words, two FIFO depths, so a device whose RXFE never sets holds no driver.
+%%
+%% One input message outstanding: the console's driver sends its next input message only
+%% after the console's erx_console_taken answers the last, and drains meanwhile into a store
+%% of one drain's bytes (erx_uart_input). A send takes a waiting answer between its bytes,
+%% so output never waits on input being taken, nor input on output. A line's driver hands
+%% each drain up as read, as its owner bounds what it holds.
 %%
 %% Sending: one byte per free FIFO slot. A full FIFO waits a millisecond at a time with the
 %% receive side still served. A UART at 115200 baud frees eleven slots a millisecond, so no
@@ -40,7 +48,6 @@
 -export_type([step/0]).
 
 -include("generated/erx_hw_pl011.hrl").
--include("erx_uart_marker.hrl").
 
 %% The spec's one line.
 -define(RX_LINE, 0).
@@ -60,13 +67,17 @@
 %% The reads that empty the receive side: the FIFO's 32 entries (2-6) and the holding
 %% register.
 -define(RX_DRAIN_READS, 33).
+%% The words one delivery's drain reads at most: two FIFO depths.
+-define(DRAIN_WORDS, 64).
 
-%% The driver's state: its device, its line, the process it serves, and whether it marks a
-%% loss of input in the bytes it hands up, which only the console's driver does.
+%% The driver's state: its device, its line, the process it serves, whether it makes a
+%% loss of an overrun, which only the console's driver does, and the console's input not
+%% yet sent (erx_uart_input), which a line's driver leaves empty.
 -record(driver, {dev :: erx_device:device(),
                  irq :: erx_irq_line:handle(),
                  owner :: pid(),
-                 on_overrun :: on_overrun()}).
+                 on_overrun :: on_overrun(),
+                 input :: erx_uart_input:input()}).
 -type on_overrun() :: mark | pass.
 
 %% One step of a driver's start over its UART (program/1), which run/3 performs: a
@@ -96,9 +107,9 @@ init(console, Console) ->
 init(Spec, Owner) ->
     start(Spec, Owner, {ok, self()}, on_overrun(Spec)).
 
-%% Whether a driver marks a loss of input: the console's does, for the line editor to
+%% Whether a driver makes a loss of an overrun: the console's does, for the console to
 %% refuse the damaged line; a line's, the host link's or a Bluetooth controller's, passes
-%% its bytes as read, since they are a protocol's, which a marker would corrupt.
+%% its bytes as read, since they are a protocol's, which checks its own frames.
 -spec on_overrun(console | erx_device:spec()) -> on_overrun().
 on_overrun(console) -> mark;
 on_overrun(#{}) -> pass.
@@ -108,8 +119,8 @@ Its existence is what makes proc_lib's crash report of this process hide its ter
 (gen:hides_terms/1): the report then shows neither the mailbox, which holds the bytes the
 line sent to write (a Bluetooth line's carry keys, the console's a typed passphrase), nor
 the process dictionary, nor a stack frame's arguments, but only the reason's leading atom
-(erx_report:reason_name/1). The driver's own state, its device, line, owner and whether it
-marks lost input, holds nothing a report must hide.
+(erx_report:reason_name/1). The driver's own state is not shown either: its input store
+holds typed bytes.
 """.
 -spec format_status(#{atom() => term()}) -> #{atom() => term()}.
 format_status(Status) ->
@@ -129,9 +140,9 @@ start(Spec, Owner, Ack, OnOverrun) ->
     {ok, Irq} = erx_irq_line:attach(Dev, ?RX_LINE),
     ok = erx_device:write(Dev, imsc, ?ERX_HW_PL011_IMSC_RXIM_PUT(1) bor ?ERX_HW_PL011_IMSC_RTIM_PUT(1)),
     proc_lib:init_ack(Ack),
-    S = #driver{dev = Dev, irq = Irq, owner = Owner, on_overrun = OnOverrun},
-    deliver_input(S),
-    loop(S).
+    S = #driver{dev = Dev, irq = Irq, owner = Owner, on_overrun = OnOverrun,
+                input = erx_uart_input:new(?DRAIN_WORDS)},
+    loop(deliver_input(S)).
 
 %% The console's record, for the console to start its line's owner before the driver.
 -spec console_records() -> [erx_device:spec()].
@@ -359,62 +370,90 @@ discard(Dev, Reads) ->
 loop(S = #driver{dev = Dev, owner = Owner}) ->
     receive
         {erx_irq, Dev, ?RX_LINE} ->
-            take_input(S),
-            loop(S);
+            loop(take_input(S));
+        erx_console_taken ->
+            loop(taken(S));
         {erx_console_output, From, Bytes} ->
-            send(S, iolist_to_binary(Bytes)),
+            Next = send(S, iolist_to_binary(Bytes)),
             Owner ! {erx_console_written, From},
-            loop(S);
+            loop(Next);
         _Other ->
             loop(S)
     end.
 
-send(_S, <<>>) ->
-    ok;
-send(S = #driver{dev = Dev}, Bytes = <<Byte, Rest/binary>>) ->
+send(S, <<>>) ->
+    S;
+send(S0 = #driver{dev = Dev}, Bytes = <<Byte, Rest/binary>>) ->
+    S = answer_in_send(S0),
     case erx_device:read_field(Dev, fr, txff) of
         0 ->
             ok = erx_device:write(Dev, dr, Byte),
             send(S, Rest);
         1 ->
-            receive
-                {erx_irq, Dev, ?RX_LINE} -> take_input(S)
-            after ?FULL_WAIT_MS -> ok
-            end,
-            send(S, Bytes)
+            Next = receive
+                       {erx_irq, Dev, ?RX_LINE} -> take_input(S)
+                   after ?FULL_WAIT_MS -> S
+                   end,
+            send(Next, Bytes)
+    end.
+
+%% The owner's answer to the input message last sent, taken between two bytes of a send.
+answer_in_send(S) ->
+    receive
+        erx_console_taken -> taken(S)
+    after 0 ->
+            S
     end.
 
 take_input(S = #driver{irq = Irq}) ->
-    deliver_input(S),
-    ok = erx_irq_line:ack(Irq).
+    Next = deliver_input(S),
+    ok = erx_irq_line:ack(Irq),
+    Next.
 
-deliver_input(#driver{dev = Dev, owner = Owner, on_overrun = OnOverrun}) ->
+deliver_input(S = #driver{dev = Dev, on_overrun = OnOverrun}) ->
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, mis)),
-    case drain(Dev, OnOverrun) of
-        <<>> -> ok;
-        Bytes -> Owner ! {erx_console_input, Bytes}
+    handed(drain(Dev, OnOverrun), S).
+
+%% One drain's units: a line's driver hands its bytes up at once; the console's puts them
+%% in the store and sends the next message if none waits.
+handed(Units, S = #driver{on_overrun = pass, owner = Owner}) ->
+    [Owner ! {erx_console_input, list_to_binary(Units)} || Units =/= []],
+    S;
+handed(Units, S = #driver{on_overrun = mark, input = Input}) ->
+    send_next(S#driver{input = erx_uart_input:add(Units, Input)}).
+
+taken(S = #driver{input = Input}) ->
+    send_next(S#driver{input = erx_uart_input:taken(Input)}).
+
+send_next(S = #driver{owner = Owner, input = Input}) ->
+    case erx_uart_input:next(Input) of
+        {none, Next} -> S#driver{input = Next};
+        {Message, Next} -> Owner ! Message, S#driver{input = Next}
     end.
 
-%% The bytes the receive side holds, read until FR shows it empty.
--spec drain(erx_device:device(), on_overrun()) -> binary().
+%% The units the receive side holds, in order, read until FR shows it empty or
+%% ?DRAIN_WORDS words are read.
+-spec drain(erx_device:device(), on_overrun()) -> [erx_uart_input:unit()].
 drain(Dev, OnOverrun) ->
-    drain(Dev, OnOverrun, <<>>).
+    drain(Dev, OnOverrun, ?DRAIN_WORDS, []).
 
 %% Reading DR pops a byte, so each word is read once and decoded from that word.
-drain(Dev, OnOverrun, Bytes) ->
+drain(_Dev, _OnOverrun, 0, Units) ->
+    lists:append(lists:reverse(Units));
+drain(Dev, OnOverrun, Words, Units) ->
     case erx_device:read_field(Dev, fr, rxfe) of
         1 ->
-            Bytes;
+            lists:append(lists:reverse(Units));
         0 ->
             Received = received(erx_device:read(Dev, dr), OnOverrun),
-            drain(Dev, OnOverrun, <<Bytes/binary, Received/binary>>)
+            drain(Dev, OnOverrun, Words - 1, [Received | Units])
     end.
 
-%% The bytes a word read from DR stands for: its data, after the marker when the driver
-%% marks and the word's OE says input was lost before the byte.
+%% The units a word read from DR stands for: its data, after the loss when the driver makes
+%% losses and the word's OE says input was lost before the byte.
 received(Word, OnOverrun) ->
     Byte = ?ERX_HW_PL011_DR_DATA_GET(Word),
     case {OnOverrun, ?ERX_HW_PL011_DR_OE_GET(Word)} of
-        {mark, 1} -> <<?MARKER, Byte>>;
-        _ -> <<Byte>>
+        {mark, 1} -> [lost, Byte];
+        _ -> [Byte]
     end.

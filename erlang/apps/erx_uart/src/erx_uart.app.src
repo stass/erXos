@@ -26,7 +26,7 @@
   {modules, [erx_hostlink, erx_hostlink_9p, erx_hostlink_files, erx_hostlink_frame,
              erx_hostlink_install, erx_hostlink_payload, erx_hostlink_session,
              erx_hostlink_stream, erx_hostlink_web,
-             erx_line, erx_line_core, erx_line_fs, erx_mini_uart, erx_pl011, erx_uart_app, erx_uart_sup,
+             erx_line, erx_line_core, erx_line_fs, erx_mini_uart, erx_pl011, erx_uart_app, erx_uart_input, erx_uart_sup,
              erx_virtio_console, erx_virtio_console_core]},
   {registered, [erx_uart_sup, erx_hostlink]},
   {applications, [kernel, stdlib, erx, erx_files, erx_code]},
