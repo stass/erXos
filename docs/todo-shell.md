@@ -780,13 +780,19 @@ to the corpus and follow rc
   outstanding until `erx_console_taken` (`erx_uart_input`), which `erx_console` answers at once, handing the
   group a loss as NUL, which `edlin`'s NUL rule refuses; step 4 replaces that. `erx_tty` holds its input as units
   of bytes and losses (`lost/1`, `read_input/2`, `flushed_loss`), every master numbers `tty_input` and `tty_lost`,
-  `erx_tty_link` takes a gap as a loss, and the relay serves `tty_read_input`; `erx_console` does not yet call
-  `erx_tty_master:lost/1` or read with `tty_read_input`, which step 4 does. Build the rest of the design's event in
-  steps, each with its rows of the design's verification table:
+  `erx_tty_link` takes a gap as a loss, the relay serves `tty_read_input` and sends `lost` only while the
+  console holds, and a cooked edit that removes no byte keeps the line's loss; `erx_console` does not yet call
+  `erx_tty_master:lost/1` or read with `tty_read_input`, and drops `lost` in its event catch-all, which step 4
+  replaces. Build the rest of the design's event in steps, each with its rows of the design's verification table:
   4. `erx_console`: both roles read on demand, the system role from its own `erx_tty` with a terminal's or a
      pipe's settings as `Terminal` says, deleting `input/2` and the push; the console answers a terminal's input
      at once and a pipe's once there is room; a loss, and the relay's `lost` event, damage the group's read, and a
-     loss drops a cut character and resets `erx_console_keys`;
+     loss drops a cut character and resets `erx_console_keys`; every `erx_tty_event` is handled by name, with no
+     catch-all, and the system console takes its own tty's signals and `flushed_loss` through the same handler,
+     with one action-to-event mapping, the relay core's `event_name/1` and `lost`, exported rather than
+     copied. Until
+     step 5 gives `group` `lost` as an input, the console's one function that damages a group's read can only
+     answer its ask with a NUL, which `edlin`'s NUL rule refuses; step 5 changes that function alone;
   5. `group` and `edlin`: the damage in each input request's state, a loss damaging every unfinished request, `edlin:edit_line/3`, `lost` as an input,
      refused bounds as losses, refusal through `finish/4` until the buffer is emptied, a request starting with the group's derived damage, dumb mode; delete
      the hold, the NUL scan, `edlin_key`'s NUL rule and `group`'s history rule; `test/host/edlin_marker_test.rb`

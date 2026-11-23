@@ -32,7 +32,14 @@ at its end.
 
 Typing into the serial console works, but pasting into it can drop
 characters: the line has no flow control and its receive buffer holds
-eight bytes. To paste, log in over SSH.
+eight bytes. To paste, log in over SSH. The shell's editor finishes no
+line that it read lost characters in, and rings the bell at Enter until
+you empty the line. A loss just before `Ctrl-\` or `Ctrl-Z` at the
+prompt, whose flush drops the unread input, is not caught: the line typed
+before it stays and can run. A program that edits its own line in raw mode is not protected that
+way, as on FreeBSD: it reads a NUL byte where input was lost, and a loss
+just before `Ctrl-C`, `Ctrl-Z` or `Ctrl-\`, whose flush drops the unread
+input, does not reach it at all.
 
 ## Update the bootloader, once
 

@@ -530,7 +530,7 @@ carry_one({signal, Signal}, Core) -> signal(Signal, Core);
 carry_one(info, Core) -> {notify(info, Core), Core};
 carry_one(winch, Core) -> {notify(winch, Core), Core};
 carry_one(flush_output, Core) -> flush(Core);
-carry_one(flushed_loss, Core) -> {notify(lost, Core), Core};
+carry_one(flushed_loss, Core) -> {flushed_loss(Core), Core};
 carry_one(stop_output, #core{link = Link} = Core) ->
     {[], Core#core{link = erx_tty_link:stop(Link)}};
 carry_one(start_output, #core{link = Link} = Core) ->
@@ -545,6 +545,17 @@ signal(Signal, #core{signal = N} = Core0) ->
     Core1 = count(Signal, Core0#core{signal = N + 1}),
     {Parked, Core2} = park(Core1),
     {Parked ++ notify(event_name(Signal), Core2), Core2}.
+
+%% A flush dropped a loss, which erx_tty reports ahead of the signal it
+%% belongs to. Only the console reads lines for groups, so only it is told,
+%% in order with that signal, for it to damage the read the signal leaves
+%% going. While a job holds, no read of the console's is in progress, since
+%% a shell gives a job the terminal only between its lines: under the
+%% cooked termios the job's line is the tty's, which the flush dropped
+%% whole, and a raw-mode program editing its own line gets a loss only as
+%% the NUL it reads, as on FreeBSD, which flushes that NUL with the rest.
+flushed_loss(#core{holder = console} = Core) -> notify(lost, Core);
+flushed_loss(#core{holder = {job, _, _, _}}) -> [].
 
 event_name(sigint) -> interrupt;
 event_name(sigtstp) -> suspend;

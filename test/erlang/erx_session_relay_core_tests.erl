@@ -246,6 +246,18 @@ events_test() ->
     {[{erx_tty_event, g2, suspend}], T13} = take(console, T12),
     ?assertMatch({[], _}, take(s1, T13)).
 
+%% A flush that drops a loss: while the console holds, `lost` reaches it
+%% ahead of the signal, with the group it named; while a job holds, its
+%% shell gets the signal alone, since no line read of the console's is in
+%% progress (docs/design-shell.md, "The terminal relay's protocol").
+a_flushed_loss_reaches_only_the_console_test() ->
+    T0 = lose(type(<<"rm ">>, ok(console, {console_group, g1}, opened()))),
+    {Console, _} = take(console, type(?CTRL_BACKSLASH, T0)),
+    ?assertEqual([{erx_tty_event, g1, lost}, {erx_tty_event, g1, quit}], Console),
+    T1 = lose(type(<<"rm ">>, a_holds())),
+    {Shell, _} = take(s1, type(?CTRL_BACKSLASH, T1)),
+    ?assertEqual([{erx_tty_event, a, quit}], Shell).
+
 %% A signal suspends the job's reads, but not its writes or tcsetattr, and
 %% makes a report delivered before it stale.
 a_signal_suspends_the_jobs_reads_test() ->

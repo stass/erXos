@@ -529,7 +529,10 @@ editor then finishes no line of that read, nor of any read started while
 it is unfinished, ringing the bell at Enter,
 until the user empties the line, so a command that lost bytes never
 runs; a program reading the terminal gets a NUL where the input was
-lost, the byte FreeBSD gives there. Every other place that drops input
+lost, the byte FreeBSD gives there, and nothing for a loss a signal key
+flushes before the program reads it, so a program that edits its own
+line in raw mode is no better protected than on FreeBSD. Every other
+place that drops input
 makes a loss too: a message the system domain drops on its way to a
 session, a byte the tty has no room for, and a character the editor's
 bounds refuse. The event is designed and not built: the drivers

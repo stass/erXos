@@ -2037,7 +2037,8 @@ the terminal is a newline in the tty, and a line typed ahead of a command
 ends the command's cooked read.
 
 **Terminal events.** The relay compares holders to gate reads, but acts
-on no job. Each signal and event the line discipline returns goes to the
+on no job. Each signal and event the line discipline returns, but for
+`lost`, which goes to the console alone (below), goes to the
 holder of the moment it is made, as `{erx_tty_event, Tag, Event}`, named
 with what it was made for: while a job holds the terminal, to the
 process that gave it the terminal, the shell, `Tag` being the job's tag;
@@ -2057,7 +2058,7 @@ event carries its job:
 | `{signal, sigint}` | `interrupt` |
 | `{signal, sigtstp}` | `suspend` |
 | `{signal, sigquit}` | `quit` |
-| `flushed_loss`, before the signal whose flush dropped a loss | `lost` ([design-live.md](design-live.md#lost-input)) |
+| `flushed_loss`, before the signal whose flush dropped a loss, only while the console holds | `lost` ([design-live.md](design-live.md#lost-input)) |
 | `info` | `info` |
 | `winch` | `winch` |
 
@@ -2069,12 +2070,20 @@ of the job ([Job control](#job-control)), `suspend` stops it, `quit` is
 deliveries of [`Ctrl-T`](#ctrl-t-status-and-the-info-request) and
 [Window size](#window-size). A job that is over has no member, so
 `interrupt`, `suspend`, `quit` and `winch` then reach no one, and `info`
-writes FreeBSD's line for an empty group and sends no request. A job takes
-nothing for `lost`: the flush dropped all its unread input, and it holds no
-edited line for the loss to damage. So a key
+writes FreeBSD's line for an empty group and sends no request. So a key
 typed for one job never reaches the job that took the terminal after it,
 as a signal from FreeBSD's terminal reaches the group that was in the
 foreground when the key arrived (`tty.c:1544-1550`).
+
+The relay sends `lost` only to the console, the one holder that reads lines for
+groups, ahead of the signal it belongs to; a shell never gets it, because
+no line read of the console's is in progress while a job holds. Under the
+cooked `termios` a job's edited line is the tty's own, which the flush
+drops whole with its loss. Under a raw one the line is the program's, and
+erXos gives the program what FreeBSD gives it: a NUL where it reads a
+loss, and nothing for a loss a signal key flushes, so a raw-mode program
+editing its own line is not protected from a loss just before a signal
+key ([design-live.md](design-live.md#lost-input)).
 
 The console carries `interrupt` and `suspend` out on the group `Tag`
 names, in the state that group is in when the console takes the event,

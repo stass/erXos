@@ -1472,18 +1472,32 @@ more than its bound has bytes.
   `lost`. A cooked line ends at its newline, `VEOF` or `VEOL` as before; a
   loss is a unit of the line, so a line of a loss and `VEOF` is a line of
   one NUL, not an end of file.
-* **Editing a cooked line.** An erase never removes a loss: `VERASE` and
+* **Editing a cooked line.** An erase never removes a loss alone: `VERASE` and
   `VWERASE` remove bytes before the cursor and keep the line's losses at
-  its new end, and only `VKILL`, or an erase that leaves the line with no
-  byte, drops them with the line, as `edlin` keeps a damaged line damaged
-  until it is empty.
+  its new end, and only an edit that removes the line's last byte drops
+  them; an edit that finds no byte changes nothing, as a key that leaves
+  `edlin`'s empty buffer empty clears no damage. So a loss alone on a line,
+  where `cd /tmp` and its newline were lost whole, survives a habitual
+  `VERASE` or `VKILL` and reaches the program as a NUL on the next line,
+  and one rule clears a damaged line in the tty and in `edlin`.
 * **Moving units.** A change of `ICANON`, `VEOF` or `VEOL` recounts what
   is readable over units, so a cooked line's losses move with its bytes.
   A signal's flush and a hangup drop losses with the bytes, as FreeBSD's
   `tty_flush` drops the queue (`sys/kern/tty_ttydisc.c:1124-1133`), but a
   flush never drops a loss unseen: when the input it drops holds one, it
   returns `flushed_loss` ahead of the signal, which the relay passes on as
-  the event `lost` (below). A hangup needs none, since it ends every read.
+  the event `lost` (below) to the console, the one holder that reads lines
+  for groups, and to no job's shell. A hangup needs none, since it ends
+  every read.
+* **A program's own line.** A program that edits its own line in raw
+  mode, as a line editor library does, gets a loss only as the NUL it
+  reads, as on FreeBSD, and is otherwise unprotected: a loss that a
+  signal key flushes before the program reads it reaches it not at all,
+  so with `rm ` already read, a dropped frame, `Ctrl-\`, `target` and
+  Enter, a program that leaves the read going at `quit` runs `rm target`,
+  as on FreeBSD, whose flush drops the overrun's NUL with the queue
+  (`sys/kern/tty_ttydisc.c:1124-1133`). Under the cooked `termios` the line is the tty's own, which the
+  flush drops whole with its loss.
 
 **Compatibility with FreeBSD.** A program's read of a loss the UART made
 gives the NUL FreeBSD's read gives at that place, and that byte is all the
@@ -1644,8 +1658,9 @@ obligations are these, each with one owner:
   feeds the console has one input message outstanding, answered as output is: at once for a person's
   terminal, which overflows into a loss, and once there is room for a pipe,
   which waits;
-* a flush never drops a loss unseen: it reports `flushed_loss`, and the
-  console damages the read the signal leaves going.
+* a flush never drops a loss unseen by a line read of the console's: it
+  reports `flushed_loss`, the relay passes it on as `lost` only while the
+  console holds, and the console damages the read the signal leaves going.
 
 A typed NUL is stock's key bound to nothing, the PL011's break is the
 byte the UART read, and the hold, the scan, the history rule, the marker
@@ -1685,8 +1700,10 @@ fail, so the case proves the code under it ran.
 | the same with `Ctrl-Z` in frame 2, and with `Ctrl-C` | `Ctrl-Z`: no line is returned; `Ctrl-C`: the read ends, and the next read is undamaged | the ended read's damage passed on to the next read |
 | `erx_tty_tests`, raw: 4 KiB waiting, then three bytes | one loss after the 4 KiB, kept though no byte of room is left | the drop not marked |
 | `erx_tty_tests`, cooked: `cd`, a loss, `/`, then `VERASE`, then `VKILL`; a loss then `VEOF`; `ICANON` cleared over a line with a loss | the loss stays after the erase and is gone after the kill; the second line reads as one NUL; the loss moves to the readable input in its place | an erase that removes the loss |
+| `erx_tty_tests`, cooked: a loss on an empty line, then `VERASE`, `VWERASE` or `VKILL`, and newline; then a loss, `x`, `VERASE` and newline | each of the first reads NUL and newline; the last reads a newline alone | an edit that removes no byte dropping the line's loss |
 | `erx_tty_tests`' exploration and `erx_tty_fuzz` | `lost` is in the event alphabet; every reachable state keeps losses within the held bytes, one at most between two bytes | losses not dropped by a signal's flush |
 | `erx_session_relay_core_tests`: `tty_read_input` on a read open, a write-only open, and with a stale signal number | `lost` at a loss; `{error, ebadf}`; `eagain` with the unit still held | the request served with a stale number |
+| `erx_session_relay_core_tests`: `rm `, a loss and `Ctrl-\` while the console holds, and the same while a job holds | the console gets `lost` and then `quit`, with its group; the shell gets `quit` alone | the console's `lost` dropped; `lost` sent to the shell |
 | `edlin_lost_tests` (replacing `edlin_marker_tests`), through `edlin` and a group: a loss, more text, Enter | no line finishes; the bell rings at the loss and at Enter | the finishing function ignoring the damage |
 | the same: a loss, `Ctrl-U` at the end, new text, Enter | the new line finishes | the damage cleared by any edit key |
 | the same: a loss before the first character, `Ctrl-U` on the empty buffer, text, Enter | no line finishes | a key that leaves an empty buffer empty clearing the damage |
