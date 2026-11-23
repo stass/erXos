@@ -683,14 +683,14 @@ rings and editing goes on, and at the end of input the line is dropped and `edli
 the end of input on, which `group` gives the reader in place of a line, so the read ends
 rather than waiting for an end the console sends only once. The damage ends only when an
 explicit discard, or an edit that removes text, empties the whole edited buffer, every
-line of a multi-line edit together, or when the read ends; a key that leaves an empty
+line of a multi-line edit together, or when `Ctrl-C` or the end of input ends the read; a key that leaves an empty
 buffer empty, a history move and a search keep it, and while the read is damaged a history move
 keeps no line to come back to, so a damaged line never returns once emptying a recalled line has ended
 the damage. Text keeps the damage of the read it came from: the kill buffer holds it beside the text, so
-a yank of text killed in a damaged read damages the read it lands in, whether the same request, a later
-one or another group's that `edlin:init/1` copied the kill buffer into. A refused Enter drops the rest of
-the delivery that carried it, with its one bell, so the rest of a damaged paste, a password meant for a
-later read with echo off among it, is not echoed into the line. `group` keeps the damage in each input
+a yank of text killed in a damaged read damages the read it lands in, the same request or a later one.
+A refused Enter drops the rest of the delivery that carried it, with its one bell, so what that delivery
+carried after the Enter, a password meant for a later read with echo off among it, is not echoed into
+the line; a later delivery edits the line, damaged still. `group` keeps the damage in each input
 request's state, and a loss damages every unfinished request, the current one
 and each one set aside, since the group's one ask may be answered to a request
 other than the one the lost bytes were meant for, and a request starts damaged while

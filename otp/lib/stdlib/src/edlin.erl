@@ -659,9 +659,11 @@ do_op(yank, {LB,{Bef, Aft},LA}, Rs, D) ->
 do_op(Op, MultiLine, Rs, D) ->
     {do_op(Op, MultiLine, Rs), D}.
 
-%% erXos: stores Text, killed in a read whose damage is D, in the kill buffer.
+%% erXos: stores Text, killed in a read whose damage is D, in the kill buffer. A kill of
+%% nothing empties the buffer, as on stock, and stores no damage, so a later yank of
+%% nothing damages nothing.
 kill(Text, D) ->
-    put(kill_buffer, {D, Text}).
+    put(kill_buffer, {D andalso Text =/= [], Text}).
 
 blink(beep, C, {LB, {Bef, Aft}, LA}, Rs) ->
     {{LB,{[C|Bef], Aft},LA}, [beep,{insert_chars, unicode, [C]}|Rs]};
@@ -928,8 +930,9 @@ key_action(ShellMode, Key) ->
 %% input, and on an accepted history search, which group hands back (finish_line/3).
 %% While the read is damaged no line is finished (edit 81): the bell rings and editing
 %% goes on in the mode the key left, without Rest, the rest of the delivery that carried
-%% the key, which is dropped, so the rest of a damaged paste, a password meant for a
-%% later read among it, is not echoed into the line; a later delivery edits it. At
+%% the key, which is dropped, so what that delivery carried after the Enter, a password
+%% meant for a later read among it, is not echoed into the line; a later delivery edits
+%% it, damaged still. At
 %% the end of input a damaged line is dropped, shown moved to its end as a finished line
 %% is, and the end handed on as Rest, which group gives the reader in place of a line, so
 %% the read ends rather than waiting for an end the console sends only once. Stock

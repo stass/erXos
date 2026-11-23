@@ -5,7 +5,7 @@
 %% docs/design-runtime.md, docs/design-live.md "Lost input"). A loss reaches edlin as the
 %% input lost, beside the read's damage, which edlin takes and returns; while the read is
 %% damaged no line is finished, and the damage ends only when an edit empties the whole
-%% buffer, or with the read. A group keeps the damage in each request, damages every
+%% buffer, or when Ctrl-C or the end of input ends the read. A group keeps the damage in each request, damages every
 %% unfinished request at a loss, starts a request damaged while any unfinished one is,
 %% and holds the loss of a damaged request that ends with an error for the next request.
 %% The group cases run a group over a driver the test plays.
@@ -263,6 +263,22 @@ a_dumb_group_holds_the_loss_of_input_an_error_drops_test() ->
         ?assertEqual(none, answer(Next))
     end).
 
+%% Through a group in dumb mode: a line latin1 cannot carry, with nothing after it, fails
+%% the read and drops no other input, so the next read returns its line.
+a_dumb_group_holds_no_loss_when_an_error_drops_nothing_else_test() ->
+    with_group([{dumb, true}], fun(Group, Driver) ->
+        Test = self(),
+        First = spawn_link(fun() ->
+                                   Test ! {line, self(), io:request(Group, {get_line, latin1, "> "})}
+                           end),
+        waiting(First),
+        feed(Group, Driver, [[16#400, $\n]]),
+        ?assertEqual({error, {no_translation, unicode, latin1}}, answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["pwd\n"]),
+        ?assertEqual("pwd\n", answer(Next))
+    end).
+
 %% Through a group in dumb mode: Ctrl-C ends a damaged read and its damage, so the next
 %% read returns its line.
 a_dumb_group_ends_the_damage_with_an_interrupt_test() ->
@@ -327,12 +343,15 @@ with_group(Options, Fun) ->
     try
         Fun(Group, Driver)
     after
-        [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Group, Driver]],
+        [unlink(Pid) || Pid <- [Group, Driver]],
+        [begin Ref = monitor(process, Pid), exit(Pid, kill),
+               receive {'DOWN', Ref, process, Pid, _} -> ok end
+         end || Pid <- [Group, Driver]],
         flush()
     end.
 
-%% Drops what the group and driver of a case left the test, an ask its last damaged read
-%% made among it, so the next case answers only its own group's asks.
+%% Drops what the group and driver of a case left the test, once both are gone, an ask
+%% its last damaged read made among it, so the next case answers only its own asks.
 flush() ->
     receive {asked, _} -> flush(); beep -> flush(); {line, _, _} -> flush()
     after 0 -> ok

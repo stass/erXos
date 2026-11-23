@@ -743,7 +743,9 @@ switch_loop(internal, {line, Line}, State) ->
              {next_event, internal, line}}
     end;
 switch_loop(info,{ReadHandle,{data,Cs}}, {Cont, #state{ read = ReadHandle } = State}) ->
-    %% erXos: the job menu's line takes no loss of input, so its read is never damaged.
+    %% erXos: the job menu's read takes no loss of input and keeps no damage, so a
+    %% yank of damaged text copied by edlin:init/1 is not refused here; user_drv runs
+    %% only on a host, where erx_console does not replace it (docs/todo-shell.md).
     {Result, _Damage} = edlin:edit_line(unicode:characters_to_list(Cs), Cont, false),
     case Result of
         {done,{[Line],_,_},_Rest, Rs} ->

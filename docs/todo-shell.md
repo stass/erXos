@@ -805,6 +805,18 @@ to the corpus and follow rc
   while the editor opens, are dropped without a loss, against the rule of
   [design-live.md](design-live.md#lost-input) that every place that drops input makes one. Hand the rest
   back to `edlin:edit_line/3` in the line state the mode leaves, as the other modes do.
+* [Medium] group, losses the input-loss event does not yet count (`otp/lib/kernel/src/group.erl`): a driver's
+  `{error, _}` ends a request and drops its unfinished edited line (`cont`) without holding a loss, so typed-ahead
+  input after it can run as a command of its own; and an answer to no outstanding ask is dropped when it carries
+  characters, and only held for the next request when it carries `lost`, so the request that takes the characters
+  after it is not damaged, against "every character a group takes after a loss lands in a damaged request" of
+  [design-live.md](design-live.md#lost-input). `erx_console` sends groups no `{error, _}` and keeps one ask, so
+  neither is reached on the target. Hold a loss for an error ending of a request that has taken input, and let a
+  stray answer damage every unfinished request (`lose/1`), which changes the stray-loss row of the design's table.
+* [Low] `user_drv`'s job menu (`otp/lib/kernel/src/user_drv.erl`, `switch_loop/3`): `edlin:init/1` copies the
+  group's kill buffer with its damage, and the menu calls `edlin:edit_line/3` undamaged each time, so a yank of
+  damaged text there is not refused. Host only: `erx_console` replaces `user_drv` on the target. Thread the
+  damage through `switch_loop`'s state.
 * [Low] UART lines other than the console, a full receiver (`erx_pl011`, `erx_hostlink`, `erx_line`): a PL011
   serving the host link or Bluetooth sends its bytes as they come, so its receiver's mailbox is the only bound. If a
   bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the

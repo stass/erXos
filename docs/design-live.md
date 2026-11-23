@@ -1575,14 +1575,16 @@ nothing. Each of the group's modes then does one thing:
   not what the read lost. Text keeps the damage of the read it came from
   wherever `edlin` stores it: a kill in a damaged read stores its text
   damaged, and a yank of damaged text damages the read it lands in, the
-  same read, a later one, or another group's that copied the kill buffer,
+  same read or a later one,
   so `Ctrl-U` then `Ctrl-Y` cannot bring a damaged line back undamaged;
   the history stack, whose lines a search reads as text, does not keep a
   damaged read's line at all. A refused Enter drops the rest of the
-  delivery that carried it, with its one bell, so the rest of a damaged
-  paste, a password meant for a later read with echo off among it, is
-  not echoed into the line; later deliveries edit the line as usual, and
-  nothing runs until the user has emptied the buffer.
+  delivery that carried it, with its one bell, so what that delivery
+  carried after the Enter, a password meant for a later read with echo
+  off among it, is not echoed into the line; later deliveries, the rest
+  of a paste the console cut into several among them, edit the line as
+  usual, damaged still, and nothing runs until the user has emptied the
+  buffer.
 * **Dumb** (no editing, cooked collection): a damaged read returns no
   line: each line it collects is dropped through its newline, with the
   bell, until the read ends, by `Ctrl-C` or at the end of input. Dumb

@@ -391,8 +391,9 @@ dumb(data, Buf, Data = #state{ input = #input_state{ prompt_bytes = Pbs, encodin
 
     %% Get a single line using get_line_dumb, or a single character using get_chars_dumb
     case GetFun(Buf, Pbs, Cont, Encoding, Data) of
-        {no_translation, unicode, latin1} ->
-            fail({error,{no_translation, unicode, latin1}}, Buf, Data);
+        %% erXos: the input after the line that failed is dropped with the request.
+        {no_translation, unicode, latin1, Unread} ->
+            fail({error,{no_translation, unicode, latin1}}, Unread, Data);
         %% erXos: a damaged read returns no line: the end of input ends it, and a line
         %% is dropped with the bell.
         {done, _Dropped, eof} when Damaged ->
@@ -690,11 +691,12 @@ push_state(State, Data) ->
 %% say how it ended over-damages rather than drops a loss (edit 81).
 pop_state(How, Data = #state{ input = #input_state{ damaged = Damaged } }) ->
     Ends = How =:= interrupted orelse How =:= eof,
-    pop_state(Data#state{ held_loss = Data#state.held_loss orelse (Damaged andalso not Ends) }).
+    resume_set_aside(Data#state{ held_loss = Data#state.held_loss orelse (Damaged andalso not Ends) }).
 
 %% When an input request is done we then need to check if there was
 %% another request in progress, and if so we pop its state and resume it.
-pop_state(Data) ->
+%% erXos: reached only through pop_state/2, so every ending says how it ended.
+resume_set_aside(Data) ->
     case queue:out(Data#state.input_queue) of
         {empty, _} ->
             {next_state, server, Data#state{ input = undefined }};
@@ -1309,7 +1311,7 @@ get_line_dumb(Buf, _Pbs, Cont, ToEnc, Data = #state{ driver = Drv }) ->
             Line = lists:reverse(Enil),
             case check_encoding(Line, ToEnc) of
                 false ->
-                    {no_translation, unicode, ToEnc};
+                    {no_translation, unicode, ToEnc, Rest};
                 true ->
                     {done, Line, Rest}
             end
@@ -1330,7 +1332,7 @@ get_chars_dumb(Buf, _Pbs, _Cont, ToEnc, Data = #state{ driver = Drv }) ->
 
             case check_encoding(Chars, ToEnc) of
                 false ->
-                    {no_translation, unicode, ToEnc};
+                    {no_translation, unicode, ToEnc, []};
                 true ->
                     {done, Chars, []}
             end
