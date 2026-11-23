@@ -263,9 +263,8 @@
                 %% when its driver is a terminal relay; none when its driver
                 %% sends the input as it arrives.
                 reader = none :: none | reader(),
-                %% Each group's outstanding ask for input, or `lost` while a loss waits
-                %% for its next one (damage/2); a group that is neither has no entry.
-                asks = #{} :: #{pid() => reference() | lost}}).
+                %% Each group's outstanding ask for input.
+                asks = #{} :: #{pid() => reference()}}).
 
 %% The console of a session's tty reads its relay as libedit reads a tty
 %% (docs/design-shell.md, "The console reads on demand"): through its one open, a
@@ -906,15 +905,8 @@ from_group({Pid, set_unicode_state, Unicode}, State = #state{tty = TTY}) ->
     Pid ! {self(), set_unicode_state, prim_tty:unicode(TTY)},
     State#state{tty = prim_tty:unicode(TTY, Unicode)};
 from_group({Pid, read, Ref}, State = #state{asks = Asks}) when is_reference(Ref) ->
-    %% A loss that waits for Pid's ask answers it at once; any other ask is kept, and a
-    %% driver that sends the input as it arrives answers it only with a loss.
-    case Asks of
-        #{Pid := lost} ->
-            Pid ! {self(), {read, Ref, lost}},
-            State#state{asks = maps:remove(Pid, Asks)};
-        #{} ->
-            watch(State#state{asks = Asks#{Pid => Ref}})
-    end;
+    %% A driver that sends the input as it arrives answers an ask only with a loss.
+    watch(State#state{asks = Asks#{Pid => Ref}});
 from_group({_Pid, read, _Ask}, State) ->
     State;
 from_group({Pid, Request}, State) ->
@@ -1503,8 +1495,8 @@ reader_follows(Group, State = #state{user = User, base = Base, shells = Shells, 
 
 %% A watch of one byte, made only when none waits for its report and the current group
 %% has an ask outstanding.
-watch(State = #state{reader = Reader = #{open := Open, watching := false}}) ->
-    case is_reference(ask(current(State), State)) of
+watch(State = #state{asks = Asks, reader = Reader = #{open := Open, watching := false}}) ->
+    case is_map_key(current(State), Asks) of
         true ->
             ok = erx_session_relay:watch(Open, {read, 1}),
             State#state{reader = Reader#{watching := true}};
@@ -1520,9 +1512,9 @@ watch(State) ->
 %% at a line's start while a background program left ICANON set, is that read's end and
 %% never the hangup, which the relay tells with erx_console_eof: it is a read that found
 %% nothing, so the ask stays outstanding and the bytes held for the group go.
-read_for_ask(N, State = #state{reader = #{open := Open}}) ->
+read_for_ask(N, State = #state{asks = Asks, reader = #{open := Open}}) ->
     Group = current(State),
-    case is_reference(ask(Group, State)) andalso erx_session_relay:read_input(Open, N) of
+    case is_map_key(Group, Asks) andalso erx_session_relay:read_input(Open, N) of
         false -> {noreply, State};
         {ok, <<Byte>>} -> {noreply, watch(answer(Group, Byte, State))};
         lost -> {noreply, watch(damage(Group, State))};
@@ -1531,27 +1523,19 @@ read_for_ask(N, State = #state{reader = #{open := Open}}) ->
     end.
 
 %% The one way a loss reaches a group, so no loss is silent and none reaches a process
-%% that is not one of the console's groups: Group's outstanding ask is answered `lost`,
-%% which damages every request Group has unfinished, or, while it has none, its next ask
-%% will be (from_group/2). The leading bytes of a character held for Group go, since
-%% the loss fell among them (docs/design-live.md, "Lost input").
+%% that is not one of the console's groups: the loss is sent at once, in order with the
+%% input pushed or answered before it, as the answer to Group's outstanding ask or, while
+%% it has none, as an answer to no ask, which group takes as a loss all the same
+%% (otp/lib/kernel/src/group.erl, handle_info/3). The leading bytes of a character held
+%% for Group go, since the loss fell among them (docs/design-live.md, "Lost input").
 damage(Group, State0 = #state{asks = Asks}) ->
     State = drop_held(Group, State0),
-    case is_group(Group, State) andalso ask(Group, State) of
+    case is_group(Group, State) of
+        true ->
+            Group ! {self(), {read, maps:get(Group, Asks, make_ref()), lost}},
+            State#state{asks = maps:remove(Group, Asks)};
         false ->
-            State;
-        none ->
-            State#state{asks = Asks#{Group => lost}};
-        Ref ->
-            Group ! {self(), {read, Ref, lost}},
-            State#state{asks = maps:remove(Group, Asks)}
-    end.
-
-%% Group's outstanding ask for input, or none.
-ask(Group, #state{asks = Asks}) ->
-    case Asks of
-        #{Group := Ref} when is_reference(Ref) -> Ref;
-        #{} -> none
+            State
     end.
 
 %% The bytes held for Group go: a signal flushed the input typed with them, a loss fell
