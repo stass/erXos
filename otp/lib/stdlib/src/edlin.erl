@@ -20,8 +20,9 @@
 %% Modified by erXos: every editing call takes the read's damage and returns it
 %% (edit_line/3), and a loss of input, the input lost, damages the read; no line of a
 %% damaged read is finished (finish/5), the end of input drops it, and an edit that
-%% empties the buffer ends the damage (damage/4). Edits 80 and 81 of
-%% docs/design-runtime.md.
+%% empties the buffer ends the damage (damage_after/4). Text keeps the damage of the
+%% read it came from: the kill buffer holds it beside the text (do_op/4). Edits 80 and
+%% 81 of docs/design-runtime.md.
 %%
 %% %CopyrightEnd%
 %%
@@ -218,7 +219,7 @@ supports multiple lines.
 -doc false.
 init() ->
     put(key_map, edlin_key:get_key_map()),
-    put(kill_buffer, []).
+    put(kill_buffer, {false, []}).
 
 -doc false.
 init(Pid) ->
@@ -228,11 +229,11 @@ init(Pid) ->
         case erlang:process_info(Pid, dictionary) of
 	        {dictionary,Dict} ->
 		            case proplists:get_value(kill_buffer, Dict) of
-		                    undefined -> [];
+		                    undefined -> {false, []};
 		                    Buf       -> Buf
 		            end;
 	        undefined ->
-		            []
+		            {false, []}
 	    end,
     put(kill_buffer, CopiedKillBuf).
 
@@ -414,15 +415,15 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) 
                             {search, Op};
                         _ -> Op
                     end,
-                    case do_op(Op1, MultiLine, Rs0) of
-                        {blink,N,MultiLine1,Rs} ->
-                            edit(Cs, P, MultiLine1, {blink,N}, Rs, D);
-                        {redraw, MultiLine1, Rs} ->
+                    case do_op(Op1, MultiLine, Rs0, D) of
+                        {{blink,N,MultiLine1,Rs}, D1} ->
+                            edit(Cs, P, MultiLine1, {blink,N}, Rs, D1);
+                        {{redraw, MultiLine1, Rs}, D1} ->
                             edit(Cs, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs),
-                                 damage(D, ShellMode, MultiLine, MultiLine1));
-                        {MultiLine1,Rs} ->
+                                 damage_after(D1, ShellMode, MultiLine, MultiLine1));
+                        {{MultiLine1,Rs}, D1} ->
                             edit(Cs, P, MultiLine1, {NextMode, none}, Rs,
-                                 damage(D, ShellMode, MultiLine, MultiLine1))
+                                 damage_after(D1, ShellMode, MultiLine, MultiLine1))
                     end
             end
     end.
@@ -514,22 +515,6 @@ do_op(backward_delete_char, {[PrevLine|LB],{[], Aft},LA}, Rs) ->
     {redraw, NewLine,Rs};
 do_op(backward_delete_char, {LB,{[GC|Bef], Aft},LA}, Rs) ->
     {redraw, {LB, {Bef,Aft}, LA},[{delete_chars,-gc_len(GC)}|Rs]};
-do_op(forward_delete_word, {LB,{Bef, []},[NextLine|LA]}, Rs) ->
-    NewLine = {LB, {Bef, NextLine}, LA},
-    {redraw, NewLine, Rs};
-do_op(forward_delete_word, {LB,{Bef, Aft0},LA}, Rs) ->
-    {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
-    {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
-    put(kill_buffer, reverse(Kill)),
-    {redraw, {LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]};
-do_op(backward_delete_word, {[PrevLine|LB],{[], Aft},LA}, Rs) ->
-    NewLine = {LB, {lists:reverse(PrevLine), Aft}, LA},
-    {redraw, NewLine,Rs};
-do_op(backward_delete_word, {LB,{Bef0, Aft},LA}, Rs) ->
-    {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
-    {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
-    put(kill_buffer, Kill),
-    {{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]};
 do_op(transpose_char, {LB,{[C1,C2|Bef], []},LA}, Rs) ->
     Len = gc_len(C1)+gc_len(C2),
     {{LB, {[C2,C1|Bef],[]}, LA},[{insert_chars_over, unicode,[C1,C2]},{move_rel,-Len}|Rs]};
@@ -567,27 +552,8 @@ do_op(transpose_word, {LB,{Bef0, Aft0},LA}, Rs) ->
             {Bef3, Word2B++reverse(Word2A)++NonWord++Word1, Aft1, B2}
     end,
     {redraw,{LB, {reverse(TransposedWords)++Bef, Aft}, LA},[{insert_chars_over, unicode, TransposedWords}, {move_rel, -N}|Rs]};
-do_op(kill_word, {LB,{Bef, Aft0},LA}, Rs) ->
-    {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
-    {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
-    put(kill_buffer, reverse(Kill)),
-    {redraw,{LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]};
-do_op(backward_kill_word, {LB,{Bef0, Aft},LA}, Rs) ->
-    {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
-    {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
-    put(kill_buffer, Kill),
-    {redraw,{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]};
-do_op(kill_line, {LB, {Bef, Aft}, LA}, Rs) ->
-    put(kill_buffer, Aft),
-    {redraw,{LB, {Bef,[]}, LA},[{delete_chars,cp_len(Aft)}|Rs]};
 do_op(clear_line, _, Rs) ->
     {redraw, {[], {[],[]},[]}, Rs};
-do_op(yank, {LB,{Bef, []},LA}, Rs) ->
-    Kill = get(kill_buffer),
-    {{LB, {reverse(Kill, Bef),[]}, LA},[{insert_chars, unicode,Kill}|Rs]};
-do_op(yank, {LB,{Bef, Aft},LA}, Rs) ->
-    Kill = get(kill_buffer),
-    {redraw,{LB, {reverse(Kill, Bef),Aft}, LA},[{insert_chars, unicode,Kill}|Rs]};
 do_op(forward_line, {_,_,[]} = MultiLine, Rs) ->
     {MultiLine, Rs};
 do_op(forward_line, {LB,{Bef, Aft},[AL|LA]}, Rs) ->
@@ -640,13 +606,62 @@ do_op(end_of_line, {LB,{Bef, [_|_]=Aft},LA}, Rs) ->
     {{LB, {reverse(Aft, Bef),[]}, LA},[{move_rel,cp_len(Aft)}|Rs]};
 do_op(end_of_line, {LB,{Bef, []},LA}, Rs) ->
     {{LB, {Bef,[]}, LA},Rs};
-do_op(backward_kill_line, {LB,{Bef, Aft},LA}, Rs) ->
-    put(kill_buffer, reverse(Bef)),
-    {{LB, {[], Aft}, LA}, [{delete_chars, -cp_len(Bef)} | Rs]};
 do_op(beep, {LB,{Bef, Aft},LA}, Rs) ->
     {{LB,{Bef,Aft},LA},[beep|Rs]};
 do_op(_, {LB,{Bef, Aft},LA}, Rs) ->
     {{LB,{Bef,Aft},LA},[beep|Rs]}.
+
+%% erXos: the operations that store text or take it back, with the read's damage D, which
+%% they return. Text keeps the damage of the read it came from wherever edlin stores it
+%% (edit 81): the kill buffer holds {Damage, Text}, a kill stores its text with D, and a
+%% yank of damaged text damages the read it lands in, so a damaged line killed and yanked
+%% back, in its own read, a later one or another group's (init/1), stays damaged. Every
+%% other operation is do_op/3's and keeps D.
+do_op(forward_delete_word, {LB,{Bef, []},[NextLine|LA]}, Rs, D) ->
+    NewLine = {LB, {Bef, NextLine}, LA},
+    {{redraw, NewLine, Rs}, D};
+do_op(forward_delete_word, {LB,{Bef, Aft0},LA}, Rs, D) ->
+    {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
+    {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
+    kill(reverse(Kill), D),
+    {{redraw, {LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, D};
+do_op(backward_delete_word, {[PrevLine|LB],{[], Aft},LA}, Rs, D) ->
+    NewLine = {LB, {lists:reverse(PrevLine), Aft}, LA},
+    {{redraw, NewLine,Rs}, D};
+do_op(backward_delete_word, {LB,{Bef0, Aft},LA}, Rs, D) ->
+    {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
+    {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
+    kill(Kill, D),
+    {{{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, D};
+do_op(kill_word, {LB,{Bef, Aft0},LA}, Rs, D) ->
+    {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
+    {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
+    kill(reverse(Kill), D),
+    {{redraw,{LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, D};
+do_op(backward_kill_word, {LB,{Bef0, Aft},LA}, Rs, D) ->
+    {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
+    {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
+    kill(Kill, D),
+    {{redraw,{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, D};
+do_op(kill_line, {LB, {Bef, Aft}, LA}, Rs, D) ->
+    kill(Aft, D),
+    {{redraw,{LB, {Bef,[]}, LA},[{delete_chars,cp_len(Aft)}|Rs]}, D};
+do_op(backward_kill_line, {LB,{Bef, Aft},LA}, Rs, D) ->
+    kill(reverse(Bef), D),
+    {{{LB, {[], Aft}, LA}, [{delete_chars, -cp_len(Bef)} | Rs]}, D};
+do_op(yank, {LB,{Bef, []},LA}, Rs, D) ->
+    {KillDamage, Kill} = get(kill_buffer),
+    {{{LB, {reverse(Kill, Bef),[]}, LA},[{insert_chars, unicode,Kill}|Rs]}, D orelse KillDamage};
+do_op(yank, {LB,{Bef, Aft},LA}, Rs, D) ->
+    {KillDamage, Kill} = get(kill_buffer),
+    {{redraw,{LB, {reverse(Kill, Bef),Aft}, LA},[{insert_chars, unicode,Kill}|Rs]},
+     D orelse KillDamage};
+do_op(Op, MultiLine, Rs, D) ->
+    {do_op(Op, MultiLine, Rs), D}.
+
+%% erXos: stores Text, killed in a read whose damage is D, in the kill buffer.
+kill(Text, D) ->
+    put(kill_buffer, {D, Text}).
 
 blink(beep, C, {LB, {Bef, Aft}, LA}, Rs) ->
     {{LB,{[C|Bef], Aft},LA}, [beep,{insert_chars, unicode, [C]}|Rs]};
@@ -912,7 +927,9 @@ key_action(ShellMode, Key) ->
 %% erXos: every line the editor finishes leaves it here: on Enter, at the end of its
 %% input, and on an accepted history search, which group hands back (finish_line/3).
 %% While the read is damaged no line is finished (edit 81): the bell rings and editing
-%% goes on with Rest, the input delivered after the key, in the mode the key left. At
+%% goes on in the mode the key left, without Rest, the rest of the delivery that carried
+%% the key, which is dropped, so the rest of a damaged paste, a password meant for a
+%% later read among it, is not echoed into the line; a later delivery edits it. At
 %% the end of input a damaged line is dropped, shown moved to its end as a finished line
 %% is, and the end handed on as Rest, which group gives the reader in place of a line, so
 %% the read ends rather than waiting for an end the console sends only once. Stock
@@ -922,15 +939,15 @@ finish(How, {line,_P,MultiLine,_EditState}, Rest, Rs, false) ->
 finish(eof, {line,_P,MultiLine,_EditState}, _Rest, Rs0, true) ->
     {done, _Dropped, [], Rs} = finished(eof, MultiLine, [], [beep|Rs0]),
     {{done, ?EMPTY_BUFFER, eof, Rs}, true};
-finish(_How, {line,P,MultiLine,EditState}, Rest, Rs, true) ->
-    edit(Rest, P, MultiLine, EditState, [beep|Rs], true).
+finish(_How, {line,P,MultiLine,EditState}, _Rest, Rs, true) ->
+    edit([], P, MultiLine, EditState, [beep|Rs], true).
 
 %% erXos: the read's damage after an operation in ShellMode took the buffer from Before
 %% to After. An edit in the normal mode that empties the whole buffer, every line of a
 %% multi-line edit together, discards it (edit 81); a key that leaves an empty buffer
 %% empty keeps it, and so does an edit of a search term.
-damage(true, normal, Before, ?EMPTY_BUFFER) when Before =/= ?EMPTY_BUFFER -> false;
-damage(D, _ShellMode, _Before, _After) -> D.
+damage_after(true, normal, Before, ?EMPTY_BUFFER) when Before =/= ?EMPTY_BUFFER -> false;
+damage_after(D, _ShellMode, _Before, _After) -> D.
 
 %% The finished line and the requests that show it so: Enter moves to the line's end and
 %% starts a new one, the end of input moves to the end, and an accepted search has shown

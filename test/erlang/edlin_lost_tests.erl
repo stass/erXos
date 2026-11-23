@@ -15,11 +15,42 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% A loss damages the read: Enter rings the bell and finishes nothing, and editing goes
-%% on, so the bytes after the Enter join the line.
+%% on. The rest of the delivery that carried the refused Enter is dropped, with the one
+%% bell, so the rest of a paste, a password meant for a later read among it, is not
+%% echoed into the line; a later delivery edits it.
 enter_on_a_damaged_line_rings_the_bell_test() ->
-    {{more_chars, Cont, Requests}, true} = typed(["cd ", lost, "x\rrm"]),
-    ?assertEqual("cd xrm", edlin:current_chars(Cont)),
-    ?assert(lists:member(beep, Requests)).
+    {{more_chars, Cont, Requests}, true} = typed(["cd ", lost, "x\rsecret\rls"]),
+    ?assertEqual("cd x", edlin:current_chars(Cont)),
+    ?assertEqual([beep], [R || beep = R <- Requests]),
+    {{more_chars, Later, _}, true} = typed(["cd ", lost, "x\rsecret", "rm"]),
+    ?assertEqual("cd xrm", edlin:current_chars(Later)).
+
+%% Text killed in a damaged read keeps the damage: a yank of it damages the read it
+%% lands in, so Ctrl-U then Ctrl-Y cannot bring the damaged line back undamaged.
+a_yank_of_damaged_text_damages_the_read_test() ->
+    ?assertMatch({{more_chars, _, _}, true},
+                 typed(["rm -rf /tmp/bu", lost, "\^U", "\^Y", "\r"])),
+    ?assertMatch({{more_chars, _, _}, true},
+                 typed(["rm -rf /tmp/bu", lost, "\^A\^K", "\^Y", "\r"])).
+
+%% A yank of text killed in an undamaged read damages nothing.
+a_yank_of_undamaged_text_finishes_the_line_test() ->
+    {{done, Line, [], _}, false} = typed(["pwd", "\^U", "\^Y", "\r"]),
+    ?assertEqual("pwd\n", edlin:current_line(Line)).
+
+%% The kill buffer edlin:init/1 copies from another process keeps its damage.
+a_copied_kill_buffer_keeps_its_damage_test() ->
+    Test = self(),
+    Killer = spawn_link(fun() ->
+                                typed(["rm -rf /tmp/bu", lost, "\^U"]),
+                                Test ! {killed, self()},
+                                receive stop -> ok end
+                        end),
+    receive {killed, Killer} -> ok end,
+    edlin:init(Killer),
+    Killer ! stop,
+    {more_chars, Start, _} = edlin:start("> "),
+    ?assertMatch({{more_chars, _, _}, true}, typed_from(Start, ["\^Y\r"])).
 
 %% A loss rings the bell and drops the escape sequence under way, so the byte after it
 %% is a character of the line, not the end of a key.
@@ -149,6 +180,103 @@ a_group_keeps_no_damaged_line_to_come_back_to_test() ->
         ?assertEqual("\n", answer(Next))
     end).
 
+%% Through a group: a history move keeps the damage, so Enter on the recalled line
+%% finishes nothing.
+a_group_keeps_the_damage_across_a_history_move_test() ->
+    with_group(fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["ls\r"]),
+        ?assertEqual("ls\n", answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["rm ", lost, "\e[A", "\r"]),
+        ?assertEqual(none, answer(Next))
+    end).
+
+%% Through a group: a damaged read keeps its damage through a history search, whether
+%% the search is accepted (Enter), left to edit its result (Ctrl-A) or cancelled
+%% (Alt-c); Enter then finishes nothing.
+a_group_keeps_the_damage_across_a_search_test() ->
+    [with_group(fun(Group, Driver) ->
+                    First = reader(Group),
+                    feed(Group, Driver, ["ls\r"]),
+                    ?assertEqual("ls\n", answer(First)),
+                    Next = reader(Group),
+                    feed(Group, Driver, ["rm ", lost, "\^R", "l" | Ending]),
+                    ?assertEqual({Ending, none}, {Ending, answer(Next)})
+                end)
+     || Ending <- [["\r"], ["\^A", "\r"], ["\ec", "\r"]]].
+
+%% Through a group: text killed in a damaged read keeps the damage into the next
+%% request, so a yank there after Ctrl-C damages that request.
+a_group_keeps_the_damage_of_killed_text_test() ->
+    with_group(fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["rm -rf /tmp/bu", lost, "\^U"]),
+        Group ! {'EXIT', Driver, interrupt},
+        ?assertEqual({error, interrupted}, answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["\^Y", "\r"]),
+        ?assertEqual(none, answer(Next))
+    end).
+
+%% Through a group: an answer with a loss to an ask that is not outstanding is not
+%% dropped: its loss is held for the next request, here the one set aside, which
+%% takes it when it resumes.
+a_group_holds_a_stray_loss_for_the_resumed_request_test() ->
+    with_group(fun(Group, Driver) ->
+        Outer = reader(Group),
+        feed(Group, Driver, ["cd "]),
+        Inner = reader(Group),
+        Group ! {Driver, {read, make_ref(), lost}},
+        feed(Group, Driver, ["y\r"]),
+        ?assertEqual("y\n", answer(Inner)),
+        feed(Group, Driver, ["\r"]),
+        ?assertEqual(none, answer(Outer))
+    end).
+
+%% Through a group: a delivery that empties a damaged buffer and finishes a new line
+%% ends the damage with the request, so the next request starts undamaged.
+a_group_ends_the_damage_emptied_in_the_finishing_delivery_test() ->
+    with_group(fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["ls", lost, "\^Upwd\r"]),
+        ?assertEqual("pwd\n", answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["date\r"]),
+        ?assertEqual("date\n", answer(Next))
+    end).
+
+%% Through a group in dumb mode: input an error drops is input lost, so the next request
+%% starts damaged; here a line latin1 cannot carry fails the read and the line pasted
+%% after it goes with it.
+a_dumb_group_holds_the_loss_of_input_an_error_drops_test() ->
+    with_group([{dumb, true}], fun(Group, Driver) ->
+        Test = self(),
+        First = spawn_link(fun() ->
+                                   Test ! {line, self(), io:request(Group, {get_line, latin1, "> "})}
+                           end),
+        waiting(First),
+        feed(Group, Driver, [[16#400 | "\nrm -rf /tmp/bu\n"]]),
+        ?assertEqual({error, {no_translation, unicode, latin1}}, answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["pwd\n"]),
+        ?assertEqual(none, answer(Next))
+    end).
+
+%% Through a group in dumb mode: Ctrl-C ends a damaged read and its damage, so the next
+%% read returns its line.
+a_dumb_group_ends_the_damage_with_an_interrupt_test() ->
+    with_group([{dumb, true}], fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["ls", lost, "\n"]),
+        ?assertEqual(none, answer(First)),
+        Group ! {'EXIT', Driver, interrupt},
+        ?assertEqual({error, interrupted}, answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["pwd\n"]),
+        ?assertEqual("pwd\n", answer(Next))
+    end).
+
 %% Through a group in dumb mode: a damaged read returns no line, and the end of input
 %% ends it.
 a_dumb_group_returns_no_damaged_line_test() ->
@@ -181,6 +309,10 @@ a_group_damages_a_read_a_password_read_set_aside_test() ->
 typed(Inputs) ->
     edlin:init(),
     {more_chars, Start, _} = edlin:start("> "),
+    typed_from(Start, Inputs).
+
+%% The same from the editor state Start, with the process's kill buffer as it is.
+typed_from(Start, Inputs) ->
     lists:foldl(fun(Input, {{_, Cont, _}, Damage}) -> edlin:edit_line(Input, Cont, Damage) end,
                 {{more_chars, Start, []}, false}, Inputs).
 
@@ -195,13 +327,32 @@ with_group(Options, Fun) ->
     try
         Fun(Group, Driver)
     after
-        [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Group, Driver]]
+        [begin unlink(Pid), exit(Pid, kill) end || Pid <- [Group, Driver]],
+        flush()
+    end.
+
+%% Drops what the group and driver of a case left the test, an ask its last damaged read
+%% made among it, so the next case answers only its own group's asks.
+flush() ->
+    receive {asked, _} -> flush(); beep -> flush(); {line, _, _} -> flush()
+    after 0 -> ok
     end.
 
 %% A process that reads a line from Group and sends the test what it read.
 reader(Group) ->
     Test = self(),
-    spawn_link(fun() -> Test ! {line, self(), io:get_line(Group, "> ")} end).
+    Reader = spawn_link(fun() -> Test ! {line, self(), io:get_line(Group, "> ")} end),
+    waiting(Reader),
+    Reader.
+
+%% Returns once Pid waits for its answer or has ended, so the request it sent is with the
+%% group before anything the test sends next.
+waiting(Pid) ->
+    case process_info(Pid, status) of
+        {status, waiting} -> ok;
+        undefined -> ok;
+        _ -> erlang:yield(), waiting(Pid)
+    end.
 
 %% Answers the group's asks in turn, one per chunk: a chunk lost as a loss, eof as the end
 %% of input, and any other as its bytes.

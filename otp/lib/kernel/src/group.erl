@@ -20,13 +20,17 @@
 %% Modified by erXos: the driver's suspend (Ctrl-Z) and window-size change
 %% (winch) reach the shell; the group has one ask for input outstanding at
 %% most (ask/1), which the driver answers with {read, Ref, Chars}; format_status/1
-%% hides the shell history and the input typed or waiting (edit 75); the driver
-%% answers an ask with {read, Ref, lost} where input was lost, which damages every
-%% unfinished request, each request keeps its damage and passes it into every edlin
-%% call, a request starts damaged while any unfinished one is, a damaged request
-%% that ends with an error leaves its loss for the next, an accepted history search
-%% is finished by edlin, a damaged read's line is not kept in the history, and the
-%% end of input edlin hands on after dropping a damaged line ends the read (edit 81).
+%% hides the shell history and the input typed or waiting (edit 75).
+%%
+%% Modified by erXos, the loss of input (edit 81): the driver answers an ask with
+%% {read, Ref, lost} where input was lost. A loss damages every unfinished request
+%% (lose/1); each request keeps its damage and passes it into every edlin call; a
+%% request starts damaged while any unfinished one is. Only the user's Ctrl-C and the
+%% end of input end a damaged request's loss: any other ending holds it for the next
+%% request (pop_state/2), and so does input an error drops (fail/3) and a loss that
+%% answers no outstanding ask. An accepted history search is finished by edlin, a
+%% damaged read's line is not kept in the history (keep_line/3), and the end of input
+%% edlin hands on after dropping a damaged line ends the read.
 %%
 %% %CopyrightEnd%
 %%
@@ -78,8 +82,9 @@
          collect,
          cont,
 
-         %% erXos: whether this request lost input (edit 81): no line of a damaged
-         %% request is returned until the user empties its buffer.
+         %% erXos: whether this request lost input (edit 81). A damaged request
+         %% returns no line: an edited one until the user empties its buffer, a dumb
+         %% one at all, until Ctrl-C or the end of input ends it.
          damaged = false :: boolean(),
 
          %% Used by xterm state
@@ -123,8 +128,10 @@
           %% error leave it outstanding for the next request.
           ask = none :: none | reference(),
 
-          %% erXos: the loss of a damaged request that ended with an error, held
-          %% for the next request, which takes it first (fail/2).
+          %% erXos: a loss held for the next request, which takes it first: the
+          %% loss of a damaged request that ended other than by Ctrl-C or the end
+          %% of input (pop_state/2), of input an error dropped (fail/3), or of an
+          %% answer to no outstanding ask.
           held_loss = false :: boolean()
         }).
 
@@ -353,7 +360,8 @@ dumb(internal, {get_password, Encoding}, Data = #state{ terminal_mode = raw }) -
     dumb(input_request, {collect_line_no_eol, [], "", Encoding, GetLine}, Data);
 dumb(internal, {get_password, _Encoding}, Data) ->
     %% TODO: Implement for noshell by disabling characters echo if isatty(stdin)
-    fail({error, enotsup}, Data);
+    io_reply(Data, {error, enotsup}),
+    pop_state(error, Data);
 
 dumb(input_request, {CollectF, CollectAs, Prompt, Encoding, GetFun},
      Data = #state{ input = OrigInputState }) ->
@@ -384,12 +392,12 @@ dumb(data, Buf, Data = #state{ input = #input_state{ prompt_bytes = Pbs, encodin
     %% Get a single line using get_line_dumb, or a single character using get_chars_dumb
     case GetFun(Buf, Pbs, Cont, Encoding, Data) of
         {no_translation, unicode, latin1} ->
-            fail({error,{no_translation, unicode, latin1}}, Data);
+            fail({error,{no_translation, unicode, latin1}}, Buf, Data);
         %% erXos: a damaged read returns no line: the end of input ends it, and a line
         %% is dropped with the bell.
         {done, _Dropped, eof} when Damaged ->
             io_reply(Data, eof),
-            pop_state(Data#state{ buf = eof });
+            pop_state(eof, Data#state{ buf = eof });
         {done, _Dropped, RemainBuf} when Damaged ->
             send_drv(Data#state.driver, beep),
             dumb(data, RemainBuf, Data#state{ input = InputState#input_state{ cont = [] } });
@@ -398,15 +406,15 @@ dumb(data, Buf, Data = #state{ input = #input_state{ prompt_bytes = Pbs, encodin
             case io_lib:CollectF(State, EncodedLine, Encoding, CollectAs) of
                 {stop, eof, _} ->
                     io_reply(Data, eof),
-                    pop_state(Data#state{ buf = eof });
+                    pop_state(eof, Data#state{ buf = eof });
                 {stop, Result, eof} ->
                     io_reply(Data, Result),
-                    pop_state(Data#state{ buf = eof });
+                    pop_state(returned, Data#state{ buf = eof });
                 {stop, Result, Rest} ->
                     io_reply(Data, Result),
-                    pop_state(Data#state{ buf = append(Rest, RemainBuf, Encoding) });
+                    pop_state(returned, Data#state{ buf = append(Rest, RemainBuf, Encoding) });
                 {'EXIT',_} ->
-                    fail({error,err_func(io_lib, CollectF, CollectAs)}, Data);
+                    fail({error,err_func(io_lib, CollectF, CollectAs)}, RemainBuf, Data);
                 NewState ->
                     dumb(data, RemainBuf, Data#state{ input = InputState#input_state{ cont = undefined, io_lib_state = NewState } })
             end;
@@ -476,6 +484,8 @@ xterm(data, Buf, Data = #state{ input = #input_state{
     %% Get a single line using edlin
     case get_line_edlin(Buf, Pbs, Cont, Lines, Encoding, Damaged, Data) of
         {done, NewLines, RemainBuf, Damaged1} ->
+            %% erXos: the request's damage after the edit, which pop_state/2 reads.
+            Edited = Data#state{ input = InputState#input_state{ damaged = Damaged1 } },
             CurrentLine = case RemainBuf of
                               %% erXos: edlin hands the end of input on only once it has
                               %% dropped the line (edit 81), so the reader reads the end.
@@ -485,10 +495,10 @@ xterm(data, Buf, Data = #state{ input = #input_state{
             case io_lib:CollectF(start, CurrentLine, Encoding, CollectAs) of
                 {stop, eof, _} ->
                     io_reply(Data, eof),
-                    pop_state(Data#state{ buf = eof });
+                    pop_state(eof, Edited#state{ buf = eof });
                 {stop, Result, eof} ->
                     io_reply(Data, Result),
-                    pop_state(Data#state{ buf = eof });
+                    pop_state(returned, Edited#state{ buf = eof });
                 {stop, Result, Rest} ->
                     %% Prompt was valid expression, clear the prompt in user_drv and redraw
                     %% the formatted expression.
@@ -509,10 +519,11 @@ xterm(data, Buf, Data = #state{ input = #input_state{
 
                     io_reply(Data, Result),
                     pop_state(
-                      Data#state{ line_history = NewHistory,
-                                  buf = append(Rest, RemainBuf, Encoding) });
+                      returned,
+                      Edited#state{ line_history = NewHistory,
+                                    buf = append(Rest, RemainBuf, Encoding) });
                 {'EXIT',_} ->
-                    fail({error,err_func(io_lib, CollectF, CollectAs)}, Data);
+                    fail({error,err_func(io_lib, CollectF, CollectAs)}, RemainBuf, Edited);
                 _NewState ->
                     xterm(data, RemainBuf, Data#state{ input = InputState#input_state{ cont = undefined, lines = NewLines,
                                                                                       damaged = Damaged1 } })
@@ -559,6 +570,10 @@ handle_info(State, {Drv, {read, Ref, Chars}}, Data = #state{ driver = Drv, ask =
 handle_info(State, {Drv, {read, Ref, lost}}, Data = #state{ driver = Drv, ask = Ref }) ->
     %% erXos: the ask's answer where input was lost.
     ?MODULE:State(data, lost, lose(Data#state{ ask = none }));
+handle_info(_State, {Drv, {read, _Stale, lost}}, Data = #state{ driver = Drv }) ->
+    %% erXos: a loss that answers no outstanding ask is held for the next request,
+    %% never dropped, so no loss is silent.
+    {keep_state, Data#state{ held_loss = true }};
 handle_info(State, {Drv, {data, Buf}}, Data = #state{ driver = Drv }) ->
     ?MODULE:State(data, Buf, Data);
 handle_info(State, {Drv, eof}, Data = #state{ driver = Drv }) ->
@@ -566,7 +581,7 @@ handle_info(State, {Drv, eof}, Data = #state{ driver = Drv }) ->
 handle_info(_State, {Drv, echo, Bool}, Data = #state{ driver = Drv }) ->
     {keep_state, Data#state{ echo = Bool } };
 handle_info(_State, {Drv, {error, _} = Error}, Data = #state{ driver = Drv }) ->
-    fail(Error, Data);
+    fail(Error, Data#state.buf, Data);
 handle_info(_State, {Drv, terminal_mode, Mode}, Data = #state{ driver = Drv }) ->
     noshell = Data#state.shell,
     true = lists:member(Mode, [raw, cooked, disabled]),
@@ -612,7 +627,7 @@ handle_info(_State, {'EXIT', Drv, interrupt}, #state{ driver = Drv, shell = Shel
 handle_info(_State, {'EXIT', Drv, interrupt}, #state{ driver = Drv }  = Data) ->
     %% Interrupt current input request
     io_reply(Data, {error, interrupted}),
-    pop_state(Data#state{ buf = [] });
+    pop_state(interrupted, Data#state{ buf = [] });
 
 handle_info(_State, {Drv, Event}, #state{ driver = Drv, shell = Shell })
   when Event =:= suspend; Event =:= winch ->
@@ -651,19 +666,31 @@ any_damaged(Queue) ->
     lists:any(fun({_State, #input_state{ damaged = Damaged }}) -> Damaged end,
               queue:to_list(Queue)).
 
-%% erXos: ends the current request with Error, an error rather than the user's
-%% Ctrl-C or the end of input; a damaged request leaves its loss held for the next
-%% request, the one resumed (pop_state/1) or the next to start, which takes it first,
-%% so only the user's discard or the end of input clears a loss.
-fail(Error, Data = #state{ input = #input_state{ damaged = Damaged } }) ->
+%% erXos: ends the current request with Error and drops Unread, the input read but not
+%% yet taken, with the group's buffer. Dropped input is input lost, so when Unread held
+%% any a loss is held for the next request (edit 81).
+fail(Error, Unread, Data) ->
     io_reply(Data, Error),
-    pop_state(Data#state{ buf = [], held_loss = Damaged }).
+    pop_state(error, Data#state{ buf = [],
+                                 held_loss = Data#state.held_loss orelse holds_input(Unread) }).
+
+holds_input(eof) -> false;
+holds_input(Unread) -> not string:is_empty(Unread).
 
 %% When we get an input request while already serving another, we
 %% push the state of the current request into the input_queue and
 %% switch to handling the new request.
 push_state(State, Data) ->
     Data#state{ input_queue = queue:in({State, Data#state.input}, Data#state.input_queue) }.
+
+%% erXos: ends the current request, which ended How: interrupted (the user's Ctrl-C),
+%% eof (the end of input), returned (with its answer) or error. Only the user's
+%% discard and the end of input end a damaged request's loss; any other ending, a
+%% returned one included, holds it for the next request, so an ending that forgets to
+%% say how it ended over-damages rather than drops a loss (edit 81).
+pop_state(How, Data = #state{ input = #input_state{ damaged = Damaged } }) ->
+    Ends = How =:= interrupted orelse How =:= eof,
+    pop_state(Data#state{ held_loss = Data#state.held_loss orelse (Damaged andalso not Ends) }).
 
 %% When an input request is done we then need to check if there was
 %% another request in progress, and if so we pop its state and resume it.
@@ -672,7 +699,7 @@ pop_state(Data) ->
         {empty, _} ->
             {next_state, server, Data#state{ input = undefined }};
         {{value, {State, InputState}}, NewInputQueue} ->
-            %% erXos: the request resumed takes a held loss first (fail/2).
+            %% erXos: the request resumed takes a held loss first (pop_state/2).
             Resumed = InputState#input_state{ damaged = InputState#input_state.damaged orelse
                                                   Data#state.held_loss },
             {next_state, State, Data#state{ input = Resumed, input_queue = NewInputQueue,
@@ -1006,7 +1033,7 @@ get_line_edlin({{format_expression, _Cs, {line, _, _, _} = Cont, Rs}, D}, Drv, S
 %% Move Up, Down in History: Ctrl+P, Ctrl+N
 get_line_edlin({{history_up,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
-    case up_stack(save_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
+    case up_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
         {none,_Ls} ->
             send_drv(Drv, beep),
             get_line_edlin(edlin:edit_line(Cs, Cont, D), Drv, State);
@@ -1024,7 +1051,7 @@ get_line_edlin({{history_up,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
     end;
 get_line_edlin({{history_down,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
-    case down_stack(save_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
+    case down_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
         {none,_Ls} ->
             send_drv(Drv, beep),
             get_line_edlin(edlin:edit_line(Cs, Cont, D), Drv, State);
@@ -1373,11 +1400,13 @@ down_stack({stack,U,C,D}) ->
     down_stack({stack,[C|U],{},D}).
 
 %% erXos: the line of a damaged read is not kept, so moving through the history drops
-%% it: emptying a recalled line ends the damage (edlin:damage/4), and moving back must
-%% not then bring the damaged line back undamaged.
-save_line(Stack, _Line, true) ->
+%% it: emptying a recalled line ends the damage (edlin:damage_after/4), and moving back
+%% must not then bring the damaged line back undamaged. Text a damaged read stores
+%% keeps its damage or is not stored; the kill buffer keeps it (edlin:do_op/4), and the
+%% history stack, whose lines a search reads as text, does not store it.
+keep_line(Stack, _Line, true) ->
     Stack;
-save_line(Stack, Line, false) ->
+keep_line(Stack, Line, false) ->
     save_line(Stack, Line).
 
 save_line({stack, U, {}, []}, Line) ->

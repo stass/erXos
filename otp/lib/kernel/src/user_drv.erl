@@ -743,7 +743,9 @@ switch_loop(internal, {line, Line}, State) ->
              {next_event, internal, line}}
     end;
 switch_loop(info,{ReadHandle,{data,Cs}}, {Cont, #state{ read = ReadHandle } = State}) ->
-    case element(1, edlin:edit_line(unicode:characters_to_list(Cs), Cont, false)) of
+    %% erXos: the job menu's line takes no loss of input, so its read is never damaged.
+    {Result, _Damage} = edlin:edit_line(unicode:characters_to_list(Cs), Cont, false),
+    case Result of
         {done,{[Line],_,_},_Rest, Rs} ->
             {keep_state, State#state{ tty = io_requests(Rs, State#state.tty) },
              {next_event, internal, {line, Line}}};
