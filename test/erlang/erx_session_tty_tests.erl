@@ -7,7 +7,7 @@ A session's ttys, erx_session_tty, each with the command shell on it, driven by
 a terminal relay of its own (erx_session_relay), and a fake master in the same
 node: a process that hands the test every message the tty sends it, while the
 test takes each output, answering `{tty_taken, N}` as the console does, and
-types into the tty with `{tty_input, Bytes}`. On one tty, `echo hi` and `erl`
+types into the tty with `{tty_input, N, Bytes}`. On one tty, `echo hi` and `erl`
 return, `exit` starts the command shell again, an answer the master never sends
 is asked for again within the resend second, and a hangup ends the tty. Two
 masters each get a tty of their own, whose relays hold no name: the relay of the
@@ -373,7 +373,9 @@ opened(Master) ->
     receive {Master, {tty_open, Tty}} -> Tty after ?WAIT_MS -> error(no_tty_open) end.
 
 type(Tty, Bytes) ->
-    Tty ! {tty_input, Bytes}.
+    N = case get({typed, Tty}) of undefined -> 0; Typed -> Typed end,
+    put({typed, Tty}, N + 1),
+    Tty ! {tty_input, N, Bytes}.
 
 %% The tty_open messages waiting, which the tty sent as it named itself.
 flush_opens(Master) ->
