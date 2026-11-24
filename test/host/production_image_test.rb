@@ -494,22 +494,28 @@ class ProductionImageTest < Minitest::Test
   end
 
   # The pet proof's -eval writes through erlang:display, so its lines are debug log records
-  # of the root's space (NativeRoot::DOMAIN_RECORD), after the command shell's prompt or not;
-  # kernel_sup's children, the domain's code server among them, are named in full.
-  def test_the_survival_transcript_reads_the_evals_lines_as_records_of_the_root
-    points = Erx::ProductionImage::Run.survival_checkpoints(seconds: 60, machine: DEVELOPMENT)
-    children, past = points.last(2)
+  # of the root's space (Run::EVAL_RECORD), which the transcript reads apart from a command
+  # shell prompt before them; kernel_sup's children, the domain's code server among them, are
+  # named in full. A list without the code server fails, as does a word other than the one.
+  def test_the_pet_proofs_transcripts_read_the_evals_lines_as_records_of_the_root
     list = '[erx_code_agent,kernel_safe_sup,kernel_refc,kernel_config,logger_sup,user,erl_signal_server,global_group,' \
            'net_sup,global_name_server,rex,inet_db,erx_syslog_sup,erx_watchdog,on_load,file_server_2,standard_error,code_server]'
-    ["#15 0.596436 debug space 0: #{list}\r\n", "% #15 0.562101 debug space 0: #{list}\r\n"].each do |line|
-      assert_match children.fetch(:pattern), line
-      children.fetch(:verify).call(line)
+    survival = Erx::ProductionImage::Run.survival_checkpoints(seconds: 60, machine: DEVELOPMENT).last(2)
+    stopped = Erx::ProductionImage::Run.pet_stopped_checkpoints(window: 60, machine: DEVELOPMENT).last(2).first(1)
+    Dir.mktmpdir('erx-pet-proof-') do |directory|
+      serial = File.join(directory, 'serial.log')
+      seen = lambda do |points, bytes|
+        File.binwrite(serial, bytes)
+        Erx::Transcript.new(checkpoints: points).consume(serial, elapsed: 0.1)
+      end
+      past = "#19 65.597163 debug space 0: past_the_deadlines\r\n"
+      assert seen.call(survival, "% #15 0.562101 debug space 0: #{list}\r\n#{past}")
+      assert seen.call(survival, "#15 0.596436 debug space 0: #{list}\r\n% #{past}")
+      assert_raises(Erx::Error) { seen.call(survival, "#15 0.596436 debug space 0: #{list.sub('erx_code_agent,', '')}\r\n#{past}") }
+      refute seen.call(survival, "#15 0.596436 debug space 0: #{list}\r\n#{past.sub('deadlines', 'deadline')}")
+      assert seen.call(stopped, "% #7 0.912345 debug space 0: pet_stopped\r\n")
+      refute seen.call(stopped, "pet_stopped\r\n")
     end
-    short = "#15 0.596436 debug space 0: #{list.sub('erx_code_agent,', '')}\r\n"
-    assert_match children.fetch(:pattern), short
-    assert_raises(Erx::Error) { children.fetch(:verify).call(short) }
-    assert_match past.fetch(:pattern), "#19 65.597163 debug space 0: past_the_deadlines\r\n"
-    refute_match past.fetch(:pattern), "#19 65.597163 debug space 0: past_the_deadline\r\n"
   end
 
   def test_the_refusal_transcript_ends_at_the_roots_diagnostic

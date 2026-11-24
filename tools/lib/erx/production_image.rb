@@ -1037,6 +1037,10 @@ module Erx
       CHILDREN_EXPRESSION = 'erlang:display([element(1,C)||C<-supervisor:which_children(kernel_sup)])'
       # The suspender must outlive the suspension, which ends when it does.
       STOP_PET = 'erlang:suspend_process(whereis(erx_watchdog)),erlang:display(pet_stopped),timer:sleep(infinity).'
+      # The head of a line erlang:display writes in the system domain: its bytes are the root's
+      # C output, so each line is a debug log record (NativeRoot::DOMAIN_RECORD). The transcript
+      # reads a record alone, apart from a prompt before it (Transcript's log_line_alone).
+      EVAL_RECORD = /\A#{NativeRoot::DOMAIN_RECORD}/n
 
       # The word that starts the group's report (park_report.c).
       GROUP_REPORT_WORD = 'erx.group_report=1'
@@ -1542,16 +1546,21 @@ module Erx
       end
 
       # The release's boot with its children named, then the line that outlived the deadlines.
-      # init's -eval writes beside the command shell, so a line of its may follow the unended prompt.
-      # erlang:display writes through the root's C output, so each of its lines is a debug log
-      # record of the root's space (NativeRoot::DOMAIN_RECORD).
+      # Each is a line of init's -eval (EVAL_RECORD).
       def self.survival_checkpoints(seconds:, machine:)
         children = KERNEL_CHILDREN.join(',')
-        head = "(?:% )?#{NativeRoot::DOMAIN_RECORD.source}"
         [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          SLOGAN,
-         point('kernel-children', /\A#{head}\[[a-z0-9_,]+\]\r*\n\z/n, /\A#{head}\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
-         { name: 'past-the-deadlines', pattern: /\A#{head}past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
+         point('kernel-children', /#{EVAL_RECORD}\[[a-z0-9_,]+\]\r*\n\z/n, /#{EVAL_RECORD}\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
+         { name: 'past-the-deadlines', pattern: /#{EVAL_RECORD}past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
+      end
+
+      # The release's boot with STOP_PET's line (EVAL_RECORD), then the watchdog's crash record
+      # within window seconds.
+      def self.pet_stopped_checkpoints(window:, machine:)
+        [*Qemu.boot_transcript(memory_mib: machine.memory_mib), SLOGAN,
+         { name: 'pet-stopped', pattern: /#{EVAL_RECORD}pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
+         { name: 'watchdog-fired', pattern: /#{Regexp.escape(CrashFrame::BEGIN_MARKER)}/n, seconds: window }.freeze].freeze
       end
 
       # The refusal machine (Machine#refusal): the same image boots to the root, which
@@ -1696,9 +1705,7 @@ module Erx
                                   command_line: "#{line} erx.arg=#{expression}")
         window = proof.fetch(:pet) + proof.fetch(:period) + PET_MARGIN_SECONDS
         stopped = boot(accel, count, built, memory_mib: @machine.memory_mib, machine_end: true, command_line: "#{line} erx.arg=#{STOP_PET}",
-                                            points: [*Qemu.boot_transcript(memory_mib: @machine.memory_mib), SLOGAN,
-                                                     { name: 'pet-stopped', pattern: /\A(?:% )?pet_stopped\r*\n\z/n, seconds: EVAL_SECONDS }.freeze,
-                                                     { name: 'watchdog-fired', pattern: /#{Regexp.escape(CrashFrame::BEGIN_MARKER)}/n, seconds: window }.freeze])
+                                            points: Run.pet_stopped_checkpoints(window: window, machine: @machine))
         judge_missed_pet(File.binread(stopped.fetch('serial_log')))
         judge_missed_pet_time(stopped.fetch('checkpoints'), proof)
       end
