@@ -496,12 +496,14 @@ class ProductionImageTest < Minitest::Test
   # The pet proof's -eval writes through erlang:display, so its lines are debug log records
   # of the root's space (Run::EVAL_RECORD), which the transcript reads apart from a command
   # shell prompt before them; kernel_sup's children, the domain's code server among them, are
-  # named in full. A list without the code server fails, as does a word other than the one.
+  # named in full. A list without the code server fails, and past_the_deadline is not seen.
   def test_the_pet_proofs_transcripts_read_the_evals_lines_as_records_of_the_root
     list = '[erx_code_agent,kernel_safe_sup,kernel_refc,kernel_config,logger_sup,user,erl_signal_server,global_group,' \
            'net_sup,global_name_server,rex,inet_db,erx_syslog_sup,erx_watchdog,on_load,file_server_2,standard_error,code_server]'
-    survival = Erx::ProductionImage::Run.survival_checkpoints(seconds: 60, machine: DEVELOPMENT).last(2)
-    stopped = Erx::ProductionImage::Run.pet_stopped_checkpoints(window: 60, machine: DEVELOPMENT).last(2).first(1)
+    survival = Erx::ProductionImage::Run.survival_checkpoints(seconds: 60, machine: DEVELOPMENT)
+               .select { |point| %w[kernel-children past-the-deadlines].include?(point.fetch(:name)) }
+    stopped = Erx::ProductionImage::Run.pet_stopped_checkpoints(window: 60, machine: DEVELOPMENT)
+              .select { |point| point.fetch(:name) == 'pet-stopped' }
     Dir.mktmpdir('erx-pet-proof-') do |directory|
       serial = File.join(directory, 'serial.log')
       seen = lambda do |points, bytes|
