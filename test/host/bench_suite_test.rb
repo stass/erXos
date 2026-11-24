@@ -47,8 +47,8 @@ class BenchSuiteTest < Minitest::Test
   end
 
   def test_the_suite_cells_are_each_boots_benchmarks
-    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-wake hvf-4cpu-xdomain-wake
-                    hvf-4cpu-xdomain-xdomain], Suite.suite_cells.sort
+    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-vm hvf-4cpu-native-wake
+                    hvf-4cpu-xdomain-wake hvf-4cpu-xdomain-xdomain], Suite.suite_cells.sort
     declared = Erx::QemuGate.suites.find { |suite| suite.name == 'bench' }
     assert_equal Suite.suite_cells, declared.cells
     refute declared.offload
@@ -168,7 +168,8 @@ class BenchSuiteTest < Minitest::Test
       xdomain = Erx::XdomainBench::Landing.new(root: erxos, run: TimedOutRun.new(serial))
       ran = Suite.run(Struct.new(:root).new(erxos), history: history, native: NativeLanding.new, xdomain: xdomain)
       assert_equal({ 'hvf-4cpu-native-nullcall' => 'not_run', 'hvf-4cpu-native-sched' => 'not_run',
-                     'hvf-4cpu-native-wake' => 'not_run', 'hvf-4cpu-xdomain-wake' => 'timed_out',
+                     'hvf-4cpu-native-vm' => 'not_run', 'hvf-4cpu-native-wake' => 'not_run',
+                     'hvf-4cpu-xdomain-wake' => 'timed_out',
                      'hvf-4cpu-xdomain-xdomain' => 'timed_out' }, ran.fetch(:cells))
       notes = ran.fetch(:notes).grep(/\Abench: xdomain: /)
       assert_includes notes, 'bench: xdomain: QEMU checkpoint timed out: cells<U+001B>]8;;x'

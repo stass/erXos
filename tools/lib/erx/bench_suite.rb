@@ -149,8 +149,9 @@ module Erx
     # the xdomain boot's cells of every benchmark it runs (xdomain, an
     # XdomainBench::Landing). Each landing is given, for a test, or made for context's
     # tree. A landing that fails is a failed cell for each of its benchmarks, so the
-    # others' cells stand; a boot that ends at a QEMU deadline is recorded with its
-    # unreported cells timed_out.
+    # others' cells stand; an xdomain boot that ends at a QEMU deadline is recorded with
+    # its unreported cells timed_out, while a native boot at its deadline raises, so its
+    # benchmark's cell is failed with no record.
     def run(context, history: BenchRecord.history, native: NativeBench::Landing.new(root: context.root),
             xdomain: XdomainBench::Landing.new(root: context.root))
       landed = booted('native').map do |declared|

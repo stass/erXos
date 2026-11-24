@@ -70,6 +70,19 @@ class NativeBenchTest < Minitest::Test
     refute task.caught.call([cell('nullcall', 'root-cross-space', 'failed', reason: 'wrong result')])
   end
 
+  # The vm seed makes the task's protects answer ERX_OK without calling the service: only
+  # protect failing because its disposable task's write went through shows it, not a
+  # failed untimed check or another cell.
+  def test_the_vm_seed_is_caught_only_by_an_unfaulted_protect
+    ignored = seed('vm', 'protect ignored')
+    assert_equal [[], [Erx::NativeBench::SEED_PROTECT_IGNORED]], [ignored.root_flags, ignored.task_flags]
+    unfaulted = ->(operation) { cell('vm', operation, 'failed', reason: Erx::NativeBench::VM_UNFAULTED) }
+    assert ignored.caught.call([cell('vm', 'commit', 'not_run'), unfaulted.call('protect')])
+    refute ignored.caught.call([cell('vm', 'protect', 'failed', reason: 'the untimed check failed')])
+    refute ignored.caught.call([unfaulted.call('commit')])
+    refute ignored.caught.call([cell('vm', 'protect', 'not_run')])
+  end
+
   # Every benchmark with native landing cells has a guest, and only those do.
   def test_each_native_benchmark_has_a_guest
     native = Erx::BenchSuite.benchmarks.values.select { |declared| declared.landing.key?('native') }.map(&:name)

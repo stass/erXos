@@ -57,6 +57,19 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   phase. The root polls every 100 us on CPU 0 during `park-deadline`; a cross-CPU sample corrected below
   minus its uncertainty is clamped to 0 instead of making the cell unsupported; and that the root runs on
   CPU 0, which `same-cpu` and the pair assume, is unverified.
+* [Medium] benchmarks, a native boot's deadline and its seeded boots (`tools/lib/erx/native_bench.rb`
+  `Run#boot` and `Landing#call`): a native boot that reaches its QEMU deadline raises, so its benchmark's suite
+  cell is `failed` with no record, where the xdomain boot records its unreported cells `timed_out`; and a
+  seeded boot that fails after the landing's record is written raises out of `Landing#call`, so the suite's
+  notes say `failed` without the record's directory, which was written. A native boot at its deadline should
+  record `timed_out` as the xdomain boot does, and a failed seeded boot should keep the written record in its
+  outcome beside the failure.
+* [Medium] benchmarks, the `vm` guest (`test/guest/native_bench/vm_task.c`, `vm.c`): the task waits for the root's
+  answer at each step of its page check by spinning, which works only while the root's band is above the task's
+  (docs/design-fiasco.md, "A wait blocks"); it should block between looks. A failed prepare or act skips every undo,
+  so a later cell can fail on pages an earlier one left committed; `ERX_ENOTSUP` from a prepare or undo step marks
+  the timed operation unsupported; the root's 100 us polls fall inside the timed loops on CPU 0; `record_wait` is a
+  copy of `native_space`'s, and the histogram reset is written three times.
 * [Low] benchmarks, reasons the host writes itself (`timed_out`, `not_run`, a `rejected` cell's reason from
   `BenchMeasurement.boot`): `BenchRecord::Cell` holds every reason to `BenchRecord::REASON`, but a refusal's
   message, which embeds `JsonInput`'s reason and path names from the history destination, has no character-set

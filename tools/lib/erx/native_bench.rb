@@ -32,6 +32,10 @@ module Erx
     # The reason of a nullcall cell whose run did not raise its task's refusal count by
     # its calls, which the root is built with (ERX_BENCH_UNCOUNTED).
     NULLCALL_UNCOUNTED = 'the decoder did not answer every call'
+    # The vm seed's flag, and the reason of a protect cell whose disposable task's write to
+    # its read-only page did not fault, which the root is built with (ERX_BENCH_UNFAULTED).
+    SEED_PROTECT_IGNORED = '-DERX_BENCH_SEED_PROTECT_IGNORED'
+    VM_UNFAULTED = 'the read-only page took the write'
 
     # A seeded fault of a benchmark's guest: the flags its root and its task add for it, and
     # whether a boot's cells show it.
@@ -64,6 +68,12 @@ module Erx
                  caught: ->(cells) { uncounted?(cells, 'root-same-space') }),
         Seed.new(name: 'task refusal to the empty slot', root_flags: [], task_flags: [SEED_EMPTY_SLOT],
                  caught: ->(cells) { uncounted?(cells, 'root-cross-space') })
+      ].freeze),
+      # The task's protects answer ERX_OK without calling the service: no read sees it, but
+      # the disposable task's write to its read-only page goes through, and protect fails.
+      'vm' => Guest.new(root: %w[vm.c], task: %w[vm_task.c], seeds: [
+        Seed.new(name: 'protect ignored', root_flags: [], task_flags: [SEED_PROTECT_IGNORED],
+                 caught: ->(cells) { failed(cells, 'protect').any? { |cell| cell.reason == VM_UNFAULTED } })
       ].freeze)
     }.freeze
     # The landing forms of the profiles the guest's cells take (docs/design-bench.md,
@@ -98,7 +108,8 @@ module Erx
       fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
       ['-DERX_FIASCO_TEST_HOOKS', "-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
        "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u",
-       "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u", "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"", *seeded].freeze
+       "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u", "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"",
+       "-DERX_BENCH_UNFAULTED=\"#{VM_UNFAULTED}\"", *seeded].freeze
     end
 
     # The profile each operation of benchmark ran at, in its landing form.
