@@ -313,9 +313,9 @@ checker is the vault ([design-system.md](design-system.md#the-vault)),
 with its limits: 5 failures in 60 s per name in the network class, 5 per
 terminal, one derivation at a time for the network class, each answer
 after the login envelope. Until a checker exists, `login_passphrase`
-answers `unavailable` and no front end logs anyone in by passphrase. What
-checks passphrases in a development build before the vault is an open
-decision ([Risks and open decisions](#risks-and-open-decisions), 1).
+answers `unavailable` and no front end logs anyone in by passphrase.
+Before the vault, a development build checks root's passphrase with the
+development checker ([Risks and open decisions](#risks-and-open-decisions), 1).
 
 ### Secrets
 
@@ -511,8 +511,7 @@ names; the full gates run once per batch.
    process holds its line, and `erx_ssh_dev` goes
    ([design-ssh.md](design-ssh.md#stages)). SSH stage 2's other parts
    are its own packages.
-6. **A passphrase checker**, by open decision 1: the vault's first form,
-   or the development checker.
+6. **The development passphrase checker** (decision 1).
 7. **Bluetooth's parts for the console**: `erx_gatt_serial` started for
    a declared service, and the bond's identity address in the
    `connected` event
@@ -561,9 +560,9 @@ login moves onto the facet with the web's network front end.
 
 ## Risks and open decisions
 
-1. **Open: what checks a passphrase before the vault.** The phone console
-   offers only passphrase logins, and the vault that checks them is
-   M11's. Three ways:
+1. **Decided: the development checker checks a passphrase before the
+   vault.** The phone console offers only passphrase logins, and the vault
+   that checks them is M11's. The three ways weighed:
    * wait for the vault, so the phone console works in a development
      build only from M11;
    * bring the vault's first form forward (one passphrase slot per
@@ -583,7 +582,7 @@ login moves onto the facet with the web's network front end.
      decoder with a fuzz target, and a hash anyone holding the card can
      try offline, as anyone holding it can read the card.
 
-   Recommended: the development checker. It follows the precedent of
+   The development checker is chosen. It follows the precedent of
    root's login keys on the medium, takes one package, and lets the phone
    console and SSH's keyboard-interactive be tested before the vault;
    the vault replaces it behind the principal service's one check.
