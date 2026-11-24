@@ -801,6 +801,19 @@ LEVEL TEXT`, so a gap in the numbers shows where kernel records were
 lost. No domain's line begins with `#`, so a reader tells the two forms
 apart by the first character.
 
+Fiasco's own lines, its warnings among them, become kernel records too.
+From the log service's first take, the kernel sends every line it
+prints to a 4 KiB ring of its own instead of the console's UART, and
+each take drains the ring into the log as records whose text begins
+`fiasco: `, escaped like every other kernel line; a write the full ring
+cannot hold is counted, and the count becomes a record of its own. The
+kernel writes the UART again only when the machine stops: a panic, the
+debugger's entry or the root's end gives the UART back, and the ring's
+lines go out first. So while the console's driver runs it is the
+UART's only user, and no kernel write can hide a lost keystroke
+([design-fiasco.md, The kernel's lines](../design-fiasco.md#the-kernels-lines)).
+The ring is designed and not built.
+
 The service, its pure core and its console consumer are **Built**
 (`erlang/apps/erx/src/erx_syslog.erl`, `erx_syslog_core.erl`). The
 store that appends the lines to `/var/log/messages`, rotates the files
@@ -841,8 +854,9 @@ identifier, the uptime, a short message, the faulting thread's
 registers and a backtrace. Of the four causes the layout
 names (fault, halt, missed watchdog pet, panic), the root writes a
 fault or a missed pet; even `erlang:halt(abort)` arrives as a fault.
-When the ending thread owns the kernel log, the root first writes the
-log records still waiting for a reader; on any other thread the log
+The root first gives the UART back to the kernel, which writes out its
+own lines still in its ring. When the ending thread owns the kernel
+log, the root then writes the log records still waiting for a reader; on any other thread the log
 may be mid-write, so it is skipped (`liberx/backend/fiasco/end.c`).
 The record is **Built**.
 

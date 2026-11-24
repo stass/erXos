@@ -526,6 +526,12 @@ its own, in order with the bytes, and the console passes it on, to its
 own shell or as `tty_lost` to a session's tty, so the loss reaches the
 line editor between the keys typed before and after it
 ([design-live.md, Lost input](../design-live.md#lost-input)). The
+driver sees each loss only because it is the UART's only user while it
+runs: on Fiasco the kernel's own lines go to a ring of the kernel's
+from the log service's first take, since a kernel write would read the
+mini UART's status and clear the bit that marks a loss
+([design-fiasco.md, The kernel's lines](../design-fiasco.md#the-kernels-lines)),
+which is designed and not built. The
 editor then finishes no line of that read, nor of any read started while
 it is unfinished, ringing the bell at Enter,
 until the user empties the line, so a command that lost bytes never

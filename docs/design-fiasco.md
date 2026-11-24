@@ -794,7 +794,7 @@ that kernel, and otherwise stays a published downside.
 | FD23 | K29 | vCPU upcalls with no event lost (K29), events ending a wait | the subset of [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco), over a vCPU state area its program can write, harming only itself, since the resume validates the frame and Fiasco sanitizes what it restores (`task.cpp:93-116`, `arm/64/context-arm-hyp-64.cpp:27-35`) | signals in programs arrive late around waits and raw kernel calls, and `sem_wait` never fails with `EINTR` | narrowed by stage F3 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
 | FD24 | K7, K10 to K15, K20, K33, CLAUDE.md "Untrusted input", CLAUDE.md "Kernel stacks are proven", "Chokepoints are build checks" and "The ABI and the hardware each have one source" | a kernel built under erXos's construction rules: the stack proof, recursion only through `musttail`, the kernel chokepoint checks, generated register access, a generated kernel ABI, one route from user mode, once-only reads of every user-writable field (K7), no panic on a user thread's input (K12), bounded kernel paths (K13), and K10, K11, K14, K15, K20 and K33 by construction | Fiasco's C++, its 8 KiB thread block measured by the conformance suite's watermark (`kernel/stack_fiasco.txt`), never proven; each of those properties holds only as far as Fiasco's own code gives it | a Fiasco defect reachable from a domain's capabilities can break isolation; the system-call fuzz campaign and the upstream watch are the defence; that the kernel never loads or stores through an address a domain supplies, and reads each user-writable field once per decision (K7), holds only as far as Fiasco's own code gives it, which no erXos audit checks | erXos's kernel |
 | FD25 | D12, D16, K3, K32 | budgets with caps above guarantees, borrowing, every charge returning at once, a resize of the whole, a watch, and exact `used` for every budget (K3, K32) | every budget is a wall at its guarantee, `used + carved <= wall` checked at every charge, carve, resize and destroy, a carved budget's kernel memory a share fixed at its creation ([Memory and budgets](#memory-and-budgets)); only the user-page part resizes; each budget record counts the user pages charged to it, and its kernel memory is not counted; a destroy is the root deleting everything charged to the budget | a program is refused while its session has memory free in another part, or is sized at its largest; an app shares the `apps` wall with the others only through the principal's wall the domain service carves for each session and destroys at its retire, as on erXos's kernel ([design-packaging.md](design-packaging.md#an-apps-principal)); D16's charging of a connection to its child budget holds, at walls | narrowed by stage F6 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
-| FD26 | K19, K31 | the kernel's trace ring, entropy, log, watchdog and deterministic mode at the kernel's level (K19, K31) | the root's, in user mode ([The trace ring](#the-trace-ring), [The console](#the-console), [The watchdog](#the-watchdog)); entropy is `liberx`'s generator in the root, and a read's bytes stay in the Fiasco UTCB message registers of the reader and of the root service until a later message long enough overwrites them, and in whatever registers and stack spill slots the compiler used on both sides | the inspector's kernel row is `unsupported`; a kernel hang or a stalled watchdog thread is caught only by the board's hardware watchdog or the harness's deadline; a record still in the ring, the root's own C output among them, is lost at a watchdog end or an end on a thread other than the root service's ([The end path](#the-end-path)); the crash frame may interleave with a writing console driver, a task's frame with the watchdog end's, and a kernel `WARN` or panic line at any time; deterministic mode's comparison starts at erXos's banner, or at the root's first line if Fiasco's own boot proves not deterministic | erXos's kernel |
+| FD26 | K19, K31 | the kernel's trace ring, entropy, log, watchdog and deterministic mode at the kernel's level (K19, K31) | the root's, in user mode ([The trace ring](#the-trace-ring), [The console](#the-console), [The watchdog](#the-watchdog)); entropy is `liberx`'s generator in the root, and a read's bytes stay in the Fiasco UTCB message registers of the reader and of the root service until a later message long enough overwrites them, and in whatever registers and stack spill slots the compiler used on both sides | the inspector's kernel row is `unsupported`; a kernel hang or a stalled watchdog thread is caught only by the board's hardware watchdog or the harness's deadline; a record still in the ring, the root's own C output among them, is lost at a watchdog end or an end on a thread other than the root service's ([The end path](#the-end-path)); the crash frame may interleave with a writing console driver and a task's frame with the watchdog end's; after the handoff the kernel's own lines reach the log only at the log service's next take, are lost with the kernel's 4 KiB ring at a hang, and at the machine's end come out ahead of untaken log records older than them ([The kernel's lines](#the-kernels-lines)); in a boot that never takes the log, a test root's or a partial boot's, the kernel writes the UART whenever it prints, as upstream does; deterministic mode's comparison starts at erXos's banner, or at the root's first line if Fiasco's own boot proves not deterministic | erXos's kernel |
 | FD27 | none (an address) | the runtime maps the time page from its boot information's `time_page` | the root maps the page read-only into every task at its creation, at a constant address | a task's time page is at one address it cannot move or unmap | erXos's kernel |
 | FD28 | CLAUDE.md "Trust placement" | the startup proof, `erx_root_plan` run by the packer and the kernel, with its charge evidence, and every property of the system manifest checked | the root startup rule, and the manifest check refuses the records of properties outside its scope ([The Phase 1 manifest check](#the-phase-1-manifest-check)) | a manifest that uses those records does not build | erXos's kernel (Track K's first part, before GK3); M9 and M11 for the refused records |
 | FD29 | K31 | each board's platform items: the hardware watchdog, the crash region, the trial request and the device secret | on the Raspberry Pi 4 and the Pi 5 alike: the root's watchdog thread, which arms the board's power-management watchdog on every boot and reloads it, so a hang of Fiasco or of the root resets the board, with nothing behind the stretch before that thread starts, since the board's `config.txt` leaves `kernel_watchdog_timeout` unset and nothing under Fiasco would reload it earlier ([The watchdog](#the-watchdog)); a crash record on the console alone; the boot value as the firmware reports it; the trial request made by the root through the mailbox ([The end path](#the-end-path)); the firmware requests, each a row the domain library resolved from the manifest and the root's own code sends in the caller's thread ([The firmware request](#the-firmware-request)); `sealing` `none` ([The Raspberry Pi 4](#the-raspberry-pi-4)) | a crash leaves no record but the console's; that the caller of a firmware request chooses neither the tag nor the argument holds only against other domains, since the system domain's code shares the root's address space, which maps the mailbox's page for the boot, and could post any request, the board's key read among them; a hang before the root's watchdog thread starts, in the firmware's stage or in Fiasco's boot, stays hung until the power is cycled; and nothing is sealed to the board | M12; stage F4 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision) for the stretch before the root's watchdog thread starts |
@@ -2927,8 +2927,8 @@ every check and the body read only that copy; nothing is read from the public UT
 
 **Reply slots.** The service receives into Fiasco's explicit reply slots (`EXPLICIT_REPLY_CAPS`, a reply space charged to the
 root's quota), so that no receive fills a slot that still holds a caller: Fiasco answers such a receive by emptying the slot and
-writing `Application bug: reply capability overwritten!` (`receiver.cpp`, `set_reply_cap`) straight to the UART from a newline,
-which splits whatever line it lands in. Every message but a fault is answered from the slot it came in, and the next receive
+printing `Application bug: reply capability overwritten!` (`receiver.cpp`, `set_reply_cap`), which after the handoff reaches
+the log as a kernel record ([The kernel's lines](#the-kernels-lines)) and which the harness fails a boot on. Every message but a fault is answered from the slot it came in, and the next receive
 fills that slot again. A fault's slot is parked with its task and the receive moves to a free slot (`reply_slots.c`). Once the
 task is no longer live, its stop has deleted the faulting thread, and the service answers the parked slot with an empty message,
 which resumes nothing and frees the slot. The table has 64 slots, one for each faulting thread whose space's server has not
@@ -3193,7 +3193,9 @@ The service answers `erx_machine_end` for the root task alone and refuses it fro
 `erx_log_take`, since on erXos's kernel only the root resource carries the `POWER` the call needs
 ([design-kernel.md](design-kernel.md#kernel-calls), K31).
 
-1. **One caller.** An atomic exchange of the `ending` word; the loser sleeps forever.
+1. **One caller.** An atomic exchange of the `ending` word; the loser sleeps forever. The winner then closes the kernel's
+   route, which writes the kernel's ring out to the UART, before any write of its own
+   ([The kernel's lines](#the-kernels-lines)).
 2. **The log.** On the thread that owns the log ring, the service in a root, or the debug-log probe's one thread, which has no service,
    which alone writes it, lines the log service has not taken go out through `l4_vcon_write`; lines it has taken and the console has not yet
    written are not among them ([design-log.md](design-log.md#the-emergency-path)). On any other thread, the watchdog's or a root
@@ -3637,7 +3639,7 @@ receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_ge
 console and the harness's deadline ends the run; a release kernel's reboots ([the kernel](#boot-handoff)).
 
 **The sink** is a variable the service owns. `erx_debug_log` copies `len` bytes from the caller's public UTCB, escapes them, and writes to
-`l4_vcon_write` on `L4_BASE_LOG_CAP`, the kernel's polled UART output, or to a ring of `log.c` records. `erx_log_read` runs `erx_log_copy` into
+`l4_vcon_write` on `L4_BASE_LOG_CAP`, the kernel's console, which polls the UART until the handoff, or to a ring of `log.c` records. `erx_log_read` runs `erx_log_copy` into
 its window for a log reader of the root, and `erx_log_take` runs it for the log service. The window is the root's own memory, which the service shares and writes in place, so a task's read or take is `ERX_ENOTSUP`; the reply's three words are the next cursor, the records lost and the bytes written. The log keeps one position of what has been taken, which only the early console and the log service's take move. The early console takes each record as it writes it. The handoff is the console's first `erx_log_take`, after which the service writes no record to the UART and records wait in the ring. From then on the log service, `erx_syslog`, polls `erx_log_take`, which copies the records nobody has taken and takes them, and hands each line the log core rendered, escaped, to `erx_console`, which writes it to its driver ([design-log.md](design-log.md#the-kernels-records)); taking the log back at the machine's end hands the UART back to the early console, which writes the records past the position and then each new one. So a record reaches the UART exactly once and in order across both changes of taker, with no cursor for the log service to learn, and a ring that wraps while parked costs a line saying how many records were lost. Every other reader, such as `dmesg`, reads with `erx_log_read` from a cursor of its own, as on erXos's kernel ([design-kernel.md](design-kernel.md#console-log-and-panic)): a read changes nothing the console or another reader sees, a cursor older than the ring's oldest record is told how many records it lost, and a cursor past the end of the log, the number the next record will get, is `ERX_EINVAL`. A read from 0 also returns the records the early console already wrote; when hosted that is every record, since standard error shows each one as it is written. The two reads are two calls rather than modes of one, so the take's request has no cursor to misread and no cursor value means "take". The service is the serialization `log.h` requires. A session reads the log as the inspection path `[kernel, log]` through its inspect facet, so only a session whose facet has scope `all`, `root`'s in a development build, reads it, and the read itself runs in the system domain, which alone holds the log on this kernel ([design-live.md](design-live.md#the-inspect-service)).
 
 **A domain's runtime**, the system domain's root included, writes its standard output and standard error as records: `output_line.c`,
@@ -3654,7 +3656,8 @@ in the ring is lost at a watchdog end or an end on a thread other than the servi
 when the machine ends before the console writes it ([the end path](#the-end-path)); records are lost when the
 64 KiB ring wraps before a take, and reach only `/proc/kernel/log`, not the console, once the log service's supervisor has given up
 past its restart intensity ([design-log.md](design-log.md#the-kernels-records)); past 16 KiB a second of a space's lines the log drops and counts them.
-The root's boot lines, before the handoff, and its refusals go to the UART directly; on the service thread
+The root's boot lines, before the handoff, and its refusals go to the UART directly, a refusal through the end path, which
+closes the kernel's route first ([The kernel's lines](#the-kernels-lines)); on the service thread
 `erx_fiasco_end_refused` writes a refusal after the end has taken the log back, so it follows the records the ring held.
 
 **A program's standard output and standard error** deliver its bytes unchanged to whatever its descriptors name, a session's
@@ -3672,17 +3675,122 @@ which the service refuses with `ERX_ENOTSUP` from any task but the root, as it r
 creation sets the mark, so `erx_space_create` from any task, a domain's and a session's included, makes a task whose `task_write` answers
 `ERX_ENOTSUP` and writes nothing. The pieces of a long write are separate calls, so another thread's output can fall between
 them, and a test task's output goes to `l4_vcon_write` whatever the sink is, as the ring's records have no form for unchanged
-bytes, so it can interleave with the driver's writes at any byte.
+bytes. A test root never takes the log, so there the kernel's route stays at the UART and the bytes reach it unchanged; after
+a take they would reach the kernel's ring and arrive escaped, as kernel records ([The kernel's lines](#the-kernels-lines)).
 `erx_debug_log` is the way out for everything else: a labelled, escaped record.
 
 Fiasco's own console (`glue_libc.cc`) puts a carriage return ahead of every newline, whoever writes it, as a terminal's output
 mapping does. That is the one difference between what a program writes and what the serial log holds.
 
 **The handoff.** The service runs the log service's first `erx_log_take` after its last `l4_vcon_write` of a log record: it sets the sink
-to the ring and replies. `erx_syslog` makes that take as it starts, and `kernel_sup` starts its supervisor, `erx_syslog_sup`, before `user_sup` starts `erx_console` and its driver, so the driver's first touch of a register follows the
-service's last write of a record, whatever else maps the UART's page: the handoff names the console, not an address, and a sibling device's
+to the ring, moves the kernel's own route to the kernel's ring ([The kernel's lines](#the-kernels-lines)), and replies. `erx_syslog` makes that take as it starts, and `kernel_sup` starts its supervisor, `erx_syslog_sup`, before `user_sup` starts `erx_console` and its driver, so the driver's first touch of a register follows the
+service's last write of a record and the kernel's last write of a line, whatever else maps the UART's page: the handoff names the console, not an address, and a sibling device's
 record in the console's page hands nothing over ([design-shared-devices.md](design-shared-devices.md#the-console)). A program's output goes on as above. A
-partial boot starts no console, so its log lines reach the UART for the whole run.
+partial boot starts no console, so its log lines and the kernel's reach the UART for the whole run.
+
+#### The kernel's lines
+
+Fiasco prints after user mode is up. The release kernel leaves out only the debugger and the kernel's console input
+(`tools/lib/erx/fiasco_config.rb:42`), and `config/fiasco/kernel.defconfig` sets no warning level, so both builds take
+Kconfig's `WARN_WARNING` (`fiasco/kernel/src/Kconfig:839`), under which `WARN` and `WARNX(Error, ...)` print through `printf`
+(`kern/warn.cpp:16-28`). A task can cause some of them: the receive that empties a reply slot still holding a caller
+(`kern/receiver.cpp:234-238`, [The root service](#the-root-service)), a fault whose pager capability is invalid
+(`kern/thread-ipc.cpp:258-262`, whether it fires in erXos's configuration unverified), and a kernel allocation that fails
+(`kern/kmem_alloc.cpp:386-388`, at level `Error`); and `kdb_ke` prints without the debugger and carries on
+(`kern/kdb_ke.cpp:1-12`). The kernel's console writes each piece of a line, and then its carriage return and newline, as one
+call to the UART (`drivers/glue_libc.cc:20-36`), with interrupts off on that CPU and every other CPU's printing held off by
+the printf lock (`kern/libc_backend_lock.cc:19-39`). On the 16550 kind, which the mini UART's driver is
+(`lib/uart/uart_bcm2835.h:24`), the write sets `IER` to 0 for the whole call and polls `LSR` before each byte
+(`lib/uart/uart_16550.cc:96-99,113-123`), and a read of `LSR` clears the receiver's overrun bit
+([design-live.md](design-live.md#lost-input)). A 60-byte line takes about 5 ms at 115,200 baud and the mini UART's receive
+FIFO fills in 0.7 ms, so input that arrives meanwhile is lost and the driver never learns of the loss. The PL011's write
+leaves its interrupt mask alone (`lib/uart/uart_pl011.cc:113-116`) and its FIFO keeps each character's error bits, but the
+line still lands among the driver's output at any byte. The harness fails a boot on the reply-slot warning
+(`tools/lib/erx/qemu.rb:633-639,743`), so that line has a consumer and must still arrive.
+
+So once the console's driver can hold the UART, the kernel writes it only to stop the machine, for every UART kind. The
+construction is one console in front of the UART's, the kernel's **ring console**, through which every line the kernel
+prints passes, and one value it owns, the **route**: `uart`, `ring` or `closed`.
+
+* **One way to the UART.** The fork registers the ring console with the kernel's console multiplexer in the UART console's
+  place, wrapping it (`kern/kernel_uart.cpp:147-170`, `init_filter_console`, with and without the debugger), and gives it the
+  UART console's attributes and input, so the multiplexer's exclusive modes and the debugger find the UART as before. Under
+  `uart` and `closed` its write passes the text to the UART; under `ring` it appends the text to its ring and returns. Every
+  line the kernel prints goes through that write, whoever printed it: a `WARN`, `kdb_ke`, a panic, and the bytes the root
+  or `sigma0` write through `l4_vcon_write`, which `Vlog::log_string` puts through the same console byte by byte
+  (`kern/vlog.cpp:81-108`).
+* **Who moves the route.** It starts at `uart`. Two operations of the kernel's log object move it, which only the root and
+  `sigma0` hold (`kern/std_workload.cpp:43-48,73-78`; a task holds no log object,
+  `liberx/backend/fiasco/task_start.c:95-96`), and `sigma0` calls neither. **Take** (`Vlog` operation 4) moves `uart` to
+  `ring`, leaves `ring` and `closed` as they are, and returns what the ring holds. **Close** (operation 5) moves any route to
+  `closed`. The kernel also closes the route itself, as the first step of `terminate` (`kern/terminate.cpp`), which every
+  panic and failed assertion reaches through `Thread::system_abort` (`kern/kernel_panic.cc:26`, `kern/assertion.cpp:23`,
+  `kern/thread.cpp:1480-1486,1550-1551`), and in a development kernel from the debugger's enter queue
+  (`jdb/jdb.cpp:757`), so the debugger talks on the UART. `closed` is final: nothing moves the route back, so a take that
+  races the machine's end cannot hide the end's lines.
+* **Closing writes the ring out.** Before the route changes, the close writes what the ring holds to the UART, in the order
+  the kernel printed it, then a line saying how many bytes the ring lost, if it lost any. So everything printed before a stop
+  reaches the UART ahead of it, and the stops need no hook of their own: the release kernel's trap dump, which runs before its
+  panic (`kern/arm/thread-jdb.cpp:122-125`), the panic's own line (whose `end_exclusive(Console::GZIP)`,
+  `kern/kernel_panic.cc:16`, leaves the ring console enabled), and a warning just before either all come out at
+  `terminate`'s close.
+
+The ring, the route and the reading of a take's reply are one pure C17 core, `kernel/core/console_ring.c` behind
+`include/erx/core/console_ring.h`, which Fiasco links through `erx_cores.a` and the root links as well, so the reply's
+layout has one source. Fiasco's printf lock is its only lock: every write already holds it, and the glue takes it for a take
+and a close, so the three are serialized across CPUs with no lock of the core's own, and a take or close holds it for a
+bounded copy of at most the ring.
+
+* **The bound.** The ring holds 4,096 bytes. A write that does not fit whole is dropped whole and its bytes are counted. The
+  ring never overwrites what it holds, so the lines that arrive are the first of a burst, which say most about it, and a
+  dropped write is never half a line. A take returns the count and resets it; a close writes it out.
+* **A take's reply** is in the caller's message registers: the count of bytes lost since the last take, the number of bytes
+  that follow, and the bytes, at most `ERX_CONSOLE_RING_REPLY_BYTES`, the 61 words of Fiasco's 63 message words
+  (`L4_UTCB_GENERIC_DATA_SIZE`) left after the two counts. The core hands out whole lines, up to the last newline that fits; a
+  line longer than a reply is cut at the reply's end and its rest opens the next one, and a line still without its newline
+  stays in the ring for a later take or the close.
+* **The root's side.** Every `erx_log_take` of the service, the first included, runs the take until a reply has no bytes, at
+  most `ERX_CONSOLE_RING_BYTES / ERX_CONSOLE_RING_REPLY_BYTES + 1` times, so a take is bounded while the kernel goes on
+  printing, and what is left waits for the next take. The core's line reader gives each line without its carriage return and
+  skips empty ones (each `WARN` opens with a newline), and the service logs each line as a kernel record of level `warning`
+  whose text is `fiasco: ` and the line, through the log core's own formatter (`ERX_LOG_FORMAT` with `%.*s`,
+  `include/erx/log.h`), whose escape every byte passes, so a kernel line reaches the console and the stored kernel lines as
+  printable ASCII, its colour sequences as `\x1b[31m`, as the untrusted-text rule asks of every sink
+  ([design-log.md](design-log.md#the-kernels-records)). A count above 0 becomes a record of its own ahead of the lines,
+  `fiasco: N bytes of kernel output lost`, so a loss is never silent. These records join the log before the take copies, so
+  the same take hands them to the log service.
+
+What happens on each path:
+
+* **A second take**, and every take after it, finds `ring` and only drains. The log service takes every 100 ms
+  ([design-log.md](design-log.md#overview)), so a kernel line reaches the log within one period.
+* **No take.** A test root, which runs no log service (`test/guest/native_libc_test`'s among them), a partial
+  boot, which starts no console, and a boot whose log service never makes its first take leave the route at `uart` for the
+  whole run: the kernel writes the UART as upstream does, and a test task's bytes reach it unchanged. No console driver runs
+  in the first two; for the third, FD26 publishes what sharing costs. The route moves in the same `service_log_take` as the
+  log's sink, so it holds the same ordering against the driver's start, and the `TODO.md` item on that handoff covers both.
+* **The log service stops.** Takes stop, the ring fills, and further writes are counted. The restarted service's first take
+  drains the ring and logs the count. If its supervisor gives up past its restart intensity, the ring's lines and its count
+  reach the UART when the machine ends.
+* **The driver stops.** The route stays `ring`: the log service goes on taking, the kernel's lines go on reaching the log, and
+  the console shows them once its driver restarts; the UART is silent meanwhile, as it is for every other record.
+* **A panic or a failed assertion** closes at `terminate`, and the development kernel's debugger at its entry, as above.
+* **The machine's end.** `erx_fiasco_end` closes the route right after its one-caller exchange (step 1 of
+  [the end path](#the-end-path)), before its first `l4_vcon_write`, on whichever thread it runs: the close is a kernel
+  operation under the printf lock and needs no ownership of the root's log. So the ring's lines come out first, then the
+  log's untaken records, the crash record and the last line; a kernel line still in the ring is written ahead of untaken log
+  records older than it, the one place where the two orders differ.
+* **A hang.** A hang of Fiasco, or a stop that only the hardware watchdog ends, loses what the ring holds, as it loses the
+  root's untaken records (FD26).
+* **A burst.** The ring bounds what one take logs to 4 KiB, so a task that makes the kernel warn in a loop adds at most about
+  40 KiB a second of kernel records, which push the log's oldest records out, counted as the log counts every loss. Kernel
+  records have no per-space rate (`erx_log_format`, `include/erx/log.h`), and the kernel's lines get none either.
+* **The root's own writes after the take.** An `l4_vcon_write` of the root outside the end path after the handoff, such as a
+  development build's test task's `task_write`, reaches the ring and arrives as kernel records, escaped.
+
+The operations refuse nothing new: an operation number Fiasco's log object does not know is still `-L4_err::ENosys`
+(`kern/vlog.cpp:209-222`), and the take writes only the caller's own message registers, so neither reads memory the caller
+names.
 
 ## The Raspberry Pi 4
 
@@ -4018,6 +4126,19 @@ no test can drive the change:
   one, whose JDB stops every CPU ([Boot handoff](#boot-handoff)). Its test is the kernel-trap case
   of [The backend's cases](#the-backends-cases), on a test kernel with a seeded trap; seeded
   failure: upstream's handler, under which the trap dumps repeat.
+* **The kernel's lines after the handoff.** Upstream's kernel writes every line it prints to the console UART by
+  polling, whenever it prints, so its warnings land among the console driver's output and, on the mini UART, lose input
+  unmarked. The fork's ring console stands in front of the UART's and sends the kernel's lines to a 4 KiB ring from the log
+  service's first take until the machine stops, and the root drains the ring into the log as kernel records at every take
+  ([The kernel's lines](#the-kernels-lines)). The C++ is the ring console and its registration in place of the UART's
+  (`kern/kernel_uart.cpp`), the take and the close in `Vlog::kinvoke` (`kern/vlog.cpp`), one call at the head of `terminate`
+  (`kern/terminate.cpp`) and, in a development kernel, a handler on the debugger's enter queue, all reaching the core through
+  the glue file `fiasco/kernel/src/erx/erx_console_ring.cpp`, whose references to the printf lock, the console multiplexer
+  and the enter queue are lines of `fiasco/erx_glue_imports.txt`: an estimate of about 80 lines, unverified. The route
+  machine, the ring with its bound and loss count, the reply's layout and its line reader are the C17 core
+  `kernel/core/console_ring.c`, in `erx_cores.a`, which the root links too; the root's side, the take's loop in
+  `service_log_take` and the close in `erx_fiasco_end`, is about 40 lines. Its tests are the *Kernel lines* case of
+  [The backend's cases](#the-backends-cases) and the core's host tests.
 * **An unbound pin's interrupt.** `Irq_chip_gen::detach` masks and clears a pin without waiting
   for a CPU that has already acknowledged its interrupt, so upstream's `Irq_chip::handle_irq`
   (`irq_chip.cpp`) can dereference a null object when a domain's interrupt is detached as it fires.
@@ -4032,11 +4153,13 @@ no test can drive the change:
 * **The semaphore's wake.** A semaphore's down waits for the activation of the up that dequeued it
   (`semaphore.cpp`, [A semaphore's wake across CPUs](#thread-creation)). Its test is the case of
   that name in [The backend's cases](#the-backends-cases).
-* **Test kernels' seeds.** Two defines, set only for a test kernel, compile seeds into the fork:
+* **Test kernels' seeds.** Three defines, set only for a test kernel, compile seeds into the fork:
   `ERX_TEST_KERNEL_TRAP` a kernel-mode load from an unmapped address once boot is done
-  (`kernel_thread.cpp`, for `native_kernel_trap.rb`), and `ERX_TEST_SEMAPHORE_WAKE_HOLD_US` a hold
+  (`kernel_thread.cpp`, for `native_kernel_trap.rb`), `ERX_TEST_SEMAPHORE_WAKE_HOLD_US` a hold
   of an up between its dequeue and its activation (`semaphore.cpp`, for
-  `native_semaphore_race.rb`). No other kernel builds them; `make check-native-seeds` runs both.
+  `native_semaphore_race.rb`), and `ERX_TEST_KERNEL_WARN` a `WARN` at a task's yield, the second of
+  which also panics (`thread-ipc.cpp`, for `native_console_ring.rb`). No other kernel builds them;
+  `make check-native-seeds` runs all three.
 * **The interrupt entry's stamp, development builds only.** At each interrupt entry the kernel writes one
   `irq_entry` record naming the line into its CPU's ring, so the Raspberry Pi 4's interrupt measurement times a
   receipt from Fiasco's interrupt entry ([Verification](#verification)). The record's layout, its coherence
@@ -4116,6 +4239,7 @@ ran the code it claims to:
 | **The watchdog from the command line**, a test release under `erx.watchdog=1,5,600` stays up past `D` after its first pet | the first pet withheld under `1,5,7` and `1,5,14`: each ends with `ERX_CRASH_CAUSE_WATCHDOG` at its own `B`; `erx_watchdog` stopping after a pet: the end at `D`; a malformed `erx.watchdog=` and `1,5,2` (`B` under `D`) booting |
 | **Native boot**, `native_boot`: the root accepts the record through `user_ptr`, checks the archive's last entry, writes one line and shuts down | shutdown removed: the deadline fires; `user_ptr` left 0: the root's accept refuses; the archive's sub-type removed: `sigma0` refuses the root's fault |
 | **Debug log**, `tools/erx check-debug-log`, `debug_log`: the probe's calls compared record by record on both backends | one byte more than a full message (`make check-qemu-mutant`): only the target's transcript differs |
+| **Kernel lines**, `native_console_ring`, a development full boot under QEMU `virt` on a test kernel built with `ERX_TEST_KERNEL_WARN`, under which a receive from the thread itself with a zero timeout ([A yield](#scheduling)), a call every task can make, prints one `WARN` naming the test: a test program makes that receive once the console is up, the transcript must hold the warning as a kernel record, `#SEQ SECONDS.MICROSECONDS warning fiasco: ` and the escaped line, and its text nowhere else, and a line the harness types into the system shell while the warning is printed runs whole; a second such receive makes the test kernel print a second warning and panic, and the transcript must hold that warning raw ahead of the panic's line. The trigger is the test kernel's because the warnings a task causes on the stock kernel need conditions no test makes reliably, 64 parked faults for the reply-slot one, and the record's path does not depend on which line the kernel prints. `test/host/console_ring_test.rb`, over the core built for the host, holds the route machine to every route and operation, a write that does not fit dropped whole and counted, a take's whole lines, a long line cut and its rest in the next reply, and the reader's carriage returns and empty lines. QEMU's UART models are not known to lose input as the hardware does (unverified), so the loss itself is an item of the Raspberry Pi 4's manual checklist: a 4 KiB paste into the system shell while a program triggers the warning in a loop arrives with no loss | the take's kernel operation never called: the warning reaches the UART raw and the case fails; the close at a stop removed (at `terminate` on a release test kernel, at the debugger's entry on a development one): the second warning never reaches the transcript; a write that fits only in part appended: the bound's host test fails; the last-newline search one byte short: the cut-line test fails; on the Pi 4's checklist, the take's operation never called: the paste loses bytes |
 | **Memory**, `native_memory`: commit, decommit, protection changes and the whole pool keep contents and count | the wrong window page; zeroing skipped; a protect that takes a fresh page; the pool check removed: a protect that should be refused is not |
 | **Protection**, a test task: a write in RX and a run in RW fault; a stack through `PROT_NONE`; a refused protect changes nothing | the drop step skipped: the write succeeds; commit on access change removed: a fault; the plan applied page by page: the first page changed |
 | **musl**, `native_musl`: the C library's interface as the root, threads, TLS, condition variables, timed waits, `malloc` across threads, `mprotect` under a running thread, cancellation, `exit` | `FUTEX_REQUEUE` restored: a broadcast stalls; `__unmapself` not releasing: the pool's count stays down; `mprotect` committing first: the running thread faults |

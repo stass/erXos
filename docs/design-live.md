@@ -919,11 +919,17 @@ log service:
   build fixes and checks against `stdout-path` at boot, which it writes by
   polling until the log service's first take hands the log to the
   console, before the driver starts, and again at a panic or the
-  machine's end; so the kernel and the driver share the UART in time.
-  On Fiasco the machine's end stops no thread first
+  machine's end; so the kernel and the driver share the UART in time,
+  and while the driver runs it is the UART's only user. On Fiasco the
+  kernel's own lines go from that take on to a ring of the kernel's,
+  which each take drains into the log as kernel records, and reach the
+  UART only when the machine stops
+  ([design-fiasco.md](design-fiasco.md#the-kernels-lines)). On Fiasco
+  the machine's end stops no thread first
   ([design-fiasco.md](design-fiasco.md#the-end-path)), so the end's last
-  lines can fall among a driver write still under way, and a
-  development build's test tasks write their bytes to it unchanged
+  lines can fall among a driver write still under way. A test root's
+  test tasks, which run with no console driver and no take, write their
+  bytes to it unchanged
   ([design-fiasco.md](design-fiasco.md#the-console)).
 
 The host link shows its own session's output and the log lines the log
@@ -1166,7 +1172,14 @@ A console UART has no flow control on its line, so input that arrives
 faster than its driver drains the receive FIFO is lost: the mini UART's
 FIFO holds eight bytes, about 0.7 ms at 115,200 baud
 (`erlang/apps/erx_uart/src/erx_mini_uart.erl`), and a paste overruns it
-whenever the driver is late. Input is lost in other places too: a frame
+whenever the driver is late. The driver sees every such loss only
+because it is the UART's only user while it runs
+([The console](#the-console)): a kernel write between its reads would
+hold the UART's interrupts off and, on the mini UART, read `LSR` and
+clear the overrun bit that marks the loss, which is why on Fiasco the
+kernel's lines go to its ring from the log service's first take
+([design-fiasco.md](design-fiasco.md#the-kernels-lines)). Input is lost
+in other places too: a frame
 the system domain's peer drops on its way to a session's tty, a byte the
 tty has no room for, and a character the line editor's bounds refuse. A
 command line that lost bytes anywhere must never run: `cd /tmp` with its
