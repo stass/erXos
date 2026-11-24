@@ -35,10 +35,11 @@ module Erx
 
       FACET_LIMITS = "  service @service.echo\n  operations none\n  max_request 512\n" \
                      "  in_flight 4\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n"
+      # The grant of echo to peer, which the xdomain bench image (XdomainBench) makes too.
+      PEER_FACET = "facet echo_peer\n  grantee @domain.peer\n#{FACET_LIMITS}"
       ROWS = [ECHO_ROW.sub(CONNECTIONS_LINE, "  connections 2\n"), PEER_ROW]
              .map { |row| row.sub(RESTARTS_LINE, "  restarts 1\n") }.join +
-             ECHO_SERVICES +
-             "facet echo_peer\n  grantee @domain.peer\n#{FACET_LIMITS}"
+             ECHO_SERVICES + PEER_FACET
       # The grant to every session made from the system principal's template. It follows
       # the template, which the manifest takes from the development manifest's.
       SESSION_FACET = "facet echo_session\n  grantee @session.system\n#{FACET_LIMITS}"

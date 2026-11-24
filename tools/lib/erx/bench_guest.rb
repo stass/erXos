@@ -78,15 +78,20 @@ module Erx
         "#{iterations_for(workload, plan)},#{plan.samples}))]).\r"
     end
 
-    # The beam as numbered shell lines: each binds a piece, and the last loads their join and
-    # prints the digest of the module that loaded.
-    def load_lines(beam, module_name: 'erx_otp_bench')
+    # The beam as numbered shell lines: each binds a piece to a variable named prefix and
+    # its number, and the last loads their join and prints the digest of the module that
+    # loaded. With node, the module loads there, by erpc, instead of in the shell's node.
+    def load_lines(beam, module_name: 'erx_otp_bench', prefix: 'B', node: nil)
       pieces = beam.bytes.each_slice(CHUNK_BYTES).map { |slice| "<<#{slice.join(',')}>>" }
-      names = pieces.each_index.map { |index| "B#{index}" }
+      names = pieces.each_index.map { |index| "#{prefix}#{index}" }
       binds = pieces.zip(names).map { |piece, name| "#{name} = #{piece}, ok.\r" }
-      binds + ["{module,#{module_name}}=code:load_binary(#{module_name},\"#{module_name}.beam\"," \
-               "iolist_to_binary([#{names.join(',')}])),io:format(\"G3BEAM ~s~n\"," \
-               "[binary:encode_hex(#{module_name}:module_info(md5),lowercase)]).\r"]
+      load = [module_name, "\"#{module_name}.beam\"", "iolist_to_binary([#{names.join(',')}])"].join(',')
+      loaded, digest = if node
+                         ["erpc:call(#{node},code,load_binary,[#{load}])", "erpc:call(#{node},#{module_name},module_info,[md5])"]
+                       else
+                         ["code:load_binary(#{load})", "#{module_name}:module_info(md5)"]
+                       end
+      binds + ["{module,#{module_name}}=#{loaded},io:format(\"G3BEAM ~s~n\",[binary:encode_hex(#{digest},lowercase)]).\r"]
     end
 
     # Everything typed at the Erlang shell, in order. The first line is typed at the Erlang

@@ -674,6 +674,17 @@ module Erx
                             lane: 4096, args: MediumBoot.binary_args(DOMAIN_ARGS), env: '<<>>', connections: 1)
     end
 
+    # A test image in directory whose erts script boots the test-only erx_echo_test
+    # (ECHO_BOOT), with manifest, on machine: the system domain suite's images and the
+    # xdomain bench image (XdomainBench) are each one.
+    def test_image(root:, runner:, compiler:, linker:, machine:, fiasco:, directory:, manifest:)
+      cleared = ProductionImage.clear_directory(root: root, path: directory)
+      image = ProductionImage.new(root: root, runner: runner, compiler: compiler, linker: linker, machine: machine,
+                                  fiasco: fiasco)
+      nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+      image.build_test_image(directory: cleared, added: nothing, domains: [ECHO_BOOT], manifest_source: manifest)
+    end
+
     # The first line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
     # ECHO_EXPRESSION and FOREIGN_ATOM_EXPRESSION. SERVICE_KILL_STEPS follow it.
     def service_kill_setup(domain, grant:) = "SdSpec=#{later_spec(domain, grant: grant)},#{ECHO_EXPRESSION},#{FOREIGN_ATOM_EXPRESSION}"
@@ -765,15 +776,10 @@ module Erx
 
       private
 
-      # A test image under build/system-domain/name whose erts script boots the test-only
-      # erx_echo_test (ECHO_BOOT), with manifest.
+      # The test image under build/system-domain/name, with manifest.
       def image(fiasco, name, manifest)
-        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/system-domain', name))
-        image = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
-                                    fiasco: fiasco)
-        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
-        image.build_test_image(directory: directory, added: nothing, domains: [ECHO_BOOT],
-                               manifest_source: manifest)
+        SystemDomain.test_image(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                fiasco: fiasco, directory: File.join(@root, 'build/system-domain', name), manifest: manifest)
       end
 
       def regrant(accel, count, remote, built)

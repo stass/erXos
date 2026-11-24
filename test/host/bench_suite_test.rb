@@ -43,7 +43,8 @@ class BenchSuiteTest < Minitest::Test
   end
 
   def test_the_suite_cells_are_each_boots_benchmarks
-    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-wake hvf-4cpu-xdomain-wake], Suite.suite_cells.sort
+    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-wake hvf-4cpu-xdomain-wake
+                    hvf-4cpu-xdomain-xdomain], Suite.suite_cells.sort
     declared = Erx::QemuGate.suites.find { |suite| suite.name == 'bench' }
     assert_equal Suite.suite_cells, declared.cells
     refute declared.offload
@@ -84,7 +85,8 @@ class BenchSuiteTest < Minitest::Test
 
       { record: record, written: nil, refused: [], seeds_missed: [] }
     end
-    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', landing: landing)
+    xdomain = ->(*, **) { { record: record, written: nil, refused: [] } }
+    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: landing, xdomain: xdomain)
     assert_equal 'failed', answer.fetch(:cells).fetch('hvf-4cpu-native-nullcall')
     assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-native-wake')
     assert_equal 'pending', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
