@@ -2499,7 +2499,8 @@ ends the facet, so the handler stops ([The client](#the-client)), and
 restart attaches through the facet the new incarnation mints; no shell
 outlives its client's link. The end of the console's root session ends
 the line and so `erx_bleuart`. A boot whose read of `/etc/start.conf`
-fails starts no row, `bleuart`'s included
+fails starts each row at its published default, so `bleuart` does not
+start
 ([design-apps.md](design-apps.md#the-start-table), "A read that cannot
 read the file").
 

@@ -888,12 +888,20 @@ class ManifestDomainsTest < Minitest::Test
   def test_a_start_row_is_packed_with_its_defaults_or_its_own_fields
     none = @codec.constant('mf_none')
     enabled = @codec.member('mf_start_flags', 'enabled')
+    published = @codec.member('mf_start_flags', 'published_enabled')
     fields = %w[principal flags display restarts restart_period_s]
     view = @codec.open('manifest', admit(with_session(self.class.session) + self.class.start).bytes)
-    assert_equal [[0, enabled, none, 5, 600]], rows(view, 'starts').map { |row| row.values_at(*fields) }
+    assert_equal [[0, enabled | published, none, 5, 600]], rows(view, 'starts').map { |row| row.values_at(*fields) }
     own = self.class.start('system', "  enable NO\n  restarts 3\n  restart_period_s 60\n")
     view = @codec.open('manifest', admit(with_session(self.class.session) + own).bytes)
     assert_equal [[0, 0, none, 3, 60]], rows(view, 'starts').map { |row| row.values_at(*fields) }
+    # A published default apart from enable is packed beside it, in either direction.
+    { "  enable YES\n  published_enable NO\n" => enabled, "  enable NO\n  published_enable YES\n" => published }
+      .each do |lines, flags|
+        source = with_session(self.class.session) + self.class.start('system', lines)
+        view = @codec.open('manifest', admit(source).bytes)
+        assert_equal [flags], rows(view, 'starts').map { |row| row.fetch('flags') }
+      end
   end
 
   def test_a_start_row_of_a_principal_without_a_session_template_is_refused
@@ -954,6 +962,11 @@ class ManifestDomainsTest < Minitest::Test
     view = @codec.open('manifest', admit(with_windows(self.class.start('system', display),
                                                       self.class.start('other', "  enable NO\n#{display}"))).bytes)
     assert_equal 2, view.count('starts')
+    # A boot that cannot read the settings file starts the published defaults' rows.
+    off = "  enable NO\n  published_enable YES\n#{display}"
+    refused(Erx::Manifest::Invalid, 'start.display',
+            with_windows(self.class.start('system', off), self.class.start('other', off)),
+            message: /two published-default enabled/)
   end
 
   def test_a_partial_boot_starts_no_row

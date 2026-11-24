@@ -123,8 +123,8 @@ read_back(Number, {Name, Field, Value}, Local) ->
         orelse error({written_line_misread, Number, Name, Field, Value, Local}).
 
 merged(Local) ->
-    Rows = [#{principal => Name, enable => rand:uniform(2) =:= 1, display => pick([none | ?DISPLAYS]),
-              restarts => 5, period => 600} || Name <- ?NAMES],
+    Rows = [#{principal => Name, enable => rand:uniform(2) =:= 1, published_enable => rand:uniform(2) =:= 1,
+              display => pick([none | ?DISPLAYS]), restarts => 5, period => 600} || Name <- ?NAMES],
     Grants = maps:from_list([{Name, [D || D <- ?DISPLAYS, rand:uniform(2) =:= 1]} || Name <- ?NAMES]),
     {Merged, _Skipped} = erx_start_table:merge(Rows, Local, Grants),
     [P || #{principal := P} <- Merged] =:= ?NAMES orelse error({row_added, Merged}),

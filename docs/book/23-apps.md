@@ -139,7 +139,11 @@ One manifest packs both a builder's own card and the published one,
 so a row may also carry `published_enable`, the `enable` the published
 card is packed with: `bleuart`, root's shell over Bluetooth, runs at boot
 on a builder's card and ships off on the website's
-([chapter 19](19-bluetooth.md)). This is designed and not built.
+([chapter 19](19-bluetooth.md)). Every card carries that published
+default beside `enable`, and a boot that cannot read the file starts each
+row at it, so a machine whose settings nobody knows runs what the
+website's card runs. The boot's use of the field is built; the published
+card's packing of it in `enable`'s place is designed and not built.
 
 Each kept row has an OTP supervisor of its own, `one_for_one` with the
 row's intensity, whose one child is a **session keeper**, a process

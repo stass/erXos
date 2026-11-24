@@ -72,7 +72,7 @@ module Erx
         'facet' => %w[name grantee service operations max_request in_flight reductions period_ns max_heap_size queue],
         'image' => %w[device input salt],
         'partial_boot' => %w[image],
-        'start' => %w[enable display restarts restart_period_s],
+        'start' => %w[enable published_enable display restarts restart_period_s],
         'display' => %w[policy idle_dim_s idle_off_s palette],
         'apps' => %w[memory services max gatt],
         'package' => %w[input enable],
@@ -81,7 +81,7 @@ module Erx
       }.freeze
       OPTIONAL = { 'machine' => %w[system_args boot_timeout_s], 'domain' => %w[args env], 'session' => %w[args env], 'service' => %w[name],
                    'facet' => %w[name queue], 'image' => %w[salt], 'window' => %w[partition drive],
-                   'start' => %w[enable display restarts restart_period_s],
+                   'start' => %w[enable published_enable display restarts restart_period_s],
                    'apps' => %w[services max gatt], 'package' => %w[enable], 'display' => %w[palette] }.freeze
       # The declarations that carry no source alias: the one machine, the one apps row
       # (docs/design-packaging.md, "The apps row") and the one system_image row

@@ -58,9 +58,20 @@ class ErxStartTableTest < Minitest::Test
               from: 'decimal(Raw, 0, ?ERX_START_RESTARTS_MAX)', to: 'decimal(Raw, 0, 16#FFFFFFFF)',
               caught_by: 'restarts_and_period_past_their_ceilings_are_refused_test'),
     Fault.new(name: 'a read that gives up after 30 failures',
-              from: '{{unread, Count}, Log ++ Manifest ++ [{retry, Delay}]};',
-              to: '{{unread, Count}, Log ++ Manifest ++ [{retry, Delay} || Count < 30]};',
-              caught_by: 'a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test')
+              from: '{{unread, Count}, Log ++ Defaults ++ [{retry, Delay}]};',
+              to: '{{unread, Count}, Log ++ Defaults ++ [{retry, Delay} || Count < 30]};',
+              caught_by: 'a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test'),
+    Fault.new(name: "a failed read that makes the table from the manifest's enable",
+              from: 'Defaults = [card_defaults || not Made],',
+              to: 'Defaults = [{apply, <<>>} || not Made],',
+              caught_by: 'a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test'),
+    Fault.new(name: "published defaults that keep each row's enable",
+              from: '[Row#{enable := maps:get(published_enable, Row)} || Row <- Rows]', to: 'Rows',
+              caught_by: 'an_unreadable_file_starts_each_row_at_its_published_default_test'),
+    Fault.new(name: 'a file over the bound applied as a text',
+              from: 'read_answered({ok, Text}, Reading, Made) when byte_size(Text) > ?ERX_START_RC_CONF_MAX ->',
+              to: 'read_answered({ok, Text}, Reading, Made) when byte_size(Text) < 0 ->',
+              caught_by: 'a_file_over_the_bound_is_a_failed_read_test'),
   ].freeze
 
   def test_the_cases_pass

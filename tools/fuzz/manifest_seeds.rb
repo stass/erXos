@@ -17,7 +17,8 @@ module Erx
   # configured domains' with the machine's boot_timeout_s 0, which the reader refuses,
   # the configured domains' with alpha's probe granted to the system principal's
   # session template, so the facet table holds a session grantee, and the same with a
-  # start row for that template, left off and with its own restart intensity, and the
+  # start row for that template, left off, on at its published default and with its own
+  # restart intensity, and the
   # display_domain suite's manifest with its client's grant of the display stating each
   # parameter of the windows interface a facet row may, so the facet table holds parameter
   # rows, the configured domains' with alpha granted the line on a UART of its own, so a
@@ -30,7 +31,7 @@ module Erx
   module ManifestSeeds
     SESSION_FACET = "facet session_probe\n  grantee @session.system\n  service @service.probe\n  operations none\n" \
                     "  max_request 64\n  in_flight 1\n  reductions 1\n  period_ns 1\n  max_heap_size 1\n"
-    START_ROW = "start system\n  enable NO\n  restarts 3\n  restart_period_s 60\n"
+    START_ROW = "start system\n  enable NO\n  published_enable YES\n  restarts 3\n  restart_period_s 60\n"
     # The service named packages_service and a service of the net interface, appnet, which
     # the apps row offers, so the build derives the app template's packages row and a row
     # of appnet.

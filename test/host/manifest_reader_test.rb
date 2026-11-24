@@ -177,7 +177,7 @@ class ManifestReaderTest < Minitest::Test
 
   def test_start_row_fields_are_checked
     { { reserved: 1 } => /starts\[\].reserved/, { principal: 1 } => /index starts\[\].principal/,
-      { display: 0 } => /index starts\[\].display/, { flags: 2 } => /starts\[\].flags/ }.each do |fields, error|
+      { display: 0 } => /index starts\[\].display/, { flags: 4 } => /starts\[\].flags/ }.each do |fields, error|
       status, output = decode(AbiManifestFixture.start_rows(**fields))
       assert_equal 1, status, "#{fields}: #{output}"
       assert_match(error, output, fields.to_s)

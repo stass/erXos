@@ -16,9 +16,12 @@
 %% kiosk and logger are enabled, clock is not; principal numbers are their
 %% manifest index plus one. kiosk allows two restarts a minute.
 manifest() ->
-    #{rows => [#{principal => <<"clock">>, enable => false, display => none, restarts => 5, period => 600},
-               #{principal => <<"kiosk">>, enable => true, display => none, restarts => 2, period => 60},
-               #{principal => <<"logger">>, enable => true, display => none, restarts => 5, period => 600}],
+    #{rows => [#{principal => <<"clock">>, enable => false, published_enable => false,
+                 display => none, restarts => 5, period => 600},
+               #{principal => <<"kiosk">>, enable => true, published_enable => true,
+                 display => none, restarts => 2, period => 60},
+               #{principal => <<"logger">>, enable => true, published_enable => true,
+                 display => none, restarts => 5, period => 600}],
       grants => #{},
       principals => #{<<"clock">> => 1, <<"kiosk">> => 2, <<"logger">> => 3},
       boot_order => [<<"storage">>, <<"net">>], windows => [], packages => none}.
@@ -57,8 +60,17 @@ starter_test_() ->
 %% A first read of rc.conf that fails: the file is a directory until the case
 %% replaces it.
 unreadable_test_() ->
-    {foreach, fun() -> setup(fun unreadable/1) end,
-     fun cleanup/1, [fun a_failed_read_starts_the_manifest_rows_and_reads_again/1]}.
+    {foreach, fun() -> setup(fun unreadable/1, answer, published_manifest()) end,
+     fun cleanup/1, [fun a_failed_read_starts_the_published_defaults_and_reads_again/1,
+                     fun a_restart_at_the_card_defaults_keeps_them/1,
+                     fun a_publication_at_the_card_defaults_keeps_them/1]}.
+
+%% manifest() with published defaults apart from enable: clock's on, kiosk's
+%% off; logger's is its enable. Its package rows enable dash.
+published_manifest() ->
+    #{rows := [Clock, Kiosk, Logger]} = Manifest = manifest(),
+    Manifest#{rows := [Clock#{published_enable := true}, Kiosk#{published_enable := false}, Logger],
+              packages := #{<<"dash">> => true}}.
 
 %% A first read of rc.conf that waits for the system domain's namespace: the stub
 %% holds its answer, and rc.conf is unreadable until the case replaces it, as on a
@@ -93,8 +105,10 @@ screen() -> <<"screen">>.
 
 %% kiosk as in manifest/0, and painter, enabled, on display screen.
 display_manifest() ->
-    #{rows => [#{principal => <<"kiosk">>, enable => true, display => none, restarts => 2, period => 60},
-               #{principal => <<"painter">>, enable => true, display => <<"screen">>, restarts => 5, period => 600}],
+    #{rows => [#{principal => <<"kiosk">>, enable => true, published_enable => true,
+                 display => none, restarts => 2, period => 60},
+               #{principal => <<"painter">>, enable => true, published_enable => true,
+                 display => <<"screen">>, restarts => 5, period => 600}],
       grants => #{<<"painter">> => [<<"screen">>]},
       principals => #{<<"kiosk">> => 1, <<"painter">> => 2},
       boot_order => [<<"display">>], windows => [<<"screen">>], packages => none}.
@@ -106,13 +120,15 @@ display_manifest() ->
 %% to home is refused with {no_grant, <<"home">>}, and one it moves to screen
 %% starts. Root's template, the system principal's, is granted the windows
 %% service display by display_root (config/manifest/development.txt), and the
-%% table names that grant and no other.
+%% table names that grant and no other. Clock's row is on and its published
+%% default off, each read from its own bit.
 only_a_granted_windows_service_is_a_display_test() ->
     Path = os:getenv("ERX_STARTER_MANIFEST"),
     ?assertNotEqual(false, Path),
     {ok, Packed} = file:read_file(Path),
     {ok, #{rows := Rows, grants := Grants}} = erx_starter:manifest_table({ok, Packed}),
-    ?assertEqual([#{principal => <<"clock">>, enable => true, display => none, restarts => 1, period => 600}],
+    ?assertEqual([#{principal => <<"clock">>, enable => true, published_enable => false, display => none,
+                    restarts => 1, period => 600}],
                  Rows),
     ?assertEqual(#{<<"clock">> => [<<"screen">>], <<"system">> => [<<"display">>]}, Grants),
     {ok, Home} = erx_start_table:parse_rc_conf(<<"clock_display=home\n">>),
@@ -660,7 +676,7 @@ enable_clears_the_mark_before_the_table_is_made(_) ->
             Calls = table_calls(whereis(erx_starter),
                                      fun() -> ok = erx_starter:command({enable, <<"kiosk">>, #{}}) end),
             Clear = {unmark, <<"kiosk">>},
-            ?assertMatch([Clear, {record, _} | _],
+            ?assertMatch([Clear, {record, {rc_conf, _}} | _],
                          [Call || Call <- Calls, Call =:= Clear orelse is_record_call(Call)])
     end.
 
@@ -723,18 +739,52 @@ a_write_of_an_ended_table_lands_before_the_next_table_reads(Setup) ->
             ?assertEqual({ok, <<"clock_enable=\"YES\"\nlogger_enable=\"NO\"\n">>}, file:read_file(rc_path(Setup)))
     end.
 
-a_failed_read_starts_the_manifest_rows_and_reads_again(Setup) ->
+%% The unreadable case's manifest gives clock and kiosk published defaults
+%% apart from their enable, and logger none, so the first failed read starts
+%% clock and logger and leaves kiosk off; once rc.conf reads, the table is the
+%% manifest's enable with its settings, which starts kiosk and stops clock.
+a_failed_read_starts_the_published_defaults_and_reads_again(Setup) ->
     fun() ->
             ok = watch(),
-            _ = started(?KIOSK),
+            Clock = started(?CLOCK),
             Logger = started(?LOGGER),
             ?assertEqual(unread, rc_conf()),
+            ?assertEqual(none, run(<<"kiosk">>)),
             ?assertEqual({error, rc_conf_unread}, erx_starter:command({disable, <<"logger">>, #{}})),
             ok = file:del_dir(rc_path(Setup)),
             ok = file:write_file(rc_path(Setup), <<"logger_enable=\"NO\"\n">>),
             receive {ended, ?LOGGER, Logger, _} -> ok after ?WAIT_MS -> error(rc_conf_not_read_again) end,
+            receive {ended, ?CLOCK, Clock, _} -> ok after ?WAIT_MS -> error(published_row_kept) end,
+            _ = started(?KIOSK),
             ?assertEqual(read, rc_conf()),
             ?assertEqual(none, run(<<"logger">>))
+    end.
+
+%% A table restarted while rc.conf is still unreadable is made from the basis
+%% the keepers' branch recorded, the card's defaults, and not from the
+%% manifest's enable, which has kiosk on: kiosk stays disabled and clock runs.
+a_restart_at_the_card_defaults_keeps_them(_) ->
+    fun() ->
+            ok = watch(),
+            Clock = started(?CLOCK),
+            ok = restart_table(),
+            ?assertEqual(unread, rc_conf()),
+            ?assertEqual(none, run(<<"kiosk">>)),
+            ?assertEqual(none, started_within(?KIOSK, 300)),
+            ?assert(is_process_alive(Clock))
+    end.
+
+%% A package set taken while rc.conf is unreadable makes the table again from
+%% the card's defaults: the set's dash starts, at its own enable, and kiosk,
+%% which the card ships off, does not.
+a_publication_at_the_card_defaults_keeps_them(_) ->
+    fun() ->
+            ok = watch(),
+            _ = started(?CLOCK),
+            ok = erx_starter:packages(self(), [package(<<"dash">>, system)]),
+            _ = started({app, <<"dash">>}),
+            ?assertEqual(none, run(<<"kiosk">>)),
+            ?assertEqual(none, started_within(?KIOSK, 300))
     end.
 
 %% While the system domain's namespace is not in place the table does not read
@@ -821,8 +871,8 @@ traced(Pid) ->
     after 0 -> []
     end.
 
-%% A call that records rc.conf's text.
-is_record_call({record, _Text}) -> true;
+%% A call that records the table's basis.
+is_record_call({record, _Basis}) -> true;
 is_record_call(_Call) -> false.
 
 %% Kills the table and waits for its supervisor to start the next. The kill is

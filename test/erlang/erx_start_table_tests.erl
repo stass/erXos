@@ -11,9 +11,12 @@
 
 %% A manifest's rows: clock and kiosk may take the display; logger has none.
 rows() ->
-    [#{principal => <<"clock">>, enable => false, display => <<"display">>, restarts => 5, period => 600},
-     #{principal => <<"kiosk">>, enable => true, display => <<"display">>, restarts => 5, period => 600},
-     #{principal => <<"logger">>, enable => true, display => none, restarts => 3, period => 60}].
+    [#{principal => <<"clock">>, enable => false, published_enable => false,
+       display => <<"display">>, restarts => 5, period => 600},
+     #{principal => <<"kiosk">>, enable => true, published_enable => true,
+       display => <<"display">>, restarts => 5, period => 600},
+     #{principal => <<"logger">>, enable => true, published_enable => true,
+       display => none, restarts => 3, period => 60}].
 
 grants() ->
     #{<<"clock">> => [<<"display">>, <<"second">>], <<"kiosk">> => [<<"display">>]}.
@@ -87,7 +90,8 @@ a_bad_line_and_an_undeclared_name_are_skipped_test() ->
     ?assertMatch(#{restarts := 3, period := 60, from_rc_conf := []}, row(<<"logger">>, Rows)).
 
 a_name_splits_at_its_last_underscore_test() ->
-    Rows = [#{principal => <<"a_b">>, enable => false, display => none, restarts => 5, period => 600}],
+    Rows = [#{principal => <<"a_b">>, enable => false, published_enable => false,
+              display => none, restarts => 5, period => 600}],
     {ok, Local} = erx_start_table:parse_rc_conf(<<"a_b_enable=YES\n">>),
     ?assertEqual([{set, 1, <<"a_b">>, enable, true}], Local),
     ?assertMatch({[#{principal := <<"a_b">>, enable := true, status := enabled}], []},
@@ -294,14 +298,36 @@ restarts_and_period_past_their_ceilings_are_refused_test() ->
 
 a_failed_read_retries_with_a_growing_bounded_delay_and_never_gives_up_test() ->
     Fail = fun(Failures, Made) -> erx_start_table:read_answered({error, eio}, {unread, Failures}, Made) end,
-    %% The first failure, before any table, makes it from the manifest and logs.
-    ?assertMatch({{unread, 1}, [{log, _, _}, {apply, <<>>}, {retry, 1000}]}, Fail(0, false)),
+    %% The first failure, before any table, makes it from the published defaults and logs.
+    ?assertMatch({{unread, 1}, [{log, _, _}, card_defaults, {retry, 1000}]}, Fail(0, false)),
     ?assertMatch({{unread, 1}, [{log, _, _}, {retry, 1000}]}, Fail(0, true)),
     ?assertMatch({{unread, 2}, [{log, _, _}, {retry, 2000}]}, Fail(1, true)),
     ?assertEqual({{unread, 3}, [{retry, 4000}]}, Fail(2, true)),
     ?assertEqual({{unread, 10}, [{retry, 60000}]}, Fail(9, true)),
     ?assertMatch({{unread, 1024}, [{log, _, _}, {retry, 60000}]}, Fail(1023, true)),
     ?assertEqual({{unread, 100001}, [{retry, 60000}]}, Fail(100000, true)).
+
+%% A file that cannot be read may disable any row, so the table made before
+%% any read is the published card's: each row at its published_enable, which
+%% for logger is its enable.
+an_unreadable_file_starts_each_row_at_its_published_default_test() ->
+    [Clock, Kiosk, Logger] = rows(),
+    Rows = [Clock#{published_enable := true}, Kiosk#{published_enable := false}, Logger],
+    {Published, []} = erx_start_table:merge(erx_start_table:published_defaults(Rows), [], grants()),
+    ?assertMatch(#{status := enabled, display := <<"display">>, from_rc_conf := []}, row(<<"clock">>, Published)),
+    ?assertMatch(#{status := disabled}, row(<<"kiosk">>, Published)),
+    ?assertMatch(#{status := enabled}, row(<<"logger">>, Published)),
+    %% The manifest's own defaults, which a readable or absent file starts from.
+    {Declared, []} = erx_start_table:merge(Rows, [], grants()),
+    ?assertMatch(#{status := enabled}, row(<<"kiosk">>, Declared)),
+    ?assertMatch(#{status := disabled}, row(<<"clock">>, Declared)).
+
+%% A file over the bound is a read that fails, so a boot finding one starts
+%% the published defaults too, never the manifest's enable.
+a_file_over_the_bound_is_a_failed_read_test() ->
+    Long = binary:copy(<<"#">>, erx_start_table:rc_conf_limit() + 1),
+    ?assertMatch({{unread, 1}, [{log, _, _}, card_defaults, {retry, 1000}]},
+                 erx_start_table:read_answered({ok, Long}, {unread, 0}, false)).
 
 a_read_that_answers_makes_the_table_test() ->
     ?assertEqual({read, [{apply, <<"x">>}]}, erx_start_table:read_answered({ok, <<"x">>}, {unread, 0}, false)),

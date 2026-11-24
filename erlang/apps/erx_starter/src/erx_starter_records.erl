@@ -12,7 +12,8 @@ the sessions the branch keeps.
   was enabled. No setting clears a mark: the table never starts a marked
   row (erx_start_table:reconcile/3), so it stays stopped whatever rc.conf
   sets, until unmark/1, at `start` or `enable`.
-* The text of rc.conf the table was last made from, so a restarted table
+* The basis the table was last made from, rc.conf's text or the
+  published card's defaults (erx_starter:basis()), so a restarted table
   has the table it had while rc.conf is unread.
 * The last package set the table took (erx_starter:packages/2), so a
   restarted table has the rows of every app it keeps without asking the
@@ -46,13 +47,13 @@ unmark(Name) ->
 stopped() ->
     gen_server:call(?MODULE, stopped).
 
--doc "Records Text as the text of rc.conf the table is made from.".
--spec record(binary()) -> ok.
-record(Text) ->
-    gen_server:call(?MODULE, {record, Text}).
+-doc "Records Basis as the basis the table is made from.".
+-spec record(erx_starter:basis()) -> ok.
+record(Basis) ->
+    gen_server:call(?MODULE, {record, Basis}).
 
--doc "The text record/1 last recorded, or none.".
--spec recorded() -> {ok, binary()} | none.
+-doc "The basis record/1 last recorded, or none.".
+-spec recorded() -> {ok, erx_starter:basis()} | none.
 recorded() ->
     gen_server:call(?MODULE, recorded).
 
@@ -66,10 +67,10 @@ record_set(Set) ->
 recorded_set() ->
     gen_server:call(?MODULE, recorded_set).
 
-%% The state: the stopped marks, an ordset of names, the recorded text and the
+%% The state: the stopped marks, an ordset of names, the recorded basis and the
 %% recorded package set.
 init([]) ->
-    {ok, #{stopped => ordsets:new(), text => none, set => []}}.
+    {ok, #{stopped => ordsets:new(), basis => none, set => []}}.
 
 handle_call({mark, Name}, _From, #{stopped := Stopped} = State) ->
     {reply, ok, State#{stopped := ordsets:add_element(Name, Stopped)}};
@@ -77,10 +78,10 @@ handle_call({unmark, Name}, _From, #{stopped := Stopped} = State) ->
     {reply, ok, State#{stopped := ordsets:del_element(Name, Stopped)}};
 handle_call(stopped, _From, #{stopped := Stopped} = State) ->
     {reply, Stopped, State};
-handle_call({record, Text}, _From, State) ->
-    {reply, ok, State#{text := {ok, Text}}};
-handle_call(recorded, _From, #{text := Text} = State) ->
-    {reply, Text, State};
+handle_call({record, Basis}, _From, State) ->
+    {reply, ok, State#{basis := {ok, Basis}}};
+handle_call(recorded, _From, #{basis := Basis} = State) ->
+    {reply, Basis, State};
 handle_call({record_set, Set}, _From, State) ->
     {reply, ok, State#{set := Set}};
 handle_call(recorded_set, _From, #{set := Set} = State) ->

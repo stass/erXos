@@ -41,7 +41,7 @@ process:
   The spec holds the row's erx_starter_row:row(), what its session is
   kept with, so a restarted table compares it with the table it makes.
 * `records`, the branch's first child, is erx_starter_records, which
-  holds the stopped marks and the text of rc.conf the table was last made
+  holds the stopped marks and the basis the table was last made
   from. It is the branch's one significant child, and the branch shuts
   down when it ends: a crash of the records process ends every session
   the branch kept, and an end of the branch ends the records, so the two

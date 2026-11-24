@@ -396,7 +396,12 @@ class DomPlannerTest < Minitest::Test
     admit(source + "start guest\n  enable NO\n")
     error = assert_raises(Erx::Manifest::Invalid) { admit(source + "start system\nstart guest\n") }
     assert_equal 'start', error.field, error.message
-    assert_match(/session of start row guest with nomem\b/i, error.message)
+    assert_match(/session of enabled start row guest with nomem\b/i, error.message)
+    # A boot that cannot read the settings file starts the published defaults' rows.
+    error = assert_raises(Erx::Manifest::Invalid) do
+      admit(source + "start system\nstart guest\n  enable NO\n  published_enable YES\n")
+    end
+    assert_match(/session of published-default enabled start row guest with nomem\b/i, error.message)
   end
 
   # Property 17 counts the console's login: the console logs root in from the system
@@ -416,7 +421,7 @@ class DomPlannerTest < Minitest::Test
     admit(source)
     error = assert_raises(Erx::Manifest::Invalid) { admit(source + "start system\n") }
     assert_equal 'start', error.field, error.message
-    assert_match(/session of start row system with nomem\b/i, error.message)
+    assert_match(/session of enabled start row system with nomem\b/i, error.message)
     alone = fixture.substitute(source, memory, "\\1#{domain}")
     error = assert_raises(Erx::Manifest::Invalid) { admit(alone) }
     assert_equal 'machine.console', error.field, error.message

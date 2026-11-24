@@ -44,8 +44,17 @@ class ErxStarterTest < Minitest::Test
               caught_by: 'a_crash_of_the_table_ends_no_session'),
     Fault.new(name: 'a restarted table that ignores the recorded text and makes the manifest\'s rows',
               file: "#{APP}/erx_starter.erl",
-              from: '{ok, Text} -> make(Text, WithSet);', to: '{ok, _Text} -> WithSet;',
+              from: '{ok, Basis} -> make(WithSet#{basis := Basis});', to: '{ok, _Basis} -> WithSet;',
               caught_by: 'a_restart_while_rc_conf_is_unreadable_stops_no_row'),
+    Fault.new(name: "a restarted table that drops the recorded card's defaults for rc.conf's empty text",
+              file: "#{APP}/erx_starter.erl",
+              from: '{ok, Basis} -> make(WithSet#{basis := Basis});', to: '{ok, _Basis} -> make(WithSet);',
+              caught_by: 'a_restart_at_the_card_defaults_keeps_them'),
+    Fault.new(name: "a publication that makes the table from rc.conf's text at the card's defaults",
+              file: "#{APP}/erx_starter.erl",
+              from: '#{basis := Basis} -> apply_basis(Basis, Published)',
+              to: '#{basis := _Basis} -> apply_basis({rc_conf, <<>>}, Published)',
+              caught_by: 'a_publication_at_the_card_defaults_keeps_them'),
     Fault.new(name: 'a restarted table that forgets the package set it took',
               file: "#{APP}/erx_starter.erl",
               from: 'State#{set := erx_starter_records:recorded_set()}', to: 'State#{set := []}',
@@ -100,8 +109,8 @@ class ErxStarterTest < Minitest::Test
               caught_by: 'start_clears_the_mark_before_it_starts_the_row'),
     Fault.new(name: 'an enable that clears the mark after the table is made from its text',
               file: "#{APP}/erx_starter.erl",
-              from: "ok = clear_for_enable(Command),\n    Applied = apply_text(Text, State),",
-              to: "Applied = apply_text(Text, State),\n    ok = clear_for_enable(Command),",
+              from: "ok = clear_for_enable(Command),\n    Applied = apply_basis({rc_conf, Text}, State),",
+              to: "Applied = apply_basis({rc_conf, Text}, State),\n    ok = clear_for_enable(Command),",
               caught_by: 'enable_clears_the_mark_before_the_table_is_made'),
     Fault.new(name: 'a table that leaves a held row that is marked stopped',
               file: "#{APP}/erx_start_table.erl",
@@ -129,6 +138,10 @@ class ErxStarterTest < Minitest::Test
     Fault.new(name: 'a manifest table that reads the interface of the service after the granted one',
               file: "#{APP}/erx_starter.erl",
               from: 'lists:nth(Index + 1, ServiceRecords)', to: 'lists:nth(Index + 2, ServiceRecords)',
+              caught_by: 'only_a_granted_windows_service_is_a_display'),
+    Fault.new(name: "a table that reads a start row's published default from its enable bit",
+              file: "#{APP}/erx_starter.erl",
+              from: 'Flags band ?ERX_MF_START_PUBLISHED_ENABLED =/= 0', to: 'Flags band ?ERX_MF_START_ENABLED =/= 0',
               caught_by: 'only_a_granted_windows_service_is_a_display')
   ].freeze
 
@@ -187,8 +200,11 @@ class ErxStarterTest < Minitest::Test
     @packed_manifest ||= begin
       codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
       platform = Erx::MediumBoot.machine(Erx::Platform.development(ROOT)).record
+      # Clock's published default is off, so the table's decode of it is read apart from enable.
       source = Erx::Apps.manifest(Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT),
-                                  boot: :kept) + SCREEN
+                                  boot: :kept)
+                  .sub(Erx::Apps::START.fetch(:kept), Erx::Apps::START.fetch(:kept).sub("  enable YES\n", "  enable YES\n  published_enable NO\n")) +
+               SCREEN
       arguments = ManifestContextFixture.manifest_arguments(codec, source)
       Erx::Manifest.admit(source: source, codec: codec,
                           context: Erx::Manifest::Context.new(**arguments, platform: platform),

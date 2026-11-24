@@ -20,8 +20,10 @@ erx_start_table's; this process carries them out.
   erx_start_table:read_answered/3 decides
   what each answer leads to: a text, or no file, makes the table; a
   failure reads again after a backoff that never gives up, and the first
-  one, when no table has been made, makes it from the manifest's rows
-  alone, so they start while the storage domain is down. The first read
+  one, when no table has been made, makes it from the rows' published
+  defaults (erx_start_table:published_defaults/1), so the rows the
+  published card starts run while the storage domain is down and a row it
+  ships off, which the unread file may have left on, does not. The first read
   follows the domain service's answer that the system domain's namespace
   is in place (erx_domain:system_namespace/0), so a storage domain that
   comes up on its first boot, its grant made within the grant's deadline,
@@ -78,7 +80,7 @@ erx_start_table's; this process carries them out.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, command/1, rows/0, packages/2]).
--export_type([source/0, answer/0, run/0]).
+-export_type([source/0, answer/0, run/0, basis/0]).
 -export([manifest_table/1]).
 -export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -101,6 +103,11 @@ erx_start_table's; this process carries them out.
 %% `{failed, Reason}` for a command the table admitted that could not be
 %% carried out: rc.conf's write, or the supervisor's start, failed.
 -type answer() :: ok | {error, erx_start_table:ctl_error() | rc_conf_unread | {failed, term()}}.
+%% What the table is made from: a text of rc.conf over the manifest's and the
+%% package set's rows, the empty text being no settings, or, after a boot's
+%% read failed, the published card's defaults of those rows with no settings
+%% (erx_start_table:published_defaults/1). The keepers' branch records it.
+-type basis() :: {rc_conf, binary()} | card_defaults.
 %% Where an enabled row's session stands, from the keepers' branch alone
 %% (erx_starter_sup:held/0): `running`, its supervisor alive; `down`, its
 %% supervisor ended at its intensity; `stopped`, marked so by `stop`; or
@@ -147,8 +154,8 @@ The table: each manifest row merged, with the key `run` (run()), or
 skipped; `rc_conf`, `read` once this process's read of rc.conf has
 answered, `unread` before; and `boot_order`, the configured domains'
 names in the manifest's boot order. While rc.conf is unread the rows are
-those of the text the keepers' branch recorded, or of the manifest alone,
-and may not be what the file sets.
+those of the text the keepers' branch recorded, or the rows' published
+defaults, and may not be what the file sets.
 """.
 -spec rows() -> #{rows := [map()] | unmade, skipped := [erx_start_table:local()], rc_conf := read | unread,
                   boot_order := [binary()]}.
@@ -186,6 +193,7 @@ manifest_table({ok, Manifest}) ->
         %% "The start table's rows").
         TemplatePrincipal = fun(Session) -> maps:get(principal, lists:nth(Session + 1, Sessions)) end,
         Rows = [#{principal => Name(Principal), enable => Flags band ?ERX_MF_START_ENABLED =/= 0,
+                  published_enable => Flags band ?ERX_MF_START_PUBLISHED_ENABLED =/= 0,
                   display => display(Display, Service), restarts => Restarts, period => Period}
                 || #{principal := Principal, flags := Flags, display := Display, restarts := Restarts,
                      restart_period_s := Period} <- Starts],
@@ -254,7 +262,7 @@ init({system, Directory}) ->
 %% rows and grants are the manifest's; set is the last package set the table
 %% took, whose rows and grants follow the manifest's (rows_and_grants/1).
 init({#{rows := _, grants := _, packages := _, windows := _} = Manifest, Directory}) ->
-    {ok, Manifest#{set => [], directory => Directory, text => <<>>, local => {unread, 0}, merged => none,
+    {ok, Manifest#{set => [], directory => Directory, basis => {rc_conf, <<>>}, local => {unread, 0}, merged => none,
                    skipped => [], reader => none, writer => none, queue => queue:new(), displays => #{}},
      {continue, read}}.
 
@@ -263,13 +271,13 @@ init({#{rows := _, grants := _, packages := _, windows := _} = Manifest, Directo
 %% (namespace_answered/2). A manifest with no start row and no package process
 %% has no row to read rc.conf for. A restarted table takes the package set the
 %% keepers' branch recorded, the empty set at boot, before it makes the table
-%% from the recorded text.
+%% from the recorded basis.
 handle_continue(read, #{rows := [], packages := none} = State) ->
     {noreply, State#{local := read, merged := []}};
 handle_continue(read, State) ->
     WithSet = State#{set := erx_starter_records:recorded_set()},
     Recorded = case erx_starter_records:recorded() of
-                   {ok, Text} -> make(Text, WithSet);
+                   {ok, Basis} -> make(WithSet#{basis := Basis});
                    none -> WithSet
                end,
     {noreply, Recorded#{reader := {namespace, erx_domain:system_namespace()}}}.
@@ -367,17 +375,18 @@ effect({log, Format, Args}, State) ->
     logger:warning(Format, Args),
     State;
 effect({apply, Text}, State) ->
-    apply_text(Text, State);
+    apply_basis({rc_conf, Text}, State);
+effect(card_defaults, State) ->
+    apply_basis(card_defaults, State);
 effect({retry, Delay}, State) ->
     _ = erlang:send_after(Delay, self(), read),
     State.
 
-%% The table made from Text, rc.conf's text or the empty text of the manifest's
-%% rows alone, recorded in the keepers' branch first, with the rows' keepers
-%% reconciled with it.
-apply_text(Text, State) ->
-    ok = erx_starter_records:record(Text),
-    #{merged := After} = Made = make(Text, State),
+%% The table made from Basis, recorded in the keepers' branch first, with the
+%% rows' keepers reconciled with it.
+apply_basis(Basis, State) ->
+    ok = erx_starter_records:record(Basis),
+    #{merged := After} = Made = make(State#{basis := Basis}),
     {Rows, Stopped} = erx_starter_sup:held(),
     Held = #{Name => {running_or_down(Run), kept(Row)} || {Name, Run, Row} <- Rows},
     {Stop, Start} = erx_start_table:reconcile(Held, Stopped, After),
@@ -402,25 +411,31 @@ publish(Set, #{principals := Principals} = State) ->
     Published = lists:foldl(fun unwait/2, State#{set := Set}, Dropped),
     case Published of
         #{merged := none} -> Published;
-        #{text := Text} -> apply_text(Text, Published)
+        #{basis := Basis} -> apply_basis(Basis, Published)
     end.
 
 %% The table's rows and the `windows` services each row's principal is granted:
-%% the manifest's, then the package set's (erx_start_table:package_rows/3).
-rows_and_grants(#{rows := Rows, grants := Grants, set := Set, packages := Defaults, windows := Windows}) ->
+%% the manifest's, then the package set's (erx_start_table:package_rows/3),
+%% each at its published default while the table's basis is the card's defaults.
+rows_and_grants(#{rows := Rows, grants := Grants, set := Set, packages := Defaults, windows := Windows,
+                  basis := Basis}) ->
     {AppRows, AppGrants} = erx_start_table:package_rows(Set, defaults(Defaults), Windows),
-    {Rows ++ AppRows, maps:merge(Grants, AppGrants)}.
+    Table = case Basis of
+                card_defaults -> erx_start_table:published_defaults(Rows ++ AppRows);
+                {rc_conf, _Text} -> Rows ++ AppRows
+            end,
+    {Table, maps:merge(Grants, AppGrants)}.
 
 %% A manifest whose package rows were not read sends no set; one that does has
 %% its defaults.
 defaults(none) -> #{};
 defaults(#{} = Defaults) -> Defaults.
 
-%% The table rc.conf's Text makes, with every skipped line and refused row
+%% The table the state's basis makes, with every skipped line and refused row
 %% logged; no keeper changes.
-make(Text, State) ->
+make(State) ->
     {Rows, Grants} = rows_and_grants(State),
-    Local = case erx_start_table:parse_rc_conf(Text) of
+    Local = case erx_start_table:parse_rc_conf(text(State)) of
                 {ok, Parsed} ->
                     Parsed;
                 {error, too_large} ->
@@ -433,7 +448,11 @@ make(Text, State) ->
          || {skipped, Line, Reason} <- Skipped],
     _ = [logger:warning("erx_starter: row ~ts refused: ~0p", [Name, Reason])
          || #{principal := Name, status := {refused, Reason}} <- Merged],
-    State#{text := Text, merged := Merged, skipped := Skipped}.
+    State#{merged := Merged, skipped := Skipped}.
+
+%% The text of rc.conf the table is made from: the card's defaults set nothing.
+text(#{basis := {rc_conf, Text}}) -> Text;
+text(#{basis := card_defaults}) -> <<>>.
 
 %% ---------------------------------------------------------------------------
 %% Commands
@@ -458,9 +477,9 @@ run({packages, Lifetime, Set}, From, State) ->
 run(_Command, From, #{merged := none} = State) ->
     gen_server:reply(From, {error, rc_conf_unread}),
     next(State);
-run(Command, From, #{text := Text, local := Local} = State) ->
+run(Command, From, #{local := Local} = State) ->
     {Rows, Grants} = rows_and_grants(State),
-    case erx_start_table:apply_ctl(Command, Text, Rows, Grants) of
+    case erx_start_table:apply_ctl(Command, text(State), Rows, Grants) of
         {rc_conf, _} when Local =/= read ->
             gen_server:reply(From, {error, rc_conf_unread}),
             next(State);
@@ -491,7 +510,7 @@ act({error, _} = Refused, _State) ->
 %% starts an enabled row that is neither held nor marked.
 written(ok, From, Command, Text, State) ->
     ok = clear_for_enable(Command),
-    Applied = apply_text(Text, State),
+    Applied = apply_basis({rc_conf, Text}, State),
     gen_server:reply(From, ok),
     Applied;
 %% A write that failed may still have renamed its text over rc.conf (a

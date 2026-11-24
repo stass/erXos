@@ -280,16 +280,20 @@ start clock
   restart_period_s 600
 ```
 
-A `start` row may also say `published_enable`, `YES` or `NO`, which
-only the packer reads: the published medium's build packs it in
-`enable`'s place, and every other medium's ignores it
+A `start` row may also say `published_enable`, `YES` or `NO`, its
+*published default*, the `enable` the published card runs it with: the
+published medium's build packs it in `enable`'s place
 ([design-packaging.md](design-packaging.md#the-apps-row)). A builder's
 own card and the website's are packed from one manifest, and this is
 how they ship a row on and off: `bleuart`, a root shell over the radio,
 runs at boot on a builder's card and ships off on the published one
-([design-bluetooth.md](design-bluetooth.md#the-console)). The table
-never sees the field; the row it holds has the `enable` its medium was
-packed with.
+([design-bluetooth.md](design-bluetooth.md#the-console)). The field is
+not the packer's alone: every medium packs the published default beside
+`enable` (`mf_start_flags`' `published_enabled` in `abi/manifest.txt`),
+`enable`'s own value for a row that does not say it, and the table
+reads it at boot, and only when it cannot read `/etc/start.conf`
+([A read that cannot read the file](#the-start-table)). An app's row
+has none, so its published default is its `enable`.
 
 `/etc/start.conf` holds this machine's own settings of those rows and
 nothing else, one variable per line, in the assignment syntax of
@@ -522,11 +526,20 @@ only for a row of the boot's table that the boot had not yet recorded
 **A read that cannot read the file.** A read that fails, or finds a
 file over the bound, gives no settings, and the failure is in the log
 and at `/proc/apps`. The boot, its package set's rows included, starts
-no row the read was for: each shows `stopped`, since the file it could
-not read may disable any row, and a declared default that enables
-`bleuart` or an app would otherwise start what the administrator turned
-off. Each row starts at its own command, whose read succeeds once the
-storage domain serves, or at the next boot. An absent file is not a
+each row the read was for at its published default, `published_enable`,
+or `enable` for a row that does not say it: the file it could not read
+may disable any row, and the published card's defaults are the ones
+chosen for a machine whose settings nobody knows, so the kiosk, which
+the published card runs, starts, and `bleuart`, a root shell over the
+radio that a builder's card enables, does not. A row its published
+default leaves off shows `disabled`. The start service reads the file
+again after a delay that doubles from a second to a minute and then
+stays there, so it never gives up, and the first read that succeeds
+makes the table from the file: the rows it enables start and the rows
+it disables stop. That read is the boot's application of the file:
+the published defaults apply no file, so they leave the boot mark
+([Concurrency](#concurrency)) unset, and a restarted table reads the
+file again to finish the boot. An absent file is not a
 failed read: it is a machine with no settings of its own, and so is a
 machine whose manifest grants the system domain no `data` facet, where
 the build proved that no file can exist and the boot reads none. A
@@ -1108,12 +1121,12 @@ and starts a row of an install or an update only by its own command.
 
 | Failure | Detected by | What happens |
 | --- | --- | --- |
-| the storage domain is down at boot, ends before it reports ready, or does not make the system domain's grant within the mint core's deadline | the first read of `start.conf`, which follows the system domain's namespace being in place ([design-system.md](design-system.md#a-session-takes-the-console)), fails, since the system domain's `data` grant is absent | no row the read was for starts, each shows `stopped`, and `/proc/apps` shows `start_conf` as `failed` with its reason; nothing reads the file again for those rows, and each starts at its own command, whose read succeeds once the storage domain serves, or at the next boot |
+| the storage domain is down at boot, ends before it reports ready, or does not make the system domain's grant within the mint core's deadline | the first read of `start.conf`, which follows the system domain's namespace being in place ([design-system.md](design-system.md#a-session-takes-the-console)), fails, since the system domain's `data` grant is absent | each row the read was for starts at its published default, so a row the published card ships off, `bleuart`'s among them, does not start and shows `disabled`, and `/proc/apps` shows `start_conf` as `failed` with its reason; the start service reads the file again after a delay that doubles from a second to a minute, never giving up, and the first read that succeeds makes the table from the file, starting the rows it enables and stopping the rows it disables |
 | the principal has no room | the domain library's plan | the start is refused with `quota` or `no_memory`; a kept row counts it as an end |
 | a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` or the next boot |
 | a local setting names a display the template is not granted, or one a kept row holds | the admission | at boot the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps` and starts nothing; at a `start` or `restart` the command answers `eperm` or `ebusy`, with the reason in the log, and changes nothing |
 | `start.conf` is damaged, holds `sh` the reader does not take, or names a row the table does not hold | the settings judgement, at every read | each problem line is skipped and shown at `/proc/apps` with its line, and the rest stands; `service -c` prints them |
-| `start.conf` is longer than 64 KiB | the table's reader | reported at `/proc/apps` as `too_long` and handled as a read that fails: at boot no row it was for starts, the boot's package set's rows included, as in the first row, and as in the next row at a command |
+| `start.conf` is longer than 64 KiB | the table's reader | reported at `/proc/apps` as `too_long` and handled as a read that fails: at boot each row it was for, the boot's package set's rows included, starts at its published default, as in the first row, and as in the next row at a command |
 | an `enable` or `disable` whose new text would be longer than `start_conf_max` | the start service, before it writes | `efbig`; the file is left as it was, so no edit of the start service ever makes a file every later read takes as `too_long` |
 | a read of `start.conf` fails at a command | `erx_starter_rc`'s answer | `start`, `restart`, `onestart` and `onerestart` answer `eio` and change nothing; `stop` and `onestop` are judged on the row as it was last applied and end the session that runs ([How a command is judged](#how-a-command-is-judged)); no other row changes, and the failure is logged and shown at `/proc/apps` |
 | a purge arrives while the package process carries out an install, update or removal | nothing: it is the order the package process takes them in | the `ctl` write's callback waits in the writer's grant for the purge's answer while the table takes the operation's publication; the purge is carried out after it, and a later `ctl` write of the same client waits for the purge |
@@ -1250,6 +1263,9 @@ durability runs over the storage power-cut harness's simulated medium
   starts a row declared `enable YES` whose record is disabled; the `eio`
   refusal applied to every command, which refuses the `stop` of a kept
   row;
+* a read that fails at boot: a table made from the manifest's `enable`,
+  which starts a row that says `enable YES` and `published_enable NO`;
+  published defaults that keep each row's `enable`, the same;
 * a read that fails at a command: a command that reads the failure as a
   file with no settings, which starts a row the file disabled; a start
   service that answers `eio` to every command whose read fails, which
@@ -1325,10 +1341,11 @@ variable left out of the reserve, which admits the third.
   keeper that does not clear the count;
 * the states the inspector shows, each with a test: `refused` with its
   reason, `down`, `disabled`, `stopped`, `installed`, and `start_conf`
-  `failed` after a seeded read failure, under a row the file disables
-  and a row whose declared default enables, where neither starts;
+  `failed` after a seeded read failure, under a row that says
+  `enable YES` and `published_enable NO`, which does not start, and a
+  row that says `enable NO` and `published_enable YES`, which starts;
   seeded: a boot that reads the failure as a file with no settings,
-  which starts the second; and `read` on a manifest that grants the
+  which starts the first and not the second; and `read` on a manifest that grants the
   system domain no `data` facet, where the manifest's enabled rows run;
   seeded: a boot that counts that machine's missing file as a failed
   read, which starts none.
@@ -1436,8 +1453,9 @@ Decisions:
     `enable` and `disable` answer `eio` and write nothing, and `stop` and
     `onestop` are judged on the row as it was last applied, so an
     administrator can always stop a running row; a boot whose read
-    fails starts no row the read was for, so a row the administrator
-    disabled never starts on a failed read, while a machine whose
+    fails starts each row the read was for at its published default,
+    so a failed read starts only what the published card runs, never a
+    row it ships off such as `bleuart`, while a machine whose
     manifest grants the system domain no `data` facet has no file and
     starts what its build proved
     ([A read that cannot read the file](#the-start-table)).

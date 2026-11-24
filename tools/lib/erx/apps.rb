@@ -192,7 +192,7 @@ module Erx
     # of clock's row: for a row left off, the state disabled and the fields rc.conf set,
     # and the error scope where no row exists. It waits for rc.conf to be read, not only
     # for the table to be made: while rc.conf cannot be read the table holds the
-    # manifest's rows alone, which would start a row that rc.conf disables. Ahead of the
+    # rows at their published defaults, which may start a row that rc.conf disables. Ahead of the
     # answer it prints the lines of /proc/kernel/log that may be clock's, for reports!.
     NO_CLOCK = "#{HELPERS}CkRead = fun CkM(0) -> timeout; CkM(CkN) -> case erx_inspector:inspect([apps]) of " \
                '{ok, #{attrs := #{rc_conf := {_, {ok, read}}}}} -> read; _ -> timer:sleep(500), CkM(CkN - 1) end end, ' \

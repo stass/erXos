@@ -52,8 +52,9 @@ so every decision is tested with made-up manifests.
 * **Reading rc.conf.** read_answered/3 decides what one answer of the
   table's read of rc.conf leads to: the table made from the text, or,
   for a failed read, the next read after a backoff that grows to a
-  minute and never gives up, the manifest's rows alone when no table has
-  been made yet, and a log line at the 1st, 2nd, 4th, 8th... failure.
+  minute and never gives up, the table made from the rows' published
+  defaults (published_defaults/1) when none has been made yet, and a log
+  line at the 1st, 2nd, 4th, 8th... failure.
 
 No reason, value or name made from input is an atom: every atom here is
 a literal of this module.
@@ -62,7 +63,8 @@ a literal of this module.
 -include("generated/erx_abi.hrl").
 
 -export([parse_rc_conf/1, merge/3, parse_ctl/1, set/3]).
--export([apply_ctl/4, ctl_errno/1, reconcile/3, kept/1, package_rows/3, read_answered/3, rc_conf_limit/0]).
+-export([apply_ctl/4, ctl_errno/1, reconcile/3, kept/1, package_rows/3, read_answered/3, published_defaults/1,
+         rc_conf_limit/0]).
 
 -export_type([row/0, field/0, value/0, local/0, merged/0, command/0, action/0, ctl_error/0, kept/0, held/0]).
 -export_type([reading/0, read_answer/0, read_effect/0]).
@@ -80,7 +82,11 @@ a literal of this module.
 -type name() :: binary().
 -type field() :: enable | display | restarts | period.
 -type value() :: boolean() | none | name() | non_neg_integer().
--type row() :: #{principal := name(), enable := boolean(),
+%% A row of the manifest or of an app, with its published default,
+%% published_enable, the enable the published card is packed with, which the
+%% table reads only when rc.conf cannot be read (published_defaults/1); an
+%% app's is its enable.
+-type row() :: #{principal := name(), enable := boolean(), published_enable := boolean(),
                  display := none | name(),
                  restarts := non_neg_integer(), period := pos_integer()}.
 %% Why a line of rc.conf is skipped: a closed set, so the start service shows
@@ -95,7 +101,7 @@ a literal of this module.
                             | {past_ceiling, restarts | period}}.
 %% A merged row: the manifest's row with the settings applied, which fields
 %% rc.conf set, and whether the table takes it.
--type merged() :: #{principal := name(), enable := boolean(),
+-type merged() :: #{principal := name(), enable := boolean(), published_enable := boolean(),
                     display := none | name(),
                     restarts := non_neg_integer(), period := pos_integer(),
                     from_rc_conf := [field()], status := status()}.
@@ -122,9 +128,11 @@ a literal of this module.
 %% the reader included.
 -type read_answer() :: {ok, binary()} | absent | {error, term()}.
 %% What the table does on an answer, in order: make the table from a text of
-%% rc.conf, the empty text being the manifest's rows alone, read again after
-%% a delay, or log a warning.
--type read_effect() :: {apply, binary()} | {retry, pos_integer()}
+%% rc.conf, the empty text being the manifest's rows alone, make it from the
+%% rows at the published card's defaults with no settings (card_defaults,
+%% published_defaults/1), read again after a delay, or
+%% log a warning.
+-type read_effect() :: {apply, binary()} | card_defaults | {retry, pos_integer()}
                      | {log, io:format(), [term()]}.
 
 %% ---------------------------------------------------------------------------
@@ -515,9 +523,10 @@ intensity. An app's grants are the needs among Windows, the manifest's
 -spec package_rows([erx_pkg_plan:published()], #{name() => boolean()}, [name()]) ->
           {[row()], #{name() => [name()]}}.
 package_rows(Set, Enabled, Windows) ->
-    Rows = [#{principal => Name, enable => Place =:= system andalso maps:get(Name, Enabled, false),
-              display => Display, restarts => ?ERX_START_RESTARTS_DEFAULT, period => ?ERX_START_PERIOD_DEFAULT_S}
-            || #{name := Name, place := Place, admitted := #{display := Display}} <- Set],
+    Rows = [#{principal => Name, enable => Enable, published_enable => Enable, display => Display,
+              restarts => ?ERX_START_RESTARTS_DEFAULT, period => ?ERX_START_PERIOD_DEFAULT_S}
+            || #{name := Name, place := Place, admitted := #{display := Display}} <- Set,
+               Enable <- [Place =:= system andalso maps:get(Name, Enabled, false)]],
     Grants = #{Name => [Need || Need <- Needs, lists:member(Need, Windows)]
                || #{name := Name, checked := #{header := #{needs := Needs}}} <- Set},
     {Rows, Grants}.
@@ -531,23 +540,26 @@ kept(Merged) ->
 -doc """
 What Answer, one answer of the table's read of rc.conf, leads to, when the
 read had failed Failures times before and Made says whether the table has
-been made, from a record of an earlier table or from the manifest's rows:
+been made, from a record of an earlier table or from the published defaults:
 the next reading() and the effects to carry out in order. A text, or no
-file, which is a machine with no settings, makes the table. A failure
-reads again after a delay that doubles from a second to a minute and then
+file, which is a machine with no settings, makes the table. A failure,
+a text over the bound among them, reads again after a delay that doubles from a second to a minute and then
 stays there, so the read never gives up; the first one, when no table has
-been made, makes it from the manifest's rows alone, the empty text. The 1st, 2nd, 4th,
-8th... failure logs a line, so a file that stays unreadable is reported
-without a line per minute.
+been made, makes it from the rows' published defaults, since the file it
+could not read may disable any row (docs/design-apps.md, "A read that
+cannot read the file"). The 1st, 2nd, 4th, 8th... failure logs a line, so
+a file that stays unreadable is reported without a line per minute.
 """.
 -spec read_answered(read_answer(), {unread, non_neg_integer()}, boolean()) -> {reading(), [read_effect()]}.
+read_answered({ok, Text}, Reading, Made) when byte_size(Text) > ?ERX_START_RC_CONF_MAX ->
+    read_answered({error, too_long}, Reading, Made);
 read_answered({error, Reason}, {unread, Failures}, Made) ->
     Count = Failures + 1,
     Delay = min(?LAST_RETRY_MS, ?FIRST_RETRY_MS bsl min(Failures, 16)),
     Log = [{log, "erx_starter: rc.conf cannot be read (failure ~b): ~0P; reading again in ~b ms",
             [Count, Reason, 8, Delay]} || Count band (Count - 1) =:= 0],
-    Manifest = [{apply, <<>>} || not Made],
-    {{unread, Count}, Log ++ Manifest ++ [{retry, Delay}]};
+    Defaults = [card_defaults || not Made],
+    {{unread, Count}, Log ++ Defaults ++ [{retry, Delay}]};
 read_answered(Answer, {unread, Failures}, _Made) ->
     Text = case Answer of
                {ok, Read} -> Read;
@@ -555,6 +567,15 @@ read_answered(Answer, {unread, Failures}, _Made) ->
            end,
     Log = [{log, "erx_starter: rc.conf read after ~b failures", [Failures]} || Failures > 0],
     {read, Log ++ [{apply, Text}]}.
+
+-doc """
+Rows, each at its published default: the `enable` the published card is
+packed with, its published_enable. A boot whose read of rc.conf fails
+makes its table from these, with no settings.
+""".
+-spec published_defaults([row()]) -> [row()].
+published_defaults(Rows) ->
+    [Row#{enable := maps:get(published_enable, Row)} || Row <- Rows].
 
 -doc "The largest rc.conf the table reads, in bytes; a longer file sets nothing.".
 -spec rc_conf_limit() -> pos_integer().

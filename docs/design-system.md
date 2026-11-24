@@ -1255,9 +1255,11 @@ in place before anyone can connect to it.
   domain comes up on its first start and makes the grant within the mint
   core's deadline the read finds the machine's settings before any row
   starts. On one whose storage domain is down, ends before it reports
-  ready, or misses the deadline, the read fails and no row starts, since
-  the unread file may disable any of them, and each row starts at its
-  own command, whose read then succeeds, or at the next boot
+  ready, or misses the deadline, the read fails and each row starts at
+  its published default, the `enable` the published card runs it with,
+  since the unread file may disable any of them; the start service reads
+  the file again until a read succeeds, and the table is then made from
+  it
   ([design-apps.md](design-apps.md#failure-handling-diagnostics-and-debuggability)).
 * **A display's row.** The start table starts a row that names a
   display only once that display's server has settled, by the same rule

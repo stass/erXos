@@ -13,9 +13,12 @@
 
 %% logger is enabled on display d1; kiosk is granted d1 too; clock is granted none.
 rows() ->
-    [#{principal => <<"clock">>, enable => false, display => none, restarts => 5, period => 600},
-     #{principal => <<"kiosk">>, enable => false, display => none, restarts => 5, period => 600},
-     #{principal => <<"logger">>, enable => true, display => <<"d1">>, restarts => 5, period => 600}].
+    [#{principal => <<"clock">>, enable => false, published_enable => false,
+       display => none, restarts => 5, period => 600},
+     #{principal => <<"kiosk">>, enable => false, published_enable => false,
+       display => none, restarts => 5, period => 600},
+     #{principal => <<"logger">>, enable => true, published_enable => true,
+       display => <<"d1">>, restarts => 5, period => 600}].
 
 grants() ->
     #{<<"kiosk">> => [<<"d1">>], <<"logger">> => [<<"d1">>]}.

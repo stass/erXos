@@ -417,6 +417,12 @@ module Erx
       # counts the row the same way whether or not the manifest has one.
       AppsRow = Data.define(:memory, :services, :max, :gatt)
       NO_APPS = AppsRow.new(memory: 0, services: [].freeze, max: 0, gatt: [].freeze)
+      # The start rows a boot may start together, each a bit of mf_start_flags and how a
+      # refusal names its rows: those enabled, which a read of the settings file
+      # starts with no settings, and those the published default enables, which a boot
+      # that cannot read the file starts (docs/design-apps.md, "A read that cannot read
+      # the file"). The display and session checks hold for each.
+      START_SETS = { 'enabled' => 'enabled', 'published_enabled' => 'published-default enabled' }.freeze
       # A package row of the image, bound to its package artifact (check_packages): its
       # app's name, its header's SHA-256 in hexadecimal, whether its row is enabled and
       # the memory its declaration asks.
@@ -2215,7 +2221,7 @@ module Erx
         end
         check_package_gatt(artifacts.map { |record, package| [record.name, package.fetch('gatt')] })
         rows = artifacts.map do |record, package|
-          enabled = record.properties.key?('enable') && start_flags(record).positive?
+          enabled = record.properties.key?('enable') && yes?(record, 'enable')
           Package.new(name: record.name, sha256: package.fetch('sha256'), enabled: enabled, memory: package.fetch('memory'))
         end
         memory = rows.select(&:enabled).sum(&:memory)
@@ -2256,17 +2262,19 @@ module Erx
       # defaults applied: enabled, no display and start_restarts_default ends in
       # start_period_default_s seconds (abi/manifest.txt). Property 17's structural clauses: a row is keyed
       # by its principal's name, so the frontend gives a principal at most one, and that
-      # principal has a session template; no two enabled rows name one display; and a
+      # principal has a session template; no two enabled rows name one display, nor two
+      # rows the published default enables (START_SETS); and a
       # display is a service of the windows interface that a facet row grants the
       # principal's template. Property 17's last
       # clause, that the enabled rows' sessions fit beside the configured domains, is the
       # domain library's judgment, in check_plans.
       def normalize_starts(services, tables)
         rows = records('start').map { |record| start_row(record, services, tables.fetch('sessions')) }
-        enabled = @codec.member('mf_start_flags', 'enabled')
         none = @codec.constant('mf_none')
-        displays = rows.select { |row| (row.fetch('flags') & enabled) != 0 }.map { |row| row.fetch('display') } - [none]
-        invalid('two enabled start rows name one display', 'start.display') unless displays.uniq.size == displays.size
+        START_SETS.each do |bit, what|
+          displays = started(rows, bit).map { |row| row.fetch('display') } - [none]
+          invalid("two #{what} start rows name one display", 'start.display') unless displays.uniq.size == displays.size
+        end
         rows.reject { |row| row.fetch('display') == none }.each { |row| check_start_display(row, tables) }
         rows.sort_by { |row| row.fetch('principal') }
       end
@@ -2281,7 +2289,7 @@ module Erx
           sessions.any? { |row| row.fetch('principal') == principal }
         stated = ->(key, default, &value) { record.properties.key?(key) ? value.call(key) : default }
         row = { 'principal' => principal,
-                'flags' => stated.call('enable', @codec.member('mf_start_flags', 'enabled')) { start_flags(record) },
+                'flags' => start_flags(record),
                 'display' => stated.call('display', @codec.constant('mf_none')) { start_display(record, services) },
                 'restarts' => stated.call('restarts', @codec.constant('start_restarts_default')) { |key| number(record, key) },
                 'restart_period_s' => stated.call('restart_period_s', @codec.constant('start_period_default_s')) { |key| number(record, key) } }
@@ -2297,11 +2305,21 @@ module Erx
         invalid("a start row's #{key} is over #{ceiling}", "start.#{key}") if row.fetch(key) > ceiling
       end
 
-      # A row's enable: YES or NO, as rc.conf(5) writes it.
+      # A row's enable or published_enable, Key: YES or NO, as rc.conf(5) writes it.
+      def yes?(record, key)
+        token = one(record, key)
+        record.line.fail!("#{key} is YES or NO") if token.quoted || !%w[YES NO].include?(token.value)
+        token.value == 'YES'
+      end
+
+      # A start row's flags: enabled unless its enable says NO, and published_enabled
+      # as its published_enable says or, where it says none, as enabled
+      # (docs/design-apps.md, "The start table").
       def start_flags(record)
-        token = one(record, 'enable')
-        record.line.fail!('enable is YES or NO') if token.quoted || !%w[YES NO].include?(token.value)
-        token.value == 'YES' ? @codec.member('mf_start_flags', 'enabled') : 0
+        enabled = !record.properties.key?('enable') || yes?(record, 'enable')
+        published = record.properties.key?('published_enable') ? yes?(record, 'published_enable') : enabled
+        { 'enabled' => enabled, 'published_enabled' => published }
+          .sum { |bit, on| on ? @codec.member('mf_start_flags', bit) : 0 }
       end
 
       # A row's display, @service.NAME, as the service's index in the sorted service table.
@@ -3307,15 +3325,24 @@ module Erx
       # its reserve) and the connection rows are the library's own judgment, in its own
       # arithmetic. Then, property 17's planning clause, it plans the sessions the boot
       # starts after them, in the boot's order (planned_sessions): root's console
-      # session, and then each enabled start row's. So an enabled row whose principal
-      # cannot hold its session beside the configured domains and the sessions before it
-      # fails the build, and so does a system principal that cannot hold root's console
-      # session. A build passes a planner always; without one, a manifest with no domains
-      # and no session to plan is not planned, and any other fails closed.
+      # session, and then each start row's of one of START_SETS, once for each set that
+      # starts different sessions. So a row whose principal cannot hold its session beside
+      # the configured domains and the sessions before it fails the build, and so does a
+      # system principal that cannot hold root's console session. A build passes a planner
+      # always; without one, a manifest with no domains and no session to plan is not
+      # planned, and any other fails closed.
       def check_plans(bytes, normalized)
         rows = normalized.fetch('tables')
+        system_principal = normalized.fetch('header').fetch('system_principal')
+        START_SETS
+          .map { |bit, what| planned_sessions(rows, system_principal, bit: bit, what: what) }
+          .uniq { |sessions| sessions.map { |session| session.fetch('template') } }
+          .each { |sessions| check_plan(bytes, rows, sessions) }
+      end
+
+      # check_plans for one boot's Sessions.
+      def check_plan(bytes, rows, sessions)
         domains = rows.fetch('domains')
-        sessions = planned_sessions(rows, normalized.fetch('header').fetch('system_principal'))
         unless @planner
           return if domains.empty? && sessions.empty?
 
@@ -3346,28 +3373,36 @@ module Erx
       # the system principal's template: the reader requires a console line, which
       # logs root in at boot in a development build and must let root log in in any
       # build, so it is planned whenever that template exists; a system principal with
-      # none gives the console no session to count. Then each enabled start row's.
-      def planned_sessions(rows, system_principal)
+      # none gives the console no session to count. Then the session of each start row
+      # whose flags have Bit, What naming such a row.
+      def planned_sessions(rows, system_principal, bit:, what:)
         principals = rows.fetch('principals')
         console = rows.fetch('sessions').each_index.select do |index|
           rows.fetch('sessions').fetch(index).fetch('principal') == system_principal
         end
         console.map { |template| { 'template' => template, 'what' => "the console's session of root", 'field' => 'machine.console' } } +
-          enabled_starts(rows).map do |start|
+          starts(rows, bit).map do |start|
             name = principals.fetch(start.fetch('principal')).fetch('name')
-            { 'template' => start.fetch('template'), 'what' => "the session of start row #{name}", 'field' => 'start' }
+            { 'template' => start.fetch('template'), 'what' => "the session of #{what} start row #{name}",
+              'field' => 'start' }
           end
       end
 
-      # The enabled start rows, in the start table's order, each its principal's index
-      # and the index of that principal's session template, which property 17's
-      # structural clauses make exist and the session table holds one per principal.
-      def enabled_starts(rows)
-        enabled = @codec.member('mf_start_flags', 'enabled')
+      # The start rows whose flags have Bit, in the start table's order, each its
+      # principal's index and the index of that principal's session template, which
+      # property 17's structural clauses make exist and the session table holds one per
+      # principal.
+      def starts(rows, bit)
         template = rows.fetch('sessions').each_with_index.to_h { |row, index| [row.fetch('principal'), index] }
-        rows.fetch('starts').select { |row| (row.fetch('flags') & enabled) != 0 }.map do |row|
+        started(rows.fetch('starts'), bit).map do |row|
           { 'principal' => row.fetch('principal'), 'template' => template.fetch(row.fetch('principal')) }
         end
+      end
+
+      # The start rows whose flags have bit Bit of mf_start_flags.
+      def started(starts, bit)
+        mask = @codec.member('mf_start_flags', bit)
+        starts.select { |row| (row.fetch('flags') & mask) != 0 }
       end
 
       # Refuses the manifest naming what the library refused; status 0 passes.

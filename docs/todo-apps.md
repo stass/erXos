@@ -205,7 +205,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     host test against the host's `sh` and a fuzz target, replacing `parse_rc_conf/1` and `erx_rc_conf_fuzz`; a
     variable's row found from the field name that ends it, not a split at the last `_`;
     `erx_start_settings:judge/2` returning each read's problems with their lines, shown at `/proc/apps` as
-    `problems`, with `start_conf` in place of `rc_conf` (`abi/inspection.txt`); `service -c [FILE]`, which checks row names only where `/proc/apps` lists the rows and says so elsewhere;
+    `problems`, with `start_conf`, which tells `failed` with its reason and `too_long`, in place of `rc_conf`,
+    which tells only `read` and `unread` (`abi/inspection.txt`); `service -c [FILE]`, which checks row names only where `/proc/apps` lists the rows and says so elsewhere;
     `judge/2` takes row names (or `any`) and no grants: a display line is judged for its form alone, and the
     admission refuses a display the principal may not draw on;
   * names: a row's variable name is its principal's name with each `-` replaced by `_`; the manifest check
@@ -225,10 +226,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     `service -e` judges `/etc/start.conf` itself with the rows' `declared_enable`;
   * applying: a command applies the file to its own row alone and the whole file applies only at boot, so
     `erx_start_table:reconcile/3`, the stopped marks, the recorded text, the restart of a running row whose
-    settings changed, the comparison `erx_starter:kept/1` serves and the failed read's retry with backoff go;
+    settings changed, the comparison `erx_starter:kept/1` serves go;
     the records process holds each row's applied record and the boot mark; the display rule judges a row
-    against the rows kept, so `merge/3` becomes `merge/4`; a failed read counts as a file with no settings at
-    boot, while at a command `start`, `restart`, `onestart` and `onerestart` answer `eio` and `stop` and
+    against the rows kept, so `merge/3` becomes `merge/4`; a failed read at boot starts the rows at their published
+    defaults and leaves the boot mark unset until a later read applies the file, while at a command `start`, `restart`, `onestart` and `onerestart` answer `eio` and `stop` and
     `onestop` are judged on the row as last applied; the boot applies the file to the rows of the boot's
     package set when it arrives, and a later publication records the rows it adds `installed` and starts
     nothing; a restarted table reads the file only to finish a boot the mark says is not done; the keeper waits
@@ -313,8 +314,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   boot order; and no test reads `manifest_table/1`'s boot order from a packed manifest, which the QEMU
   `service -e` checkpoint checks only by its exit status.
 * [Low] `erx_starter_rc:read/1` treats `enoent` as a machine with no `rc.conf`. If a storage domain that is down
-  answers `enoent` under `/data` rather than another error, the boot's read finds no settings, as a failed read
-  would, but `/proc/apps` shows `rc_conf` as `read` rather than `failed`; and the shell's `enable` or `disable`,
+  answers `enoent` under `/data` rather than another error, the boot's read finds no settings and starts each row
+  at its manifest `enable` rather than at its published default, as a failed read would, and `/proc/apps` shows
+  `rc_conf` as `read` rather than `failed`; and the shell's `enable` or `disable`,
   reading the same answer, would write a file of its one line over the real one if its write then succeeded,
   losing the other settings. An absent `data` grant answers `eio` (`erx_path`); check what a live but failing
   storage domain answers.
@@ -462,11 +464,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the rooting rests on `erx_fs_grant` building nodes only from the callbacks' answers (`erx_lfs` should check
   each path against its grant's root, as `tree apps` will need); and a file at `/packages`, or a directory a
   full volume cannot make, leaves the tree failing its requests without a diagnostic at attach.
-* [High] apps, the built boot's fallback at a failed read of the start table's file
-  (`erlang/apps/erx_starter/src/erx_start_table.erl`, `read_answered/3`): the first failed read makes the table
-  from the manifest's rows alone and starts every row their defaults enable, so a row an administrator
-  disabled, `bleuart`'s among them, starts on such a boot. [design-apps.md](design-apps.md#the-start-table)
-  ("A read that cannot read the file", decision 10) starts no row; fix it with the seeded tests that section names.
 
 ## Planned features
 
