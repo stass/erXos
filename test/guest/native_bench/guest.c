@@ -230,44 +230,10 @@ bench_thread_start(uint32_t index, uint32_t cpu, uint32_t thread_class, void (*e
 		bench_fail("erx: bench: no thread FAILED\n");
 }
 
-/* The ERX_BENCH_LARGEST largest of n values, largest first, earlier first among equals. */
-static size_t
-largest_of(const uint64_t *samples, size_t n, erx_bench_sample_t *top)
-{
-	size_t kept = 0;
-
-	for (size_t at = 0; at < n; at++) {
-		size_t place = kept;
-
-		while (place > 0 && top[place - 1].value < samples[at])
-			place--;
-		if (place >= ERX_BENCH_LARGEST)
-			continue;
-		for (size_t move = kept < ERX_BENCH_LARGEST ? kept : ERX_BENCH_LARGEST - 1; move > place; move--)
-			top[move] = top[move - 1];
-		top[place] = (erx_bench_sample_t){ .sequence = at, .value = samples[at] };
-		if (kept < ERX_BENCH_LARGEST)
-			kept++;
-	}
-	return (kept);
-}
-
 void
 bench_summarize(erx_bench_cell_t *cell, const uint64_t *samples, size_t n, erx_bench_sample_t *top)
 {
-	for (size_t at = 0; at < ERX_BENCH_HIST_BUCKETS; at++)
-		bench_hist.count[at] = 0;
-	bench_hist.samples = 0;
-	cell->min = UINT64_MAX;
-	cell->max = 0;
-	for (size_t at = 0; at < n; at++) {
-		erx_bench_hist_add(&bench_hist, samples[at]);
-		cell->min = samples[at] < cell->min ? samples[at] : cell->min;
-		cell->max = samples[at] > cell->max ? samples[at] : cell->max;
-	}
-	cell->hist = &bench_hist;
-	cell->largest = top;
-	cell->nlargest = largest_of(samples, n, top);
+	erx_bench_cell_summarize(cell, &bench_hist, samples, n, top);
 }
 
 static void

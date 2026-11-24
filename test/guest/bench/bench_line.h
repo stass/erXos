@@ -113,5 +113,12 @@ size_t erx_bench_line_clock(char *buf, size_t size, const erx_bench_calibration_
 /* A sustained cell's WINDOW line for thread's window (docs/design-bench.md, "A sustained cell"). */
 size_t erx_bench_line_window(char *buf, size_t size, uint32_t window, uint32_t thread,
     const erx_bench_window_t *kept);
+/*
+ * Fills cell's histogram, extremes and largest samples from n samples: hist, cleared and
+ * filled here, becomes cell's histogram, and top, of ERX_BENCH_LARGEST entries, its
+ * largest samples. The status and the rest are the caller's.
+ */
+void erx_bench_cell_summarize(erx_bench_cell_t *cell, erx_bench_hist_t *hist, const uint64_t *samples, size_t n,
+    erx_bench_sample_t *top);
 
 #endif

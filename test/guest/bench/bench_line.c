@@ -314,3 +314,44 @@ erx_bench_line_window(char *buf, size_t size, uint32_t window, uint32_t thread, 
 	number(&t, "waited", kept->waited);
 	return (finish(&t));
 }
+
+/* The ERX_BENCH_LARGEST largest of n values, largest first, earlier first among equals. */
+static size_t
+largest_of(const uint64_t *samples, size_t n, erx_bench_sample_t *top)
+{
+	size_t kept = 0;
+
+	for (size_t at = 0; at < n; at++) {
+		size_t place = kept;
+
+		while (place > 0 && top[place - 1].value < samples[at])
+			place--;
+		if (place >= ERX_BENCH_LARGEST)
+			continue;
+		for (size_t move = kept < ERX_BENCH_LARGEST ? kept : ERX_BENCH_LARGEST - 1; move > place; move--)
+			top[move] = top[move - 1];
+		top[place] = (erx_bench_sample_t){ .sequence = at, .value = samples[at] };
+		if (kept < ERX_BENCH_LARGEST)
+			kept++;
+	}
+	return (kept);
+}
+
+void
+erx_bench_cell_summarize(erx_bench_cell_t *cell, erx_bench_hist_t *hist, const uint64_t *samples, size_t n,
+    erx_bench_sample_t *top)
+{
+	for (size_t at = 0; at < ERX_BENCH_HIST_BUCKETS; at++)
+		hist->count[at] = 0;
+	hist->samples = 0;
+	cell->min = UINT64_MAX;
+	cell->max = 0;
+	for (size_t at = 0; at < n; at++) {
+		erx_bench_hist_add(hist, samples[at]);
+		cell->min = samples[at] < cell->min ? samples[at] : cell->min;
+		cell->max = samples[at] > cell->max ? samples[at] : cell->max;
+	}
+	cell->hist = hist;
+	cell->largest = top;
+	cell->nlargest = largest_of(samples, n, top);
+}
