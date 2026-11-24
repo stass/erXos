@@ -109,14 +109,29 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      FAT32 and EROFS; a host tool that writes a littlefs volume's files with `erx_lfs_config`; an MBR and
      a GPT writer; signature-only images of the refused formats), and the QEMU cases of design-drives.md
      in the `usb` suite, over its stick plumbing.
-  * [Low] `erx_blk_drive_facet` and `erx_blk_drive_proxy`: design-drives.md's verification cases
-    not yet tested, beyond a second domain's request, one past `max_request` and the grant ending
-    before it answers (`erx_blk_drive_facet_tests`): the facet finding the grant afresh at each ask
-    across a grant's restart, the facet's own `{error, no_medium}` while Find answers `none`, the
-    proxy's end past `max_heap_size`, and the mint process itself (`start_mint/1` providing `drive`
-    and starting one facet per request). The facet process runs without the grant's
-    `max_heap_size`, which `erx_facet:start/3` does not apply to the facets it starts, though
-    design-drives.md says the facet and its proxy each run with it.
+  * [Medium] The drive grant (`erx_blk_drive`) holds every ask that arrives while a medium ends,
+    those of proxies the facet has since ended included, and answers the one window to all of them:
+    the held list grows with each re-ask during a stuck end, outside any `max_heap_size`, and a
+    second live asker would get a second proxy on one window. The grant should monitor each held
+    asker and drop it at its end, so at most one live ask is held by construction.
+  * [Medium] `erx_media_drive` makes its 60 s ask inside `handle_call`, so walks queue one behind
+    another and each may ask again; the ask should go out with `gen_server:send_request/2` and its
+    one answer serve every waiting caller, as "Concurrency" says two walks share one reading.
+  * [Medium] The drive's facet runs without the grant's `max_heap_size`, which `erx_facet:start/3`
+    applies to no facet (`erx_facet`'s heap-limit residual), though design-drives.md says the facet
+    and its proxy each run with it.
+  * [Low] The drive facet and proxy's untested verification cases: the facet finding the grant
+    afresh across a grant's restart, its own `{error, no_medium}` while Find answers `none`, the
+    proxy's end past `max_heap_size`, and the mint process itself (`start_mint/1`).
+  * [Low] Smaller review findings of the drive facet, proxy and drive process: the facet's
+    `init/1` checks its limits' presence and not their types, so a grant missing `exports` or with
+    a bad `max_heap_size` fails at the first ask, not by a named refusal; the proxy's export module
+    is the grant map's while the facet's is `erx_facet:start/3`'s option, two sources for one fact;
+    a failed export crashes the proxy by badmatch instead of ending it quietly;
+    `erx_media_sup:drive/1` relies on its caller's registry check and matches no `already_present`;
+    the 60 s ask is written in `erx_media_drive` and `erx_blk_drive` both; the proxy's loop state
+    has no type of its own; `erx_media_drive_tests` kills the proxy without waiting for its
+    `'DOWN'` before the next ask, a race.
   Open findings of step 3's reviews:
   * [Medium] `erx_lfs` lies in `erx_storage`, which the media domain's release may not name, so
     step 4's littlefs volumes need it moved to an application of its own, as `erx_fat_read` moved to
