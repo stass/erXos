@@ -129,11 +129,11 @@ void erx_console_ring_take(erx_console_ring_t *ring,
 
 /*
  * Vlog operation 5, and the head of every stop's report. Moves any route to
- * closed, taking back and counting a line open in the ring, and ends any
- * drop, so the stop's report that follows reaches the UART whole; the rest
- * of the counted line, if it arrives after the close, goes to the UART raw.
- * Returns
- * whether this call closed it: only then does the caller
+ * closed, keeping a line open in the ring as the ring's last line, which the
+ * drain writes out with the others, and ends any drop, so the stop's report
+ * that follows reaches the UART whole; the rest of the open line, if it
+ * arrives after the close, goes to the UART raw. Returns whether this call
+ * closed it: only then does the caller
  * write the ring out, through erx_console_ring_drain, so a stop inside that
  * write finds the route closed and its close does nothing.
  */
@@ -141,7 +141,8 @@ bool erx_console_ring_close(erx_console_ring_t *ring);
 
 /*
  * The close's output, one piece at a time: the loss line if lines were
- * lost, then each non-empty whole line of the ring, oldest first, as
+ * lost, then each non-empty line of the ring, oldest first, the line the
+ * close kept open last, as
  * "fiasco: ", the line without its carriage return and newline through
  * erx_log_escape, and a carriage return and newline. A piece ends on a whole
  * token. Returns the piece's length, 0 once everything is written or while

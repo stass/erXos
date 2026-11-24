@@ -20,8 +20,8 @@ require_relative 'log_model'
 # * A write that would overfill the ring, or make the open line longer than
 #   LINE_MAX, takes the open line back, counts one lost line and drops what
 #   follows in the ring through the next newline. A take that finds a line
-#   open on the UART does the same. A close that finds a line open in the
-#   ring takes it back and counts it, and ends any drop.
+#   open on the UART does the same. A close keeps a line open in the ring
+#   as its last line, counting nothing, and ends any drop.
 # * A take hands out the lines lost since the last one and as many whole
 #   lines as fit REPLY_BYTES, and nothing after the close, which leaves the
 #   loss count for the drain; the close writes the loss line and then every
@@ -111,7 +111,8 @@ class ConsoleRingModel
   def close
     return 'close 0' if @route == :closed
 
-    take_back if @route == :ring && !@open.empty?
+    @whole << @open
+    @open = +''.b
     @dropping = false
     @route = :closed
     'close 1'
@@ -137,13 +138,9 @@ class ConsoleRingModel
 
   private
 
-  def take_back
+  def lose
     @open = +''.b
     @lost += 1
-  end
-
-  def lose
-    take_back
     @dropping = true
   end
 

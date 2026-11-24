@@ -119,12 +119,13 @@ class ConsoleRingTest < Minitest::Test
   end
 
   # A panic prints with no newline ahead of it, so a line open in the ring
-  # at the close must not swallow the stop's report.
-  def test_a_close_counts_the_open_line_and_the_report_reaches_the_uart_whole
+  # at the close must not swallow the stop's report, and the close writes
+  # the open line out as the ring's last, losing nothing.
+  def test_a_close_writes_the_open_line_last_and_the_report_reaches_the_uart_whole
     out = run_driver(['verbose 1', 'reset', 'take', "write #{hex("whole\r\nhal")}", 'close',
                       "write #{hex("Panic: x\r\n")}", 'state', 'drain'])
-    rendered = "fiasco: 1 kernel lines lost\r\nfiasco: whole\r\n"
-    assert_equal ['close 1', 'write uart', "state closed 0 0 0 1 #{hex("whole\r\n")}", "drain #{hex(rendered)}"],
+    rendered = "fiasco: whole\r\nfiasco: hal\r\n"
+    assert_equal ['close 1', 'write uart', "state closed 0 0 0 0 #{hex("whole\r\nhal")}", "drain #{hex(rendered)}"],
                  out.last(4)
   end
 
@@ -201,8 +202,9 @@ class ConsoleRingTest < Minitest::Test
       'the open line is not taken back' => ["\tring->head = ring->open;\n", "\n"],
       'the drop does not end at the newline' => ["\t\t\tring->dropping = false;\n", "\t\t\t;\n"],
       'a take keeps the rest of the uart line' => ["\t\tif (ring->uart_line_open)\n\t\t\tconsole_ring_lose(ring);\n", "\n"],
-      'a close keeps the open line' => ["\tif (ring->route == ERX_CONSOLE_ROUTE_RING && ring->head != ring->open)\n" \
-                                        "\t\tconsole_ring_take_back(ring);\n", "\n"],
+      'a close leaves the open line out' => ["too. */\n\tring->open = ring->head;\n", "too. */\n"],
+      'a close counts the open line' => ["too. */\n\tring->open = ring->head;\n",
+                                         "too. */\n\tring->head = ring->open;\n\t++ring->lost;\n"],
       'a line may be one byte longer' => ['segment > ERX_CONSOLE_RING_LINE_MAX - ', 'segment > 1 + ERX_CONSOLE_RING_LINE_MAX - '],
       'the ring may overfill by one' => ['segment > ERX_CONSOLE_RING_BYTES - ', 'segment > 1 + ERX_CONSOLE_RING_BYTES - '],
       # A leftover drop under closed changes no output; the state line shows it.
@@ -213,8 +215,9 @@ class ConsoleRingTest < Minitest::Test
       'the reader keeps the carriage return' => ["\t\t\tbody--;\n", "\t\t\t;\n"],
       'the reader takes one byte past its words' => ['> (words->count - ERX_CONSOLE_RING_REPLY_HEADER) * 8)',
                                                      '> (words->count - ERX_CONSOLE_RING_REPLY_HEADER) * 8 + 1)'],
+      'the drain leaves the last line unended' => [' || ring->drain_in_line) {', ') {'],
       'the drain labels a resumed line again' => ["\t\t\tring->drain_in_line = true;\n", "\t\t\t;\n"],
-      'the drain keeps the carriage return' => ["\t\t\tbody_end--;\n", "\t\t\t;\n"],
+      'the drain keeps the carriage return' => ["== '\\r')\n\t\tend--;\n", "== '\\r')\n\t\t;\n"],
       'the drain writes no loss line' => ["\tif (ring->lost > 0) {\n", "\tif (false) {\n"],
       'the close writes empty lines' => ["\t\t\t\tring->tail = end;\t/* an empty line */\n\t\t\t\tcontinue;\n", "\n"]
     }

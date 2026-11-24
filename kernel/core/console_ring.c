@@ -11,7 +11,8 @@
  * ERX_CONSOLE_RING_LINE_MAX; anything else goes through console_ring_lose,
  * the one place a line is taken back and counted. So tail..open is always
  * whole lines of at most ERX_CONSOLE_RING_LINE_MAX bytes each, which is what
- * the take and the drain rely on when they walk it. A drop is armed only
+ * the take relies on when it walks it; the close moves open to head, so the
+ * drain walks a line still open as the last. A drop is armed only
  * on the ring route and the close disarms it, so a write on any other route
  * goes to the UART whole.
  */
@@ -57,9 +58,11 @@ static void console_ring_append(erx_console_ring_t *, const uint8_t *,
     uint32_t);
 static uint8_t console_ring_byte(const erx_console_ring_t *, uint32_t);
 static size_t console_ring_drop(erx_console_ring_t *, const uint8_t *, size_t);
-static uint32_t console_ring_line_end(const erx_console_ring_t *, uint32_t);
+static uint32_t console_ring_body_end(const erx_console_ring_t *, uint32_t,
+    uint32_t);
+static uint32_t console_ring_line_end(const erx_console_ring_t *, uint32_t,
+    uint32_t);
 static void console_ring_lose(erx_console_ring_t *);
-static void console_ring_take_back(erx_console_ring_t *);
 static size_t console_segment(const uint8_t *, size_t);
 static bool console_piece_add(erx_console_drain_t *, size_t *, const void *,
     size_t);
@@ -70,24 +73,18 @@ console_ring_byte(const erx_console_ring_t *ring, uint32_t position)
 	return (ring->bytes[position & CONSOLE_RING_MASK]);
 }
 
-/* The open line's bytes come back off the tail, and the loss is counted once. */
-static void
-console_ring_take_back(erx_console_ring_t *ring)
-{
-	ring->head = ring->open;
-	if (ring->lost != UINT64_MAX)
-		ring->lost++;
-}
-
 /*
- * The ring route's one way a line is lost: the open line is taken back and
- * the rest of the line, through its newline, is dropped. Only a write and a
- * take on the ring route call it, so a drop is only ever armed there.
+ * The one way a line is lost: the open line's bytes come back off the tail,
+ * the loss is counted once, and the rest of the line, through its newline,
+ * is dropped. Only a write and a take on the ring route call it, so a drop
+ * is only ever armed there.
  */
 static void
 console_ring_lose(erx_console_ring_t *ring)
 {
-	console_ring_take_back(ring);
+	ring->head = ring->open;
+	if (ring->lost != UINT64_MAX)
+		ring->lost++;
 	ring->dropping = true;
 }
 
@@ -168,17 +165,32 @@ erx_console_ring_write(erx_console_ring_t *ring, const void *text,
 }
 
 /*
- * The position just past the newline of the whole line that starts at
- * start, which must be before ring->open.
+ * The position just past the newline of the line that starts at start, or
+ * stop if no newline comes before it: only the last line the close keeps
+ * can end so.
  */
 static uint32_t
-console_ring_line_end(const erx_console_ring_t *ring, uint32_t start)
+console_ring_line_end(const erx_console_ring_t *ring, uint32_t start,
+    uint32_t stop)
 {
 	uint32_t at;
 
-	for (at = start; console_ring_byte(ring, at) != '\n'; at++)
-		;
-	return (at + 1);
+	for (at = start; at != stop; at++)
+		if (console_ring_byte(ring, at) == '\n')
+			return (at + 1);
+	return (stop);
+}
+
+/* Where the line from start to end ends without its newline and carriage return. */
+static uint32_t
+console_ring_body_end(const erx_console_ring_t *ring, uint32_t start,
+    uint32_t end)
+{
+	if (end != start && console_ring_byte(ring, end - 1) == '\n')
+		end--;
+	if (end != start && console_ring_byte(ring, end - 1) == '\r')
+		end--;
+	return (end);
 }
 
 void
@@ -203,7 +215,7 @@ erx_console_ring_take(erx_console_ring_t *ring,
 	}
 
 	for (end = ring->tail; end != ring->open; end = next) {
-		next = console_ring_line_end(ring, end);
+		next = console_ring_line_end(ring, end, ring->open);
 		if (next - ring->tail > ERX_CONSOLE_RING_REPLY_BYTES)
 			break;
 	}
@@ -224,8 +236,8 @@ erx_console_ring_close(erx_console_ring_t *ring)
 {
 	if (ring->route == ERX_CONSOLE_ROUTE_CLOSED)
 		return (false);
-	if (ring->route == ERX_CONSOLE_ROUTE_RING && ring->head != ring->open)
-		console_ring_take_back(ring);
+	/* A line open in the ring stays as its last line, which the drain writes too. */
+	ring->open = ring->head;
 	/* A drop an earlier loss armed ends: the report reaches the UART whole. */
 	ring->dropping = false;
 	ring->route = ERX_CONSOLE_ROUTE_CLOSED;
@@ -273,12 +285,10 @@ erx_console_ring_drain(erx_console_ring_t *ring, erx_console_drain_t *piece)
 		ring->lost = 0;
 	}
 
-	while (ring->tail != ring->open) {
-		end = console_ring_line_end(ring, ring->tail);
-		body_end = end - 1;
-		if (body_end != ring->tail &&
-		    console_ring_byte(ring, body_end - 1) == '\r')
-			body_end--;
+	/* The last line can end at open with its label out and its end still to write. */
+	while (ring->tail != ring->open || ring->drain_in_line) {
+		end = console_ring_line_end(ring, ring->tail, ring->open);
+		body_end = console_ring_body_end(ring, ring->tail, end);
 		if (!ring->drain_in_line) {
 			if (body_end == ring->tail) {
 				ring->tail = end;	/* an empty line */
