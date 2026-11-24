@@ -1025,8 +1025,10 @@ module Erx
       end
       # kernel_sup's children in the system release, a node over the erx carrier (net_sup
       # holds net_kernel and the connection agent), in which_children's order: the last
-      # started first (docs/design-runtime.md, Configuration).
-      KERNEL_CHILDREN = %w[kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
+      # started first (docs/design-runtime.md, Configuration). erx_code_agent, the domain's
+      # code server, is listed in the system domain too, where its start returns ignore
+      # (docs/design-live.md, "The code server").
+      KERNEL_CHILDREN = %w[erx_code_agent kernel_safe_sup kernel_refc kernel_config logger_sup user erl_signal_server
                            global_group net_sup global_name_server rex inet_db erx_syslog_sup
                            erx_watchdog on_load file_server_2 standard_error code_server].freeze
       # From the banner to -eval's first output, which loads the evaluator: long under TCG.
@@ -1541,12 +1543,15 @@ module Erx
 
       # The release's boot with its children named, then the line that outlived the deadlines.
       # init's -eval writes beside the command shell, so a line of its may follow the unended prompt.
+      # erlang:display writes through the root's C output, so each of its lines is a debug log
+      # record of the root's space (NativeRoot::DOMAIN_RECORD).
       def self.survival_checkpoints(seconds:, machine:)
         children = KERNEL_CHILDREN.join(',')
+        head = "(?:% )?#{NativeRoot::DOMAIN_RECORD.source}"
         [*Qemu.boot_transcript(memory_mib: machine.memory_mib),
          SLOGAN,
-         point('kernel-children', /\A(?:% )?\[[a-z0-9_,]+\]\r*\n\z/n, /\A(?:% )?\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
-         { name: 'past-the-deadlines', pattern: /\A(?:% )?past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
+         point('kernel-children', /\A#{head}\[[a-z0-9_,]+\]\r*\n\z/n, /\A#{head}\[#{children}\]\r*\n\z/n, seconds: EVAL_SECONDS),
+         { name: 'past-the-deadlines', pattern: /\A#{head}past_the_deadlines\r*\n\z/n, seconds: seconds + 60 }.freeze].freeze
       end
 
       # The refusal machine (Machine#refusal): the same image boots to the root, which
