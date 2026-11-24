@@ -131,7 +131,7 @@ class ProductionImageTest < Minitest::Test
 
   # What each kind carries, as build_medium hands it to the one build (MediumProbe): a
   # development medium its builder's apps alone; a test medium those and its test code,
-  # marked as test code; a published medium its own apps (published_apps) and the Doom
+  # marked as test code; a published medium its own apps (own_apps) and the Doom
   # example, each on Machine.development, as pack_platform packs it. A card carries its own
   # apps whatever its kind, and Doom only when published.
   def test_each_medium_kind_carries_what_its_rule_gives
@@ -155,11 +155,11 @@ class ProductionImageTest < Minitest::Test
   end
 
   # An image builder that stops at the one build and returns what build_medium handed it,
-  # its own apps (published_apps) named :own.
+  # its own apps (own_apps) named :own.
   class MediumProbe < Erx::ProductionImage
     OWN = Erx::ImageApps.plan([], enable: [], local: false)
 
-    def published_apps = OWN
+    def own_apps(_kind) = OWN
 
     def carried(kind:, apps:)
       catch(:assembled) { build_medium(directory: '/nonexistent', kind: kind, manifest_source: '', apps: apps) }
@@ -183,15 +183,15 @@ class ProductionImageTest < Minitest::Test
   # card's manifest keeps the board's apps row, as QEMU's medium's does.
   def test_a_medium_refuses_what_its_kind_does_not_carry
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
-    assert_match(/^apps\n  memory [0-9]+\n  max 1\n  services display net\n/, pi.manifest_source(ROOT))
+    assert_match(/^apps\n  memory [0-9]+\n  max 2\n  services display net ble\n  gatt nus\n/, pi.manifest_source(ROOT))
     local = Erx::ImageApps.plan([], enable: [], local: true)
     builders = Erx::ImageApps.plan([CLOCK], enable: [])
-    card = 'the raspi4b card is the one the website offers: it carries the kiosk alone and takes no app, signer or --local'
+    card = 'the raspi4b card is the one the website offers: it carries its own apps and takes no app, signer or --local'
     {
       [KIND.published, Erx::ProductionImage::Machine.site(PLATFORM), Erx::ImageApps.none] =>
         "the published qemu-virt medium is packed for its board's machine (ProductionImage::Machine.development)",
       [KIND.published, DEVELOPMENT, local] =>
-        'the published qemu-virt medium is the one the website offers: it carries the kiosk alone and takes no app, signer or --local',
+        'the published qemu-virt medium is the one the website offers: it carries its own apps and takes no app, signer or --local',
       [KIND.development, Erx::ProductionImage::Machine.development(pi), local] => card,
       [KIND.development, Erx::ProductionImage::Machine.development(pi), builders] => card,
       [KIND.published, Erx::ProductionImage::Machine.development(pi), builders] => card,
@@ -209,7 +209,7 @@ class ProductionImageTest < Minitest::Test
         Erx::ProductionImage.pack_platform(root: ROOT, runner: nil, compiler: '', linker: '', platform: platform,
                                            medium: KIND.published, apps: apps)
       end
-      assert_match(/is the one the website offers: it carries the kiosk alone/, error.message)
+      assert_match(/is the one the website offers: it carries its own apps/, error.message)
     end
     Erx::ProductionImage.check_medium(KIND.development, machine: DEVELOPMENT, apps: builders)
     Erx::ProductionImage.check_medium(KIND.published, machine: DEVELOPMENT, apps: Erx::ImageApps.none)
@@ -250,7 +250,7 @@ class ProductionImageTest < Minitest::Test
                                  runtime: nil, jit_runtime: nil)
       error = assert_raises(Erx::Error) { image.build_medium(directory: '/nonexistent', kind: kind) }
       assert_equal "the published #{name} medium trusts no package key, but its manifest trusts signer deployer", error.message
-      assert_equal [:published_apps, :assemble_published], image.calls, name
+      assert_equal [:own_apps, :assemble_published], image.calls, name
     end
   end
 
@@ -264,8 +264,8 @@ class ProductionImageTest < Minitest::Test
 
     PUBLISHED = Erx::ImageApps.plan([], enable: [], local: false)
 
-    def published_apps
-      calls << :published_apps
+    def own_apps(_kind)
+      calls << :own_apps
       PUBLISHED
     end
 
@@ -279,30 +279,44 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # The card's own packages: the kiosk, examples/dashboard, packed as the kiosk suite packs
-  # it, and enabled, with no signer row and no --local, so the card trusts the package by
-  # its row's hash and trusts no key. Two builders, each with a development package key of
+  # Which examples each medium that carries its own apps packs (own_examples): the kiosk on
+  # QEMU's published medium and the published card, and the kiosk with the Bluetooth echo
+  # on the development card (docs/design-bluetooth.md, decision 7), so the card the website
+  # offers gains no app.
+  def test_only_the_development_card_carries_the_echo_beside_the_kiosk
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
+    kiosk = [Erx::ImageApps::KIOSK]
+    { [PLATFORM, KIND.published] => kiosk, [pi, KIND.published] => kiosk,
+      [pi, KIND.development] => [*kiosk, Erx::ImageApps::ECHO] }.each do |(platform, kind), examples|
+      assert_equal examples, Erx::ProductionImage.own_examples(kind, platform), "#{platform.name}'s #{kind.name} medium"
+    end
+  end
+
+  # The development card's own packages: the kiosk, examples/dashboard, and the echo,
+  # examples/echo, packed as the kiosk suite and the Bluetooth suite pack them, each
+  # enabled, with no signer row and no --local, so the card trusts each package by its
+  # row's hash and trusts no key. Two builders, each with a development package key of
   # their own (two homes), pack the same bytes, sealed by the published package key, so
   # two builders' cards of one commit are the same.
-  def test_a_card_carries_the_kiosk_enabled_alike_from_any_builder_and_trusts_no_key
+  def test_a_card_carries_its_apps_enabled_alike_from_any_builder_and_trusts_no_key
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     image = Erx::ProductionImage.new(root: ROOT, runner: runner, compiler: ENV.fetch('ERX_CLANG'), linker: ENV.fetch('ERX_LLD'),
                                      machine: Erx::ProductionImage::Machine.development(pi), fiasco: Object.new,
                                      runtime: nil, jit_runtime: nil)
     builds = 2.times.map do
-      apps = Dir.mktmpdir('erx-card-apps-home-') { |home| with_home(home) { image.published_apps } }
-      [apps, File.binread(apps.packages.first.path)]
+      apps = Dir.mktmpdir('erx-card-apps-home-') { |home| with_home(home) { image.own_apps(KIND.development) } }
+      [apps, apps.packages.map { |package| Digest::SHA256.file(package.path).hexdigest }]
     end
-    apps, bytes = builds.first
-    assert_equal ['dashboard'], apps.packages.map(&:name)
-    assert_equal 'BSD-2-Clause', apps.packages.first.license
+    apps, digests = builds.first
+    assert_equal %w[dashboard echo], apps.packages.map(&:name)
+    assert_equal [[], ['nus']], apps.packages.map(&:gatt)
+    assert_equal ['BSD-2-Clause'] * 2, apps.packages.map(&:license)
     refute apps.local
     rows = apps.rows
-    assert_match(/^package dashboard\n(?:  .*\n)*  enable YES\n/, rows)
+    %w[dashboard echo].each { |name| assert_match(/^package #{name}\n(?:  .*\n)*  enable YES\n/, rows) }
     refute_match(/^signer /, rows)
-    assert_equal Digest::SHA256.hexdigest(bytes), Digest::SHA256.hexdigest(builds.last.last),
-                 "two builders' cards carry different kiosk packages"
+    assert_equal digests, builds.last.last, "two builders' cards carry different packages"
     assert_equal rows, builds.last.first.rows
   end
 

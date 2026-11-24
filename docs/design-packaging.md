@@ -389,10 +389,13 @@ no room for the row's memory. The Raspberry Pi 4's card, the medium of a
 board the firmware boots from a boot partition, is the other image the
 website offers, and boots to the kiosk: it keeps the board's row and
 carries one package, `examples/dashboard`, enabled, which its own build
-packs from the tree as the kiosk suite does (`ImageApps.packed_kiosk`)
-and the row binds by its header's hash. Until a release signer exists it
-carries no signer row and no development key, so the card trusts that
-one package by its hash and no key, and no downloaded card ever trusts
+packs from the tree as the kiosk suite does (`ImageApps.packed`)
+and the row binds by its header's hash. A development card carries a
+second, the Bluetooth echo, `examples/echo`, enabled, packed the same
+way (`ProductionImage.own_examples`;
+[design-bluetooth.md](design-bluetooth.md#decisions), decision 7).
+Until a release signer exists a card carries no signer row and no
+development key, so it trusts its packages by their hashes and no key, and no downloaded card ever trusts
 its builder's development key: the build refuses a card whose admitted
 manifest trusts a key (`ProductionImage.check_published_trust`), and refuses
 a package, signer or `--local` of its builder's
@@ -407,8 +410,8 @@ code. QEMU's release medium, the page's QEMU virt
 download ([design-ssh.md](design-ssh.md#the-ssh-domain)), is the
 published kind: it carries the same kiosk, enabled, takes no app of its
 builder's, and its build refuses the same trust. A card is the website's
-whatever its kind, so a development card carries the kiosk alone too;
-only the published kind carries the Doom example
+whatever its kind, so a development card takes no app of its builder's
+either and carries only its own two; only the published kind carries the Doom example
 ([Examples](#examples)). Since a package of the image is
 authenticated by its hash and its signer and signature fields are not
 read ([The package](#the-package)), the kiosk is sealed by the
@@ -440,11 +443,11 @@ The row's size follows from how the build counts it:
   * QEMU `virt`'s development machine sets `max` 4: with the default 8,
     the row's reserve leaves the archive less room than the development
     image's archive needs.
-  * The Raspberry Pi 4 sets `max` 1: its card, the only medium a
+  * The Raspberry Pi 4 sets `max` 2: its card, the only medium a
     Raspberry Pi 4 image takes packages on, trusts no key
-    ([The shipped manifests](#the-apps-row)), so it holds only the one
-    package its build adds, the dashboard, and the display pays for one
-    pixel area.
+    ([The shipped manifests](#the-apps-row)), so it holds only the
+    packages its build adds, the dashboard and, on the development card,
+    the Bluetooth echo, and the display pays for two pixel areas.
 
   When the archive grows past the room `max` leaves it, the packer
   refuses the image, and the board's `max` is lowered then; a `max` set
@@ -2651,8 +2654,9 @@ Decisions:
     [design-apps.md](design-apps.md#the-start-table)).
 11. **Both development manifests carry an `apps` row**, sized as
     [The shipped manifests](#the-apps-row) says; the website's image
-    carries none, and the Raspberry Pi 4's card carries the kiosk alone,
-    trusted by its hash, and trusts no key until a release signer exists.
+    carries none, and the Raspberry Pi 4's published card carries the
+    kiosk alone and its development card the kiosk and the Bluetooth
+    echo, each trusted by its hash, and trusts no key until a release signer exists.
 12. **A native app starts through `erx_prog_handler`'s `window`
     option**, and the handler's start returns a monitor whose `'DOWN'`
     is the program's one end report, so no second launcher and no second

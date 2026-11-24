@@ -31,10 +31,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [High] bluetooth, the serial service on the board (docs/design-bluetooth.md "On the board", Decisions 7): the
   QEMU suite's serial row passes through the echo domain and through the echo package, `examples/echo`, in its
   app cell (`tools/lib/erx/bt_domain.rb`, `test/bt/peer/serial_peer.py`), but no board run has echoed `nus` to a
-  phone. Decision 7 has the Pi 4's development card carry the echo as a second package, enabled, with `max 2`,
-  and its `apps` row offer `gatt nus` alone: `ProductionImage#published_apps` adds the kiosk alone, and
-  `config/manifest/raspi4b-development.txt`'s `apps` row has `max 1`, `services display net` and no `gatt`, so the
-  board's `blew nus` run waits on the card.
+  phone. The Pi 4's development card carries the echo beside the kiosk, enabled (`ProductionImage.own_examples`),
+  under an `apps` row of `max 2` offering `ble` and `gatt nus` (decision 7); run the board checklist's `nus` echo
+  from a phone or `blew` on a card of it.
 * [Medium] bluetooth, a phone's bytes in crash reports (`erx_gatt_service`, `erx_gatt_serial`, `examples/echo`):
   the handler has no `format_status/1`, so a serial handler that crashes inside a `send` (the Bluetooth domain's
   restart ends the facet mid-call) logs its last request, the bytes with it, and the echo's crash report lists its
