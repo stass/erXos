@@ -3571,9 +3571,9 @@ library therefore adds to a configured domain's arguments, beside its
 device records, one record for each drive window whose device lies in
 one of the domain's gives: `-erx_record drive ROLE N`, ROLE the name of
 that device row's `mf_device_role`, `usb` or `block`, the only two a
-drive window may lie on, and N the row's `drive` field in decimal. The
-records follow the window table's order. The window's holder, the media
-domain, gets none: what it needs of a drive comes through the drive's
+drive window may lie on, and N the row's `drive` field in decimal; a
+device's records follow the window table's order. The window's holder,
+the media domain, gets none: what it needs of a drive comes through the drive's
 grant. The system domain gets none either, since the manifest check
 refuses a drive on a device it holds, and the hosted entry writes none.
 `ERX_BOOT_DRIVE_WORDS_MAX` in `include/erx/boot_words.h` bounds one

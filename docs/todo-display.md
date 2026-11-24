@@ -380,8 +380,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   fault where normal memory would not. Read the manual's device-memory rules before the driver writes to the
   mapping, and keep its bulk copies aligned or map the framebuffer as normal non-cacheable memory
   ([todo-performance.md](todo-performance.md), the framebuffer mapped as device memory).
-* [Medium] the framebuffer record's target paths (`liberx/system/dom_apply.c`, `apply_given_words` and
-  `apply_unrecorded`; `liberx/backend/fiasco/runtime_entry.c`, `gather_args`, `framebuffer_facts`,
+* [Medium] the framebuffer record's target paths (`liberx/system/dom_args.c`, `args_given_words` and
+  `args_unrecorded`; `liberx/backend/fiasco/runtime_entry.c`, `gather_args`, `framebuffer_facts`,
   `framebuffer_give`): only the pure core and the view are host-tested, and no shipped manifest gives a framebuffer
   to a configured domain. A check that a configured holder's boot page carries one `-erx_record framebuffer` record with a
   non-null handle for a placed framebuffer and none for an unplaced one would catch a dropped skip or a wrong

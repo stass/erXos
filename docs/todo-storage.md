@@ -18,7 +18,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      built. What remains, as four packages in this order:
      1. Drive records ([design-fiasco.md](design-fiasco.md#drive-records)): the domain library writes
         `-erx_record drive ROLE N` for each drive window on a device a configured domain holds
-        (`dom_boot_view.c` collects the rows, `dom_apply.c` writes them beside the device records,
+        (`dom_boot_view.c` hangs them on their devices, `dom_args.c` writes them beside the device records,
         `ERX_BOOT_DRIVE_WORDS_MAX` in `include/erx/boot_words.h`); `erx_device_record:drives/2` reads
         them, joining `tools/fuzz/erx_device_record.rb`; the manifest check refuses a drive on any
         device the system domain holds, not only a block device. The host tests and seeds are that

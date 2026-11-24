@@ -95,8 +95,7 @@ static const char *boot_display(const erx_manifest_view_t *, uint32_t, const cha
 		    erx_dom_display_t *);
 static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_system_image(erx_dom_lib_t *, const erx_manifest_view_t *);
-static const char *boot_drives(const erx_dom_view_t *, const erx_manifest_view_t *, uint32_t,
-		    erx_dom_configured_t *);
+static const char *boot_drives(const erx_manifest_view_t *, erx_dom_device_entry_t *, uint32_t);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *, uint32_t);
 static const char *boot_templates(erx_dom_view_t *, const erx_manifest_view_t *,
@@ -574,7 +573,7 @@ boot_devices(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_dom_
 		}
 	}
 	view->ndevices = count;
-	return (NULL);
+	return (boot_drives(manifest, entries, count));
 }
 
 /*
@@ -893,40 +892,36 @@ boot_system_image(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest)
 }
 
 /*
- * Sets row->drives to the drives of configured row index
- * (docs/design-fiasco.md, "Drive records"): each drive window whose device
- * lies on the row, so in one of the gives of the row's every creation, in
- * the window table's order. It keys on the device's row, not the
- * window's holder: the holder is the media domain, which learns a drive
- * through its grant and gets no record. The manifest check holds each
- * drive to a usb or block device and a number below mf_none, and a row to
- * ERX_DOM_DRIVES_MAX drives; a manifest past those is refused here, so
- * every record the row's creations write has its room.
+ * Hangs each drive window on its device's entry, the first count of
+ * entries (docs/design-fiasco.md, "Drive records"), in the window table's
+ * order, so every give of the device writes its records and a domain
+ * learns only the drives on what it holds. The window's holder is the
+ * media domain, which learns a drive through its grant and gets no
+ * record. The manifest check holds each drive to a usb or block device
+ * and a number below mf_none, and a domain's devices to
+ * ERX_DOM_DRIVES_MAX drives (boot_configured); a manifest past those is
+ * refused, so every record a creation writes has its room.
  */
 static const char *
-boot_drives(const erx_dom_view_t *view, const erx_manifest_view_t *manifest, uint32_t index,
-    erx_dom_configured_t *row)
+boot_drives(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries, uint32_t count)
 {
-	const erx_dom_device_entry_t *entry;
+	erx_dom_device_entry_t *entry;
 	erx_mf_window_t window;
 
-	row->ndrives = 0;
 	for (uint32_t at = 0; at < manifest->header.windows.count; at++) {
 		if (!erx_manifest_windows_at(manifest, at, &window))
 			return ("manifest: a window the reader cannot read");
 		if (window.role != ERX_MF_WINDOW_ROLE_DRIVE)
 			continue;
-		if (window.device >= view->ndevices)
+		if (window.device >= count)
 			return ("manifest: a drive window names no device");
-		entry = &view->devices[window.device];
-		if (entry->row != index)
-			continue;
+		entry = &entries[window.device];
 		if ((entry->role != ERX_MF_DEVICE_ROLE_USB && entry->role != ERX_MF_DEVICE_ROLE_BLOCK) ||
 		    window.drive == ERX_MF_NONE)
 			return ("manifest: a drive window not on a usb or block device, or naming no drive");
-		if (row->ndrives == ERX_DOM_DRIVES_MAX)
-			return ("manifest: a configured domain's devices carry more drives than its boot page records");
-		row->drives[row->ndrives++] = (erx_dom_drive_t){ .role = entry->role, .number = window.drive };
+		if (entry->ndrives == ERX_DOM_DRIVES_MAX)
+			return ("manifest: a device carries more drives than its holder's boot page records");
+		entry->drives[entry->ndrives++] = window.drive;
 	}
 	return (NULL);
 }
@@ -949,7 +944,7 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 	erx_mf_limits_t profile;
 	erx_dom_configured_t *row;
 	const char *strings, *reason;
-	uint32_t held, records;
+	uint32_t held, records, drives;
 	bool block;
 
 	view->configured = configured;
@@ -973,11 +968,13 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 			return ("manifest: a configured domain's name is not 1 to 63 bytes");
 		held = 0;
 		records = 0;
+		drives = 0;
 		block = false;
 		for (uint32_t device = 0; device < view->ndevices; device++) {
 			if (view->devices[device].row != index)
 				continue;
 			held++;
+			drives += view->devices[device].ndrives;
 			if (!erx_dom_entry_driven(&view->devices[device]))
 				continue;
 			records++;
@@ -985,15 +982,15 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		}
 		if (held > ERX_DOM_DEVICES_MAX)
 			return ("manifest: a configured domain holds more devices than its creation gives");
-		if ((reason = boot_drives(view, manifest, index, row)) != NULL)
-			return (reason);
+		if (drives > ERX_DOM_DRIVES_MAX)
+			return ("manifest: a configured domain's devices carry more drives than its boot page records");
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
 		strings = (const char *)manifest->bytes + manifest->header.strings.offset;
 		if ((reason = boot_display(manifest, index, strings + domain.env.offset, domain.env.length,
 		    &row->display)) != NULL)
 			return (reason);
 		if (!boot_strings_fit(domain.args.length, domain.env.length +
-		    (row->display.name_len != 0 ? ERX_DOM_DISPLAY_WORDS_MAX : 0), records, row->ndrives, block,
+		    (row->display.name_len != 0 ? ERX_DOM_DISPLAY_WORDS_MAX : 0), records, drives, block,
 		    index + 1 == system_image_holder))
 			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
 			    "no reserve for its node names, device records and display");

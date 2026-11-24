@@ -962,7 +962,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   still pack, fit their machine and build reproducibly. Give one gate cell a
   fetched Doom fork and have it pack both published media with Doom.
 * [Low] tests, `test/host/erx_starter_test.rb`: the suite takes about 4.5 minutes, most of it seeded fault 0 (the keeper not linking), under which nearly every case waits out EUnit's 5 s timeout. Fail the fault's cases fast instead of by timeout.
-* [Low] tests, `liberx/system/dom_apply.c` (`apply_given_words`): no host test checks the record words written for a framebuffer handed to a domain other than the system domain; placement, the apply steps and `erx_boot_framebuffer_words` itself (`boot_manifest_test.rb`) are tested, and the raspi4b suite's tcg-4cpu cell, one QEMU boot under TCG, checks the display domain's record through its driver's framebuffer line and, for the base and offset, only through its picture.
+* [Low] tests, `liberx/system/dom_args.c` (`args_given_words`): no host test checks the record words written for a framebuffer handed to a domain other than the system domain; placement, the apply steps and `erx_boot_framebuffer_words` itself (`boot_manifest_test.rb`) are tested, and the raspi4b suite's tcg-4cpu cell, one QEMU boot under TCG, checks the display domain's record through its driver's framebuffer line and, for the base and offset, only through its picture.
 * [Medium] fuzz, `tools/fuzz/erx_device_record.rb`: the target fails on the module as it is, before
   any mutant runs, with `{too_few_accepted, 159, 648, 482}` at seed 1: its generator
   (`test/erlang/erx_device_record_fuzz.erl`, `entry/0`) finds an accepted device record in 159 of

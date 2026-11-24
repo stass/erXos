@@ -15,7 +15,8 @@
  * configured row that serves a display, with the display its creation puts
  * in its environment, then, for the configured row whose boot page carries
  * -erx_record system_image, that record's words after its form, then each
- * configured row's -erx_record drive records, as its creation writes them,
+ * configured row's -erx_record drive records, as its creation writes them
+ * (erx_dom_args),
  * and the length of the longest drive record against its bound:
  *
  *   device INDEX unit=NAME compatible=STRING|none ranges=BASE+SIZE,... lines=LINE,... confined=0|1
@@ -94,6 +95,7 @@
 #include "erx/boot_words.h"
 #include "erx/dom_lib.h"
 #include "liberx/backend/core/boot_manifest.h"
+#include "liberx/system/dom_args.h"
 #include "input.h"
 
 static void
@@ -192,27 +194,59 @@ print_system_image(const erx_dom_lib_t *lib)
 }
 
 /*
- * Each configured row's -erx_record drive words, as its creation writes
- * them, then the longest record's length, a block drive numbered just below
- * mf_none, against ERX_BOOT_DRIVE_WORDS_MAX: the two are equal when the
- * bound is exact, and the length is 0 when the record does not fit.
+ * A creation of configured row index into plan: one give of every device
+ * the catalogue places on the row, which the view holds to
+ * ERX_DOM_DEVICES_MAX, as the planner's gives of the row's units hold them
+ * (dom_plan_gives). No device is driven, so the arguments carry no given
+ * record, and every other field stays zero: the drive records erx_dom_args
+ * writes read only which devices the gives hold.
+ */
+static void
+plan_gives(const erx_dom_view_t *view, uint32_t index, erx_dom_plan_t *plan)
+{
+	erx_dom_unit_plan_t *give = &plan->gives[0];
+
+	memset(plan, 0, sizeof(*plan));
+	plan->ngives = 1;
+	for (uint32_t device = 0; device < view->ndevices; device++)
+		if (view->devices[device].row == index)
+			give->devices[give->ndevices++] = (erx_dom_unit_device_t){ .index = device,
+			    .window = ERX_DOM_UNIT_NONE, .line = ERX_DOM_UNIT_NONE };
+}
+
+/*
+ * Each configured row's -erx_record drive records, as erx_dom_args writes
+ * them into the arguments of a creation that gives the row's devices
+ * (plan_gives) and whose give made and installed nothing; then the
+ * longest record's length, a block drive numbered just below mf_none,
+ * against ERX_BOOT_DRIVE_WORDS_MAX: the two are equal when the bound is
+ * exact, and the length is 0 when the record does not fit. A row whose
+ * arguments do not fit prints `refused drives ROW` and fails the driver.
  */
 static bool
-print_drives(const erx_dom_view_t *view)
+print_drives(const erx_dom_lib_t *lib)
 {
+	static const char drive[] = ERX_BOOT_RECORD_FLAG "\0drive";
+	static erx_dom_plan_t plan;
+	static erx_dom_give_made_t gives[ERX_DOM_GIVES_MAX];
+	static erx_dom_args_t args;
 	char words[ERX_BOOT_DRIVE_WORDS_MAX];
-	const erx_dom_drive_t *drive;
-	size_t used;
+	const erx_boot_words_t *run;
+	size_t nruns;
 
-	for (uint32_t index = 0; index < view->nconfigured; index++) {
-		for (uint32_t at = 0; at < view->configured[index].ndrives; at++) {
-			drive = &view->configured[index].drives[at];
-			if ((used = erx_boot_drive_words(drive->role, drive->number, words, sizeof(words))) == 0)
-				return (false);
+	for (uint32_t index = 0; index < lib->view.nconfigured; index++) {
+		plan_gives(&lib->view, index, &plan);
+		if ((nruns = erx_dom_args(lib, &plan, gives, &args)) == 0) {
+			printf("refused drives %" PRIu32 "\n", index);
+			return (false);
+		}
+		for (size_t at = 0; at < nruns; at++) {
+			run = &args.runs[at];
+			if (run->length <= sizeof(drive) || memcmp(run->bytes, drive, sizeof(drive)) != 0)
+				continue;
 			printf("drive %" PRIu32, index);
-			for (size_t word = sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("drive"); word < used;
-			    word += strlen(words + word) + 1)
-				printf(" %s", words + word);
+			for (size_t word = sizeof(drive); word < run->length; word += strlen(run->bytes + word) + 1)
+				printf(" %s", run->bytes + word);
 			printf("\n");
 		}
 	}
@@ -530,7 +564,7 @@ main(int argc, char **argv)
 			    index, (int)display->name_len, display->name, display->policy, display->idle_dim_s,
 			    display->idle_off_s);
 	}
-	if (!print_system_image(&lib) || !print_drives(&lib.view))
+	if (!print_system_image(&lib) || !print_drives(&lib))
 		return (2);
 	return (fflush(stdout) == 0 ? 0 : 2);
 }

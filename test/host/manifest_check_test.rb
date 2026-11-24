@@ -722,12 +722,13 @@ class ManifestCheckTest < Minitest::Test
   end
 
   # The drive records of docs/design-fiasco.md, "Drive records", as the domain library's
-  # boot view collects them and each creation writes them (test/fixtures/dom_view_driver.c):
+  # boot view hangs them on their devices and erx_dom_args writes them into each configured
+  # row's creation (test/fixtures/dom_view_driver.c):
   # two USB drives on one controller and a block drive give the network domain, which holds
   # the controller, its two `usb` records and the disk domain
   # its one `block` record, and the media domain, which holds the windows, and every other
-  # domain none. Seeded with a view keyed on the window's holder, which gives the media
-  # domain the records, and with ERX_BOOT_DRIVE_WORDS_MAX a byte short or long.
+  # domain none. Seeded with erx_dom_args writing the drives of a device outside the gives
+  # and dropping the records, and with ERX_BOOT_DRIVE_WORDS_MAX a byte short or long.
   def test_a_drive_record_goes_to_the_holder_of_the_drive_s_device_alone
     source, against = block_drive_source
     view = @codec.open('manifest', admit(source + drive_window('disk3', name: 'first') + drive_window('disk1', name: 'second'), against).bytes)
@@ -745,10 +746,16 @@ class ManifestCheckTest < Minitest::Test
       length, bound = found.grep(/\Adrive_bound /).first.split.drop(1)
       assert_equal bound, length
 
-      boot_view = File.read(File.join(DomViewBuild::ROOT, 'liberx/system/dom_boot_view.c'))
-      File.write(keyed = File.join(work, 'dom_boot_view.c'), boot_view.sub('if (entry->row != index)', 'if (window.holder != index)'))
-      seeded = lines.call(DomViewBuild.build(output: File.join(work, 'keyed'), runner: runner, name: 'keyed', boot_view: keyed))
-      assert_equal [row.call('media')], seeded.grep(/\Adrive /).map { |line| line.split[1].to_i }.uniq
+      args = File.read(File.join(DomViewBuild::ROOT, 'liberx/system/dom_args.c'))
+      seeded = lambda do |name, old, new|
+        File.write(source = File.join(work, "#{name}.c"), args.sub(old) { new }.tap { |text| refute_equal args, text })
+        lines.call(DomViewBuild.build(output: File.join(work, name), runner: runner, name: name, args: source)).grep(/\Adrive /)
+      end
+      neighbour = seeded.call('neighbour', 'entry = &lib->view.devices[give->devices[d].index];',
+                              'entry = &lib->view.devices[(give->devices[d].index + 1) % lib->view.ndevices];')
+      refute_equal expected.sort, neighbour.sort, 'drive records of a device outside the gives passed'
+      assert_empty seeded.call('dropped', 'runs[count++] = (erx_boot_words_t){ out->drive_words[drive++], length };',
+                               'drive++;'), 'dropped drive records passed'
 
       words = File.read(File.join(DomViewBuild::ROOT, 'include/erx/boot_words.h'))
       { 'short' => '- 1u', 'long' => '+ 1u' }.each do |name, change|

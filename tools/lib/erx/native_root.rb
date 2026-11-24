@@ -70,7 +70,7 @@ module Erx
     PIPE = %w[liberx/erx_pipe_check.c liberx/erx_pipe_core.c liberx/erx_pipe_run.c].freeze
     # The domain library: its pure core, its apply phase and install funnel, and the lanes it sizes.
     DOMAIN_LIBRARY = %w[liberx/system/dom_core.c liberx/system/dom_life.c liberx/system/dom_apply.c
-                        liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
+                        liberx/system/dom_args.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c
                         liberx/system/dom_dump.c].freeze
     # The root's way to the archive: the record, the launcher and the manifest's reader.
     LAUNCH = %W[#{BACKEND}/root_open.c #{BACKEND}/root_handoff.c #{BACKEND}/launcher.c #{BACKEND}/boot_args.c kernel/core/boot_handoff.c build/gen/liberx/generated/abi_reader.c].freeze
@@ -156,7 +156,8 @@ module Erx
     # - the kiosk suite's stand-in for Doom (Kiosk::FRONT_PROGRAM).
     # libc-test and the native_musl suite compile none of them, so they build without the runtime.
     LIBC_SOURCES = %w[liberx/backend/core/boot_info.c liberx/system/dom_core.c liberx/system/dom_life.c
-                      liberx/system/dom_apply.c liberx/system/dom_boot.c liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
+                      liberx/system/dom_apply.c liberx/system/dom_args.c liberx/system/dom_boot.c
+                      liberx/system/dom_boot_view.c liberx/system/dom_install.c liberx/system/dom_dump.c
                       liberx/erx_lane.c liberx/erx_funnel.c
                       liberx/erx_pipe_check.c liberx/erx_pipe_core.c liberx/erx_pipe_run.c
                       liberx/erx_etf.c test/guest/native_domain/guest.c

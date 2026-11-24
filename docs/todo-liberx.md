@@ -577,7 +577,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   layout for domain releases (IM1) that service domains never run the
   system release's ERTS entry.
 * [Medium] domain library, the give of a PCIe function (`liberx/system/dom_life.c` `life_unit_function`,
-  `liberx/system/dom_apply.c` `apply_function_words`, [design-pcie.md](design-pcie.md#the-catalogue-and-gives)):
+  `liberx/system/dom_args.c` `args_function_words`, [design-pcie.md](design-pcie.md#the-catalogue-and-gives)):
   the BAR each range came from is found again in the apply by repeating the planner's "memory and placed" test, so
   a change to one copy pairs a BAR with another's window; store each range's BAR index in `erx_dom_unit_device_t`
   and read each BAR's window from the planner's layout rather than scanning the WINDOW steps. `erx_dom_unit_check`

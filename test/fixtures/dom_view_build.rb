@@ -5,8 +5,8 @@
 require_relative '../../tools/lib/erx/generated'
 
 # test/fixtures/dom_view_driver.c over the domain library's boot view, built for the host:
-# with boot_view in liberx/system/dom_boot_view.c's place, or include, a directory searched
-# before include/, for a seeded fault.
+# with boot_view in liberx/system/dom_boot_view.c's place, args in liberx/system/dom_args.c's,
+# or include, a directory searched before include/, for a seeded fault.
 module DomViewBuild
   ROOT = File.expand_path('../..', __dir__)
   LIBRARY = %w[liberx/system/dom_core.c liberx/system/dom_life.c].freeze
@@ -14,8 +14,9 @@ module DomViewBuild
 
   module_function
 
-  def build(output:, runner:, name:, boot_view: File.join(ROOT, 'liberx/system/dom_boot_view.c'), include: nil)
-    sources = [*LIBRARY.map { |path| File.join(ROOT, path) }, boot_view, *SUPPORT.map { |path| File.join(ROOT, path) }]
+  def build(output:, runner:, name:, boot_view: File.join(ROOT, 'liberx/system/dom_boot_view.c'),
+            args: File.join(ROOT, 'liberx/system/dom_args.c'), include: nil)
+    sources = [*LIBRARY.map { |path| File.join(ROOT, path) }, boot_view, args, *SUPPORT.map { |path| File.join(ROOT, path) }]
     runner.run([ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror',
                 '-O1', *(include ? ['-I', include] : []), *Erx::Generated.include_flags(root: ROOT),
                 '-I', File.join(ROOT, 'include'), '-I', ROOT, '-I', File.join(ROOT, 'tools/host'), *sources,

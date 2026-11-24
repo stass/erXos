@@ -38,11 +38,14 @@ module Erx
     # domain's row (docs/design-system.md, "The manifest", property 12). It builds
     # only for the host, so it is no caller on the target.
     DOM_HOST_PLANNER = 'tools/host/dom_plan.c'
+    # The pure half of the apply phase: the arguments a creation writes into its boot page.
+    DOM_ARGS = 'liberx/system/dom_args.c'
+    DOM_ARGS_HEADER = 'liberx/system/dom_args.h'
     # The erXos NIFs inside OTP's tree, where the domain library's NIF lives.
     ERXOS_NIFS = 'otp/erts/emulator/nifs/erxos/**/*'
 
     declare_group(
-      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, DOM_APPLY_HEADER, DOM_BOOT, DOM_BOOT_VIEW, DOM_DUMP, DOM_NONE, *DOM_INSTALL_FILES],
+      unchecked_objects: [DOM_CORE, DOM_LIFE, DOM_APPLY, DOM_APPLY_HEADER, DOM_ARGS, DOM_ARGS_HEADER, DOM_BOOT, DOM_BOOT_VIEW, DOM_DUMP, DOM_NONE, *DOM_INSTALL_FILES],
       rules: [
         # A creation origin is authority provenance: the planning entries
         # build every specification, origin included, inside the core, so

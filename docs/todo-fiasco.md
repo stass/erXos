@@ -344,7 +344,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   programmed I/O. It fails safe, and does not happen on a supported board: the pool is the lowest RAM `sigma0`
   has free, inside every range the manifests' trees give. An object the check after creation still refuses
   stays unused for the boot's life, in the root's table or, unnamed by its record, in the holder's.
-* [Medium] Fiasco backend, `liberx/system/dom_apply.c` (`apply_memory_inside`, `apply_given_words`): a holder's
+* [Medium] Fiasco backend, `liberx/system/dom_apply.c` (`apply_memory_inside`) and `dom_args.c` (`args_given_words`): a holder's
   memory refused after it is made (`outside`) prints no line, while `tree_facts` already printed the row's
   range, and a refused `erx_mem_dma_addr` reads as no memory rather than as the backend error the root's own
   give stops on; [design-device-tree.md](design-device-tree.md) ("Concurrency and failure") wants one

@@ -23,25 +23,13 @@
 #include "liberx/backend/core/boot_info.h"
 #include "liberx/backend/core/boot_manifest.h"
 #include "liberx/system/dom_apply.h"
+#include "liberx/system/dom_args.h"
 #include "liberx/system/dom_install.h"
 
 /* The system domain's identifier, its node's name before '@'. */
 #define SYSTEM_NAME	"system"
 /* A handle no table holds: what a step gets for an object no creation names. */
 #define APPLY_NO_HANDLE	UINT64_MAX
-
-/*
- * One give of a creation in progress: the handles its steps made, by
- * device object, each value its installs took in the holder's table, and
- * how many of its steps were tried, the refused one included.
- */
-typedef struct apply_give {
-	uint64_t	made[ERX_DOM_OBJ_MADE_COUNT];	/* ERX_CAP_NULL for none */
-	uint64_t	installed[ERX_DOM_OBJ_COUNT];
-	/* Each MSI object's message, by its line, as its creation returned it. */
-	erx_msi_message_t messages[ERX_DOM_UNIT_LINES_MAX];
-	uint32_t	tried;
-} apply_give_t;
 
 /* One creation in progress: the plan, the handles made so far, and what the steps learnt. */
 typedef struct apply {
@@ -54,17 +42,8 @@ typedef struct apply {
 	uint64_t		 pc;		/* the runtime image's entry */
 	uint64_t		 bootinfo_addr;	/* where the domain sees its boot page */
 	uint64_t		 release_addr;	/* where it sees its release slice */
-	apply_give_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
-	/*
-	 * The boot page's -erx_record given record of each device, -erx_record drive of each drive,
-	 * -erx_record boot, -erx_record build and -erx_record system_image.
-	 */
-	char			 given_words[ERX_DOM_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX > ERX_BOOT_FUNCTION_WORDS_MAX ?
-				     ERX_BOOT_GIVEN_WORDS_MAX : ERX_BOOT_FUNCTION_WORDS_MAX];
-	char			 drive_words[ERX_DOM_DRIVES_MAX][ERX_BOOT_DRIVE_WORDS_MAX];
-	char			 pair_words[ERX_BOOT_PAIR_WORDS_MAX];
-	char			 build_words[ERX_BOOT_BUILD_WORDS_MAX];
-	char			 system_image_words[ERX_BOOT_SYSTEM_IMAGE_WORDS_MAX];
+	erx_dom_give_made_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
+	erx_dom_args_t		 args;		/* the boot page's arguments */
 } apply_t;
 
 /*
@@ -477,26 +456,6 @@ apply_give_step(apply_t *apply, uint32_t at, const erx_dom_step_t *step)
 }
 
 /*
- * Give `at` of the plan, its steps in order. Its objects are the
- * library's until the creation succeeds, when apply_keep writes them into
- * the device's record; a refusal leaves them to apply_undo.
- */
-static int
-apply_give(apply_t *apply, uint32_t at)
-{
-	const erx_dom_unit_plan_t *give = &apply->plan->gives[at];
-	apply_give_t *state = &apply->gives[at];
-	int status;
-
-	for (state->tried = 0; state->tried < give->nsteps;) {
-		status = apply_give_step(apply, at, &give->steps[state->tried++]);
-		if (status != ERX_OK)
-			return (status);
-	}
-	return (ERX_OK);
-}
-
-/*
  * Whether device d of give `at` may have its DMA memory reach its holder's
  * record: the device address of the root's object, made by this give or
  * kept from an earlier one, lies whole inside the DMA range of the entry's
@@ -523,218 +482,28 @@ apply_memory_inside(const apply_t *apply, uint32_t at, uint32_t d)
 }
 
 /*
- * The value in the holder's table of the give's object obj + n, or
- * ERX_CAP_NULL for n ERX_DOM_UNIT_NONE: a device with no window or line
- * names none. Every record of a run or a line names its one object under
- * one handle.
+ * Give `at` of the plan, its steps in order, and then whether each driven
+ * device's DMA memory reaches its holder's record (apply_memory_inside),
+ * which the record erx_dom_args writes for it names. Its objects are the
+ * library's until the creation succeeds, when apply_keep writes them into
+ * the device's record; a refusal leaves them to apply_undo.
  */
-static uint64_t
-apply_unit_installed(const apply_t *apply, uint32_t at, erx_dom_obj_t obj, uint32_t n)
-{
-	return (n == ERX_DOM_UNIT_NONE ? ERX_CAP_NULL : apply->gives[at].installed[obj + n]);
-}
-
-/*
- * The message of a PCIe function's line: the one its MSI object's creation
- * returned, zero for a wired line and for none.
- */
-static erx_msi_message_t
-apply_message(const apply_t *apply, uint32_t at, const erx_dom_unit_device_t *device)
-{
-	if ((device->route != ERX_PCIE_ROUTE_MSI && device->route != ERX_PCIE_ROUTE_MSIX) ||
-	    device->line >= ERX_DOM_UNIT_LINES_MAX)
-		return ((erx_msi_message_t){ 0 });
-	return (apply->gives[at].messages[device->line]);
-}
-
-/*
- * The -erx_record function record of PCIe function d of give `at`
- * (erx_boot_function_words): as a given device's, and its place, its
- * route, an MSI-X route's message and table, and each placed BAR's window
- * and offset there, the give's WINDOW step whose run holds the BAR's span,
- * which the plan check proved is one of them; the BARs' spans are the
- * device's ranges, in BAR order (erx/dom.h).
- */
-static size_t
-apply_function_words(apply_t *apply, uint32_t at, uint32_t d, char *words, size_t capacity)
+static int
+apply_give(apply_t *apply, uint32_t at)
 {
 	const erx_dom_unit_plan_t *give = &apply->plan->gives[at];
-	const erx_dom_unit_device_t *device = &give->devices[d];
-	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[device->index];
-	const erx_pcie_function_t *record = &device->function;
-	const uint64_t *installed = apply->gives[at].installed;
-	const uint64_t held = installed[ERX_DOM_OBJ_DEV_MEMORY + d] != ERX_CAP_NULL ?
-	    installed[ERX_DOM_OBJ_DEV_MEMORY + d] : installed[ERX_DOM_OBJ_DEV_KEPT + d];
-	const bool memory = entry->memory != 0 && apply_memory_inside(apply, at, d);
-	const bool msix = device->route == ERX_PCIE_ROUTE_MSIX;
-	erx_boot_function_t function = { .role = entry->role_word, .peripheral = entry->peripheral,
-	    .bridge = entry->bridge, .bus = record->bus, .device = record->device, .function = record->function,
-	    .line = apply_unit_installed(apply, at, ERX_DOM_OBJ_DEV_IRQ, device->line), .line_shared = device->shared,
-	    .memory = memory ? held : ERX_CAP_NULL, .memory_size = memory ? entry->memory : 0,
-	    .coherent = erx_boot_coherent(entry->asked ? &entry->facts : NULL, entry->memory), .route = device->route,
-	    .message = msix ? apply_message(apply, at, device) : (erx_msi_message_t){ 0 },
-	    .table_bar = msix ? record->msix_table_bar : 0, .table_offset = msix ? record->msix_table_offset : 0,
-	    .table_size = msix ? record->msix_table_size : 0 };
-	uint32_t range = 0;
+	erx_dom_give_made_t *state = &apply->gives[at];
+	int status;
 
-	for (uint32_t bar = 0; bar < sizeof(function.bars) / sizeof(function.bars[0]); bar++) {
-		function.bars[bar].size_log2 = record->bars[bar].size_log2;
-		function.bars[bar].window = ERX_CAP_NULL;
-		if (record->bars[bar].kind != ERX_PCIE_BAR_MEMORY ||
-		    (record->bars[bar].flags & ERX_PCIE_BAR_PLACED) == 0 || range == device->nranges)
-			continue;
-		const erx_dom_range_t *span = &device->ranges[range++];
-		for (uint32_t step = 0; step < give->nsteps; step++) {
-			const erx_dom_step_t *window = &give->steps[step];
-
-			if (window->kind != ERX_DOM_STEP_WINDOW)
-				continue;
-			if (span->base >= window->base && span->base - window->base < window->size) {
-				function.bars[bar].window = installed[window->obj];
-				function.bars[bar].offset = span->base - window->base;
-				break;
-			}
-		}
+	for (state->tried = 0; state->tried < give->nsteps;) {
+		status = apply_give_step(apply, at, &give->steps[state->tried++]);
+		if (status != ERX_OK)
+			return (status);
 	}
-	return (erx_boot_function_words(&function, words, capacity));
-}
-
-/*
- * The -erx_record given record of device d of give `at` (erx_boot_given_words)
- * into words, capacity bytes: the values its give's installs took in the
- * holder's table, its window's and its line's, ERX_CAP_NULL for a device
- * whose node raises no line, marked shared as the plan
- * says, and its memory's; its registers' offset into its window from the
- * plan; the facts of its catalogue entry, COHERENT and, for a network row,
- * MAC, and its catalogue entry's index, its manifest device row, as
- * INDEX; or for a framebuffer row its -erx_record framebuffer record
- * (erx_boot_framebuffer_words) over its window; and its length, or 0 when
- * the words do not fit, which the view's names and paths rule out. A device of no
- * kind has no role word to write, so apply_given_words answers 0 for one;
- * apply_args asks only of a device its give marks driven, so never for
- * one. The registers' offset and size are the give's, which the plan
- * check proved lie whole inside the window.
- */
-static size_t
-apply_given_words(apply_t *apply, uint32_t at, uint32_t d, char *words, size_t capacity)
-{
-	const erx_dom_unit_device_t *device = &apply->plan->gives[at].devices[d];
-	const erx_dom_device_entry_t *entry = &apply->lib->view.devices[device->index];
-	const erx_dt_device_t *facts = entry->asked ? &entry->facts : NULL;
-	const uint64_t *installed = apply->gives[at].installed;
-	const uint64_t held = installed[ERX_DOM_OBJ_DEV_MEMORY + d] != ERX_CAP_NULL ?
-	    installed[ERX_DOM_OBJ_DEV_MEMORY + d] : installed[ERX_DOM_OBJ_DEV_KEPT + d];
-	const uint64_t window = apply_unit_installed(apply, at, ERX_DOM_OBJ_DEV_WINDOW, device->window);
-	const bool memory = entry->memory != 0 && apply_memory_inside(apply, at, d);
-	const erx_boot_given_t given = { .role = entry->role_word, .peripheral = entry->peripheral,
-	    .path = { entry->path, entry->path_len }, .window = window, .offset = device->offset, .size = device->reg_size,
-	    .line = apply_unit_installed(apply, at, ERX_DOM_OBJ_DEV_IRQ, device->line), .line_shared = device->shared,
-	    .memory = memory ? held : ERX_CAP_NULL, .memory_size = memory ? entry->memory : 0, .clock = entry->clock,
-	    .coherent = erx_boot_coherent(facts, entry->memory),
-	    .mac = facts != NULL && entry->role == ERX_MF_DEVICE_ROLE_NETWORK ? erx_boot_mac_number(facts) : 0,
-	    .index = device->index };
-
-	if (device->pci)
-		return (device->driven ? apply_function_words(apply, at, d, words, capacity) : 0);
-	if (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER)
-		return (erx_boot_framebuffer_words(&entry->framebuffer, entry->format, window, device->offset, words,
-		    capacity));
-	if (!device->driven)
-		return (0);
-	return (erx_boot_given_words(&given, words, capacity));
-}
-
-/*
- * Whether an entry writes no record: a framebuffer the tree did not place
- * in its window (erx_dom_view_framebuffer) has no range (erx/dom.h), so
- * its give made no window for it and its holder finds no framebuffer
- * record.
- */
-static bool
-apply_unrecorded(const erx_dom_device_entry_t *entry)
-{
-	return (entry->role == ERX_MF_DEVICE_ROLE_FRAMEBUFFER && entry->nranges == 0);
-}
-
-/*
- * The boot page's arguments into words, which holds 4 + ERX_DOM_DEVICES_MAX +
- * ERX_DOM_DRIVES_MAX runs:
- * - the specification's own;
- * - -erx_record build with the boot image's build identifier;
- * - a -erx_record given or -erx_record framebuffer record per device of the
- *   gives that has one;
- * - for a configured domain, a -erx_record drive record per drive on its
- *   devices, which are its gives' (boot_drives collects them);
- * - for a holder of a block device of a kind, -erx_record boot with the
- *   boot's pair;
- * - for the configured row that holds the system window alone
- *   (boot_system_image), -erx_record system_image from the manifest's
- *   system_image row, which the root's own page never carries.
- * All but the drive and system_image records are as the root's own page
- * carries them. A
- * device of no kind, which its give marks not driven
- * (erx_dom_entry_driven), is held with its unit and has no record, so no
- * driver opens it, as the root writes none
- * for the system domain's (devices_read); nor has a framebuffer the tree
- * did not place (apply_unrecorded). The plan check holds the gives to
- * ERX_DOM_DEVICES_MAX devices in all, so each record has its given_words.
- * The number of runs, or 0 when a record does not fit.
- */
-static size_t
-apply_args(apply_t *apply, erx_boot_words_t *words)
-{
-	const erx_dom_spec_t *spec = &apply->plan->spec;
-	const erx_dom_unit_plan_t *give;
-	const erx_dom_device_entry_t *entry;
-	const erx_dom_configured_t *row;
-	size_t count = 0, length;
-	uint32_t record = 0;
-	bool block = false;
-
-	if (spec->args_len != 0)
-		words[count++] = (erx_boot_words_t){ spec->strings, spec->args_len };
-	if ((length = erx_boot_build_words(apply->lib->build_id, apply->build_words, sizeof(apply->build_words))) == 0)
-		return (0);
-	words[count++] = (erx_boot_words_t){ apply->build_words, length };
-	for (uint32_t at = 0; at < apply->plan->ngives; at++) {
-		give = &apply->plan->gives[at];
-		for (uint32_t d = 0; d < give->ndevices; d++) {
-			entry = &apply->lib->view.devices[give->devices[d].index];
-			if (!give->devices[d].driven || apply_unrecorded(entry))
-				continue;
-			if (record == ERX_DOM_DEVICES_MAX ||
-			    (length = apply_given_words(apply, at, d, apply->given_words[record],
-			    sizeof(apply->given_words[record]))) == 0)
-				return (0);
-			words[count++] = (erx_boot_words_t){ apply->given_words[record++], length };
-			block = block || entry->role == ERX_MF_DEVICE_ROLE_BLOCK;
-		}
-	}
-	row = spec->origin.kind == ERX_DOM_CONFIGURED ? &apply->lib->view.configured[spec->origin.record] : NULL;
-	for (uint32_t at = 0; row != NULL && at < row->ndrives; at++) {
-		length = erx_boot_drive_words(row->drives[at].role, row->drives[at].number, apply->drive_words[at],
-		    sizeof(apply->drive_words[at]));
-		if (length == 0)
-			return (0);
-		words[count++] = (erx_boot_words_t){ apply->drive_words[at], length };
-	}
-	if (block) {
-		length = erx_boot_pair_words(apply->lib->boot.value, apply->lib->boot.slot, apply->pair_words,
-		    sizeof(apply->pair_words));
-		if (length == 0)
-			return (0);
-		words[count++] = (erx_boot_words_t){ apply->pair_words, length };
-	}
-	if (apply->lib->system_image_holder != 0 &&
-	    erx_dom_from_row(&spec->origin, apply->lib->system_image_holder - 1)) {
-		length = erx_boot_system_image_words(&apply->lib->system_image,
-		    apply->lib->record_volume, apply->system_image_words,
-		    sizeof(apply->system_image_words));
-		if (length == 0)
-			return (0);
-		words[count++] = (erx_boot_words_t){ apply->system_image_words, length };
-	}
-	return (count);
+	for (uint32_t d = 0; d < give->ndevices; d++)
+		state->memory[d] = give->devices[d].driven && apply->lib->view.devices[give->devices[d].index].memory != 0 &&
+		    apply_memory_inside(apply, at, d);
+	return (ERX_OK);
 }
 
 /*
@@ -762,7 +531,6 @@ apply_bootinfo(apply_t *apply)
 	const erx_dom_plan_t *plan = apply->plan;
 	const erx_dom_spec_t *spec = &plan->spec;
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
-	erx_boot_words_t args[4 + ERX_DOM_DEVICES_MAX + ERX_DOM_DRIVES_MAX];
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
 	char node[ERX_DOM_NODE_MAX], system_node[ERX_DOM_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };
@@ -811,8 +579,8 @@ apply_bootinfo(apply_t *apply)
 		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial,
 		    .ctl_slots = spec->connections };
 	}
-	inputs.args = args;
-	inputs.nargs = apply_args(apply, args);
+	inputs.args = apply->args.runs;
+	inputs.nargs = erx_dom_args(apply->lib, plan, apply->gives, &apply->args);
 	if (inputs.nargs == 0)
 		return (ERX_EINVAL);
 	inputs.env = &env;
@@ -916,7 +684,7 @@ apply_undo(apply_t *apply, uint32_t applied)
 	erx_dom_obj_t undo[ERX_DOM_PLAN_STEPS_MAX], gone[ERX_DOM_UNIT_STEPS];
 	handle_set_t set = set_of_domain(&apply->handles);
 	const erx_dom_unit_plan_t *give;
-	apply_give_t *state;
+	erx_dom_give_made_t *state;
 	uint32_t count;
 
 	for (uint32_t at = apply->plan->ngives; at > 0; at--) {
@@ -987,7 +755,7 @@ apply_keep_gives(apply_t *apply)
 			record->dma = CAP(ERX_DOM_OBJ_DEV_DMA + d);
 			record->setting = (erx_pcie_setting_t){ .mode = ERX_PCIE_MODE_OFF,
 			    .route = give->devices[d].driven ? give->devices[d].route : ERX_PCIE_ROUTE_NONE,
-			    .message = apply_message(apply, at, &give->devices[d]) };
+			    .message = erx_dom_give_message(&apply->gives[at], &give->devices[d]) };
 			if (made[ERX_DOM_OBJ_DEV_MEMORY + d] != ERX_CAP_NULL)
 				record->memory = CAP(ERX_DOM_OBJ_DEV_MEMORY + d);
 		}
