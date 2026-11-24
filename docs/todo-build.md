@@ -70,9 +70,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   program modes for the recording spinners, `share-equal`, `share-tasks` and `band-work`; lands with the quantum
   case's seed run.
 * [Medium] benchmarks, `nullcall` ([design-bench.md](design-bench.md#3-nullcall-the-decoder-refusal-round-trip)):
-  the decoder-refusal round trips, same and cross space, checked by the service's received count, and the kernel's
-  cheapest call chosen from Fiasco's source; then FD32's ten runs a build on the Raspberry Pi 4, judged by its own
-  predicate.
+  FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,
   touch, protect, decommit, release, map and child operations from the root and from a test task.
 * [Medium] benchmarks, `xdomain` ([design-bench.md](design-bench.md#5-xdomain-one-message-one-domain-to-another)):

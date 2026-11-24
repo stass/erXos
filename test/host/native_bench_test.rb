@@ -33,30 +33,57 @@ class NativeBenchTest < Minitest::Test
     assert_equal [], Erx::NativeBench.asked(wake, cpus: 1).pairs
   end
 
+  def cell(benchmark, operation, status, lost: 0, reason: 'lost wake')
+    Erx::BenchRecord::Cell.new(
+      benchmark: benchmark, operation: operation, profile: Erx::NativeBench::LANDING_PROFILES.fetch('fast'),
+      conditions: Erx::BenchRecord::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'counter', batch: 1),
+      status: status, reason: status == 'failed' ? reason : 'the guest printed no line for it',
+      counts: { 'lost' => lost, 'early' => 0, 'missed' => 0 }, detail: {}
+    )
+  end
+
+  def seed(benchmark, name) = Erx::NativeBench.guest(benchmark).seeds.find { |declared| declared.name == name }
+
   # The seeded build skips one wake of wake-same-cpu: only that cell failed with a lost
   # wake shows the run caught it.
   def test_the_seeded_boot_is_caught_only_by_a_lost_wake_of_wake_same_cpu
-    cell = lambda do |operation, status, lost|
-      Erx::BenchRecord::Cell.new(
-        benchmark: 'wake', operation: operation, profile: Erx::NativeBench::LANDING_PROFILES.fetch('fast'),
-        conditions: Erx::BenchRecord::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'counter', batch: 1),
-        status: status, reason: status == 'failed' ? 'lost wake' : 'the guest printed no line for it',
-        counts: { 'lost' => lost, 'early' => 0, 'missed' => 0 }, detail: {}
-      )
-    end
-    assert Erx::NativeBench.seed_caught?([cell.call('wake-same-cpu', 'failed', 1), cell.call('trigger-take', 'not_run', 0)])
-    refute Erx::NativeBench.seed_caught?([cell.call('wake-same-cpu', 'not_run', 0)])
-    refute Erx::NativeBench.seed_caught?([cell.call('wake-cross-cpu', 'failed', 1)])
-    refute Erx::NativeBench.seed_caught?([])
+    caught = seed('wake', 'lost wake').caught
+    assert caught.call([cell('wake', 'wake-same-cpu', 'failed', lost: 1), cell('wake', 'trigger-take', 'not_run')])
+    refute caught.call([cell('wake', 'wake-same-cpu', 'not_run')])
+    refute caught.call([cell('wake', 'wake-cross-cpu', 'failed', lost: 1)])
+    refute caught.call([])
   end
+
+  # Each nullcall seed sends one caller's requests to the empty slot: only that caller's
+  # cells failing by their count of refusals shows it, not a wrong result.
+  def test_each_nullcall_seed_is_caught_only_by_its_callers_failed_cells
+    root = seed('nullcall', 'root refusal to the empty slot')
+    task = seed('nullcall', 'task refusal to the empty slot')
+    assert_equal [[Erx::NativeBench::SEED_EMPTY_SLOT], []], [root.root_flags, root.task_flags]
+    assert_equal [[], [Erx::NativeBench::SEED_EMPTY_SLOT]], [task.root_flags, task.task_flags]
+    uncounted = ->(operation) { cell('nullcall', operation, 'failed', reason: Erx::NativeBench::NULLCALL_UNCOUNTED) }
+    assert root.caught.call([uncounted.call('root-same-space')])
+    refute root.caught.call([cell('nullcall', 'root-same-space', 'not_run'), uncounted.call('root-cross-space')])
+    refute root.caught.call([cell('nullcall', 'root-same-space', 'failed', reason: 'wrong result')])
+    assert task.caught.call([uncounted.call('root-cross-space')])
+    refute task.caught.call([cell('nullcall', 'root-cross-space', 'not_run'), uncounted.call('root-same-space')])
+    refute task.caught.call([cell('nullcall', 'root-cross-space', 'failed', reason: 'wrong result')])
+  end
+
+  # Every benchmark with native landing cells has a guest, and only those do.
+  def test_each_native_benchmark_has_a_guest
+    native = Erx::BenchSuite.benchmarks.values.select { |declared| declared.landing.key?('native') }.map(&:name)
+    assert_equal native.sort, Erx::NativeBench::GUESTS.keys.sort
+  end
+
   # The guest's sample counts are the landing profiles' (one source): the root is built
-  # with them, and the seeded build adds only its fault.
+  # with them, and a seeded build adds only its fault.
   def test_the_root_is_built_with_the_landing_profiles_sizes
     fast, periodic = Erx::NativeBench::LANDING_PROFILES.values_at('fast', 'periodic')
     sizes = ["-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
              "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u"]
-    plain = Erx::NativeBench.flags(seed_lost_wake: false)
+    plain = Erx::NativeBench.flags
     assert_equal sizes, plain.grep(/SAMPLES|WARMUP/)
-    assert_equal plain + ['-DERX_BENCH_SEED_LOST_WAKE'], Erx::NativeBench.flags(seed_lost_wake: true)
+    assert_equal plain + ['-DERX_BENCH_SEED_LOST_WAKE'], Erx::NativeBench.flags(seeded: seed('wake', 'lost wake').root_flags)
   end
 end

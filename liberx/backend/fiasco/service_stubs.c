@@ -30,6 +30,22 @@
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/generated/calls.h"
 
+#ifdef ERX_FIASCO_TEST_HOOKS
+_Static_assert(ERX_FIASCO_TEST_EMPTY_SLOT_ERROR == L4_IPC_ENOT_EXISTENT, "Fiasco's error for an empty slot");
+
+/*
+ * Slot 0 lies before Fiasco's base capabilities, the first of which is slot 1
+ * (L4_BASE_TASK_CAP), and before every slot root_layout.h plans, so it is empty in every task.
+ */
+uint64_t
+erx_fiasco_test_empty_slot_call(void)
+{
+	l4_utcb_t *const utcb = l4_utcb();
+
+	return (l4_ipc_error(l4_ipc_call(0, utcb, l4_msgtag(0, 0, 0, 0), L4_IPC_NEVER), utcb));
+}
+#endif
+
 static int stub_range(uint32_t, uint64_t, uint64_t, uint64_t);
 static int stub_flagged(uint32_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t *);
 static int stub_copy(uint32_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);

@@ -138,30 +138,49 @@ module Erx
       suite_cell(judged + (refused.empty? ? [] : [['rejected', false]]))
     end
 
-    # The suite's run: the native boot's wake cells and its seeded run, recorded in
-    # history (NativeBench::Landing). The xdomain boot has no bench image yet, so its
-    # cells are pending, the gate's status for a cell whose call does not exist.
-    def run(context, history: BenchRecord.history)
-      landing = NativeBench::Landing.new(root: context.root).call(benchmark('wake'), boot: BOOTS.fetch('native'),
-                                                                   history: history)
-      record = landing.fetch(:record)
-      cells = suite_cells.to_h { |cell| [cell, 'pending'] }
-                         .merge(suite_cell_name('native', 'wake') => boot_cell(record, seed_caught: landing.fetch(:seed_caught),
-                                                                             refused: landing.fetch(:refused)))
-      { cells: cells, notes: landing_notes(landing) + ['bench: the xdomain boot has no bench image to boot'] }
+    # The suite's run: each benchmark's native boot and its seeded runs, recorded in
+    # history (landing, a NativeBench::Landing). A benchmark whose landing fails is a
+    # failed cell, so the others' cells stand. The xdomain boot has no bench image yet, so
+    # its cells are pending, the gate's status for a cell whose call does not exist.
+    def run(context, history: BenchRecord.history, landing: NativeBench::Landing.new(root: context.root))
+      outcomes = benchmarks.values.select { |declared| declared.landing.key?('native') }.to_h do |declared|
+        [declared.name, native_outcome(landing, declared, history)]
+      end
+      judged = outcomes.to_h { |name, outcome| [suite_cell_name('native', name), outcome_cell(outcome)] }
+      { cells: suite_cells.to_h { |cell| [cell, 'pending'] }.merge(judged),
+        notes: outcomes.flat_map { |name, outcome| landing_notes(name, outcome) } + ['bench: the xdomain boot has no bench image to boot'] }
     end
 
-    # What the report says of the native boot, each note escaped for the terminal: a
-    # refusal never quotes a guest's line but may carry JsonInput's words about it.
-    def landing_notes(landing)
-      record = landing.fetch(:record)
-      written = landing.fetch(:written)
-      kept = written ? "recorded #{written}" : "replayed the stored log #{record.run.reused_from}, no record added"
-      seed = landing.fetch(:seed_caught) ? [] : ['the seeded lost wake was not caught']
-      cells = record.cells.reject { |cell| cell.status == 'measured' }
-                    .map { |cell| "#{cell.operation} #{cell.conditions.placement}: #{cell.status} (#{cell.reason})" }
-      refused = landing.fetch(:refused).map { |reason| "refused: #{reason}" }
-      [kept, *seed, *cells, *refused].map { |note| "bench: native: #{LineEscape.escape(note)}" }
+    # A benchmark's native landing, or { error: } with the message of the failure that ended it.
+    def native_outcome(landing, declared, history)
+      landing.call(declared, boot: BOOTS.fetch('native'), history: history)
+    rescue Error => e
+      { error: e.message }
+    end
+    private_class_method :native_outcome
+
+    def outcome_cell(outcome)
+      case outcome
+      in { error: String } then 'failed'
+      in { record:, seeds_missed:, refused: } then boot_cell(record, seed_caught: seeds_missed.empty?, refused: refused)
+      end
+    end
+    private_class_method :outcome_cell
+
+    # What the report says of a benchmark's native boot, each note escaped for the
+    # terminal: a refusal never quotes a guest's line but may carry JsonInput's words about
+    # it, and a failure's message may quote the guest's FAILED line.
+    def landing_notes(name, outcome)
+      notes = case outcome
+              in { error: String => error } then ["failed: #{error}"]
+              in { record:, written:, seeds_missed:, refused: }
+                kept = written ? "recorded #{written}" : "replayed the stored log #{record.run.reused_from}, no record added"
+                cells = record.cells.reject { |cell| cell.status == 'measured' }
+                              .map { |cell| "#{cell.operation} #{cell.conditions.placement}: #{cell.status} (#{cell.reason})" }
+                [kept, *seeds_missed.map { |missed| "the seeded #{missed} was not caught" }, *cells,
+                 *refused.map { |reason| "refused: #{reason}" }]
+              end
+      notes.map { |note| "bench: native: #{name}: #{LineEscape.escape(note)}" }
     end
     private_class_method :landing_notes
   end

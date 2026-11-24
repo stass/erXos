@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_SERVICE_TASK_H
 #define ERX_FIASCO_SERVICE_TASK_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -86,6 +87,8 @@ typedef struct erx_fiasco_task {
 	erx_log_rate_t		 log_rate;	/* what its erx_debug_log lines have cost, zero at its start */
 	bool			 test_task;	/* the launcher made it, so its task_write reaches the console */
 	erx_fiasco_task_band_t	 bands;		/* fixed when it is made (band.h) */
+	/* Counted, never printed: its messages the decoder refused, zero at its start. */
+	_Atomic uint64_t	 refused;
 } erx_fiasco_task_t;
 
 /*

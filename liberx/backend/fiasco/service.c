@@ -120,8 +120,6 @@ _Static_assert(sizeof(service_build) == sizeof(((erx_boot_handoff_view_t *)0)->b
 static erx_fiasco_reply_slots_t service_replies;
 /* Counted, never printed: a label naming no live task. */
 static _Atomic uint64_t service_dropped;
-/* Counted, never printed: every message the service received, a request, a fault or a drop. */
-static _Atomic uint64_t service_received;
 
 /* The gate and the service thread sit past the root's window of IRQ slots (thread.h). */
 uint64_t
@@ -318,7 +316,6 @@ service_message(l4_msgtag_t tag, l4_umword_t label, const l4_msg_regs_t *mr, erx
 	    .words = (uint32_t)l4_msgtag_words(tag), .task_live = erx_fiasco_task_live, .mr = (const uint64_t *)mr->mr };
 	const erx_fiasco_wire_decoded_t decoded = erx_fiasco_wire_decode(&input);
 
-	atomic_fetch_add_explicit(&service_received, 1, memory_order_relaxed);
 	switch (decoded.kind) {
 	case ERX_FIASCO_WIRE_DROP:
 		atomic_fetch_add_explicit(&service_dropped, 1, memory_order_relaxed);
@@ -334,6 +331,7 @@ service_message(l4_msgtag_t tag, l4_umword_t label, const l4_msg_regs_t *mr, erx
 		erx_fiasco_reply_park(&service_replies, decoded.task);
 		return (false);
 	case ERX_FIASCO_WIRE_REFUSE:
+		atomic_fetch_add_explicit(&erx_fiasco_task(decoded.task)->refused, 1, memory_order_relaxed);
 		*reply = (erx_fiasco_reply_t){ .status = decoded.status };
 		return (true);
 	case ERX_FIASCO_WIRE_REQUEST:
@@ -969,12 +967,6 @@ uint64_t
 erx_fiasco_test_dropped(void)
 {
 	return (atomic_load_explicit(&service_dropped, memory_order_relaxed));
-}
-
-uint64_t
-erx_fiasco_test_received(void)
-{
-	return (atomic_load_explicit(&service_received, memory_order_relaxed));
 }
 
 uint32_t

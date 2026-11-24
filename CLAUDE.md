@@ -991,8 +991,7 @@ within about 20 percent of the length, write plain code.
   cross-domain frames and their reassembly, the host link deframer, the
   `authorized_keys` line decoder (`erx_boot_keys`), device
   ring processing, the netmap ring core, PCIe configuration snapshots, `/proc` names, the command
-  shell's parser and `grep`'s pattern translator, the phone console's prompt
-  (`erx_bt_prompt`), each line escaper, the
+  shell's parser and `grep`'s pattern translator, each line escaper, the
   partition table, EROFS, F2FS, littlefs and FAT images, update manifests,
   the boot-selection record, the harness's slot parser, the pipe ring and
   record checks, the pipe reader page, the pipe protocol frames, the

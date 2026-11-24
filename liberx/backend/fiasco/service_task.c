@@ -718,7 +718,7 @@ task_unmake(uint32_t task)
 /*
  * One live task's stop, by the task stopper: step 1, then the row is stopping and keeps
  * only what the teardown needs, its place in the tree, the status, the stopper and its
- * place among the stops.
+ * place among the stops, and its count of refusals, which the root may read until the join.
  */
 static void
 task_stop(uint32_t task, uint32_t stopper, int64_t status)
@@ -726,13 +726,15 @@ task_stop(uint32_t task, uint32_t stopper, int64_t status)
 	erx_fiasco_task_t *const row = erx_fiasco_task(task);
 	erx_fiasco_task_pairs_t pairs;
 	erx_fiasco_task_tree_t tree;
+	uint64_t refused;
 
 	task_unrun(task);
 	tree = row->tree;
 	pairs = row->pairs;
+	refused = atomic_load_explicit(&row->refused, memory_order_relaxed);
 	task_stops++;
 	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_STOPPING, .tree = tree, .pairs = pairs, .status = status,
-	    .stopper = stopper, .stop_order = task_stops };
+	    .stopper = stopper, .stop_order = task_stops, .refused = refused };
 }
 
 /*
@@ -748,9 +750,11 @@ task_finish(uint32_t task)
 	const erx_fiasco_task_pairs_t pairs = row->pairs;
 	const uint32_t stopper = row->stopper;
 	const int64_t status = row->status;
+	const uint64_t refused = atomic_load_explicit(&row->refused, memory_order_relaxed);
 
 	task_unmake(task);
-	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .tree = tree, .pairs = pairs, .status = status };
+	*row = (erx_fiasco_task_t){ .state = ERX_FIASCO_TASK_ENDED, .tree = tree, .pairs = pairs, .status = status,
+	    .refused = refused };
 	erx_fiasco_gate_exit(task, stopper, status);
 	erx_fiasco_trace_service(ERX_TRACE_EVENT_SPACE_END, (uint64_t)task + 1, (uint64_t)status, 0);
 	(void)l4_semaphore_up(task_ended_cap(task));
@@ -1179,5 +1183,15 @@ uint32_t
 erx_fiasco_test_pool_free(void)
 {
 	return (erx_slot_pool_free_count(&task_pairs) + erx_slot_pool_free_count(&thread_pairs));
+}
+
+uint64_t
+erx_fiasco_test_refused(uint64_t space)
+{
+	uint32_t task;
+
+	if (task_space_named(ERX_FIASCO_TASK_ROOT, space, &task) != ERX_OK)
+		return (UINT64_MAX);
+	return (atomic_load_explicit(&erx_fiasco_task(task)->refused, memory_order_relaxed));
 }
 #endif
