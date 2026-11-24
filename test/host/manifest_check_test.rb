@@ -248,9 +248,9 @@ class ManifestCheckTest < Minitest::Test
   def test_accepted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
     # The development manifest's own, clock, code_objects, data, display, home, inspect, install, line,
-    # log, login_keys, machine, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
+    # log, login, login_keys, machine, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
     # system, usb_input and web, and this one.
-    assert_equal %w[clock code_objects data display home inspect install line log login_keys machine net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    assert_equal %w[clock code_objects data display home inspect install line log login login_keys machine net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 

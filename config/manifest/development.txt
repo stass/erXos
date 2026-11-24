@@ -409,6 +409,14 @@ service line
 service code_objects
   server system
   interface code_objects
+# login: the one facet every front end logs a person in through (docs/design-login.md,
+# "The service and its facet"), served by the system domain, where erx_login registers
+# as its server (erx_facet:serve/2). A row that grants it names its line and logins and
+# holds to the table of front ends ("Who holds it"), which the manifest check holds every
+# row to; no row here grants it.
+service login
+  server system
+  interface login
 # pci_bus and pci: the device service's PCIe interfaces (docs/design-pcie.md, "Facets"),
 # served by the system domain, where the domain service registers as their server
 # (erx_facet:serve/2) and forwards each request to the device service's PCIe process.
