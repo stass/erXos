@@ -72,8 +72,8 @@ The grant's state: the drive's medium, none or its window, the monitor of
 that window, its issuer and whether a holder was handed the window; the
 monitor of the window whose end the grant asked for and waits on, or
 none; the asks held meanwhile, oldest first; and the monitor of the
-occupant that took the drive and has served no medium under it yet, or
-none.
+occupant that took the drive, or none, held until the occupant ends or
+the medium served under it ends, whichever is first.
 """.
 -type state() :: #{medium := none | #{window := pid(), monitor := reference(), issuer := issuer(),
                                       answered := boolean()},
