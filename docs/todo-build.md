@@ -66,9 +66,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   validator's check that a histogram holds the line's sample count removed, is run by hand and kept nowhere;
   make it a test that runs a fixed number of inputs from a fixed seed against the faulted validator, so the
   target's one invariant is shown to catch what it guards.
-* [Medium] benchmarks, `sched` ([design-bench.md](design-bench.md#2-sched-how-a-cpu-is-shared)): `native_task`
-  program modes for the recording spinners, `share-equal`, `share-tasks` and `band-work`; lands with the quantum
-  case's seed run.
+* [Medium] benchmarks, `sched` ([design-bench.md](design-bench.md#2-sched-how-a-cpu-is-shared)): `native_task`'s
+  `MODE_SHARE` runs the recording spinners, its `share` case runs four of them, and `tools/lib/erx/share_windows.rb`
+  reads their windows. Still to build: the native bench guest launching them for `share-equal`, `share-tasks` and
+  `band-work`, a `BENCH` line, a measurement and a record for a sustained cell, and the quantum case's seed as a
+  sensitivity run of the `bench` suite. Still to decide: a lost turn's "twenty loop periods", since a pass of the
+  loop takes less than a counter tick under HVF, so the loop period reads as one tick and the count takes in
+  interrupts within a turn.
 * [Medium] benchmarks, `nullcall` ([design-bench.md](design-bench.md#3-nullcall-the-decoder-refusal-round-trip)):
   FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,

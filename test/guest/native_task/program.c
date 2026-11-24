@@ -37,6 +37,8 @@
 /* MODE_TURNS: the turns it takes the median of, and how long it tries. */
 #define TURNS		15u
 #define TURNS_DEADLINE_NS	UINT64_C(2000000000)
+/* MODE_SHARE: how long its first thread blocks between looks at a spinner it waits for. */
+#define SHARE_POLL_NS	UINT64_C(1000000)
 /* QEMU virt's fw_cfg and RAM (hw/arm/virt.c), as test/guest/function_api/device_cases.c uses them. */
 #define FW_CFG_PHYS	UINT64_C(0x9020000)
 #define RAM_PHYS	UINT64_C(0x40000000)
@@ -380,6 +382,194 @@ mode_turns(void)
 	return ((int64_t)(turns[TURNS / 2] / 1000));
 }
 
+/*
+ * MODE_SHARE (docs/design-bench.md, "2. `sched`: how a CPU is shared"). Each recording spinner
+ * reads the counter in a loop on the one CPU it shares with the others. A gap is the ticks
+ * between two of its reads, the first counted from the plan's start, before any spinner
+ * started, so a spinner that starts late shows the wait as a gap. A short gap is a pass of its
+ * own loop, a long one a turn of another thread or an interrupt. Its loop period is its
+ * shortest gap of a tick or more in the warm-up, which the counter's resolution bounds from
+ * below. For each window it keeps its passes, its longest gap and its gaps over
+ * SHARE_LOST_LOOPS loop periods, and publishes them; the read that passes a window's end is
+ * that window's last, and a window no read fell in was one gap, its whole length, with no
+ * pass. The windows are fixed before any spinner starts, so every spinner's windows are the
+ * same span of the counter.
+ */
+typedef struct {
+	uint64_t	iterations;
+	uint64_t	longest;	/* ticks */
+	uint64_t	lost;		/* gaps over SHARE_LOST_LOOPS loop periods */
+} share_window_t;
+
+typedef struct {
+	uint64_t	start;		/* the counter before the first spinner starts */
+	uint64_t	first;		/* the first window's start, after the warm-up */
+	uint64_t	window;		/* each window's length, in ticks */
+	uint32_t	windows;
+} share_plan_t;
+
+static share_plan_t share_plan;
+static share_window_t share_windows[SHARE_SPINNERS_MAX][SHARE_WINDOWS_MAX];
+/* By spinner: its loop period, UINT64_MAX when the warm-up gave it no gap of a tick or more. */
+static uint64_t share_loops[SHARE_SPINNERS_MAX];
+/* By spinner: how many of its windows are published, each released after its record. */
+static _Atomic uint32_t share_published[SHARE_SPINNERS_MAX];
+
+static uint64_t
+share_window_end(uint32_t window)
+{
+	return (share_plan.first + (uint64_t)(window + 1) * share_plan.window);
+}
+
+static void
+share_spinner(uint64_t index)
+{
+	uint64_t last = share_plan.start, loop = UINT64_MAX, lost_after;
+
+	while (last < share_plan.first) {
+		const uint64_t now = erx_fiasco_counter();
+
+		if (now != last && now - last < loop)
+			loop = now - last;
+		last = now;
+	}
+	share_loops[index] = loop;
+	lost_after = loop > UINT64_MAX / SHARE_LOST_LOOPS ? UINT64_MAX : loop * SHARE_LOST_LOOPS;
+	for (uint32_t window = 0; window < share_plan.windows; window++) {
+		const uint64_t end = share_window_end(window);
+		share_window_t kept = { .longest = last < end ? 0 : share_plan.window };
+
+		while (last < end) {
+			const uint64_t now = erx_fiasco_counter();
+			const uint64_t gap = now - last;
+
+			kept.iterations++;
+			if (gap > kept.longest)
+				kept.longest = gap;
+			if (gap > lost_after)
+				kept.lost++;
+			last = now;
+		}
+		share_windows[index][window] = kept;
+		atomic_store_explicit(&share_published[index], window + 1, memory_order_release);
+	}
+	erx_fiasco_sleep_forever();
+}
+
+/* One line of SHARE_LINE_BYTES at most, built from text and decimal numbers. */
+#define SHARE_LINE_BYTES	160u
+/* The longest window line: its text, four 20-digit numbers and two of one digit, and its newline. */
+_Static_assert(sizeof("share: window 9 spinner 7 iterations  longest  lost  loop \n") - 1 + 4 * 20 <= SHARE_LINE_BYTES,
+    "a window line fits its buffer");
+_Static_assert(SHARE_WINDOWS_MAX <= 10 && SHARE_SPINNERS_MAX <= 10, "a window and a spinner are one digit each");
+
+typedef struct {
+	char	bytes[SHARE_LINE_BYTES];
+	size_t	used;
+} share_line_t;
+
+static void
+share_text(share_line_t *line, const char *text)
+{
+	for (; *text != '\0' && line->used < SHARE_LINE_BYTES; text++)
+		line->bytes[line->used++] = *text;
+}
+
+/* Appends " name value". */
+static void
+share_number(share_line_t *line, const char *name, uint64_t value)
+{
+	char digits[20];
+	size_t count = 0;
+
+	share_text(line, " ");
+	share_text(line, name);
+	share_text(line, " ");
+	do {
+		digits[count++] = (char)('0' + value % 10);
+		value /= 10;
+	} while (value != 0);
+	while (count > 0 && line->used < SHARE_LINE_BYTES)
+		line->bytes[line->used++] = digits[--count];
+}
+
+/* Blocks until spinner has published every window, or the patience after the last one's end runs out. */
+static bool
+share_wait(uint32_t spinner, uint64_t hz)
+{
+	_Atomic uint32_t *const published = &share_published[spinner];
+	const uint64_t patience = share_window_end(share_plan.windows - 1) + hz * SHARE_PATIENCE_MS / 1000;
+
+	for (;;) {
+		const uint32_t seen = atomic_load_explicit(published, memory_order_acquire);
+
+		if (seen == share_plan.windows)
+			return (true);
+		if (erx_fiasco_counter() >= patience)
+			return (false);
+		(void)erx_umtx_wait((uint64_t)(uintptr_t)published, seen, erx_fiasco_clock_ns() + SHARE_POLL_NS);
+	}
+}
+
+/*
+ * The first thread, on CPU 0, starts the spinners on cpu and, once they have published every
+ * window, writes through the task's write one line of the run and then one per window and
+ * spinner in that order, which tools/lib/erx/share_windows.rb reads: no line is written while
+ * a window runs. It ends with 0 once every line is written.
+ */
+static int64_t
+mode_share(uint64_t argument)
+{
+	const uint32_t spinners = (uint32_t)(argument >> 8) & 0xffu, cpu = (uint32_t)(argument >> 16) & 0xffu;
+	const uint32_t windows = (uint32_t)(argument >> 24) & 0xffu;
+	const uint64_t window_ms = argument >> 32, hz = erx_fiasco_counter_hz();
+	share_line_t line = { .used = 0 };
+	uint64_t thread;
+
+	if (spinners == 0 || spinners > SHARE_SPINNERS_MAX || cpu >= 64 || windows == 0 || windows > SHARE_WINDOWS_MAX ||
+	    window_ms == 0 || window_ms > SHARE_WINDOW_MS_MAX)
+		return (SHARE_ARGUMENT_BAD);
+	if (erx_thread_set_affinity(erx_fiasco_thread_self()->index, UINT64_C(1)) != ERX_OK)
+		return (SHARE_PINNED);
+	share_plan.start = erx_fiasco_counter();
+	share_plan.first = share_plan.start + hz * SHARE_WARMUP_MS / 1000;
+	share_plan.window = hz * window_ms / 1000;
+	share_plan.windows = windows;
+	for (uint32_t spinner = 0; spinner < spinners; spinner++) {
+		const int64_t step = thread_spawn(share_spinner, spinner, UINT64_C(1) << cpu, NULL, &thread);
+
+		if (step != 0)
+			return (SHARE_SPAWN + step);
+	}
+	for (uint32_t spinner = 0; spinner < spinners; spinner++)
+		if (!share_wait(spinner, hz))
+			return (SHARE_STARVED);
+	share_text(&line, "share: run");
+	share_number(&line, "hz", hz);
+	share_number(&line, "spinners", spinners);
+	share_number(&line, "cpu", cpu);
+	share_number(&line, "windows", windows);
+	share_number(&line, "window_ms", window_ms);
+	share_text(&line, "\n");
+	erx_fiasco_task_write(line.bytes, line.used);
+	for (uint32_t window = 0; window < windows; window++)
+		for (uint32_t spinner = 0; spinner < spinners; spinner++) {
+			const share_window_t *const kept = &share_windows[spinner][window];
+
+			line.used = 0;
+			share_text(&line, "share:");
+			share_number(&line, "window", window);
+			share_number(&line, "spinner", spinner);
+			share_number(&line, "iterations", kept->iterations);
+			share_number(&line, "longest", kept->longest);
+			share_number(&line, "lost", kept->lost);
+			share_number(&line, "loop", share_loops[spinner]);
+			share_text(&line, "\n");
+			erx_fiasco_task_write(line.bytes, line.used);
+		}
+	return (0);
+}
+
 /* Requests until the task ends under it. */
 static void
 commit_helper(uint64_t addr)
@@ -595,7 +785,12 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 	const uint64_t argument = args[0];
 	int64_t step;
 
-	switch (argument) {
+	/* Only MODE_SHARE takes parameters above its mode byte. */
+	if ((argument & MODE_BITS) != MODE_SHARE && argument > MODE_BITS)
+		return (90);
+	switch (argument & MODE_BITS) {
+	case MODE_SHARE:
+		return (mode_share(argument));
 	case MODE_SERVICE:
 		return (mode_service());
 	case MODE_WRITE_RX:

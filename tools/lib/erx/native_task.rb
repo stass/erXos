@@ -10,6 +10,7 @@ require_relative 'native_root'
 require_relative 'qemu'
 require_relative 'qemu_cells'
 require_relative 'runner'
+require_relative 'share_windows'
 
 module Erx
   # A second task on QEMU (docs/design-fiasco.md, "The root service", "Task exit",
@@ -32,6 +33,8 @@ module Erx
     # The pool case's thread creates, starts, exits and reaps, one more than the root's slot pool
     # holds pairs, one at a time: under TCG above all.
     POOL_ROUNDS_SECONDS = 400
+    # The share case: its 2 s warm-up and three 1 s windows, under TCG above all.
+    SHARE_SECONDS = 60
     CASE_LINE = /\Aerx: task: (?<name>[a-z_]+) (?<result>ok|FAILED)/n
     STATUS_FAULT = -1
     WRITE_BIT = 2
@@ -59,6 +62,7 @@ module Erx
        case_point('log', seconds: 30),
        case_point('write', seconds: 30), case_point('write_refused', seconds: 30),
        case_point('spin_stop', seconds: 60), case_point('band', seconds: 30),
+       case_point('share', seconds: SHARE_SECONDS),
        case_point('quantum', seconds: 30), case_point('root_stops', seconds: 30),
        case_point('request_against_exit', seconds: RACE_SECONDS),
        { name: 'task-done', pattern: /\Aerx: task: done/n, seconds: 30 }.freeze].freeze
@@ -80,6 +84,7 @@ module Erx
     def judge(serial)
       judge_log(serial)
       judge_write(serial)
+      ShareWindows.judge(serial)
       statuses = serial.b.scan(ADDRESS_LINE).flatten
       raise Error, "#{statuses.size} address lines, not #{FAULTS.size}" unless statuses.size == FAULTS.size
 

@@ -26,6 +26,34 @@
 #define MODE_WRITE_REFUSED	15	/* from a task the launcher did not make: the launcher's create and a raw write refused: ends with 0 */
 #define MODE_SPIN	16	/* SPIN_THREADS threads spinning on CPU 0 until the root stops the task */
 #define MODE_TURNS	17	/* two threads spin on CPU 0: ends with the median turn of one, in us, or a negative status */
+#define MODE_SHARE	18	/* recording spinners on one CPU write each window through the task's write: ends with 0 */
+
+/*
+ * The argument names its mode in its low byte; only MODE_SHARE reads the rest, which
+ * SHARE_ARGUMENT packs: its spinners, the one CPU they are pinned to, its windows, and each
+ * window's length in milliseconds (docs/design-bench.md, "2. `sched`: how a CPU is shared").
+ */
+#define MODE_BITS	UINT64_C(0xff)
+#define SHARE_ARGUMENT(spinners, cpu, windows, window_ms)						\
+	((uint64_t)MODE_SHARE | (uint64_t)(spinners) << 8 | (uint64_t)(cpu) << 16 | (uint64_t)(windows) << 24 |	\
+	    (uint64_t)(window_ms) << 32)
+#define SHARE_SPINNERS_MAX	8u
+#define SHARE_WINDOWS_MAX	10u
+#define SHARE_WINDOW_MS_MAX	60000u
+/* The sustained profile's warm-up, in both its forms, before the first window starts. */
+#define SHARE_WARMUP_MS		2000u
+/* A gap longer than this many loop periods is a turn the spinner lost. */
+#define SHARE_LOST_LOOPS	20u
+/*
+ * MODE_SHARE's statuses when it ends early: an argument out of the bounds above, its first
+ * thread not moved to CPU 0, a spinner that published no window within SHARE_PATIENCE_MS of its
+ * end, and a spinner it could not start, its status added to SHARE_SPAWN.
+ */
+#define SHARE_ARGUMENT_BAD	100
+#define SHARE_PINNED		101
+#define SHARE_STARVED		102
+#define SHARE_SPAWN		110
+#define SHARE_PATIENCE_MS	5000u
 
 /* The threads MODE_WAIT starts before it sleeps, each asleep for good. */
 #define WAIT_THREADS	2u

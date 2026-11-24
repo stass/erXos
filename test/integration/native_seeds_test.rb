@@ -45,6 +45,10 @@ class NativeSeedsTest < Minitest::Test
           "\t}\n"
   Seed = Data.define(:file, :from, :to, :suite, :cpus, :expected)
   SEEDS = {
+    # The quantum case's seed (docs/design-bench.md, "Verification"): a thread takes its task row's
+    # slice, which a test task's row does not hold, so its quantum is Fiasco's 10 ms default.
+    'the task row slice taken' => Seed.new(file: SERVICE, from: "\t    erx_fiasco_task(bands->domain)->bands.slice_us);\n",
+                                       to: "\t    bands->slice_us);\n", suite: :task, cpus: 1, expected: /quantum FAILED/),
     'the clear before the deletion' => Seed.new(file: THREAD, from: REAP_CALL + "\tif (record->release_size", to: "#{CLEAR}#{REAP_CALL}\tif (record->release_size",
                                                 suite: :threads, cpus: 4, expected: /join_loop FAILED/),
     'the clear removed' => Seed.new(file: THREAD, from: CLEAR, to: '', suite: :threads, cpus: 1, expected: /join_loop FAILED/),

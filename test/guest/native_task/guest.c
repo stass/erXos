@@ -47,6 +47,13 @@
  */
 #define QUANTUM_MIN_US		250
 #define QUANTUM_MAX_US		4000
+/*
+ * The share case: the sched benchmark's landing cell of share-equal, four spinners for three
+ * 1 s windows (docs/design-bench.md, "The gates").
+ */
+#define SHARE_SPINNERS		4u
+#define SHARE_WINDOWS		3u
+#define SHARE_WINDOW_MS		1000u
 
 void erx_fiasco_root_main(void);
 
@@ -291,6 +298,20 @@ case_quantum(void)
 	say_case("quantum", turn >= QUANTUM_MIN_US && turn <= QUANTUM_MAX_US);
 }
 
+/*
+ * The share case (docs/design-bench.md, "2. `sched`: how a CPU is shared"): SHARE_SPINNERS
+ * recording spinners of one task on the last CPU, off the root's unless the machine has one,
+ * while the root waits in its join. The task writes its windows, which
+ * tools/lib/erx/native_task.rb reads back; here the task's status and its pools are judged.
+ */
+static void
+case_share(void)
+{
+	const uint32_t cpus = erx_fiasco_test_cpu_count();
+
+	case_ends("share", 0, SHARE_ARGUMENT(SHARE_SPINNERS, cpus - 1, SHARE_WINDOWS, SHARE_WINDOW_MS), 0);
+}
+
 /* A thread requesting while another faults, and the label reused at once each time. */
 static void
 case_race(void)
@@ -342,6 +363,7 @@ erx_fiasco_root_main(void)
 	case_write_refused();
 	case_ends("spin_stop", 0, MODE_SPIN_STOP, STATUS_SPIN_STOP);
 	case_band();
+	case_share();
 	case_quantum();
 	case_root_stops();
 	case_race();
