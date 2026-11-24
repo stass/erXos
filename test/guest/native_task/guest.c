@@ -139,17 +139,22 @@ case_ends(const char *name, uint32_t flags, uint64_t mode, int64_t expected)
 
 /*
  * A task the root makes with erx_space_create, as the domain library makes a domain's,
- * not through the launcher: it is no test task, so its raw write is refused.
+ * not through the launcher: it is no test task, so its raw write is refused. Its fault
+ * gate, which every such create names, is made before the counts are read and goes
+ * after they are compared, so the counts see only the task.
  */
 static void
 case_write_refused(void)
 {
+	uint64_t gate = ERX_CAP_NULL, space = 0, pc;
+	int result = erx_gate_create(0, &gate);
 	const uint64_t before = erx_fiasco_vm_free_pages();
 	const uint32_t pairs = erx_fiasco_test_pool_free();
 	int64_t status = INT64_MIN;
-	uint64_t space = 0, pc;
-	int result = erx_space_create(0, ERX_CAP_SELF, 0, 0, 0, erx_space_cap_limit_max(), &space);
+	bool counted;
 
+	if (result == ERX_OK)
+		result = erx_space_create(0, ERX_CAP_SELF, gate, 0, 0, erx_space_cap_limit_max(), &space);
 	if (result == ERX_OK && erx_image_map(space, 0, program_entry, &pc) != ERX_OK) {
 		(void)erx_space_stop(space, ERX_EINVAL);
 		(void)erx_fiasco_task_join(space, &status);
@@ -160,9 +165,13 @@ case_write_refused(void)
 		result = erx_fiasco_launch_start(space, pc, MODE_WRITE_REFUSED);
 	if (result == ERX_OK)
 		result = erx_fiasco_task_join(space, &status);
+	counted = erx_fiasco_test_pool_slots_gone() && erx_fiasco_vm_free_pages() == before &&
+	    erx_fiasco_test_pool_free() == pairs;
+	if (gate != ERX_CAP_NULL && (erx_object_destroy(gate) != ERX_OK ||
+	    erx_cap_close((erx_cap_t){ .raw = gate }) != ERX_OK))
+		result = ERX_EINVAL;
 	say_status(status);
-	say_case("write_refused", result == ERX_OK && status == 0 && erx_fiasco_test_pool_slots_gone() &&
-	    erx_fiasco_vm_free_pages() == before && erx_fiasco_test_pool_free() == pairs);
+	say_case("write_refused", result == ERX_OK && status == 0 && counted);
 }
 
 /*

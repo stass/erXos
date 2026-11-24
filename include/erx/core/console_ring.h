@@ -45,6 +45,9 @@ extern "C" {
 	((ERX_CONSOLE_RING_REPLY_WORDS - ERX_CONSOLE_RING_REPLY_HEADER) * 8)
 /* The longest line, its carriage return and newline included: one reply. */
 #define ERX_CONSOLE_RING_LINE_MAX	ERX_CONSOLE_RING_REPLY_BYTES
+/* Vlog's operations for the take and the close, after Fiasco's own 0 to 3. */
+#define ERX_CONSOLE_RING_OP_TAKE	4
+#define ERX_CONSOLE_RING_OP_CLOSE	5
 /* What opens every kernel line the log or the close writes. */
 #define ERX_CONSOLE_RING_LABEL		"fiasco: "
 /* "N kernel lines lost" for any 64-bit N. */

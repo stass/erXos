@@ -36,8 +36,8 @@ public:
     Read     = 1,
     Set_attr = 2,
     Get_attr = 3,
-    Erx_take  = 4, ///< erXos: the ring console's take
-    Erx_close = 5, ///< erXos: the ring console's close
+    Erx_take  = 4, ///< erXos: ERX_CONSOLE_RING_OP_TAKE, the ring console's take
+    Erx_close = 5, ///< erXos: ERX_CONSOLE_RING_OP_CLOSE, the ring console's close
   };
 
 private:

@@ -477,7 +477,10 @@ case_created(void)
 	    erx_fiasco_vm_free_pages() == before);
 }
 
-/* What the root's create refuses: a parent or a fault gate that names no space or gate it holds. */
+/*
+ * What the root's create refuses: a parent or a fault gate that names no space or gate it holds,
+ * ERX_CAP_NULL among them, which only the launcher's test create takes as no gate.
+ */
 static void
 case_space_refusals(void)
 {
@@ -485,7 +488,8 @@ case_space_refusals(void)
 	bool passed = erx_mem_create(0, PAGE, 0, &mem) == ERX_OK;
 
 	passed = passed && erx_space_create(0, mem, ERX_CAP_NULL, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE &&
-	    erx_space_create(0, ERX_CAP_SELF, mem, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE;
+	    erx_space_create(0, ERX_CAP_SELF, mem, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ETYPE &&
+	    erx_space_create(0, ERX_CAP_SELF, ERX_CAP_NULL, 0, 0, TASK_CAP_LIMIT, &refused) == ERX_ESTALE;
 	passed = handle_close(mem) == ERX_OK && passed;
 	say_case("space_refusals", passed);
 }
@@ -790,7 +794,7 @@ case_passing(void)
 	bool passed = erx_mem_create(0, SHARED_PAGES * PAGE, 0, &mem) == ERX_OK &&
 	    object_fill(mem, SHARED_PAGES, ROOT_PATTERN) && erx_cap_dup(mem, &moved) == ERX_OK &&
 	    erx_gate_create(0, &gate) == ERX_OK && task_make(&task, SHARED_ADDR, SHARED_PAGES) &&
-	    erx_space_create(0, ERX_CAP_SELF, ERX_CAP_NULL, 0, 0, 4, &small) == ERX_OK;
+	    erx_space_create(0, ERX_CAP_SELF, gate, 0, 0, 4, &small) == ERX_OK;
 
 	item_put(0, mem, ERX_HR_READ | ERX_HR_MAP, false);
 	item_put(1, moved, write | ERX_HR_DESTROY, true);
@@ -1304,16 +1308,23 @@ image_task_start(uint32_t entry, uint64_t budget, uint64_t gate, uint64_t label,
 	return (false);
 }
 
-/* Starts a task of the image entry under the root's budget and waits for its status. */
+/*
+ * Starts a task of the image entry under budget and waits for its status. Its records go
+ * to a gate nobody serves, which goes once the task has ended.
+ */
 static int64_t
-image_task_run(uint32_t entry, uint64_t argument)
+image_task_run(uint32_t entry, uint64_t budget, uint64_t argument)
 {
-	uint64_t space;
+	uint64_t gate, space;
 	int64_t status = INT64_MIN;
 
-	if (!image_task_start(entry, ERX_CAP_SELF, 0, 0, argument, &space) ||
-	    erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+	if (erx_gate_create(0, &gate) != ERX_OK)
 		return (INT64_MIN);
+	if (!image_task_start(entry, budget, gate, 0, argument, &space) ||
+	    erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + WAIT_NS, &status) != ERX_OK)
+		status = INT64_MIN;
+	if (erx_object_destroy(gate) != ERX_OK || handle_close(gate) != ERX_OK)
+		status = INT64_MIN;
 	return (status);
 }
 
@@ -1333,13 +1344,13 @@ image_task_run(uint32_t entry, uint64_t argument)
 static void
 case_image_shared(uint32_t entry)
 {
-	uint64_t budget, first, file_space, image_space, gate, writer, label, steady, before, file_taken, image_taken;
+	uint64_t budget, quiet = ERX_CAP_NULL, file_space, image_space, gate, writer, label, steady, before, file_taken,
+	    image_taken;
 	int64_t status = INT64_MIN, code_before, code_after;
 	erx_fault_t record;
 	bool passed = erx_budget_create(ERX_CAP_SELF, ERX_BUDGET_WALL, 64, 64, &budget) == ERX_OK &&
-	    image_task_start(entry, budget, 0, 0, MODE_DATA, &first) &&
-	    erx_fiasco_task_join_until(first, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK && status == 0 &&
-	    erx_object_destroy(budget) == ERX_OK && handle_close(budget) == ERX_OK;
+	    image_task_run(entry, budget, MODE_DATA) == 0 && erx_object_destroy(budget) == ERX_OK &&
+	    handle_close(budget) == ERX_OK && erx_gate_create(0, &quiet) == ERX_OK;
 
 	steady = erx_fiasco_vm_free_pages();
 	before = steady;
@@ -1348,15 +1359,15 @@ case_image_shared(uint32_t entry)
 	if (passed)
 		task_drop(file_space);
 	before = erx_fiasco_vm_free_pages();
-	passed = passed && image_task_start(entry, ERX_CAP_SELF, 0, 0, MODE_DATA, &image_space);
+	passed = passed && image_task_start(entry, ERX_CAP_SELF, quiet, 0, MODE_DATA, &image_space);
 	image_taken = before - erx_fiasco_vm_free_pages();
 	passed = passed && erx_fiasco_task_join_until(image_space, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK &&
 	    status == 0;
 	say_count("image_file_pages", file_taken);
 	say_count("image_shared_pages", image_taken);
-	passed = passed && image_taken < file_taken && image_task_run(entry, MODE_DATA) == 0;
+	passed = passed && image_taken < file_taken && image_task_run(entry, ERX_CAP_SELF, MODE_DATA) == 0;
 
-	code_before = passed ? image_task_run(entry, MODE_CODE_READ) : INT64_MIN;
+	code_before = passed ? image_task_run(entry, ERX_CAP_SELF, MODE_CODE_READ) : INT64_MIN;
 	passed = passed && code_before != INT64_MIN && code_before != 0 &&
 	    erx_gate_create(0, &gate) == ERX_OK && erx_gate_bind(gate, ERX_CAP_SELF_THREAD, 0) == ERX_OK &&
 	    image_task_start(entry, ERX_CAP_SELF, gate, IMAGE_LABEL, MODE_CODE_WRITE, &writer) &&
@@ -1367,8 +1378,10 @@ case_image_shared(uint32_t entry)
 	    exit_record_is(&record, IMAGE_LABEL, label, IMAGE_STATUS) &&
 	    erx_fiasco_task_join_until(writer, erx_fiasco_clock_ns() + WAIT_NS, &status) == ERX_OK &&
 	    status == IMAGE_STATUS && erx_object_destroy(gate) == ERX_OK && handle_close(gate) == ERX_OK;
-	code_after = passed ? image_task_run(entry, MODE_CODE_READ) : INT64_MIN;
+	code_after = passed ? image_task_run(entry, ERX_CAP_SELF, MODE_CODE_READ) : INT64_MIN;
 	passed = passed && code_after == code_before && erx_fiasco_vm_free_pages() == steady;
+	if (quiet != ERX_CAP_NULL)
+		passed = erx_object_destroy(quiet) == ERX_OK && handle_close(quiet) == ERX_OK && passed;
 	say_case("image_shared", passed);
 }
 

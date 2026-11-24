@@ -73,9 +73,9 @@ uint64_t	erx_fiasco_task_cap(uint32_t task);
 uint64_t	erx_fiasco_service_thread(void);
 
 /*
- * Task calls of the call table. fault is ERX_CAP_NULL or a gate the caller holds,
- * else the lookup's refusal (ERX_ESTALE for a value that names nothing, ERX_ETYPE for
- * another kind), and the space's records go to it with label as their label; parent
+ * Task calls of the call table. fault is a gate the caller holds, or ERX_CAP_NULL in the
+ * launcher's test create alone, else the lookup's refusal (ERX_ESTALE for a value that
+ * names nothing, ERX_CAP_NULL among them, ERX_ETYPE for another kind), and the space's records go to it with label as their label; parent
  * is ERX_CAP_SELF or a space the caller created, else the lookup's refusal, and one
  * that is stopping is ERX_EINVAL; the new space joins parent's tree and stops when
  * parent stops; budget charges the space as for every create

@@ -38,12 +38,18 @@ static _Atomic uint32_t end_taken;
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_record[ERX_CRASH_SIZE];
 static _Alignas(ERX_CRASH_BUFFER_ALIGN) uint8_t end_scratch[ERX_CRASH_SCRATCH_BYTES];
 
-/* The first caller goes on; every other sleeps. */
+/*
+ * The first caller goes on; every other sleeps. The winner closes the kernel's route at
+ * once, so the ring's lines reach the UART ahead of the end's own first line, and
+ * every line the kernel prints from here on goes there (docs/design-fiasco.md,
+ * "The kernel's lines").
+ */
 static void
 end_take(void)
 {
 	if (atomic_exchange_explicit(&end_taken, 1, memory_order_acq_rel) != 0)
 		erx_fiasco_sleep_forever();
+	erx_fiasco_console_close();
 }
 
 bool

@@ -66,12 +66,12 @@ erx_fiasco_gate_init(void)
 }
 
 int
-erx_fiasco_gate_named(uint32_t caller, uint64_t fault, uint32_t *gate)
+erx_fiasco_gate_named(uint32_t caller, uint64_t fault, bool test_task, uint32_t *gate)
 {
 	uint32_t index;
 	int status;
 
-	if (fault == ERX_CAP_NULL) {
+	if (test_task && fault == ERX_CAP_NULL) {
 		*gate = GATE_NONE;
 		return (ERX_OK);
 	}

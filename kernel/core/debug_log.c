@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "erx/abi.h"
+#include "erx/core/console_ring.h"
 #include "erx/core/effects.h"
 #include "erx/log.h"
 #include "abi_calls.h"
@@ -111,6 +112,18 @@ erx_sys_debug_log(erx_sys_context_t *context,
 	    arguments->len);
 	if (status == ERX_OK && !erx_debug_log_for_console)
 		erx_debug_log_drain();
+	erx_effect_log_unlock();
+	return (status);
+}
+
+erx_status_t
+erx_debug_log_kernel_line(const void *bytes, size_t length)
+{
+	erx_status_t status;
+
+	erx_effect_log_lock();
+	status = erx_log_bytes(&erx_debug_log_ring, ERX_LOG_LEVEL_WARNING,
+	    erx_effect_clock_ns(), ERX_CONSOLE_RING_LABEL, bytes, length);
 	erx_effect_log_unlock();
 	return (status);
 }

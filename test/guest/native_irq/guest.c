@@ -525,7 +525,7 @@ case_destroyed_handle(void)
 static void
 check_object_space(void)
 {
-	uint64_t space;
+	uint64_t gate, space;
 	int64_t ignored;
 	const char *reason;
 
@@ -533,10 +533,13 @@ check_object_space(void)
 		fail("erx: irq: the largest cap_limit answered is not the object space's FAILED\n");
 	if (erx_space_create(0, ERX_CAP_SELF, 0, 0, 0, erx_space_cap_limit_max() + 1, &space) != ERX_EINVAL)
 		fail("erx: irq: a window past the object space was admitted FAILED\n");
-	if (erx_space_create(0, ERX_CAP_SELF, ERX_CAP_NULL, 0, 0, erx_space_cap_limit_max(), &space) != ERX_OK)
+	if (erx_gate_create(0, &gate) != ERX_OK ||
+	    erx_space_create(0, ERX_CAP_SELF, gate, 0, 0, erx_space_cap_limit_max(), &space) != ERX_OK)
 		fail("erx: irq: the largest window that fits was refused FAILED\n");
 	(void)erx_space_stop(space, 0);
 	(void)erx_fiasco_task_join(space, &ignored);
+	if (erx_object_destroy(gate) != ERX_OK || erx_cap_close((erx_cap_t){ .raw = gate }) != ERX_OK)
+		fail("erx: irq: the space's fault gate did not go FAILED\n");
 	reason = erx_fiasco_test_object_space_probe(irq_soft);
 	if (reason != NULL)
 		fail(reason);

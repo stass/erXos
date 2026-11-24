@@ -60,7 +60,7 @@ module Erx
                  kernel/crypto/chacha20/chacha.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/pm_wdt.c #{BACKEND}/vc_mbox.c #{BACKEND}/bcm2711_pins.c kernel/core/bcm2711_pins.c kernel/core/vc_mailbox.c kernel/core/vc_property.c #{BACKEND}/end.c #{BACKEND}/end_how.c liberx/backend/core/trace_ring.c #{BACKEND}/trace.c
                  #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
-                 kernel/core/watchdog.c kernel/core/pm_wdt.c kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
+                 kernel/core/watchdog.c kernel/core/pm_wdt.c kernel/core/admit.c kernel/core/console_ring.c kernel/core/debug_log.c kernel/core/dispatch.c
                  build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
     # What ERTS's lane port driver (erx_lane_drv.c) calls: the lanes, the funnel and the
     # ETF reader and writer, which hashes atoms with BLAKE3.

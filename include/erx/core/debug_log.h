@@ -20,6 +20,16 @@
 
 #include "erx/log.h"
 
+/*
+ * One line Fiasco printed, from a take of its ring console, as a kernel record of level
+ * warning: ERX_CONSOLE_RING_LABEL, then exactly length bytes, each through erx_log_escape
+ * (erx_log_bytes), so the console and the stored lines get them escaped, never raw
+ * (docs/design-fiasco.md, "The kernel's lines"). The record always waits for the console's
+ * take: the early console's write would put it back in the kernel's ring it came from.
+ * Returns erx_log_bytes's status.
+ */
+erx_status_t erx_debug_log_kernel_line(const void *bytes, size_t length);
+
 /* From here on, records wait in the ring for the console's take, not the early console. */
 void	erx_debug_log_hand_to_console(void);
 

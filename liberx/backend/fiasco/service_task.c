@@ -425,7 +425,7 @@ task_create(task_create_t *create, uint64_t *space)
 		return (ERX_EINVAL);
 	status = task_space_named(caller, request->parent, &create->parent);
 	if (status == ERX_OK)
-		status = erx_fiasco_gate_named(caller, request->fault, &create->gate);
+		status = erx_fiasco_gate_named(caller, request->fault, create->test_task, &create->gate);
 	if (status != ERX_OK)
 		return (status);
 	/* A stopped space takes no child, so a stop's walk of the tree below it is final. */

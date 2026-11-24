@@ -32,12 +32,15 @@
 const char	*erx_fiasco_gate_init(void);
 
 /*
- * What erx_space_create's fault names, for the caller: ERX_CAP_NULL is no gate, 0 in
- * *gate; a gate the caller holds is its record's index plus one, but ERX_ETYPE for one
- * whose index the gate table cannot name; any other value is erx_fiasco_object_find's
- * refusal, ERX_ETYPE for another kind.
+ * What erx_space_create's fault names, for the caller: a gate the caller holds is its
+ * record's index plus one, but ERX_ETYPE for one whose index the gate table cannot name;
+ * any other value is erx_fiasco_object_find's refusal, ERX_ETYPE for another kind. Only
+ * the launcher's test create (test_task, which only the root sets) may name ERX_CAP_NULL,
+ * no gate, 0 in *gate, so only a test task's fault writes a crash frame
+ * (docs/design-fiasco.md, "The kernel's lines"); for every other create ERX_CAP_NULL is
+ * refused as any handle that names no gate is.
  */
-int	erx_fiasco_gate_named(uint32_t caller, uint64_t fault, uint32_t *gate) ERX_WARN_UNUSED_RESULT;
+int	erx_fiasco_gate_named(uint32_t caller, uint64_t fault, bool test_task, uint32_t *gate) ERX_WARN_UNUSED_RESULT;
 
 /* A new space's part: the gate erx_fiasco_gate_named gave, and its label. ERX_ENOMEM when the pool cannot hold it. */
 int	erx_fiasco_gate_space_open(uint32_t task, uint32_t gate, uint64_t label) ERX_WARN_UNUSED_RESULT;

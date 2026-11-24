@@ -97,6 +97,7 @@ static bool	service_log_window_valid(uint64_t, uint64_t);
 static int service_log_reply(const erx_log_copy_result_t *, erx_fiasco_reply_t *);
 static int service_log_read(uint32_t, const erx_fiasco_log_read_request_t *, erx_fiasco_reply_t *);
 static int service_log_take(uint32_t, const erx_fiasco_log_take_request_t *, erx_fiasco_reply_t *);
+static void service_log_kernel_lines(void);
 static int service_object_info(uint32_t, const erx_fiasco_object_info_request_t *);
 static const char *service_start(void);
 static bool	service_failed(l4_msgtag_t);
@@ -560,12 +561,40 @@ service_log_read(uint32_t task, const erx_fiasco_log_read_request_t *request, er
 }
 
 /*
+ * One take of the kernel's ring console, logged: the count of lines it lost as a record of
+ * its own, then each line. A take the kernel refuses logs nothing, and the route stays where
+ * it was. The records wait for the log's take (erx_debug_log_kernel_line), never the
+ * early console, whose write would land in the ring they came from.
+ */
+static void
+service_log_kernel_lines(void)
+{
+	erx_console_reply_words_t words;
+	erx_console_reply_t reply;
+	erx_console_loss_text_t loss;
+	erx_console_line_t line;
+	size_t offset = 0;
+
+	if (!erx_fiasco_console_take(&words) || !erx_console_reply_read(&words, &reply))
+		return;
+	if (reply.lost != 0) {
+		loss = erx_console_loss_text(reply.lost);
+		(void)erx_debug_log_kernel_line(loss.bytes, loss.length);
+	}
+	while (erx_console_reply_next_line(&reply, &offset, &line))
+		(void)erx_debug_log_kernel_line(line.bytes, line.length);
+}
+
+/*
  * The console's read: what neither the early console nor an earlier take had. The first
  * take is the handoff (docs/design-fiasco.md, "The console"), and each later take hands over
  * again, which changes nothing: from the first on the early console
  * writes no record, and records wait in the ring for the next take. The log service makes
  * it as it starts, before the console's driver touches the UART, so the handoff names the
- * console's reader, never an address another device's record could share.
+ * console's reader, never an address another device's record could share. Each take also
+ * takes the kernel's ring console, the first moving the kernel's lines from the UART to its
+ * ring, and logs what it hands over as kernel records ahead of the copy, so the same take
+ * carries them (docs/design-fiasco.md, "The kernel's lines").
  */
 static int
 service_log_take(uint32_t task, const erx_fiasco_log_take_request_t *request, erx_fiasco_reply_t *reply)
@@ -577,6 +606,7 @@ service_log_take(uint32_t task, const erx_fiasco_log_take_request_t *request, er
 	if (!service_log_window_valid(request->window, request->size))
 		return (ERX_EINVAL);
 	erx_debug_log_hand_to_console();
+	service_log_kernel_lines();
 	copied = erx_debug_log_take((uint8_t *)(uintptr_t)request->window, (size_t)request->size);
 	return (service_log_reply(&copied, reply));
 }
