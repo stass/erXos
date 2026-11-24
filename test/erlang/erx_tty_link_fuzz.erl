@@ -27,9 +27,11 @@
 -module(erx_tty_link_fuzz).
 -export([run/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(ROUNDS, 1500).
 -define(MAX_HELD, 4096).
--define(MAX_INPUT, 4096).
+-define(MAX_INPUT, ?ERX_TTY_MAX_INPUT).
 -define(MAX_SIDE, 65535).
 -define(REQUEST_ROUNDS, 4000).
 -define(MAX_CHANNELS, 10).

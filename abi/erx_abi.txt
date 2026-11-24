@@ -162,6 +162,10 @@ limit log_ring_bytes u32 65536
 # Holds the longest erx_debug_log line, each UTCB byte escaped, with its prefix.
 limit log_text_max u32 2112
 limit log_rate_bytes u32 16384
+# The bytes a tty's input holds unread, complete lines and the line being edited,
+# FreeBSD's MAX_INPUT (erx_tty; docs/design-live.md, "Lost input"); a byte past it is
+# lost. One tty_input frame carries at most this many (erx_tty_link).
+limit tty_max_input u32 4096
 limit group_depth_max u32 8
 limit space_depth_max u32 64
 # The mapping records of one space, and the most pages one part of a range call

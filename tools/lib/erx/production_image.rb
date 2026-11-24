@@ -994,6 +994,35 @@ module Erx
       CTRL_G_MENU = /\Aerx_console: Ctrl-G menu\r*\n\z/n
       MENU_LEFT = /\e\\\e\[0m\r*\n\z/n
       ERLANG_SHELL = { name: 'erlang-shell', pattern: /\AEshell V/n, seconds: 60 }.freeze
+      # The Erlang shell's prompt, `N> ` or `(node)N> `, at the start of a line if it
+      # printed one there: what it prints first after a line typed ahead of its prompt
+      # may follow the prompt on its line.
+      SHELL_PROMPT = '(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?'
+      # A part of what a harness types at the Erlang shell: a sequence of expressions with
+      # no end of its own, and the checkpoints of what it prints.
+      ShellPart = Data.define(:expression, :answers)
+
+      # The checkpoints that type parts at the Erlang shell, each part a line of its own,
+      # typed only once the shell has read and run the part before: the console reads
+      # through a tty whose input drops what passes its bound (tty_max_input, which
+      # Transcript holds every typed string under), so a line typed ahead of the shell
+      # must fit there whole. The first part is typed at the checkpoint typed_at. Every
+      # part but the last ends with the atom name_N (name in lower case and hyphens, N the
+      # part's place), which the shell prints as its value once the part has run, and the
+      # checkpoint name-N of that line types the next part; the last part ends as its
+      # expression does. The shell keeps every binding, so a later part uses what an
+      # earlier one bound.
+      def self.shell_parts(typed_at, parts, name:)
+        raise Error, "shell part name #{name.inspect} is no atom's stem" unless /\A[a-z][a-z0-9-]*\z/.match?(name)
+
+        atom = ->(place) { "#{name.tr('-', '_')}_#{place}" }
+        ran = ->(place) { { name: "#{name}-#{place}", pattern: /\A#{SHELL_PROMPT}#{atom.call(place)}\r*\n\z/n, seconds: 60 } }
+        parts.each_with_index.flat_map do |part, index|
+          typer = index.zero? ? typed_at : ran.call(index)
+          line = index == parts.size - 1 ? part.expression : "#{part.expression},#{atom.call(index + 1)}."
+          [typer.merge(type: "#{line}\r").freeze, *part.answers]
+        end
+      end
       # kernel_sup's children in the system release, a node over the erx carrier (net_sup
       # holds net_kernel and the connection agent), in which_children's order: the last
       # started first (docs/design-runtime.md, Configuration).

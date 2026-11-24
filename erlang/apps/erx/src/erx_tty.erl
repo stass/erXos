@@ -87,7 +87,7 @@ and takes no flow control.
 -include("generated/erx_abi.hrl").
 
 %% Bytes held: complete lines unread and the line being edited.
--define(MAX_INPUT, 4096).
+-define(MAX_INPUT, ?ERX_TTY_MAX_INPUT).
 %% Bytes the owner holds for the master at most (docs/design-shell.md,
 %% "Output").
 -define(MASTER_ROOM, 4096).

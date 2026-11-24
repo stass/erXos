@@ -46,12 +46,15 @@ class MediumBootTest < Minitest::Test
   def test_the_boot_value_line_follows_the_image_line_and_must_name_the_slot
     points = [{ name: 'banner' }, { name: 'image-identity' }, { name: 'root-identity' }, { name: 'release-shell' }]
     merged = Boot.checkpoints(points, Choice.new(slot: :b, offset: 0, length: 64), release: release, domain: DOMAIN, grant: GRANT)
-    assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c domain-lib] +
+    assert_equal %w[banner image-identity boot-value root-identity release-shell erlang-shell image-md5 crc32c domain-lib-1 domain-lib] +
                  Boot::COMMAND_SHELL.map { |point| point.fetch(:name) }, merged.map { |point| point.fetch(:name) }
     typed = merged.to_h { |point| [point.fetch(:name), point[:type]] }
     assert_equal "erl\r", typed.fetch('release-shell')
     assert_match(/\AImWait=fun /, typed.fetch('erlang-shell'))
-    assert_equal "#{Boot.domain_lib_expression(DOMAIN, grant: GRANT)}\r", typed.fetch('crc32c')
+    helpers, run = Boot.domain_lib_lines(DOMAIN, grant: GRANT)
+    assert_equal "#{helpers},domain_lib_1.\r", typed.fetch('crc32c')
+    assert_equal "#{run}\r", typed.fetch('domain-lib-1')
+    assert_match merged.find { |point| point.fetch(:name) == 'domain-lib-1' }.fetch(:pattern), "domain_lib_1\r\n"
     assert_equal "erx_shell:start().\r", typed.fetch('domain-lib')
     assert_match merged.find { |point| point.fetch(:name) == 'erlang-shell' }.fetch(:pattern),
                  "Eshell V16.0 (type help(). for help)\r\n"
@@ -168,8 +171,8 @@ class MediumBootTest < Minitest::Test
   # domain's halt and the cell's halt, stop, kill, BeamAsm halt and faceted halt give; a line with another
   # end, a restarted configured domain or a refused create does not pass.
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
-    expression = Boot.domain_lib_expression(DOMAIN, grant: GRANT)
-    assert_match(/id=>17,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, expression)
+    helpers, expression = Boot.domain_lib_lines(DOMAIN, grant: GRANT)
+    assert_match(/\ADlSpec=\#\{id=>17,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, helpers)
     # The library refuses an id at or below the system domain's, so the service's ids
     # start above it; the shell's own calls of the library are refused.
     header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
@@ -177,21 +180,23 @@ class MediumBootTest < Minitest::Test
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
     assert_includes expression, 'DlNotService=Lib:configured(17,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'
-    assert expression.start_with?('io:format("~0kp~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=fun(Id)->')
+    assert_includes helpers, ',DlDeath=fun(Id)->'
+    assert expression.start_with?('io:format("~0kp~n",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlCrash=')
     # The BeamAsm domain names the BeamAsm image and halts 0 only as BeamAsm.
-    assert_match(/\},\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\},/,
+    assert_match(/,DlSpec,\#\{runtime=>42,args=><<"--",0,.*"-eval",0,"erlang:halt\(case erlang:system_info\(emu_flavor\) of jit->0;_->2 end\)",0>>\},/,
                  expression)
     # The stopped and the killed domain stay up as nodes: no -eval, so no halt of their own.
     up = expression[/\},(\#\{args=><<[^>]*>>\})\)\]\)\.\z/, 1]
     assert_includes up, '"-proto_dist",0,"erx",0>>'
     refute_includes up, '-eval'
     assert_match(/args=><<"--",0,"-root",0,.*"-eval",0,"erlang:halt\(length\(.*init:get_argument\(sname\){6}\+100-lists:sum\(\[100\|\|\{S,_\}<-\[init:script_id\(\)\],S=:=atom_to_list\(erts\)\]\)\)",0>>,env=><<>>/,
-                 expression)
-    refute_match(/[^\x20-\x7e]/, expression)
+                 helpers)
+    refute_match(/[^\x20-\x7e]/, "#{helpers}#{expression}")
     merged = Boot.checkpoints([{ name: 'image-identity' }, Erx::ProductionImage::Run::RELEASE_SHELL],
                               Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, grant: GRANT)
     point = merged.find { |each| each.fetch(:name) == 'domain-lib' }
     refute_match point.fetch(:pattern), "4> #{expression}\r\n"
+    refute_match point.fetch(:pattern), "4> #{helpers}\r\n"
     point.fetch(:verify).call("4> #{Boot::DOMAIN_LIB_ANSWER}\r\n")
     [Boot::DOMAIN_LIB_ANSWER.sub('{halt,0}', '{halt,1}'), Boot::DOMAIN_LIB_ANSWER.sub('{error,einval}', '{error,enotsup}'),
      Boot::DOMAIN_LIB_ANSWER.sub('[{5,{halt,0}}]', '[{8,{halt,0}},{5,{halt,0}}]'),
@@ -218,7 +223,7 @@ class MediumBootTest < Minitest::Test
     runs = Boot::Footprint::RELEASES.keys.to_h { |name| [name, { 'entry' => 1, 'files' => 7 }] }
     plan = Erx::BenchG5::Plan.new(accel: 'tcg', length: 10, samples: 3, rounds: 1, wait_seconds: 1)
     grant = Boot.created_grant(manifest)
-    expressions = { 'domain cell' => Boot.domain_lib_expression(DOMAIN, grant: grant),
+    expressions = { 'domain cell' => Boot.domain_lib_lines(DOMAIN, grant: grant).first,
                     'footprint' => Boot::Footprint.expression(runs: runs, runtime: 41, grant: grant),
                     'later peer' => Erx::SystemDomain.later_spec(DOMAIN, grant: grant),
                     'bench g5' => Erx::BenchG5.shell_line(plan, DOMAIN, grant: grant) }

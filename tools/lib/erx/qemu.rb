@@ -8,6 +8,7 @@ require 'ipaddr'
 require 'set'
 require 'json'
 require_relative 'bootstrap_memory'
+require_relative 'generated_abi'
 require_relative 'platform'
 require_relative 'qemu_remote'
 require_relative 'qmp'
@@ -641,6 +642,7 @@ module Erx
     REPLY_OVERWRITTEN = /Application bug: reply capability overwritten!/n
     REQUIRED_KEYS = %i[name pattern seconds].freeze
     OPTIONAL_KEYS = %i[verify verify_seconds type].freeze
+    TTY_MAX_INPUT = ABI::Generated.constant('tty_max_input')
     attr_reader :observed
 
     def initialize(checkpoints:)
@@ -652,6 +654,7 @@ module Erx
       raise Error, 'duplicate transcript checkpoint name' unless names.uniq == names
       raise Error, 'invalid transcript checkpoint' unless checkpoints.all? { |point| valid_checkpoint?(point) }
 
+      checkpoints.each { |point| check_typed_room(point) }
       @checkpoints = checkpoints.map(&:dup).each(&:freeze).freeze
       @observed = []
       @pending = ''.b
@@ -701,6 +704,19 @@ module Erx
     end
 
     private
+
+    # What one checkpoint types reaches the guest's console at once, ahead of whoever reads
+    # it, and may all wait there unread in a tty, which holds at most TTY_MAX_INPUT bytes,
+    # a cooked line's last one kept for its end, and drops the rest (erx_tty). A string
+    # that could not fit is refused before the boot, not lost in it; the bound kept is one
+    # byte short of the tty's, so it holds whether or not the string ends a line.
+    def check_typed_room(point)
+      typed = point.fetch(:type, '').bytesize
+      return if typed < TTY_MAX_INPUT
+
+      raise Error, "checkpoint #{point.fetch(:name)} types #{typed} bytes at once, and the console's tty holds fewer than " \
+                   "#{TTY_MAX_INPUT} unread (tty_max_input); type it in parts the reader takes one at a time"
+    end
 
     def checkpoint_keys?(point)
       (REQUIRED_KEYS - point.keys).empty? && (point.keys - REQUIRED_KEYS - OPTIONAL_KEYS).empty?

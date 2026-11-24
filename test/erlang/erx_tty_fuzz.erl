@@ -23,8 +23,10 @@
 -module(erx_tty_fuzz).
 -export([run/1]).
 
+-include("generated/erx_abi.hrl").
+
 -define(ROUNDS, 3000).
--define(MAX_INPUT, 4096).
+-define(MAX_INPUT, ?ERX_TTY_MAX_INPUT).
 %% The tables of the ABI file's termios table.
 -define(IFLAGS, erx_abi_termios:flags(iflag)).
 -define(OFLAGS, erx_abi_termios:flags(oflag)).

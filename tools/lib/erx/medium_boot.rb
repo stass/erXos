@@ -221,22 +221,22 @@ module Erx
        'true']
     ].freeze
     # DlRunWith: asks the domain service for a domain named Name with the request fields of
-    # Spec changed by Fields, monitors its domain pid, does Then to it and waits for the
+    # DlSpec changed by Fields, monitors its domain pid, does Then to it and waits for the
     # monitor's reason, answering the id, Then's result and that reason, or the create's
     # refusal; a missing end is timeout in the reason's place. A domain that reports ready
     # and halts at once may have ended, and its pid with it, by the time the create
     # answers, so the monitor's noproc is read from the service's record of the death,
-    # whose Info the pid's reason carries otherwise. DlRun is DlRunWith with Spec's own
+    # whose Info the pid's reason carries otherwise. DlRun is DlRunWith with DlSpec's own
     # fields.
-    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name,boot=><<"%<boot>s">>})) of ' \
+    DOMAIN_LIB_RUN = 'fun(Name,Fields,Then)->case erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],DlSpec),Fields#{name=>Name,boot=><<"%<boot>s">>})) of ' \
                      '{ok,DlDomain}->DlMonitor=monitor(process,erx_domain:pid(DlDomain)),DlThen=Then(DlDomain),' \
                      'DlWhy=receive {\'DOWN\',DlMonitor,process,_,noproc}->DlDeath(erx_domain:id(DlDomain));' \
                      '{\'DOWN\',DlMonitor,process,_,DlReason}->DlReason after 60000->timeout end,' \
                      '{erx_domain:id(DlDomain),DlThen,DlWhy};' \
                      'DlRefused->DlRefused end end' % { boot: DOMAIN_BOOT.name }
-    # DlAsk: the domain service's answer to a create of Name with the request fields of Spec
+    # DlAsk: the domain service's answer to a create of Name with the request fields of DlSpec
     # changed by Fields.
-    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],Spec),Fields#{name=>Name,boot=><<"%<boot>s">>})) end' % { boot: DOMAIN_BOOT.name }
+    DOMAIN_LIB_ASK = 'fun(Name,Fields)->erx_domain:create(maps:merge(maps:without([id,principal,domain_pid],DlSpec),Fields#{name=>Name,boot=><<"%<boot>s">>})) end' % { boot: DOMAIN_BOOT.name }
     # DlFirstDeaths: the system principal's deaths as {Id, Info}, once there is one, polled from the
     # domain service's state every 100 ms at most N times; timeout if none comes.
     DOMAIN_LIB_WAIT = 'fun DlWait(0)->timeout;DlWait(N)->' \
@@ -250,7 +250,7 @@ module Erx
                        '[DlDInfo1|_]->{domain_down,Id,DlDInfo1};[]->noproc end end'
     # DlFree: the machine's free memory in bytes, as the Fiasco backend's page pool reports it.
     DOMAIN_LIB_FREE = 'fun()->#{attrs:=#{memory_free:={_,{partial,DlFreeB}}}}=erx_kernel_records:machine(),DlFreeB end'
-    # DlCost: what a domain named Name with the request fields of Spec changed by Fields
+    # DlCost: what a domain named Name with the request fields of DlSpec changed by Fields
     # takes from the machine's free memory once its create has answered, which comes after
     # its init reported ready. The domain is then stopped, and its domain_down awaited,
     # which the service sends only after the library's teardown has returned the domain's
@@ -262,20 +262,22 @@ module Erx
                       'io:format("~s ~w~n",[Name,DlCostTaken]),DlCostTaken end'
     # The line the cell prints: every step's answer, in order.
     DOMAIN_LIB_ANSWER = "{domain_lib,#{DOMAIN_LIB_STEPS.map(&:last).join(',')}}".freeze
-    DOMAIN_LIB_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{domain_lib,/n
+    DOMAIN_LIB_START = /\A#{ProductionImage::Run::SHELL_PROMPT}\{domain_lib,/n
 
     module_function
 
     # The domain service's NIF module, erx_domain_lib, in the system domain, with the
     # library the root built from the medium manifest: DOMAIN_LIB_STEPS in order, then
-    # their answers. Variables are fun parameters or carry a Dl prefix no earlier
-    # expression binds, since the shell keeps every binding. The domain service is the
-    # library's registrant, so the shell's own register is refused and no end reaches it. The
-    # answers are printed with ~0kp, on one line however long and with map keys in term
-    # order, and the shell's own ok follows on the next. The expression starts with
-    # io:format, so the shell's echo of it does not start {domain_lib, and only the printed
-    # answer matches DOMAIN_LIB_START.
-    def domain_lib_expression(domain, grant:)
+    # their answers, as two lines the shell reads one at a time (domain_lib_checkpoints),
+    # since the console's tty holds no line as long as both: the first binds DlSpec, the
+    # create request, and the helpers, the second runs the steps. Variables are fun
+    # parameters or carry a Dl prefix no earlier expression binds, since the shell keeps
+    # every binding. The domain service is the library's registrant, so the shell's own
+    # register is refused and no end reaches it. The answers are printed with ~0kp, on one
+    # line however long and with map keys in term order, and the shell's own ok follows on
+    # the next. The second line starts with io:format, so the shell's echo of either line
+    # does not start {domain_lib, and only the printed answer matches DOMAIN_LIB_START.
+    def domain_lib_lines(domain, grant:)
       spec = erlang_map(id: FREE_ID, name: '<<"cell">>', principal: 1, runtime: domain.runtime, release: domain.release,
                         release_files: domain.release_files, memory: DOMAIN_MEMORY, outer: DOMAIN_OUTER,
                         grant: grant,
@@ -285,11 +287,12 @@ module Erx
       up = erlang_map(args: binary_args(UP_ARGS))
       badarg = 'DlBadarg=fun(Call)->try Call() catch error:badarg->badarg end end'
       steps = DOMAIN_LIB_STEPS.map { |name, call, _answer| "#{name}=#{call}" }
-      "io:format(\"~0kp~n\",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->DlDeath=#{DOMAIN_LIB_DEATH}," \
-        "DlRunWith=#{DOMAIN_LIB_RUN},DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
-        "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg},DlFree=#{DOMAIN_LIB_FREE},DlCost=#{DOMAIN_LIB_COST}," \
-        "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)" \
-        "(erx_domain_lib,#{spec},#{jit},#{facet},#{up})])."
+      ["DlSpec=#{spec},DlDeath=#{DOMAIN_LIB_DEATH}," \
+       "DlRunWith=#{DOMAIN_LIB_RUN},DlRun=fun(Name,Then)->DlRunWith(Name,\#{},Then) end,DlAsk=#{DOMAIN_LIB_ASK}," \
+       "DlFirstDeaths=#{DOMAIN_LIB_WAIT},#{badarg},DlFree=#{DOMAIN_LIB_FREE},DlCost=#{DOMAIN_LIB_COST}",
+       "io:format(\"~0kp~n\",[(fun(Lib,Spec,JitFields,FacetFields,UpFields)->" \
+       "#{steps.join(',')},{domain_lib,#{DOMAIN_LIB_STEPS.map(&:first).join(',')}} end)" \
+       "(erx_domain_lib,DlSpec,#{jit},#{facet},#{up})])."]
     end
 
     # A boot page's argument strings as an Erlang binary expression: each NUL-terminated.
@@ -398,15 +401,18 @@ module Erx
          verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the CRC-32C expression" unless whole.match?(text) } }.freeze]
     end
 
-    # After the shell's line previous, the person types domain_lib_expression of the
-    # archive's domain, and its answer must be DOMAIN_LIB_ANSWER whole. Three ERTS domains
-    # boot and end before it, the configured one first, so it has more time than the other
-    # answers.
+    # After the shell's line previous, the person types domain_lib_lines of the archive's
+    # domain as shell parts, and the answer must be DOMAIN_LIB_ANSWER whole. Three ERTS
+    # domains boot and end before it, the configured one first, so it has more time than
+    # the other answers.
     def domain_lib_checkpoints(previous, domain, grant:)
-      whole = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
-      [previous.merge(type: "#{domain_lib_expression(domain, grant: grant)}\r").freeze,
-       { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 300,
-         verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze]
+      whole = /\A#{ProductionImage::Run::SHELL_PROMPT}#{Regexp.escape(DOMAIN_LIB_ANSWER)}\r*\n\z/n
+      answer = { name: 'domain-lib', pattern: DOMAIN_LIB_START, seconds: 300,
+                 verify: ->(text) { raise Error, "the shell answered #{text.inspect} to the domain library expression" unless whole.match?(text) } }.freeze
+      helpers, run = domain_lib_lines(domain, grant: grant)
+      ProductionImage::Run.shell_parts(previous, [ProductionImage::Run::ShellPart.new(expression: helpers, answers: []),
+                                                  ProductionImage::Run::ShellPart.new(expression: run, answers: [answer])],
+                                       name: 'domain-lib')
     end
 
     # After the Erlang shell's line previous, the person starts a nested command shell, and

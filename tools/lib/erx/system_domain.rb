@@ -51,6 +51,8 @@ module Erx
     raise Error, 'MediumBoot::DOMAIN_ARGS no longer ends in its -eval' unless MediumBoot::DOMAIN_ARGS[-2] == '-eval'
     raise Error, 'MediumBoot::UP_ARGS no longer starts with --' unless MediumBoot::UP_ARGS.first == '--'
 
+    # The Erlang shell's prompt where a line starts with it.
+    PROMPT = ProductionImage::Run::SHELL_PROMPT
     DOMAIN_ARGS = ['-erx', 'test_lane_hold', *MediumBoot::UP_ARGS].freeze
 
     # The suite's records for erts: MediumBoot's share eighth, limits erts and domain erts
@@ -317,7 +319,7 @@ module Erx
     # Each forgery dropped and counted once, erts's stray answers counted five by the core
     # and three by the domain pid, the call answered from erts, the pair up.
     HOSTILE_ANSWER = "{hostile,ok,ok,1,1,{5,3},ok,{pong,#{DOMAINS.fetch('erts')},ping},up}"
-    HOSTILE_START = /\A\{hostile,/n
+    HOSTILE_START = /\A#{PROMPT}\{hostile,/n
     # The connection's down path (docs/design-domains.md, "Introduction and connection
     # down"), from one side each time, on the introduced pair. SdPhase is the pair's phase
     # in the domain service's core, and SdNone polls it every 100 ms at most K times until
@@ -389,7 +391,7 @@ module Erx
     # the whole burst, the objects deleted and the pair introduced again.
     CONNECTION_DOWN_ANSWER = "{connection_down,ok,{ok,noconnection},{#{DOWN_BURST},true,noconnection},none,ok," \
                              'ok,{ok,true,noconnection},noconnection,none,ok,{ok,pong,false,timeout,ok,pong}}'
-    CONNECTION_DOWN_START = /\A\{connection_down,/n
+    CONNECTION_DOWN_START = /\A#{PROMPT}\{connection_down,/n
     # A survivor that ignores connection_down (docs/design-domains.md, "Verification and
     # testing", the hostile domain): SdYs runs in erts and suspends erts's agent, which
     # therefore never reads the record, until the shell tells it to resume the agent, or two minutes
@@ -420,7 +422,7 @@ module Erx
     # true, the pair went closing, SdYv as above, the agent resumed (ok), the pair's
     # objects went (none) and it was introduced again (ok).
     IGNORED_DOWN_ANSWER = '{ignored_down,ok,true,closing,{closing,1,0,false,true,{error,closing},erts@erxos},ok,none,ok}'
-    IGNORED_DOWN_START = /\A\{ignored_down,/n
+    IGNORED_DOWN_START = /\A#{PROMPT}\{ignored_down,/n
     # The ends of both domains, with a later domain of peer's name between them, in three
     # parts: SERVICE_KILL_ENDS ends peer, SERVICE_KILL_LATER makes and checks the later
     # peer, SERVICE_KILL_HALT halts erts; SdE1, SdL1 and SdV1 of the first are printed with
@@ -515,7 +517,7 @@ module Erx
     # four, and the later peer is the first domain created after them.
     LATER_ID = STORAGE_ID + 1
     LATER_DOMAIN_ANSWER = "{later_domain,ok,{#{LATER_ID},ok},{[nodedown,nodeup],{noproc,noproc,noproc,noproc,true},up},ok,sd_new,#{LATER_ID},false}"
-    LATER_DOMAIN_START = /\A\{later_domain,/n
+    LATER_DOMAIN_START = /\A#{PROMPT}\{later_domain,/n
     # SERVICE_KILL_HALT: a watcher of a process of erts, and erts made to kill its own
     # agent, its pid asked of erts first, since the system domain may only send to it, by
     # SdBurst behind its burst, with the domain service suspended until erts no longer
@@ -536,28 +538,38 @@ module Erx
                         'SdE2=SdUntil(2,600),SdV2=receive {sd_watched,SdW2,SdV2w}->SdV2w after 60000->timeout end,' \
                         'SdV3=[receive {sd_called,SdCk,SdCv}->SdCv after 60000->timeout end||SdCk<-[SdC1,SdC2,SdC3,SdC4,SdC5]],' \
                         'SdV4=receive {sd_collected,SdTr,SdTv}->SdTv after 60000->timeout end'
-    # Prints each step's answer, ends the two configured domains, prints how they ended,
-    # then kills the service. The line starts with a binding, so the shell's echo of it
-    # starts neither {service_kill nor {domain_ends, and only the printed answers match.
-    SERVICE_KILL_EXPRESSION = "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
-                              "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL},#{SERVICE_KILL_BURST}," \
-                              'SdL=SdWait(600),' \
-                              "io:format(\"~0kp~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL),SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])," \
-                              "#{SERVICE_KILL_TABLE},io:format(\"~0kp~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])," \
-                              "#{SERVICE_KILL_INTRODUCED},io:format(\"~0kp~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])," \
-                              "#{SERVICE_KILL_HOSTILE},io:format(\"~0kp~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZx,SdZvs,SdZpong,SdZph}])," \
-                              "#{SERVICE_KILL_DOWN},io:format(\"~0kp~n\",[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2,SdStale}])," \
-                              "#{SERVICE_KILL_IGNORED},io:format(\"~0kp~n\",[{ignored_down,SdYh,SdYc,SdYp,SdYv,SdYr,SdYn,SdYi}])," \
-                              "#{SERVICE_KILL_ENDS},#{SERVICE_KILL_LATER},io:format(\"~0kp~n\",[{later_domain,SdNh,SdLi,SdLv,SdLqr,SdLqv,SdLn,SdLsv}])," \
-                              "#{SERVICE_KILL_HALT},io:format(\"~0kp~n\",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}])," \
-                              'exit(whereis(erx_domain_srv),kill).'
+    # The service kill's steps, by the checkpoint of the answer each prints, in order; each
+    # is typed as a line of its own once the shell has run the one before
+    # (service_kill_checkpoints), since the console's tty holds no line as long as all of
+    # them. The first binds every helper, so each later step finds all of them bound; the
+    # last ends the two configured domains, prints how they ended, then kills the service.
+    # Each step starts with a binding, so the shell's echo of it starts with no answer, and
+    # only the printed answers match.
+    SERVICE_KILL_STEPS = {
+      'domain-running' => "#{SERVICE_KILL_LIVES},#{SERVICE_KILL_WAIT},#{SERVICE_KILL_ASK},#{SERVICE_KILL_DEATHS}," \
+                          "#{SERVICE_KILL_FORGED},#{SERVICE_KILL_WATCH},#{SERVICE_KILL_CALL},#{SERVICE_KILL_BURST}," \
+                          'SdL=SdWait(600),' \
+                          "io:format(\"~0kp~n\",[{service_kill,SdL,#{SERVICE_KILL_SYSTEM},SdPeers(SdL)," \
+                          "SdForged(#{DOMAINS.fetch('erts')},erts@erxos)}])",
+      'control-table' => "#{SERVICE_KILL_TABLE},io:format(\"~0kp~n\",[{control_table,SdHolding,SdFull,SdPaused()>SdP0,SdStray,SdIntro,SdHeld}])",
+      'introduced' => "#{SERVICE_KILL_INTRODUCED},io:format(\"~0kp~n\",[{introduced,SdUps,SdNodes,SdServing,SdPong}])",
+      'hostile' => "#{SERVICE_KILL_HOSTILE},io:format(\"~0kp~n\",[{hostile,SdZr,SdZw,SdZad,SdZdd,SdZx,SdZvs,SdZpong,SdZph}])",
+      'connection-down' => "#{SERVICE_KILL_DOWN},io:format(\"~0kp~n\"," \
+                           '[{connection_down,SdKh,SdKbv,SdKcv,SdN1,SdR1,SdMh,SdMfv,SdMwv,SdN2,SdR2,SdStale}])',
+      'ignored-down' => "#{SERVICE_KILL_IGNORED},io:format(\"~0kp~n\",[{ignored_down,SdYh,SdYc,SdYp,SdYv,SdYr,SdYn,SdYi}])",
+      'later-domain' => "#{SERVICE_KILL_ENDS},#{SERVICE_KILL_LATER}," \
+                        'io:format("~0kp~n",[{later_domain,SdNh,SdLi,SdLv,SdLqr,SdLqv,SdLn,SdLsv}])',
+      'domain-ends' => "#{SERVICE_KILL_HALT}," \
+                       'io:format("~0kp~n",[{domain_ends,SdE1,SdL1,SdV1,SdG2,SdE2,SdV2,SdB1,SdB2,SdV3,SdV4}]),' \
+                       'exit(whereis(erx_domain_srv),kill).'
+    }.freeze
     SERVICE_KILL_ANSWER = begin
       lives = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,ready}" }.join(',')
       nodes = [*DOMAINS.keys.map { |name| "#{name}@erxos" }, *MANIFEST_NODES].sort.join(',')
       peers = DOMAINS.map { |name, id| "{#{id},#{name}@erxos,#{id}}" }.join(',')
       "{service_kill,[#{lives}],#{SYSTEM_NODE},#{SYSTEM_CREATION},[#{nodes}],[#{peers}],{2,erts@erxos}}".freeze
     end
-    SERVICE_KILL_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{service_kill,/n
+    SERVICE_KILL_START = /\A#{PROMPT}\{service_kill,/n
     # Typed ahead of the service kill: SdEcho waits up to 60 s for the system domain's
     # echo grant to be installed and answers its facet; the line then calls it with an
     # echo and with a request erx_echo_test refuses, and reads the domain service's counts.
@@ -571,7 +583,7 @@ module Erx
     # own and stray as undeclared, and nothing else was refused or dropped.
     ECHO_ANSWER = '{echo_facet,true,{echo,hi},{error,badarg},' \
                   '#{{refused,foreign_mint} => 1,{refused,undeclared} => 1}}'
-    ECHO_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{echo_facet,/n
+    ECHO_START = /\A#{PROMPT}\{echo_facet,/n
     # Typed after the echo, while erts runs: the system domain spawns
     # erx_echo_test:foreign_atoms/1 in erts, monitored, which asks to spawn a module named
     # by an atom erts made on the system domain's node and sends the shell the error it
@@ -604,7 +616,7 @@ module Erx
     FOREIGN_ATOM_ANSWER = '{foreign_atom,0,2,[{foreign_spawn,noconnection},foreign_after],' \
                           '{foreign_spawn,noconnection},{erx_foreign_reason,true},false,false,false,' \
                           '{error,badarg}}'
-    FOREIGN_ATOM_START = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?\{foreign_atom,/n
+    FOREIGN_ATOM_START = /\A#{PROMPT}\{foreign_atom,/n
     # peer stopped by its side's end while erts runs, its watcher told noconnection twice;
     # then erts halted with status 69, its watcher told {domain_down, Erts, {halt, 69}} by
     # the link, the monitor and the spawn's error reply, and the library calls given
@@ -618,16 +630,16 @@ module Erx
         'ok,[ok,ok,ok,ok],[{badrpc,nodedown},{exit,{nodedown,erts@erxos}},{error,{erpc,noconnection}},noconnection,noconnection],' \
         "{#{BURST},true,#{down}}}".freeze
     end
-    DOMAIN_ENDS_START = /\A\{domain_ends,/n
+    DOMAIN_ENDS_START = /\A#{PROMPT}\{domain_ends,/n
     # The lane filled and the side paused, the stray call refused, the introduction up, and
     # erts's port took its record and nothing more, none rewritten.
     CONTROL_TABLE_ANSWER = "{control_table,ok,full,true,badarg,ok,{ok,#{RECORDS},0}}"
-    CONTROL_TABLE_START = /\A\{control_table,/n
+    CONTROL_TABLE_START = /\A#{PROMPT}\{control_table,/n
     # erts saw peer come up and peer erts, each lists the other and the system domain, and
     # the call from erts reached peer's process from erts's id and came back.
     INTRODUCED_ANSWER = '{introduced,[peer@erxos,erts@erxos],[[peer@erxos,system@erxos],[erts@erxos,system@erxos]],ok,' \
                         "{pong,#{DOMAINS.fetch('erts')},ping}}"
-    INTRODUCED_START = /\A\{introduced,/n
+    INTRODUCED_START = /\A#{PROMPT}\{introduced,/n
     # init's slogan as it halts the runtime once the permanent application erx_domain has
     # ended, shut down by its supervisor; it may follow an unended prompt. The application
     # controller's reason is a string, which init prints with its quotes:
@@ -662,50 +674,60 @@ module Erx
                             lane: 4096, args: MediumBoot.binary_args(DOMAIN_ARGS), env: '<<>>', connections: 1)
     end
 
-    # The line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
-    # ECHO_EXPRESSION, FOREIGN_ATOM_EXPRESSION and SERVICE_KILL_EXPRESSION.
-    def service_kill_line(domain, grant:) = "SdSpec=#{later_spec(domain, grant: grant)},#{ECHO_EXPRESSION},#{FOREIGN_ATOM_EXPRESSION},#{SERVICE_KILL_EXPRESSION}"
+    # The first line typed at the Erlang shell: SdSpec bound to later_spec(domain), then
+    # ECHO_EXPRESSION and FOREIGN_ATOM_EXPRESSION. SERVICE_KILL_STEPS follow it.
+    def service_kill_setup(domain, grant:) = "SdSpec=#{later_spec(domain, grant: grant)},#{ECHO_EXPRESSION},#{FOREIGN_ATOM_EXPRESSION}"
 
     # The production checkpoints to the command shell, then the Erlang shell, the kill and
-    # the runtime's end. points must end at the command shell; domain is where the image's
-    # archive carries the configured rows' runtime and release.
+    # the runtime's end: service_kill_setup typed as a shell part that prints the echo
+    # facet's and the foreign atoms' answers, then each of SERVICE_KILL_STEPS as one that
+    # prints the answer of its checkpoint. points must
+    # end at the command shell; domain is where the image's archive carries the configured
+    # rows' runtime and release.
     def service_kill_checkpoints(points, domain:, grant:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      echo = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(ECHO_ANSWER)}\r*\n\z/n
-      foreign = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(FOREIGN_ATOM_ANSWER)}\r*\n\z/n
-      answer = /\A(?:(?:\([a-z0-9_]+@[a-z0-9_.-]+\))?[0-9]+> )?#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
-      ends = /\A#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
-      table = /\A#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
-      introduced = /\A#{Regexp.escape(INTRODUCED_ANSWER)}\r*\n\z/n
-      hostile = /\A#{Regexp.escape(HOSTILE_ANSWER)}\r*\n\z/n
-      down = /\A#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
-      ignored = /\A#{Regexp.escape(IGNORED_DOWN_ANSWER)}\r*\n\z/n
-      later = /\A#{Regexp.escape(LATER_DOMAIN_ANSWER)}\r*\n\z/n
+      echo = /\A#{PROMPT}#{Regexp.escape(ECHO_ANSWER)}\r*\n\z/n
+      foreign = /\A#{PROMPT}#{Regexp.escape(FOREIGN_ATOM_ANSWER)}\r*\n\z/n
+      answer = /\A#{PROMPT}#{Regexp.escape(SERVICE_KILL_ANSWER)}\r*\n\z/n
+      ends = /\A#{PROMPT}#{Regexp.escape(DOMAIN_ENDS_ANSWER)}\r*\n\z/n
+      table = /\A#{PROMPT}#{Regexp.escape(CONTROL_TABLE_ANSWER)}\r*\n\z/n
+      introduced = /\A#{PROMPT}#{Regexp.escape(INTRODUCED_ANSWER)}\r*\n\z/n
+      hostile = /\A#{PROMPT}#{Regexp.escape(HOSTILE_ANSWER)}\r*\n\z/n
+      down = /\A#{PROMPT}#{Regexp.escape(CONNECTION_DOWN_ANSWER)}\r*\n\z/n
+      ignored = /\A#{PROMPT}#{Regexp.escape(IGNORED_DOWN_ANSWER)}\r*\n\z/n
+      later = /\A#{PROMPT}#{Regexp.escape(LATER_DOMAIN_ANSWER)}\r*\n\z/n
+      echo_facet, foreign_atom, *step_answers, ended = [
+        { name: 'echo-facet', pattern: ECHO_START, seconds: 180,
+          verify: ->(text) { raise Error, "the echo facet gave #{text.inspect}" unless echo.match?(text) } }.freeze,
+        { name: 'foreign-atom', pattern: FOREIGN_ATOM_START, seconds: 180,
+          verify: ->(text) { raise Error, "the foreign atoms gave #{text.inspect}" unless foreign.match?(text) } }.freeze,
+        { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
+          verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
+        { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
+          verify: ->(text) { raise Error, "the control table answered #{text.inspect}" unless table.match?(text) } }.freeze,
+        { name: 'introduced', pattern: INTRODUCED_START, seconds: 180,
+          verify: ->(text) { raise Error, "the introduced pair answered #{text.inspect}" unless introduced.match?(text) } }.freeze,
+        { name: 'hostile', pattern: HOSTILE_START, seconds: 180,
+          verify: ->(text) { raise Error, "the forged records gave #{text.inspect}" unless hostile.match?(text) } }.freeze,
+        { name: 'connection-down', pattern: CONNECTION_DOWN_START, seconds: 180,
+          verify: ->(text) { raise Error, "the connection went down as #{text.inspect}" unless down.match?(text) } }.freeze,
+        { name: 'ignored-down', pattern: IGNORED_DOWN_START, seconds: 180,
+          verify: ->(text) { raise Error, "the ignored connection_down gave #{text.inspect}" unless ignored.match?(text) } }.freeze,
+        { name: 'later-domain', pattern: LATER_DOMAIN_START, seconds: 600,
+          verify: ->(text) { raise Error, "the later domain of peer gave #{text.inspect}" unless later.match?(text) } }.freeze,
+        { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
+          verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
+        { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,
+          verify: ->(text) { raise Error, "the runtime ended with #{text.inspect}" unless SLOGAN.match?(text) } }.freeze]
+      answer_of = step_answers.to_h { |point| [point.fetch(:name), point] }
+      steps = SERVICE_KILL_STEPS.map do |name, expression|
+        ProductionImage::Run::ShellPart.new(expression: expression, answers: [answer_of.fetch(name)])
+      end
+      parts = [ProductionImage::Run::ShellPart.new(expression: service_kill_setup(domain, grant: grant), answers: [echo_facet, foreign_atom]),
+               *steps]
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
-       ProductionImage::Run::ERLANG_SHELL.merge(type: "#{service_kill_line(domain, grant: grant)}\r").freeze,
-       { name: 'echo-facet', pattern: ECHO_START, seconds: 180,
-         verify: ->(text) { raise Error, "the echo facet gave #{text.inspect}" unless echo.match?(text) } }.freeze,
-       { name: 'foreign-atom', pattern: FOREIGN_ATOM_START, seconds: 180,
-         verify: ->(text) { raise Error, "the foreign atoms gave #{text.inspect}" unless foreign.match?(text) } }.freeze,
-       { name: 'domain-running', pattern: SERVICE_KILL_START, seconds: 180,
-         verify: ->(text) { raise Error, "the shell answered #{text.inspect} before the kill" unless answer.match?(text) } }.freeze,
-       { name: 'control-table', pattern: CONTROL_TABLE_START, seconds: 180,
-         verify: ->(text) { raise Error, "the control table answered #{text.inspect}" unless table.match?(text) } }.freeze,
-       { name: 'introduced', pattern: INTRODUCED_START, seconds: 180,
-         verify: ->(text) { raise Error, "the introduced pair answered #{text.inspect}" unless introduced.match?(text) } }.freeze,
-       { name: 'hostile', pattern: HOSTILE_START, seconds: 180,
-         verify: ->(text) { raise Error, "the forged records gave #{text.inspect}" unless hostile.match?(text) } }.freeze,
-       { name: 'connection-down', pattern: CONNECTION_DOWN_START, seconds: 180,
-         verify: ->(text) { raise Error, "the connection went down as #{text.inspect}" unless down.match?(text) } }.freeze,
-       { name: 'ignored-down', pattern: IGNORED_DOWN_START, seconds: 180,
-         verify: ->(text) { raise Error, "the ignored connection_down gave #{text.inspect}" unless ignored.match?(text) } }.freeze,
-       { name: 'later-domain', pattern: LATER_DOMAIN_START, seconds: 600,
-         verify: ->(text) { raise Error, "the later domain of peer gave #{text.inspect}" unless later.match?(text) } }.freeze,
-       { name: 'domain-ends', pattern: DOMAIN_ENDS_START, seconds: 180,
-         verify: ->(text) { raise Error, "the domains ended as #{text.inspect}" unless ends.match?(text) } }.freeze,
-       { name: 'system-domain-ended', pattern: SLOGAN_PATTERN, seconds: 60,
-         verify: ->(text) { raise Error, "the runtime ended with #{text.inspect}" unless SLOGAN.match?(text) } }.freeze].freeze
+       *ProductionImage::Run.shell_parts(ProductionImage::Run::ERLANG_SHELL, parts, name: 'service-kill'), ended].freeze
     end
 
     # Boots the image under HVF at each CPU count, where placement puts each cell.

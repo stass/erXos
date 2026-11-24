@@ -54,29 +54,44 @@ class SystemDomainTest < Minitest::Test
     shell = { name: 'release-shell', pattern: /x/n, seconds: 60 }.freeze
     domain = Erx::MediumBoot::Domain.new(runtime: 11, jit: 12, release: 13, release_files: 14)
     points = Suite.service_kill_checkpoints([{ name: 'image-identity', pattern: /y/n, seconds: 30 }, shell], domain: domain, grant: GRANT)
-    line = Suite.service_kill_line(domain, grant: GRANT)
-    assert_equal %w[image-identity release-shell erlang-shell echo-facet foreign-atom domain-running control-table introduced hostile connection-down
-                    ignored-down later-domain domain-ends system-domain-ended],
+    lines = [Suite.service_kill_setup(domain, grant: GRANT), *Suite::SERVICE_KILL_STEPS.values]
+    assert_equal %w[image-identity release-shell erlang-shell echo-facet foreign-atom service-kill-1 domain-running service-kill-2
+                    control-table service-kill-3 introduced service-kill-4 hostile service-kill-5 connection-down service-kill-6
+                    ignored-down service-kill-7 later-domain service-kill-8 domain-ends system-domain-ended],
                  points.map { |point| point.fetch(:name) }
     assert_equal Erx::ProductionImage::Run::ERL_LINE, points[1].fetch(:type)
-    assert_equal "#{line}\r", points[2].fetch(:type)
+    # Each line is typed once the shell has printed the atom the line before ends with,
+    # and the console's tty holds every one whole.
+    typed = points.drop(2).filter_map { |point| point[:type] }
+    assert_equal [*lines[0...-1].each_with_index.map { |line, index| "#{line},service_kill_#{index + 1}.\r" }, "#{lines.last}\r"], typed
+    assert_equal 'service-kill-1', points[5].fetch(:name)
+    assert_match points[5].fetch(:pattern), "service_kill_1\r\n"
+    refute_match points[5].fetch(:pattern), "#{typed.first}\n"
+    typed.each { |line| assert_operator line.bytesize, :<, Erx::ABI::Generated.constant('tty_max_input') }
+    Erx::Transcript.new(checkpoints: points)
     # The later domain's request names the image's runtime and release, the rows' boot
     # script, and one connection.
-    assert line.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,boot=><<"erts">>,')
-    assert_includes line, ",connections=>1},#{Suite::ECHO_EXPRESSION},#{Suite::FOREIGN_ATOM_EXPRESSION},SdLives="
-    running, table, _introduced, _hostile, _down, ignored, later, ends, ended = points.last(9)
+    assert lines.first.start_with?('SdSpec=#{name=><<"peer">>,runtime=>11,release=>13,release_files=>14,boot=><<"erts">>,')
+    assert lines.first.end_with?(",connections=>1},#{Suite::ECHO_EXPRESSION},#{Suite::FOREIGN_ATOM_EXPRESSION}")
+    assert lines[1].start_with?('SdLives=')
+    named = points.to_h { |point| [point.fetch(:name), point] }
+    running, table, ignored, later, ends, ended = named.values_at('domain-running', 'control-table', 'ignored-down', 'later-domain',
+                                                                  'domain-ends', 'system-domain-ended')
+    # No answer's pattern matches the shell's echo of a typed line, after a prompt or not.
+    echoes = typed.flat_map { |line| ["#{line}\n", "1> #{line}\n"] }
+    named.except('image-identity', 'release-shell', 'erlang-shell').each_value do |point|
+      echoes.each { |echo| refute_match point.fetch(:pattern), echo, point.fetch(:name) }
+    end
     # The echo checkpoint: the facet answered and both hostile provides refused, and
     # nothing else. A report whose foreign mint was taken (no owner check), a call the
     # facet did not answer, or a facet erx:cap/1 does not find each fails.
     echo = points[3]
     good_echo = '{echo_facet,true,{echo,hi},{error,badarg},#{{refused,foreign_mint} => 1,{refused,undeclared} => 1}}'
     echo.fetch(:verify).call("1> #{good_echo}\r\n")
-    refute_match echo.fetch(:pattern), "1> #{line}\r\n"
     [good_echo.sub('{refused,foreign_mint} => 1,', ''), good_echo.sub('{echo,hi}', "{'EXIT',noproc}"),
      good_echo.sub('echo_facet,true', 'echo_facet,false')].each do |bad|
       assert_raises(Erx::Error) { echo.fetch(:verify).call("#{bad}\r\n") }
     end
-    refute_match running.fetch(:pattern), "1> #{line}\r\n"
     good = '{service_kill,[{5,erts@erxos,ready},{7,peer@erxos,ready}],system@erxos,4,' \
            '[erts@erxos,network@erxos,peer@erxos,storage@erxos],[{5,erts@erxos,5},{7,peer@erxos,7}],{2,erts@erxos}}'
     running.fetch(:verify).call("1> #{good}\r\n")
@@ -90,7 +105,6 @@ class SystemDomainTest < Minitest::Test
     # side, the stray command 3 refused. A record that waited behind the paused port (a
     # domain pid that sends it as a message), a stray call that wrote a slot (no caller
     # check), or a lane never filled each fails.
-    refute_match table.fetch(:pattern), "1> #{line}\r\n"
     good_table = '{control_table,ok,full,true,badarg,ok,{ok,1,0}}'
     table.fetch(:verify).call("#{good_table}\r\n")
     [good_table.sub('badarg,ok', 'badarg,timeout').sub('{ok,1,0}', '{timeout,0,0}'),
@@ -110,7 +124,6 @@ class SystemDomainTest < Minitest::Test
     # The forged records: one the agent or the domain pid acted on (no origin check), so
     # nothing more is counted, the call fails or the pair is no longer up, each fails.
     hostile = points.find { |point| point.fetch(:name) == 'hostile' }
-    refute_match hostile.fetch(:pattern), "1> #{line}\r\n"
     hostile.fetch(:verify).call("#{Suite::HOSTILE_ANSWER}\r\n")
     [Suite::HOSTILE_ANSWER.sub(',ok,1,1,', ',ok,timeout,1,'), Suite::HOSTILE_ANSWER.sub(',1,1,', ',1,0,'),
      Suite::HOSTILE_ANSWER.sub('{pong,5,ping}', '{error,{erpc,noconnection}}'),
@@ -124,7 +137,6 @@ class SystemDomainTest < Minitest::Test
     # (no connection_lost from a port that ended by itself), objects never deleted or a
     # quota never freed each fails.
     down = points.find { |point| point.fetch(:name) == 'connection-down' }
-    refute_match down.fetch(:pattern), "1> #{line}\r\n"
     down.fetch(:verify).call("#{Suite::CONNECTION_DOWN_ANSWER}\r\n")
     [Suite::CONNECTION_DOWN_ANSWER.sub('{20,true,noconnection}', '{0,true,timeout}'),
      Suite::CONNECTION_DOWN_ANSWER.sub('{ok,noconnection}', '{ok,timeout}'),
@@ -136,7 +148,6 @@ class SystemDomainTest < Minitest::Test
     end
     # The ignored connection_down: a core that lets the connection go, or frees erts's
     # quota, while erts never answered, or an agent that answered anyway, each fails.
-    refute_match ignored.fetch(:pattern), "1> #{line}\r\n"
     ignored.fetch(:verify).call("#{Suite::IGNORED_DOWN_ANSWER}\r\n")
     [Suite::IGNORED_DOWN_ANSWER.sub('{closing,1,0,', '{gone,0,0,'), Suite::IGNORED_DOWN_ANSWER.sub('{closing,1,0,', '{closing,0,0,'),
      Suite::IGNORED_DOWN_ANSWER.sub('{error,closing}', 'ok'), Suite::IGNORED_DOWN_ANSWER.sub('false,true', 'true,true'), Suite::IGNORED_DOWN_ANSWER.sub(',ok,none,ok}', ',ok,closing,{error,closing}}')]
@@ -147,7 +158,6 @@ class SystemDomainTest < Minitest::Test
     # by the connection's end (a monitor sent to the later peer), or a stale pid taken for
     # the later domain's process of the same number and serial, or a build answer that is
     # supervised or has no supervised key, each fails.
-    refute_match later.fetch(:pattern), "1> #{line}\r\n"
     later.fetch(:verify).call("#{Suite::LATER_DOMAIN_ANSWER}\r\n")
     [Suite::LATER_DOMAIN_ANSWER.sub('{9,ok}', '{7,ok}'), Suite::LATER_DOMAIN_ANSWER.sub('[nodedown,nodeup]', '[nodeup,nodedown]'),
      Suite::LATER_DOMAIN_ANSWER.sub('true},up}', 'true},down}'), Suite::LATER_DOMAIN_ANSWER.sub('{9,ok}', '{error,name_taken}'),
@@ -155,7 +165,6 @@ class SystemDomainTest < Minitest::Test
      Suite::LATER_DOMAIN_ANSWER.sub('sd_new', 'sd_old'), Suite::LATER_DOMAIN_ANSWER.sub(/false\}\z/, 'true}'),
      Suite::LATER_DOMAIN_ANSWER.sub(/false\}\z/, 'none}')]
       .each { |answer| assert_raises(Erx::Error) { later.fetch(:verify).call("#{answer}\r\n") } }
-    refute_match ends.fetch(:pattern), "1> #{line}\r\n"
     down = '{domain_down,5,{halt,69}}'
     good_ends = '{domain_ends,[{7,stopped}],[{5,erts@erxos,ready}],[noconnection,noconnection],gone,' \
                 "[{5,{halt,69}},{7,stopped}],[#{down},#{down},{error,#{down}}]," \

@@ -336,6 +336,17 @@ class QemuTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::Transcript.new(checkpoints: [{ name: 'prompt', pattern: /^p/n, seconds: 2, type: 7 }]) }
   end
 
+  # What one checkpoint types may all wait unread in the console's tty, which drops the
+  # bytes past its input bound, so a checkpoint that types that many is refused before the
+  # boot; one byte fewer is not.
+  def test_a_checkpoint_may_type_no_more_than_the_ttys_input_holds
+    bound = Erx::ABI::Generated.constant('tty_max_input')
+    point = ->(bytes) { [{ name: 'prompt', pattern: /^p/n, seconds: 2, type: "#{'x' * (bytes - 1)}\r" }] }
+    assert Erx::Transcript.new(checkpoints: point.call(bound - 1)).types?
+    error = assert_raises(Erx::Error) { Erx::Transcript.new(checkpoints: point.call(bound)) }
+    assert_includes error.message, "prompt types #{bound} bytes"
+  end
+
   def test_invalid_guest_configuration_is_refused
     assert_raises(Erx::Error) do
       Erx::QemuPlan.argv(platform: PLATFORM, accel: 'unknown', image: 'image', serial: 'serial')

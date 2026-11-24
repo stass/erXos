@@ -77,7 +77,7 @@ anywhere, so an owner waits for output to drain only while it does.
 -define(MAX_HELD, erx_tty:master_room()).
 %% At most this many bytes wait in writes nobody waits on.
 -define(MAX_WAITING, 65536).
--define(MAX_INPUT, 4096).
+-define(MAX_INPUT, ?ERX_TTY_MAX_INPUT).
 
 %% Who waits on a write: a term the relay hands back, or none.
 -type writer() :: term().
