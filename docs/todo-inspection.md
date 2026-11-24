@@ -433,13 +433,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 * [Low] live, `erx:i()`'s processes section (`erlang/apps/erx/src/erx_inspector.erl`, `overview/0`;
   `erx_inspect_worker.erl`, `processes/1`): it prints the `[processes]` listing's first page, which an
-  ordinary listing is ([design-live.md](design-live.md#the-inspect-service), "A path is data"). A
+  ordinary listing is ([design-live.md](design-live.md#the-inspect-service)). A
   production boot's processes, about 600 encoded bytes each, pass `inspect_reply_max` (256 KiB) near 420
   entries, so the page is `[partial]` and the domains after the cut show none; and since the page
   is cut on every such boot, the production image's `inspect-processes` point, which accepts
   `[partial]`, no longer shows that every domain before the cut answered. The design gives no
   narrower path to read the rest: `[domains, D, processes]` is declared (`abi/inspection.txt`) but
-  design-live.md's "A path is data" serves it only for the system domain. Change that sentence so
+  design-live.md's "The inspect service" serves it only for the system domain. Change that sentence so
   the worker answers `[domains, D, processes]` from D's agent, one answer per domain as now, and
   have `erx:i()` print each living domain's processes as its own listing; the point then expects
   whole listings again.

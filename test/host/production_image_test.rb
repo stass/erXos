@@ -647,7 +647,7 @@ class ProductionImageTest < Minitest::Test
 
   # erx:i()'s processes listing is an ordinary listing, which has no continuation: it is its
   # first page, marked [partial] when the page's 1,000 entries or inspect_reply_max cut it
-  # (docs/design-live.md, "A path is data" and Bounds). A production boot's processes pass
+  # (docs/design-live.md, "The inspect service" and "Bounds"). A production boot's processes pass
   # inspect_reply_max, so the header may end in [partial]; an empty listing and a listing
   # that failed whole still fail.
   def test_the_processes_listing_is_its_first_page_whole_or_cut

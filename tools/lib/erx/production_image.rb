@@ -1427,7 +1427,7 @@ module Erx
          console_point('inspect-uptime', /\A  uptime +kernel +[1-9][0-9]*\r*\n\z/n),
          console_point('inspect-used', /\A  used +root pool +\[partial\]\r*\n\z/n),
          # An ordinary listing is its first page, [partial] when the page cut it
-         # (docs/design-live.md, "A path is data"). This boot's processes pass
+         # (docs/design-live.md, "The inspect service"). This boot's processes pass
          # inspect_reply_max, so the point does not show that every domain before
          # the cut answered (docs/todo-inspection.md, erx:i()'s processes section).
          console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries(?: \[partial\])?\r*\n\z}n),
