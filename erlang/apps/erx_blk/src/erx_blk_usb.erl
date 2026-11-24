@@ -10,6 +10,12 @@
 %% ends; it is reached by pid and never registered. The function and its transport monitor
 %% each other, never link: the function's end ends the transport, and the transport's end
 %% ends only its medium, which the function's unit finds again by its readiness sequence.
+%% With its window it is the medium's block service (docs/design-usb.md, "Media and
+%% drives"): it starts one window of role drive over every sector of the medium,
+%% erx_blk_window linked to it and bound to it, so the window ends with the transport and
+%% the transport with a window that crashes; and it tells the medium's drive grant, when
+%% the function names one, of that window and that the grant ends the medium through the
+%% function under the medium's reference (erx_blk_drive).
 %% It holds the medium's reference, which every request it hands the function carries, so
 %% the engine answers a request of a medium that has ended `{error, {device, gone}}` and
 %% sends nothing. It checks
@@ -37,9 +43,9 @@
 %% One bulk buffer's worth of sectors, 64 (docs/design-usb.md, "The block transport").
 -define(MAX_SECTORS, (?ERX_XHCI_BULK_BUFFER_SIZE div ?ERX_SCSI_BLOCK_LENGTH)).
 
--doc "What the function knows of a ready medium: its unit, reference, capacity in sectors, whether it flushes, and the unit's text.".
+-doc "What the function knows of a ready medium: its unit, reference, capacity in sectors, whether it flushes, the unit's text, and the drive grant that hands the medium out, or none.".
 -type medium() :: #{function := pid(), lun := erx_usb_bot_core:lun(), ref := erx_usb_bot_core:medium_ref(),
-                    capacity := pos_integer(), flush := boolean(), detail := map()}.
+                    capacity := pos_integer(), flush := boolean(), detail := map(), drive := none | pid()}.
 
 -doc "Starts the transport of Medium, monitored by the caller, its BOT function, and monitoring it.".
 -spec start_monitor(medium()) -> {ok, {pid(), reference()}}.
@@ -47,8 +53,10 @@ start_monitor(Medium) ->
     gen_server:start_monitor(?MODULE, Medium, []).
 
 -doc false.
-init(Medium = #{function := Function}) ->
+init(Medium = #{function := Function, lun := Lun, ref := Ref, capacity := Capacity, drive := Drive}) ->
     _ = monitor(process, Function),
+    {ok, Window} = erx_blk_window:start_link({drive, 0, Capacity}, self()),
+    _ = Drive =/= none andalso erx_blk_drive:serve(Drive, Window, {Function, {Lun, Ref}}),
     {ok, Medium}.
 
 -doc false.

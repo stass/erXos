@@ -44,9 +44,16 @@ device's detach makes every transfer answer `gone`, which reaches reset
 recovery and ends the function so. Each transport monitors the function,
 so it ends with the function.
 
-The block service above the transport (the partition and window
-processes) and the drives the manifest names are not started yet: the
-transport is the medium's whole service.
+**The block service.** A ready medium's block service is its transport
+and the one window over the whole medium that the transport starts
+(erx_blk_usb). A drive grant asked again for that window sends the
+function `{erx_blk_drive, end_medium, {Lun, Ref}}`, and the function ends
+the medium as a UNIT ATTENTION does: the transport and window stop, the
+engine answers every request of the old reference `gone` unsent, and the
+unit becomes ready again only through commands queued behind any already
+issued (erx_blk_drive). A medium's transport is started with no drive
+grant: the drives the manifest names do not reach the USB domain, so no
+medium takes one (docs/todo-storage.md, the drives item).
 
 Everything the device sends reaches only the engine's decoders, which
 bound what they take; the INQUIRY's text is kept as bytes in the
@@ -125,6 +132,19 @@ handle_info({'DOWN', Monitor, process, _Transport, Reason}, B = #bot{units = Uni
             log_medium_ended(Lun, erx_report:reason_name(Reason)),
             run([{end_medium, Lun, Ref}], B#bot{units = Units#{Lun := maps:remove(transport, maps:get(Lun, Units))}});
         [] -> {noreply, B}
+    end;
+%% A drive grant asked again for the medium's window: the medium ends as a UNIT ATTENTION
+%% ends it, here at once, so its transport and window end and the engine refuses every
+%% request of the old reference; the unit's readiness sequence, behind any command
+%% already issued, makes the next medium. A reference that is not the unit's current
+%% medium ends nothing.
+handle_info({erx_blk_drive, end_medium, {Lun, Ref}}, B = #bot{units = Units}) ->
+    case Units of
+        #{Lun := Unit = #{ref := Ref}} ->
+            log_medium_ended(Lun, restart),
+            Stopped = stop_transport(Unit, maps:remove(transport, Unit)),
+            run([{end_medium, Lun, Ref}], B#bot{units = Units#{Lun := Stopped}});
+        #{} -> {noreply, B}
     end;
 handle_info(_Message, B) ->
     {noreply, B}.
@@ -274,7 +294,7 @@ effect(Lun, serve, B = #bot{units = Units}) ->
     Unit = #{ref := Ref, capacity := Capacity, flush := Flush, detail := Detail, removable := Removable} =
         maps:get(Lun, Units),
     {ok, Transport} = erx_blk_usb:start_monitor(#{function => self(), lun => Lun, ref => Ref, capacity => Capacity,
-                                                  flush => Flush, detail => Detail}),
+                                                  flush => Flush, detail => Detail, drive => none}),
     Serving = B#bot{units = Units#{Lun := Unit#{transport => Transport}}},
     logger:notice("erx_usb_bot: medium LUN ~b ready: ~b blocks of ~b bytes", [Lun, Capacity, ?ERX_SCSI_BLOCK_LENGTH]),
     case Removable of

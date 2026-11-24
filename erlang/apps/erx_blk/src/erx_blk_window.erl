@@ -6,18 +6,22 @@
 %% file system holds a window's pid and nothing of the device; the window checks every
 %% request against its sectors with erx_blk_table:place/3 and hands only what passes to
 %% the device process, erx_blk, at the medium's sector. erx_blk_service starts one per
-%% partition the table admits, linked to itself.
+%% partition the table admits, linked to itself; a USB medium's transport, erx_blk_usb,
+%% starts one of role drive over the whole medium, linked to itself and bound to it from
+%% the start (start_link/2), so its requests reach that transport alone.
 %%
 %% A request answers {ok, Bytes} for a read and ok for a write or a flush, or {error,
 %% Reason}: einval for a request that names no whole sectors or more than one device
 %% request carries (max_sectors of erx_blk:info/1), erange for one that leaves the window,
 %% erofs for a write to a read-only window or passed on from the write path, and eio for
 %% anything else the device process answered or a device process that did not answer. A
-%% flush is the whole medium's (erx_blk:flush/1). A window answers one request at a time,
-%% in order.
+%% flush is the whole medium's (erx_blk:flush/1), and enotsup on a medium that cannot
+%% flush. A window answers one request at a time, in order.
 %%
-%% A window is bound to one device process's life. Its first request that reaches the
-%% device binds it to the process erx_blk names then (erx_blk:device/0); it calls that
+%% A window is bound to one device process's life. One started by start_link/2 is bound
+%% from its start to the transport it names. One started by start_link/1 is bound by its
+%% first request that reaches the device to the process erx_blk names then
+%% (erx_blk:device/0); it calls that
 %% process by pid from then on and monitors it. Once that process has ended, every request
 %% that would reach the device answers eio, even when a new device process runs: whatever
 %% restarted the driver (storage_ctl, /dev's ctl, the supervisor) reset the device, and
@@ -36,7 +40,7 @@
 -module(erx_blk_window).
 -behaviour(gen_server).
 
--export([start_link/1, read/3, write/3, flush/1, info/1]).
+-export([start_link/1, start_link/2, read/3, write/3, flush/1, info/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -include("generated/erx_abi.hrl").
@@ -55,6 +59,13 @@
 start_link(Window) ->
     gen_server:start_link(?MODULE, Window, []).
 
+%% A window bound from its start to the transport Device, a process that answers erx_blk's
+%% calls by pid, as a USB medium's transport does (erx_blk_usb): it reaches no process
+%% registered as erx_blk, and answers eio once Device has ended.
+-spec start_link(erx_blk_table:window(), pid()) -> {ok, pid()}.
+start_link(Window, Device) ->
+    gen_server:start_link(?MODULE, {bound, Window, Device}, []).
+
 %% Count sectors from Sector of the window.
 -spec read(pid(), non_neg_integer(), pos_integer()) -> {ok, binary()} | {error, einval | erange | erofs | eio}.
 read(Window, Sector, Count) -> call(Window, {read, Sector, Count}).
@@ -64,7 +75,7 @@ read(Window, Sector, Count) -> call(Window, {read, Sector, Count}).
 write(Window, Sector, Bytes) -> call(Window, {write, Sector, Bytes}).
 
 %% ok once every write the window answered before it is durable on the medium.
--spec flush(pid()) -> ok | {error, eio}.
+-spec flush(pid()) -> ok | {error, enotsup | eio}.
 flush(Window) -> call(Window, flush).
 
 %% The window's role and its length in sectors; where it lies on the medium is not the
@@ -76,6 +87,8 @@ info(Window) -> call(Window, info).
 call(Window, Request) ->
     try gen_server:call(Window, Request, ?CALL_TIMEOUT) catch exit:_ -> {error, eio} end.
 
+init({bound, Window, Device}) ->
+    {ok, #state{window = Window, device = {bound, Device, monitor(process, Device)}}};
 init(Window) ->
     {ok, #state{window = Window}}.
 
@@ -151,10 +164,12 @@ bind(State = #state{device = unbound}) ->
     end.
 
 %% The device process's answer to a flush in the window's terms: ok only for ok, since a
-%% flush moves no bytes, and eio for anything else.
+%% flush moves no bytes; enotsup for a medium that cannot flush (no_flush, which only a
+%% USB medium's transport answers); and eio for anything else.
 flush_answer(Call) ->
     try Call() of
         ok -> ok;
+        {error, no_flush} -> {error, enotsup};
         _DeviceError -> {error, eio}
     catch
         exit:_ -> {error, eio}

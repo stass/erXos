@@ -12,11 +12,12 @@
 %% the block service; erx_blk_sd_card and erx_blk_sd_host are the SD host controller's pure
 %% cores and erx_blk_sd_regs its spaced register writes, and erx_blk_sd the SD card's device
 %% process (docs/design-storage.md, "The SD host controller"); erx_blk_usb is a USB
-%% mass-storage medium's transport (docs/design-usb.md, "The block transport").
+%% mass-storage medium's transport (docs/design-usb.md, "The block transport"), and
+%% erx_blk_drive a drive grant (docs/design-drives.md, "A drive and its medium").
 {application, erx_blk,
  [{description, "erXos block driver"},
   {vsn, "1"},
-  {modules, [erx_blk, erx_blk_usb, erx_blk_image, erx_blk_request, erx_blk_sd, erx_blk_sd_card,
+  {modules, [erx_blk, erx_blk_drive, erx_blk_usb, erx_blk_image, erx_blk_request, erx_blk_sd, erx_blk_sd_card,
              erx_blk_sd_host, erx_blk_sd_regs, erx_blk_service, erx_blk_sup, erx_blk_table,
              erx_blk_virtio, erx_blk_window, erx_blk_write]},
   {registered, [erx_blk, erx_blk_service, erx_blk_sup]},

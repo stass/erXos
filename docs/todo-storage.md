@@ -13,12 +13,18 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      partition and is held only by the media domain; the rules of design-drives.md's "Manifest rows",
      each with a seeded manifest; the 9P statfs type `media` in `abi/protocols/9p.txt`; the `media`
      service and its mount point in `erx_ns`. The two limits are step 3's.
-  2. The whole-medium window: `erx_usb_bot`'s block service with one window over the medium and
-     `erx_blk_drive`, the drive grant, which, asked again for a window it answered, ends and restarts
-     the medium's block service first through the medium reference the issuing process checks (on USB the
-     engine's, as UNIT ATTENTION ends a medium; on a block device one `erx_blk`'s device process gains,
-     USB's rule), answering the new window only after the old reference's issued requests finish; `erx_blk`
-     serving a `block` device's medium as a drive. Its moduledoc's "not started yet" goes.
+  2. The whole-medium window. `erx_blk_drive`, the drive grant, and USB's block service (the transport
+     and its one window over the medium, ended through the engine when a grant is asked again) are
+     built. What remains: the medium reference on a block device, which `erx_blk`'s device process
+     (`erx_blk_virtio` first) gains, USB's rule: every request of a drive's window carries it, the
+     process checks it at the head of its queue, and ending it answers the grant only once the
+     requests already issued have finished, before the next window starts under a fresh one;
+     `erx_blk` serving a `block` device's medium as a drive; and the drives the manifest names
+     reaching the domain that serves them, so the USB domain's media take the lowest free drive and a
+     block device's holder knows its device is a drive. That last needs a design: the domain library
+     hands the serving domain no record of its drive rows, and design-drives.md and design-usb.md
+     do not name one (a record form beside `system_image`'s `record_volume` word is the
+     likely shape). `erx_usb_bot` starts every transport with no grant until then.
   3. `erx_media_table` (MBR, GPT with both copies and the metadata rule, none, whole-table refusal,
      `place/3`) and `erx_media_probe` with `abi/formats/probe.txt`, pure, with their fuzz targets and
      seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name;
