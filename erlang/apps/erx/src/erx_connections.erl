@@ -52,8 +52,8 @@ start(Kernel, System) ->
 %% it to net_kernel as an accepted connection to the domain's node, before the domain's
 %% first thread runs, and answers once erx_dist's owner has brought the domain's entry up,
 %% so the caller finds the connection to the domain's node there: erx_dist:export/3 to
-%% the domain succeeds from the answer on. The caller is then sent {system_side_ended, Id}
-%% if the side ends before close_side/2 closes it. {error, noconnection} for a side that
+%% the domain succeeds from the answer on. The caller is then sent {system_side_ended, Id,
+%% Reason}, Reason the port's exit reason, if the side ends before close_side/2 closes it. {error, noconnection} for a side that
 %% ends before its entry is up; {error, noproc} where no agent runs, the runtime being no
 %% node; the lane driver's or net_kernel's refusal otherwise, and badarg for a domain
 %% whose side is open or opening already, or asked by any process but the agent's
@@ -275,10 +275,10 @@ sides(#{kernel := Kernel, open := Open, installer := Installer} = Env, Sides, Dr
         {'$gen_call', {_, _} = From, _Request} ->
             gen:reply(From, {error, badarg}),
             sides(Env, Sides, Dropped);
-        {{side_ended, Id}, Monitor, port, Port, _Reason} ->
+        {{side_ended, Id}, Monitor, port, Port, Reason} ->
             case maps:take(Id, Sides) of
                 {{Port, Monitor, {open, Service}}, Rest} ->
-                    Service ! {system_side_ended, Id},
+                    Service ! {system_side_ended, Id, Reason},
                     sides(Env, Rest, Dropped);
                 {{Port, Monitor, {opening, _} = Phase}, Rest} ->
                     answer_unopened(Phase),

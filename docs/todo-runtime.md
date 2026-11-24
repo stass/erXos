@@ -916,7 +916,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `net_kernel` with no restart leaves the runtime running with no agent, and in the
   system domain no side reports reach the domain service. Make it hold by construction:
   quiet only when the runtime's ordered end is under way (a mark written on that path),
-  halt otherwise. Also tighten `{system_side_ended, Id}`, which any local process can send
+  halt otherwise. erx_dist's owner follows net_kernel's shutdown the same way
+  (`erx_dist:exited/4`) and shares the gap. Also tighten `{system_side_ended, Id, Reason}`,
+  which any local process can send
   to the service: carry the side's monitor reference, or check the sender is the agent.
 * [Medium] runtime, `erts_internal_dist_spawn_request_4` in `otp/erts/emulator/beam/dist.c`:
   design-domains.md ("The funnel", step 4) has the sender's peer check a spawn request's

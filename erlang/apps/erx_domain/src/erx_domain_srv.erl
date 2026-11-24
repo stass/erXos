@@ -773,15 +773,17 @@ handle_info({stop_request, Ref, Id}, #{core := Core} = State) ->
         _ -> ok
     end,
     {noreply, State};
-handle_info({system_side_ended, Id}, #{core := Core} = State) ->
+handle_info({system_side_ended, Id, Reason}, #{core := Core} = State) ->
     %% The agent's report that a side it opened for this service ended before the service
     %% closed it: this runtime ended the connection, for a malformed frame, a peer bound
     %% passed or its owner's end, so the domain goes (docs/design-system.md, "A lost
-    %% system connection ends the domain"). Ids are never reused, so a late report for an
-    %% ended domain finds no record.
+    %% system connection ends the domain"), and the log names why by the leading atom of
+    %% the port's exit reason. Ids are never reused, so a late report for an ended domain
+    %% finds no record.
     case erx_domain_core:fetch(Id, Core) of
         {ok, #{state := Life}} when ?IS_LIVE(Life) ->
-            logger:notice("erx_domain: domain ~b's system side ended; stopping the domain", [Id]),
+            logger:notice("erx_domain: domain ~b's system side ended, ~s; stopping the domain",
+                          [Id, erx_report:reason_name(Reason)]),
             stop(Id, State);
         _ ->
             ok

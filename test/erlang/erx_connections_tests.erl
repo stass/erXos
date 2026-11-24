@@ -488,7 +488,7 @@ side_ended_after_up(Agent) ->
     Agent ! {erx_connection_inserted, ?PEER, Port},
     ?assertEqual({ok, Port}, side_answer(2000)),
     exit(Port, kill),
-    ?assertEqual({system_side_ended, ?PEER}, side_answer(2000)).
+    ?assertEqual({system_side_ended, ?PEER, killed}, side_answer(2000)).
 
 sides_only_from_service(Agent) ->
     %% The system domain's agent opens and closes a side only for its installer, as it

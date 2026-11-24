@@ -184,7 +184,8 @@ accept_connection(AcceptPid, Connection, MyNode, _Allowed, _SetupTime) ->
 %% once for the frames that came before, reports the node up as dist_util does, and tells
 %% the acceptor of an introduced connection once net_kernel has inserted it. Every
 %% way it ends, a refusal or a crash included, goes through ended/2, so the system
-%% connection's owner halts the domain on each. It acts on {Kernel, disconnect}, which
+%% connection's owner halts the domain on each, except net_kernel's shutdown, the
+%% runtime's ordered end, which it follows (exited/4). It acts on {Kernel, disconnect}, which
 %% names net_kernel by a pid any peer can write; a message from another domain arrives
 %% as {erx_origin, D, Msg} (edit 16) and reaches only its catch-all.
 owner(Kernel, AcceptPid, MyNode, Connection) ->
@@ -192,6 +193,7 @@ owner(Kernel, AcceptPid, MyNode, Connection) ->
     try
         owner_up(Kernel, AcceptPid, MyNode, Connection)
     catch
+        exit:shutdown -> exit(shutdown);
         exit:{shutdown, _} = Shutdown -> exit(Shutdown);
         Class:Reason -> ended(Connection, {Class, Reason})
     end.
@@ -199,7 +201,7 @@ owner(Kernel, AcceptPid, MyNode, Connection) ->
 owner_up(Kernel, AcceptPid, MyNode, #{port := Port, node := Peer, id := PeerId} = Connection) ->
     receive
         {AcceptPid, controller} -> link(Port);
-        {'EXIT', _From, Reason} -> ended(Connection, Reason)
+        {'EXIT', From, Reason} -> exited(Kernel, From, Reason, Connection)
     end,
     Kernel ! {self(), {accept_pending, MyNode, Peer, normal}},
     receive
@@ -253,11 +255,21 @@ owner_loop(Kernel, DHandle, Connection) ->
         {From, Ref, {Options, _}} when Options =:= setopts; Options =:= getopts ->
             From ! {Ref, {error, enotsup}},
             owner_loop(Kernel, DHandle, Connection);
-        {'EXIT', _From, Reason} ->
-            ended(Connection, Reason);
+        {'EXIT', From, Reason} ->
+            exited(Kernel, From, Reason, Connection);
         _Other ->
             owner_loop(Kernel, DHandle, Connection)
     end.
+
+%% An exit signal to the owner. net_kernel traps exits, so its shutdown comes only from
+%% its supervisor, in the runtime's ordered end (erx_connections:kernel_ended/1 says when
+%% else): the owner follows it, as the agent does, so the runtime ends as it was told, init
+%% halting it with its own status, and not as for a lost system connection. Any other exit,
+%% the port's or net_kernel's crash, ends the connection.
+exited(Kernel, Kernel, shutdown, _Connection) ->
+    exit(shutdown);
+exited(_Kernel, _From, Reason, Connection) ->
+    ended(Connection, Reason).
 
 %% The owner's end, which closes the port it is linked to and takes the entry down.
 ended(#{system := true}, Reason) ->

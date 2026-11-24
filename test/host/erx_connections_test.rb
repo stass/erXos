@@ -16,7 +16,7 @@ require_relative '../../tools/lib/erx/host_os'
 # (test/display/erx_area_stand_in.c), so a case can hold a real area resource.
 class ErxConnectionsTest < Minitest::Test
   APPLICATIONS = %w[erx].freeze
-  TESTS = %w[test/erlang/erx_connections_tests.erl].freeze
+  TESTS = %w[test/erlang/erx_connections_tests.erl test/erlang/erx_dist_tests.erl].freeze
   ROOT = File.expand_path('../..', __dir__)
   AREA_STAND_IN = 'test/display/erx_area_stand_in.c'
 
@@ -25,16 +25,28 @@ class ErxConnectionsTest < Minitest::Test
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       area_nif(work)
 
-      output, status = Open3.capture2e(Erx::HostOs.nif_search_environment(work), 'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
-                                       '-pa', work, '-eval',
-                                       'halt(case eunit:test(erx_connections_tests, [verbose]) of ok -> 0; _ -> 1 end).',
-                                       chdir: work, stdin_data: '')
-      assert status.success?, output
-      assert_match(/All \d+ tests passed/, output)
+      eunit(work, 'erx_connections_tests')
+    end
+  end
+
+  # erx_dist's owner, at the runtime's ordered end; a halt of the runtime fails the run.
+  def test_owner_cases_pass_under_eunit
+    Dir.mktmpdir('erx-dist-test') do |work|
+      ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
+      eunit(work, 'erx_dist_tests')
     end
   end
 
   private
+
+  def eunit(work, mod)
+    output, status = Open3.capture2e(Erx::HostOs.nif_search_environment(work), 'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell',
+                                     '-pa', work, '-eval',
+                                     "halt(case eunit:test(#{mod}, [verbose]) of ok -> 0; _ -> 1 end).",
+                                     chdir: work, stdin_data: '')
+    assert status.success?, output
+    assert_match(/(All \d+ tests passed|Test passed)/, output)
+  end
 
   # erx_area.so in work, against the headers of the emulator ERX_ERL runs.
   def area_nif(work)
