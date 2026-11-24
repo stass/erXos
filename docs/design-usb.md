@@ -661,9 +661,14 @@ mounted twice at once
 ([design-drives.md](design-drives.md#a-drive-and-its-medium)). The window is an ordinary window of the
 block service, whose sectors are the medium's, answering `{read, Sector,
 Count}`, `{write, Sector, Bytes}` and `flush` with the block service's
-answers, and it ends when its medium ends. It is started with
-`{erx_serve, any}`, so it serves the media domain, toward which the
-facet's reply exports it. Holding a drive's facet is holding whatever
+answers, and it ends when its medium ends. It serves the USB domain
+alone: the media domain reaches it through a proxy the drive's facet
+starts and answers in its reply, which takes those requests from the
+media domain alone under the grant's limits and charges them to the
+grant's account, so what the media domain can make the USB domain hold
+and spend, beside its HID functions, is the grant's
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
+Holding a drive's facet is holding whatever
 medium that drive holds, whole, as holding a window is holding its
 sectors, so the grant checks no caller and names nothing else: the facet
 in front of it admits only its grantee's `window`. What the media domain does with it, from the table to the files

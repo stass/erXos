@@ -489,13 +489,17 @@ turns any such medium into files by one path
 The domain that drives the medium's transport, the USB domain for a
 stick, serves the medium **whole**, as one window, and parses none of
 it, so nothing a stranger wrote is read in a domain that holds a
-device. A drive's grant hands that window to the **media
+device. A drive's grant lends that window to the **media
 domain**, which holds no device and nothing but the drives. The grant
 needs no channel of its own: the drive's row in the system manifest is
 the grant, and the system domain has the drive's domain make it for the
 media domain as it has any domain make a service for another, a facet
 whose one request asks for the window, made again whenever either
-domain restarts
+domain restarts. The window itself never leaves its domain. The facet
+answers with a stand-in it starts for each medium, which passes the
+media domain's sector requests to the window under the grant's limits
+and charges their work to the grant, so the media domain cannot make
+the drive's domain spend more than the grant allows
 ([design-drives.md, How the grant reaches the media domain](../design-drives.md#how-the-grant-reaches-the-media-domain)).
 There the
 medium passes through a few steps. A pure reader takes its partition table

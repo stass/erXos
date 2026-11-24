@@ -57,16 +57,22 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      process with its probe and memory bound, the media tree with `status`, `ctl` and the two-volume
      `exdev` rule, the writable rule over the formats the build writes, the finish shared by `eject` and the freezing
      checkpoint; the drive grants of design-drives.md's "How the grant reaches the media domain":
-     `abi/services/drive.txt`, one operation `window`, marked `served_by drive` (a value the closed
-     set of `tools/lib/erx/abi_contracts.rb` gains), the domain service's grant for each drive
-     window row and its admission of `drive` in a ready report (`erx_domain_mints`, design-system.md's
-     "A drive window as a grant"), `erx_blk_drive:start_mint/1` and `erx_blk_drive_facet` with the
-     USB places' mint child, a drive's window started with `{erx_serve, any}`, which needs edit 59
-     ([todo-runtime.md](todo-runtime.md), "Runtime, origins", its item 3), the facet table
-     check passing `served_by drive` as it passes a session's lines, the manifest check's refusal of
-     a service or facet row of `drive`, and one more of the media and serving domains'
-     `connections` and of `max_connections` for each drive grant in the board manifests, with the
-     host tests and QEMU cases those sections' tables name;
+     `abi/services/drive.txt`, one operation `window` and the five quantities design-drives.md
+     gives, marked `served_by drive` (a value the closed set of `tools/lib/erx/abi_contracts.rb`
+     gains, whose quantity rule it meets); the domain service's grant for each drive window row and
+     its admission of `drive` in a ready report (`erx_domain_mints`, design-system.md's "A drive
+     window as a grant"), with each record's service apart from its installed name
+     (design-system.md's "One operation per grant"): `key()`'s name becomes the installed name, and
+     `current_pair/2` and `mint_request/4` look the mint up and name it by the service, where today
+     one `Name` serves all three; `erx_blk_drive:start_mint/1` and `erx_blk_drive_facet` with the
+     USB places' mint child, and `erx_blk_drive_proxy`, the window proxy, under the facet's
+     admission path and account (design-domains.md's "Processes a facet starts", whose account
+     `erx_facet` has yet to build: its residuals in TODO.md); the facet table check passing
+     `served_by drive` as it passes a session's lines; the manifest check's refusal of a service or
+     facet row of `drive` and of a drive window whose rights are not `read,write`; and in each board
+     manifest one more of the media domain's and the serving domain's `connections` and of
+     `max_connections` for each pair of media and serving domain, however many drives it carries;
+     with the host tests and QEMU cases those sections' tables name;
      the release check that `erx_media` lies only in the media domain's release, which names
      no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the resolver's no-follow rule
      as a `nofollow` mark a provider carries, the provider `{facet, media}` marked by `erx_ns` by the
@@ -76,8 +82,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
      here too. QEMU virt's development manifest names its media domain, the service `media` and the
      drive `disk0` on the xhci row, so its USB domain serves a stick as `disk0`; the domain runs
-     nothing yet, and its `connections` of 1 and the USB domain's of 2 leave no room for the drive
-     grant's connection between them.
+     nothing yet. The quotas count no system connection (`life_connections` in
+     `liberx/system/dom_life.c`), so at rest the media domain's `connections` of 1 and the USB
+     domain's of 2 hold the one drive connection between them beside the display's `usb_input`;
+     a peer's restart, while its old row is still closing, needs one more on each, 2 and 3, which
+     the manifest's rows for other configured peers do not reckon either. `max_connections` grows
+     from 34 to 36: 13 rows at rest, and a restarted USB domain's three (its system connection,
+     `usb_input` and the drive's) beside its own, which the comment's "two a restarted configured
+     domain makes" already undercounts for the display (its system connection, `usb_input` and
+     root's session's display).
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume: its read path, then its batches, dirty flag
      and finish.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside
@@ -429,6 +442,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Security residuals
 
+* [Medium] storage, a window served to another domain (`erlang/apps/erx_blk/src/erx_blk_window.erl`;
+  [design-storage.md](design-storage.md#data-model), "The block service"): a client in another domain
+  reaches its window directly, outside any facet, so one that sends requests without waiting for their
+  answers queues them on the window without a bound the grant declares, and its requests' work is
+  charged to no account. A drive's window has a proxy under its grant's admission
+  ([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)); the storage domain's
+  windows to other domains need the same, or a bound of their own, before an untrusted domain holds one.
 * [Medium] USB, a USB domain's holdings (`tools/lib/erx/manifest.rb`; [design-usb.md](design-usb.md)):
   the rule that a USB domain holds its controller's unit and nothing else, which keeps what drives a
   stick from parsing anything, has no check, as the media domain's and a block drive holder's

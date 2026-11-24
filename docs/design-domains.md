@@ -2329,7 +2329,10 @@ queue quota.
 domain that act for its grantee alone, as the network service's grant
 starts a connection, listener or datagram process for each of its
 grantee's sockets
-([design-network-stack.md](design-network-stack.md#sockets-act-for-one-domain)).
+([design-network-stack.md](design-network-stack.md#sockets-act-for-one-domain)),
+and a drive's facet starts a proxy of the medium's window, through
+which the media domain's every sector request passes
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
 Such a process runs the facet's generated admission path on every
 request, exported toward the grantee with `send` alone, and charges the
 facet's account, for work that has no reply as well as for requests:

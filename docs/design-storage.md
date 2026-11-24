@@ -419,13 +419,17 @@ media that answers one request, `window`: the pid of the window covering
 the whole of the medium the drive holds now, or `{error, no_medium}`
 ([design-drives.md](design-drives.md#a-drive-and-its-medium)). It
 reaches it through a facet of that domain, which the drive's window row
-grants it and whose one operation is `window`; the window comes in the
-facet's reply, which exports it to the media domain, and is started with
-`{erx_serve, any}`, so it serves the media domain's calls
-([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)). A window answers one request at a time per client in
-order, so a client's own requests in flight bound what the service holds
-for it, and a client that stops reading its lane blocks only its own
-window.
+grants it and whose one operation is `window`; the window stays in its
+domain, and the facet's reply carries instead a proxy the facet starts,
+which takes the window's requests under the grant's admission and
+account, so every sector request of the media domain passes the
+grant's limits
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
+A window answers one request at a time per client in order, and a
+client that stops reading its lane blocks only its own window. A client
+in another domain that sends requests without waiting for their answers
+queues them on its window, which no facet admits
+([todo-storage.md](todo-storage.md)).
 
 **Where the driver runs.** The block device goes to exactly one domain,
 named by the system configuration, whose creation gives it

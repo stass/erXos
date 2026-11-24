@@ -2540,9 +2540,14 @@ its grantee the row's holder, the media domain, its service the
 interface `drive`, which `abi/services` marks `served_by drive`, and the
 name it is installed under `{drive, N}`, N the row's drive number, from
 the manifest, never from a report. Its limits are the interface's one
-operation, `window`, as the operations the grant lists, and
-`drive => N`, so the mint learns which drive it mints for, with the
-`erx_facet` defaults for the rest. A configured domain's ready report
+operation, `window`, as the operations the grant lists, `drive => N`,
+so the mint learns which drive it mints for, and the five quantities
+`abi/services/drive.txt` declares, as a session line's limits are its
+interface's: `max_request` 65,536, `in_flight` 8, `reductions`
+1,000,000, `period_ns` one second and `max_heap_size` 131,072 words,
+which hold the facet and the window proxy it starts for each medium
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)
+gives each figure's reason). A configured domain's ready report
 may provide `drive` exactly when a drive window lies on one of its
 devices, as if a service row declared it; a report of any other domain
 that names it is refused as a name no row declares. From then the
@@ -2550,10 +2555,18 @@ grant's record follows its pair as a facet row's does, and moves on the
 same events.
 
 **One operation per grant.** For each grant, named by its grantee (a
-configured domain, the system domain or a live session) and its service's
-name, the domain service keeps one record. The
+configured domain, the system domain or a live session) and its
+installed name, the domain service keeps one record. A record carries
+two names, fixed when it is made: its **service**, the name a server's
+ready report provides a mint for, which the mint request carries, and
+its **installed name**, which keys the record beside its grantee and
+names the facet in the grantee's registry. For a facet row's grant and
+a session's line the two are the same name, the service's; a grant of
+`svc` has the service `svc` and the installed name `{svc, NAME}`, and a
+drive's grant the service `drive` and the installed name `{drive, N}`,
+so the several grants one mint serves are separate records. The
 grant's **pair** is the current ready incarnation of its server, if that
-incarnation provides the name, and the current ready incarnation of its
+incarnation provides the record's service, and the current ready incarnation of its
 grantee; the system domain, id 4, is always ready. The record follows the
 pair, so each operation is bound to both incarnations by construction:
 
@@ -2601,8 +2614,8 @@ The record moves on these events, and on nothing else:
   service never reuses, and a **deadline** of 10 seconds from its start,
   for the whole of its introduction, mint and installation;
 * **the introduction's result**: `ok` sends the mint
-  `{erx_facet_mint, Tag, Name, Grantee, Principal, Limits}`, where
-  `Principal` is the user name of the grantee's principal, the prefix of
+  `{erx_facet_mint, Tag, Service, Grantee, Principal, Limits}`, where
+  `Service` is the record's service, `Principal` is the user name of the grantee's principal, the prefix of
   its sessions' names: `root` for the system principal, and for any other
   its name in the system manifest, a configured domain's row's or a
   session's template's
@@ -2610,7 +2623,8 @@ The record moves on these events, and on nothing else:
   from which a server scopes the grant by principal, as the storage
   domain roots a home grant at the user's home
   ([design-files.md](design-files.md#building-binding-and-mounting), "A
-  user's home"), and `Limits` is the facet row's limits, with
+  user's home"), and `Limits` is the grant's limits, a facet row's or
+  those its interface declares, with
   the `session` parameter added where the grant's record carries the
   session mark (below), through the server's
   domain pid, which the server's domain already holds, since a send
@@ -2629,7 +2643,8 @@ The record moves on these events, and on nothing else:
   that tag. `{ok, Facet}` with `Facet` a pid the server's incarnation
   owns, node and creation both, moves the operation to `installing` and
   sends the grantee
-  `{erx_facets_install, Tag, Name, Facet}`, where `Facet` is the pid, or
+  `{erx_facets_install, Tag, Name, Facet}`, where `Name` is the record's
+  installed name and `Facet` is the pid, or
   for a files service `{Pid, Rights}` with the rights of the grant's
   facet row, which the manifest states and no reply sets
   ([design-files.md](design-files.md#building-binding-and-mounting),
