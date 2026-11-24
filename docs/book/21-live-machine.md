@@ -805,11 +805,14 @@ Fiasco's own lines, its warnings among them, become kernel records too.
 From the log service's first take, the kernel sends every line it
 prints to a 4 KiB ring of its own instead of the console's UART, and
 each take drains the ring into the log as records whose text begins
-`fiasco: `, escaped like every other kernel line; a write the full ring
-cannot hold is counted, and the count becomes a record of its own. The
-kernel writes the UART again only when the machine stops: a panic, the
-debugger's entry or the root's end gives the UART back, and the ring's
-lines go out first. So while the console's driver runs it is the
+`fiasco: `, escaped like every other kernel line. The ring holds only
+whole lines: a line it cannot hold whole is dropped whole, never cut,
+and counted, and the count becomes a record of its own. The kernel
+writes the UART again only when the machine stops: a panic, a failed
+assertion, a kernel trap, the debugger's entry or the root's end takes
+the UART back before it prints its first byte, so the stop's report
+never waits in the ring, and the ring's lines go out first, escaped as
+a take would give them. So while the console's driver runs it is the
 UART's only user, and no kernel write can hide a lost keystroke
 ([design-fiasco.md, The kernel's lines](../design-fiasco.md#the-kernels-lines)).
 The ring is designed and not built.

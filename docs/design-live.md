@@ -923,11 +923,14 @@ log service:
   and while the driver runs it is the UART's only user. On Fiasco the
   kernel's own lines go from that take on to a ring of the kernel's,
   which each take drains into the log as kernel records, and reach the
-  UART only when the machine stops
+  UART only when the machine stops, or when a development build's
+  kernel enters its debugger, which shares the UART with the driver
+  from then on if the operator resumes
   ([design-fiasco.md](design-fiasco.md#the-kernels-lines)). On Fiasco
-  the machine's end stops no thread first
-  ([design-fiasco.md](design-fiasco.md#the-end-path)), so the end's last
-  lines can fall among a driver write still under way. A test root's
+  neither a kernel stop nor the machine's end stops a thread first
+  ([design-fiasco.md](design-fiasco.md#the-end-path)), so a stop's
+  report and the end's last lines can fall among a driver write still
+  under way. A test root's
   test tasks, which run with no console driver and no take, write their
   bytes to it unchanged
   ([design-fiasco.md](design-fiasco.md#the-console)).
