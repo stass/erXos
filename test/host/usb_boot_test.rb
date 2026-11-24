@@ -72,10 +72,11 @@ class UsbBootTest < Minitest::Test
     assert_equal ['logged_served'], Erx::UsbBoot.host_passed(image: STICK.image, console: ENDED + SERVED)
   end
 
-  # The stick's answer names its stages as the keyboard's do; only those true pass.
+  # The stick's answer, the USB domain's text and then the media domain's, names its stages
+  # as the keyboard's do; only those true pass, from either text.
   def test_only_the_true_stages_of_a_stick_answer_pass
-    line = '(system@erxos)5> {usb_stick,<<"{[{reported,true},{sized,true},{read,false},{written,true},' \
-           '{read_back,true},{flushed,true}],{#{units => #{0 => serving}},2048,ok,ok,ok,ok}}">>}'
+    line = '(system@erxos)5> {usb_stick,<<"{[{reported,true},{sized,true}],{#{units => #{0 => serving}},2048}}">>,' \
+           '<<"{[{read,false},{written,true},{read_back,true},{flushed,true}],{ok,ok,ok,ok}}">>}'
     assert_equal %w[reported sized written read_back flushed], Erx::UsbBoot.passed(line, tag: 'usb_stick')
     assert_equal ['unplugged'], Erx::UsbBoot.passed('{usb_gone,<<"{[{unplugged,true}],[]}">>}', tag: 'usb_gone')
   end

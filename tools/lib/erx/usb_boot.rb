@@ -33,14 +33,15 @@ module Erx
   # writes into the boot's directory (Stick), served by the mass-storage function,
   # erx_usb_bot (docs/design-usb.md, "Mass storage"). Once the key's records are read, a
   # third line (stick_line) waits at the USB domain for the stick's medium transport,
-  # erx_blk_usb, and reads the stages of STICK_STAGES: the function's reported status
-  # (its format_status) showing unit 0 served, the transport's capacity the image's, the
-  # harness's sectors read equal, a pattern written, read back equal and flushed. Two of
-  # the design's cases are not met yet and these stand in for them: no USB device has an
-  # inspection path (abi/inspection.txt), so the reported status is what shows the unit;
-  # and the medium takes the manifest's drive disk0, whose grant answers its window, but
-  # no holder asks it: the media domain runs nothing and is handed no drive grant
-  # (docs/todo-storage.md, step 4), so the transport is what is read. Then
+  # erx_blk_usb, and reads the first stages of STICK_STAGES there: the function's reported
+  # status (its format_status) showing unit 0 served, and the transport's capacity the
+  # image's. No USB device has an inspection path (abi/inspection.txt), so the reported
+  # status stands in for the design's case of the unit's path. The same line then waits at
+  # the media domain, the holder of the manifest's drive disk0, until its drive process
+  # holds the medium, a window proxy its facet {drive, 0} answers, and through the proxy
+  # reads the harness's sectors equal, writes a pattern, reads it back equal and flushes:
+  # the medium's path from the stick to the media domain (docs/design-drives.md, "How the
+  # grant reaches the media domain"), before any volume of it mounts. Then
   # the harness ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
@@ -59,6 +60,7 @@ module Erx
     DOMAIN = 'usb'
     NODE = "#{DOMAIN}@erxos".freeze
     DISPLAY_NODE = 'display@erxos'
+    MEDIA_NODE = 'media@erxos'
     LEFT_OUT = 'web'
 
     # The development manifest's text for platform, a Platform of QEMU virt, from root's
@@ -151,9 +153,10 @@ module Erx
     # 200 ms and the follower poll's 100. The second waits at most 15 s for the tracer.
     ANSWER_SECONDS = PcieDomain::HOLD_SECONDS + 90
     TYPED_SECONDS = 30
-    # The third line's poll, 20 s, and its five requests, inside UbAt's minute; the fourth's
-    # and fifth's polls, 20 s each, and the fourth's second.
-    STICK_SECONDS = 75
+    # The third line's two calls, each inside UbAt's minute: at the USB domain a 20 s poll and
+    # one request, at the media domain a 20 s poll and four; the fourth's and fifth's polls,
+    # 20 s each, and the fourth's second.
+    STICK_SECONDS = 130
     GONE_SECONDS = 30
     # The restart line's wait for another incarnation, 1200 rounds of 100 ms, then the
     # enumeration's and the follower's polls as in the first line.
@@ -251,33 +254,51 @@ module Erx
     # request is reported as timed out, not left to the checkpoint.
     STICK_CALL_MS = 9000
 
-    # The body of the fun the third line runs at the USB domain. StPoll(K) is the one
-    # mass-storage function and the one transport, polled every 200 ms at most K times
-    # until both run. StRep is the function's reported status, its format_status. Each
-    # request goes to the transport as erx_blk sends it; StCall gives the class and reason
-    # of a call that fails.
-    STICK_BODY = [
-      STICK_OF,
-      'StPoll=fun StPo(0)->{StOf(erx_usb_bot),StOf(erx_blk_usb)};StPo(StK)->' \
-      'case {StOf(erx_usb_bot),StOf(erx_blk_usb)} of {[_],[_]}=StL->StL;_->timer:sleep(200),StPo(StK-1) end end',
-      "StCall=fun(StTp,StQ)->try gen_server:call(StTp,StQ,#{STICK_CALL_MS}) catch StC:StR->{StC,StR} end end",
-      "StData=binary:copy(<<\"#{Stick::WRITE_TEXT}\">>,#{Stick.written.bytesize / Stick::WRITE_TEXT.bytesize})",
-      'StAnswer=case StPoll(100) of {[StB],[StTp]}->' \
-      'StRep=try hd([StS||{data,[{"State",StS}]}<-lists:last(element(4,sys:get_status(StB)))]) catch _:_->none end,' \
-      'StInfo=StCall(StTp,info),' \
-      "StRead=StCall(StTp,{read,0,#{Stick::READ}})," \
-      "StW=StCall(StTp,{write,#{Stick::WRITE_SECTOR},StData})," \
-      "StBack=StCall(StTp,{read,#{Stick::WRITE_SECTOR},#{Stick::WRITE_SECTORS}})," \
-      'StFl=StCall(StTp,flush),' \
-      "{[{reported,case StRep of \#{units:=\#{0:=serving}}->true;_->false end}," \
-      "{sized,case StInfo of {ok,\#{capacity:=#{Stick::SECTORS}}}->true;_->false end}," \
-      "{read,case StRead of {ok,StD}->binary:encode_hex(erlang:md5(StD))=:=<<\"#{Stick.read_md5}\">>;_->false end}," \
-      '{written,StW=:=ok},{read_back,StBack=:={ok,StData}},{flushed,StFl=:=ok}],' \
-      '{StRep,StInfo,StW,StFl,case StRead of {ok,_}->ok;_->StRead end,case StBack of {ok,_}->ok;_->StBack end}};' \
-      'StOther->{[],StOther} end',
-      'StText=iolist_to_binary(io_lib:format("~0kP",[StAnswer,40]))',
-      'binary:part(StText,0,min(byte_size(StText),2000))'
-    ].join(',').freeze
+# The body of the fun the third line runs at the USB domain. StPoll(K) is the one
+# mass-storage function and the one transport, polled every 200 ms at most K times
+# until both run. StRep is the function's reported status, its format_status; StInfo
+# is the transport's info as erx_blk sends it, and StCall gives the class and reason
+# of a call that fails.
+STICK_BODY = [
+  STICK_OF,
+  'StPoll=fun StPo(0)->{StOf(erx_usb_bot),StOf(erx_blk_usb)};StPo(StK)->' \
+  'case {StOf(erx_usb_bot),StOf(erx_blk_usb)} of {[_],[_]}=StL->StL;_->timer:sleep(200),StPo(StK-1) end end',
+  "StCall=fun(StTp,StQ)->try gen_server:call(StTp,StQ,#{STICK_CALL_MS}) catch StC:StR->{StC,StR} end end",
+  'StAnswer=case StPoll(100) of {[StB],[StTp]}->' \
+  'StRep=try hd([StS||{data,[{"State",StS}]}<-lists:last(element(4,sys:get_status(StB)))]) catch _:_->none end,' \
+  'StInfo=StCall(StTp,info),' \
+  "{[{reported,case StRep of \#{units:=\#{0:=serving}}->true;_->false end}," \
+  "{sized,case StInfo of {ok,\#{capacity:=#{Stick::SECTORS}}}->true;_->false end}],{StRep,StInfo}};" \
+  'StOther->{[],StOther} end',
+  'StText=iolist_to_binary(io_lib:format("~0kP",[StAnswer,40]))',
+  'binary:part(StText,0,min(byte_size(StText),2000))'
+].join(',').freeze
+
+# The body of the fun the third line then runs at the media domain, the drive disk0's
+# holder (docs/design-drives.md, "How the grant reaches the media domain"). MdPoll(K)
+# is the drive's medium, erx_media_drive:medium(0), polled every 200 ms at most K times
+# until the drive process holds a window proxy: the facet {drive, 0} is installed
+# once the USB domain is ready. Through the proxy it reads the harness's READ sectors
+# and compares their MD5, writes WRITTEN at WRITE_SECTOR, reads it back and flushes,
+# each request as a volume of the medium would send it; MdCall gives the class and
+# reason of a call that fails.
+MEDIA_BODY = [
+  'MdPoll=fun MdPo(0)->erx_media_drive:medium(0);MdPo(MdK)->' \
+  'case erx_media_drive:medium(0) of {ok,_}=MdM->MdM;_->timer:sleep(200),MdPo(MdK-1) end end',
+  "MdCall=fun(MdPx,MdQ)->try gen_server:call(MdPx,MdQ,#{STICK_CALL_MS}) catch MdC:MdR->{MdC,MdR} end end",
+  "MdData=binary:copy(<<\"#{Stick::WRITE_TEXT}\">>,#{Stick.written.bytesize / Stick::WRITE_TEXT.bytesize})",
+  'MdAnswer=case MdPoll(100) of {ok,MdPx}->' \
+  "MdRead=MdCall(MdPx,{read,0,#{Stick::READ}})," \
+  "MdW=MdCall(MdPx,{write,#{Stick::WRITE_SECTOR},MdData})," \
+  "MdBack=MdCall(MdPx,{read,#{Stick::WRITE_SECTOR},#{Stick::WRITE_SECTORS}})," \
+  'MdFl=MdCall(MdPx,flush),' \
+  "{[{read,case MdRead of {ok,MdD}->binary:encode_hex(erlang:md5(MdD))=:=<<\"#{Stick.read_md5}\">>;_->false end}," \
+  '{written,MdW=:=ok},{read_back,MdBack=:={ok,MdData}},{flushed,MdFl=:=ok}],' \
+  '{MdW,MdFl,case MdRead of {ok,_}->ok;_->MdRead end,case MdBack of {ok,_}->ok;_->MdBack end}};' \
+  'MdOther->{[],MdOther} end',
+  'MdText=iolist_to_binary(io_lib:format("~0kP",[MdAnswer,40]))',
+  'binary:part(MdText,0,min(byte_size(MdText),2000))'
+].join(',').freeze
 
     # StUntil(F, K): whether F() turns true, polled every 200 ms at most K times.
     STICK_UNTIL = 'StUntil=fun StU(_,0)->false;StU(StF,StK)->case StF() of true->true;' \
@@ -350,7 +371,8 @@ module Erx
 
     # The third, fourth and fifth lines, typed once the key's records, the stick's answer
     # and the medium's end are read.
-    def self.stick_line = "io:format(\"~0kp~n\",[{usb_stick,UbAt(#{NODE},fun()->#{STICK_BODY} end)}]).\r".freeze
+    def self.stick_line = "io:format(\"~0kp~n\",[{usb_stick,UbAt(#{NODE},fun()->#{STICK_BODY} end)," \
+                          "UbAt(#{MEDIA_NODE},fun()->#{MEDIA_BODY} end)}]).\r".freeze
     # The fourth binds UbBots, the functions running before the stick is unplugged, which
     # the fifth waits on.
     def self.ended_line = "UbBots=UbAt(#{NODE},fun()->#{STICK_OF},StOf(erx_usb_bot) end)," \
