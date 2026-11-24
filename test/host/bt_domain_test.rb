@@ -45,22 +45,26 @@ class BtDomainTest < Minitest::Test
     assert_includes Erx::BtDomain::ECHO_BOOT.applications, 'erx_gatt_echo_test'
   end
 
-# The app cell's manifest: the apps row offers ble beside its services and gatt nus,
-# each of its apps gains the connection to ble's server, and no echo domain or grant of
-# ble to one is left, so the echo answers only through the app's own grant.
-def test_the_app_cell_offers_ble_and_nus_to_apps_in_place_of_the_echo_domain
-  source = Erx::BtDomain.app_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
-  apps = source[source.index("\napps\n")..][/\A\napps\n(?:  [^\n]*\n)+/]
-  assert_includes apps, "  services display net ble\n"
-  assert_includes apps, "  gatt nus\n"
-  refute_includes source, "domain echo\n"
-  refute_includes source, "facet ble\n"
-  assert_includes source, "service ble\n  server @domain.bt\n"
-  plain = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
-  connections = ->(text) { Erx::Manifest::Edit.value(text, record: 'machine', field: 'max_connections') }
-  max = Erx::Manifest::Edit.value(source, record: 'apps', field: 'max')
-  assert_equal connections.call(plain) - 1 + max, connections.call(source)
-end
+  # The app cell's manifest: the apps row offers ble beside its services and gatt nus,
+  # each of its apps gains the connection to ble's server, and no echo domain or grant of
+  # ble to one is left, so the echo answers only through the app's own grant. Both cells
+  # start from one medium manifest, so the app cell leaves out the media domain as the
+  # echo cell does, and its connections are the echo cell's without the echo's own
+  # (BtDomain::ECHO_CONNECTIONS) and with one per app.
+  def test_the_app_cell_offers_ble_and_nus_to_apps_in_place_of_the_echo_domain
+    source = Erx::BtDomain.app_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
+    apps = source[source.index("\napps\n")..][/\A\napps\n(?:  [^\n]*\n)+/]
+    assert_includes apps, "  services display net ble\n"
+    assert_includes apps, "  gatt nus\n"
+    refute_includes source, "domain echo\n"
+    refute_includes source, "facet ble\n"
+    refute_includes source, "domain media\n"
+    assert_includes source, "service ble\n  server @domain.bt\n"
+    plain = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
+    connections = ->(text) { Erx::Manifest::Edit.value(text, record: 'machine', field: 'max_connections') }
+    max = Erx::Manifest::Edit.value(source, record: 'apps', field: 'max')
+    assert_equal connections.call(plain) - Erx::BtDomain::ECHO_CONNECTIONS + max, connections.call(source)
+  end
 
   # The echo case passes only when the echo domain answers that its handler attached nus.
   def test_the_echo_case_wants_the_application_started

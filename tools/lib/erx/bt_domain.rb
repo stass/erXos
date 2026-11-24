@@ -108,13 +108,13 @@ module Erx
     # Its grant is a grant of its own from the Bluetooth domain's share record, 50 mcpu on
     # CPU 0: MediumBoot's eighth of a CPU does not fit the system share's reserve beside
     # the medium manifest's other domains (the planner refuses the web domain then), and
-    # the suite leaves the media domain out (manifest) for the same reason. Its
+    # the suite leaves the media domain out (medium) for the same reason. Its
     # memory is the Bluetooth domain's MEMORY, reused unmeasured. Its arguments are
     # MediumBoot's without the halt, so it stays up.
     #
     # Its one facet is ble for nus. The domain service makes it by introducing the two
     # domains, so the echo's limits allow one connection (the Bluetooth domain's already
-    # allow one) and the machine's max_connections grows by one (manifest). The request
+    # allow one) and the machine's max_connections grows by ECHO_CONNECTIONS (manifest). The request
     # bound, 1,024 octets, is above the largest request a handler makes, a notify of tx's
     # 244 octets with its term's framing; 16 may be in flight.
     ECHO_DOMAIN = 'echo'
@@ -173,24 +173,36 @@ module Erx
     end
 
     # The suite's manifest from the development manifest's text, source, on platform: the
-    # line unit on the system domain, with root_memory grown by its DMA memory
-    # (Manifest::Edit.with_unit), without the media domain, whose 50 mcpu the
-    # Bluetooth and echo domains' 100 need beside the others (2,325 at most), then MediumBoot's medium manifest with room for one
-    # domain of MEMORY, and the domain's rows and line grant. MediumBoot drops the system
-    # principal's session template, as for every medium cell: the shell the line is typed
-    # at runs on the console, and the room one more domain gives the principal makes no
-    # more sessions that the display's grants would have to fit in its outer budget. The
-    # echo domain's rows follow (ECHO_ROWS), and the principal gains room for both domains
-    # at MEMORY each, and the machine room for the connection the echo's grant makes. The
-    # restarts are 0, so a failed bring-up that ends a domain stays ended.
+    # cells' medium manifest (medium) with the echo domain's rows (ECHO_ROWS), the principal
+    # gaining room for the Bluetooth and echo domains at MEMORY each, and the machine room
+    # for the ECHO_CONNECTIONS the echo's grant makes. The restarts are 0, so a failed
+    # bring-up that ends a domain stays ended.
     def self.manifest(source, platform:)
+      MediumBoot.grown(medium(source, platform: platform, echo: true), memory: 0, domains: 0, connections: ECHO_CONNECTIONS)
+    end
+
+    # The connections the echo domain's one facet, ble for nus, adds to the machine's
+    # max_connections (ECHO_ROWS).
+    ECHO_CONNECTIONS = 1
+
+    # The medium manifest both cells start from, from the development manifest's text,
+    # source, on platform: the line unit on the system domain, with root_memory grown by its
+    # DMA memory (Manifest::Edit.with_unit), without the media domain, whose 50 mcpu the
+    # Bluetooth and echo domains' 100 need beside the others (2,325 at most), then
+    # MediumBoot's medium manifest with the Bluetooth domain's rows and line grant, and with
+    # echo the echo domain's rows too, and room for one domain of MEMORY per configured
+    # domain. MediumBoot drops the system principal's session template, as for every
+    # medium cell: the shell the line is typed at runs on the console, and the room one
+    # more domain gives the principal makes no more sessions that the display's grants
+    # would have to fit in its outer budget.
+    def self.medium(source, platform:, echo:)
       units = platform.record.fetch('units')
       lined = Manifest::Edit.with_unit(Manifest::Edit.without_domain(source, 'media', units: units), LINE_UNIT,
                                        holder: 'system', units: units)
-      medium = MediumBoot.manifest(lined, row: ROWS + line_grant(line_device(platform)) + ECHO_ROWS, domains: 2,
-                                          domain_memory: MEMORY)
-      MediumBoot.grown(medium, memory: 0, domains: 0, connections: 1)
+      rows = ROWS + line_grant(line_device(platform)) + (echo ? ECHO_ROWS : '')
+      MediumBoot.manifest(lined, row: rows, domains: echo ? 2 : 1, domain_memory: MEMORY)
     end
+    private_class_method :medium
 
     # The app cell (docs/design-bluetooth.md, "On QEMU against Bumble", and "Decisions", 7):
     # the echo as decision 7's second package, examples/echo (ImageApps::ECHO), which
@@ -206,14 +218,12 @@ module Erx
     ECHOING = /erx_echo: echoing nus/n
     APP_SECONDS = 240
 
-    # The app cell's manifest from the development manifest's text, source, on platform: as
-    # manifest, without the echo domain's rows, and with the apps row offering ble beside
-    # its services and APP_GATT as its gatt (Manifest::Edit.offering), so the one grant of
-    # ble for nus is the app template's.
+    # The app cell's manifest from the development manifest's text, source, on platform:
+    # the cells' medium manifest (medium) without the echo domain's rows, and with the apps
+    # row offering ble beside its services and APP_GATT as its gatt (Manifest::Edit.offering),
+    # so the one grant of ble for nus is the app template's.
     def self.app_manifest(source, platform:)
-      lined = Manifest::Edit.with_unit(source, LINE_UNIT, holder: 'system', units: platform.record.fetch('units'))
-      medium = MediumBoot.manifest(lined, row: ROWS + line_grant(line_device(platform)), domains: 1, domain_memory: MEMORY)
-      Manifest::Edit.offering(medium, service: 'ble', gatt: APP_GATT)
+      Manifest::Edit.offering(medium(source, platform: platform, echo: false), service: 'ble', gatt: APP_GATT)
     end
 
     # The line typed at the Erlang shell, one expression per element: the wait for the
