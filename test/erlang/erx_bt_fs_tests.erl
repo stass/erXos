@@ -104,7 +104,7 @@ a_pairing_reaches_the_opener_as_lines_test() ->
     ?assertEqual({ok, <<"passkey 000042 C0:01:02:03:04:05\n">>}, reply_within(Read, 1000)),
     say(Link, {keeping, 1}),
     erx_bt_fs ! {outcome, Link, 1, {bonded, ?IDENTITY, authenticated}},
-    ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C authenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
+    ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C public authenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
     ?assertEqual({ok, <<>>}, call(Grant, {read, 2, 0, 4096})),
     ?assertMatch({ok, _, _}, open(Grant, 3)),
     stop(S).
@@ -197,7 +197,7 @@ the_window_starts_with_the_store_and_restarts_with_it_test() ->
                       [exit(Grant, kill) || #{grant := Grant} <- [Unread, Read]]
               end).
 
-%% A store unknown since its start refuses ctl's `forget ADDRESS`, and `forget all` while
+%% A store unknown since its start refuses ctl's `forget ADDRESS TYPE`, and `forget all` while
 %% it cannot read; once its volume has come, `forget all` puts an empty state, and pair
 %% opens from then on without a restart, the window told by the confirmed answer.
 forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test() ->
@@ -205,7 +205,7 @@ forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test() ->
               fun(_Sup, Volume) ->
                       #{grant := Grant} = grant(whereis(erx_bt_fs)),
                       ?assertEqual({error, eio}, open(Grant, 2)),
-                      ?assertEqual({error, eio}, ctl(Grant, 3, <<"forget 00:1B:DC:0A:0B:0C\n">>)),
+                      ?assertEqual({error, eio}, ctl(Grant, 3, <<"forget 00:1B:DC:0A:0B:0C public\n">>)),
                       ?assertEqual({error, eio}, ctl(Grant, 3, <<"forget all\n">>)),
                       ?assertEqual({error, eio}, open(Grant, 4)),
                       ok = file:make_dir(Volume),
@@ -214,22 +214,28 @@ forget_all_ends_the_refusal_of_a_store_unknown_since_its_start_test() ->
                       exit(Grant, kill)
               end).
 
-%% ctl forgets a kept bond by its identity, in either case, and then answers enoent for
-%% it; any write but `forget ADDRESS` or `forget all` is einval, an open for reading
+%% ctl forgets a kept bond by its identity, its address in either case with its type, and
+%% then answers enoent for it, as for the same address of another type; any write but
+%% `forget ADDRESS TYPE` or `forget all` is einval, an open for reading
 %% eacces, and a create, which a shell's redirection sends, opens ctl.
 ctl_forgets_a_bond_and_refuses_the_rest_test() ->
     under_sup(fun a_bond/1,
               fun(_Sup, _Volume) ->
                       #{grant := Grant} = grant(whereis(erx_bt_fs)),
-                      ?assertEqual({error, enoent}, ctl(Grant, 2, <<"forget 00:1B:DC:0A:0B:0D">>)),
-                      ?assertEqual(ok, ctl(Grant, 2, <<"forget 00:1b:dc:0a:0B:0C\n">>)),
-                      ?assertEqual({error, enoent}, ctl(Grant, 2, <<"forget 00:1B:DC:0A:0B:0C">>)),
+                      ?assertEqual({error, enoent}, ctl(Grant, 2, <<"forget 00:1B:DC:0A:0B:0D public">>)),
+                      ?assertEqual({error, enoent}, ctl(Grant, 2, <<"forget 00:1B:DC:0A:0B:0C random">>)),
+                      ?assertEqual(ok, ctl(Grant, 2, <<"forget 00:1b:dc:0a:0B:0C public\n">>)),
+                      ?assertEqual({error, enoent}, ctl(Grant, 2, <<"forget 00:1B:DC:0A:0B:0C public">>)),
                       [?assertEqual({error, einval}, ctl(Grant, 2, Bytes))
                        || Bytes <- [<<>>, <<"\n">>, <<"forget">>, <<"forget ">>, <<"forget all\n\n">>,
                                     <<"forget ALL">>, <<"forget  all">>, <<"forget all ">>, <<"reset">>,
-                                    <<"forget 00:1B:DC:0A:0B">>, <<"forget 00:1B:DC:0A:0B:0C:0D">>,
-                                    <<"forget 00-1B-DC-0A-0B-0C">>, <<"forget +0:1B:DC:0A:0B:0C">>,
-                                    <<"forget 0G:1B:DC:0A:0B:0C">>, <<"forget 00:1B:DC:0A:0B:0C\r\n">>]],
+                                    <<"forget 00:1B:DC:0A:0B public">>, <<"forget 00:1B:DC:0A:0B:0C:0D public">>,
+                                    <<"forget 00-1B-DC-0A-0B-0C public">>, <<"forget +0:1B:DC:0A:0B:0C public">>,
+                                    <<"forget 0G:1B:DC:0A:0B:0C public">>, <<"forget 00:1B:DC:0A:0B:0C public\r\n">>,
+                                    <<"forget 00:1B:DC:0A:0B:0C">>, <<"forget 00:1B:DC:0A:0B:0C\n">>,
+                                    <<"forget 00:1B:DC:0A:0B:0C PUBLIC">>, <<"forget 00:1B:DC:0A:0B:0C  public">>,
+                                    <<"forget 00:1B:DC:0A:0B:0C static">>, <<"forget 00:1B:DC:0A:0B:0C public ">>,
+                                    <<"forget 00:1B:DC:0A:0B:0C public\n\n">>]],
                       {ok, _} = call(Grant, {walk, 1, 3, [<<"ctl">>]}),
                       ?assertEqual({error, eacces}, call(Grant, {lopen, 3, 0})),
                       ?assertEqual({error, eacces}, call(Grant, {lopen, 3, ?ERX_P9_O_RDWR})),
@@ -281,7 +287,7 @@ a_link_killed_after_keeping_leaves_the_store_to_decide_test() ->
     exit(Link, kill),
     ?assertEqual({error, ebusy}, open(Grant, 3)),
     erx_bt_fs ! {outcome, Link, 1, {bonded, ?IDENTITY, unauthenticated}},
-    ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C unauthenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
+    ?assertEqual({ok, <<"bonded 00:1B:DC:0A:0B:0C public unauthenticated\n">>}, call(Grant, {read, 2, 0, 4096})),
     ?assertEqual({wait, 0}, tell(link(), wait)),
     stop(S).
 

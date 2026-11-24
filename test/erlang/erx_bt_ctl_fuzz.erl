@@ -7,18 +7,22 @@
 %% refuses, as it is, with newlines, blanks or bytes added, mutated, or replaced by random
 %% bytes. Whatever arrives, parse/1 makes no atom and never raises, and it agrees with a
 %% writer of its own, a regular expression: `forget all` and `forget` with six colon-split
-%% pairs of hex digits, each with at most one trailing newline, the address's octets in
-%% the order written. The seed comes from make check-fuzz.
+%% pairs of hex digits, one space and `public` or `random`, each with at most one
+%% trailing newline, the address's octets in the order written. The seed comes from make
+%% check-fuzz.
 
 -module(erx_bt_ctl_fuzz).
 -export([run/1]).
 
 -define(ROUNDS, 20000).
 -define(HEX, "([0-9A-Fa-f]{2})").
--define(GRAMMAR, "\\Aforget (?:all|" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ")\\n?\\z").
+-define(GRAMMAR, "\\Aforget (?:all|" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX
+                  " (public|random))\\n?\\z").
 -define(COMMANDS, [<<"forget all">>, <<"forget ALL">>, <<"forget">>, <<"reset">>, <<>>,
                    <<"forget +0:1B:DC:0A:0B:0C">>, <<"forget -1:1B:DC:0A:0B:0C">>,
-                   <<"forget 00:1B:DC:0A:0B">>, <<"forget 00-1B-DC-0A-0B-0C">>]).
+                   <<"forget 00:1B:DC:0A:0B public">>, <<"forget 00-1B-DC-0A-0B-0C public">>,
+                   <<"forget 00:1B:DC:0A:0B:0C">>, <<"forget 00:1B:DC:0A:0B:0C PUBLIC">>,
+                   <<"forget 00:1B:DC:0A:0B:0C  random">>, <<"forget 00:1B:DC:0A:0B:0C static">>]).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 27, list_to_integer(Seed)}),
@@ -44,7 +48,9 @@ round_of(Write, Grammar) ->
 written(Write, Grammar) ->
     case re:run(Write, Grammar, [{capture, all_but_first, binary}]) of
         {match, []} -> {forget, all};
-        {match, Pairs} -> {forget, << <<(binary_to_integer(Pair, 16))>> || Pair <- Pairs >>};
+        {match, Captured} ->
+            {Pairs, [Type]} = lists:split(6, Captured),
+            {forget, {binary_to_existing_atom(Type), << <<(binary_to_integer(Pair, 16))>> || Pair <- Pairs >>}};
         nomatch -> refused
     end.
 
@@ -59,13 +65,15 @@ write() ->
         6 -> rand:bytes(rand:uniform(32) - 1)
     end.
 
-%% A refused command, or `forget` of a random address in random case, which most rounds
-%% take.
+%% A refused command, or `forget` of a random address in random case with its type, which
+%% most rounds take.
 command() ->
     case rand:uniform(3) of
         1 -> lists:nth(rand:uniform(length(?COMMANDS)), ?COMMANDS);
-        _ -> iolist_to_binary(["forget ", lists:join($:, [pair() || _ <- lists:seq(1, 6)])])
+        _ -> iolist_to_binary(["forget ", lists:join($:, [pair() || _ <- lists:seq(1, 6)]), $\s, type()])
     end.
+
+type() -> lists:nth(rand:uniform(2), [<<"public">>, <<"random">>]).
 
 pair() ->
     Pair = io_lib:format("~2.16.0B", [rand:uniform(256) - 1]),

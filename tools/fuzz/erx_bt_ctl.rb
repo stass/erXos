@@ -17,8 +17,8 @@ module ErxBtCtlFuzz
   ROOT = File.expand_path('../..', __dir__)
   TREE = 'erlang/apps/erx_bt/src/erx_bt_fs_tree.erl'
   FUZZ = 'test/erlang/erx_bt_ctl_fuzz.erl'
-  CLAUSE = '|| Pair <- Pairs >>}};'
-  SEEDED = '|| Pair <- lists:reverse(Pairs) >>}};'
+  CLAUSE = '|| Pair <- Pairs >>}}};'
+  SEEDED = '|| Pair <- lists:reverse(Pairs) >>}}};'
   DEADLINE_SECONDS = '120'
   VERDICT = 'disagrees_with_writer'
 

@@ -17,7 +17,7 @@ service, `erx_bt_fs`, which keeps the window and the tree's waiting reads. The t
   lines have ended. Offsets are ignored: `pair` is a stream. Clunking the open closes
   the window, and withdraws a pairing it took that the link still runs.
 * **ctl** opens for writing only; an open for reading is refused with `eacces`.
-  parse/1 takes `forget ADDRESS` and `forget all` and refuses anything else with
+  parse/1 takes `forget ADDRESS TYPE` and `forget all` and refuses anything else with
   `einval`. The callback asks the store to forget (`erx_bt_store:forget/1`), which
   answers `enoent` when no bond has that identity and `eio` when it stays `unknown` or
   its put is unconfirmed. A confirmed forget leaves the store `read`, and the callback
@@ -46,23 +46,26 @@ other answers, a `pair` line among them, wait with it.
 -define(FILES, [{pair, <<"pair">>}, {ctl, <<"ctl">>}]).
 
 -doc """
-What one ctl write Bytes asks: `{forget, all}` for `forget all`, or `{forget, Octets}`
-for `forget AA:BB:CC:DD:EE:FF`, a bond's identity address most significant octet first,
-as the `pair` file's lines show it, in hex digits of either case; each with at most one
+What one ctl write Bytes asks: `{forget, all}` for `forget all`, or `{forget, {Type,
+Octets}}` for `forget AA:BB:CC:DD:EE:FF TYPE`, a bond's identity as the `pair` file's
+`bonded` line shows it: the address most significant octet first, in hex digits of
+either case, then one space and its type, `public` or `random`; each with at most one
 trailing newline. Any other bytes are `{error, einval}`.
 """.
--spec parse(binary()) -> {ok, {forget, all | <<_:48>>}} | {error, einval}.
+-spec parse(binary()) -> {ok, {forget, all | erx_smp_crypto:address()}} | {error, einval}.
 parse(<<"forget all">>) -> {ok, {forget, all}};
 parse(<<"forget all\n">>) -> {ok, {forget, all}};
-parse(<<"forget ", Address:17/binary>>) -> forget_address(Address);
-parse(<<"forget ", Address:17/binary, "\n">>) -> forget_address(Address);
+parse(<<"forget ", Address:17/binary, " public">>) -> forget_identity(public, Address);
+parse(<<"forget ", Address:17/binary, " public\n">>) -> forget_identity(public, Address);
+parse(<<"forget ", Address:17/binary, " random">>) -> forget_identity(random, Address);
+parse(<<"forget ", Address:17/binary, " random\n">>) -> forget_identity(random, Address);
 parse(Bytes) when is_binary(Bytes) -> {error, einval}.
 
 %% Six pairs of hex digits split by colons, which the 17 bytes leave no room around.
-forget_address(Address) ->
+forget_identity(Type, Address) ->
     Pairs = binary:split(Address, <<":">>, [global]),
     case length(Pairs) =:= 6 andalso lists:all(fun hex_pair/1, Pairs) of
-        true -> {ok, {forget, << <<(binary_to_integer(Pair, 16))>> || Pair <- Pairs >>}};
+        true -> {ok, {forget, {Type, << <<(binary_to_integer(Pair, 16))>> || Pair <- Pairs >>}}};
         false -> {error, einval}
     end.
 

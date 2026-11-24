@@ -180,7 +180,7 @@ terminal(_) -> false.
 well_formed(Line) ->
     lists:any(fun(Pattern) -> re:run(Line, Pattern, [{capture, none}]) =:= match end,
               ["^wait [0-9]+$", "^waiting$", "^passkey [0-9]{6} ([0-9A-F]{2}:){5}[0-9A-F]{2}$",
-               "^bonded ([0-9A-F]{2}:){5}[0-9A-F]{2} (authenticated|unauthenticated)$",
+               "^bonded ([0-9A-F]{2}:){5}[0-9A-F]{2} (public|random) (authenticated|unauthenticated)$",
                "^failed ([0-9A-F]{2}:){5}[0-9A-F]{2} [a-z_]+$", "^closed timeout$"]).
 
 %% Cases -----------------------------------------------------------------------
@@ -267,7 +267,7 @@ a_bond_is_written_with_the_identity_and_level_test() ->
     W = window(a, nodisplay, 0, new()),
     {_, W1} = run([{link, ?L1, {admit, 1, ?PHONE}}, {link, ?L1, {keeping, 1}},
                    {store, {outcome, ?L1, 1, {bonded, ?IDENTITY, unauthenticated}}}], 10, W),
-    ?assertEqual(<<"waiting\nbonded 00:1B:DC:0A:0B:0C unauthenticated\n">>, lines(a, W1)),
+    ?assertEqual(<<"waiting\nbonded 00:1B:DC:0A:0B:0C public unauthenticated\n">>, lines(a, W1)),
     {eof, _} = erx_bt_window:take(a, 10, element(2, erx_bt_window:take(a, 4096, W1))).
 
 closing_withdraws_a_running_pairing_test() ->

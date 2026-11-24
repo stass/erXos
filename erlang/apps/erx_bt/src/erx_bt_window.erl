@@ -49,7 +49,7 @@ instant and its wait, so it needs no timer of its own. A success leaves the wait
 
 **The lines** each open reads are ASCII the core composes from numbers and addresses
 alone, so nothing a radio peer sends reaches them as text and they need no escaping:
-`wait N`, `waiting`, `passkey NNNNNN ADDR`, `bonded ADDR LEVEL`, `failed ADDR REASON`
+`wait N`, `waiting`, `passkey NNNNNN ADDR`, `bonded ADDR TYPE LEVEL`, `failed ADDR REASON`
 and `closed timeout`. After the last three the open's lines end; `take/3` gives what is
 left, then `eof`. A closed window's open keeps its unread lines until its clunk.
 
@@ -233,8 +233,9 @@ input({down, _Link}, _Now, Core) ->
 input({store, {outcome, Link, Tag, Outcome}}, Now, #core{pairing = {Link, Tag, Address, Stage}} = Core) ->
     Demonitor = [{demonitor, Link} || Stage =:= running],
     case Outcome of
-        {bonded, Identity, Level} ->
-            Line = iolist_to_binary(["bonded ", address(Identity), $\s, atom_to_binary(Level), $\n]),
+        {bonded, {Type, _} = Identity, Level} ->
+            Line = iolist_to_binary(["bonded ", address(Identity), $\s, atom_to_binary(Type), $\s,
+                                    atom_to_binary(Level), $\n]),
             {Demonitor ++ [{log, #{address => Identity, outcome => Outcome}}], ended(Line, Core)};
         {failed, Reason} ->
             {Actions, Failed} = failure(Address, Reason, Now, Core),

@@ -32,7 +32,7 @@ then every change is refused until `forget all` or the next start. After an unco
 `put` it keeps what it had and reads before the next change, which goes on only if that
 read gives a state. Every change
 but `forget all`, a pairing's `keep`, a bonded link's `subscriptions` and `served`, and
-`forget ADDRESS`, goes through `change/2`: the state last read, the edit, one `put` of the
+`forget ADDRESS TYPE`, goes through `change/2`: the state last read, the edit, one `put` of the
 whole result, and the new bonds only at `ok`. After every confirmed change and every
 read, each link it monitors whose bond is gone is sent `forgotten` (`adopt/2`).
 
@@ -119,11 +119,11 @@ resolve(Address) ->
     gen_server:call(?MODULE, {resolve, Address}).
 
 -doc """
-Forgets the bonds with that identity address, or every bond (the control tree's
-`forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or the
+Forgets the bond with that identity, its type with its address, or every bond (the
+control tree's `forget`): `enoent` when no bond has it, `eio` when the store stays `unknown` or the
 `put` is unconfirmed. The store bounds the wait itself, by a read and a put.
 """.
--spec forget(<<_:48>> | all) -> ok | {error, enoent | eio}.
+-spec forget(identity() | all) -> ok | {error, enoent | eio}.
 forget(Target) ->
     gen_server:call(?MODULE, {forget, Target}, infinity).
 
@@ -193,9 +193,9 @@ call({resolve, Address}, {Link, _}, #store{bonds = Bonds} = Store) ->
 call({forget, all}, _From, Store) ->
     {Answer, Next} = forget_all(Store),
     {reply, Answer, Next};
-call({forget, <<_:48>> = Address}, _From, Store) ->
+call({forget, {_, <<_:48>>} = Identity}, _From, Store) ->
     Edit = fun(Bonds) ->
-                   case [Bond || #{identity := {_, Octets}} = Bond <- Bonds, Octets =/= Address] of
+                   case [Bond || #{identity := Other} = Bond <- Bonds, Other =/= Identity] of
                        Bonds -> {error, enoent};
                        Kept -> {ok, Kept}
                    end

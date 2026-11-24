@@ -308,7 +308,7 @@ start_unread(Get, Reason) ->
     keep(Link, 2),
     ?assertEqual({error, unavailable}, kept(Link)),
     ?assertEqual({failed, unavailable}, outcome(Link)),
-    ?assertEqual({error, eio}, erx_bt_store:forget(<<0, 0, 0, 0, 0, 1>>)),
+    ?assertEqual({error, eio}, erx_bt_store:forget(identity(1))),
     ?assertEqual([{public, <<0, 0, 0, 0, 0, 1>>}], identities(medium(Script))),
     ?assertEqual(ok, erx_bt_store:forget(all)),
     ?assertEqual(#{address => Address, bonds => []}, medium(Script)),
@@ -389,14 +389,27 @@ forget_ends_the_links_of_that_bond_test() ->
     One = Resolver(1),
     Two = Resolver(2),
     wait_links(2),
-    ?assertEqual({error, enoent}, erx_bt_store:forget(<<0, 0, 0, 0, 0, 9>>)),
-    ?assertEqual(ok, erx_bt_store:forget(<<0, 0, 0, 0, 0, 1>>)),
+    ?assertEqual({error, enoent}, erx_bt_store:forget(identity(9))),
+    ?assertEqual(ok, erx_bt_store:forget(identity(1))),
     receive {link, One, {store, forgotten}} -> ok after 2000 -> error(not_forgotten) end,
     receive {link, Two, {store, forgotten}} -> error(other_forgotten) after 100 -> ok end,
     ?assertEqual([identity(2)], identities(medium(Script))),
     ?assertMatch(#{links := 1}, erx_bt_store:facts()),
     exit(Two, kill),
     wait_links(0),
+    stop(Store).
+
+%% A bond's identity is its type with its octets: forgetting the public address leaves
+%% the random one of the same octets, and a type no bond has is `enoent`.
+forget_matches_the_whole_identity_test() ->
+    Octets = <<16#C0, 0, 0, 0, 0, 1>>,
+    Public = (bond(1))#{identity := {public, Octets}},
+    Random = (bond(2))#{identity := {random, Octets}},
+    {Store, Script} = start(blob([Random, Public]), [], []),
+    ?assertEqual({error, enoent}, erx_bt_store:forget({random, <<16#C0, 0, 0, 0, 0, 2>>})),
+    ?assertEqual(ok, erx_bt_store:forget({public, Octets})),
+    ?assertEqual([{random, Octets}], identities(medium(Script))),
+    ?assertEqual({error, enoent}, erx_bt_store:forget({public, Octets})),
     stop(Store).
 
 wait_links(N) ->
@@ -495,8 +508,8 @@ explore(Known, Request, Put, Reread) ->
 
 request(keep_new) -> L = fake_link(), keep(L, 2), {kept(L), outcome(L)};
 request(keep_kept) -> L = fake_link(), keep(L, 1), {kept(L), outcome(L)};
-request(forget_one) -> erx_bt_store:forget(<<0, 0, 0, 0, 0, 1>>);
-request(forget_missing) -> erx_bt_store:forget(<<0, 0, 0, 0, 0, 5>>);
+request(forget_one) -> erx_bt_store:forget(identity(1));
+request(forget_missing) -> erx_bt_store:forget(identity(5));
 request(forget_all) -> erx_bt_store:forget(all).
 
 %% The model of "Bonds and the store": whether the change may start, its edit, then its put.
@@ -577,7 +590,7 @@ late_put_never_brings_back_a_forgotten_bond_test_() ->
         Link = fake_link(),
         keep(Link, 2),
         ?assertEqual({error, unavailable}, kept(Link)),
-        ?assertEqual(ok, erx_bt_store:forget(<<0, 0, 0, 0, 0, 1>>)),
+        ?assertEqual(ok, erx_bt_store:forget(identity(1))),
         Storage ! release,
         ?assertEqual(ok, receive {landed, Late} -> Late after 5000 -> not_landed end),
         exit(Storage, kill),
