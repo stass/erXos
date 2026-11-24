@@ -5,7 +5,7 @@
 
 /*
  * The native bench root's common part (guest.c) and what each benchmark's file (wake.c,
- * nullcall.c) gives it. tools/lib/erx/native_bench.rb links guest.c with the one file of
+ * nullcall.c, sched.c, vm.c) gives it. tools/lib/erx/native_bench.rb links guest.c with the one file of
  * the benchmark a boot times, so a boot prints only that benchmark's BENCH lines.
  */
 
@@ -64,6 +64,8 @@ void	bench_print_unsupported(erx_bench_cell_t cell, const char *reason);
 /* The root's side, A, of one calibration between CPU 0 and the CPU whose thread runs bench_calibrate_b. */
 erx_bench_offset_t	bench_calibrate_a(void);
 void	bench_calibrate_b(void);
+/* One calibration of CPU 0 against cpu, whose B is a new thread of the root at stack index, asleep for good after. */
+erx_bench_offset_t	bench_calibrate_on(uint32_t index, uint32_t cpu);
 void	bench_print_clock(const erx_bench_pair_t *pair, size_t npairs);
 
 #endif /* ERX_NATIVE_BENCH_ROOT_H */

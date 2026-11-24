@@ -55,23 +55,6 @@ share_cell(void)
 	return (cell);
 }
 
-/* One side B of a calibration on the last CPU, then asleep for good. */
-static void
-calibrate_main(uint64_t index)
-{
-	(void)index;
-	bench_calibrate_b();
-	erx_fiasco_sleep_forever();
-}
-
-/* Calibrates CPU 0 against last with the root's thread index. */
-static erx_bench_offset_t
-calibrate(uint32_t index, uint32_t last)
-{
-	bench_thread_start(index, last, ERX_THREAD_CLASS_WORKER, calibrate_main);
-	return (bench_calibrate_a());
-}
-
 /* Runs the spinner task on last and names its cell: measured when it ended with 0. */
 static void
 share_equal(uint32_t last, const erx_pack_view_t *pack)
@@ -114,8 +97,8 @@ bench_cells(uint32_t cpus, const erx_pack_view_t *pack)
 		bench_print_clock(NULL, 0);
 		return;
 	}
-	pair.before = calibrate(0, cpus - 1);
+	pair.before = bench_calibrate_on(0, cpus - 1);
 	share_equal(cpus - 1, pack);
-	pair.after = calibrate(1, cpus - 1);
+	pair.after = bench_calibrate_on(1, cpus - 1);
 	bench_print_clock(&pair, 1);
 }

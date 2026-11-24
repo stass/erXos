@@ -56,3 +56,13 @@ erx_bench_hist_median(const erx_bench_hist_t *hist)
 	}
 	return (0);
 }
+
+uint64_t
+erx_bench_batch_for(uint64_t median)
+{
+	uint64_t batch = 1;
+
+	while (batch < ERX_BENCH_BATCH_MAX && batch * median < ERX_BENCH_SPAN_TICKS)
+		batch *= 2;
+	return (batch);
+}

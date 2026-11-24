@@ -14,9 +14,6 @@
 #include "liberx/generated/calls.h"
 #include "test/guest/native_bench/nullcall.h"
 
-/* A batch of this many calls spans the clock however fast a call is. */
-#define BATCH_MAX	(NULLCALL_SPAN_TICKS * 2u)
-
 int64_t
 nullcall_refusal(void)
 {
@@ -29,17 +26,6 @@ nullcall_refusal(void)
 
 	return (erx_fiasco_service_call(ERX_FIASCO_CALL_VM_COMMIT, &caller, sizeof(caller), &reply));
 #endif
-}
-
-/* The smallest power of two of calls of median ticks each that spans NULLCALL_SPAN_TICKS. */
-static uint64_t
-batch_for(uint64_t median)
-{
-	uint64_t batch = 1;
-
-	while (batch < BATCH_MAX && batch * median < NULLCALL_SPAN_TICKS)
-		batch *= 2;
-	return (batch);
 }
 
 nullcall_run_t
@@ -61,7 +47,7 @@ nullcall_time(nullcall_fn_t call, int64_t expected, uint64_t *samples, erx_bench
 		}
 		erx_bench_hist_add(scratch, erx_fiasco_counter() - start);
 	}
-	run.batch = batch_for(erx_bench_hist_median(scratch));
+	run.batch = erx_bench_batch_for(erx_bench_hist_median(scratch));
 	for (; run.taken < ERX_BENCH_FAST_SAMPLES; run.taken++) {
 		const uint64_t start = erx_fiasco_counter();
 

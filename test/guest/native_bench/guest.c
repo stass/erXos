@@ -181,6 +181,21 @@ bench_calibrate_b(void)
 	erx_bench_rounds_b(&token, erx_fiasco_counter, ROUNDS);
 }
 
+static void
+calibrate_main(uint64_t index)
+{
+	(void)index;
+	bench_calibrate_b();
+	erx_fiasco_sleep_forever();
+}
+
+erx_bench_offset_t
+bench_calibrate_on(uint32_t index, uint32_t cpu)
+{
+	bench_thread_start(index, cpu, ERX_THREAD_CLASS_WORKER, calibrate_main);
+	return (bench_calibrate_a());
+}
+
 void
 bench_print_clock(const erx_bench_pair_t *pair, size_t npairs)
 {

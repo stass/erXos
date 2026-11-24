@@ -38,4 +38,13 @@ void erx_bench_hist_add(erx_bench_hist_t *hist, uint64_t value);
  */
 uint64_t erx_bench_hist_median(const erx_bench_hist_t *hist);
 
+/*
+ * Short operations are timed in batches (docs/design-bench.md, "Short operations"): the
+ * smallest power of two of operations of median ticks each that spans ERX_BENCH_SPAN_TICKS,
+ * and at most ERX_BENCH_BATCH_MAX, a batch that spans the clock however fast an operation is.
+ */
+#define	ERX_BENCH_SPAN_TICKS	UINT64_C(100)
+#define	ERX_BENCH_BATCH_MAX	256u
+uint64_t erx_bench_batch_for(uint64_t median);
+
 #endif

@@ -24,17 +24,13 @@
 #error "the build passes the fast profile's sizes"
 #endif
 
-/* Operations that span fewer ticks are timed in batches (docs/design-bench.md, "The one clock"). */
-#define NULLCALL_SPAN_TICKS	UINT64_C(100)
-
 /* One call of a cell; what it answers, a status or Fiasco's error, is held to the cell's correct result. */
 typedef int64_t (*nullcall_fn_t)(void);
 
 /*
- * A timed run: the batch, the smallest power of two of calls whose warm-up median spans
- * NULLCALL_SPAN_TICKS; the samples taken, each a batch's ticks over its calls, rounded
- * down; every call made, warm-up included; and the first answer that was not the correct
- * result, with wrong set.
+ * A timed run: the batch, erx_bench_batch_for of the warm-up median; the samples taken,
+ * each a batch's ticks over its calls, rounded down; every call made, warm-up included;
+ * and the first answer that was not the correct result, with wrong set.
  */
 typedef struct {
 	uint64_t	batch;
