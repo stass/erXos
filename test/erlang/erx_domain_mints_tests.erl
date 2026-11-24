@@ -396,7 +396,17 @@ invalid_configuration_is_refused_test() ->
            #{services => [{?S, data}], grants => [{?S, data, ?S, #{}}], owner => Owner},
            #{services => [{?S, data}], grants => [{?G, data, ?S, #{}}, {?G, data, ?S, #{}}], owner => Owner},
            #{services => [{?T, data}], grants => [{?G, data, ?S, #{}}], owner => Owner},
-           #{services => [{?S, data}, {system, start}], grants => [{?G, data, ?S, #{}}], owner => Owner}],
+           #{services => [{?S, data}, {system, start}], grants => [{?G, data, ?S, #{}}], owner => Owner}]
+        %% A drive number named twice, by one server or two; a drive served by its own
+        %% grantee; a drive number or a row that is none; a service named drive, which
+        %% would mix the services' names with the drive grants' service; and a facet
+        %% row's grant of drive, which only a drive window row makes.
+        ++ [#{services => Services, grants => [], drives => Drives, owner => Owner}
+            || {Services, Drives} <- [{[], [{?S, ?G, 0}, {?S, ?G, 0}]}, {[], [{?S, ?G, 0}, {?T, ?G, 0}]},
+                                      {[], [{?S, ?S, 0}]}, {[], [{?S, ?G, -1}]}, {[], [{?S, ?G, x}]},
+                                      {[], [{system, ?G, 0}]}, {[], [{?S, system, 0}]}, {[], [{?S, ?G}]},
+                                      {[{?S, drive}], [{?S, ?G, 0}]}, {[{?T, drive}], []}]]
+        ++ [#{services => [{?S, data}], grants => [{?G, drive, ?S, #{}}], drives => [{?S, ?T, 0}], owner => Owner}],
     [?assertError(badarg, erx_domain_mints:new(Config)) || Config <- Bad].
 
 %% Sessions: template 0's sessions are granted data. A session's id is never reused
@@ -1051,3 +1061,48 @@ a_drive_grant_is_no_granted_service_test() ->
     State = erx_domain_mints:new((drive_config())#{grants := [{?G, data, ?S, ?LIMITS}]}),
     ?assertEqual([{data, ?S}], erx_domain_mints:granted_services(?G, State)),
     ?assertEqual([data], erx_domain_mints:granted_names(?G, State)).
+
+%% S1 = 5 ready, G1 = 6 ready: drive 3's grant installed as {drive, 3}, minted by 5's mint.
+drive_installed() ->
+    {_, State} = run([ready(?S, 5, #{drive => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
+                      {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}],
+                     erx_domain_mints:new((drive_config())#{drives := [{?S, ?G, 3}]})),
+    ?assertMatch(#{{?G, {drive, 3}} := {installed, {5, 6}, _}}, erx_domain_mints:grants(State)),
+    State.
+
+%% The serving domain's restart (docs/design-drives.md, "Restarts need nothing new"): its
+%% end leaves the grant waiting, and its next incarnation's ready report mints it again
+%% for the grantee's same incarnation, from the new mint, under the same number.
+a_drive_grant_is_minted_again_for_a_new_server_test() ->
+    {_, Ended} = run([{ended, ?S, 5}], drive_installed()),
+    ?assertNotMatch(#{{?G, {drive, 3}} := {installed, _, _}}, erx_domain_mints:grants(Ended)),
+    {Actions, State} = run([ready(?S, 9, #{drive => mint(9)}), {introduced, 2, ok}, {minted, 9, 2, {ok, facet(9)}}],
+                           Ended),
+    Mint = mint(9),
+    Facet = facet(9),
+    ?assertMatch([{mint, 2, Mint, drive, 6, #{drive := 3}}], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]),
+    ?assertMatch([{install, 2, 6, {drive, 3}, Facet}], [I || Step <- Actions, {install, _, _, _, _} = I <- Step]),
+    ?assertMatch(#{{?G, {drive, 3}} := {installing, {9, 6}, 2, Facet}}, erx_domain_mints:grants(State)).
+
+%% A serving row's ready report that provides no drive mint mints nothing for its drives:
+%% the grant is never installed, so the media domain lists no such drive.
+a_serving_report_without_drive_mints_nothing_test() ->
+    {Actions, State} = run([ready(?S, 5, #{}), ready(?G, 6, #{}), {introduced, 1, ok}],
+                           erx_domain_mints:new((drive_config())#{drives := [{?S, ?G, 3}]})),
+    ?assertEqual([], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]),
+    ?assertNotMatch(#{{?G, {drive, 3}} := {installed, _, _}}, erx_domain_mints:grants(State)).
+
+%% A hostile ready report cannot move a drive: while the serving row is ready, another
+%% row's report that names a drive mint is refused, as undeclared from a row that serves
+%% another service and as oversized from the grantee, which serves none, and the grant
+%% stays the serving row's: the grantee's restart is introduced to the serving row again.
+another_row_s_drive_mint_moves_no_drive_test() ->
+    {_, Installed} = run([ready(?S, 5, #{drive => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
+                          {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}],
+                         erx_domain_mints:new((drive_config())#{services := [{?S, data}, {?T, other}],
+                                                                 drives := [{?S, ?G, 3}]})),
+    {Actions, State} = run([ready(?T, 7, #{drive => mint(7)}), ready(?G, 8, #{drive => mint(8)})], Installed),
+    ?assertMatch([{refused, undeclared, {?T, 7}}, {refused, oversized, {?G, 8, 1}}],
+                 [A || Step <- Actions, {refused, _, _} = A <- Step]),
+    ?assertEqual([], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]),
+    ?assertMatch(#{{?G, {drive, 3}} := {introducing, {5, 8}, _}}, erx_domain_mints:grants(State)).

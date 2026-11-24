@@ -174,9 +174,10 @@ from one counter, so a tag names one of them at most.
 -type tag() :: pos_integer().
 -type template() :: non_neg_integer().
 -type grantee() :: row() | system | {session, id()}.
-%% The name a grant is installed under in its grantee's registry: its service's name, or
-%% for a drive window row's grant {drive, N}, N the row's drive number.
--type installed() :: name() | {drive, non_neg_integer()}.
+%% The name a grant is installed under in its grantee's registry, the registry's own
+%% name: its service's name, or for a drive window row's grant {drive, N}, N the row's
+%% drive number.
+-type installed() :: erx_facets:name().
 -type key() :: {grantee(), installed()}.
 -type pair() :: {ServerId :: id(), GranteeId :: id()}.
 -type pending() :: introducing | minting | installing.
@@ -264,42 +265,51 @@ limits are the interface's (?ERX_DRIVE_GRANTS) and drive => N, and makes the
 serving row declare drive, as if a service row named it (docs/design-system.md,
 "A drive window as a grant"); none by default. A grant of a
 service its server does not declare, a grant to its own server, two
-grants of one name to one grantee, or a service whose server is no row (the
-system domain's, which the ready answers serve) is a bug of the caller,
-which the manifest check and the caller's filter rule out, and fails with
-badarg.
+grants of one name to one grantee, a service whose server is no row (the
+system domain's, which the ready answers serve), a service named drive, a
+drive number named twice, and a drive whose rows are no rows or one row
+twice is a bug of the caller, which the manifest check and the caller's
+filter rule out, and fails with badarg.
 """.
 -spec new(config()) -> state().
 new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_function(Owner, 1) ->
     Drives = maps:get(drives, Config, []),
-    DriveLimits = maps:get(drive, ?ERX_DRIVE_GRANTS),
     Declared = maps:groups_from_list(fun({Row, _}) -> Row end, fun({_, Name}) -> Name end,
                                      lists:usort(Services ++ [{Server, drive} || {Server, _, _} <- Drives])),
     Keys = [{Grantee, Name} || {Grantee, Name, _, _} <- Grants],
-    Valid = lists:all(fun({Row, _Name}) -> is_integer(Row) andalso Row >= 0 end, Services)
+    Valid = lists:all(fun({Row, Name}) -> is_integer(Row) andalso Row >= 0 andalso Name =/= drive end, Services)
         andalso length(lists:usort(Keys)) =:= length(Grants)
+        andalso lists:all(fun valid_drive/1, Drives)
         andalso length(lists:usort([N || {_, _, N} <- Drives])) =:= length(Drives)
-        andalso lists:all(fun({Server, Grantee, N}) ->
-                                  is_integer(Server) andalso Server >= 0 andalso is_integer(Grantee)
-                                      andalso Grantee >= 0 andalso Server =/= Grantee
-                                      andalso is_integer(N) andalso N >= 0
-                          end, Drives)
         andalso lists:all(fun({Grantee, Name, Server, Limits}) ->
                                   Grantee =/= Server andalso is_map(Limits)
-                                      andalso lists:member(Name, maps:get(Server, Declared, []))
+                                      andalso lists:member({Server, Name}, Services)
                           end, Grants),
     Valid orelse error(badarg),
     %% A template's grants are held by its sessions, each from its own ready report.
     Entries = maps:from_list([{{Grantee, Name}, entry(Server, Name, Limits, false)}
                               || {Grantee, Name, Server, Limits} <- Grants, not is_template(Grantee)]
-                             ++ [{{Grantee, {drive, N}}, entry(Server, drive, DriveLimits#{drive => N}, false)}
-                                 || {Server, Grantee, N} <- Drives]),
+                             ++ drive_entries(Drives)),
     Windows = maps:get(windows, Config, []),
     #{declared => Declared, grants => Entries, rows => #{}, sessions => sets:new([{version, 2}]),
           lines => #{}, line_ops => #{},
           next_tag => 1, owner => Owner, files => maps:get(files, Config, []), windows => Windows,
           inputs => maps:get(inputs, Config, []),
           areas => areas(Windows, Grants), deadline => maps:get(deadline, Config, ?DEADLINE)}.
+
+%% A drive window row's grant, {Server, Grantee, N}: two distinct configured rows and a
+%% drive number.
+valid_drive({Server, Grantee, N}) ->
+    is_integer(Server) andalso Server >= 0 andalso is_integer(Grantee) andalso Grantee >= 0
+        andalso Server =/= Grantee andalso is_integer(N) andalso N >= 0;
+valid_drive(_Drive) ->
+    false.
+
+%% Each drive's grant record: of the service drive, installed as {drive, N} beside its
+%% grantee, with the interface's limits and drive => N, which its mint request carries.
+drive_entries(Drives) ->
+    Limits = maps:get(drive, ?ERX_DRIVE_GRANTS),
+    [{{Grantee, {drive, N}}, entry(Server, drive, Limits#{drive => N}, false)} || {Server, Grantee, N} <- Drives].
 
 %% A grant's record, its service fixed beside the installed name that keys it.
 entry(Server, Service, Limits, Mark) ->
