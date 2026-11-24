@@ -512,11 +512,18 @@ written by hand, and carries no host name:
 
 | Kind | Name | Holds | Compared with |
 | --- | --- | --- | --- |
-| QEMU `virt` under HVF | `qemu-hvf-<model>-<n>cpu`, `<model>` the host's hardware model | the development numbers and the landing gate | itself; side by side with `host` |
-| QEMU `virt` under TCG | `qemu-tcg-<model>-<n>cpu` | functional runs on hosts without HVF | itself only |
-| deterministic mode | `qemu-det` | deterministic virtual time of one CPU, the same at every run of the same inputs | itself only |
-| the Raspberry Pi 4 | `pi4-4gb-<system>`, `<system>` one of `erxos`, `l4re`, `freebsd`, `linux` | the native numbers and the three limits | itself; side by side with the other systems on the board |
+| QEMU `virt` under HVF | `qemu-hvf-<model>-<n>cpu-<system>`, `<model>` the host's hardware model | the development numbers and the landing gate | itself; side by side with `host`, and with the other systems in the same kind, model and CPU count |
+| QEMU `virt` under TCG | `qemu-tcg-<model>-<n>cpu-<system>` | functional runs on hosts without HVF | itself only |
+| deterministic mode | `qemu-det-<system>` | deterministic virtual time of one CPU, the same at every run of the same inputs | itself only |
+| the Raspberry Pi 4 | `pi4-4gb-<system>` | the native numbers and the three limits | itself; side by side with the other systems on the board |
 | the host | `host-<model>` | stock OTP natively | side by side with `qemu-hvf` |
+
+Every environment that boots a guest names the system the guest runs,
+one of `erxos`, `l4re`, `freebsd` and `linux`. The system is part of where
+a run happened, not of what ran, so two systems' records never have equal
+environments, and no comparison can give one system's number as a
+verdict on another's: setting systems beside each other is only ever the
+side-by-side table.
 
 QEMU's `raspi4b` model is not an environment: it runs only under TCG, and
 its numbers describe the model. Under HVF, a guest's CPU affinity does not
@@ -606,8 +613,8 @@ cell's longest gap) of one cell between a **baseline**, at least three runs, and
   cells: the same operation, load cell, placement, workload parameters,
   clock, batch size and profile sizes. Anything else is refused with what
   differs. The one exception is the side-by-side table, which sets
-  `qemu-hvf` beside `host` for G3 and one board's systems beside each
-  other, and gives no verdict.
+  `qemu-hvf` beside `host` for G3, and beside each other the systems of
+  environments that differ only in their system, and gives no verdict.
 * **The noise band.** The band of a statistic is the range of its values
   across the baseline's runs, widened by one histogram bucket.
 * **The verdict.** `same` when every candidate run lies within the band;
@@ -1195,6 +1202,258 @@ same function of the log it captured. Every byte the reader takes is
 the board's, untrusted: nothing it reads reaches the terminal but
 through `LineEscape`, and the reader is fuzzed with the bench lines'
 reader.
+## Other systems in QEMU under HVF
+
+erXos is set beside L4Re and Linux first in QEMU's `virt` machine under
+HVF on the development host, where it is measured every day, and on the
+board after. FreeBSD runs on the board only.
+
+**The construction.** A comparison is one environment with only its
+system varied. Each system's guest boots through the one QEMU plan the
+erXos cells use (`QemuPlan.argv`, `tools/lib/erx/qemu.rb`): the same
+pinned QEMU, the `qemu-virt` platform's machine line, `-accel hvf -cpu host`,
+the CPU count and memory of the erXos boot it is set beside (four CPUs
+and 512 MiB for the native bench image, `NativeBench::MEMORY_MIB`), no
+network device, no disk, `-no-reboot`, a deadline and its serial log.
+Only what follows `-kernel` differs: erXos's bench image, Linux's kernel
+with an initramfs, L4Re's `bootstrap.elf`. Each guest reports on its
+console; the BENCH and CLOCK lines go through `BenchMeasurement` as
+erXos's do, and L4Re's own lines through its importer. Each boot is one
+run in its own environment, `qemu-hvf-<model>-<n>cpu-<system>`, written
+by `BenchRecord.write`, so the record format is the one this document
+defines and the side-by-side table is the one view across them. The
+board form is the same session with the board's boot step per system
+in place of QEMU's.
+
+### A comparison session
+
+`tools/erx bench NAME --systems erxos,l4re,linux` boots, on one host in
+one session, each listed system's guest for the cells of NAME that system
+has a counterpart for, one system after another and never two at once,
+in rounds: one round in the landing form, three in the full form
+(`--profile full`), the order within each round the order given. Rounds
+spread the host's drift over every system, as [paired runs](#comparison)
+do over two images; a session gives no verdict, so it needs no pairing
+rule beyond that. It writes each boot's run as the boot ends, so a
+system that fails leaves its record and the session goes on with the
+next, and then prints the side-by-side table of the session's runs. It
+runs by hand and at the plan gates that ask for it, never at the landing
+gate, which keeps its one system.
+
+The side-by-side table has a row per erXos cell and a column per system:
+each run's median, 99th percentile and maximum where its profile allows
+them, its status, its clock, and the counterpart's line from the table
+in [Counterparts](#other-systems-on-the-same-raspberry-pi-4). Where both
+sides read `counter` at one frequency it prints nanoseconds; where a
+side reports another unit (L4Re's cycles) it prints that unit and sets
+no ratio, unless the same session's erXos `CLOCK` line measured the
+CPU's cycles per counter tick, which under HVF it reports as `unknown`
+where the cycle counter is not readable.
+
+The record of a run that is not erXos keeps, in its `subject`, the erXos
+source revision of the harness and of `erx_peer_bench`, and every pin
+the guest was built from:
+
+| System | `environment` details beyond erXos's | `subject` details |
+| --- | --- | --- |
+| `erxos` | none | as today |
+| `linux` | the kernel command line | the kernel's pin (`deps.lock` id, version, SHA-256), the initramfs's SHA-256, `erx_peer_bench`'s SHA-256, the compiler's version and complete flags, the C library's pin |
+| `l4re` | none | each L4Re repository's pinned commit, the resolved Fiasco configuration's SHA-256 and its difference from erXos's, the compiler's version and flags, `bootstrap.elf`'s SHA-256 |
+
+Each boot's serial log is kept in its run directory as every boot's is;
+Linux's holds the kernel's own report of its version, CPU features and
+mitigations, which the record therefore keeps without parsing.
+
+### Cells under HVF
+
+What each system runs is [the counterparts table](#other-systems-on-the-same-raspberry-pi-4).
+Under HVF:
+
+| erXos cells | Set beside | What HVF adds |
+| --- | --- | --- |
+| `nullcall.kernel` | L4Re, Linux | nothing the three do not share: a system call does not leave the guest, unless the guest's path touches a register HVF traps (unverified for all three) |
+| `nullcall.root-same-space` | L4Re | the same |
+| `nullcall.root-cross-space` | L4Re, Linux | the same; an address-space switch stays in the guest, under the host's stage-2 translation |
+| `wake.wake-same-cpu`, `wake.wake-cross-cpu` | Linux | an idle vCPU's `WFI` exits to the host, so a wake to a sleeping CPU includes macOS waking QEMU's thread |
+| `wake.park-deadline` | Linux | the timer interrupt is delivered through QEMU's interrupt controller, so lateness includes the host's delivery |
+| `vm.commit`, `vm.touch`, `vm.protect`, `vm.decommit`, `vm.map` | Linux | the first touch of a guest-physical page faults to the host as well (below) |
+| `sched.share-equal` | Linux | each vCPU is a host thread macOS schedules |
+| `xdomain.local-rtt`, `xdomain.xdomain-pingpong` | Linux | the wake costs above |
+
+erXos's alone: `wake.trigger-take`, `wake.erlang-timer`,
+`sched.share-tasks`, `sched.band-work`, `vm.reserve`, `vm.release` and
+`vm.mem-child`. `wake.gpio-edge` and the three limits are the board's
+alone; QEMU's `virt` has no pins to time.
+
+### Linux's guest
+
+**Kernel.** Alpine Linux 3.24.4's `virt` kernel, `vmlinuz-virt` from the
+release's netboot directory
+(`https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/netboot-3.24.4/`),
+pinned in `deps.lock` with its configuration file beside it, both
+fetched by the fetch step and read as data. It is the distribution's
+stock kernel for virtual machines, built by the distribution, unmodified,
+and booted with its own defaults: no option that changes mitigations or
+preemption. Alpine was chosen because its releases are files at
+versioned URLs with published SHA-256 sums, need no account, and boot
+offline without a disk image. Its configuration
+(`config-6.18.60-0-virt`) shows what the comparison depends on: Linux
+6.18.60, the PL011 console built in, `HZ=1000`, `NO_HZ_FULL`,
+`PREEMPT_NONE` by default with `PREEMPT_DYNAMIC`, 4 KiB pages, an
+initramfs with gzip support, PSCI, and `EFI_ZBOOT`. The kernel file is
+an EFI zboot image: its first bytes are `MZ`, `zimg` and the compression
+name `gzip`. Whether QEMU's `-kernel` loads such an image directly is
+unverified. If it does not, the boot step inflates its payload before
+the boot, the payload's offset and size read from the zboot header and
+the result checked against the `decoded_sha256` and `decoded_bytes` the
+pin records, as `deps.lock`'s file sources allow for what a file encodes.
+
+**User mode.** No distribution user mode at all: the initramfs holds
+`erx_peer_bench` as `/init`, and the directories `/dev` and `/dev/shm`
+with `/dev/console` as a character device. A Ruby writer of the `newc`
+format makes it, so the host needs no `mknod` and no `cpio`. The kernel
+runs `/init` as process 1 (unverified, settled by the first boot), so
+nothing else runs in user mode, as nothing else runs beside erXos's bench
+root and its test tasks. The initramfs's root file system is in memory,
+so `shm_open` under `/dev/shm` needs no mount (unverified). When
+`erx_peer_bench` is process 1 it ends by powering the machine off with
+`reboot(2)`, and QEMU exits; anywhere else it exits. That and its CPU
+pinning are its only differences by system.
+
+**Build.** `erx_peer_bench` is compiled on the host by erXos's own clang
+(`ERX_CLANG`) and linked by `ld.lld` for `aarch64-linux-musl`, static,
+against the headers and `libc.a` of Alpine 3.24.4's `musl-dev` package,
+pinned in `deps.lock` and unpacked in its own directory under the build
+tree. Whether the link needs a compiler helper, which erXos's compiler-rt
+builtins archive would supply, is unverified. The profile sizes reach it
+as they reach the erXos guest it is set beside, so a cell's profile is
+equal on both sides. One static binary runs on any AArch64 Linux, so the
+board's Linux row can carry the same file ([open decision](#open-decisions-of-the-comparison)).
+
+**Boot.** `QemuPlan.argv` with `-kernel` the kernel, `-initrd` the
+initramfs, and `-append "console=ttyAMA0 panic=-1"`, without the host
+link. The serial log is read as erXos's is (`NativeBench.guest_lines`).
+The kernel's own messages share the console; one that lands inside a
+`BENCH` line makes that line `rejected`, which is visible and fails safe.
+`panic=-1` makes a crash of process 1 end the boot at once instead of at
+the deadline (both parameters' behaviour is unverified, from no source
+read).
+
+### L4Re's guest
+
+**Sources.** L4Re's repositories, at the commits each was at on
+2026-10-14T14:13:14Z, the commit date of upstream Fiasco
+`50bbe8a981199e17865e8553a4eb02c387b339cf`, the revision erXos's fork
+came from (`fiasco/kernel/ORIGIN.md`); Fiasco itself at exactly that
+revision, unpatched; and ipcbench (`github.com/l4re/ipcbench`) at
+`148682322103a984ddf84eb1a28e67a3d50c0b28`, its last commit before that
+date. Each is a `git` source in `deps.lock`, fetched by the fetch step
+into its own directory under the build tree, laid out at the paths
+L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
+`l4` for `mk`, `l4/pkg/<name>` for packages, `fiasco` for the kernel,
+and `l4/pkg/ipcbench` for ipcbench. Which of the manifest's packages
+the build needs beyond `mk`, `l4re-core`, `bootstrap`, `libfdt` and
+`drivers-frst` is unverified, and the first build names them. Ham, the
+manifest's own tool, is not used: the fetch step does its one job. The
+published snapshot (`l4re-snapshot-26.09.0`) is not used, because which
+Fiasco revision it carries is unverified.
+
+**Clean room.** l4re-core's source is never read, and neither is
+ipcbench's, whose repository states no license (no license file at that
+commit, and none GitHub detects), so it is treated as copyleft. A
+separate agent reads ipcbench's source and writes a facts record of its
+output lines, the counter each program reads, what one reported number
+covers (one IPC or a round trip, a mean over how many) and which build
+option selects the counter; the importer and this document's counterpart
+lines are written from that record alone, as for every copyleft source.
+L4Re's page says its numbers are means over tens of thousands of calls,
+read from the cycle counter on Arm, with Fiasco in its
+`CONFIG_BENCHMARKING=y` configuration.
+
+**Build.** L4Re's own build system, run as its documentation describes
+and as a black box: `gmake` from Homebrew on the host, for `arm64`, with
+`PT=arm_virt`, the target `elfimage E=ipcbench` (L4Re's macOS page builds
+`E=hello` that way), and `MODULE_SEARCH_PATH` naming the Fiasco build.
+It builds with erXos's clang (`CLANG = 1` and `LD = ld.lld` in
+`Makeconf.local`, and clang chosen in Fiasco's configuration, as L4Re's
+clang page describes), so both kernels come from one compiler; whether
+any part still needs a GCC cross toolchain is unverified, and Homebrew's
+`aarch64-elf-gcc`, which L4Re's macOS page names, is used only if it
+does, recorded as the compiler. The kernel is configured from erXos's
+`config/fiasco/kernel.defconfig`, so the two kernels differ only by the
+fork's patches: the comparison is of the kernel configuration erXos
+runs, not of L4Re's published one. Whether that file configures upstream
+Fiasco unchanged is unverified; the record keeps the resolved
+`globalconfig.out` and its difference from erXos's. The build directory
+is under `build/`, and nothing of L4Re enters the tree.
+
+**Boot and import.** `QemuPlan.argv` with `-kernel` the built
+`bootstrap.elf` and no command line. L4Re's `l4image ... launch`, which
+starts its own QEMU, is not used, so L4Re's QEMU arguments are erXos's.
+The boot ends at a checkpoint on ipcbench's last line, or at the
+deadline. `tools/erx bench import --env qemu-hvf-<model>-<n>cpu-l4re LOG`
+turns its console log into a record through the same importer as the
+board's: each row it can read is a cell, `partial: mean only`, its mean
+in the unit the facts record names; a line it cannot read is `rejected`;
+a declared counterpart no line reports is `not_run`. Whether HVF lets a
+guest read the cycle counter is unverified; if it does not, every L4Re
+row is `unsupported` with the reason, and L4Re's comparison happens on
+the board.
+
+### What HVF does to fairness
+
+The three guests share one host, one QEMU and one virtual machine shape,
+and differ in how each kernel meets what HVF virtualizes. Each difference
+is recorded, never corrected:
+
+* **One counter.** erXos's guests and `erx_peer_bench` read the
+  architecture's virtual counter in user mode, at the frequency its
+  register gives (24 MHz under HVF on the primary host,
+  [research-baselines.md](research-baselines.md#exception-and-address-space-switch-costs)),
+  so their ticks are the same clock, about 42 ns each, and short
+  operations are batched by [the rule](#the-one-clock). erXos's read is
+  `erx_fiasco_counter`; that Linux lets user mode read the counter is
+  unverified, and where it does not `erx_peer_bench` reads
+  `CLOCK_MONOTONIC` and the record says so. ipcbench reads the cycle
+  counter, a different clock, which is why its rows set no ratio.
+* **What leaves the guest.** System calls, exceptions and address-space
+  switches run on the host's core without an exit, so `nullcall` costs
+  are close to the core's own. Timer programming, interrupts and `WFI`
+  go through HVF and QEMU, so every wake and deadline includes the
+  host's part. Whether QEMU's interrupt controller under HVF is its own emulation
+  or the host's is unverified, and is the same for all three.
+* **The host's scheduler.** Each vCPU is a QEMU thread that macOS places
+  on any core, performance or efficiency, as it chooses; nothing pins
+  it ([Environments](#environments)). Rounds spread that drift, and the
+  record keeps the host's load before and after each boot.
+* **First touch.** QEMU allocates guest memory as the guest first
+  touches it, so a guest's first write to a guest-physical page faults
+  in the host too. `vm` cells that land on fresh pages include that,
+  and how often they do depends on how each kernel reuses its frames.
+  erXos's QEMU arguments stay as its own cells use them.
+* **Each kernel's own defaults.** Linux runs its distribution's
+  configuration and its own choice of mitigations, which its boot log
+  records; L4Re's Fiasco runs erXos's configuration; erXos runs as
+  built. Linux's kernel is the distribution's build, with its compiler;
+  the two Fiasco builds and `erx_peer_bench` share erXos's clang.
+
+### Open decisions of the comparison
+
+* **Which Linux.** Alpine's `virt` kernel is a stock kernel trimmed for
+  virtual machines, not the generic kernel most systems run; Ubuntu
+  26.04's generic kernel is already pinned for
+  [F2FS's distribution guest](design-f2fs.md#the-distribution-guest).
+  Recommendation: Alpine alone now, and Ubuntu's kernel as a second
+  Linux row only if a cell's result would change a decision.
+* **The board's Linux binary.** The board's Linux row compiles
+  `erx_peer_bench` on the board. Recommendation: carry the same static
+  binary instead, so both forms run one file and the board needs no
+  compiler; FreeBSD keeps compiling on its board.
+* **L4Re without a cycle counter.** If ipcbench cannot time under HVF,
+  L4Re's VM rows are `unsupported`. Recommendation: accept that and
+  compare L4Re on the board, rather than write an erXos program for
+  L4Re, which would need L4Re's headers that the clean room keeps
+  closed.
 
 ## Other systems on the same Raspberry Pi 4
 
@@ -1238,12 +1497,19 @@ benchmark prints its own format; its importer keeps only what it prints,
 so its rows are `partial: mean only` where it gives a mean.
 
 **Counterparts.** Each declaration names, per operation, what the other
-systems run, and the side-by-side table prints that line with the numbers:
+systems run, and the side-by-side table prints that line with the numbers.
+The table is the one list for the board and for
+[QEMU under HVF](#other-systems-in-qemu-under-hvf) alike. The L4Re
+column names ipcbench's programs by their file names (`syscallbench`,
+`ipcbench`, `ipcclient` and `ipcserver`); what each measures, and in
+which direction, comes from the facts record of
+[L4Re's guest](#l4res-guest), not from the names:
 
 | erXos operation | L4Re | FreeBSD and Linux | What differs |
 | --- | --- | --- | --- |
-| `nullcall.kernel` | the null system call | `getppid` | a POSIX call does a little work |
-| `nullcall.root-cross-space` | IPC between two tasks | an 8-byte round trip over a pipe between two processes | erXos's number is a decoder-refusal round trip: Fiasco's IPC plus the root service's receive, decode and refusal; how far it differs from L4Re's IPC is read only once ipcbench's direction, payload and statistic are known |
+| `nullcall.kernel` | the null system call (`syscallbench`) | `getppid` | a POSIX call does a little work |
+| `nullcall.root-same-space` | IPC between two threads of one task (`ipcbench`, L4Re's "Intra") | none | erXos's number is the decoder-refusal round trip, as for the cross-space cell |
+| `nullcall.root-cross-space` | IPC between two tasks (`ipcclient` and `ipcserver`, L4Re's "Inter") | an 8-byte round trip over a pipe between two processes | erXos's number is a decoder-refusal round trip: Fiasco's IPC plus the root service's receive, decode and refusal; how far it differs from L4Re's IPC is read only once ipcbench's direction, payload and statistic are known |
 | `vm.commit`, `vm.touch`, `vm.protect`, `vm.decommit`, `vm.map` | none | `mmap` of anonymous memory, the first write to each page, `mprotect`, `madvise` freeing pages, `mmap` of a shared memory object | erXos's calls are requests to the root service on Fiasco, and its commit may map pages at once where POSIX allocates at the first touch; the table therefore also sets allocation plus first touch of a whole range beside each other, the one endpoint both share |
 | `wake.park-deadline` | none | `clock_nanosleep` with an absolute deadline, period 1 ms | the systems' timer resolution |
 | `wake.wake-cross-cpu` | none | a thread blocked on a condition variable woken from another CPU | the wait primitive |
@@ -1679,6 +1945,12 @@ from it, and the board's `boot.img` request would then be answered 404.
 | a record that does not parse, or of an older format | refused with the file and the reason |
 | a baseline with fewer than three runs, or none | the comparison is `inconclusive`, not an error |
 | `--paired` without two images | refused |
+| `--systems` naming a system not in `erxos`, `l4re`, `freebsd`, `linux`, or one with no guest in the environment (FreeBSD under HVF) | refused before any boot, naming it |
+| `--systems` for a system whose pins the fetch step has not fetched | refused before any boot, naming the missing source |
+| a comparison of two records whose environments differ only in their system | refused, naming the system; the side-by-side table is the only view across systems |
+| a record of a guest's environment without its system | refused as a record that does not parse |
+| a cell no other system has a counterpart for | not asked of that system; the side-by-side table prints `none` |
+| an L4Re line the importer cannot read | its cell is `rejected`; a declared counterpart no line reports is `not_run` |
 | a call that answers `ERX_ENOTSUP` | the cell is `unsupported`, reported by the backend |
 | a sustained cell whose `WINDOW` lines are not exactly one for each of its windows and threads, in order | the cell is `rejected`, naming the first missing or misplaced line |
 | `WINDOW` lines followed by a `BENCH` line of another profile, or by none | the lines are refused |
@@ -1733,6 +2005,11 @@ fault that must fail it:
 | the window accounting (C, on the host) | at a 24 MHz counter and a 1,000 us slice, a gap of 0.6 ms is one lost turn whose ticks are added to `waited`, a gap of 0.4 ms is a pass, and a window no read fell in is one gap of its whole length with no pass | the slice taken as ticks without the frequency: the 0.4 ms gap counts as a lost turn |
 | a sustained cell | twelve `WINDOW` lines, three windows of four threads, then `share-equal`'s `BENCH` line give a `measured` cell with each thread's share and the longest gap; with one `WINDOW` line dropped the cell is `rejected`, and with a thread making no pass in window 1 it is `failed` | the line count check removed: the cell missing a line is `measured`; the idle-window check removed: the starved cell is `measured` |
 | a sustained comparison | three baseline runs whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
+| a system's environment | an erXos and a Linux record of one model and CPU count under HVF are named `...-erxos` and `...-linux`, their comparison is refused naming the system, and the side-by-side table sets them beside each other | the system left out of the name: the two records share an environment and the comparison gives a verdict |
+| Linux's guest | a one-CPU boot of the Linux guest gives `measured` cells through `BenchMeasurement`, a `CLOCK` line, and its serial log in the run directory | `erx_peer_bench` built with the seeded lost wake the native bench root takes (`-DERX_BENCH_SEED_LOST_WAKE`): `wake-same-cpu` comes back `failed` with one lost wake, which only the binary in that initramfs can have produced |
+| the zboot payload, if QEMU needs it unpacked | the inflated kernel matches the pin's `decoded_sha256` and boots | the pin's decoded hash altered by one digit: the boot step refuses the kernel before QEMU starts |
+| L4Re's importer | a captured ipcbench log, a small fixture, gives one `partial: mean only` cell per counterpart the facts record names, in its unit | a fixture with one counterpart's line removed: that cell is `not_run`, never a number; and one with a field cut short: that cell is `rejected` |
+| L4Re's guest | a one-CPU boot of `bootstrap.elf` reaches ipcbench's last line and the importer reads every counterpart | an image built with `E=hello` instead of `E=ipcbench`: every L4Re cell is `not_run`, which shows the rows came from ipcbench's own output |
 | the interrupt-entry pairing (with the patch) | given receipts and `irq_entry` records, one entry between two receipts makes a sample, and none, two, or a window with a record counted as overwritten makes the receipt `partial` | the window's lower end dropped, pairing each receipt with the latest entry before it: the two-entry case yields a sample |
 | the board's set | the `nullcall` set's `kernel8.img` starts with the board's own first stage and boots in QEMU's `raspi4b` model under TCG, as the `raspi4b` suite boots the card, with `erx.arg=` and a name on its command line: the banner names the set's build and index hash, the root's naming lines carry the name, every declared cell reports between two of them, and the last line is `erx: end reset`; the model's numbers are not recorded, since the model is no environment | the main build's first stage packed instead: no banner appears before the boot's deadline; the root built to end with `ASKED_OFF`: the judge refuses the boot's end as `erx: end off` |
 | the guest's deadline | a `nullcall` build seeded to spin forever once it has reported its first cell, at a 20 s guest deadline, prints `erx: bench: boot NAME deadline` and `erx: end reset` by itself; the cell it reported is `rejected`, as the boot has no `CLOCK` line, and every later one `timed_out` | the deadline thread not started: QEMU's own deadline ends the boot, no deadline line appears, and the test fails |
@@ -2038,6 +2315,24 @@ data; nothing fetched was run.
 | sel4bench's IPC benchmark, BSD-2-Clause, `apps/ipc/src/main.c` | `sel4bench/ipc_main.c` | `364ab7c13f0e5c625794ad38010dbf66dbaddfe1c609e7847cbb348356545aee` |
 | F. P. Schmidt, linux-rt-users, 2022-06-01, cyclictest maxima on the Raspberry Pi 4 | `linuxrt/spinics25944.html` | `5b5a91969f6898e5b486c46d9d838f7973ff148d6e8585224d13a7f77134783c` |
 | Trustworthy Systems, comparative L4 IPC performance | `ts/comp.html` | `695e0dcdad8444b9ce6b80169fcae2e0bcb96f10643af320e3ed09928d2c15c4` |
+
+For [the comparison under HVF](#other-systems-in-qemu-under-hvf),
+fetched on 2026-11-24 into `~/erxos-scratch/src-benchvm/` over HTTPS and
+read as data; nothing fetched was run:
+
+| Source | File | SHA-256 |
+| --- | --- | --- |
+| Alpine Linux 3.24.4, aarch64 release list, `https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/aarch64/latest-releases.yaml` | `alpine/latest-releases.yaml` | `196908ccecdc7e4792a727acfa127800d6a3379532a10d7ace379ba597b867db` |
+| Alpine Linux 3.24.4 netboot, the `virt` kernel's configuration, `.../netboot-3.24.4/config-6.18.60-0-virt` | `alpine/config-6.18.60-0-virt` | `b7643cddcd3ba109183a2aaafa3c911d91e7d89485fd7b2caf5ede9396bf78ca` |
+| Alpine Linux 3.24.4 netboot, the `virt` kernel, `.../netboot-3.24.4/vmlinuz-virt`; only its first 96 bytes were read | `alpine/vmlinuz-virt` | `cd05fed9e617b5df93dc62ece9b78c422fd94e9b432a2f7c092714b139d5eef4` |
+| L4Re, "Building With GNU Make", `https://l4re.org/_sources/getting_started/make.rst` | `l4re/getting_started_make.html` | `62fda3601a52d661177ece6a94391dc6fa18fa685aaa2f91f91a9812643fc041` |
+| L4Re, "MacOS", `https://l4re.org/_sources/getting_started/macosx.rst` | `l4re/getting_started_macosx.html` | `724796166e09583c594ff9066f73a9a3b340f99928ddd522456b1df1dc50e805` |
+| L4Re, "Cross-Compiling", `https://l4re.org/_sources/detailed_introduction/buildsystem/cross_compiling.rst` | `l4re/detailed_introduction_buildsystem_cross_compiling.html` | `86235cc92b75c169391aa43bc3e7f4cdc053f3d5af6a3cd1f22f213ec370c116` |
+| L4Re, "Using Clang", `https://l4re.org/_sources/detailed_introduction/buildsystem/clang.rst` | `l4re/clang.rst` | `9b5e1c5bb82ad84de14eb87590bc4c70cd177e346109f2599ca4b5ae4fadc9c8` |
+| L4Re's manifest, `https://raw.githubusercontent.com/L4Re/manifest/main/default.xml`, MIT | `l4re/default.xml` | `3a932eb2471f0fa47c65d39ab370156e24124ec6194e441e7ca88c73c7ecb571` |
+| L4Re's snapshot directory, `https://l4re.org/download/snapshots/` | `l4re/snapshots.html` | `50633d11cc0a0e7ffb6238826bebaa59abd0370d923504fe2d516920af63f536` |
+| ipcbench's file list and last commit before 2026-10-15, GitHub's API for `l4re/ipcbench`; file names only, no source read | `ipcbench/tree.json`, `ipcbench/commits.json` | `a9bae27369188ab20035825e02fa7604c35e346ba31bb8d7dc800fa91ee8c4aa`, `e7a7c99d7d13db7b11820ef1a839952a09b196dfd99df5e0fdb6cdbcaf27fe3c` |
+| Fiasco `50bbe8a9`'s commit date, GitHub's API for `kernkonzept/fiasco` | not kept | `2026-10-14T14:13:14Z`, "arm64/cpu_virt: Do not leak SVE registers between contexts" |
 
 In the tree: [design-fiasco.md](design-fiasco.md) (Urgency, Bands, The
 trace ring, Measurements, Verification), [design-build.md](design-build.md)

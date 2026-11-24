@@ -778,6 +778,16 @@ message from one domain to another. A passing suite says the benchmarks
 ran and answered correctly; whether a change made the system slower is
 the comparison's question, and an inconclusive comparison leaves it open.
 
+Other systems are measured beside erXos in two places. Under HVF on the
+development host, L4Re and Linux boot in the same QEMU machine as
+erXos's bench images, with the same processors and memory, each in turn
+over several rounds of one session. The system is part of where a run
+happened, so no comparison can turn one system's number into a verdict
+on another's; the systems meet only in a side-by-side table. Linux is a
+distribution's stock kernel with erXos's small benchmark program as its
+only user program, and L4Re is built by its own build system from the
+revision erXos's kernel came from, running its own IPC benchmark.
+
 The same Raspberry Pi 4 also boots stock L4Re, FreeBSD and Linux, with
 the same firmware settings, and each runs the counterpart of an
 operation where one exists; the side-by-side table says where none does.

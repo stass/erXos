@@ -156,6 +156,25 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   Includes the development-only Fiasco patch that stamps the interrupt entry
   ([design-bench.md](design-bench.md#the-interrupt-entrys-stamp)), the check of the Glasgow's stock applets for the
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.
+  L4Re's pins, its build and its importer come from the L4Re guest package below, built for the board's platform.
+* [Medium] benchmarks, the comparison under HVF, erXos's side
+  ([design-bench.md](design-bench.md#other-systems-in-qemu-under-hvf)): the system in every guest environment's name
+  (`BenchRecord::Environment`, `NativeBench::Landing#environment` passing `erxos`), the refusal of a comparison across
+  systems, `tools/erx bench NAME --systems LIST` booting each system's guest in rounds through `QemuPlan.argv` and
+  writing one run per boot, and the side-by-side table across environments that differ only in their system. Tests:
+  the system's environment case of the verification table. Lands first; the two guest packages plug a boot step each
+  into its session.
+* [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)): Alpine 3.24.4's
+  `vmlinuz-virt`, its configuration and `musl-dev` pinned in `deps.lock`; the static `aarch64-linux-musl` build of
+  `bench/peer/erx_peer_bench.c` with erXos's clang and `ld.lld`, and its process-1 power-off; the Ruby `newc` writer
+  of the initramfs; the boot step, after a probe of whether QEMU loads the zboot kernel directly (if not, the
+  payload's inflation checked against the pin's decoded hash). Needs `erx_peer_bench` landed. Tests: Linux's guest
+  and, if built, the zboot payload, on one-CPU cells.
+* [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): first a clean-room
+  facts record of ipcbench's output, counters and build options, written by a separate agent that alone reads its
+  source; then L4Re's repositories, upstream Fiasco `50bbe8a9` and ipcbench `14868232` pinned in `deps.lock` at the
+  manifest's paths; the out-of-tree build with L4Re's own `gmake`, erXos's clang and `config/fiasco/kernel.defconfig`;
+  the boot step; and the importer shared with the board. Tests: L4Re's importer and L4Re's guest.
 
 ## Stopgap replacements
 
