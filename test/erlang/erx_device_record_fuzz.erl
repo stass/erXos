@@ -1,11 +1,11 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% Random argument lists through erx_device_record:find/3, framebuffers/1 and system_image/1,
+%% Random argument lists through erx_device_record:find/3, framebuffers/1, system_image/1 and drives/2,
 %% find/3 asked both for a given or device record and for a PCIe function record.
 %% Whatever arrives, each returns {ok, Value} or {error, {bad_device_record, Text}}, and what it
-%% says agrees with reference/1, function_reference/1, framebuffer_reference/1 or
-%% system_image_reference/1, readers
+%% says agrees with reference/1, function_reference/1, framebuffer_reference/1,
+%% system_image_reference/1 or drives_reference/2, readers
 %% that share no code with it:
 %% they find records by filtering and numbers by a regular expression, and take a format's
 %% bits from a table of their own. The words come from a small alphabet of record heads,
@@ -28,27 +28,28 @@
                   {"r5g5b5a1", 16}, {"r8g8b8", 24}, {"x1r5g5b5", 16}, {"x2r10g10b10", 32}, {"x8r8g8b8", 32},
                   {"x8b8g8r8", 32}]).
 %% The fewest rounds that must find each form, a device record, a function record, a
-%% framebuffer record and a system image, so an edit to the generator cannot leave any
+%% framebuffer record, a system image and a set of drives, so an edit to the generator cannot leave any
 %% accepting path untried.
 -define(MIN_ACCEPTED, ?ROUNDS div 100).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
     Verdicts = [round_of(arguments()) || _ <- lists:seq(1, ?ROUNDS)],
-    Accepted = length([ok || {accepted, _, _, _} <- Verdicts]),
-    Functions = length([ok || {_, accepted, _, _} <- Verdicts]),
-    Framebuffers = length([ok || {_, _, accepted, _} <- Verdicts]),
-    Images = length([ok || {_, _, _, accepted} <- Verdicts]),
-    case lists:min([Accepted, Functions, Framebuffers, Images]) >= ?MIN_ACCEPTED of
+    Accepted = length([ok || {accepted, _, _, _, _} <- Verdicts]),
+    Functions = length([ok || {_, accepted, _, _, _} <- Verdicts]),
+    Framebuffers = length([ok || {_, _, accepted, _, _} <- Verdicts]),
+    Images = length([ok || {_, _, _, accepted, _} <- Verdicts]),
+    Drives = length([ok || {_, _, _, _, accepted} <- Verdicts]),
+    case lists:min([Accepted, Functions, Framebuffers, Images, Drives]) >= ?MIN_ACCEPTED of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted, ~p functions accepted, ~p framebuffers accepted, "
-                          "~p system images accepted~n", [?ROUNDS, Accepted, Functions, Framebuffers, Images]);
-        false -> error({too_few_accepted, Accepted, Functions, Framebuffers, Images})
+                          "~p system images accepted, ~p drive sets accepted~n", [?ROUNDS, Accepted, Functions, Framebuffers, Images, Drives]);
+        false -> error({too_few_accepted, Accepted, Functions, Framebuffers, Images, Drives})
     end.
 
 %% The verdicts of the readers on one argument list, each accepted or refused.
 round_of(Arguments) ->
     {devices_round(Arguments), functions_round(Arguments), framebuffers_round(Arguments),
-     system_image_round(Arguments)}.
+     system_image_round(Arguments), drives_round(Arguments)}.
 
 devices_round(Arguments) ->
     Said = erx_device_record:find(block, virtio_mmio, Arguments),
@@ -159,6 +160,38 @@ system_image_round(Arguments) ->
         true when element(1, Said) =:= ok -> accepted;
         true -> refused;
         false -> error({disagrees_with_reference, Arguments, Said})
+    end.
+
+%% Both roles' answers agree with the reference, and no answer makes an atom, which an
+%% unknown role word, often fresh here, would.
+drives_round(Arguments) ->
+    Atoms = erlang:system_info(atom_count),
+    Said = [erx_device_record:drives(Role, Arguments) || Role <- [usb, block]],
+    case erlang:system_info(atom_count) of
+        Atoms -> ok;
+        _ -> error({disagrees_with_reference, Arguments, made_an_atom})
+    end,
+    [ok = case Answer of {ok, Numbers} when is_list(Numbers) -> ok; {error, {bad_device_record, Text}} when is_list(Text) -> ok end
+     || Answer <- Said],
+    Read = [Words || ["drive" | Words] <- Arguments] =/= [],
+    case [verdict(Answer) || Answer <- Said] =:= [drives_reference(Role, Arguments) || Role <- ["usb", "block"]] of
+        true when element(1, hd(Said)) =:= ok, Read -> accepted;
+        true -> refused;
+        false -> error({disagrees_with_reference, Arguments, Said})
+    end.
+
+%% Every drive record two words, usb or block and a decimal below mf_none; no number twice;
+%% at most usb_drives_max usb and one block. The sorted numbers of Role's.
+drives_reference(Role, Arguments) ->
+    Records = [Words || ["drive" | Words] <- Arguments],
+    Read = [{R, decimal(N, ?ERX_MF_NONE - 1)} || [R, N] <- Records, R =:= "usb" orelse R =:= "block"],
+    Numbers = [N || {_, N} <- Read],
+    Distinct = maps:size(maps:from_keys(Numbers, true)) =:= length(Numbers),
+    Fits = length(Read) =:= length(Records) andalso lists:all(fun is_integer/1, Numbers) andalso Distinct
+        andalso length([u || {"usb", _} <- Read]) =< ?ERX_USB_DRIVES_MAX andalso length([b || {"block", _} <- Read]) =< 1,
+    case Fits of
+        true -> {ok, lists:sort([N || {R, N} <- Read, R =:= Role])};
+        false -> {error, bad_device_record}
     end.
 
 verdict({ok, Specs}) -> {ok, Specs};
@@ -299,7 +332,16 @@ decimal(Word, Max) ->
     end.
 
 arguments() ->
-    [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)].
+    [entry() || _ <- lists:seq(1, rand:uniform(?MAX_ENTRIES + 1) - 1)] ++ drive_set().
+
+%% One round in six also carries a whole set of drive records of distinct numbers, up to
+%% usb_drives_max + 1 usb and up to two block, so both bounds are reached often.
+drive_set() ->
+    Run = fun(Role, Count, First) -> [["drive", Role, integer_to_list(First + N)] || N <- lists:seq(1, Count)] end,
+    case rand:uniform(6) of
+        1 -> Run("usb", rand:uniform(?ERX_USB_DRIVES_MAX + 2) - 1, 10) ++ Run("block", rand:uniform(3) - 1, 20);
+        _ -> []
+    end.
 
 %% Half of the entries are records of the asked role and peripheral, in either form, half of
 %% those with their form's count of number words and a mark word after the line, the numbers
@@ -317,7 +359,7 @@ entry() ->
     Number = Pick([fun number/0, fun() -> Pick(["0", "1"]) end]),
     Numbers = fun(N) -> [Number() || _ <- lists:seq(1, N)] end,
     case rand:uniform(7) of
-        7 -> function_entry(Words);
+        7 -> Pick([function_entry(Words), drive_entry()]);
         6 -> system_image_entry();
         5 -> framebuffer_entry(Words);
         1 -> [Form, "block", "virtio_mmio" | Words];
@@ -408,6 +450,21 @@ function_entry(Words) ->
         1 -> lists:sublist(Record, rand:uniform(length(Record)) - 1);
         2 -> Record ++ Words;
         _ -> Record
+    end.
+
+%% A drive record, most of two words, usb more often than block, and a number at or near its
+%% bounds, so that distinct well formed sets are common and five usb or two block occur;
+%% otherwise a role word of another spelling or one never seen, which an atom would keep,
+%% a third word or a missing one.
+drive_entry() ->
+    Pick = fun(List) -> lists:nth(rand:uniform(length(List)), List) end,
+    Number = Pick(["0", "1", "2", "3", "4", integer_to_list(rand:uniform(1000)), "4294967294", "4294967295",
+                   "04294967294", "", "-1", "1 "]),
+    Role = Pick(["usb", "usb", "usb", "block", "Usb", "block ", "fat", "role" ++ integer_to_list(rand:uniform(1 bsl 40))]),
+    case rand:uniform(8) of
+        1 -> ["drive", Role, Number, Pick(["0", "usb", word()])];
+        2 -> lists:sublist(["drive", Role, Number], rand:uniform(2));
+        _ -> ["drive", Role, Number]
     end.
 
 mark() ->

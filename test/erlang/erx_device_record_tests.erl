@@ -414,3 +414,49 @@ function_record_place_widths_test() ->
     ?assertMatch({ok, [#{place := {4294967295, 255, 31, 7}}]},
                  erx_device_record:find(usb, xhci, [function_edited("intx", [{4, "4294967295"}, {5, "255"}, {6, "31"},
                                                                            {7, "7"}])])).
+
+%% The drive records (docs/design-fiasco.md, "Drive records"): `-erx_record drive ROLE N`, one
+%% per drive window on a device the domain holds. drives/2 answers the sorted numbers of the
+%% asked role, and refuses every record when any is malformed, so a domain gets its whole set
+%% of drives or none.
+drives_refusal(Role, Arguments) ->
+    {error, {bad_device_record, Text}} = erx_device_record:drives(Role, Arguments),
+    true = is_list(Text),
+    Text.
+
+no_drive_record_is_no_drive_test() ->
+    ?assertEqual({ok, []}, erx_device_record:drives(usb, [])),
+    ?assertEqual({ok, []}, erx_device_record:drives(block, [["boot", "normal", "a"]])).
+
+each_role_s_drives_are_kept_apart_and_sorted_test() ->
+    Records = [["drive", "usb", "3"], ["boot", "normal", "a"], ["drive", "usb", "0"], ["drive", "block", "7"]],
+    ?assertEqual({ok, [0, 3]}, erx_device_record:drives(usb, Records)),
+    ?assertEqual({ok, [7]}, erx_device_record:drives(block, Records)),
+    ?assertEqual({ok, [4294967294]}, erx_device_record:drives(block, [["drive", "block", "4294967294"]])).
+
+each_malformed_word_refuses_every_drive_record_test() ->
+    Good = ["drive", "usb", "1"],
+    [?assertMatch([_ | _], drives_refusal(usb, [Good, Bad]))
+     || Bad <- [["drive", "Usb", "2"], ["drive", "", "2"], ["drive", "usb ", "2"], ["drive", "fat", "2"],
+                ["drive", "usb", ""], ["drive", "usb", "-1"], ["drive", "usb", "+2"], ["drive", "usb", "0x2"],
+                ["drive", "usb", "4294967295"], ["drive", "usb", "04294967294"], ["drive", "usb", "1e3"],
+                ["drive", "usb", "2", "3"], ["drive", "usb"], ["drive"]]],
+    %% The same refusal whichever role is asked: every drive record is read.
+    ?assertEqual(drives_refusal(usb, [["drive", "usb", "1", "x"]]), drives_refusal(block, [["drive", "usb", "1", "x"]])).
+
+a_number_named_twice_refuses_every_drive_record_test() ->
+    ?assertMatch([_ | _], drives_refusal(usb, [["drive", "usb", "1"], ["drive", "usb", "1"]])),
+    ?assertMatch([_ | _], drives_refusal(block, [["drive", "usb", "2"], ["drive", "block", "2"]])).
+
+past_the_bounds_of_a_domain_s_drives_is_refused_test() ->
+    Usb = fun(Count) -> [["drive", "usb", integer_to_list(N)] || N <- lists:seq(1, Count)] end,
+    ?assertMatch({ok, [_, _, _, _]}, erx_device_record:drives(usb, Usb(?ERX_USB_DRIVES_MAX))),
+    ?assertMatch([_ | _], drives_refusal(usb, Usb(?ERX_USB_DRIVES_MAX + 1))),
+    ?assertMatch([_ | _], drives_refusal(block, [["drive", "block", "1"], ["drive", "block", "2"]])).
+
+%% The role word is compared as a string: an unknown one makes no atom.
+an_unknown_role_word_makes_no_atom_test() ->
+    Word = "erx_drive_role_never_named",
+    ?assertError(badarg, list_to_existing_atom(Word)),
+    ?assertMatch([_ | _], drives_refusal(usb, [["drive", Word, "1"]])),
+    ?assertError(badarg, list_to_existing_atom(Word)).

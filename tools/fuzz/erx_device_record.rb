@@ -8,8 +8,8 @@ require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
 
-# The fuzz target of erx_device_record:find/3, framebuffers/1 and system_image/1, the parses
-# of the device, framebuffer and system_image records that the boot information carries to init's arguments, compiled from source and run alone on stock's
+# The fuzz target of erx_device_record:find/3, framebuffers/1, system_image/1 and drives/2, the parses
+# of the device, framebuffer, system_image and drive records that the boot information carries to init's arguments, compiled from source and run alone on stock's
 # emulator (ERX_ERL and ERX_ERLC, the oracle's), so it needs no hosted build. It runs the
 # module as it is, then each seeded copy of MUTANTS, which must fail: a physical record that
 # reads its line as 64 bits wide shows the reference holds each field to its width, a
@@ -24,7 +24,9 @@ require_relative '../lib/erx/generated'
 # holds a record to the geometry the tree's reader passed. For system_image, a reader that
 # takes a root hash of any length, a salt of no bytes or of 33, any sixth word as the
 # record_volume window's name, or the first of two records shows the reference holds the
-# record to its one shape.
+# record to its one shape. For drives, a reader that takes any role word, makes an unknown one an
+# atom, keeps a number named twice, takes mf_none as a number, or takes five usb records or two
+# block shows the reference holds a domain to its whole set of drives or none.
 module ErxDeviceRecordFuzz
   ROOT = File.expand_path('../..', __dir__)
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_device_record.erl')
@@ -53,7 +55,14 @@ module ErxDeviceRecordFuzz
     'taking a function record with a null line marked shared' => ["function_lines(shared, ?ERX_CAP_NULL) -> bad(\"a function record marks no line shared\");\n", ''],
     'taking an MSI-X table in another BAR' => ['#{bar := Bar, offset := Offset', '#{bar := _, offset := Offset'],
     'taking an MSI-X table of no entries' => ['when Entries >= 1, Entries', 'when Entries >= 0, Entries'],
-    'taking an MSI-X table that ends past its BAR' => ['Offset + Entries * ?ERX_PCIE_MSIX_ENTRY_SIZE =< Size', 'Offset < Size']
+    'taking an MSI-X table that ends past its BAR' => ['Offset + Entries * ?ERX_PCIE_MSIX_ENTRY_SIZE =< Size', 'Offset < Size'],
+    'taking any drive role word' => ['drive_records([[RoleWord, Word] | Rest], Drives) when RoleWord =:= "usb"; RoleWord =:= "block" ->',
+                                     'drive_records([[RoleWord, Word] | Rest], Drives) ->'],
+    'making an unknown drive role word an atom' => ["drive_records([[_, _] | _], _Drives) ->\n", "drive_records([[R, _] | _], _Drives) ->\n    _ = list_to_atom(R),\n"],
+    'keeping a drive number named twice' => ['length(lists:usort(Numbers)) =:= length(Numbers)', 'true'],
+    'taking mf_none as a drive number' => ['at_most(Word, ?ERX_MF_NONE - 1)', 'at_most(Word, ?ERX_MF_NONE)'],
+    'taking five usb drives' => ['Usb > ?ERX_USB_DRIVES_MAX ->', 'Usb > ?ERX_USB_DRIVES_MAX + 1 ->'],
+    'taking two block drives' => ['Block > 1 ->', 'Block > 2 ->']
   }.freeze
   DEADLINE_SECONDS = '120'
 
@@ -64,12 +73,12 @@ module ErxDeviceRecordFuzz
     MUTANTS.each_value { |from, _to| raise "#{from.inspect} is not in #{MODULE_SOURCE}" unless source.include?(from) }
 
     output, status = fuzz(source, seed: seed)
-    abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted, \d+ functions accepted, \d+ framebuffers accepted, \d+ system images accepted$/)
+    abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted, \d+ functions accepted, \d+ framebuffers accepted, \d+ system images accepted, \d+ drive sets accepted$/)
     MUTANTS.each do |name, (from, to)|
       output, status = fuzz(source.sub(from, to), seed: seed)
       abort("#{name} passed:\n#{output}") if status.success? || !output.include?('disagrees_with_reference')
     end
-    puts "erx_device_record:find/3, for device and function records, framebuffers/1 and system_image/1 agree with their references, and no seeded copy does (#{MUTANTS.keys.join('; ')})"
+    puts "erx_device_record:find/3, for device and function records, framebuffers/1, system_image/1 and drives/2 agree with their references, and no seeded copy does (#{MUTANTS.keys.join('; ')})"
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round.

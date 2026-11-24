@@ -711,6 +711,13 @@ class ManifestCheckTest < Minitest::Test
             message: /the device of drive disk0 is held by a configured domain/)
   end
 
+  # The system domain's boot carries no drive record (docs/design-fiasco.md, "Drive
+  # records"), so a drive on a USB controller it holds is refused as a block drive is.
+  def test_a_usb_drive_on_the_system_domain_s_controller_is_refused
+    usb_refused('unit.holder', /the device of drive disk0 is held by a configured domain/,
+                media_source(USB_HOLDERS.merge('stick' => 'system')) + drive_window('disk0'))
+  end
+
   # The driver-control service a block drive's holder serves the system domain, as every
   # unit holder does (docs/design-system.md, "The holder's driver-control facet"), and
   # its facet row granted to the system domain.

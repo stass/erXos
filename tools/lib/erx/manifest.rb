@@ -3428,7 +3428,7 @@ module Erx
       # its drives' grants come through the windows, by introduction. The holder of a block
       # device's drive, a configured domain, is named by nothing but the unit that places
       # that device alone, its driver-control service, its pci facet and its log facets
-      # (check_block_drive_holder). That every drive window is the media
+      # (check_drive_holder). That every drive window is the media
       # domain's, and that a manifest with one holds one media service, is
       # check_window_services'.
       def check_drive_domains(tables)
@@ -3445,12 +3445,14 @@ module Erx
             end
           end
         end
-        tables.fetch('windows').select { |row| row.fetch('role') == drive_role }.each { |window| check_block_drive_holder(window, tables) }
+        tables.fetch('windows').select { |row| row.fetch('role') == drive_role }.each { |window| check_drive_holder(window, tables) }
       end
 
-      # The holder of a block device's drive (check_drive_domains); a drive window on a USB
-      # controller is the USB domain's, whose drives check_drives counts. Besides its
-      # device's unit and its log facets, the holder serves one driver-control service,
+      # The holder of a drive's device (check_drive_domains): a configured domain for every
+      # drive, since the system domain's boot carries no drive record (docs/design-fiasco.md,
+      # "Drive records"). A drive window on a USB controller is the USB domain's, whose
+      # drives check_drives counts. The holder of a block device's drive, besides its
+      # device's unit and its log facets, serves one driver-control service,
       # the one every unit holder serves (docs/design-system.md, "The holder's
       # driver-control facet"), whose facets only the system domain holds
       # (normalize_facets), and holds a pci facet, of the system domain's service pci
@@ -3458,14 +3460,14 @@ module Erx
       # units hold a PCIe function, and this holder's units hold the drive's device
       # alone, so it holds one only when that device is a PCIe function, as an NVMe or a
       # virtio-blk-pci drive is.
-      def check_block_drive_holder(window, tables)
+      def check_drive_holder(window, tables)
         devices = tables.fetch('devices')
         device = devices.fetch(window.fetch('device'))
-        return unless device.fetch('role') == device_role('block')
-
         label = "drive disk#{window.fetch('drive')}"
         holder = device_holder(tables, window.fetch('device'))
         invalid("the device of #{label} is held by a configured domain", 'unit.holder') if holder == @codec.constant('mf_none')
+        return unless device.fetch('role') == device_role('block')
+
         control = fetch_interface('driver_control')
         controls = tables.fetch('services').select { |service| service.fetch('server') == holder && service.fetch('interface') == control }
         what = "the holder of #{label}, #{domain_name(tables, holder)}, holds nothing but its device's unit, " \

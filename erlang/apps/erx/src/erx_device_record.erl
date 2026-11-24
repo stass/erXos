@@ -63,7 +63,7 @@
 -include("generated/erx_abi.hrl").
 
 -export([records/0, find/2, find/3, framebuffers/0, framebuffers/1, system_image/0, system_image/1,
-         record_volume/1]).
+         record_volume/1, drives/1, drives/2]).
 -export_type([spec/0, framebuffer/0, format/0, system_image/0]).
 
 %% What erx_device:open/1 takes: a given device's objects, or a physical device's window and
@@ -174,6 +174,51 @@ image_record(Arguments) ->
             bad("no system_image record");
         [_, _ | _] ->
             bad("more than one system_image record")
+    end.
+
+%% The drive records among the boot records.
+-spec drives(usb | block) -> {ok, [non_neg_integer()]} | {error, {bad_device_record, string()}}.
+drives(Role) ->
+    drives(Role, records()).
+
+%% Pure, as find/3 is. The domain library writes `-erx_record drive ROLE N` for each drive
+%% window on a device the domain holds (docs/design-fiasco.md, "Drive records"): ROLE the
+%% device's role, usb or block, and N its drive number. The answer is the sorted numbers of
+%% Role's records, [] for none, a normal state. Every drive record is read whichever role is
+%% asked, and all are refused with the reason when any is not two words, has a role word
+%% other than usb or block, which is compared as a string and never made an atom, or a
+%% number that is not a decimal of at most ten digits below mf_none; when two name one
+%% number; when more than usb_drives_max are usb; or when more than one is block. So a
+%% domain gets its whole set of drives or none.
+-spec drives(usb | block, [[string()]]) -> {ok, [non_neg_integer()]} | {error, {bad_device_record, string()}}.
+drives(Role, Arguments) when Role =:= usb; Role =:= block ->
+    RoleWord = atom_to_list(Role),
+    case drive_records([Words || ["drive" | Words] <- Arguments], []) of
+        {ok, Drives} -> {ok, lists:sort([Number || {R, Number} <- Drives, R =:= RoleWord])};
+        {error, _} = Refused -> Refused
+    end.
+
+%% Each drive record's words as {RoleWord, Number}, then the set's bounds (drive_set/1).
+drive_records([], Drives) ->
+    drive_set(Drives);
+drive_records([[RoleWord, Word] | Rest], Drives) when RoleWord =:= "usb"; RoleWord =:= "block" ->
+    case at_most(Word, ?ERX_MF_NONE - 1) of
+        {ok, Number} -> drive_records(Rest, [{RoleWord, Number} | Drives]);
+        error -> bad("a drive record's number is not a decimal below mf_none")
+    end;
+drive_records([[_, _] | _], _Drives) ->
+    bad("a drive record's role is neither usb nor block");
+drive_records([_ | _], _Drives) ->
+    bad("a drive record is not two words, a role and a number").
+
+drive_set(Drives) ->
+    Numbers = [Number || {_, Number} <- Drives],
+    case {length(lists:usort(Numbers)) =:= length(Numbers), length([usb || {"usb", _} <- Drives]),
+          length([block || {"block", _} <- Drives])} of
+        {false, _, _} -> bad("two drive records name one number");
+        {_, Usb, _} when Usb > ?ERX_USB_DRIVES_MAX -> bad("more than usb_drives_max drive records are usb");
+        {_, _, Block} when Block > 1 -> bad("more than one drive record is block");
+        _ -> {ok, Drives}
     end.
 
 %% Every boot record of this runtime's boot page, each the word list after one
