@@ -12,8 +12,8 @@ module Erx
   # development manifest, usb, whose application, erx_usb, starts the places at the
   # domain's start and the controller's bus group once the domain holds its facets
   # (docs/design-usb.md, "Who holds a controller"). The suite boots that manifest without
-  # its web domain, which it tests nothing of, and with the USB domain's restarts 0, so a
-  # failure is seen, not restarted away.
+  # its web domain, which it tests nothing of, and, but for the restart cell's boot, with
+  # the USB domain's restarts 0, so a failure is seen, not restarted away.
   #
   # From the system's Erlang shell the keyboard's two lines run. The first (line) waits for
   # the domain and polls, at the USB domain's node, the controller's and the bus's states
@@ -45,6 +45,15 @@ module Erx
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
   # stops, the harness checks HOST_STAGES itself: the image holds the written pattern, and
   # the console shows the medium's served line and then its ended one.
+  #
+  # The restart cell is a second boot of each cell (BOOTS), whose manifest alone allows the
+  # USB domain one restart (docs/design-system.md, "Waiting for a grant", "Verification").
+  # It runs the first two lines, typing the key between them, then the restart line
+  # (restart_line) kills the domain's first incarnation, waits for another to be ready and
+  # its keyboard described, and waits at the display until the follower reads the
+  # usb_input tree on a grant other than the one it read before the kill. Then the harness
+  # types the key again, and the last line (retyped_line) asks the new tracer for the
+  # records it saw. RESTART_SIDES names its cells.
   module UsbBoot
     DOMAIN = 'usb'
     NODE = "#{DOMAIN}@erxos".freeze
@@ -57,9 +66,10 @@ module Erx
       Manifest::Edit.without_domain(platform.manifest_source(root), LEFT_OUT, units: platform.record.fetch('units'))
 
     # The suite's manifest, from manifest_source's text: MediumBoot's medium manifest with no
-    # configured row of its own and no room added, and the USB domain without restarts.
-    def self.manifest(source)
-      Manifest::Edit.set(MediumBoot.manifest(source, row: '', domains: 0), { ["domain #{DOMAIN}", 'restarts'] => 0 })
+    # configured row of its own and no room added, and the USB domain's restarts, none but
+    # in the restart cell's boot.
+    def self.manifest(source, restarts: 0)
+      Manifest::Edit.set(MediumBoot.manifest(source, row: '', domains: 0), { ["domain #{DOMAIN}", 'restarts'] => restarts })
     end
 
     # The keyboard's five stages, in order; the stick's, read at the USB domain; and those
@@ -67,7 +77,17 @@ module Erx
     STAGES = %w[started connected addressed described typed].freeze
     STICK_STAGES = %w[reported sized read written read_back flushed ended unplugged].freeze
     HOST_STAGES = %w[persisted logged_served logged_ended].freeze
-    SIDE_CELLS = [*STAGES, *STICK_STAGES, *HOST_STAGES].map { |stage| "-#{stage}" }.freeze
+    # The restart boot's cells, by the stage of its answers each is: the first key typed;
+    # after the kill, another incarnation ready, its keyboard described and the follower on
+    # its tree; and the second key typed.
+    RESTART_SIDES = { first: { 'typed' => '-restart-first-key' },
+                      restart: { 'restarted' => '-restart-domain', 'described' => '-restart-described',
+                                 'followed' => '-restart-followed' },
+                      second: { 'typed' => '-restart-second-key' } }.freeze
+    SIDE_CELLS = [*[*STAGES, *STICK_STAGES, *HOST_STAGES].map { |stage| "-#{stage}" },
+                  *RESTART_SIDES.values.flat_map(&:values)].freeze
+    # The stick boot's cells, by the stage of its answers each is.
+    STAGE_SIDES = [*STAGES, *STICK_STAGES].to_h { |stage| [stage, "-#{stage}"] }.freeze
 
     # The stick's raw image and what the cases do with it. It holds SECTORS sectors of
     # SECTOR bytes, 1 MiB; each of its first READ sectors is its own line, repeated, and
@@ -134,6 +154,9 @@ module Erx
     # and fifth's polls, 20 s each, and the fourth's second.
     STICK_SECONDS = 75
     GONE_SECONDS = 30
+    # The restart line's wait for another incarnation, 1200 rounds of 100 ms, then the
+    # enumeration's and the follower's polls as in the first line.
+    RESTART_SECONDS = 120 + 90
 
     # The key the harness types, a, as the display's records name it: evdev's KEY_A.
     KEY_A = 30
@@ -168,12 +191,19 @@ module Erx
       'binary:part(UbText,0,min(byte_size(UbText),3000))'
     ].join(',').freeze
 
-    # The body of the fun the first line runs at the display domain once the keyboard is
-    # described. UbTr keeps the first 64 records routed from the input tree's files until
-    # asked, then waits up to 5 s at a time for more until it holds KEY_A's up. UbFollow()
-    # is the phase of the follower's tree usb_input, polled every 200 ms at most 100 times
-    # until its readers run. It returns whether they do, and the phase, as text.
-    FOLLOW_BODY = [
+    # UbTree(): the display's follower's tree usb_input, or an empty map while it has none.
+    FOLLOWER_TREE = 'UbTree=fun()->[UbFo]=[UbP||UbP<-processes(),' \
+                    'case proc_lib:initial_call(UbP) of {erx_input_follower,_,_}->true;_->false end],' \
+                    'maps:get(usb_input,maps:get(trees,sys:get_state(UbFo)),#{}) end'
+
+    # The body of the fun a line runs at the display domain once the keyboard is described.
+    # UbTr keeps the first 64 records routed from the input tree's files until asked, then
+    # waits up to 5 s at a time for more until it holds KEY_A's up. UbFollow() is whether
+    # the follower's readers run on the tree usb_input, and the tree, polled every 200 ms at
+    # most 100 times until they do. Given past, an Erlang expression of the shell's, they
+    # count only when past is a grant, a 3-tuple, and theirs is another, so a failed read
+    # of past never passes. It returns whether they do, and the tree, as text.
+    def self.follow_body(past: nil) = [
       'UbTr=spawn(fun()->(fun UbTl(UbA)->receive ' \
       "{trace,_,call,{_,_,[<<\"usb_input/\",_/binary>>,UbR]}} when length(UbA)<64->UbTl([UbR|UbA]);" \
       "{ub_get,UbP}->(fun UbGe(UbB)->case lists:member({key,up,#{KEY_A}},UbB) of true->UbP!{ub_records,lists:reverse(UbB)};" \
@@ -183,14 +213,13 @@ module Erx
       'true=register(ub_tracer,UbTr)',
       'erlang:trace_pattern({erx_winfs,input,2},true,[global])',
       'erlang:trace(all,true,[call,{tracer,UbTr}])',
-      'UbFollow=fun()->try [UbFo]=[UbP||UbP<-processes(),' \
-      'case proc_lib:initial_call(UbP) of {erx_input_follower,_,_}->true;_->false end],' \
-      'maps:get(phase,maps:get(usb_input,maps:get(trees,sys:get_state(UbFo)),#{}),none) ' \
-      'catch UbC3:UbR3->{UbC3,UbR3} end end',
-      'UbFpoll=fun UbFp(0)->UbFollow();UbFp(UbK)->case UbFollow() of {reading,_}=UbPh->UbPh;' \
+      FOLLOWER_TREE,
+      "UbFollow=fun()->try UbTree() of \#{grant:=UbG,phase:={reading,_}}=UbT#{past && " when tuple_size(#{past})=:=3,UbG=/=#{past}"}->{true,UbT};" \
+      'UbT->{false,UbT} catch UbC3:UbR3->{false,{UbC3,UbR3}} end end',
+      'UbFpoll=fun UbFp(0)->UbFollow();UbFp(UbK)->case UbFollow() of {true,_}=UbF->UbF;' \
       '_->timer:sleep(200),UbFp(UbK-1) end end',
-      'UbFph=UbFpoll(100)',
-      'UbFtext=iolist_to_binary(io_lib:format("~0kP",[{[{followed,is_tuple(UbFph) andalso element(1,UbFph)=:=reading}],UbFph},40]))',
+      '{UbFok,UbFtree}=UbFpoll(100)',
+      'UbFtext=iolist_to_binary(io_lib:format("~0kP",[{[{followed,UbFok}],UbFtree},40]))',
       'binary:part(UbFtext,0,min(byte_size(UbFtext),1000))'
     ].join(',').freeze
 
@@ -277,13 +306,38 @@ module Erx
       "UbDomain=PcWait(#{NODE},1200)",
       AT,
       "UbEnum=UbAt(#{NODE},fun()->#{ENUM_BODY} end)",
-      "UbFollowed=UbAt(#{DISPLAY_NODE},fun()->#{FOLLOW_BODY} end)",
+      "UbFollowed=UbAt(#{DISPLAY_NODE},fun()->#{follow_body} end)",
       'io:format("~0kp~n",[{usb_enum,UbEnum,UbFollowed}])'
     ].join(',').concat(".\r").freeze
 
-    # The second line, typed once the key has been sent. The shell keeps the first line's
-    # bindings, UbAt among them.
-    def self.typed_line = "io:format(\"~0kp~n\",[{usb_typed,UbAt(#{DISPLAY_NODE},fun()->#{TYPED_BODY} end)}]).\r".freeze
+    # The second line, typed once the key has been sent, its answer tagged tag. The shell
+    # keeps the first line's bindings, UbAt among them.
+    def self.typed_line(tag: 'usb_typed') =
+      "io:format(\"~0kp~n\",[{#{tag},UbAt(#{DISPLAY_NODE},fun()->#{TYPED_BODY} end)}]).\r".freeze
+
+    # The restart boot's line once the first key's records are read, each expression bound
+    # in turn: UbPast, the grant the follower reads usb_input on; the first incarnation,
+    # UbDomain's pid, killed; UbAgain, another incarnation once one is ready; at it, the
+    # enumeration; and at the display, the tracer and the wait for a grant other than
+    # UbPast. Its answer holds three texts: the restarted stage's, the enumeration's and
+    # the follower's.
+    def self.restart_line = [
+      'UbFirst=maps:get(pid,UbDomain)',
+      "UbPast=UbAt(#{DISPLAY_NODE},fun()->#{FOLLOWER_TREE},maps:get(grant,UbTree(),none) end)",
+      'exit(UbFirst,kill)',
+      # UbNext(K): polls every 100 ms at most K times until the domain has one ready
+      # incarnation other than the first.
+      "UbNext=fun UbNx(0)->timeout;UbNx(UbK)->case [UbD||\#{pid:=UbPd}=UbD<-PcFind(#{NODE}),UbPd=/=UbFirst] of " \
+      '[UbD]->UbD;_->timer:sleep(100),UbNx(UbK-1) end end',
+      'UbAgain=UbNext(1200)',
+      'UbRestarted=iolist_to_binary(io_lib:format("~0kP",[{[{restarted,is_map(UbAgain)}],UbAgain},40]))',
+      "UbEnumAgain=UbAt(#{NODE},fun()->#{ENUM_BODY} end)",
+      "UbFollowedAgain=UbAt(#{DISPLAY_NODE},fun()->#{follow_body(past: 'UbPast')} end)",
+      'io:format("~0kp~n",[{usb_restart,UbRestarted,UbEnumAgain,UbFollowedAgain}])'
+    ].join(',').concat(".\r").freeze
+
+    # The restart boot's last line, typed once the key has been sent again.
+    def self.retyped_line = typed_line(tag: 'usb_retyped')
 
     # The third, fourth and fifth lines, typed once the key's records, the stick's answer
     # and the medium's end are read.
@@ -297,11 +351,16 @@ module Erx
     # A stage of an answer's line, true or false, as the domain printed it.
     STAGE = /\{([a-z_]+),(true|false)\}/n
 
-    # The stages the answer's text of the line tagged tag shows passed.
+    # The stages the answer's text of the line tagged tag shows passed: those of each text
+    # the answer holds, a binary whose term starts with its list of stages. A binary
+    # inside such a text is printed with its quotes escaped, so only a text starts <<".
     def self.passed(text, tag:)
       line = text.b.sub(/\A#{PcieDomain::PROMPT}/n, '')
-      stages = line[/\A\{#{tag},<<"\{\[([^\]]*)\]/n, 1].to_s
-      stages.scan(STAGE).filter_map { |stage, value| stage if value == 'true' }
+      return [] unless line.start_with?("{#{tag},".b)
+
+      line.scan(/<<"\{\[([^\]]*)\]/n).flatten.flat_map do |stages|
+        stages.scan(STAGE).filter_map { |stage, value| stage if value == 'true' }
+      end
     end
 
     # The key the harness types, down then up, each a batch QEMU ends with a report, which
@@ -322,44 +381,79 @@ module Erx
     end
 
     # The production checkpoints to the command shell, then the Erlang shell, the first
-    # line and its answer, after which the key is typed through socket, the second line and
-    # its answer, the third, after whose answer the stick's medium is ejected through
-    # socket, the fourth, after whose answer the stick is unplugged, and the fifth. Each
-    # answer's stages are reported through side and its text through note.
-    def self.checkpoints(points, socket:, side:, note:)
+    # line and its answer, after which the key is typed through socket, and the second line
+    # and its answer, after which after is typed. Each answer's text goes through note, and
+    # each stage of it that sides names through side as its cell.
+    def self.first_key(points, socket:, sides:, side:, note:, after:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      answer = lambda do |tag|
-        lambda do |text|
-          note.call(LineEscape.escape(text.b.strip[0, 3000]))
-          passed(text, tag: tag).each { |stage| side.call("-#{stage}") }
-        end
-      end
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: line).freeze,
        { name: 'usb-enum', pattern: /\A#{PcieDomain::PROMPT}\{usb_enum,/n, seconds: ANSWER_SECONDS,
          verify: lambda do |text|
-           answer.call('usb_enum').call(text)
+           answer('usb_enum', sides: sides, side: side, note: note).call(text)
            type_key(socket)
          end, type: typed_line }.freeze,
        { name: 'usb-typed', pattern: /\A#{PcieDomain::PROMPT}\{usb_typed,/n, seconds: TYPED_SECONDS,
-         verify: answer.call('usb_typed'), type: stick_line }.freeze,
+         verify: answer('usb_typed', sides: sides, side: side, note: note), type: after }.freeze]
+    end
+
+    # The verify of the answer tagged tag: its text through note, and through side the cell
+    # sides names for each stage the text shows passed. A stage sides does not name is in
+    # the text only.
+    def self.answer(tag, sides:, side:, note:)
+      lambda do |text|
+        note.call(LineEscape.escape(text.b.strip[0, 3000]))
+        passed(text, tag: tag).filter_map { |stage| sides[stage] }.each { |cell| side.call(cell) }
+      end
+    end
+
+    # The stick boot's checkpoints: first_key's, then the third line, after whose answer
+    # the stick's medium is ejected through socket, the fourth, after whose answer the
+    # stick is unplugged, and the fifth. Each answer's stages are reported through side and
+    # its text through note.
+    def self.checkpoints(points, socket:, side:, note:)
+      stick_answer = ->(tag) { answer(tag, sides: STAGE_SIDES, side: side, note: note) }
+      [*first_key(points, socket: socket, sides: STAGE_SIDES, side: side, note: note, after: stick_line),
        { name: 'usb-stick', pattern: /\A#{PcieDomain::PROMPT}\{usb_stick,/n, seconds: STICK_SECONDS,
          verify: lambda do |text|
-           answer.call('usb_stick').call(text)
+           stick_answer.call('usb_stick').call(text)
            qmp(socket) { |client| client.eject("#{QemuPlan.usb_stick_id(0)}drive") }
          end, type: ended_line }.freeze,
        { name: 'usb-ended', pattern: /\A#{PcieDomain::PROMPT}\{usb_ended,/n, seconds: GONE_SECONDS,
          verify: lambda do |text|
-           answer.call('usb_ended').call(text)
+           stick_answer.call('usb_ended').call(text)
            qmp(socket) { |client| client.device_del(QemuPlan.usb_stick_id(0)) }
          end, type: gone_line }.freeze,
        { name: 'usb-gone', pattern: /\A#{PcieDomain::PROMPT}\{usb_gone,/n, seconds: GONE_SECONDS,
-         verify: answer.call('usb_gone') }.freeze].freeze
+         verify: stick_answer.call('usb_gone') }.freeze].freeze
     end
 
-    # Boots the image under HVF at each CPU count. Returns { "<accel>-<n>cpu" => 'passed',
-    # and each stage's "<accel>-<n>cpu-<stage>" => 'passed' or 'failed' }.
+    # The restart boot's checkpoints: first_key's, then the restart line, after whose
+    # answer the key is typed again through socket, and the retyped line. Each answer's
+    # stages are reported through side as RESTART_SIDES names them, and its text through
+    # note.
+    def self.restart_checkpoints(points, socket:, side:, note:)
+      [*first_key(points, socket: socket, sides: RESTART_SIDES.fetch(:first), side: side, note: note,
+                          after: restart_line),
+       { name: 'usb-restart', pattern: /\A#{PcieDomain::PROMPT}\{usb_restart,/n, seconds: RESTART_SECONDS,
+         verify: lambda do |text|
+           answer('usb_restart', sides: RESTART_SIDES.fetch(:restart), side: side, note: note).call(text)
+           type_key(socket)
+         end, type: retyped_line }.freeze,
+       { name: 'usb-retyped', pattern: /\A#{PcieDomain::PROMPT}\{usb_retyped,/n, seconds: TYPED_SECONDS,
+         verify: answer('usb_retyped', sides: RESTART_SIDES.fetch(:second), side: side, note: note) }.freeze].freeze
+    end
+
+    # The two boots of each cell: the stick's, whose USB domain is never restarted, and the
+    # restart cell's, which allows it one restart. Each names its directories' suffix, its
+    # manifest's restarts, its checkpoints and whether the harness reads the stick back.
+    Boot = Data.define(:suffix, :restarts, :checkpoints, :reads_stick)
+    BOOTS = [Boot.new(suffix: '', restarts: 0, checkpoints: method(:checkpoints), reads_stick: true),
+             Boot.new(suffix: '-restart', restarts: 1, checkpoints: method(:restart_checkpoints), reads_stick: false)].freeze
+
+    # Boots each of BOOTS under HVF at each CPU count. Returns { "<accel>-<n>cpu" =>
+    # 'passed', and each side cell's "<accel>-<n>cpu-<side>" => 'passed' or 'failed' }.
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), qemu: 'qemu-system-aarch64',
@@ -371,31 +465,40 @@ module Erx
         @qemu = qemu
         @machine = MediumBoot.machine(platform)
         @xhci = PcieDomain.xhci(platform)
-        @manifest = UsbBoot.manifest(UsbBoot.manifest_source(@root, platform: platform))
+        source = UsbBoot.manifest_source(@root, platform: platform)
+        @manifests = BOOTS.to_h { |kind| [kind, UsbBoot.manifest(source, restarts: kind.restarts)] }
         @notes = []
       end
 
       # What each boot's answers said.
       def notes = @notes.dup.freeze
 
-      # Packs the image once, then boots it at each CPU count.
+      # Packs each boot's image once, then boots them at each CPU count.
       def call(cpus:, jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/usb/image'))
-        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
-                                     fiasco: fiasco)
-                                .build_medium(directory: directory, machine: @machine, manifest_source: @manifest)
+        images = BOOTS.to_h { |kind| [kind, image(kind, fiasco)] }
         booted = placement.each(accels: [QemuCells::LOCAL_ACCELERATOR], cpus: cpus) do |accel, count, remote|
-          ["#{accel}-#{count}cpu", boot(accel, count, remote, built)]
+          passed = BOOTS.flat_map { |kind| boot(kind, images.fetch(kind), accel: accel, count: count, remote: remote) }
+          ["#{accel}-#{count}cpu", SIDE_CELLS.to_h { |side| [side, passed.include?(side) ? 'passed' : 'failed'] }]
         end
         booted.flat_map { |cell, sides| [[cell, 'passed'], *sides.map { |side, status| ["#{cell}#{side}", status] }] }.to_h
       end
 
       private
 
-      def boot(accel, count, remote, built)
-        cell = "#{accel}-#{count}cpu"
+      def image(kind, fiasco)
+        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, "build/usb/image#{kind.suffix}"))
+        built, = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
+                                     fiasco: fiasco)
+                                .build_medium(directory: directory, machine: @machine, manifest_source: @manifests.fetch(kind))
+        built
+      end
+
+      # Boots kind's image built; returns the side cells its answers, and the stick's bytes
+      # and the console where kind reads them back, show passed.
+      def boot(kind, built, accel:, count:, remote:)
+        cell = "#{accel}-#{count}cpu#{kind.suffix}"
         path = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/usb', cell))
         boot = OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
         socket = File.join(boot, 'qmp.sock')
@@ -403,18 +506,20 @@ module Erx
         File.binwrite(stick, Stick.image)
         pcie = QemuPlan::Pcie.new(qmp_socket: socket, functions: { @xhci.slot => 'qemu-xhci' },
                                   usb: ['usb-kbd', QemuPlan::Disk.new(path: stick)])
-        sides = SIDE_CELLS.to_h { |side| [side, 'failed'] }
+        passed = []
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: count,
-                                                         manifest_source: @manifest, memory_mib: @machine.memory_mib)
+                                                         manifest_source: @manifests.fetch(kind),
+                                                         memory_mib: @machine.memory_mib)
         Qemu.new(root: @root, runner: @runner, program: @qemu)
             .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
                  memory_mib: @machine.memory_mib, directory: boot, pcie: pcie,
-                 checkpoints: UsbBoot.checkpoints(points, socket: socket, side: ->(side) { sides[side] = 'passed' },
-                                                          note: ->(text) { @notes << "#{cell}: #{text}" }))
-        UsbBoot.host_passed(image: BoundedFile.read(stick, maximum: Stick::SECTORS * Stick::SECTOR),
-                            console: BoundedFile.read(Qemu.serial_log(boot), maximum: MAX_CONSOLE_BYTES))
-               .each { |stage| sides["-#{stage}"] = 'passed' }
-        sides
+                 checkpoints: kind.checkpoints.call(points, socket: socket, side: ->(side) { passed << side },
+                                                            note: ->(text) { @notes << "#{cell}: #{text}" }))
+        return passed unless kind.reads_stick
+
+        passed + UsbBoot.host_passed(image: BoundedFile.read(stick, maximum: Stick::SECTORS * Stick::SECTOR),
+                                     console: BoundedFile.read(Qemu.serial_log(boot), maximum: MAX_CONSOLE_BYTES))
+                        .map { |stage| "-#{stage}" }
       end
     end
   end
