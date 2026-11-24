@@ -1,7 +1,7 @@
 {
   "version": 1,
   "recipes": {
-    "config/fiasco/kernel.defconfig": "d8bec09f052cc89406748a56e607cebbfcef54d9e2d72b0f44471555f5938853",
+    "config/fiasco/kernel.defconfig": "420c225aef293e611f1279190fc571752cd878d75567b559b0a7f0ce6df2578a",
     "config/fiasco/modules.list": "415aae92ab8b8baf1c43b9229bdf039cc931d580d58e0014f72fbbb63959e2fb",
     "config/fiasco/user.defconfig": "a21e9c2bbb12b9eb4749380fd532dc8abd691dbd5bfc0e224e921c29988e518d",
     "fiasco/bootstrap/server/src/Make.rules": "1ed4ed98cc2ea4a93527693ba50e597a2378e09e848b7d9ae3a60a610e4bc986",
@@ -18,11 +18,11 @@
     "fiasco/kernel/tool/config-tags": "791f463b77a54e1862d294b32afb78a8d4f9b52558f0b746ee3533cda11324a1",
     "fiasco/kernel/tool/gen_kconfig": "8d1cde5253ba072714454357627990af042345fbb209546e1849ae8e89154451",
     "fiasco/kernel/tool/kconfig/COPYING": "fb5a425bd3b3cd6071a3a9aff9909a859e7c1158d54d32e07658398cd67eb6a0",
-    "fiasco/kernel/tool/kconfig/Makefile": "aaceaacfd59508468f9bed4cffaf6a82d7e9d3929827253b44857a41e17c0c30",
-    "fiasco/kernel/tool/kconfig/README": "a80946576917ef74f4668292e94dc403e6d146a3613cc478fc804b3685610164",
+    "fiasco/kernel/tool/kconfig/Makefile": "1863d6971bfe7c73d5f8734abc699ef44afd6bcc3fc5efb7581ad5fc92d01137",
+    "fiasco/kernel/tool/kconfig/README": "9a753987d14020d70efc416fa486a20735111d8526f5ba05bf2963976867b0ab",
     "fiasco/kernel/tool/kconfig/scripts/Kbuild.include": "1953e3cb531ea8d93dfd0de7779e89dd4243f550e070d99356887e0121a70de9",
     "fiasco/kernel/tool/kconfig/scripts/Makefile": "b25f2c1fcd47dbe44203bdaf5917d9deaf87c8a018752805f8448283f5d9e414",
-    "fiasco/kernel/tool/kconfig/scripts/Makefile.build": "f809b9faecae017150b3ac0b999176be0a25efc6725bda566bf20d8f9f7c9414",
+    "fiasco/kernel/tool/kconfig/scripts/Makefile.build": "28bbbaf54262d1869da642666cfa49f3f3dbf5b23a74034a6f9e2ac08bf8506c",
     "fiasco/kernel/tool/kconfig/scripts/Makefile.clang": "c385b73ad4c36348bf4a7cd8ddc0f6afb88e4804579f8d5f3f18de0f1fa2c8d7",
     "fiasco/kernel/tool/kconfig/scripts/Makefile.clean": "385225abf868f3075f8f814ea242704adabae1125e28256fae3b019537696591",
     "fiasco/kernel/tool/kconfig/scripts/Makefile.compiler": "3de828ba8ace97964d3b6ceec8a98d570c6a1c5738d52344199a78add66e01be",
@@ -32,8 +32,8 @@
     "fiasco/kernel/tool/kconfig/scripts/Makefile.modinst": "3063335b53928dbd6358c8c456f30791a98032322f4eb4c7c6c2802be0eb28b9",
     "fiasco/kernel/tool/kconfig/scripts/Makefile.modpost": "1816d5dc8cfa39f33cac7c17d28579b04453b979ebf863a334113be907e58b76",
     "fiasco/kernel/tool/kconfig/scripts/basic/Makefile": "c246f266cacc723eba76ee78c6a091d864be7c0f9c80a0c8f63fb1033d675eb3",
-    "fiasco/kernel/tool/kconfig/scripts/basic/fixdep.c": "512a85c24ca2cdd44d1d652e071abc6650cf4776e21979e0a08b421178f59590",
-    "fiasco/kernel/tool/kconfig/scripts/config": "a05f1a7669fd88820761bbeb1c3f321cc4c48e65624f9ae39572f58c264f1e85",
+    "fiasco/kernel/tool/kconfig/scripts/basic/fixdep.c": "16634c3444a92b85f7993c8c631ed8c5974b1f6981544f0085e25529cdfbbfb2",
+    "fiasco/kernel/tool/kconfig/scripts/config": "7835b25d03f562c3fbf42ddd58ba73070e53d0f47046d3b27ee4fb69344c0026",
     "fiasco/kernel/tool/kconfig/scripts/include/array_size.h": "90ea8c7000afb1f9ad8504dcc24c1ddcd3c08239787248b617fc632ed3577ce4",
     "fiasco/kernel/tool/kconfig/scripts/include/hash.h": "036b553056d9b4728a27658ecdd33e23cd5174bf07b8cbb79a4a91a66c7fda60",
     "fiasco/kernel/tool/kconfig/scripts/include/hashtable.h": "3f3b31f8490d515f62c7a65b69145f39aeae4f3cf7963267f6d697ffd08aa377",
@@ -41,10 +41,10 @@
     "fiasco/kernel/tool/kconfig/scripts/include/list_types.h": "36df90fe1e5b16bff75afbbe2b0018f21eaeca9fe67f95e054cf645f28071356",
     "fiasco/kernel/tool/kconfig/scripts/include/xalloc.h": "c69a8c5116bd0aac41088990401ddcfaffc1b28fe7d649117b7452b8fb5af7fa",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/Makefile": "d43aaa5e76a1eb4fb186f6dc0f48920183893979d809d234330258eefcb6442c",
-    "fiasco/kernel/tool/kconfig/scripts/kconfig/conf.c": "027d209d2fb12a4350bf629a05f876f065f9254ba788bcf61e68eed135401a0a",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/conf.c": "6b0543136a9202d06eede775bcaf7b700aa6cb14e88bd960290da8aa2a3f5375",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/confdata.c": "75810864753b4994a17ecc119c4da918c43d29856b02c08d4b524ceae2c78ba7",
-    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.c": "e1db484d6011e0855ddad833a00ca90ac445e284e8a9cd4608114c51b2f622a2",
-    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.h": "cce11d519da373fca76f897d8b6a6d1baa61d84d9220dcd5b91e86549afc36aa",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.c": "779bde1aa07b2aceb3d9e0026fedc4822ca30e4abcf6fe320a6ddaa8e8c95e05",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/expr.h": "5919309ff64bd934b281748f0afa98a8d28ac462d4027ae5bf1b0a073ccc8cd6",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf-cfg.sh": "080339e0f10d0fed364ee6045f218b90fbed67fcd7c2fc53e2f88d2e29697192",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf.c": "fcc7fddd99d6f2fa0ae3433eb46606a8a2f8ef2aaadb4cf57605bdc6f3b385d0",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/gconf.ui": "ccb10be947b636701f568a65b31bfa201ad9bb2e7f1cb28a589d77de719d5d48",
@@ -75,7 +75,7 @@
     "fiasco/kernel/tool/kconfig/scripts/kconfig/lxdialog/yesno.c": "4da4dec3cc1ee87b839ce3612c57e47976a658b3144d8b087b1e2621d5991134",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/mconf-cfg.sh": "3a05180e35f6e60174bde4d91986964571d920b18c75029e097811aa1baf61c1",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/mconf.c": "21aa06ac1dcc11c2662c4dfc8db753ae514ff940510acbad7e3b097ff2b51b02",
-    "fiasco/kernel/tool/kconfig/scripts/kconfig/menu.c": "a2028cc88d847d91ea10676eb1bce9d65d16aab44e87be65f09c678eada35aae",
+    "fiasco/kernel/tool/kconfig/scripts/kconfig/menu.c": "44c6591272e60c712eadb8a0d68740c23d16d4993ca9a73ceaea83e62fb32ed6",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/mnconf-common.c": "0681901f2ccf1188d624407e0321952bff15989f34b6a583ba2fdee6128989a5",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/mnconf-common.h": "8f24b6108b76594bfb50079623885e1e2ab12183fc182a28f6de4c6a8c861d06",
     "fiasco/kernel/tool/kconfig/scripts/kconfig/nconf-cfg.sh": "e0f4b29605e09cee76cbf50f0742a9b80f4d6d15c5dd0c74470f8a507b6b1377",
@@ -185,7 +185,7 @@
       },
       "build/fiasco/kernel/.Modules.deps": {
         "mode": "text",
-        "sha256": "92e1cf57cf719d9a416c8a91fed4664f31205aa801db97fe37949c0552f45d31"
+        "sha256": "a7f6604a10169b55bcf300839126e44c2355118b2b38fb7768cbd1dfbf333861"
       },
       "build/fiasco/kernel/.dump_tcboffsets.cc.d": {
         "mode": "text",
@@ -201,7 +201,7 @@
       },
       "build/fiasco/kernel/Kconfig": {
         "mode": "text",
-        "sha256": "2b307344e1218ded6770986a08c493caacef5b81f1098d049f11e26fa18e2cab"
+        "sha256": "89dbd2c74907ce4aeb7d0f0daef8924b1004f5af7638e9eb7916e8c27f7615f6"
       },
       "build/fiasco/kernel/bootstrap.fiasco.bin": {
         "mode": "binary",
@@ -209,7 +209,7 @@
       },
       "build/fiasco/kernel/bootstrap.fiasco.pre.o": {
         "mode": "binary",
-        "sha256": "2220942fb356c1b3f11b6a6554438a608bbbf100d3d6f1d955f161abfadfd647"
+        "sha256": "caca2ab0bfd6f62f798b120019128fd072f680b22f31ad1ba2dfa4154470c9a6"
       },
       "build/fiasco/kernel/dump_tcboffsets": {
         "mode": "binary",
@@ -217,11 +217,11 @@
       },
       "build/fiasco/kernel/globalconfig.out": {
         "mode": "text",
-        "sha256": "6e3d968d19a6133e844e413afdf5d6949cbe40fa297102b6a1296465028aa311"
+        "sha256": "47031153f4e0dd3bdc4f5a4a1977ccfe8b3e0dfea54e485ba055d65723f75750"
       },
       "build/fiasco/kernel/scripts/kconfig/conf": {
         "mode": "binary",
-        "sha256": "b0a076daec79157be64abe53bd0702a40ab78a1b3ae9c7e10c068905e0821898"
+        "sha256": "c0d3bc3795100f39fb02f98eee547c7d0dc15495e4c2a7a123c3a385bf8787bc"
       },
       "build/fiasco/kernel/tcboffset.bin": {
         "mode": "binary",
@@ -279,7 +279,7 @@
     "profiles": {
       "kernel/globalconfig.h": {
         "role": "configuration",
-        "output_sha256": "cdd67bb20b9eb9ed1b004cbbec633ff683173f91bcd6a67fff9960573f435669",
+        "output_sha256": "529b1f90ad771a9c6343b60fbd87f5c85d14b427c65efb4523aa8bcdaac0dad7",
         "code": [],
         "configuration": [
           "build/fiasco/kernel/globalconfig.out",

@@ -318,7 +318,7 @@ config TICKLESS_IDLE
 
 config FINE_GRAINED_CPUTIME
 	bool "Fine-grained CPU time"
-	depends on !PERFORMANCE || ONE_SHOT || ONE_SHOT_PARAM
+	depends on !BENCHMARKING || ONE_SHOT || ONE_SHOT_PARAM
 	help
 	  Measure CPU time consumed by a thread from switching to the thread
 	  until switching to another thread. Induces an overhead during each
@@ -613,16 +613,25 @@ config COV_OUTPUT_MEMBUF_SIZE
 
 endif
 
-config PERFORMANCE
+config BENCHMARKING
 	bool "Performance configuration"
+	default PERFORMANCE
 	select INLINE
 	select NDEBUG
 	select NO_FRAME_PTR
 	help
-	  Setup the kernel such that performance is chosen over
-	  being friendly for debugging. With this option, no
-	  assertions are included and additional run-time functionality
-	  is de-selected.
+	  Setup the kernel such that performance is chosen over being friendly
+	  for debugging. With this option, no assertions are included and
+	  additional run-time functionality is de-selected.
+
+	  This option shall be enabled for doing benchmarking and performance
+	  analysis.
+
+config PERFORMANCE
+	bool
+	transitional
+	help
+	  Transitional symbol for BENCHMARKING.
 
 config PERF_CNT
 	bool "Support for performance counters"
@@ -675,7 +684,7 @@ config NO_FRAME_PTR
 
 config STACK_DEPTH
 	bool "Measure stack depth of threads"
-	depends on !PERFORMANCE
+	depends on !BENCHMARKING
 	help
 	  When this option is enabled, each thread control block is marked
 	  with magic numbers while creation. The function ``show thread
@@ -685,7 +694,7 @@ config STACK_DEPTH
 config BEFORE_IRET_SANITY
 	bool "Sanity checks at syscall entry/exit"
 	depends on PF_PC
-	depends on !PERFORMANCE
+	depends on !BENCHMARKING
 	help
 	  Perform the following additional sanity checks before returning to
 	  usermode:

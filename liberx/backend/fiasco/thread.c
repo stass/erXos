@@ -255,8 +255,9 @@ erx_thread_create(uint64_t budget, uint64_t space, uint64_t group, uint64_t thre
 /*
  * The marker goes to 1 first, as the kernel may hold the UTCB from the bind on, and
  * only for a thread created and not started: see erx_fiasco_thread_state_t. A failed
- * start leaves it: if the kernel ran its kill path it writes 0 and the index returns,
- * and if it only unbound the thread the index stays lost.
+ * start leaves it: if the kernel completes its kill path it writes 0 and the index
+ * returns, and if the kill never completes the index stays lost (design-fiasco.md,
+ * "A failed start").
  */
 int
 erx_thread_start(uint64_t thread)

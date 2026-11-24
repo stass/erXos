@@ -152,6 +152,11 @@ Io_apic_mgr::pm_on_resume([[maybe_unused]] Cpu_number current_cpu) override
   Io_apic::restore_state(true);
 }
 
+PUBLIC
+void
+Io_apic_mgr::pm_on_shutdown(Cpu_number) override
+{}
+
 
 IMPLEMENT inline NEEDS["mem.h"]
 Mword

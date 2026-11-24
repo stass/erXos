@@ -181,9 +181,6 @@ public:
    */
   Jdb_module(char const *category = "MISC") FIASCO_INIT;
 
-  /// dtor
-  virtual ~Jdb_module() = 0;
-
   /**
    * The actual handler of the module.
    * @param cmd the command ID (see Cmd::id) of the executed command.
@@ -251,6 +248,9 @@ public:
 
   typedef cxx::H_list_bss<Jdb_module> List;
   static List modules;
+
+protected:
+  ~Jdb_module() = default;
 
 private:
   Jdb_category const *_cat;
@@ -365,8 +365,6 @@ Jdb_module::Jdb_module(char const *category)
 {
   modules.push_front(this);
 }
-
-IMPLEMENT inline Jdb_module::~Jdb_module() {}
 
 PUBLIC static
 bool

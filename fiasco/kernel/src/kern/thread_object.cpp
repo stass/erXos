@@ -157,12 +157,7 @@ void
 Thread_object::destroy(Kobjects_list &reap_list) override
 {
   Kobject::destroy(reap_list);
-
-  if (!is_invalid(false))
-    kill();
-  else
-    unbind();
-
+  kill();
   assert(_magic == magic);
 }
 
@@ -647,9 +642,15 @@ Thread_object::ex_regs(Address ip, Address sp,
   if (!ex_regs_arch(ops))
     return false;
 
-  if (state() & Thread_dead)	// resurrect thread
-    state_change_dirty(~Thread_dead, Thread_ready);
+  if (state() & Thread_dead)
+    {
+      // Killed threads cannot be restarted.
+      if (state() & Thread_killed)
+        return false;
 
+      // Start thread.
+      state_change_dirty(~Thread_dead, Thread_ready);
+    }
   else if (ops & Exr_cancel)
     // cancel ongoing IPC or other activity
     state_add_dirty(Thread_cancel | Thread_ready);

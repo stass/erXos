@@ -315,6 +315,12 @@ Thread::bind(Task *t, User_ptr<Utcb> utcb)
   if (_space.space() != Kernel_task::kernel_task())
     return false;
 
+  // Binding a task to a killed thread is not possible. The potentially
+  // non-CPU-local thread state access is synchronized through _space.lock(),
+  // with the unbind() call from Thread::do_kill().
+  if (is_killed(false))
+    return false;
+
   _space.space(t);
   t->inc_ref();
   t->add_bound_thread();
@@ -411,6 +417,8 @@ Thread::~Thread()		// To be called in locked state.
   Fpu_alloc::free_state(fpu_state());
   assert (!(state() & Thread_ready_mask));
   assert (!in_ready_list());
+  assert (sender_list()->empty());
+  assert (!drq_pending());
 }
 
 // IPC-gate deletion stuff ------------------------------------
@@ -582,9 +590,8 @@ Thread::do_kill()
   reset_reply_cap(Implicit_reply_cap_index);
 
   // If other threads want to send me IPC messages, abort these operations.
-  // IMPORTANT: After the following code block, the cpu lock must not be
-  //            released until the Thread_dead flag is set, otherwise new
-  //            senders can be enqueued in the sender list of the dying thread.
+  // Because the `Thread_killed` flag is set, no new IPC messages can be queued,
+  // so after clearing it here the sender list will stay empty.
   {
     while (Sender *s = Sender::cast(sender_list()->first()))
       {
@@ -619,7 +626,7 @@ Thread::do_kill()
 
   arch_vcpu_ext_shutdown();
 
-  state_change_dirty(~Thread_dying, Thread_dead);
+  state_add_dirty(Thread_dead);
 
   // dequeue from system queues
   Sched_context::rq.current().ready_dequeue(sched());
@@ -652,24 +659,74 @@ INTERFACE:
 
 IMPLEMENTATION:
 
+/**
+ * \pre Interrupts must be disabled.
+ * \pre Must only be invoked in a context where it is safe to access the
+ *      Thread's state, e.g. on the Thread's home CPU or in a DRQ targeted
+ *      at the Thread.
+ */
 PRIVATE inline
 void
-Thread::prepare_kill()
+Thread::prepare_kill(Cpu_number *migrate_to_cpu)
 {
-  if (state() & (Thread_dying | Thread_dead))
+  if (state() & Thread_killed)
     return;
 
+  // Mark thread as killed to prevent it form being restarted or migrated. Then
+  // allow migration only if not both Thread_dead and Thread_killed are set.
+  // This allows the killed thread to be migrated to an online CPU, where it can
+  // execute Thread::do_kill(). That eventually sets Thread_dead, thus no more
+  // migration will be possible and the thread stays on the invalid CPU.
+  state_add_dirty(Thread_killed);
+
+  if (state() & Thread_dead) [[unlikely]]
+    {
+      // Thread that was not-yet-started can nevertheless be on an online CPU,
+      // and thus can have DRQs queued, or have IPC senders queued.
+      // Therefore, it must go through to the regular kill procedure.
+      state_del_dirty(Thread_dead);
+
+      // To ensure the kill operation eventually completes, we migrate the
+      // killed thread to current CPU if it is on an offline CPU.
+      if (!Cpu::online(home_cpu()))
+        {
+          Migration migration;
+          migration.cpu = current_cpu();
+          // Schedule with same scheduling parameters as the current thread, who
+          // initiated the kill, after all killing the thread is work that needs
+          // to be done on behalf of it.
+          Sched_context::Sp sp;
+          current()->sched()->get(&sp);
+          migration.sp = &sp.p;
+
+          // Thread is on offline CPU, thus it must be different from
+          // current_cpu(), which is online. Since prepare_kill() is executed in
+          // a DRQ, we hold the _pending_rqq lock of the thread's offline home
+          // CPU, as required by migrate_away.
+          migrate_away(&migration, true, true);
+
+          // We must not execute migrate_to() here, while still holding the
+          // _pending_rqq lock of the old home CPU, as migrate_to() takes the
+          // _pending_rqq lock of the target CPU (danger of deadlock) and
+          // potentially even executes DRQs. Thus we execute the migrate_to()
+          // part in `Thread::kill()` outside of DRQ context.
+          assert(migrate_to_cpu != nullptr);
+          *migrate_to_cpu = migration.cpu;
+        }
+    }
+
   inc_ref();
-  state_add_dirty(Thread_dying | Thread_cancel | Thread_ready);
+  state_add_dirty(Thread_cancel | Thread_ready);
   _exc_cont.restore(regs()); // overwrite an already triggered exception
   do_trigger_exception(regs(), reinterpret_cast<void*>(&leave_and_kill_myself));
 }
 
 PRIVATE static
 Context::Drq::Result
-Thread::handle_remote_kill(Drq *, Context *self, void *)
+Thread::handle_remote_kill(Drq *, Context *self, void *p)
 {
-  nonull_static_cast<Thread*>(self)->prepare_kill();
+  Cpu_number *migrate_to_cpu = static_cast<Cpu_number *>(p);
+  nonull_static_cast<Thread*>(self)->prepare_kill(migrate_to_cpu);
   return Drq::done();
 }
 
@@ -682,11 +739,16 @@ Thread::kill()
 
   if (home_cpu() == current_cpu())
     {
-      prepare_kill();
+      prepare_kill(nullptr);
       Sched_context::rq.current().deblock(sched(), current()->sched());
     }
   else
-    drq(Thread::handle_remote_kill, nullptr);
+    {
+      Cpu_number migrate_to_cpu = Cpu_number::nil();
+      drq(Thread::handle_remote_kill, &migrate_to_cpu);
+      if (migrate_to_cpu != Cpu_number::nil())
+        migrate_to(migrate_to_cpu);
+    }
 }
 
 
@@ -826,7 +888,7 @@ Reschedule
 Thread::do_migration_not_current(Migration *m)
 {
   Cpu_number target_cpu = access_once(&m->cpu);
-  Reschedule resched = migrate_away(m, false);
+  Reschedule resched = migrate_away(m, false, false);
   resched |= migrate_to(target_cpu);
 
   return resched;
@@ -987,7 +1049,7 @@ IMPLEMENTATION [!mp]:
 
 PRIVATE inline
 Reschedule
-Thread::migrate_away(Migration *inf, bool remote)
+Thread::migrate_away(Migration *inf, bool remote, bool force)
 {
   assert (current() != this);
   assert (cpu_lock.test());
@@ -1024,8 +1086,24 @@ Thread::migrate_away(Migration *inf, bool remote)
   sc->replenish();
   set_sched(sc);
 
-  state_add_dirty(Thread_finish_migration);
-  set_home_cpu(cpu);
+  // Killed thread that reached its final dead state must not be migrated
+  // away from the invalid CPU, because then it could become DRQ ready,
+  // which would be a problem during its deletion. (see also
+  // Thread::force_to_invalid_cpu())
+  // In addition, a thread with a pending kill operation must not be migrated to
+  // an offline CPU, to ensure the operation completes eventually so the thread
+  // can be deleted, thereby preventing resource exhaustion attacks.
+  bool migration_possible = !is_killed() || force;
+
+  // If migrating the thread is not possible, do not change its home CPU
+  // to the requested target CPU. That will cause the migration to fail
+  // in migrate_to().
+  if (migration_possible) [[likely]]
+    {
+      state_add_dirty(Thread_finish_migration);
+      set_home_cpu(cpu);
+    }
+
   write_now(&inf->caller_may_return, true);
   return resched;
 }
@@ -1256,13 +1334,14 @@ Thread::handle_global_remote_requests_irq()
  *
  * \param remote  False if home CPU is the current CPU.
  *                True if home CPU is the *invalid* CPU or an offline CPU.
+ * \param force   Force migration, even if the thread has Thread_killed set.
  *
  * \retval Reschedule::Yes if a reschedule is necessary.
  * \retval Reschedule::No  if no reschedule is necessary.
  */
 PRIVATE inline
 Reschedule
-Thread::migrate_away(Migration *inf, bool remote)
+Thread::migrate_away(Migration *inf, bool remote, bool force)
 {
   assert(check_for_current_cpu());
   assert(current() != this);
@@ -1327,11 +1406,26 @@ Thread::migrate_away(Migration *inf, bool remote)
       assert (!in_ready_list());
       assert (!_pending_rq.queued());
 
-      // The migration must be finished on the new CPU core before executing any
-      // userland code. This will be done by Context::switch_handle_drq() after
-      // the next context switch to this context was performed on the new CPU.
-      state_add_dirty(Thread_finish_migration);
-      set_home_cpu(target_cpu);
+      // Killed thread that reached its final dead state must not be migrated
+      // away from the invalid CPU, because then it could become DRQ ready,
+      // which would be a problem during its deletion. (see also
+      // Thread::force_to_invalid_cpu())
+      // In addition, a thread with a pending kill operation must not be migrated to
+      // an offline CPU, to ensure the operation completes eventually so the thread
+      // can be deleted, thereby preventing resource exhaustion attacks.
+      bool migration_possible = !is_killed() || force;
+
+      // If migrating the thread is not possible, do not change its home CPU
+      // to the requested target CPU. That will cause the migration to fail
+      // in migrate_to().
+      if (migration_possible) [[likely]]
+        {
+          // The migration must be finished on the new CPU core before executing any
+          // userland code. This will be done by Context::switch_handle_drq() after
+          // the next context switch to this context was performed on the new CPU.
+          state_add_dirty(Thread_finish_migration);
+          set_home_cpu(target_cpu);
+        }
       Mem::mp_mb();
       write_now(&inf->caller_may_return, true);
     }
@@ -1437,7 +1531,7 @@ Thread::migrate_xcpu(Cpu_number cpu)
           Migration *m = inf.migration();
           Cpu_number target_cpu = access_once(&m->cpu);
           // Dequeue from ready queue with spin lock held!
-          migrate_away(m, true);
+          migrate_away(m, true, false);
           g.reset();
           return migrate_to(target_cpu);
         }

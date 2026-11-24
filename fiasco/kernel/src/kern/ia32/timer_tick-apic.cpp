@@ -1,7 +1,9 @@
 IMPLEMENTATION [ia32 || amd64]:
 
 #include "apic.h"
+#include "config.h"
 #include "idt.h"
+#include "nmi.h"
 
 IMPLEMENT
 void
@@ -16,6 +18,12 @@ Timer_tick::enable(Cpu_number)
 {
   Apic::timer_enable_irq();
   Apic::irq_ack();
+
+  // We might have missed an interrupt while it was masked, so trigger it now.
+  // If the timer expires between unmasking and the read, or there was no
+  // interrupt intended, the additional interrupt does no harm.
+  if (Config::scheduler_one_shot() && Apic::timer_reg_read() == 0)
+    Apic::timer_reg_write(Apic::Timer_min);
 }
 
 IMPLEMENT
@@ -52,6 +60,7 @@ void
 thread_timer_interrupt(Address ip)
 {
   (void)ip;
+  Nmi::report();
   Timer_tick::ack();
   Timer_tick::handler_all_noack();
 }

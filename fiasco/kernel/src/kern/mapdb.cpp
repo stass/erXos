@@ -71,9 +71,51 @@ public:
   public:
     using Iterator = Mapping_tree::Iterator;
 
+    // WARN: The iterator might become stale if the mapping tree in `frame` is
+    // modified. After modifying the mapping tree, revalidate() must be called,
+    // to ensure `m` is not stale (otherwise could result in use-after-free or
+    // in using a wrong mapping).
     Iterator m;
     Treemap *treemap;
     Physframe *frame = nullptr;
+
+    /**
+     * The mapping this frame refers to, or nullptr for an insertion head.
+     */
+    Mapping *mapping() const
+    { return *m; }
+
+    /**
+     * Re-establish the iterator after the mapping tree may have been modified.
+     *
+     * `m` is an S_list iterator, so it holds the address of the
+     * *predecessor's* next pointer, not of the mapping itself.
+     * Anything that frees the predecessor leaves the iterator dangling.
+     * Anything that inserts after the predecessor makes the iterator point to a
+     * different mapping. Even though the mapping the iterator refers to is
+     * untouched.
+     *
+     * \param mapping  The mapping this frame referred to, as returned by
+     *                 mapping() before the modification.
+     *
+     * \retval true   The frame refers to `mapping` again, or it did not
+     *                refer to a mapping in the first place.
+     * \retval false  `mapping` is gone, the frame must not be used any more.
+     */
+    bool revalidate(Mapping *mapping)
+    {
+      if (!mapping || !frame)
+        return true;
+
+      for (Mapping_tree::Iterator i = frame->tree()->begin(); *i; ++i)
+        if (*i == mapping)
+          {
+            m = i;
+            return true;
+          }
+
+      return false;
+    }
 
     Pfn vaddr(Mapping_tree::Iterator m) const
     { return treemap->vaddr(*m); }
@@ -245,6 +287,8 @@ public:
   {
   public:
     static constexpr void *frame = nullptr;
+    static constexpr void *mapping() { return nullptr; }
+    bool revalidate(void *) const { return true; }
     bool same_lock(Frame const &) const { return false; }
     void clear() {}
     void might_clear() {}
@@ -414,9 +458,6 @@ public:
   Pfn to_vaddr(Page v) const
   { return Pfn(cxx::int_value<Page>(v << _page_shift)); }
 
-  Pcnt page_size() const
-  { return Pcnt(1) << _page_shift; }
-
   Space *owner(Treemap const *submap) const
   { return submap->owner(); }
 
@@ -435,8 +476,11 @@ PUBLIC
 unsigned long
 Treemap_ops::mem_size(Treemap const *submap) const
 {
-  unsigned long quota
-    = cxx::int_value<Page>(submap->_key_end) * sizeof(Physframe) + sizeof(Treemap);
+  // This must match what Treemap::create() charged and what Treemap::operator
+  // delete() refunds, otherwise granting a submap moves a different amount than
+  // is accounted for it.
+  unsigned long quota =
+    cxx::int_value<Bytes>(Treemap::quota_size(submap->_key_end));
 
   for (Page key = Page(0);
       key < submap->_key_end;
@@ -494,6 +538,8 @@ void
 Treemap_ops::flush(Treemap *submap,
                    Treemap::Pcnt offs_begin, Treemap::Pcnt offs_end) const
 {
+  assert(submap->round_to_page(offs_end) <= submap->end());
+
   for (Treemap::Page i = submap->trunc_to_page(offs_begin);
       i < submap->round_to_page(offs_end);
       ++i)
@@ -515,10 +561,10 @@ Treemap_ops::flush(Treemap *submap,
           submap->flush(subframe,
                         page_offs_begin > offs_begin
                           ? Pcnt(0)
-                          : cxx::get_lsb(offs_begin - page_offs_begin, _page_shift),
+                          : offs_begin - page_offs_begin,
                         page_offs_end < offs_end
-                          ? page_size()
-                          : cxx::get_lsb(offs_end - page_offs_begin - Pcnt(1), _page_shift) + Pcnt(1));
+                          ? submap->page_size()
+                          : offs_end - page_offs_begin);
         }
     }
 }

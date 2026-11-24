@@ -352,7 +352,8 @@ PRIVATE inline
 Thread::Check_sender
 Thread::check_sender(Thread *sender, bool zero_timeout)
 {
-  if (is_invalid()) [[unlikely]]
+  // Prevent send to killed thread, but allow send to not-yet-started thread.
+  if (is_killed()) [[unlikely]]
     {
       sender->utcb().access()->error = L4_error::Not_existent;
       return Check_sender::Failed;

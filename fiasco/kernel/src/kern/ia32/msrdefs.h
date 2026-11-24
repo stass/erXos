@@ -148,3 +148,20 @@ enum class Msr : Unsigned32
   Vm_cr = 0xc0010114,               // SVM
   Vm_hsave_pa = 0xc0010117,         // SVM host state-save area
 };
+
+// Definitions for Ia32_efer:
+enum
+{
+  Efer_sce = 1 << 0,      // System Call Extensions
+  Efer_lme = 1 << 8,      // Long Mode Enable
+  Efer_lma = 1 << 10,     // Long Mode Active
+  Efer_nxe = 1 << 11,     // No-Execute Enable
+  Efer_svme = 1 << 12,    // Secure Virtual Machine Enable
+  Efer_lmsle = 1 << 13,   // Long Mode Segment Limit Enable
+  Efer_ffxsr = 1 << 14,   // Fast FXSAVE/FXRSTOR
+  Efer_tce = 1 << 15,     // Translation Cache Extension
+  Efer_mcommit = 1 << 17, // Enable MCOMMIT instruction
+  Efer_intwb = 1 << 18,   // Interruptible WBINVD/WBNOINVD enable
+  Efer_uaie = 1 << 20,    // Upper Address Ignore Enable
+  Efer_aibrse = 1 << 21,  // Automatic IBRS Enable
+};

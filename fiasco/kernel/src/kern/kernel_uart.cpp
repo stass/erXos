@@ -144,6 +144,13 @@ Kernel_uart::pm_on_resume([[maybe_unused]] Cpu_number current_cpu) override
     uart()->enable_rcv_irq();
 }
 
+PUBLIC void
+Kernel_uart::pm_on_shutdown(Cpu_number) override
+{
+  if (Config::serial_input != Config::Serial_input_noirq)
+    uart()->disable_rcv_irq();
+}
+
 // ------------------------------------------------------------------------
 IMPLEMENTATION [serial && !jdb]:
 

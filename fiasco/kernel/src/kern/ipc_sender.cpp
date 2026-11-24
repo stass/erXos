@@ -134,6 +134,13 @@ inline  NEEDS["config.h","globals.h", "thread_state.h",
 Reschedule
 Ipc_sender<Derived>::send_msg(Receiver *receiver, bool is_xcpu)
 {
+  // Prevent send to killed thread, but allow send to not-yet-started thread.
+  if (receiver->is_killed()) [[unlikely]]
+    {
+      derived()->reject_send(receiver); // WARN: Do not use this/derived() from here on!
+      return Reschedule::No;
+    }
+
   // XXX careful!  This code may run in midst of an do_ipc()
   // operation (or similar)!
   if (Receiver::Rcv_state s = receiver->sender_ok(this))

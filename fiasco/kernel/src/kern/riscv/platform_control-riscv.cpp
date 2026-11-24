@@ -11,6 +11,7 @@ public:
 // ------------------------------------------------------------------------
 IMPLEMENTATION:
 
+#include "pm.h"
 #include "processor.h"
 #include "sbi.h"
 
@@ -18,6 +19,7 @@ IMPLEMENT_OVERRIDE
 void
 Platform_control::system_off()
 {
+  Cpu_pm_callbacks::run_on_shutdown_hooks(current_cpu());
   Sbi::shutdown();
 }
 

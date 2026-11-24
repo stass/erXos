@@ -318,7 +318,7 @@ Pi_mutex::set_owner(Thread *owner, bool check_dead)
   //     In addition, it makes no sense for a never started thread to become
   //     fast path owner, this can only happen if user-space illegally tampers
   //     with ku_status.
-  if (check_dead && (owner->state() & (Thread_dying | Thread_dead)))
+  if (check_dead && (owner->state() & (Thread_killed | Thread_dead)))
     return false;
 
   inc_ref();

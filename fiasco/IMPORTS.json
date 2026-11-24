@@ -2,8 +2,8 @@
   {
     "part": "kernel",
     "repository": "https://github.com/kernkonzept/fiasco",
-    "revision": "50bbe8a981199e17865e8553a4eb02c387b339cf",
-    "archive_sha256": "80cb4b4db43f18521b859012cb16201d62b3b541c69cdfb2f36f6fa726a8aea5"
+    "revision": "07ea18e1f293bda6b9f75e59707ee1c70cf4321f",
+    "archive_sha256": "e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee"
   },
   {
     "part": "l4re-core",

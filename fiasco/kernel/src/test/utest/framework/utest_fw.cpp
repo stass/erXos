@@ -318,23 +318,18 @@ public:
   static Global_data<Utest_fw> tap_log;
   static Global_data<External_info> ext_info;
 
-  void test_name(char const *name) { _test_name = name; }
-  void group_name(char const *name) { _group_name = name; }
-
-  char const *test_name() const
-  { return _test_name ? _test_name : "No_name"; }
-
-  char const *group_name() const
-  { return _group_name ? _group_name : "No_group"; }
-
 private:
   int _num_tests = 0;
   int _sum_failed = 0;
   unsigned _instance_counter = 0;
   // prevent printing of multiple TAP lines per test
   bool _tap_line_printed = false;
-  char const *_group_name = nullptr;
-  char const *_test_name = nullptr;
+
+  constexpr static unsigned Max_test_name = 255;
+
+  char _test_name[Max_test_name + 1] = { 0 };
+  char _test_name_tmp[Max_test_name + 1] = { 0 };
+
   char const *_test_uuid = nullptr;
 };
 
@@ -520,16 +515,15 @@ Utest_fw::parse_feature_string()
 }
 
 /**
- * Print the TAP header and set a group and test name.
+ * Print the TAP header
  *
  * This function needs to be called once before any tests are executed.
  */
 PUBLIC inline
 void
-Utest_fw::start(char const *group = nullptr, char const *test = nullptr)
+Utest_fw::start()
 {
   parse_feature_string();
-  name_group_test(group, test);
   printf("\nKUT TAP TEST START\n");
 }
 
@@ -579,15 +573,6 @@ Utest_fw::finish(char const *skip_msg = nullptr)
   terminate(_sum_failed);
 }
 
-/// Use a new `group` and `test` name for subsequent TAP output.
-PUBLIC inline
-void
-Utest_fw::name_group_test(char const *group, char const *test)
-{
-  _group_name = group;
-  _test_name = test;
-}
-
 /**
  * Start a new test with new `group` and `test` name and a mandatory UUID.
  *
@@ -602,6 +587,26 @@ void
 Utest_fw::new_test(char const *group, char const *test,
                    char const *uuid)
 {
+  new_testf("%s::%s", group, test);
+  test_uuid(uuid);
+}
+
+/**
+ * Start a new test with name generated from format string and args.
+ *
+ * When the name is used as the previous test, an instance counter is
+ * incremented.
+ *
+ * \note It is forbidden to use the same test name for non-consecutive tests.
+ *       This also contradicts a shuffle feature.
+ */
+PUBLIC inline
+__attribute__((format(printf, 2, 3)))
+void
+Utest_fw::new_testf(char const *fmt, ...)
+{
+  va_list args;
+
   // finish previous test if this isn't the first.
   if (_num_tests > 0)
     test_done();
@@ -610,19 +615,37 @@ Utest_fw::new_test(char const *group, char const *test,
   // initialize for new test.
   _tap_line_printed = false;
 
-  test_uuid(uuid);
+  va_start(args, fmt);
+  static_cast<void>(vsnprintf(_test_name_tmp, Max_test_name, fmt, args));
+  va_end(args);
+
+  test_uuid(nullptr);
 
   // same group and test name as before.
-  if (   group && test && _group_name && _test_name
-      && !strcmp(group, _group_name) && !strcmp(test, _test_name))
+  if (!strcmp(_test_name, _test_name_tmp))
     ++_instance_counter;
   else
     {
       _instance_counter = 0;
-      name_group_test(group, test);
+
+      static_assert(sizeof(_test_name) == sizeof(_test_name_tmp));
+      strcpy(_test_name, _test_name_tmp);
     }
 
-  Utest_debug::printf("New test %s::%s/%u\n", group, test, _instance_counter);
+  Utest_debug::printf("New test %s/%u\n", _test_name, _instance_counter);
+}
+
+/**
+ * Start a new test with a three part test name formatted as a::b::c.
+ *
+ * When the name is used as the previous test, an instance counter is
+ * incremented.
+ */
+PUBLIC inline
+void
+Utest_fw::new_test3(char const *a, char const *b, char const *c)
+{
+  new_testf("%s::%s::%s", a, b, c);
 }
 
 /// Emit a TAP line for the current test, if the TAP Line wasn't printed before.
@@ -667,14 +690,14 @@ Utest_fw::tap_msg(bool success,
 
   // Print in a single printf statement to avoid line splitting in SMP setups.
   if (_instance_counter == 0)
-    printf("\nKUT %s %i %s::%s%s%s%s\n", success ? "ok" : "not ok", _num_tests,
-           group_name(), test_name(),
+    printf("\nKUT %s %i %s%s%s%s\n", success ? "ok" : "not ok", _num_tests,
+           _test_name,
            (todo_skip || msg) ? " " : "",
            todo_skip ? todo_skip : "",
            msg ? msg : "");
   else
-    printf("\nKUT %s %i %s::%s/%u%s%s%s\n", success ? "ok" : "not ok", _num_tests,
-           group_name(), test_name(),
+    printf("\nKUT %s %i %s/%u%s%s%s\n", success ? "ok" : "not ok", _num_tests,
+           _test_name,
            _instance_counter,
            (todo_skip || msg) ? " " : "",
            todo_skip ? todo_skip : "",
@@ -778,8 +801,8 @@ Utest_fw::binary_cmp(bool finish_on_failure, bool result,
   if (result)
     {
       // Print debug output, not a TAP line.
-      Utest_debug::printf("%s::%s/%u - %s (line %i)\n", group_name(),
-                          test_name(), _instance_counter, msg, line);
+      Utest_debug::printf("%s/%u - %s (line %i)\n",
+                          _test_name, _instance_counter, msg, line);
     }
   else
     {
@@ -1128,10 +1151,9 @@ Utest::wait_for_events(Bool_cpu_array const &done, unsigned long timeout)
 {
   bool occurred = true;
 
-  for (auto i = Cpu_number::first(); i < Config::max_num_cpus(); ++i)
+  for (Cpu_number i : Cpu::online_mask())
     {
-      // Skip the current and offline CPUs.
-      if (i == current_cpu() || !Cpu::online(i))
+      if (i == current_cpu())
         continue;
 
       if (!wait_for_event(&done[i], timeout))
@@ -1168,15 +1190,23 @@ Utest::thread_fn()
 }
 
 /**
- * Kill the current thread.
+ * Kill the current thread (consumes the thread-internal capability reference).
  */
 PUBLIC static
 void
 Utest::kill_current_thread()
 {
   auto guard = lock_guard(cpu_lock);
-  Sched_context::rq.current().deblock(current()->sched(),
-                                      current()->sched());
+
+    {
+      Kobject::Reap_list reap_list;
+      current_thread()->initiate_deletion(reap_list.list());
+      // Reap immediately without RCU.
+      reap_list.del_1();
+      reap_list.del_2();
+    }
+
+  // Execute the leave_and_kill_myself continuation immediately.
   Thread::do_leave_and_kill_myself();
 }
 
@@ -1461,10 +1491,9 @@ Utest::Tick_disabler::wait_for_events(Bool_cpu_array const &done,
 {
   bool occurred = true;
 
-  for (auto i = Cpu_number::first(); i < Config::max_num_cpus(); ++i)
+  for (Cpu_number i : Cpu::online_mask())
     {
-      // Skip the current and offline CPUs.
-      if (i == current_cpu() || !Cpu::online(i))
+      if (i == current_cpu())
         continue;
 
       if (!Tick_disabler::wait_for_event(&done[i], timeout))

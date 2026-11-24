@@ -30,7 +30,7 @@ NOOPT		+= $(patsubst %.o, %,$(OBJ_LIBC) $(OBJ_JDB) $(OBJ_LIBDISASM))
 #
 INTERFACES_KERNEL	:= cpu_mask rcupdate kobject_mapdb context_base pm \
 			   mem_region per_cpu_data startup                   \
-			   queue queue_item l4_buf_iter bitmap               \
+			   queue queue_item l4_buf_iter bitmap seq_lock      \
 			   mapping spin_lock mapping_tree                    \
 			   dbg_page_info mapdb pic kobject_dbg koptions      \
 			   kobject_iface kobject ready_queue_wfq             \
@@ -108,8 +108,10 @@ endif
 
 ifeq ($(CONFIG_JDB),y)
 INTERFACES_KERNEL += \
-	jdb_tbuf jdb_tbuf_init tb_entry jdb_trace string_buffer
+	jdb_tbuf jdb_tbuf_init tb_entry jdb_trace
 endif
+
+INTERFACES_KERNEL += $(if $(CONFIG_JDB)$(CONFIG_TEST_SUPPORT_CODE),string_buffer)
 
 # erXos's glue onto the C17 cores (Makeconf, ERX_CORE_ARCHIVE).
 VPATH			+= erx

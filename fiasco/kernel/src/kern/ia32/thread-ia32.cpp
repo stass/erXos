@@ -45,8 +45,10 @@ IMPLEMENTATION [ia32 || amd64]:
 #include "ipi.h"
 #include "mem_layout.h"
 #include "logdefs.h"
+#include "nmi.h"
 #include "paging.h"
 #include "processor.h"		// for cli/sti
+#include "platform_control.h"
 #include "regdefs.h"
 #include "std_macros.h"
 #include "thread.h"
@@ -145,12 +147,15 @@ Thread::handle_kernel_exc(Trap_state *ts)
 
 /**
  * The global trap handler switch.
+ *
  * This function handles CPU-exception reflection, int3 debug messages,
  * kernel-debugger invocation, and thread crashes (if a trap cannot be
  * handled).
- * @param state trap state
- * @return 0 if trap has been consumed by handler;
- *          -1 if trap could not be handled.
+ *
+ * \param ts  Trap state.
+ *
+ * \retval 0   Trap has been consumed by handler.
+ * \retval -1  Trap could not be handled.
  */
 PUBLIC
 int
@@ -167,7 +172,18 @@ Thread::handle_slow_trap(Trap_state *ts)
     }
 
   if (ts->_trapno == 2) [[unlikely]]
-    goto generic_debug;        // NMI always enters kernel debugger
+    {
+      if (Platform_control::handle_shutdown_nmi())
+        return 0;
+
+      if (!nested_trap_handler)
+        {
+          Nmi::handle(current_cpu(), ts->ip());
+          return 0;
+        }
+
+      goto generic_debug;
+    }
 
   if (from_user && _space.user_mode())
     {

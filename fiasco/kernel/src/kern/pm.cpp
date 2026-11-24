@@ -2,6 +2,7 @@ INTERFACE:
 
 #include <cxx/dlist>
 #include <cassert>
+#include "context_base.h"
 #include "per_cpu_data.h"
 
 /**
@@ -66,8 +67,8 @@ private:
  * CPU-local power management callbacks.
  *
  * Inheriting from this class allows to define callbacks that are executed
- * before suspend and after resume on a CPU specified by calling the
- * #register_pm() method.
+ * before suspend, after resume, and before shutdown/reboot on a CPU specified
+ * by calling the #register_pm() method.
  */
 class Cpu_pm_callbacks : public cxx::D_list_item
 {
@@ -100,13 +101,25 @@ public:
    */
   virtual void pm_on_resume(Cpu_number current_cpu) = 0;
 
+  /**
+   * Shutdown callback, to be defined by the inheriting class.
+   *
+   * \note The callback might be called from a non-thread context and the
+   *       implementation should be prepared for that. For example, the
+   *       #current_cpu() function cannot be safely called and the provided
+   *       argument should be used instead.
+   *
+   * \param current_cpu  Current CPU number.
+   */
+  virtual void pm_on_shutdown(Cpu_number current_cpu) = 0;
+
   virtual ~Cpu_pm_callbacks() = 0;
 
   /**
-   * Register power management classbacks on a specific CPU.
+   * Register power management callbacks on a specific CPU.
    *
    * This method is allowed to be called at most once (since each object
-   * inheriting from #Cpu_pm_callbacks can only be enququed into a single
+   * inheriting from #Cpu_pm_callbacks can only be enqueued into a single
    * per-CPU list of callbacks as it a list element itself).
    *
    * \param cpu  CPU where to run the power management callbacks on.
@@ -151,6 +164,25 @@ public:
 
     for (auto const &&i: list)
       i->pm_on_resume(current_cpu);
+  }
+
+  /**
+   * Run power management reboot/shutdown callbacks registered for the current
+   * CPU.
+   *
+   * \note The CPU number of the current CPU must be explicitly supplied by
+   *       the caller. There is no generic way the method can check that the
+   *       supplied CPU number is the current CPU since this method might be
+   *       called from a non-thread context.
+   *
+   * \param current_cpu  Current CPU number.
+   */
+  static void run_on_shutdown_hooks(Cpu_number current_cpu)
+  {
+    List &list = _list.cpu(current_cpu);
+
+    for (auto const &&i: list)
+      i->pm_on_shutdown(current_cpu);
   }
 
 private:

@@ -51,8 +51,8 @@ enum Thread_state : Mword
 
   /// TCB allocated, but inactive (not in any queue).
   Thread_dead                 = 0x200,
-  /// Thread is about to be killed.
-  Thread_dying                = 0x400,
+  /// Thread was killed, so can never again be started.
+  Thread_killed               = 0x400,
 
   /// A semaphore's activation of this thread has landed (Semaphore::wake_dequeued()).
   Thread_sem_woken            = 0x800,

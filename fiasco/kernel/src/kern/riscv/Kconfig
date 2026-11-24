@@ -87,3 +87,17 @@ config RISCV_VMID
 
 config RISCV_SBI_V1
 	bool
+
+# SECTION: COMPILING
+
+config LD_NORELAX
+	bool "Pass --no-relax to the linker"
+	depends on EXPERT
+	help
+	  Performing linker relaxation can be very time-consuming on RISC-V
+	  when using the GNU linker. Enable this option to sped-up linking, in
+	  particular if kernel unit tests building is enabled.
+
+	  Do NOT enable this option for production builds as it disables certain
+	  performance optimization!
+

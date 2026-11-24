@@ -153,6 +153,12 @@ Apic::pm_on_suspend(Cpu_number) override
   _saved_apic_timer = timer_reg_read();
 }
 
+PUBLIC void
+Apic::pm_on_shutdown(Cpu_number) override
+{
+  Apic::timer_disable_irq();
+}
+
 //----------------------------------------------------------------------------
 IMPLEMENTATION [!mp]:
 

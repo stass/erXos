@@ -726,15 +726,31 @@ Context::kernel_context(Cpu_number cpu, Context *ctxt)
 //-
 
 /**
- * Check if the context is inactive, i.e. has not yet been started or was killed.
- * @return true if this context is inactive.
+ * Check if the context has been killed, although the actual kill operation,
+ * i.e. Thread::do_kill(), might be still pending or in progress.
+ *
+ * @return true if this context has been killed, false otherwise.
  */
 PUBLIC inline NEEDS ["thread_state.h"]
 bool
-Context::is_invalid(bool check_cpu_local = false) const
+Context::is_killed(bool check_cpu_local = false) const
 {
   unsigned s = state(check_cpu_local);
-  return (s & Thread_dead);
+  return s & Thread_killed;
+}
+
+/**
+ * Check if the context has been killed, and the kill operation has finished.
+ *
+ * @return true if this context has been killed and reached its final dead
+ *         state, false otherwise.
+ */
+PUBLIC inline NEEDS ["thread_state.h"]
+bool
+Context::is_killed_and_dead(bool check_cpu_local = false) const
+{
+  unsigned s = state(check_cpu_local);
+  return (s & (Thread_dead | Thread_killed)) == (Thread_dead | Thread_killed);
 }
 
 /**

@@ -85,11 +85,23 @@ void
 Svm::pm_on_resume(Cpu_number) override
 {
   Unsigned64 efer = Cpu::rdmsr(Msr::Ia32_efer);
-  efer |= 1 << 12;
+  efer |= Efer_svme;
   Cpu::wrmsr(efer, Msr::Ia32_efer);
   Unsigned64 vm_hsave_pa = Kmem::virt_to_phys(_vm_hsave_area);
   Cpu::wrmsr(vm_hsave_pa, Msr::Vm_hsave_pa);
   _last_user_vmcb = nullptr;
+}
+
+PUBLIC
+void
+Svm::pm_on_shutdown(Cpu_number) override
+{
+  asm volatile ("clgi");
+
+  Unsigned64 efer;
+  efer = Cpu::rdmsr(Msr::Ia32_efer);
+  efer &= ~Efer_svme;
+  Cpu::wrmsr(efer, Msr::Ia32_efer);
 }
 
 PUBLIC static inline NEEDS["cpu.h"]
@@ -122,7 +134,7 @@ Svm::Svm(Cpu_number cpu)
 
   Unsigned64 efer;
   efer = c.rdmsr(Msr::Ia32_efer);
-  efer |= 1 << 12;
+  efer |= Efer_svme;
   c.wrmsr(efer, Msr::Ia32_efer);
 
   Unsigned32 eax, ebx, ecx, edx;

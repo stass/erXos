@@ -61,7 +61,7 @@ void
 Cpu::init_sysenter()
 {
   setup_sysenter();
-  wrmsr(rdmsr(Msr::Ia32_efer) | 1, Msr::Ia32_efer);
+  wrmsr(rdmsr(Msr::Ia32_efer) | Efer_sce, Msr::Ia32_efer);
 }
 
 

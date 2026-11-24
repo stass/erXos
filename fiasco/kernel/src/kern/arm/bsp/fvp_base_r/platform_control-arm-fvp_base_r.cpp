@@ -9,12 +9,14 @@ EXTENSION class Platform_control
 // ------------------------------------------------------------------------
 IMPLEMENTATION [arm && pf_fvp_base_r && !arm_psci]:
 
+#include "pm.h"
 #include "reset.h"
 
 IMPLEMENT_OVERRIDE
 void
 Platform_control::system_off()
 {
+  Cpu_pm_callbacks::run_on_shutdown_hooks(current_cpu());
   platform_shutdown();
 }
 

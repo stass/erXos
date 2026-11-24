@@ -40,3 +40,6 @@ SHARED_FLAGS += -mcmodel=medany
 
 KERNEL_LDFLAGS += -defsym kernel_load_addr=$(CONFIG_KERNEL_LOAD_ADDR) \
                   -defsym kernel_virt_addr=$(CONFIG_KERNEL_VIRT_ADDR)
+
+KERNEL_LDFLAGS += $(if $(and $(CONFIG_LD_NORELAX),$\
+                      $(call CHECKLD,--no-relax,)),--no-relax)

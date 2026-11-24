@@ -43,7 +43,7 @@ private:
 
   int skip_empty(To_iter *c, int i)
   {
-    while (*c == _q->first(i).end() && i < static_cast<int>(_q->queues()))
+    while (*c == _q->first(i).end() && i + 1 < static_cast<int>(_q->queues()))
       {
         ++i;
         *c = _q->first(i).begin();
@@ -107,6 +107,13 @@ public:
   {
   public:
     Iterator() {}
+
+    Iterator operator + (int offs) const
+    {
+      Iterator i = *this;
+      i += offs;
+      return i;
+    }
 
     Iterator const &operator += (int offs) &
     {
@@ -191,7 +198,7 @@ static
 int
 Jdb_list_timeouts::get_type(Timeout *t)
 {
-  for (Cpu_number i = Cpu_number::first(); i < Config::max_num_cpus(); ++i)
+  for (Cpu_number i : Config::cpu_numbers())
     if (Per_cpu_data::valid(i) && (t == timeslice_timeout.cpu(i)))
       return Timeout_timeslice;
 
@@ -223,7 +230,7 @@ static
 void
 Jdb_list_timeouts::show_header()
 {
-  printf("%s  type           timeout    owner       name\033[m\033[K\n",
+  printf("%s  type           timeout             owner   name\033[m\033[K\n",
          Jdb::esc_emph);
 }
 
@@ -231,48 +238,44 @@ static
 void
 Jdb_list_timeouts::list_timeouts_show_timeout(Timeout *t)
 {
-  char const *type;
-  char ownerstr[32] = "";
+  String_buf<18> owner_str;
   Thread *owner;
   Signed64 timeout = t->get_timeout(Jdb::system_clock_on_enter());
 
   Kconsole::console()->getchar_chance();
 
+  char const *type;
+  // For showing the owner, don't use "%p" but use %lx without '#' to have the
+  // same content as the list of kernel objects ('Q').
   switch (get_type(t))
     {
     case Timeout_timeslice:
       type  = "timeslice";
       owner = get_owner(t);
       if (owner)
-        snprintf(ownerstr, sizeof(ownerstr), "  %p",
-                 static_cast<void *>(owner));
+        owner_str.printf("%16lx", reinterpret_cast<Address>(owner));
       else
-       strcpy(ownerstr, "destruct");
+        owner_str.printf("%16s", "destruct");
       break;
     default:
-      snprintf(ownerstr, sizeof(ownerstr), "  0x%lx",
-               reinterpret_cast<Address>(t));
+      owner_str.printf("%16lx", reinterpret_cast<Address>(t));
       type  = "unkn";
       owner = nullptr;
       break;
     }
 
-  printf("  %-10s   ", type);
+  String_buf<11> time_str;
   if (timeout < 0)
-    putstr("   over     ");
+    time_str.printf("   over");
   else
-    {
-      String_buf<12> time_str;
-      Jdb::write_ll_ns(&time_str, timeout * 1000, false);
-      putstr(time_str.c_str());
-    }
+    Jdb::write_ll_ns(&time_str, timeout * 1000, false);
 
   Jdb_kobject_name *nx = nullptr;
-
   if (owner)
     nx = Jdb_kobject_extension::find_extension<Jdb_kobject_name>(owner);
 
-  printf(" %s  %s\033[K\n", ownerstr, nx ? nx->name() : "");
+  printf("  %-10s %11s  %s   %s\033[K\n",
+         type, time_str.c_str(), owner_str.c_str(), nx ? nx->name() : "");
 }
 
 IMPLEMENT
@@ -298,8 +301,6 @@ static
 void
 Jdb_list_timeouts::list()
 {
-  unsigned y, y_max;
-
   typedef Rnd_container<Timeout_iter> Cont;
   typedef Cont::Iterator Iter;
 
@@ -307,6 +308,7 @@ Jdb_list_timeouts::list()
                Timeout_iter(&Timeout_q::timeout_queue.cpu(Cpu_number::first()), true));
   Iter first = to_cont.begin();
   Iter current = first;
+  unsigned long const page = Jdb_screen::height() - 3;
   Iter end = to_cont.end();
   --end;
 
@@ -315,25 +317,27 @@ Jdb_list_timeouts::list()
   show_header();
   for (;;)
     {
-      y = current.pos();
+      unsigned y = current.pos();
 
-      for (bool resync=false; !resync; )
+      for (bool resync = false; !resync; )
         {
           Jdb::cursor(2, 1);
-          y_max = 0;
-          // need to check for y_max > Jdb_screen::height()-3 here too
-          for (Iter i = current; i != to_cont.end(); ++i, ++y_max)
+          unsigned y_max = 0;
+          for (Iter i = current; i != to_cont.end() && y_max < page; ++i, ++y_max)
             list_timeouts_show_timeout(*i);
 
-          for (unsigned i=y_max; i<Jdb_screen::height()-3; ++i)
+          if (y_max > 0 && y >= y_max)
+            y = y_max - 1;
+
+          for (unsigned i = y_max; i < page; ++i)
             putstr("\033[K\n");
 
-          Jdb::printf_statline("timouts", "<CR>=select owner", "_");
+          Jdb::printf_statline("timeouts", "<CR>=select owner", "_");
 
-          for (bool redraw=false; !redraw; )
+          for (bool redraw = false; !redraw; )
             {
-              Jdb::cursor(y+2, 1);
-              switch (int c=Jdb_core::getchar())
+              Jdb::cursor(y + 2, 1);
+              switch (int c = Jdb_core::getchar())
                 {
                 case KEY_CURSOR_UP:
                   if (y > 0)
@@ -346,38 +350,34 @@ Jdb_list_timeouts::list()
                     }
                   break;
                 case KEY_CURSOR_DOWN:
-                  if (y < y_max)
+                  if (y + 1 < y_max)
                     y++;
-                  else
+                  else if (current + y_max != to_cont.end())
                     {
-                      Iter i = current;
-                      ++current;
-
-                      if (current == to_cont.end())
-                        current = i;
-                      redraw = i != current;
+                      current += 1;
+                      redraw = true;
                     }
                   break;
                 case KEY_PAGE_UP:
-                    {
-                      Iter i = current;
-                      current -= Jdb_screen::height()-3;
-                      redraw =  i != current;
-                      if (!redraw)
-                        y = 0;
-                    }
-                  break;
+                  {
+                    Iter i = current;
+                    current -= page;
+                    redraw = i != current;
+                    if (!redraw)
+                      y = 0;
+                    break;
+                  }
                 case KEY_PAGE_DOWN:
-                    {
-                      Iter i = current;
-                      current += Jdb_screen::height()-3;
-                      if (current == to_cont.end())
-                        current = end;
-                      redraw =  i != current;
-                      if (!redraw)
-                        y = y_max;
-                    }
-                  break;
+                  {
+                    Iter i = current;
+                    current += page;
+                    if (current == to_cont.end())
+                      current = end;
+                    redraw = i != current;
+                    if (!redraw && y_max > 0)
+                      y = y_max - 1;
+                    break;
+                  }
                 case KEY_CURSOR_HOME:
                   redraw = current != first;
                   current = first;
@@ -386,16 +386,13 @@ Jdb_list_timeouts::list()
                 case KEY_CURSOR_END:
                   redraw = current != end;
                   current = end;
-                  y = y_max;
+                  y = 0;
                   break;
                 case KEY_RETURN:
                 case KEY_RETURN_2:
                   if (jdb_show_tcb != nullptr)
-                    {
-                      Thread *owner;
-                      Iter i = current;
-                      i += y;
-                      if (i != to_cont.end() && (owner = get_owner(*i)))
+                    if (Iter i = current + y; i != to_cont.end())
+                      if (Thread *owner = get_owner(*i))
                         {
                           if (!jdb_show_tcb(owner, 1))
                             return;
@@ -403,7 +400,6 @@ Jdb_list_timeouts::list()
                           show_header();
                           redraw = 1;
                         }
-                    }
                   break;
                 case KEY_ESC:
                   Jdb::abort_command();

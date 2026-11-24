@@ -668,6 +668,11 @@ map(MAPDB* mapdb,
                     v_delete<SPACE>(m, size, Page::Rights::FULL(), true, tlb);
                   });
 
+              // The flush below can invalidate sender_frame's iterator, see
+              // Frame::revalidate() for details. Remember the mapping so we
+              // can revalidate it below.
+              auto sender_mapping = sender_frame.mapping();
+
               // And finally recursively remove the mapping from the mapdb.
               mapdb->flush(rcv_frame, L4_map_mask::full(), SPACE::to_pfn(r_addr),
                            SPACE::to_pfn(r_addr + r_size));
@@ -692,9 +697,14 @@ map(MAPDB* mapdb,
                   continue;
                 }
 
-              // unlock destination if it is not a grant is the same tree
+              // unlock destination if it is not a grant in the same tree
               if (!rcv_frame.same_lock(sender_frame))
                 rcv_frame.clear();
+              // Re-establish the sender iterator after the flush (see above).
+              else
+                // Must never fail, as this is already covered by the
+                // `Dst_equal_to_or_ancestor_of_src` case above.
+                check(sender_frame.revalidate(sender_mapping));
             }
         }
       else if (! mapdb->lookup(from_id,

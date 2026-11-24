@@ -11,7 +11,7 @@ to get feedback and an 'OK' from our side that the presented figures are
 reasonable.
 
 In any case, for doing benchmarks and performance analysis, please ensure
-to have CONFIG_PERFORMANCE selected in Fiasco's configuration.
+to have CONFIG_BENCHMARKING selected in Fiasco's configuration.
 
 
 Thank you.

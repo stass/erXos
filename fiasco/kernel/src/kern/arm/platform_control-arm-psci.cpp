@@ -4,6 +4,7 @@ IMPLEMENTATION [arm && arm_psci]:
 #include "cpu.h"
 #include "mem.h"
 #include "minmax.h"
+#include "pm.h"
 #include "processor.h"
 #include "psci.h"
 #include "timer.h"
@@ -63,7 +64,10 @@ void
 Platform_control::system_off()
 {
   if (Psci::is_detected())
-    Psci::system_off();
+    {
+      Cpu_pm_callbacks::run_on_shutdown_hooks(current_cpu());
+      Psci::system_off();
+    }
   else
     printf("PSCI not detected, cannot turn the system off.\n");
 }

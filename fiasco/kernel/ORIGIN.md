@@ -2,10 +2,18 @@
 
 Repository: https://github.com/kernkonzept/fiasco
 
-Revision: 50bbe8a981199e17865e8553a4eb02c387b339cf
+Revision: 07ea18e1f293bda6b9f75e59707ee1c70cf4321f
 
 The inventory records the imported bytes and their license evidence.
 Third-party notices remain in their original files.
+
+Last upstream commit reviewed for security fixes: the revision above,
+07ea18e1f293bda6b9f75e59707ee1c70cf4321f, on 2026-11-24. The fork carries
+upstream's tree at the revision above, except upstream's
+`arm/bootstrap: make it work with ld.lld` (1e927ebf), whose job erXos's own
+bootstrap relocation patch already does: `src/kern/arm/bootstrap.cpp`,
+`src/kern/arm/Makerules.KERNEL.arm` and both architectures' bootstrap entry
+keep erXos's form.
 
 `src/kern/kobject_rpc.h` is not Fiasco's: it is erXos's clean-room replacement of
 the GPL-2.0-only original, written without reading it from the clean-room
@@ -17,8 +25,8 @@ is under `changes`.
 {
   "version": 1,
   "repository": "https://github.com/kernkonzept/fiasco",
-  "revision": "50bbe8a981199e17865e8553a4eb02c387b339cf",
-  "archive_sha256": "80cb4b4db43f18521b859012cb16201d62b3b541c69cdfb2f36f6fa726a8aea5",
+  "revision": "07ea18e1f293bda6b9f75e59707ee1c70cf4321f",
+  "archive_sha256": "e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee",
   "exclusions": [
     {
       "path": "src/kern/arm/bsp/qcom/Kconfig",
@@ -417,7 +425,9 @@ is under `changes`.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     }
   ],
-  "removed": [],
+  "removed": [
+
+  ],
   "files": {
     ".github/workflows/check_build_arm.yml": {
       "license": "MIT",
@@ -463,7 +473,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "198a781982a63135b8a0b82b97d92cd407d73844d78a0493fc33c75906355ae5",
+      "sha256": "db1f99b4ab463c6304a24edca845d4ada7dbc28fd0351b1a5d33667f08775008",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -603,7 +613,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ebef345ec650ad12b444767b696e07492d6232d9cf02464b3c59a3f626659f4a",
+      "sha256": "a41314d0f0ec92d00f32adcb73d9d0ea096666590759593ad76e386a916ddd2e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -663,7 +673,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "3ab1c714be4ea7250d4e3abbc5c38b6a8bbcf5d75ef7370c548632ba2cdb70e5",
+      "sha256": "2ccb48ec63c78e221ac37723f8046a864a5028395b6aa894d471ed90f54fe9af",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -973,7 +983,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "d78f8647a34f928750f945cd0532b25efe41810f2f26e7f26f2704d552e8e768",
+      "sha256": "e68a4eca29ab111361eeeabb23b37cda93f7303e9b3a093a2ca82d646b224e75",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -993,7 +1003,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "b04932811171ad458c6e82990369884d68f32713691ff095493a2c6f75fcdf11",
+      "sha256": "24bcc18948e1b93847a959dfc326abafa84d72462ddfb604b1428ad941dd3038",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -1003,7 +1013,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "50bae6b8979fdcc72e45bb52617fd146273bd4f9d71ddc3469a17d29265ad645",
+      "sha256": "01e56c39db53e346a37d203064ca03b4e59c7cb3e845527600b1a02ed8e5a44b",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2206,7 +2216,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "18a077f7475809130782e3d6d96759f9fd99af815093a718c7bb775ea490ff5b",
+      "sha256": "105e75045c3f5254f3c5388dcd4599ccabb0fa5795817c5ab27397726b260aff",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2276,7 +2286,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "122fa4df3cbfc85bc7c175c4b6faf92730f7043ec40ce3fbfa2cabc53cf1ea03",
+      "sha256": "3c477ea619006c525483bbc927ca7fba3b7a611ea2f3bd78ca04f68264c2b9e9",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2336,7 +2346,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "772b59f147ede103dc8ddbc4f54ae9c3fc0b95ee187053ab5b0976661bcabb38",
+      "sha256": "aad1796303ab168809a816ed1145e35607f23cb42641bcea05adff9aa5dbe448",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2366,7 +2376,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ba320b89dc49a75f34c1c21e8fd4e5fed6b1bb43db227cebb098df0f033604a6",
+      "sha256": "0e7722954aa0d38bf2b43fc0fc3013048f08beb89a40da60190c8dce94d4f298",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2476,7 +2486,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "15f7f57faee83202384115c32ecef5f567dde388d2433f4fa00a295e4185d1ad",
+      "sha256": "d27467e35c1ae889bcac88229c3ba9ba9d31ae90151887baf27c9506c5235c7f",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2526,7 +2536,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0b1867f38728a7b832c0d5ed90116b1654983e1b21a7e37da47587b8e2eb0a79",
+      "sha256": "5358b80cbd83616986cb49ca702398b9f6fc0acaf1bc3a9db7c9ef45041dc485",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2586,7 +2596,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "c446a1086fdf6de52187fce508875a02abaebdf9e9e03d8568c811a3b398eedf",
+      "sha256": "c2fd6a007f036aff51ee2361897cc7b3d9dc1b456bebbc5d466562ff5686e21e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2596,7 +2606,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "bfddf854db3a68ea2856bd581ca937417860cec3034230f0f8fc27a4a33b98fa",
+      "sha256": "c8c9a12dd282311bee243754572d6ede460ed264bb047dfd144512f7b065727e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2626,7 +2636,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "130458f17adc5a285663c842e54184c03dac6903f0653a439a3629c7ce02537c",
+      "sha256": "1c734d4c00764c5afea5a04c2167f64dc5dd21c26e80b609eb3a3061178e626f",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2716,7 +2726,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "b64c3368d0016ed677bb5d1e8ed66250f53f68b3e81d66821524ddfe7e1c02bb",
+      "sha256": "87fa7f781c3768afe6258b86a64af69c5603b3356326f4d56d12e3222b2425d0",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2776,7 +2786,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "bc316e9005de6236c722bf28fed50957cca824d0cc85a0bfe9a2572543eaa9c2",
+      "sha256": "128529fefbf7f6fb9b89b68a4bfd18328026441126d7f564d0a38be6273d3415",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2886,7 +2896,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "aad354d31809d48a6ebe29c97cdc9c81f32df53f3bc6b302f8532752822b16f9",
+      "sha256": "6c72209ff99bdfb6dba035e520f3790f5dfc6f5403e067fc412653b3cbfcf143",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2906,7 +2916,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "aa5d1c604cc6e6a9bfd61343d40618e99c9562eefdd0a0cc523a153ebf50171a",
+      "sha256": "c02103e52d5abdb859ec26e11f784d9693dd25f3730034301fa7bf42e82a7163",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2926,7 +2936,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "7ced159e944a5c17d685cea12eb74b017f17d3b927bdce26afe5d095d03c3f9d",
+      "sha256": "37c0da48e53156d79990f896729cb925783bd871ea45db905c36b2255ffaced6",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -3146,7 +3156,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a42caa37b186d9e534e26e311d619eea3c718060c651a16ac145d3aa04e32ec1",
+      "sha256": "2bee9cc2b9f3910a20a0d92287cb8fe951767c9a45c8d9c5f44f486e1d449d23",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -3256,7 +3266,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "5f048dccf416d9fc1dae1c1f48baf65f70d3ba346b42b30ca1c564f12bf5fea8",
+      "sha256": "895ab8def7f2a955c1d95e8b89c7b6c2d30362634b0244fb3daee410c67d5b0e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -3546,7 +3556,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ce4f0da057b8d786ed2bafb69a6270e12ea18572518bd66d116c57bd4745f88b",
+      "sha256": "d3f3a7df23d6b75012bfddf8b9e5e59ae9efadb21244edf11ec27bd76234a271",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -3616,7 +3626,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "51d1f2a03028a5083b973faa0cb1922869f8519b91d99b5b2069152e408ddbfd",
+      "sha256": "c163142fdd14031c39163255d86cc55232fd71e9a3c35ce40c7692d36b09e2cb",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -3956,7 +3966,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ad5530f5b9faff560440174b3eac38fa9f5fe20bd3a9193921ad43b56458f264",
+      "sha256": "a3078808e6110595d55fad7143becac2c6c06a7c385197a2f6edc16ca7ea7a41",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -4036,7 +4046,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0d48e8c9da31d17a5794704615034d7b9a4653b8694b9dae11e325b84514738a",
+      "sha256": "5316af730c2b28d9230b9f9f57833d2f9c11973cd6de52b298285753feb9b5e5",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -4526,7 +4536,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "1f2a5458faa94fa2b2ae7de78b7ef4ef574bd07abc050a2ef4d6123c1aeade8d",
+      "sha256": "b10023942b2799ebe5b38fb3b0d272e40d6592d35bf57526dd4791603679e0f5",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -4616,7 +4626,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "5a818b4cf956cf540ec87dcab632348021c2d302506591879e1f532f509c0b77",
+      "sha256": "7359fe6e484382e08a94821a5fca1123ed33f860e15da33b839e3c65873ac23f",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -5836,7 +5846,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "552de7227a1c1ed1df0c435ce7e72ce3fea5f46bd8478adedccc88d87630dbfe",
+      "sha256": "d05d1ff9dcecb582f20004b2d4eade5d4e82c79a18898857fd722bdbe97823ea",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -6986,7 +6996,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "b9462ae022f56c9448004ab20bbadc9b2520e6f1f84dddeaff12870eac278285",
+      "sha256": "8d54d8c81777b191abbe6db499aed685709e0001f86b2dea1280bc0105fc6d7d",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7436,7 +7446,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "d1918f33246a2a82af2590cd6b09c964d60e34f07dc74016b17b4445149d9625",
+      "sha256": "7862dd4d7fa5665d65afe6ad61ab724d298784186a1a388e71922d10e3bc611b",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7466,7 +7476,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0cfb1c4ee46e25a93248b6ec89aa87ce457173bf8c65c6025cb39edaedf4a6cc",
+      "sha256": "0e2ae41ab37d1ca85d9b4ffbcf4a8b1ec80d2efc7620b7bea5be9527a0eaac5a",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7786,7 +7796,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "cec1d9b3785c9f2c74d8b3028e2b4de3b33bde3da4725c690674123c5f366da7",
+      "sha256": "1f6834d725b79839d96bf85d4eb81b741e0eda3677fb10bdb278e90894a8b4a4",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7906,7 +7916,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "fb670012aecab1d3ae8a44ee939e9252a6259637e50f9047b041f38369cf3ef2",
+      "sha256": "5e9098198077af6b25c45327141490176ba7cab72ecec231f7941ea49507a7b7",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7936,7 +7946,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "1801e5774e6f661532f34c3a7636718ab78078046c4b462296da79d483fb3b15",
+      "sha256": "ee5b217841c064b5f7b066e70e7fb15432345dfa09e149ba369076b2ca8e8ea7",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7966,7 +7976,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "1c47d45337db3437abff7275a9316ab9c07eb47fee5f387c25c768bb41f40013",
+      "sha256": "b43e83fd1d02716d06a6388d29d18f442ae9b28be267ef5ea4655108936447bc",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -7996,7 +8006,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0d4bd23b2399863403d6d1942a6149dcce492b615b763f06f10292da4b3faf8c",
+      "sha256": "23ded6c9620cb94d6541ffeca64d9221b098e9fd94eaabad5b9602115e0cbf6d",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8146,7 +8156,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "feca081ddb6dc59950cece4e5a698d02c5302f86df7752a93a7d25121f1c5207",
+      "sha256": "a383326e0251335bd3a1e8e3db1060cc6d6f23710ccca4d970972f9b130feafe",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8156,7 +8166,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "e55ba554485b1cbd56a51bb1cc6b0421fd92f7bd89a366183992d9db3fea10b3",
+      "sha256": "598a26c89c966f54dd737781694c77042bfdeeed02a246b1612ef188aa6e5e5d",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8386,7 +8396,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "898014e93b5ff9e9fe2395a3aebe83da2ae5526eae7d04f990a75ed3acac1b55",
+      "sha256": "6f91e084fa8fe562841306da4b0223541601686c4a4e099adcdf8b50e0598ff6",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8406,7 +8416,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a509b770288b7d1344fceb0efa3157de2e70f879c66052e43bb09f28e72b3cbe",
+      "sha256": "17ce1a84d67d39433c64ec6e81fb14c5d936d36c5ed6e979b06779ba17e7d03b",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8446,7 +8456,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "e58f04d5214842125b8d72a9ba65ae9bba36d930db85a8feba7302fc5ae53c4d",
+      "sha256": "d7a3ced03282dd2356383d03387d5572b476f386bdc805b25e863dccc2286bff",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8476,7 +8486,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a5a6643dd0ccaa01d02a924f0c47ee4b74fa44105cd20dc042c14c63e8c30717",
+      "sha256": "6d68889830528387048c3e796becb1c76c0a8d7682ea4e5455cbfb79d2916595",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8626,7 +8636,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "4c21d256ab81cdc39098a29ae6ac9a82e0dae238a3a587b3810e9425da006d1a",
+      "sha256": "a17bba9e83beccfda78453d009c9b9d749a35bbf2b530b5a556cdb46aa9f89b8",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8646,7 +8656,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "f59ea1bd1f1735f5a25e24eccc1597de23a1fbae89f2958d28554d247bbe3570",
+      "sha256": "b8f869d6e918b5e20cd6ee6ada45f0992277082150ce75d87d2f0b14359f1059",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8656,7 +8666,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "79e5f54220fe36788d1dfcde814be3efdebe94236be66df5fa601ba7cc7f3bcc",
+      "sha256": "209dfbdc7c8729bfa6d53513cdc307f5321a4954b3804d81f24e50565b719f38",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8716,7 +8726,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "4d78330deccc77aa3044db51e7337b6f4d185b020ec877a735f02499e66c4111",
+      "sha256": "b048a4fa3c86ab27e2649bd07c96389e823a3b358070094d619123f27182558c",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8816,7 +8826,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "bc0409e703d80c2e1ded6f059d82113e6e7adfc12061853f7a2dc97cf5385155",
+      "sha256": "626f28596d4de1693e725d9732e4121cd41b97f48f9ddebd5db457c326dc5ee6",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8896,7 +8906,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a9ac47e871c358b7e224c06fdb53c98c5bc7c465fed57a758c742ad9da0608e3",
+      "sha256": "1626b7821299c0b40429cb53bc4a3d7839a0ad5a6850011fed27f1dbea8dd83c",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8916,7 +8926,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "84832fd94a9ed0687f4a06cd055c91c8cfa47f72edea5e9c15a8e5800f88b21b",
+      "sha256": "eedb1846bcb32451cf8d87d8da9ed0b8cd75f92f19050f5926b39848d5660a86",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -8936,7 +8946,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "81ef4fbb7bf9c33e95c1006830442177b00a9ea88817210ca583b7bdb34c78d2",
+      "sha256": "00858b02ca6ee86557dbb5beb64259a2f78fb25c9f2373c0fe96c3bd5fb7f772",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9016,7 +9026,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "6cdda5944e3c788198a9bf5b5c2e1bfaf01e29ae44daf0e7504159362239c1b5",
+      "sha256": "44caed05cb38887b3f7c3f8bff06021d041ed25a8d272d5d5cf62c8cfe444ddb",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9076,7 +9086,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ff26bec542c649d7af76413ec7347a2817b667fd7b4c55a3a9f361950853852d",
+      "sha256": "f02d0b1cbd5ec02b26dc4930664c34bcc270b3b3938bb87ca4ce3876f7058878",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9106,7 +9116,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "9e2c22e8f7642470ce7dea18385d821c424fc23700b0d12926fb433840d9ec89",
+      "sha256": "97829f1fe9eb22156a978149d3eb7ec9710733c4bb494ddcc3ed2f3fe02ae894",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9126,7 +9136,17 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "22f4dfe68ccd87aa8293f0e23276aac32c56c41d6a15dfa3902ef5c533cc4773",
+      "sha256": "69b81f6f429c1d3ddb33e64942adf3e6b3814b14038a423b6d72aac9df546b28",
+      "kind": "file",
+      "non_ascii_lines": [
+
+      ]
+    },
+    "src/kern/ia32/nmi.cpp": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "e29b01966b35705ef769093daf36801f94a0e7afef2a63c76a29db5d4fa28b63",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9226,7 +9246,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a7e4bcaa594166bd201374c389b12b1813fd87af5e2c96c617cea96323edfa66",
+      "sha256": "e8560f7394bf91422b60ec3f0a69fdd804bb628aecece980e458c12bcf7373ab",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9246,7 +9266,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "f6b63be3c3f6f293b1bd2201b8330a01a7f7d1b2ae792699a0156b23f2982c10",
+      "sha256": "aea265f1517bb328d8efff8a6ee9dc1a3559c5ceee746e59b6e06e996398a0dd",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9326,7 +9346,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "53e4b5f7719916c66d42aa1fa955fdb96625ec36a752b37a7faebaf3f84ec476",
+      "sha256": "c97858bcb8963e82da2cd8a33aa4a05aed027c760f1a89d5afd153433019d567",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9336,7 +9356,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "245a16c92f0815f54bf4b6baf68be21d658c2c686be213bf7dfa315f05ee8cdf",
+      "sha256": "e3687ed53b21081492cf077e0c3aab649b3fda7cdfc4a8ecf72d7b1a564f2750",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9406,7 +9426,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "e96cf81a91de9ee5a1981ea92494ba3d8da8a49ef75e7970b8a4aaa90aeea321",
+      "sha256": "eceafa02e6584032f9068e1d490514348ecf5c4dc73799e8f46d06d2d0d97397",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9426,7 +9446,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "cf97ee24bffe902980172a6a851f2e9b3a4d139cc4e9ef0a97345df07baadde9",
+      "sha256": "1399bc6f457559ec564ba78129d4eeeee3eb760860bafbda6c11e1ef9c22a1bd",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9446,7 +9466,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "048e5947d3cb18c1cf54c30594f1df69e81088aeb2b819451069eee3e1a7ecfa",
+      "sha256": "7e4ba6f6cf285b9bff650f67441859d8c69ea13b4737d1a3cf0bf11a813364d4",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9536,7 +9556,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "c77d299851513c6df815c0b1cab3617f1211408ca01615c9cbf77f6e04f3ed64",
+      "sha256": "d113eb64c4fa38ff087233a2cd6e9dabf59d1d5ccfd303f9c122c7eb1525d69e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9716,7 +9736,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "8d2ac9e00cd7a28610e74d97eb4bd331623ae66eeb0c8c15c1f877ff27c3923c",
+      "sha256": "2b75795b8933a872132dc490d5d433440efc8402bf18e03f2a91312404f62e61",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9816,7 +9836,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a0dd9dbc37622e1e13b37db4ba214f7d71eaefb7eed70a6cb56521c2f95e90cd",
+      "sha256": "4a1e5bf1f19a40809cf7775ec93da53426034445e097752323f9380201d5dd6e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9906,7 +9926,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "f906b64491bab1d2d67dec2be010d4701dd4a51f08a6475d88ed3f561b871bbe",
+      "sha256": "39a5f349c503b2dd7d9956caa43f34857f426effa0b2a385ad866cbc974f1489",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -9916,7 +9936,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0f611f0f806691d9c37664b5e4beef5d0da369f8dd801492622e54a31a2040e5",
+      "sha256": "4a82c8a9adae1270e126e642cfeda5c4f9439176a81c84b230b30274b5bf3ee0",
       "kind": "file",
       "non_ascii_lines": [
         "bbd42b8be0e4fa3a7129dbd9ab24dbc21b652824272dff068d26883e22dcd735",
@@ -10468,7 +10488,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a4d1da4a14d4a16709bd1fcaea66e4a87ba817353402df875ea5bc3b2f32da60",
+      "sha256": "c430df5af3337037f9b6cdc2932d7f24823ea9de887b6050b4aa0da83d0dcf3b",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10608,7 +10628,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "58b2620e0a3654331a41493f5c1b8a13e3667e5fea2c6ae8f2684a67d8005fde",
+      "sha256": "23ba016f510b2738edb7e8ff09253d2dc92e79700e54861a301a8aa004023d7c",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10888,7 +10908,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "d7ac9a5d8ded63037cda7ac4672a784184691ce7454a454082bfe57e3b895201",
+      "sha256": "aa701cd6eed014c68fe52b2bd60ff9a00f31dabac2d5a4b028676215945b1700",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10918,7 +10938,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "f82a4358e8d48fa600633badb11749eefabcc2de8ca75488bfd801cfed92e854",
+      "sha256": "4f327507d230cdd0c026b3ac424970d321b810c26e7ab8acddbb28407e901b1b",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10958,7 +10978,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "4f3eccd3390b480a07b41f8b007d7179e05e745057634f2aa1a4899a9a7c1b8d",
+      "sha256": "21112f09df2e53188ad67117a80a08584d8512db1b2cf59641c7bb791df06f50",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10968,7 +10988,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "34f786e79f8df9ebd15c9370c0d4aadabede4dfb5ccdb9af0a14d79bc987855d",
+      "sha256": "797923a9e6f0f9e5340c6dcdd7e8ee0a065b725fc2f257593779a66229c25eec",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -10988,7 +11008,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "542539656e6d26aa3884e4936efec7d82a1ee96d1ebfc89be6a403214c8891c3",
+      "sha256": "e6e97657527718555c1debe702f2f017a1c8cd800c1ebdb817f18d34f5e3ae12",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11098,7 +11118,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "fe1ce81a46b19d0799551744dd3242f4f190cd78c01c0b55f4369885e91cc1b0",
+      "sha256": "70151fda38208cf0fb59eed5b242ee26e387d5c96699e532b2a96a5b34996647",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11128,7 +11148,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "6c6d3a3478bb22ff5c9187c559d253ae8ac17481e57d408dcd49efe529944fdf",
+      "sha256": "a8cbbef02382da6af403d6bafb029869a5e8d1d910fe9c5956aea8d5171a6816",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11428,7 +11448,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a1e9eba24595ea311877ff3764648fbfc49fb5b0a8fd0d1958418c7ce65c726d",
+      "sha256": "d62246e8e550912b0703d1b5d50487a8264c4e745ff498c031bfcf0149cf6376",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11488,7 +11508,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a10b449169906ac1ce1af42f53a578d35bf876d149c3e86d60f2e73f8fa04a06",
+      "sha256": "f9973b3e4fc2f4dfe12fcd4e8fff5dc90cd26f9a9dad86dcc5a09c4aab249680",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11498,7 +11518,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "004399818bd26a57a384690827b225ce9557024b5f1b4460b8a17abc51799bcf",
+      "sha256": "7424b703a8525ca3a9dff105f832b1ae50c5c32b2c28a4f3b4c9c306bde481f7",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11508,7 +11528,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "14d71189130b2d84c5b4f8479a7840833c306c101ec9b0f8c367b62484ccd768",
+      "sha256": "3a18c881f04b1333932be236a53ff02baa52710e832a2b2c697b69ac73fc7a52",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11678,7 +11698,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "387742e25a36308f0b810f0a66f6079b070ece712a94c1caea6c15613731efe7",
+      "sha256": "5e240d187ef7815f545459f839b2d666ceac6b62d51cd8f323b269d3c11f7f3e",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -11858,7 +11878,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "57ddafb509967691c60232f126b2bba44b1bc5baefdf0bcb9a90105401dcf72b",
+      "sha256": "b94dd336d6e64a0681eee39620b996a7b5eeb57c26a9759cd1bc19a670072427",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -12079,7 +12099,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "8e8a67b9004eb8773cd6ef02920f91e4cf403dc6ac9db4247558ff60fbe1e26e",
+      "sha256": "9454deab378e651ac47b20ba406c193af48c83c672d8ff02643b2225e8ca0428",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -12099,7 +12119,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "1cbc79e7dc57241f6e7fb4700287909cd57d77191be46283f22de1ef4c82e024",
+      "sha256": "c4488f2f0c84ee1e87160fd1a34d606f26362634cc86f84bbfafdc7edda81236",
       "kind": "file",
       "non_ascii_lines": [
         "0bea48e87ab84a1e386b0f2a7addd71982dcc0ddd9c6940503f2644222159576"
@@ -12149,7 +12169,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "8012f991f3d13af303b7fc3164057aba9d2e679ad6ffe14e4a28f9066414e681",
+      "sha256": "f0bda186f91cfac7c055ea09dcbe2f742f401e4ef062b689397ae213bec9b019",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -12159,7 +12179,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "4ef55eff4ca514c4d1c16838e889e013c4c83e7d3366b109af3ad258118af51b",
+      "sha256": "24c362c68517637c755f393e6db1152f4f29f3a3e169e764af265646c4c0a858",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -12169,7 +12189,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ca5bd2f3bf150ad7349a77815313fefe16f3a306261bfef89cca192013064894",
+      "sha256": "49e1b045ec5ccba4fe7d4e57fba647528301f055822f1b24f2d1f6e2daa2e3cb",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -15129,7 +15149,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "29b5659450f5e567eba784b23d3f254cf3469160725e40178f01f13ee413401a",
+      "sha256": "94b7b1c586e1faca7de021cc63ca33e65434d97c3adac09c87c2caa5bf014d17",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -15299,7 +15319,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a907a27cba1bcb2db92c98ae44abec77f851abddfef7802830570c6d23815711",
+      "sha256": "8dccfdb8ad7b31542cb24a861b79b70b96c25fd6d23ace7762c1f6fb3ce13374",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -15419,7 +15439,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "aecf65989683cded24be4ac7a2203b58d23973869ad192ef84e9d2434efdc109",
+      "sha256": "893b459be16b292640dd12d9b520d1af07407a3ec517187c8f982e8d8e8fa2f6",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -15699,7 +15719,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "bffa70b9c2cda7c2ed90ae2d4cc44f669b7813328c4f93d36054ec21ec41054e",
+      "sha256": "0c7c67a9da90da8d92d0bf00b684906a64c3223bea714b12c57cb446540260d5",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -15750,6 +15770,16 @@ is under `changes`.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "b8ed9118d23e3b1b1c7c6f3bee698b738b072313bbcf08bac9a13f1ca25fff66",
+      "kind": "file",
+      "non_ascii_lines": [
+
+      ]
+    },
+    "src/lib/libk/seq_lock.cpp": {
+      "license": "MIT",
+      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
+      "reviewed": true,
+      "sha256": "80c16a0f5f06e3a0ec89ef0f2db75aaa23d4209ce4497c939f9fc484f00e4ea4",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -16411,7 +16441,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "1b59a52c1515fdb22093fafc39bd436be6b72892c5e398a841432c93e7447831",
+      "sha256": "16fa0c7653f493b4127f6cc8b31bbc5dcab71f1cce3647f5ba26ed938ff06254",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -16911,7 +16941,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "04546ce43ad130f55db30fb6d60a7ab4e44fc7ee3c628a133c485444f8b7094c",
+      "sha256": "dee94fd7904d165f3e6911428ccf1621231b48f12a6551d8f8985fd4bb9c33a8",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -16921,7 +16951,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "ddd217aff6b32c963441c13d9d43c23c2a04c130a40a2e0e1a28f5d4d06c8da1",
+      "sha256": "aedf5236fe0ceeb11dd3fa456a253d1b25fd0c819396da52acbe959fbe796501",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17291,7 +17321,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "973e637923de39c69c516e462ff4cf2b6ace96baf11ac705c0d0879cb38ea0bf",
+      "sha256": "1f16760e200b5f0149195b7de01344955bc0e1b701ff8b64934bffb8b68540d7",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17591,7 +17621,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "0d079f07d274b9baa0e719bf6466993545f7b9a72f78c49ed95de922fc1fb1d0",
+      "sha256": "71c0037c6f27a4f682b78602372bec266baf7ec79a7a8b006a269a0e3d17f4fa",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17721,7 +17751,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "aaceaacfd59508468f9bed4cffaf6a82d7e9d3929827253b44857a41e17c0c30",
+      "sha256": "1863d6971bfe7c73d5f8734abc699ef44afd6bcc3fc5efb7581ad5fc92d01137",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17731,7 +17761,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "a80946576917ef74f4668292e94dc403e6d146a3613cc478fc804b3685610164",
+      "sha256": "9a753987d14020d70efc416fa486a20735111d8526f5ba05bf2963976867b0ab",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17761,7 +17791,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "f809b9faecae017150b3ac0b999176be0a25efc6725bda566bf20d8f9f7c9414",
+      "sha256": "28bbbaf54262d1869da642666cfa49f3f3dbf5b23a74034a6f9e2ac08bf8506c",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17871,7 +17901,7 @@ is under `changes`.
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
-      "sha256": "512a85c24ca2cdd44d1d652e071abc6650cf4776e21979e0a08b421178f59590",
+      "sha256": "16634c3444a92b85f7993c8c631ed8c5974b1f6981544f0085e25529cdfbbfb2",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17881,7 +17911,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "a05f1a7669fd88820761bbeb1c3f321cc4c48e65624f9ae39572f58c264f1e85",
+      "sha256": "7835b25d03f562c3fbf42ddd58ba73070e53d0f47046d3b27ee4fb69344c0026",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17971,7 +18001,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "027d209d2fb12a4350bf629a05f876f065f9254ba788bcf61e68eed135401a0a",
+      "sha256": "6b0543136a9202d06eede775bcaf7b700aa6cb14e88bd960290da8aa2a3f5375",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -17991,7 +18021,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "e1db484d6011e0855ddad833a00ca90ac445e284e8a9cd4608114c51b2f622a2",
+      "sha256": "779bde1aa07b2aceb3d9e0026fedc4822ca30e4abcf6fe320a6ddaa8e8c95e05",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -18001,7 +18031,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "cce11d519da373fca76f897d8b6a6d1baa61d84d9220dcd5b91e86549afc36aa",
+      "sha256": "5919309ff64bd934b281748f0afa98a8d28ac462d4027ae5bf1b0a073ccc8cd6",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -18311,7 +18341,7 @@ is under `changes`.
       "license": "GPL-2.0-only",
       "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
       "reviewed": true,
-      "sha256": "a2028cc88d847d91ea10676eb1bce9d65d16aab44e87be65f09c678eada35aae",
+      "sha256": "44c6591272e60c712eadb8a0d68740c23d16d4993ca9a73ceaea83e62fb32ed6",
       "kind": "file",
       "non_ascii_lines": [
 

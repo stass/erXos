@@ -91,7 +91,7 @@ private:
           auto o = p & ~2ULL;
           if (o != p)
             {
-              write_now(&e->v, p);
+              write_now(&e->v, o);
               clean_dcache(e);
             }
         }
@@ -501,8 +501,8 @@ Dmar_space::remove_from_all_iommus()
     {
       need_wait[mmu.idx()] = false;
 
-      for (unsigned bus = 0; bus < 255; ++bus)
-        for (unsigned df = 0; df < 255; ++df)
+      for (unsigned bus = 0; bus < 256; ++bus)
+        for (unsigned df = 0; df < 256; ++df)
           {
             auto entryp = mmu.get_context_entry(bus, df, false);
             if (!entryp)

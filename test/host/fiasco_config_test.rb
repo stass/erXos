@@ -31,7 +31,7 @@ class FiascoConfigTest < Minitest::Test
     CONFIG_FPU=y
     # CONFIG_ARM_SVE is not set
     CONFIG_SYNC_CLOCK=y
-    CONFIG_PERFORMANCE=y
+    CONFIG_BENCHMARKING=y
     CONFIG_PERF_CNT=y
     CONFIG_PERF_CNT_USER=y
     CONFIG_MP_MAX_CPUS=8
@@ -60,7 +60,7 @@ class FiascoConfigTest < Minitest::Test
     assert_empty violations(stripped)
   end
 
-  # The case a `select` produces: PERFORMANCE selecting LAZY_FPU writes it
+  # The case a `select` produces: BENCHMARKING selecting LAZY_FPU writes it
   # set even when the defconfig says it is not.
   def test_lazy_fpu_set_fails
     resolved = RESOLVED.sub("CONFIG_FPU=y\n", "CONFIG_FPU=y\nCONFIG_LAZY_FPU=y\n")
@@ -99,8 +99,8 @@ class FiascoConfigTest < Minitest::Test
   end
 
   def test_every_violation_is_reported
-    resolved = replacing('CONFIG_ARM_SVE', with: 'CONFIG_ARM_SVE=y').sub("CONFIG_PERFORMANCE=y\n", '')
-    assert_equal ['CONFIG_PERFORMANCE must be y, found unset', 'CONFIG_ARM_SVE must be unset, found "y"'],
+    resolved = replacing('CONFIG_ARM_SVE', with: 'CONFIG_ARM_SVE=y').sub("CONFIG_BENCHMARKING=y\n", '')
+    assert_equal ['CONFIG_BENCHMARKING must be y, found unset', 'CONFIG_ARM_SVE must be unset, found "y"'],
                  violations(resolved)
   end
 

@@ -29,6 +29,16 @@ public:
     Kobject_mappable *frame = nullptr;
     Mapping *m = nullptr;
 
+    Mapping *mapping() const
+    { return m; }
+
+    /**
+     * Nothing to do here: this frame stores the mapping itself, not an
+     * iterator.
+     */
+    bool revalidate(Mapping *) const
+    { return true; }
+
     void clear()
     {
       frame->_lock.clear();

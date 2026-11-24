@@ -10,7 +10,7 @@ require_relative '../../tools/lib/erx/fiasco'
 # Resolves the fork's real Kconfig with the real defconfig, as the
 # fiasco-kernel-config step does, and runs the configuration check over the
 # result. The seeded case puts Fiasco's LAZY_FPU option back with the
-# `select` from PERFORMANCE and gives the defconfig a line saying it is not
+# `select` from BENCHMARKING and gives the defconfig a line saying it is not
 # set: the select wins over that line, and the check must catch the result.
 # The release defconfig (FiascoConfig.release_defconfig) resolves with the
 # debugger and console input unset, which no select turns back on, while the

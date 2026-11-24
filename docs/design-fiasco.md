@@ -175,8 +175,8 @@ whose tag carries items, so no request maps anything into the root.
 map needs to the receiving task's quota, which is its domain's factory: a placement may need a new
 capability-table page (`obj_space_phys_util.cpp:163,226`), refused as `Insert_err_nomem`
 (`map_util-objs.cpp:117-127`), and a memory map a new page-table page (`Mem_space::v_insert`,
-`arm/mem_space-arm.cpp:229-233`) and its mapping-database node (`Treemap::insert`, `mapdb.cpp:858`),
-refused as `L4_error::Map_failed` (`map_util.cpp:735-760,774-775`). A factory's create fails the same
+`arm/mem_space-arm.cpp:229-233`) and its mapping-database node (`Treemap::insert`, `mapdb.cpp:904`),
+refused as `L4_error::Map_failed` (`map_util.cpp:745-770,784-785`). A factory's create fails the same
 way, from the factory it is made from. So does a task's added kernel-user memory, which
 [vCPU arming](#vcpu-upcalls-on-fiasco) takes: `l4_task_add_ku_mem` charges the area to the task's
 quota (`task.cpp:248`), maps it into the task (`:255`), and when either is refused frees the area
@@ -200,7 +200,7 @@ with the reason; nothing else Fiasco refuses does.
 
 One object every thread reaches without a slot is itself: Fiasco resolves the special selector to
 the calling thread with the rights `CWS` (`Obj_cap::deref`, `thread_object.cpp:61-75`). Every
-operation of the thread object (`thread_object.cpp:204-235`) is therefore open to a thread on
+operation of the thread object (`thread_object.cpp:199-230`) is therefore open to a thread on
 itself, and each harms only its own domain, because each names other objects only through slots of
 its own task, which hold nothing but what the root placed:
 
@@ -211,7 +211,7 @@ its own task, which hold nothing but what the root placed:
 | `Switch`, `Stats` | a switch to a thread it names, which needs a thread capability it does not hold; its own time | on |
 | `Vcpu_control`, `Vcpu_resume` | its vCPU state area; a resume into a task needs that task's capability with the special right | on, for [vCPU upcalls](#vcpu-upcalls-on-fiasco) |
 | `Register_del_irq`, `Modify_senders` | an IRQ object of its own slots fired at its deletion; the labels of senders queued on itself | on |
-| `Register_doorbell_irq` | `ENOSYS` without `IRQ_DIRECT_INJECT` (`thread_object.cpp:830-833`) | `IRQ_DIRECT_INJECT` off |
+| `Register_doorbell_irq` | `ENOSYS` without `IRQ_DIRECT_INJECT` (`thread_object.cpp:831-834`) | `IRQ_DIRECT_INJECT` off |
 | `Pf_tramp_control` | a one-shot page-fault trampoline in its own thread | `PAGEFAULT_TRAMPOLINE` off (`src/Kconfig:452-454`, on by default) |
 | the architecture's operations (`arm/thread-arm.cpp:342-351`) | its own `TPIDRURO` | on |
 
@@ -516,10 +516,10 @@ holds:
   domain's factory: the root's capability to each of the domain's objects grows the root's own
   capability table, which Fiasco charges to the root's quota (`obj_space_phys_util.cpp:163,226`);
   a map the root makes into one of the domain's tasks takes its mapping-database node from the
-  receiving task's quota, the domain's factory (`mapdb.cpp:858`; `Mapdb::insert`, `mapdb.cpp:1109-1110`,
+  receiving task's quota, the domain's factory (`mapdb.cpp:904`; `Mapdb::insert`, `mapdb.cpp:1155-1156`,
   "takes quota from `space`"), so the domain's kernel-memory figure covers it, and only a map smaller
   than the root's own mapping of the page needs a new submap node, which the root, as the mapping's
-  parent, pays for (`mapdb.cpp:880-886`); every held exception takes a reply slot of the
+  parent, pays for (`mapdb.cpp:926-932`); every held exception takes a reply slot of the
   root's ([Threads, bands and stops](#threads-bands-and-stops)); and every object takes a record
   and a page-index label of the root's tables. So the domain's row bounds these too: besides its
   thread limit it names an object limit and a mapping limit, the root's cost per thread, object and
@@ -569,7 +569,7 @@ that the root never waits for a thread:
   and goes on serving.
 * For each thread of the space that its records do not already show held (a thread whose fault
   the root holds is held already, and counts from that record), the root runs `ex_regs` with
-  `Exr_cancel` and `Exr_trigger_exception` (`thread_object.cpp:639-660`). Without `Exr_cancel`
+  `Exr_cancel` and `Exr_trigger_exception` (`thread_object.cpp:634-661`). Without `Exr_cancel`
   the trigger does nothing to a thread already in an exception, and nothing until a thread blocked
   in an IPC leaves the kernel, so an ERTS scheduler parked on its semaphore would never arrive.
   With it, a blocked wait or call ends with Fiasco's cancel status, and `liberx`'s wait and call
@@ -838,7 +838,7 @@ priority can be used for:
   thread of its own priority or a lower one: the running thread keeps the CPU only if its priority
   is strictly higher (`Sched_context::Ready_queue::deblock`, `sched_context.cpp:120-148`;
   `Sched_context::dominates`, `sched_context-fixed_prio.cpp:261-264`; `Context::activate`,
-  `context.cpp:1060-1067`; a semaphore's wake is `activate`, `semaphore.cpp:80-99`). So a thread
+  `context.cpp:1076-1083`; a semaphore's wake is `activate`, `semaphore.cpp:80-99`). So a thread
   that blocks hears of its work at once, and a thread that is ready but not running waits its turn.
 * **No migration.** A thread runs on the one CPU it was placed on ([Scheduling](#scheduling)), so
   a thread behind a busy CPU's work is not helped by an idle CPU.
@@ -1024,7 +1024,7 @@ The files and lines are in [Read in source, never run](#read-in-source-never-run
 to the root service. The root records the thread's level in its thread row, the band's ceiling when
 `urgency` is above its group's base and the band's base otherwise, and runs the thread at it with
 `l4_scheduler_run_thread`, which changes a started thread's priority on its own CPU
-(`Thread::start_migration` and `Thread::set_sched_params`, `thread.cpp:790-806`, `:695-711`). One
+(`Thread::start_migration` and `Thread::set_sched_params`, `thread.cpp:852-868`, `:757-773`). One
 function builds every scheduling parameter the root hands Fiasco from the thread's row, so an
 affinity change passes the same level again and a thread's level has one owner, the root. In a band
 whose ceiling is its base the call succeeds and changes nothing. On any other thread it is
@@ -1043,10 +1043,10 @@ gives the object a free entry of the task's label page, stores the label there a
 its group's objects and its threads'. The thread takes its deliveries with `erx_ipc_wait(deadline)`,
 which is `l4_ipc_wait` with the deadline and returns the label of the entry Fiasco's label names.
 A fire while the thread runs, or blocks in a umtx wait or a request, stays queued at the thread
-(`Ipc_sender::send_msg`, `ipc_sender.cpp:176-181`) and arrives at its next wait, one delivery a
+(`Ipc_sender::send_msg`, `ipc_sender.cpp:183-188`) and arrives at its next wait, one delivery a
 wait. A wait whose deadline is zero takes a delivery already queued and otherwise returns at once,
 since Fiasco's receive takes a queued sender before it looks at the timeout
-(`Thread::do_ipc_receive`, `thread-ipc.cpp:775-787`), so a thread that is busy can take what has
+(`Thread::do_ipc_receive`, `thread-ipc.cpp:776-788`), so a thread that is busy can take what has
 arrived without blocking. Nothing stands between Fiasco and the thread: no dispatcher, no ready
 list and no semaphore.
 
@@ -1234,7 +1234,7 @@ garbage collection, on any CPU. Ahead of the driver's process there can still be
   all. The service serves one body at a time, so the request waits for the body it is running,
   at the base level when that body runs on the service's own context, and a caller that finds the
   service busy waits in its queue, where its time is lent to no one (`Thread::check_sender`,
-  `thread-ipc.cpp:351-371`). While it waits, the scheduler takes no delivery. An app that floods
+  `thread-ipc.cpp:351-372`). While it waits, the scheduler takes no delivery. An app that floods
   the root with requests lengthens that wait (FD17);
 * a `high` process's dirty work, and a garbage collection ERTS sends to a dirty scheduler, which
   run at the base.
@@ -1293,7 +1293,7 @@ into erXos's kernel. The sizes are estimates from the files named and are unveri
 
 | Stage | What it adds | Where in Fiasco | Estimate |
 | --- | --- | --- | --- |
-| 1, status words | each executor's state, CPU and preemption count written by Fiasco into a kernel-user page beside the UTCB, as Fiasco places a vCPU state area (`thread_object.cpp:578`) | the switch path (`Context::switch_sched` and `schedule`, `context.cpp:887-986`, of a 2,949-line file) | 150 to 300 lines of C++ |
+| 1, status words | each executor's state, CPU and preemption count written by Fiasco into a kernel-user page beside the UTCB, as Fiasco places a vCPU state area (`thread_object.cpp:573`) | the switch path (`Context::switch_sched` and `schedule`, `context.cpp:903-1002`, of a 2,965-line file) | 150 to 300 lines of C++ |
 | 2, deferred preemption | at a slice end with another thread ready, a bounded grace while the executor's `defer` count is raised; never for a higher-priority wake | `Timeslice_timeout::expired` (`timeslice_timeout.cpp:36-48`, a 49-line file) | 50 to 150 lines |
 | 3, urgency within a band | the urgent scheduler: a thread at its band's ceiling that waits for the lines bound to it ([Urgency](#urgency)) | nothing in Fiasco: the root's `l4_scheduler_run_thread` and `l4_rcv_ep_bind_thread`, and ERTS's enqueue (`erl_process.c:6500-6553`) | none in the fork; 300 to 600 lines of ERTS |
 | 4, group park | the group's ready list and epochs in the kernel, removing the dispatcher's thread switch | a new kernel object beside `Irq_sender` | 300 to 600 lines, with the park core |
@@ -1433,7 +1433,7 @@ these into the task with `l4_task_map`:
 
 | Slot | Object | Used for |
 | --- | --- | --- |
-| `L4_BASE_PAGER_CAP` | the task's gate | `_pager` and `_exc_handler` of its threads, resolved in the thread's own task at the fault (`thread-ipc.cpp:254,1020`), and every request |
+| `L4_BASE_PAGER_CAP` | the task's gate | `_pager` and `_exc_handler` of its threads, resolved in the thread's own task at the fault (`thread-ipc.cpp:254,1021`), and every request |
 | the first slot after `L4_BASE_CAPS_LAST`, plus the thread's index | the thread's semaphore | umtx, park, reaper |
 | the IRQ base ([Handles](#handles)) plus an entry's index | the IRQ object that entry names, while the entry is open | `erx_irq_trigger`, `erx_irq_ack` |
 
@@ -1604,7 +1604,7 @@ system reset, or the BCM2711 watchdog where the device tree has one and no PSCI 
 the handoff checks among them, does not reset. With console input in, the exit question would wait on the console with
 interrupts off instead. `FiascoConfig` checks the resolved configuration,
 `globalconfig.out`, after every configuration step, since a `select` can set what the defconfig
-leaves unset: every kernel needs `CONFIG_FPU`, `CONFIG_PERFORMANCE`, `CONFIG_PERF_CNT_USER` (with
+leaves unset: every kernel needs `CONFIG_FPU`, `CONFIG_BENCHMARKING`, `CONFIG_PERF_CNT_USER` (with
 `CONFIG_PERF_CNT`, which only JDB turns on by default) and
 `CONFIG_SYNC_CLOCK`, and none has `CONFIG_LAZY_FPU`, `CONFIG_ARM_SVE` or `CONFIG_CPU_VIRT`.
 
@@ -2135,7 +2135,7 @@ holds no entry, may need a page-table page and takes a mapping-database node, bo
 refusal is `ERX_ENOMEM`. A fresh map is a commit of an uncommitted page, or a raise of rights on a committed page with no access,
 whose entry the drop to no access cleared (`Mem_space::v_delete`, `arm/mem_space-arm.cpp:334-337`). Every other step needs no
 kernel memory: an unmap frees; a raise of rights over a present entry finds the entry at its level, so the walk allocates nothing,
-and it is an attribute upgrade, which adds no mapping-database node (`map_util.cpp:748`); and a drop of a right other than read
+and it is an attribute upgrade, which adds no mapping-database node (`map_util.cpp:758`); and a drop of a right other than read
 keeps the entry (`arm/mem_space-arm.cpp:322-340`). So applying runs every fresh map of the plan first, in ascending address order,
 and only then the steps that cannot fail, also in ascending order. A fresh map Fiasco refuses unmaps the fresh maps before it,
 returns to the pool the pages the plan took, and answers `ERX_ENOMEM`; a committed page with no access whose fresh map is undone
@@ -2347,7 +2347,7 @@ mask share one CPU of its set rather than spread across it, until an affinity re
 and after it moves the thread at once, through the same call; a mask whose intersection is empty is
 `ERX_EINVAL` and changes nothing. An affinity change keeps the thread's level, which the root passes
 again from the thread's row ([Urgency](#urgency)), and refills its quantum
-(`Thread::set_sched_params`, `thread.cpp:704`), so a thread that asks for one every slice keeps its
+(`Thread::set_sched_params`, `thread.cpp:766`), so a thread that asks for one every slice keeps its
 CPU from the others of its level; only an app is hostile, and it shares only the app level (FD15).
 
 **The quantum.** A thread's quantum is the `slice_us` of its domain's grant, 1 ms in the development manifests, in
@@ -2410,11 +2410,11 @@ priority. A yield is for giving equals a turn; it is not a wait. The native task
 `l4_ipc_call`, whose tag carries no flag (`service_stubs.c:48-49`), and the page-fault and exception messages Fiasco
 sends for a thread (`thread-ipc.cpp:299`, `:977-978`). So Fiasco lends the caller's time to the service
 (`L4_msg_tag::do_switch`, `abi/l4_types.cpp:946-947`): when the service waits on the caller's CPU and no other message
-is queued, a call switches straight to it without choosing its scheduling context (`thread-ipc.cpp:536-549`,
+is queued, a call switches straight to it without choosing its scheduling context (`thread-ipc.cpp:537-550`,
 `:788-805`), and the service's body runs on the caller's scheduling context, at the caller's level and on what is left
 of the caller's quantum. The loan ends at the first reschedule on that CPU, at the slice's end or when a thread that
 outranks the caller wakes: the service then joins the ready queue on its own scheduling context, at the base level
-(`Context::update_ready_list`, `context.cpp:1032-1038`). A call from another CPU lends nothing, and the service wakes
+(`Context::update_ready_list`, `context.cpp:1048-1054`). A call from another CPU lends nothing, and the service wakes
 on its own context. erXos keeps the loan, because each of its cases is work the bands allow:
 
 * an urgent caller's body runs at the urgent level on at most that caller's remaining slice, work that ends, asked by
@@ -2426,7 +2426,7 @@ on its own context. erXos keeps the loan, because each of its cases is work the 
   the app level behind the base level's work.
 
 So the root service never sets its own urgency, and above the base level it runs only its caller's request, on its caller's
-time. That the loan ends at the first reschedule is read from `Context::schedule` (`context.cpp:897-972`) and is
+time. That the loan ends at the first reschedule is read from `Context::schedule` (`context.cpp:913-988`) and is
 unverified until the donated-call case runs ([Verification](#verification)).
 
 **Locks and priorities.** A task's threads run at two priorities, its band's base and ceiling, and the root service
@@ -2454,7 +2454,7 @@ thread holds no index: it runs before the table's area exists and is no client o
 slot of the kernel-given UTCB page.
 
 **Claiming an index.** Fiasco writes `free_marker` when finished with a UTCB, in `do_kill`, some time after the
-deletion call returns (`thread.cpp:603-604`, `utcb.h:176-185`). So an index is claimable when **its record is
+deletion call returns (`thread.cpp:610-611`, `utcb.h:176-185`). So an index is claimable when **its record is
 free and its marker reads 0**, checked under the thread lock, lowest first, as L4Re checks (`manager.cc:541`).
 Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears one. No claimable index is
 `ERX_ENOMEM`.
@@ -2500,9 +2500,11 @@ Starting a thread twice is `ERX_EINVAL`.
 **A failed start.** If any step fails, the service deletes the thread and its semaphore with `l4_task_delete_obj`,
 drops the handle, and only then replies with the failure. So the thread cannot run on a stack the caller now
 frees (`pthread_create.c:384`): it was never runnable, or the deletion's return means it never reaches user mode
-again (`thread_object.cpp:157-166`, `thread.cpp:657-690`). The stub frees the record and leaves the marker, which
-is safe either way: if Fiasco ran its kill path it writes 0 and the index returns; if it only unbound the thread
-the marker stays 1 and the index is lost until the task ends. A deletion the root cannot perform ends the machine.
+again (`thread_object.cpp:157-161`, `thread.cpp:670-752`). The stub frees the record and leaves the marker, which
+is safe either way: if Fiasco completes its kill path it writes 0 and the index returns; if the kill does not
+complete the marker stays 1 and the index is lost until the task ends. Fiasco completes the kill of a thread that
+never started on the deleting thread's CPU, but a thread deleted after `ex_regs` and before the scheduler ran it
+has no CPU to complete it on. A deletion the root cannot perform ends the machine.
 
 **The trampoline.** `l4_thread_ex_regs` carries no thread pointer (`thread.h:94`), so `ip` is a few lines of
 assembly in the backend's architecture layer and `sp` is the record. It stores the record in the native UTCB's
@@ -2627,7 +2629,7 @@ the service's stops, so a child's end finishes before its parent's and the loop 
 the stops (a space's release finishes its own tree first, and withdraws the records that posts):
 
 1. **The threads.** `l4_task_delete_obj` on each thread of the task, newest first, reaper and dispatcher included.
-   Each return means that thread never reaches user mode again (`thread_object.cpp:157-166`). Then its semaphores
+   Each return means that thread never reaches user mode again (`thread_object.cpp:157-161`). Then its semaphores
    and gate, and its home group, as [Budgets and groups as records](#budgets-and-groups-as-records) deletes one, its
    bind records with it, so each IRQ object bound to it is detached, and one that outlives the task, a
    connection's bell that the domain library created, is left unbound, and a trigger of it waits at the object.
@@ -2638,7 +2640,7 @@ the stops (a space's release finishes its own tree first, and withdraws the reco
    (`erx_backend_vm_shed`): its pages return to the pool, each of its mapping records is dropped from its object's
    list, which frees an object whose last reference that was, and a mapping reaching across the piece's start keeps
    its part below. So a page returns to the pool only once no space maps it, and a piece costs its 512 pages of
-   addresses, in the root's walk of its page index and in Fiasco's of the task's page tables (`map_util.cpp:866-886`
+   addresses, in the root's walk of its page index and in Fiasco's of the task's page tables (`map_util.cpp:876-896`
    visits every entry of a table that exists), and the end of an object whose last mapping it drops.
 3. **The objects.** Once the table is empty, the task object, whose deletion unmaps what is left and frees its
    page tables before the call returns (`task.cpp:686-699`). Step 2's unmaps clear entries and free no table
@@ -3081,16 +3083,16 @@ directory up), and have not been executed; `native_signal` ([Verification](#veri
 * **The interface is there.** The vCPU modules build into the fork's kernel for this architecture (`Modules.arm:94`,
   `:154`, `:166`), and a state area that is not the extended one needs no virtualization option. Fiasco's state area
   holds the saved frame, the event-enable and fault-diverting state bits, the saved state, a sticky pending flag set whenever
-  a delivery queues at the thread and cleared when none is left (`vcpu.cpp:7-47`; `receiver.cpp:532`, `:696-703`), and
+  a delivery queues at the thread and cleared when none is left (`vcpu.cpp:7-47`; `receiver.cpp:532`, `:699-706`), and
   the entry address. `vcpu_control` arms a thread through any capability to it, and arming cannot be undone
-  (`thread_object.cpp:555-615`, `:603-609`); `vcpu_resume` acts only on the calling thread (`thread_object.cpp:255`).
+  (`thread_object.cpp:550-610`, `:598-604`); `vcpu_resume` acts only on the calling thread (`thread_object.cpp:250`).
 * **Arming** runs `vcpu_control` on the thread with a Fiasco state area in a second kernel-user memory area of the task,
   which the backend adds with `l4_task_add_ku_mem` (`task.cpp:860-890`), since the task's UTCB area holds exactly its 128
   UTCB slots and Fiasco requires the state area to lie in kernel-user memory (`space.cpp:152-170`). The add charges the
   task's factory and can be refused; it goes through the root's one kernel-user memory add, so a refusal answers the arming
   call `ERX_ENOMEM` and leaves no area and no armed thread ([The construction](#the-construction)). Every state bit that
   diverts faults or selects vCPU user mode is clear, so page faults still reach the pager and exceptions the exception
-  handler, the task's gate and from there the fault gate (`thread-vcpu.cpp:79-100`, `thread-ipc.cpp:1017-1052`). The
+  handler, the task's gate and from there the fault gate (`thread-vcpu.cpp:79-100`, `thread-ipc.cpp:1018-1053`). The
   ABI's `erx_vcpu` area stays the public one in the thread's record.
 * **A bind to a thread** runs `l4_rcv_ep_bind_thread(irq, thread, label)` on that thread, outside the dispatcher. A
   task's stop detaches it at its first step ([Task exit](#task-exit)).
@@ -3105,11 +3107,11 @@ directory up), and have not been executed; `native_signal` ([Verification](#veri
   no FP or SIMD instruction, and the trampoline's save is the one that keeps the interrupted code's FP state.
 * **`erx_vcpu_resume`** validates the public frame, writes it into Fiasco's area and resumes through Fiasco's resume,
   which restores the whole frame (`task.cpp:93-116`) and, when the restored state has events enabled and the sticky flag
-  is set, takes the queued delivery and enters the upcall again in the same call (`thread_object.cpp:312-346`), so K29
+  is set, takes the queued delivery and enters the upcall again in the same call (`thread_object.cpp:307-341`), so K29
   holds at a handler's return.
 
 **What Fiasco does not do, and the event rule.** Fiasco ends no semaphore down for a delivery: the down blocks in an IPC
-state, so the delivery queues (`semaphore.cpp:175-179`, `receiver.cpp:663-664`). A umtx wait of `liberx` ends anyway,
+state, so the delivery queues (`semaphore.cpp:175-179`, `receiver.cpp:666-667`). A umtx wait of `liberx` ends anyway,
 because the raiser wakes the thread's wake word before it triggers the IRQ object, so this backend's umtx wait never
 returns `ERX_EINTR`. Fiasco also takes no queued delivery when a kernel call returns to user mode: it checks only at a
 resume and after page-fault and exception IPC (`thread-ipc.cpp:280`, `:331-334`, `:962`, `:999`, `:1075-1076`), and it
@@ -3636,7 +3638,7 @@ one number.
 
 The console's record is `-erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK`, which the root writes from the device entry `machine.console` names (`erx_boot_console_words`). PERIPHERAL is the CMSIS-SVD peripheral of the entry's compatible string, from the one table of UART kinds, `erx_uart_kinds` in `include/erx/device_kinds.h`, beside the kinds a give drives and apart from them, so a console UART is never given: `arm,pl011` is `pl011`, which is also the host link's UART, and `brcm,bcm2835-aux-uart` is `mini_uart`. The record's first word, `console`, is the row's too. The manifest check refuses a console of any other compatible string, naming it, and the root writes no record for one. The console starts the driver of the peripheral its record names, `erx_pl011` for `pl011` and `erx_mini_uart` for `mini_uart` (`erx_console:console_driver/1`), and stops with a stated reason at any other word, at no record, or at more than one, so the console makes no atom of a record word. The hosted entry writes `-erx_record console stdio`, the same record with no UART after it, which names `erx_stdio`. The driver opens the record's window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
 
-Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:246,278-282`), so the kernel never attaches the UART's
+Without `-serial_input`, `Config::serial_input` stays `Serial_no_input` (`config.cpp:254,286-290`), so the kernel never attaches the UART's
 receive line, which `Irq_chip_gen::attach` would refuse the driver (`irq_chip_generic.cpp:77-81`). A development kernel's panic enters JDB on the
 console and the harness's deadline ends the run; a release kernel's reboots ([the kernel](#boot-handoff)).
 
@@ -3694,7 +3696,7 @@ partial boot starts no console, so its log lines and the kernel's reach the UART
 
 Fiasco prints after user mode is up. The release kernel leaves out only the debugger and the kernel's console input
 (`tools/lib/erx/fiasco_config.rb:42`), and `config/fiasco/kernel.defconfig` sets no warning level, so both builds take
-Kconfig's `WARN_WARNING` (`fiasco/kernel/src/Kconfig:839`), under which `WARN` and `WARNX(Error, ...)` print through `printf`
+Kconfig's `WARN_WARNING` (`fiasco/kernel/src/Kconfig:848`), under which `WARN` and `WARNX(Error, ...)` print through `printf`
 (`kern/warn.cpp:16-28`). A task can cause some of them: the receive that empties a reply slot still holding a caller
 (`kern/receiver.cpp:234-238`, [The root service](#the-root-service)), a fault whose pager capability is invalid
 (`kern/thread-ipc.cpp:258-262`, whether it fires in erXos's configuration unverified), and a kernel allocation that fails
@@ -3716,8 +3718,10 @@ prints passes, and one value it owns, the **route**: `uart`, `ring` or `closed`.
 leaves the ring only whole, and the route closes before a stop prints its first byte.
 
 * **One way to the UART.** The fork registers the ring console with the kernel's console multiplexer in the UART console's
-  place, wrapping it (`kern/kernel_uart.cpp:147-170`, `init_filter_console`, with and without the debugger), and gives it the
-  UART console's attributes and input, so the multiplexer's exclusive modes and the debugger find the UART as before. Under
+  place, wrapping it (`kern/kernel_uart.cpp:154-177`, `init_filter_console`, with and without the debugger), and gives it the
+  UART console's attributes and input, so the multiplexer's exclusive modes and the debugger find the UART as before. At a
+  reboot or power-off, Fiasco's shutdown hook masks the UART's receive interrupt (`Kernel_uart::pm_on_shutdown`,
+  `kern/kernel_uart.cpp:147-152`), a write to the device the console driver owns by then that ends no line. Under
   `uart` and `closed` its write passes the text to the UART; under `ring` it appends the text to its ring and returns. Every
   line the kernel prints goes through that write, whoever printed it: a `WARN`, `kdb_ke`, a panic, and the bytes the root
   or `sigma0` write through `l4_vcon_write`, which `Vlog::log_string` puts through the same console a character at a time,
@@ -3732,9 +3736,9 @@ leaves the ring only whole, and the route closes before a stop prints its first 
   calls neither rests on `sigma0` being the boot's own trusted code, not on a check. The kernel also closes the route
   itself, at the head of each of the four functions a stop's report begins in on AArch64, before the report's first byte:
   `panic` (`kern/kernel_panic.cc:13`) and `assert_fail` (`kern/assertion.cpp:12`), the only callers of
-  `Thread::system_abort` and so of `terminate` (`kern/thread.cpp:1480-1486,1550-1551`); `Trap_state::dump`
+  `Thread::system_abort` and so of `terminate` (`kern/thread.cpp:1574-1580,1644-1645`); `Trap_state::dump`
   (`kern/arm/64/trap_state-arm.cpp:83`), which every trap report ahead of a panic calls (`kern/arm/64/thread-arm-64.cpp:91,104`,
-  `kern/thread-ipc.cpp:1064`, and the release kernel's trap handler, `kern/arm/thread-jdb.cpp:122-125`); and the
+  `kern/thread-ipc.cpp:1092`, and the release kernel's trap handler, `kern/arm/thread-jdb.cpp:122-125`); and the
   development kernel's `Jdb::open_debug_console` (`jdb/jdb.cpp:751-757`), where the debugger takes the console on every
   way in (`jdb/jdb.cpp:1328`), a development kernel's `kdb_ke` among them, a `brk` (`kern/arm/64/kdb_ke-arm.cpp`) into
   `Thread::call_nested_trap_handler` (`kern/arm/64/thread-arm-64.cpp:110-111`); a breakpoint the debugger only logs
@@ -3821,11 +3825,11 @@ What happens on each path:
   the other CPUs (`jdb/jdb.cpp:755`, `Jdb::wfi_enter`, `jdb/arm/jdb-arm.cpp:61-66,117`), and a debugger entered from a
   panic finds the route closed already. A breakpoint it only logs never gets there. The console's driver is the UART's
   only user until then and not after, a limit of development builds that FD26 publishes: the debugger keeps upstream's
-  resume (`jdb/jdb.cpp:1464-1470`), and the resume after a `kdb_ke` sequence run from kernel context, which no operator
+  resume (`jdb/jdb.cpp:1462-1468`), and the resume after a `kdb_ke` sequence run from kernel context, which no operator
   makes (`jdb/jdb.cpp:1343-1359`), and from there to the machine's end the kernel writes the UART beside the
   driver. Leaving the debugger also turns the UART's receive interrupt on under the driver: `Jdb::wfi_leave` enables it
   unless the serial input mode is `Serial_input_noirq` (`jdb/arm/jdb-arm.cpp:69-75,140`), and the mode is
-  `Serial_no_input`, Fiasco's default (`kern/config.cpp:41-45,246-247`). On the PL011 the entry and the leave both clear
+  `Serial_no_input`, Fiasco's default (`kern/config.cpp:41-45,254-255`). On the PL011 the entry and the leave both clear
   the UART's pending interrupts and its error flags (`lib/uart/uart_pl011.cc:120-133`), so an error the driver had not
   yet read is lost unmarked. A development kernel started with `-wait` or `-jdb_cmd` enters the debugger before user mode
   (`kern/kernel_thread.cpp:194-217`), so the route is `closed` before the first take and the whole run writes the UART as
@@ -4158,7 +4162,7 @@ no test can drive the change:
   stay in the unit while a thread of another space runs. SVE
   stays trapped. `tools/lib/erx/fiasco_config.rb` forbids `CONFIG_LAZY_FPU` and `CONFIG_ARM_SVE`
   in every configuration; `test/integration/fiasco_config_test.rb` resolves the fork's Kconfig and
-  its seeded case puts the option back with the `select` from `PERFORMANCE` that set it whatever the
+  its seeded case puts the option back with the `select` from `BENCHMARKING` that set it whatever the
   defconfig said, which the check must catch. The switch itself has the *FP state* case of
   [The release's cases](#the-releases-cases).
 * **Branch-predictor hardening at entry, carried only if it costs nothing measurable.** The patch calls the
@@ -4422,8 +4426,8 @@ Each test below names the seeded failure that proves it ran:
 | DMA confinement | a device's access outside its window is refused and reported | the whole pool mapped into the DMA space |
 | writable or executable | a request for such a mapping into a task fails at Fiasco's map, and the root still boots from `sigma0`'s mapping | the patch's check removed: the mapping is made; the exemption removed: the root does not start |
 | release licenses | the release image's link closure is all permissive | a release build with `jdb_object.cpp` listed again in `Modules.generic`; one with the original `kobject_rpc.h` restored in place |
-| the fuzz campaign | it runs its budget clean, every seed of its corpus reached | a fork build with the bound removed from `L4_snd_item_iter::next` (`if (_buf >= _max)`, `l4_buf_iter.cpp:116-121`), which any domain reaches by a send on its own gate whose words and typed items together pass the 63 message registers (`Utcb::Max_words`, `abi/l4_types.cpp:789`), so the kernel's item transfer writes past the root service's message registers before the root's decoder sees the message (`Thread::transfer_msg_items`, `thread-ipc.cpp:1203-1227`); the seed build counts each pass of the removed bound, the case fails if that count is 0, so it cannot pass without reaching the defect, and it fails if the campaign then reports clean |
-| a map at the factory's end | a domain whose page budget exceeds its kernel-memory figure spends its factory before its page cap or its object and mapping limits. It has closed no handle, so the root hands it never-used entries in index order before any freed one ([Handles](#handles)). While its factory is ample, it makes doorbells until the IRQ slot of the handle it gets is the last slot of a capability-table page, keeping that one, `D`, so the next IRQ slot the root places at is the first of a page Fiasco has not allocated; it commits a page and sets it to no access; it then commits a page in each fresh 2 MiB region, each taking a page-table page, until one answers `ERX_ENOMEM`, and there asks for the commit, the protect and the arming named below; it then commits single pages in regions already mapped until one answers `ERX_ENOMEM`, so its factory holds less than one mapping-database node's charge. Last it destroys and closes `D`, then asks for the create: the root's delete returns once Fiasco has freed it, its slab entry back in the factory, and its entry goes behind the never-used ones, so the factory holds enough for an IRQ object's slab entry but not for a new table page. A two-page commit across a fresh region's edge, a protect of a no-access page, an `erx_vcpu_control` arming a thread (which needs the task's second kernel-user area) and an `erx_irq_create` (whose placement needs the new table page) each answer `ERX_ENOMEM`; a touch of each refused range faults in the domain alone, the arming leaves the thread unarmed, the pool's count and the domain's object count are what they were before each call, and a neighbour domain keeps committing. The recipe rests on Fiasco's sizes (a 4 KiB capability-table page, `obj_space_phys_util.cpp:221-226`; its 32-byte entries, `obj_space_types.cpp:45-102`, read, not measured; an IRQ object's slab entry, `irq.cpp:1201-1206`; a node's charge, `mapdb.cpp:858`; deletion past an RCU grace period, `kobject.cpp:155-175`) | a refused map ending the machine; the commit's undo skipped (the pool's count drops and the refused commit's first page reads); the undo returning every page of the plan to the pool (the refused protect raises the pool's count); the add's refusal ignored (the arming answers other than `ERX_ENOMEM`); the create's undo skipped (the object count rises with no handle returned) |
+| the fuzz campaign | it runs its budget clean, every seed of its corpus reached | a fork build with the bound removed from `L4_snd_item_iter::next` (`if (_buf >= _max)`, `l4_buf_iter.cpp:116-121`), which any domain reaches by a send on its own gate whose words and typed items together pass the 63 message registers (`Utcb::Max_words`, `abi/l4_types.cpp:789`), so the kernel's item transfer writes past the root service's message registers before the root's decoder sees the message (`Thread::transfer_msg_items`, `thread-ipc.cpp:1204-1228`); the seed build counts each pass of the removed bound, the case fails if that count is 0, so it cannot pass without reaching the defect, and it fails if the campaign then reports clean |
+| a map at the factory's end | a domain whose page budget exceeds its kernel-memory figure spends its factory before its page cap or its object and mapping limits. It has closed no handle, so the root hands it never-used entries in index order before any freed one ([Handles](#handles)). While its factory is ample, it makes doorbells until the IRQ slot of the handle it gets is the last slot of a capability-table page, keeping that one, `D`, so the next IRQ slot the root places at is the first of a page Fiasco has not allocated; it commits a page and sets it to no access; it then commits a page in each fresh 2 MiB region, each taking a page-table page, until one answers `ERX_ENOMEM`, and there asks for the commit, the protect and the arming named below; it then commits single pages in regions already mapped until one answers `ERX_ENOMEM`, so its factory holds less than one mapping-database node's charge. Last it destroys and closes `D`, then asks for the create: the root's delete returns once Fiasco has freed it, its slab entry back in the factory, and its entry goes behind the never-used ones, so the factory holds enough for an IRQ object's slab entry but not for a new table page. A two-page commit across a fresh region's edge, a protect of a no-access page, an `erx_vcpu_control` arming a thread (which needs the task's second kernel-user area) and an `erx_irq_create` (whose placement needs the new table page) each answer `ERX_ENOMEM`; a touch of each refused range faults in the domain alone, the arming leaves the thread unarmed, the pool's count and the domain's object count are what they were before each call, and a neighbour domain keeps committing. The recipe rests on Fiasco's sizes (a 4 KiB capability-table page, `obj_space_phys_util.cpp:221-226`; its 32-byte entries, `obj_space_types.cpp:45-102`, read, not measured; an IRQ object's slab entry, `irq.cpp:1201-1206`; a node's charge, `mapdb.cpp:904`; deletion past an RCU grace period, `kobject.cpp:155-175`) | a refused map ending the machine; the commit's undo skipped (the pool's count drops and the refused commit's first page reads); the undo returning every page of the plan to the pool (the refused protect raises the pool's count); the add's refusal ignored (the arming answers other than `ERX_ENOMEM`); the create's undo skipped (the object count rises with no handle returned) |
 | writable peer side | a domain sends a raw `erx_vm_map` request asking for read and write on its peer's side, which it was passed without `WRITE`: `ERX_ERIGHTS`, and after the domain writes through every mapping it holds, the peer's side is unchanged | the map body not asking the lookup for `WRITE`: the mapping is made and the peer's side changes |
 | CPU ceiling | a domain whose CPU set is one CPU, not the root service's, starts its threads with no mask, moves one by a raw affinity request naming every CPU, and spins them all, while a lower band's echo runs on the root service's CPU: the echo answers within one quantum, and a raw request naming only CPUs outside the set answers `ERX_EINVAL`; a domain whose set names only a CPU past the online ones is refused at admission with its diagnostic | the narrowing skipped: a spinner lands on the echo's CPU and the echo waits; the admission check removed: the domain is admitted and its first thread's start fails |
 | repeated delivery | a ringer on another CPU fires a holder's doorbell 10,000 times while the holder's executors postpone `erx_group_take_ready`: the holder's next take returns the object once, and its dispatcher's deliveries and wakes are counted and reported with the run, the load FD31 publishes | the listed flag ignored: the take returns the object more than once |
@@ -4573,14 +4577,14 @@ Apple cores an HVF guest runs on are unverified.
 
 **Read, not run:**
 
-* A fault never answered blocks its thread until deleted: `thread.cpp:582-584`; the fault paths not read.
+* A fault never answered blocks its thread until deleted: `thread.cpp:590-592`; the fault paths not read.
 * `enif_send` from a dirty NIF's callback, and its report of a dead receiver: `erl_nif.c:883`.
 * A fire of an IRQ object bound to a thread that is not in an open wait stays queued at the thread and is received at its next
   `l4_ipc_wait`, one delivery a wait, a wait with a zero deadline included: `Irq_sender::send_local` and `send`,
-  `irq.cpp:925-1009`; `Ipc_sender::send_msg`, `ipc_sender.cpp:176-181`; `Thread::do_ipc_receive`, `thread-ipc.cpp:775-787`.
+  `irq.cpp:925-1009`; `Ipc_sender::send_msg`, `ipc_sender.cpp:183-188`; `Thread::do_ipc_receive`, `thread-ipc.cpp:776-788`.
 * An edge-triggered line is acknowledged at its firing and masked only by a second edge before the first is received,
   and the receipt unmasks it: `irq.cpp:1044-1090`, `:751-776`.
-* `l4_scheduler_run_thread` on a started thread changes its priority on its own CPU: `thread.cpp:695-711`, `:790-806`; not
+* `l4_scheduler_run_thread` on a started thread changes its priority on its own CPU: `thread.cpp:757-773`, `:852-868`; not
   run for a thread whose scheduling context the root service is running on.
 * ERTS's enqueue chooses a run queue in `select_enqueue_run_queue`, `erl_process.c:6500-6553`, for a wake, a spawn and a
   schedule-out (`:6886`, `:13013`, `:6675`, through `:6743`), and immigration, evacuation and the return of bound processes

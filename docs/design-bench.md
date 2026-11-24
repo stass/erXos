@@ -1354,7 +1354,7 @@ thread starved at its level, and a band that no longer protects the work
 above it. Fiasco gives a thread whose quantum is 0 its default slice
 (`Sched_context::set`, `src/kern/sched_context-fixed_prio.cpp:198-200`
 and `:212-214`), which is `CONFIG_SCHED_DEF_TIME_SLICE` ticks of
-`CONFIG_SCHED_GRANULARITY` microseconds (`src/kern/config.cpp:153-154`),
+`CONFIG_SCHED_GRANULARITY` microseconds (`src/kern/config.cpp:161-162`),
 by default 10 ticks of 1,000 us (`src/Kconfig:353-367`) under the
 fixed-priority scheduler, Kconfig's default (`src/Kconfig:327-329`);
 `config/fiasco/kernel.defconfig` sets none of the three, so the default

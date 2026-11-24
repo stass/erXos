@@ -1,3 +1,5 @@
+// Modified by erXos: relocate() takes the load offset alone, as the fork's
+// bootstrap.cpp declares it; the relocator finds the dynamic section itself.
 IMPLEMENTATION [arm && mmu && arm_v6plus]:
 
 #include "kmem_space.h"

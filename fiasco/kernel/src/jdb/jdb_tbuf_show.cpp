@@ -799,8 +799,7 @@ restart:
           if (!_filter_str[0])
             {
               Jdb_tbuf::Lookup_state lookup_state;
-              Tb_entry const *ce = Jdb_tbuf::lookup(_absy + addy, &lookup_state);
-              if (ce)
+              if (auto const *ce = Jdb_tbuf::lookup(_absy + addy, &lookup_state))
                 {
                   Tb_entry_formatter const *fmt = Tb_entry_formatter::get_fmt(ce);
 
@@ -813,7 +812,8 @@ restart:
                       if (!pt.is_first())
                         find_group(&group, ce, lookup_state, Direction::Older,
                                    lines, pt.depth());
-                      if (!pt.is_last())
+                      if (!pt.is_last()
+                          && lookup_state.seq != Jdb_tbuf::entries_majorant())
                         find_group(&group, ce, lookup_state, Direction::Newer,
                                    lines, pt.depth());
                     }

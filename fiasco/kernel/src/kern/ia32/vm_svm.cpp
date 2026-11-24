@@ -14,12 +14,6 @@ private:
   static void resume_vm_svm(Mword phys_vmcb, Trex *regs)
     asm("resume_vm_svm") FIASCO_FASTCALL;
 
-  enum
-  {
-    EFER_LME = 1 << 8,
-    EFER_LMA = 1 << 10,
-  };
-
   static Vmcb *ext_state(Vcpu_state *s)
   {
     return offset_cast<Vmcb *>(s, Config::Ext_vcpu_state_offset);
@@ -106,7 +100,7 @@ Vm_svm::get_vm_cr3(Vmcb *v)
   // When running with shadow paging and the guest is running in long mode
   // and has paging enabled, we can just return the 4lvl page table of our
   // host Vm object.
-  if (   (v->state_save_area.efer & EFER_LME)
+  if (   (v->state_save_area.efer & Efer_lme)
       && (v->state_save_area.cr0 & CR0_PG))
     return phys_dir();
 
@@ -444,14 +438,14 @@ Vm_svm::do_resume_vcpu(Context *ctxt, Vcpu_state *vcpu, Vmcb *vmcb_s)
 
   // neither EFER.LME nor EFER.LMA must be set
   if (!is_64bit()
-      && (kernel_vmcb_s->state_save_area.efer & (EFER_LME | EFER_LMA))) [[unlikely]]
+      && (kernel_vmcb_s->state_save_area.efer & (Efer_lme | Efer_lma))) [[unlikely]]
     {
       WARN("svm: EFER invalid %llx\n", kernel_vmcb_s->state_save_area.efer);
       return -L4_err::EInval;
     }
 
   // EFER.SVME must be set
-  if (!(kernel_vmcb_s->state_save_area.efer & 0x1000)) [[unlikely]]
+  if (!(kernel_vmcb_s->state_save_area.efer & Efer_svme)) [[unlikely]]
     {
       WARN("svm: EFER invalid %llx\n", kernel_vmcb_s->state_save_area.efer);
       return -L4_err::EInval;

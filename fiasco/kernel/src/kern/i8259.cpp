@@ -147,6 +147,9 @@ private:
   void pm_on_resume(Cpu_number) override
   { restore_all(_pm_saved_state); }
 
+  void pm_on_shutdown(Cpu_number) override
+  { disable_all_save(); }
+
   Io_address _master;
   Io_address _slave;
   bool _sfn = false;

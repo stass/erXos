@@ -660,7 +660,10 @@ PRIVATE inline NEEDS["logdefs.h"]
 Receiver::Rcv_state
 Receiver::vcpu_async_ipc(Sender *sender)
 {
-  if (state() & Thread_ipc_mask) [[unlikely]]
+  // Asynchronous vCPU reception not possible if vCPU is involved in an IPC or
+  // was not-yet-started. The latter would be broken, because the sender makes
+  // the vCPU ready after transferring the IPC message.
+  if (state() & (Thread_ipc_mask | Thread_dead)) [[unlikely]]
     return Rcv_state::Not_receiving;
 
   Vcpu_state *vcpu = vcpu_state().access();

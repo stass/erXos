@@ -43,10 +43,10 @@ module Erx
       'libl4sys.p.a' => UserLibrary.new(license: 'MIT', sources: %w[l4sys/include l4sys/lib cxx/lib/tl/include]
                                           .map { "fiasco/l4re-core/#{it}" }.freeze)
     }.freeze
-    KERNEL_COMMIT = '50bbe8a981199e17865e8553a4eb02c387b339cf'
+    KERNEL_COMMIT = '07ea18e1f293bda6b9f75e59707ee1c70cf4321f'
     CORE_COMMIT = 'e2e2d5af9de7aa0e1df2a25ebadee54488fa4a49'
     # SHA-256 of git archives with no prefix, at the full commits above.
-    KERNEL_SHA256 = '80cb4b4db43f18521b859012cb16201d62b3b541c69cdfb2f36f6fa726a8aea5'
+    KERNEL_SHA256 = 'e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee'
     CORE_SHA256 = '6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f'
     ARCHIVES = {
       'mk' => {
