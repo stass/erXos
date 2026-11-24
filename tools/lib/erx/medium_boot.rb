@@ -84,9 +84,9 @@ module Erx
     # eighth of a CPU on the users share's CPUs. The configured domains' grants together
     # may come to at most the system share's rate less its reserve, 2,325 mcpu of its 3,100
     # (dom_system_reserve, liberx/system/dom_core.c). The development manifest's storage
-    # and network domains take the users share, 900 mcpu, each and its web, display, USB and
-    # PCIe domains, which the site manifest leaves out, 400 mcpu, 150, 100, 100 and 50; without them
-    # 525 mcpu remain: room for two eighths, as SystemDomain's erts and peer take. Nothing enforces a grant at run time in Phase 1
+    # and network domains take the users share, 900 mcpu, each and its web, display, USB, PCIe
+    # and media domains, which the site manifest leaves out, 450 mcpu, 150, 100, 100, 50 and 50;
+    # without them 525 mcpu remain: room for two eighths, as SystemDomain's erts and peer take. Nothing enforces a grant at run time in Phase 1
     # (docs/design-fiasco.md, property 13 and FD15), and the share's CPUs, which set a runtime's
     # schedulers, are the users share's, so the domains run as with a larger grant.
     EIGHTH_SHARE = "share eighth\n  quota_ns 1250000\n  period_ns 10000000\n  cpuset 15\n  capacity_mcpu 125\n" \
@@ -320,8 +320,8 @@ module Erx
     # the system principal's quota and max_domains each grow by domains (2), and its memory
     # and root_memory each by that many domains' budgets. ProductionImage.without_sessions drops the system
     # principal's session template, so the console's login at boot starts no session. The
-    # site manifest has no web, display or PCIe domain, so the ids and the room are the cell's own: the
-    # three domains' grants would take 300 mcpu, of what the system share's reserve
+    # site manifest has no web, display, USB, PCIe or media domain, so the ids and the room are the
+    # cell's own: the five domains' grants would take 450 mcpu, of what the system share's reserve
     # leaves, that the cells' rows use, and their ids would come before theirs
     # (HostlinkGuest, the production image's host link check, boots the web domain). The production
     # image's own manifest is not grown. row replaces DOMAIN_ROW for a harness whose configured domain runs another

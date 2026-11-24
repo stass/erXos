@@ -15,8 +15,10 @@ class ManifestEditTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   VIRT = Erx::Platform.development(ROOT)
   SOURCE = VIRT.manifest_source(ROOT)
-  # The display unit's platform unit, of two devices with 4 and 3 bytes of DMA memory.
-  UNITS = [{ 'key' => 'display', 'devices' => [{ 'dma_memory' => 4 }, { 'dma_memory' => 3 }] }].freeze
+  # The display unit's platform unit, of two device-tree devices with 4 and 3 bytes of DMA
+  # memory.
+  UNITS = [{ 'key' => 'display', 'devices' => [{ 'selector' => 'dt', 'path' => '/gpu@0', 'dma_memory' => 4 },
+                                               { 'selector' => 'dt', 'path' => '/gpu@1', 'dma_memory' => 3 }] }].freeze
 
   # Each record of text by its first line, with what it holds: its properties and facet
   # parameters, each token as its value and whether it is quoted.
@@ -162,6 +164,50 @@ class ManifestEditTest < Minitest::Test
       end
     kept = records(gone).reject { |key, _held| [%w[machine], %w[principal system], %w[limits usb]].include?(key.compact) }
     assert_equal records(SOURCE).slice(*kept.keys), kept
+  end
+
+  # A domain's windows go with it, as its units do: the media domain's drive window
+  # disk0 leaves with the domain, and nothing else that names no record taken out.
+  # The window is the drive grant that joins the media domain to the USB domain, whose
+  # xhci unit the drive lies on, so its connection comes back to the USB domain's limits
+  # and to max_connections beside the media domain's system connection.
+  def test_without_domain_takes_the_windows_it_holds
+    gone = Edit.without_domain(SOURCE, 'media', units: VIRT.record.fetch('units'))
+    taken = records(SOURCE).keys - records(gone).keys
+    assert_equal [%w[domain media], %w[limits media], %w[runtime_limits media], %w[service media], %w[share media],
+                  %w[window disk0]], taken.sort
+    { %w[machine max_connections] => -2, ['limits usb', 'connections'] => -1 }.each do |(record, field), change|
+      assert_equal value(SOURCE, record, field) + change, value(gone, record, field), "#{record} #{field}"
+    end
+  end
+
+  # A window lies on its device's unit, so taking out the domain that holds the unit takes
+  # out every window on it, another domain's too: the USB domain takes the media domain's
+  # drive window disk0 on its xhci unit, and its drive grant's connection, of the media
+  # domain's limits and of max_connections, beside the USB domain's system connection and
+  # the one usb_input takes. The xhci unit's DMA memory comes back to root_memory.
+  def test_without_domain_takes_the_windows_on_its_units
+    units = VIRT.record.fetch('units')
+    gone = Edit.without_domain(SOURCE, 'usb', units: units)
+    taken = records(SOURCE).keys - records(gone).keys
+    assert_includes taken, %w[window disk0]
+    assert_equal [%w[window disk0]], taken.select { |kind, _name| kind == 'window' }
+    { %w[machine max_connections] => -3, ['limits media', 'connections'] => -1, ['limits display', 'connections'] => -1 }
+      .each do |(record, field), change|
+        assert_equal value(SOURCE, record, field) + change, value(gone, record, field), "#{record} #{field}"
+      end
+  end
+
+  # A platform device the edit cannot name, a PCIe function without its bridge or an entry
+  # that is not a record, is refused as the edit's error, not a Ruby one, whether the
+  # domain taken holds the unit it lies on (usb) or only a drive window (media).
+  def test_without_domain_refuses_a_platform_device_it_cannot_name
+    units = VIRT.record.fetch('units')
+    [{ 'selector' => 'pci', 'bus' => 0, 'device' => 1, 'function' => 0 }, 'pci'].product(%w[usb media]).each do |device, name|
+      malformed = [{ 'key' => 'malformed', 'devices' => [device] }, *units]
+      error = assert_raises(Erx::Error) { Edit.without_domain(SOURCE, name, units: malformed) }
+      assert_match(/malformed/, error.message)
+    end
   end
 
   # with_unit places a unit and grows root_memory by its devices' DMA memory, giving back

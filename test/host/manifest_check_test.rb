@@ -142,9 +142,9 @@ class ManifestCheckTest < Minitest::Test
     assert_instance_of Erx::Manifest::Admitted, result
     assert result.bytes.frozen?
     view = @codec.open('manifest', result.bytes)
-    assert_equal 6, view.count('domains')
+    assert_equal ManifestContextFixture.rows(@source, 'domain'), view.count('domains')
     assert_equal 15, view.count('devices')
-    assert_equal 10, view.count('windows')
+    assert_equal ManifestContextFixture.rows(@source, 'window'), view.count('windows')
     assert_equal 1, view.count('images')
   end
 
@@ -163,14 +163,14 @@ class ManifestCheckTest < Minitest::Test
   # too: the test holder's row, the xhci unit it holds and its pci facet.
   def test_the_pcie_suite_s_manifest_is_accepted
     platform = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
+    source = Erx::PcieDomain.manifest(Erx::PcieDomain.manifest_source(ROOT, platform: platform))
     medium = context do |arguments|
-      arguments.merge!(ManifestContextFixture.archive_arguments(@codec, boots: [*%w[app display network ntpd pcie session storage],
-                                                                                Erx::MediumBoot::DOMAIN_BOOT.name]))
+      arguments.merge!(ManifestContextFixture.manifest_arguments(@codec, source))
       arguments[:platform] = @platform.merge('ram_bytes' => Erx::MediumBoot.machine(platform).memory_mib << 20)
     end
-    result = admit(Erx::PcieDomain.manifest(Erx::PcieDomain.manifest_source(ROOT, platform: platform)), medium)
+    result = admit(source, medium)
     view = @codec.open('manifest', result.bytes)
-    assert_equal 5, view.count('domains')
+    assert_equal ManifestContextFixture.rows(source, 'domain'), view.count('domains')
   end
 
   # The footprint cell's manifest (MediumBoot::Footprint.manifest), made from the website's,
@@ -215,7 +215,7 @@ class ManifestCheckTest < Minitest::Test
 
   def test_the_report_carries_the_checked_numbers
     report = admit.report
-    assert_equal 6, report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(@source, 'domain'), report.fetch('child_plan_instances')
     assert_equal @platform.fetch('fiasco_reserve'), report.fetch('fiasco_reserve')
     assert_equal @platform.fetch('ram_bytes'), report.fetch('ram_bytes')
     assert_equal 4096, report.fetch('root_image_loadable_bytes')
@@ -248,9 +248,9 @@ class ManifestCheckTest < Minitest::Test
   def test_accepted_services_reach_the_encoded_manifest
     view = @codec.open('manifest', admit(@source + SERVICE).bytes)
     # The development manifest's own, clock, code_objects, data, display, home, inspect, install, line,
-    # log, login, login_keys, machine, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
+    # log, login, login_keys, machine, media, net, network_ctl, packages, pci, pci_bus, pcie, start, storage_ctl,
     # system, usb_input and web, and this one.
-    assert_equal %w[clock code_objects data display home inspect install line log login login_keys machine net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
+    assert_equal %w[clock code_objects data display home inspect install line log login login_keys machine media net network_ctl packages pci pci_bus pcie probe start storage_ctl system usb_input web], view.count('services').times.map { |index| view.string(view.fetch('services', index).fetch('name')) }
     assert_equal 0, view.count('liveness')
   end
 
@@ -321,11 +321,13 @@ class ManifestCheckTest < Minitest::Test
     end
   end
 
-  # The development manifest with the units of holders in place of its bridge's and xhci's units, the
-  # pci facet of the function's holder when a configured domain holds it, and the web
-  # service served by the PCIe domain when serving.
+  # The development manifest without its media domain and that domain's drive window on the
+  # xhci function (Manifest::Edit.without_domain), with the units of holders in place of its
+  # bridge's and xhci's units, the pci facet of the function's holder when a configured domain
+  # holds it, and the web service served by the PCIe domain when serving.
   def usb_source(holders = USB_HOLDERS, serving: false)
-    bridgeless = changed(@source.sub(/^unit pcie\n(?:  .*\n)*/, '').sub(/^unit xhci\n(?:  .*\n)*/, '').sub(/^facet pci\n(?:  .*\n)*/, ''))
+    without_media = Erx::Manifest::Edit.without_domain(@source, 'media', units: @platform.fetch('units'))
+    bridgeless = changed(without_media.sub(/^unit pcie\n(?:  .*\n)*/, '').sub(/^unit xhci\n(?:  .*\n)*/, '').sub(/^facet pci\n(?:  .*\n)*/, ''))
     bridgeless = changed(bridgeless.sub("service web\n  server @domain.web\n", "service web\n  server @domain.pcie\n")) if serving
     holder = holders['xhci']
     bridgeless + units_of(holders) + (holder&.start_with?('@domain.') ? pcie_facet('pci', holder) : '')
@@ -1677,13 +1679,15 @@ class ManifestCheckTest < Minitest::Test
             message: /a window grants at least read/)
   end
 
-  def test_windows_encode_in_contract_order_on_the_block_device
+  # Every window lies on a block device or, as the media domain's drive window does, on a
+  # USB controller.
+  def test_windows_encode_in_contract_order_on_their_devices
     view = @codec.open('manifest', admit.bytes)
     rows = (0...view.count('windows')).map { |index| view.fetch('windows', index) }
     order = rows.map { |row| row.values_at('holder', 'role') }
     assert_equal order.sort, order
     rows.each do |row|
-      assert_equal @codec.member('mf_device_role', 'block'), view.fetch('devices', row.fetch('device')).fetch('role')
+      assert_includes %w[block usb].map { |role| @codec.member('mf_device_role', role) }, view.fetch('devices', row.fetch('device')).fetch('role')
     end
   end
 

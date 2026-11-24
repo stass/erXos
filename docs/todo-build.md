@@ -359,6 +359,18 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the display client clause, docs/design-display.md's "the display domain's release does not
   hold" `erx_win`, is checked nowhere; with `started` in the checker's context it is a few lines
   and a seeded test.
+* [Low] build, property 18 (`tools/lib/erx/manifest.rb` `check_display_grants`): the check counts
+  root's template's display grant once per slot of the system principal's `domains` quota, but the
+  principal's configured domains take slots of that quota too, so each configured domain costs the
+  display's outer budget a pixel area and a lane no session can use (QEMU virt's media domain, 8 MiB
+  and 4 KiB of root_memory; about 56 MiB over all the configured domains' slots). Count the quota
+  less the principal's configured domains.
+* [Low] build, `Manifest::Edit.without_domain` (`tools/lib/erx/manifest_edit.rb`, the drive windows'
+  holders): `joined` is a flat list of both holders of each drive window, the removed domain
+  included, which only the later `- [reference_of(domain)]` drops and only `.uniq` deduplicates
+  against the windows on its units, and the "Given back" comment is one long sentence. A
+  `drive_peer(window, domain)` that returns the other configured domain or nil, and the comment as a
+  list, would read directly.
 * [Low] tests, the manifest edits of the domain tests (`test/fixtures/manifest_context.rb`, `DOMAIN_ROWS`
   and `SESSION_FACETS`; `test/host/manifest_check_test.rb`, `dom_planner_test.rb` and
   `boot_manifest_test.rb`, their login_keys rows): each test removes the development manifest's

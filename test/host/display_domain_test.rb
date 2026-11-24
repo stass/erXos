@@ -134,10 +134,11 @@ class DisplayDomainTest < Minitest::Test
   def test_the_manifest_check_accepts_the_suite_s_manifest
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     platform = JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json')))
-    arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[display network pattern session storage web])
+    source = Suite.manifest(KEPT)
+    arguments = ManifestContextFixture.manifest_arguments(codec, source)
     context = Erx::Manifest::Context.new(**arguments.merge(platform: platform))
     planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
-    assert Erx::Manifest.admit(source: Suite.manifest(KEPT), codec: codec, context: context, planner: planner)
+    assert Erx::Manifest.admit(source: source, codec: codec, context: context, planner: planner)
   end
 
   # The input drivers' paths are the platform record's input devices, on the gpu's page:

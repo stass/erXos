@@ -7,7 +7,7 @@
   "ram_bytes": 738197504,
   "fiasco_reserve": 46137344,
   "root_withheld": 2621440,
-  "site_leaves_out": ["web", "display", "usb", "pcie"],
+  "site_leaves_out": ["web", "display", "usb", "pcie", "media"],
   "msi_frame": { "base": 134348800, "first": 80, "count": 64 },
   "units": [
     {

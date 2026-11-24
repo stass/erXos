@@ -31,7 +31,7 @@ class PlatformTest < Minitest::Test
     assert_equal [704, 44 << 20], [VIRT.memory_mib, VIRT.record.fetch('fiasco_reserve')]
     assert_equal 'config/manifest/qemu-virt-development.txt', VIRT.manifest_path
     assert File.file?(File.join(ROOT, VIRT.manifest_path))
-    assert_equal %w[web display usb pcie], VIRT.record.fetch('site_leaves_out')
+    assert_equal %w[web display usb pcie media], VIRT.record.fetch('site_leaves_out')
   end
 
   # Each board's development manifest is the common part followed by the board's own; the
@@ -55,8 +55,8 @@ class PlatformTest < Minitest::Test
     assert_match(/^apps$/, VIRT.manifest_source(ROOT))
     development = Erx::Manifest::Edit.without_apps(VIRT.manifest_source(ROOT))
     without = ->(source, domain) { Erx::Manifest::Edit.without_domain(source, domain, units: VIRT.record.fetch('units')) }
-    assert_equal without.(without.(without.(without.(development, 'web'), 'display'), 'usb'), 'pcie'), VIRT.site_manifest_source(ROOT)
-    assert_equal without.(without.(without.(development, 'web'), 'usb'), 'pcie'), VIRT.site_manifest_source(ROOT, keep: %w[display])
+    assert_equal %w[web display usb pcie media].reduce(development, &without), VIRT.site_manifest_source(ROOT)
+    assert_equal %w[web usb pcie media].reduce(development, &without), VIRT.site_manifest_source(ROOT, keep: %w[display])
     assert_raises(Erx::Error) { VIRT.site_manifest_source(ROOT, keep: %w[storage]) }
     site = VIRT.site_manifest_source(ROOT)
     ['domain storage', 'domain network', 'unit block', 'unit net', 'facet data', 'facet net'].each do |header|

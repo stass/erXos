@@ -38,8 +38,9 @@ module Erx
   # harness's sectors read equal, a pattern written, read back equal and flushed. Two of
   # the design's cases are not met yet and these stand in for them: no USB device has an
   # inspection path (abi/inspection.txt), so the reported status is what shows the unit;
-  # and no window or drive grant is started above a USB medium's transport (erx_usb_bot's
-  # moduledoc), so no raw window client exists and the transport is what is read. Then
+  # and the medium takes the manifest's drive disk0, whose grant answers its window, but
+  # no holder asks it: the media domain runs nothing and is handed no drive grant
+  # (docs/todo-storage.md, step 4), so the transport is what is read. Then
   # the harness ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU

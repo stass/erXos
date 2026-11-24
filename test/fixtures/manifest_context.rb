@@ -53,10 +53,22 @@ module ManifestContextFixture
   # (which domain_source's domains also name), the display, storage, network and web
   # boot scripts its domain rows name, the ntpd boot script of the ntpd session template
   # the raspi4b manifest and the net_device suite add, the pcie boot script of the pcie
-  # suite's PCIe domain, the usb boot script of the USB domain, the bt boot script of the
-  # raspi4b manifest's Bluetooth domain, the domain runtime images, runtimes/emu and
-  # runtimes/jit, and the system release's generated files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[app bt display network ntpd pcie session storage usb web])
+  # suite's PCIe domain, the usb boot script of the USB domain, the media boot script of
+  # the media domain, the bt boot script of the raspi4b manifest's Bluetooth domain, the
+  # domain runtime images, runtimes/emu and runtimes/jit, and the system release's
+  # generated files and root.
+  def arguments(codec) = archive_arguments(codec, boots: %w[app bt display media network ntpd pcie session storage usb web])
+
+  # The archive of source's own releases, a boot script for each release its domain rows,
+  # session templates and apps row name (Manifest.release_names, as the image carries
+  # them), for a test that admits one suite's manifest.
+  def manifest_arguments(codec, source)
+    archive_arguments(codec, boots: Erx::Manifest.release_names(source: source, codec: codec))
+  end
+
+  # How many records of kind source holds: its configured domains for 'domain', which
+  # the library plans one child plan for each, and the encoded manifest a row for each.
+  def rows(source, kind) = Erx::Manifest::Frontend.read(source).records.fetch(kind, []).size
 
   # An archive of the domain release, with a boot script for each of boots and one
   # library file, then runtimes/emu, then system/, the order the archive's sorted paths
@@ -147,13 +159,14 @@ module ManifestContextFixture
   SYSTEM_QUOTA = /^(principal system\n(?:  .*\n)*?  domains )\d+$/
   MAX_DOMAINS = /^(  max_domains )\d+$/
 
-  # The development manifest's own configured domains, storage, network, web, display, pcie and usb,
+  # The development manifest's own configured domains, storage, network, web, display, pcie, usb and media,
   # with the profiles and runtime limits only they name, their services (storage's
   # driver-control, data, packages, system and login_keys, network's driver-control and net, web's relay, the display's
   # window tree with its display record, and the PCIe domain's pcie) and the system domain's facets of them, the
   # PCIe domain's pci_bus facet, the display unit, which only a display domain holds (docs/design-fiasco.md, "Device
   # records"), so a manifest without one places none, the ECAM bridge's unit, which only the PCIe domain holds, and the
-  # USB domain's xhci unit, its pci facet and its input tree, usb_input, with the display's facet of it.
+  # USB domain's xhci unit, its pci facet and its input tree, usb_input, with the display's facet of it, and the
+  # media domain's service media and the drive window it holds.
   DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
                  /^service data\n(?:  .*\n)*/, /^service home\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/, /^service packages\n(?:  .*\n)*/,
@@ -170,7 +183,9 @@ module ManifestContextFixture
                  /^facet pci_bus\n(?:  .*\n)*/,
                  /^runtime_limits usb\n(?:  .*\n)*/, /^limits usb\n(?:  .*\n)*/,
                  /^domain usb\n(?:  .*\n)*/, /^unit xhci\n(?:  .*\n)*/, /^facet pci\n(?:  .*\n)*/,
-                 /^service usb_input\n(?:  .*\n)*/, /^facet usb_input\n(?:  .*\n)*/].freeze
+                 /^service usb_input\n(?:  .*\n)*/, /^facet usb_input\n(?:  .*\n)*/,
+                 /^runtime_limits media\n(?:  .*\n)*/, /^limits media\n(?:  .*\n)*/, /^domain media\n(?:  .*\n)*/,
+                 /^service media\n(?:  .*\n)*/, /^window \w+\n  holder @domain\.media\n(?:  .*\n)*/].freeze
   # Root's session template's facets, of data, net, inspect, start, machine, the clock,
   # login_keys and install, which a sessionless source (ProductionImage.without_sessions) does not hold.
   SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/,

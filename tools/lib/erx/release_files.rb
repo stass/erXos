@@ -204,9 +204,8 @@ module Erx
     #   loaded. No manifest names it; it exists because check_released requires a
     #   release for erx_wifi.
     # * media, the media domain's (docs/design-drives.md, "Manifest rows"): FAT's read
-    #   core, erx_fat, and the drives' readers, erx_media, never erx_storage or erx_blk.
-    #   No manifest names it yet; it exists because check_released requires a release
-    #   for erx_media.
+    #   core, erx_fat, and the drives' readers, erx_media, never erx_storage or erx_blk;
+    #   QEMU virt's development manifest names it as the holder of the USB domain's drive.
     # * ntpd, the network time client's session (docs/design-time.md, "Who does what"):
     #   erx_ntpd, which the ntpd template's -eval starts; its sockets and resolver are the
     #   base's network client, whose `grant` key the template's arguments set. It takes no

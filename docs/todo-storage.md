@@ -61,9 +61,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      facet's name (design-drives.md, "Links and rights"); the ordered end's step 2 freezing the media
      service; the shell's `mount` and `umount` forms ([todo-shell.md](todo-shell.md)). The media
      domain's durability facet to the system domain in the facet table, which `check_drive_domains`'
-     list then admits, and the board manifests'
-     media domain, service and drive rows, land here and not in step 1: the durability interface
-     does not exist before this step, and no release serves media before `erx_media` does.
+     list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
+     here too. QEMU virt's development manifest names its media domain, the service `media` and the
+     drive `disk0` on the xhci row, so its USB domain serves a stick as `disk0`; the domain runs
+     nothing yet. The introduction needs a design first: design-storage.md and design-usb.md name it
+     ("as it introduces any window's holder"), but no window holder in another domain is introduced
+     today, and no design states how the device service learns a drive's grant from the serving
+     domain, how it hands the grant over, or where the holder's envelope is narrowed to `window`.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume: its read path, then its batches, dirty flag
      and finish.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside
@@ -72,7 +76,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      of `mount_source/2`; and `erx_verity`'s `unchecked` form deleted, its tests and fuzz target moved to
      `erx_media_blocks`.
   7. littlefs for development builds and test images, through its port once the port exists (the port
-     item under "Stopgap replacements"): the owner's placement and write admission of the port's block
+     item under "Stopgap replacements"): the media domain's row's `spaces none` grown to the sub-spaces
+     of the ports (design-drives.md, "Manifest rows"); the owner's placement and write admission of the port's block
      requests, the port's budget, and the port's channel decoders with their fuzz targets. A steerable
      memory error in littlefs on a crafted stick reaches the port's sub-space, its own volume through
      its owner's checks, the kernel's calls and the CPU: a residual of development builds, which run only

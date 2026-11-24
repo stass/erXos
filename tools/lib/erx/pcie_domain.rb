@@ -17,8 +17,10 @@ require_relative 'runner'
 module Erx
   # The PCIe domain's suite manifest on QEMU virt (docs/design-pcie.md, "Where the rows
   # live"): the development manifest, which holds the PCIe domain's rows, without its web
-  # domain, which gives back the grant the test holder needs, and its USB domain, whose
-  # xhci unit the test holder holds instead (Manifest::Edit.without_domain).
+  # domain, which gives back the grant the test holder needs, its USB domain, whose xhci
+  # unit the test holder holds instead, and its media domain, whose one drive, disk0 on that
+  # unit, leaves with the USB domain, so it would boot serving no drive
+  # (Manifest::Edit.without_domain).
   #
   # The `pcie` QEMU suite (docs/design-pcie.md, "The `pcie` QEMU suite") boots that
   # manifest on MediumBoot's machine with a test holder added (manifest): MediumBoot's
@@ -48,8 +50,9 @@ module Erx
   # Footprint measures a domain, which the run's notes report (memory_note).
   module PcieDomain
     # The domains the suite leaves out: the web domain, whose grant the test holder takes,
-    # and the USB domain, whose xhci unit the test holder holds instead.
-    LEFT_OUT = %w[web usb].freeze
+    # the USB domain, whose xhci unit the test holder holds instead, and the media domain,
+    # whose one drive leaves with the USB domain, so it would boot serving no drive.
+    LEFT_OUT = %w[web usb media].freeze
     PCIE = 'pcie'
 
     # The test holder: MediumBoot's configured row, staying up as a node (MediumBoot::UP_ARGS),

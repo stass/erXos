@@ -187,9 +187,9 @@ class ErxStarterTest < Minitest::Test
     @packed_manifest ||= begin
       codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
       platform = Erx::MediumBoot.machine(Erx::Platform.development(ROOT)).record
-      arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[app clock display network pcie session storage usb web])
       source = Erx::Apps.manifest(Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT),
                                   boot: :kept) + SCREEN
+      arguments = ManifestContextFixture.manifest_arguments(codec, source)
       Erx::Manifest.admit(source: source, codec: codec,
                           context: Erx::Manifest::Context.new(**arguments, platform: platform),
                           planner: ManifestContextFixture.accepting_planner).bytes

@@ -511,8 +511,9 @@ The manifest check refuses:
 * more drives on one USB domain's controllers than `usb_drives_max`;
 * a `media` facet row with rights `rx`.
 
-The media domain's row allows it sub-spaces, for the littlefs ports,
-serves the one service `media`, and gives the system domain its
+The media domain's row allows it no sub-spaces (`spaces none`), since
+FAT and EROFS run in its own processes; a row that serves littlefs
+volumes allows the sub-spaces of their ports. The row serves the one service `media`, and gives the system domain its
 durability facet ([Finishing a volume](#finishing-a-volume)). The
 release check refuses a release other than the media domain's that names
 `erx_media`; a media domain's release that names `erx_storage`, whose

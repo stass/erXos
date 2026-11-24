@@ -131,8 +131,8 @@ class DomPlannerTest < Minitest::Test
   def test_the_library_plans_the_development_manifests_domains
     source = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 6, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
-                                 .report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(source, 'domain'), Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+                                                       .report.fetch('child_plan_instances')
     refute_includes source[/^  system_args .*$/], '-erx_net'
     assert_includes source, "unit net\n  placement \"net\"\n  holder @domain.network\n"
     assert_includes source, "unit display\n  placement \"display\"\n  holder @domain.display\n"
@@ -145,8 +145,8 @@ class DomPlannerTest < Minitest::Test
   def test_the_library_plans_the_narrow_images_domain
     source = Erx::ProductionImage::Run.narrow_manifest(ROOT, platform: PLATFORM)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: @context.platform))
-    assert_equal 5, Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
-                                 .report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(source, 'domain'), Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+                                                       .report.fetch('child_plan_instances')
   end
 
   # The system_domain suite's manifests, the service-kill boot's (SystemDomain.manifest)
@@ -169,11 +169,10 @@ class DomPlannerTest < Minitest::Test
   # library plans all five.
   def test_the_library_plans_the_pcie_suites_domains
     source = Erx::PcieDomain.manifest(Erx::PcieDomain.manifest_source(ROOT, platform: PLATFORM))
-    arguments = ManifestContextFixture.archive_arguments(@codec, boots: [*%w[app display network ntpd pcie session storage],
-                                                                         Erx::MediumBoot::DOMAIN_BOOT.name])
+    arguments = ManifestContextFixture.manifest_arguments(@codec, source)
     context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
-    assert_equal 5, admitted.report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(source, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
   # The Bluetooth suite's manifest (BtDomain.manifest): the development manifest with
@@ -182,10 +181,10 @@ class DomPlannerTest < Minitest::Test
   # the grant packs, and the library plans all eight domains.
   def test_the_library_plans_the_bluetooth_suites_domains
     source = Erx::BtDomain.manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
-    arguments = ManifestContextFixture.archive_arguments(@codec, boots: %w[app bt display gatt_echo network ntpd pcie session storage usb web])
+    arguments = ManifestContextFixture.manifest_arguments(@codec, source)
     context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
-    assert_equal 8, admitted.report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(source, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
   # The Raspberry Pi 4's development manifest, with its Bluetooth domain and the domain's
@@ -205,9 +204,9 @@ class DomPlannerTest < Minitest::Test
     source = PLATFORM.manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
                                                                 .merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
-    admitted = Erx::Manifest.admit(source: Erx::NetworkDomain.manifest(source), codec: @codec, context: context,
-                                   planner: @planner)
-    assert_equal 6, admitted.report.fetch('child_plan_instances')
+    network = Erx::NetworkDomain.manifest(source)
+    admitted = Erx::Manifest.admit(source: network, codec: @codec, context: context, planner: @planner)
+    assert_equal ManifestContextFixture.rows(network, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
   # The net_device suite's manifest (NetDevice.manifest), the development manifest with
@@ -231,7 +230,7 @@ class DomPlannerTest < Minitest::Test
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec)
                                                                 .merge(platform: Erx::NetDevice.machine(PLATFORM).record))
     admitted = Erx::Manifest.admit(source: edited, codec: @codec, context: context, planner: @planner)
-    assert_equal 6, admitted.report.fetch('child_plan_instances')
+    assert_equal ManifestContextFixture.rows(edited, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
   # ntpd's net grant holds two sockets (docs/design-time.md, "Who does what") on the
@@ -957,16 +956,15 @@ class DomPlannerTest < Minitest::Test
       end
     interface = ->(name) { @codec.schema.services.find { |service| service.fetch(:name) == name }.fetch(:number) }
     # The services, in name order, each with its server's index in boot order (display 0,
-    # network 1, pcie 2, storage 3, usb 4, web 5) or none for the system domain, and its interface.
-    services = [%w[clock none clock], %w[code_objects none code_objects], %w[data 3 files],
-                %w[display 0 windows], %w[home 3 files], %w[inspect none inspect], %w[install none code],
+    # media 1, network 2, pcie 3, storage 4, usb 5, web 6) or none for the system domain, and its interface.
+    services = [%w[clock none clock], %w[code_objects none code_objects], %w[data 4 files],
+                %w[display 0 windows], %w[home 4 files], %w[inspect none inspect], %w[install none code],
                 %w[line none line],
-                %w[log none log], %w[login none login], %w[login_keys 3 files], %w[machine none files],
-                %w[net 1 net],
-                %w[network_ctl 1 driver_control],
-                %w[packages 3 files], %w[pci none pci], %w[pci_bus none pci_bus], %w[pcie 2 pcie],
-                %w[start none files], %w[storage_ctl 3 driver_control],
-                %w[system 3 files], %w[usb_input 4 input], %w[web 5 web]]
+                %w[log none log], %w[login none login], %w[login_keys 4 files], %w[machine none files], %w[media 1 files], %w[net 2 net],
+                %w[network_ctl 2 driver_control],
+                %w[packages 4 files], %w[pci none pci], %w[pci_bus none pci_bus], %w[pcie 3 pcie],
+                %w[start none files], %w[storage_ctl 4 driver_control],
+                %w[system 4 files], %w[usb_input 5 input], %w[web 6 web]]
     assert_equal services.each_with_index.map { |(name, server, kind), index|
                    "service #{index} name=#{name} server=#{server} interface=#{interface.call(kind)}"
                  },
@@ -977,10 +975,10 @@ class DomPlannerTest < Minitest::Test
   # fixture's archive with a planner that places nothing, with source's edit applied.
   def display_manifest(edit = ->(source) { source })
     platform = Erx::Platform.load(root: ROOT, name: 'qemu-virt')
-    arguments = ManifestContextFixture.archive_arguments(@codec, boots: [*%w[display network session storage web], Erx::DisplayDomain::BOOT.name])
+    source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT, keep: [Erx::DisplayDomain::DOMAIN])))
+    arguments = ManifestContextFixture.manifest_arguments(@codec, source)
     context = Erx::Manifest::Context.new(**arguments.merge(platform: @context.platform))
     planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
-    source = edit.call(Erx::DisplayDomain.manifest(platform.site_manifest_source(ROOT, keep: [Erx::DisplayDomain::DOMAIN])))
     Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: planner).bytes
   end
 

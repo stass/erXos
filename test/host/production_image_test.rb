@@ -792,7 +792,7 @@ class ProductionImageTest < Minitest::Test
     source = Erx::ProductionImage.without_sessions(PLATFORM.manifest_source(ROOT)) + row
     assert_raises(Erx::ProductionImage::UnknownRelease) { image.send(:domain_boots, source) }
     echo = Erx::ReleaseFiles.domain_boot('echo', applications: [*Erx::ReleaseFiles::DOMAIN_BASE, 'erx_echo_test'], test: true)
-    assert_equal [echo, *%w[app display network pcie storage usb web].map { |name| Erx::ProductionImage.domain_boot(name) }],
+    assert_equal [echo, *%w[app display media network pcie storage usb web].map { |name| Erx::ProductionImage.domain_boot(name) }],
                  image.send(:domain_boots, source, given: [echo])
     assert_raises(Erx::Error) { image.send(:domain_boots, source, given: [echo, echo]) }
   end
@@ -844,23 +844,23 @@ class ProductionImageTest < Minitest::Test
 
   # The production image carries the domain releases its manifest's domain rows and
   # session templates name. The development manifest configures the storage, network,
-  # web and display domains, has a session template and an apps row, so it carries the
-  # app, display, network, session, storage and web releases, and all but the session's
+  # web, display, PCIe, USB and media domains, has a session template and an apps row, so
+  # it carries the app, display, media, network, pcie, session, storage, usb and web releases, and all but the session's
   # without the template; a manifest with domain rows names each release once, and a reference of
   # another form names nothing, for the manifest check to refuse.
   def test_the_production_image_carries_the_releases_its_domain_rows_name
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     source = PLATFORM.manifest_source(ROOT)
-    assert_equal %w[app display network pcie session storage usb web], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[app display media network pcie session storage usb web], Erx::Manifest.release_names(source: source, codec: codec)
     source = Erx::ProductionImage.without_sessions(source)
-    assert_equal %w[app display network pcie storage usb web], Erx::Manifest.release_names(source: source, codec: codec)
+    assert_equal %w[app display media network pcie storage usb web], Erx::Manifest.release_names(source: source, codec: codec)
     rows = %w[zeta beta zeta].each_with_index.map do |release, index|
       "domain d#{index}\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
         "  runtime @artifact.emu\n  release @artifact.#{release}\n  restarts 0\n  restart_period_s 0\n"
     end
     quoted = "domain q\n  principal @principal.system\n  limits @limits.native\n  kind service\n  flags none\n" \
              "  runtime @artifact.emu\n  release \"other\"\n  restarts 0\n  restart_period_s 0\n"
-    assert_equal %w[app beta display network pcie storage usb web zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
+    assert_equal %w[app beta display media network pcie storage usb web zeta], Erx::Manifest.release_names(source: source + rows.join + quoted, codec: codec)
   end
 
   # The widget toolkit's program ships with the toolkit (docs/design-packaging.md, "Where

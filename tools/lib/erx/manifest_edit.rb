@@ -91,12 +91,13 @@ module Erx
 
       # text without the configured domain called name, as if it had never been written in.
       #
-      # Taken out: the domain's record; the units it holds; the services it serves, each
-      # with its display record and the facets that grant it; the facets that grant it a
-      # service the system domain serves, which its system connection carries; and its
-      # limits, then the
-      # share and runtime limits they name, each unless a record left in still names it
-      # (limits first, so limits another domain keeps keep their share too).
+      # Taken out: the domain's record; the units and windows it holds, and every drive
+      # window that lies on a device of a unit it holds, another domain's too; the services it
+      # serves, each with its display record and the facets that grant it; the facets that
+      # grant it a service the system domain serves, which its system connection carries;
+      # and its limits, then the share and runtime limits they name, each unless a record
+      # left in still names it (limits first, so limits another domain keeps keep their
+      # share too). A window takes no budget, so it gives back no room.
       #
       # Given back, where the manifest reckons the room: the domain's principal loses its
       # limits' memory and outer budget and one domain of its quota; the machine loses the
@@ -111,7 +112,9 @@ module Erx
       # one of its services granted to that domain or one of that domain's granted to it,
       # as usb_input joins the USB and display domains, one of max_connections and one of
       # the other domain's limits' connections: their one connection, however many facets
-      # it carries.
+      # it carries, a drive window counting as such a grant: one it holds on a unit of the
+      # other domain's, or the other's on one of its units (docs/design-drives.md, "How the
+      # grant reaches the media domain").
       #
       # Refused: a domain that is not there; one whose service another principal's
       # template is granted; a removal that
@@ -123,7 +126,12 @@ module Erx
         domain = defined_by(all, "@domain.#{name}")
         principal = defined_by(all, domain.reference('principal'))
         limits = defined_by(all, domain.reference('limits'))
-        held = all.select { |record| %w[unit service].include?(record.kind) && names?(record, reference_of(domain)) }
+        held = all.select { |record| %w[unit window service].include?(record.kind) && names?(record, reference_of(domain)) }
+        on_units = windows_on(all, held.select { |record| record.kind == 'unit' }, units)
+                   .select { |window| window.reference('role') == 'drive' }
+        joined = [*on_units, *held.select { |record| record.kind == 'window' }].flat_map do |window|
+          window.reference('role') == 'drive' ? drive_holders(all, window, units) : []
+        end
         services = held.select { |record| record.kind == 'service' }
         facets = all.select { |record| record.kind == 'facet' && services.any? { |service| names?(record, reference_of(service)) } }
         displays = all.select { |record| record.kind == 'display' && services.any? { |service| service.name == record.name } }
@@ -133,12 +141,12 @@ module Erx
 
         held_facets = all.select { |record| record.kind == 'facet' && record.reference('grantee') == reference_of(domain) }
         servers = held_facets.map { |facet| defined_by(all, facet.reference('service')).reference('server') } - ['system']
-        others = (peers.map { |facet| facet.reference('grantee') } + servers).uniq.reject { |other| other == reference_of(domain) }
+        others = (peers.map { |facet| facet.reference('grantee') } + servers + joined).uniq - [reference_of(domain)]
 
         root = facets.any? { |facet| facet.reference('grantee') == '@session.system' } ? 1 : 0
 
         definitions = [limits, defined_by(all, limits.reference('grant')), defined_by(all, limits.reference('runtime_limits'))]
-        remaining = removed(source, with_unused_definitions([source.machine, *all], [domain, *held, *facets, *held_facets, *displays], definitions))
+        remaining = removed(source, with_unused_definitions([source.machine, *all], [domain, *held, *on_units, *facets, *held_facets, *displays].uniq, definitions))
 
         budget = %w[memory outer].sum { |field| limits.decimal(field) }
         dma = held.select { |record| record.kind == 'unit' }.sum { |unit| unit_dma(unit, units) }
@@ -267,18 +275,50 @@ module Erx
 
       # The DMA memory of the platform unit unit is placed on, in bytes.
       def unit_dma(unit, units)
-        key = unit.string('placement')
-        platform_unit = units.find { |row| row.is_a?(Hash) && row['key'] == key && row['devices'].is_a?(Array) } or
-          raise Error, "the manifest's unit #{unit.name} is placed on #{key.inspect}, which the platform has no unit of"
-        platform_unit.fetch('devices').sum do |device|
+        platform_unit(unit, units).fetch('devices').sum do |device|
           bytes = device['dma_memory']
-          raise Error, "the platform unit #{key}'s device has no whole dma_memory" unless bytes.is_a?(Integer) && !bytes.negative?
+          raise Error, "the platform unit #{unit.string('placement')}'s device has no whole dma_memory" unless bytes.is_a?(Integer) && !bytes.negative?
 
           bytes
         end
       end
+
+      # The record of units, the platform's, that the manifest's unit is placed on.
+      # Refused: a placement units has no unit of.
+      def platform_unit(unit, units)
+        key = unit.string('placement')
+        units.find { |row| placed_unit?(row) && row['key'] == key } or
+          raise Error, "the manifest's unit #{unit.name} is placed on #{key.inspect}, which the platform has no unit of"
+      end
+
+      def placed_unit?(row) = row.is_a?(Hash) && row['devices'].is_a?(Array)
+
+      # The windows of records that lie on a device of one of the units taken.
+      def windows_on(records, taken, units)
+        names = taken.flat_map { |unit| device_names(platform_unit(unit, units)) }
+        records.select { |record| record.kind == 'window' && names.include?(record.string('device')) }
+      end
+
+      # The holders of a drive window and of the unit its device lies on, when they are two
+      # configured domains, which its drive grant joins by one connection; none otherwise.
+      def drive_holders(records, window, units)
+        placed = units.find { |row| placed_unit?(row) && device_names(row).include?(window.string('device')) }
+        unit = placed && records.find { |record| record.kind == 'unit' && record.string('placement') == placed['key'] }
+        holders = [window.reference('holder'), unit&.reference('holder')].compact.uniq - ['system']
+        holders.size == 2 ? holders : []
+      end
+
+      # The names windows give the devices of platform_unit (Manifest.device_name).
+      # Refused: a device that is neither a device-tree node nor a whole PCIe place.
+      def device_names(platform_unit)
+        platform_unit.fetch('devices').map do |device|
+          Manifest.device_name(device, pci: device.is_a?(Hash) && device['selector'] == 'pci') or
+            raise Error, "the platform unit #{platform_unit['key']} has a device with no name a window can give"
+        end
+      end
       private_class_method :changed, :with_field, :replaced, :removed, :named, :defined_by, :with_unused_definitions,
-                           :reference_of, :names?, :unit_dma
+                           :reference_of, :names?, :unit_dma, :platform_unit, :placed_unit?, :windows_on,
+                           :drive_holders, :device_names
     end
   end
 end

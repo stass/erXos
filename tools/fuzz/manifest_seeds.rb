@@ -95,7 +95,7 @@ module Erx
       platform = Platform.load(root: repository, name: 'qemu-virt')
       source = DisplayDomain.manifest(platform.site_manifest_source(repository, keep: [DisplayDomain::DOMAIN]))
                             .sub("  parameter pixels #{DisplayDomain::PIXELS}\n", WINDOWS_PARAMETERS)
-      arguments = ManifestContextFixture.archive_arguments(codec, boots: %w[display network pattern session storage web])
+      arguments = ManifestContextFixture.manifest_arguments(codec, source)
       context = Manifest::Context.new(**arguments, platform: platform_of(repository, 'qemu-virt'))
       planner = ->(view) { %w[domains introductions sessions].to_h { |key| [key, view.fetch(key == 'domains' ? 'order' : key).map { 0 }] } }
       Manifest.admit(source: source, codec: codec, context: context, planner: planner).bytes

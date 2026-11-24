@@ -363,6 +363,21 @@ module Erx
       word(record, 'release')&.then { |value| value.delete_prefix('@artifact.') if value.start_with?('@artifact.') }
     end
 
+    # The name a window, an image or a device-valued facet parameter gives a placed device
+    # (docs/design-abi.md, "Devices and partition windows"); Manifest::Check reads the
+    # manifest's devices and Manifest::Edit the platform's through it. A device-tree device
+    # is named by its node path and a PCIe function (pci) by its place, its host bridge's
+    # node path, bus, device and function joined by colons, "/pcie@10000000:0:2:0", which
+    # no node path can be, since a node path has no colon. nil for a device that lacks the
+    # fields its name is made of, which names nothing.
+    def self.device_name(device, pci:)
+      return nil unless device.is_a?(Hash)
+      return device['path'] if !pci && device['path'].is_a?(String)
+
+      bridge, *place = device.values_at('bridge', 'bus', 'device', 'function')
+      [bridge, *place].join(':') if pci && bridge.is_a?(String) && place.all?(Integer)
+    end
+
     # A record's field when it is one unquoted token, nil when it is anything else.
     def self.word(record, field)
       tokens = record.properties.fetch(field, [])
@@ -3646,25 +3661,14 @@ module Erx
       end
 
       # The index of the placed device a window, an image or a device-valued facet parameter
-      # names (docs/design-abi.md, "Devices and partition windows"), of one of roles, or of
-      # any role when roles is nil; nil when none. A device-tree device is named by its node
-      # path and a PCIe function by its place, its host bridge's node path, bus, device and
-      # function joined by colons, "/pcie@10000000:0:2:0", which no node path can be, since
-      # a node path has no colon.
+      # names (Manifest.device_name), of one of roles, or of any role when roles is nil; nil
+      # when none.
       def named_device(name, devices, roles: nil)
-        place = PCI_PLACE.match(name)
-        key = place ? [place[:bridge], *%i[bus device function].map { |part| Integer(place[part], 10) }] : name
         devices.index do |device|
           (roles.nil? || roles.any? { |role| device.fetch('role') == device_role(role) }) &&
-            if place
-              device.fetch('selector') == @codec.member('mf_selector', 'pci') && device.values_at('bridge', 'bus', 'device', 'function') == key
-            else
-              device.fetch('selector') == @codec.member('mf_selector', 'dt') && device['path'] == key
-            end
+            Manifest.device_name(device, pci: device.fetch('selector') == @codec.member('mf_selector', 'pci')) == name
         end
       end
-
-      PCI_PLACE = /\A(?<bridge>[^:]+):(?<bus>0|[1-9][0-9]{0,2}):(?<device>0|[1-9][0-9]?):(?<function>[0-7])\z/
 
       def window_role(record)
         role = enum(record, 'role', 'mf_window_role')

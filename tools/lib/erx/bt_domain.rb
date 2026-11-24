@@ -104,7 +104,8 @@ module Erx
     #
     # Its grant is a grant of its own from the Bluetooth domain's share record, 50 mcpu on
     # CPU 0: MediumBoot's eighth of a CPU does not fit the system share's reserve beside
-    # the medium manifest's other domains (the planner refuses the web domain then). Its
+    # the medium manifest's other domains (the planner refuses the web domain then), and
+    # the suite leaves the media domain out (manifest) for the same reason. Its
     # memory is the Bluetooth domain's MEMORY, reused unmeasured. Its arguments are
     # MediumBoot's without the halt, so it stays up.
     #
@@ -170,7 +171,8 @@ module Erx
 
     # The suite's manifest from the development manifest's text, source, on platform: the
     # line unit on the system domain, with root_memory grown by its DMA memory
-    # (Manifest::Edit.with_unit), then MediumBoot's medium manifest with room for one
+    # (Manifest::Edit.with_unit), without the media domain, whose 50 mcpu the
+    # Bluetooth and echo domains' 100 need beside the others (2,325 at most), then MediumBoot's medium manifest with room for one
     # domain of MEMORY, and the domain's rows and line grant. MediumBoot drops the system
     # principal's session template, as for every medium cell: the shell the line is typed
     # at runs on the console, and the room one more domain gives the principal makes no
@@ -179,7 +181,9 @@ module Erx
     # at MEMORY each, and the machine room for the connection the echo's grant makes. The
     # restarts are 0, so a failed bring-up that ends a domain stays ended.
     def self.manifest(source, platform:)
-      lined = Manifest::Edit.with_unit(source, LINE_UNIT, holder: 'system', units: platform.record.fetch('units'))
+      units = platform.record.fetch('units')
+      lined = Manifest::Edit.with_unit(Manifest::Edit.without_domain(source, 'media', units: units), LINE_UNIT,
+                                       holder: 'system', units: units)
       medium = MediumBoot.manifest(lined, row: ROWS + line_grant(line_device(platform)) + ECHO_ROWS, domains: 2,
                                           domain_memory: MEMORY)
       MediumBoot.grown(medium, memory: 0, domains: 0, connections: 1)
