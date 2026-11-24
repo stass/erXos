@@ -3152,13 +3152,15 @@ without pairing.
   of stages 1 to 3
   ([design-bluetooth.md](design-bluetooth.md#on-qemu-against-bumble)).
   It needs the domains and facets of
-  [1b-A](#m5-a-wall-around-some-processes).
+  [1b-A](#m5-a-wall-around-some-processes). `bleuart`, the console over
+  the serial service, follows on the system console's driven line and
+  the start table's switched rows
+  ([design-bluetooth.md](design-bluetooth.md#the-console),
+  [design-apps.md](design-apps.md#switched-services)).
 * **(c) Stage 4 on QEMU `virt`.** The Security Manager as responder,
   the pairing window with its pairing wait and the control tree, the store with its
   development backend, reconnection with bonds and Service Changed, and
-  the stage 4 peers. The phone console joins it on the system domain's
-  login facet ([design-login.md](design-login.md)), in the order of that
-  document's build packages, once a passphrase checker exists.
+  the stage 4 peers.
 * **(d) The Raspberry Pi 4, on Fiasco.** Board probes B-P1 to B-P6,
   `erx_pl011`'s fresh start with hardware flow control, the system
   domain's line groups for the host link and the line trees, the Pi 4's
@@ -3172,8 +3174,8 @@ without pairing.
   development store keeps bonds.
 * **(e) Release.** The store's release backend, the vault's state slot
   ([design-system.md](design-system.md#state-slots)), which waits for
-  [M11](#m11-security-closure)'s vault, and the phone console's
-  manifest opt-in, off in every shipped manifest
+  [M11](#m11-security-closure)'s vault, and the manifest check that
+  refuses `bleuart`'s console line in a release manifest
   ([design-bluetooth.md](design-bluetooth.md#decisions), 2),
   and the Pi 4 on erXos's kernel at
   [M12](#m12-storage-networking-boards), where the firmware notification

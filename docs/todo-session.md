@@ -15,14 +15,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   sentinel, as `erx_login_tests` has for the service.
 * [Medium] login, a login service crash spends the front ends' intensities (docs/design-login.md,
   "Failure handling"): each crash ends every front end's domain, and each end counts against its
-  start row's intensity (5 in 600 s by default), so six crashes in ten minutes leave SSH, the web
-  and the phone console down for the boot. Fails safe, with a stop. Have the domain service not
+  start row's intensity (5 in 600 s by default), so six crashes in ten minutes leave SSH and the web
+  down for the boot. Fails safe, with a stop. Have the domain service not
   count an end a served facet's end caused, and reconcile with docs/todo-domains.md's re-grant item.
 * [Medium] login, the user-name rule at the front ends (`erx_ident`, `erx_login.hrl`,
-  docs/design-bluetooth.md, "The console"): `erx_ident` ships in the system domain alone, so a
+  docs/design-login.md): `erx_ident` ships in the system domain alone, so a
   front end's prompt cannot check a name as the facet does, and `erx_login.hrl` no longer carries
   a name bound. Move `erx_ident` into the `erx` application, its bound from `identifier_max`,
-  before the phone console's prompt is built.
+  before a front end checks a name itself.
 * [Low] login, long principal names (`erx_domain_core`, session names): a principal named in 62
   or 63 bytes can be named at a login, but its session name `NAME_N` is no identifier, so its
   login answers `unavailable` after the check. Bound the names of principals with a session

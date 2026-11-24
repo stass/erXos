@@ -1,7 +1,7 @@
 # Logging in through a front end
 
 A person reaches erXos from somewhere other than its console: an SSH
-client, a browser, a phone on the Bluetooth console. In each case a
+client or a browser. In each case a
 **front end**, a configured domain that parses what that medium sends,
 asks the system domain to log the person in, and on success gets the
 **line** of a new session of the person's principal and nothing else.
@@ -12,8 +12,9 @@ what a login returns and when a login ends.
 
 What a front end does with its line is its own design: the SSH domain's
 channels open ttys ([design-ssh.md](design-ssh.md)), the web domain opens
-views ([design-web.md](design-web.md)), the phone console, the domain
-`btconsole`, masters one tty per phone
+views ([design-web.md](design-web.md)). The Bluetooth console,
+`bleuart`, is no front end: it is a line of the system console, as the
+UART is, and holds no login facet
 ([design-bluetooth.md](design-bluetooth.md#the-console)).
 Login at a display, with its prompt, lock and overlay, is
 [design-display.md](design-display.md#risks-and-decisions)'s decision
@@ -77,9 +78,9 @@ the principal service directly ([design-live.md](design-live.md#the-console)).
 
 | Requirement | Consumer and what breaks without it |
 | --- | --- |
-| **L1.** One interface for every front end | the SSH domain, the web domain and `btconsole`; two copies of one check diverge |
+| **L1.** One interface for every front end | the SSH domain and the web domain; two copies of one check diverge |
 | **L2.** A login gives its front end the session's line and nothing else | every front end parses hostile input; a facet that granted more would hand a parser defect authority over principals |
-| **L3.** A login ends when the front end's connection ends | SSH, the web and the phone console; a crashed connection would otherwise leave a session running with nobody at its line |
+| **L3.** A login ends when the front end's connection ends | SSH and the web; a crashed connection would otherwise leave a session running with nobody at its line |
 | **L4.** A passphrase is checked in one place, under the network limits | every front end; a front end that checked passphrases itself, or under the console's local limits, would let a network peer guess faster or lock a name out at the UART |
 | **L5.** A passphrase login answers a stranger as it answers a wrong passphrase | every front end; otherwise a failed login tells whether a name has credentials |
 | **L6.** What a front end can make the system domain keep or do is bounded and declared | the system domain, whose fault resets the machine |
@@ -105,8 +106,8 @@ the start as one that ends later stops the session
 
 Each requirement that would otherwise be a rule of its own follows:
 
-* **L3 by construction.** A closed SSH connection, a crashed one, a
-  phone that walks out of range and a browser login the web domain drops
+* **L3 by construction.** A closed SSH connection, a crashed one and a
+  browser login the web domain drops
   each end the owner, and its end stops the session. The front end has
   no `logout` to remember: it ends a login by ending the process that
   holds it, so no path of a front end leaves a session behind.
@@ -152,7 +153,7 @@ the owner ends.
 * **One login per owner.** An owner logs in at most once in its life; a
   second login from it is refused `badarg`. A front end that serves
   several people runs a process for each, as the SSH daemon does for
-  each connection and `btconsole` does for each phone.
+  each connection.
 * **L6, a bound per grant.** Each grant's rows are at most its `logins`
   parameter; past it `cookie` and the logins answer `unavailable`. Each
   row costs the system domain a monitor and a few words, so the
@@ -180,22 +181,21 @@ row lists, and any other is refused `eperm` before the callback sees it
 | --- | --- | --- | --- |
 | the SSH domain ([design-ssh.md](design-ssh.md#the-ssh-domain)) | `tty_line` | `cookie`, `key_ok`, `login_key`, `login_passphrase` | 128, twice the daemon's 64 connections |
 | the web domain ([design-web.md](design-web.md#logging-in-and-the-line)) | `web_line` | `login_passphrase` | 16, the front end's live logins |
-| `btconsole`, the phone console ([design-bluetooth.md](design-bluetooth.md#the-console)) | `tty_line` | `login_passphrase` | 8 |
 
 The manifest check holds the facet to that table, as an allow-list: it
 refuses a `login` row on any other domain, a row whose `line`, operations or
 `logins` differ from its holder's, a row whose `max_request` or `in_flight`
 differs from the interface's (below), and more than one row per holder.
 The Bluetooth domain is not on it: it parses what anyone in range sends
-and holds only its radio grants.
+and holds only its radio grants; nor is `bleuart`, whose console line
+logs in as the console's lines do.
 `tty_line` is the session line [design-system.md](design-system.md#a-sessions-lines)
 serves a front end whose connections master the session's ttys,
 `open_tty` and, with design-ssh.md's answer on jobs, `open_job`;
-it is served by `erx_tty_line`, and named for what it serves, since the phone console masters ttys through it too. Whoever
+it is served by `erx_tty_line`, and named for what it serves. Whoever
 masters a tty of a logged-in session can already type any command its
 shell runs, so a front end that never opens a job gains nothing by being
-refused one, and one line interface serves SSH and the phone console
-alike.
+refused one.
 
 ### Operations
 
@@ -311,7 +311,7 @@ The login service hands the name, the passphrase, the class `network`
 and the terminal to the principal service, which passes them to its one
 passphrase checker and gives back its answer. Every login facet is
 `network`: none of its front ends is a terminal wired to the machine, so
-no phone, browser or SSH client can lock a name out at the UART. The
+no browser or SSH client can lock a name out at the UART. The
 checker is the vault ([design-system.md](design-system.md#the-vault)),
 with its limits: 5 failures in 60 s per name in the network class, 5 per
 terminal, one derivation at a time for the network class, each answer
@@ -326,7 +326,7 @@ The system domain receives three secrets through the facet: a
 passphrase, the input of an SSH key exchange, which holds its shared
 secret ([design-ssh.md](design-ssh.md#security)), and the cookie it
 mints. The front end sees the passphrase, as the SSH daemon does in
-keyboard-interactive and `btconsole` does on the stream it receives; it
+keyboard-interactive and the web domain does in its login form; it
 never stores, logs or echoes one. L8 holds on every route a term of the
 system domain takes out of a process:
 
@@ -462,8 +462,8 @@ ran the code it names.
 | failed mint (host) | a mint refused answers `unavailable` and stops the session it started | the stop removed: a session runs with no line |
 | terminal (host) | the same `Peer` from two holders counts at two terminals | the holder dropped from the terminal |
 | secrets (host) | a sentinel passphrase, with the login service seeded to crash holding it: absent from the system log, from a crash dump of the service and from the `'DOWN'` reason a monitor of another front end's facet receives | each of the sensitive flag, the status view and the facet's cut reason removed in turn |
-| grant's methods (QEMU) | `btconsole`'s grant calling `cookie` is refused `eperm` | the console's row listing every operation |
-| grant's line (QEMU) | a web grant's login mints `web_line`, `btconsole`'s `tty_line` | the line taken from the request |
+| grant's methods (QEMU) | the web domain's grant calling `cookie` is refused `eperm` | the web row listing every operation |
+| grant's line (QEMU) | a web grant's login mints `web_line`, the SSH domain's `tty_line` | the line taken from the request |
 | passphrase (QEMU, with a checker) | the right passphrase opens a session; a wrong one and an unknown name answer `no_match`; the sixth failure in 60 s answers `limited` | the checker's answer ignored, so a wrong passphrase opens a session |
 | no checker (host) | `login_passphrase` answers `unavailable` | a missing checker read as a match |
 | bounds and fuzz (host) | `admit/3` refuses each argument one past its bound and returns on every input of the fuzz target | one bound removed |
@@ -514,31 +514,16 @@ names; the full gates run once per batch.
    process holds its line, and `erx_ssh_dev` goes
    ([design-ssh.md](design-ssh.md#stages)). SSH stage 2's other parts
    are its own packages.
-6. **Bluetooth's parts for the console**: `erx_gatt_serial` started for
-   a declared service of the serial shape, the bond's identity address
-   in the `connected` event of a handler whose `ble` grant states
-   `identity`, and the gate's `bonded` level
-   ([design-bluetooth.md](design-bluetooth.md#the-console)).
-7. **`btconsole`**, its prompt core with its fuzz target, and its
-   manifest checks
-   ([design-bluetooth.md](design-bluetooth.md#the-console)).
-8. **The phone console's Bumble test**, pairing by passkey, logging in and
-   running a command
-   ([design-bluetooth.md](design-bluetooth.md#the-console)).
-9. **The phone console on the Raspberry Pi 4**, the board's manual
-   checklist.
 
-Packages 1 and 3 are independent; 2 needs 1; 4 needs 2; 5 needs 3 and
-4; 6 needs Bluetooth stage 4 on QEMU; 7 needs 2, 3 and 6; 8 needs 7 and
-a passphrase checker, the vault (decision 1); 9 needs 8 and Bluetooth's
-Raspberry Pi 4 stage. The web domain's login moves onto the facet with
-the web's network front end.
+Packages 1 and 3 are independent; 2 needs 1; 4 needs 2; and 5 needs
+both 3 and 4. The web domain's login moves onto the facet with the
+web's network front end.
 
 ## Alternatives considered
 
-* **Two facets, `erx_ssh_login` and `erx_web_login`, and a third for the
-  phone.** Three copies of one table, one check and one rate limit; a
-  fix to one misses the others.
+* **Two facets, `erx_ssh_login` and `erx_web_login`.** Two copies of
+  one table, one check and one rate limit; a fix to one misses the
+  other.
 * **A connection identifier in the request.** A front end could name any
   of its connections' cookies, as a forged caller can, and the service
   would have to bound and check a name the facet already gives it.
@@ -564,11 +549,11 @@ the web's network front end.
 
 ## Risks and open decisions
 
-1. **Decided: no passphrase checker before the vault.** The phone
-   console offers only passphrase logins, and the vault that checks them
-   is M11's. Until the vault exists the principal service has no
-   checker, `login_passphrase` answers `unavailable`, and no front end
-   logs anyone in by passphrase, so the phone console and SSH's
+1. **Decided: no passphrase checker before the vault.** The web login
+   and SSH's keyboard-interactive take passphrases, and the vault that
+   checks them is M11's. Until the vault exists the principal service
+   has no checker, `login_passphrase` answers `unavailable`, and no
+   front end logs anyone in by passphrase, so the web login and SSH's
    keyboard-interactive log in only once the vault's checker does.
 2. **Display logins.** Decision 14 of
    [design-display.md](design-display.md#risks-and-decisions) settles

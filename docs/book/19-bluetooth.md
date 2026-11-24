@@ -20,7 +20,7 @@
 > read of the serial service's write-only characteristic refused; an echo
 > through an app and pairing have not run on the board. Designed: an installed app's own `ble` grant, the rule that a service's
 > state belongs to its handler beyond its owner's check of sets and
-> notifications, the console over the serial service,
+> notifications, `bleuart`, the console over the serial service,
 > and tests against a Bumble peer that scans, connects, reads, streams
 > and pairs.
 
@@ -175,23 +175,28 @@ own.
 
 The Bluetooth domain mounts its grant of the line at `/line` and
 opens `/line/data` and `/line/ctl` as ordinary files. Its manifest
-row holds that grant and a store for its bonds (19.6). A machine may
-also offer a login console over the serial service: each phone's
-stream logs a person in by passphrase through the system domain's
-login facet, the one every front end holds
-([design-login.md](../design-login.md)), and then masters a tty of the
-new session, as an SSH channel does. A small domain of its own,
-`btconsole`, runs that console as a client of the `ble` facet and holds
-the login facet, so the Bluetooth domain keeps to its radio; the radio
-stack decrypts the link all the same, so the separation contains a
-console defect and buys no secrecy. The console's characteristics
-require `bonded`, so no write of a phone that is not yet a bond reaches
-it, and its `ble` grant alone asks to hear a bonded phone's identity
-address, the one name of a phone that stays across its connections,
-which the console gives the login as the terminal's peer; no other
-handler hears it from the bond, though a phone that does not use a
-private address shows it as its connection address to every handler. The `bonded` level and the grant's `identity` are
-built; the console and its login are designed and not built. The manifest check is designed to refuse
+row holds that grant and a store for its bonds (19.6). A development
+machine also offers its console over the serial service, as a serial
+cable that needs no plug. A small domain of its own, `bleuart`, handles
+the serial service as a client of the `ble` facet and drives a line of
+the system console through a facet the console serves, `console_line`,
+which carries the console's own driver messages: bytes in, bytes out,
+each answered, and the line's size and end
+([design-bluetooth.md, The console](../design-bluetooth.md#the-console)).
+The console treats that line as it treats its others, with its own
+`Ctrl-G` menu and root logged in, so a phone's terminal app gets what a
+terminal on the UART gets, except the system shell: the line is never
+secure. One client holds the line at a time, as one cable fits a
+serial port, and a disconnect changes nothing on the line, as
+unplugging the cable changes nothing on the UART. No radio byte reaches
+the system domain; it sees console input, as from the UART. There is no
+login and no pairing, so anyone in range gets root's session, a
+limitation published with the development images: `bleuart` is a
+switched service, on by default on a builder's own card and off on the
+published one, where `service bleuart enable` turns it on
+([chapter 23](23-apps.md#2312-what-starts-without-a-person)), and a
+release build refuses the line. The console line and `bleuart` are
+designed and not built. The manifest check is designed to refuse
 anything more, because a stranger in radio range reaches whatever the
 domain holds through a parser defect; that check is designed and not
 built, so the row's contents rest on the manifest text. Figure 19.1
@@ -509,7 +514,8 @@ A configured domain holds one by a row of the manifest; the facet and
 its request check are built, and no shipped manifest grants it to a
 domain. An installed app holds its own, without anyone editing the manifest: the board's
 `apps` row says which GATT services apps may handle (the row of the
-Bluetooth suite's app cell on QEMU `virt` offers `nus`), the package names the ones it
+Bluetooth suite's app cell on QEMU `virt` offers `nus`; the Raspberry
+Pi 4's row offers none, since its `nus` is `bleuart`'s), the package names the ones it
 handles in its own `gatt` field, and install checks that every name is
 offered and that no other app already declares it
 ([chapter 23](23-apps.md#2313-one-row-bounds-every-app)). Each session
@@ -518,9 +524,9 @@ the app can handle those services and no others. A service that no
 installed app handles is still in the table; it answers reads from its
 declared values and refuses writes. Installing, updating or removing an
 app therefore never changes the table or the advertising data. On the
-Raspberry Pi 4 no app handles `nus`: the Nordic UART service there
-belongs to a planned `bleuart` service, and both of its cards carry the
-kiosk alone ([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)).
+Raspberry Pi 4 no app handles `nus`: the Nordic UART service there is
+the console's, `bleuart`'s, and both of its cards carry the kiosk alone
+([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)).
 The `apps` row's `gatt` field,
 the package's own field, the checks of the packages an image carries
 and the narrowing of each session are built; the checks of an install
@@ -614,7 +620,7 @@ checklist with a phone follows. The board has run the domain to
 advertising on the ROM alone, with the pins set by the system domain's
 root at boot. A script, `tools/ble_board_check.rb`, drives a Mac's `blew`
 through the scripted steps (scan, connect and discover, write and read the
-serial service); an echo through an app and pairing are not yet run on the board.
+serial service); the console and pairing are not yet run on the board.
 
 ## 19.8 Design choices
 

@@ -35,6 +35,13 @@ Decisions every reader needs:
   declarations, descriptors, subscriptions, MTU and long values. The
   app's handler process answers writes, sets the values reads return,
   and sends notifications and indications, through the `ble` facet.
+* **A phone gets the console as a serial cable over the radio.** On a
+  development build, `bleuart`, a domain of its own, drives a console
+  line of the system console from Nordic's UART service: any client in
+  range gets the console's menu and root's session, with no login and
+  no pairing, and never the system shell. It is a switched service,
+  on by default on a builder's own card and off on the published one,
+  and a release build has none ([The console](#the-console)).
 * **The Bluetooth domain parses everything radio-derived.** Every byte
   from the controller is hostile: the controller's closed firmware parses
   the air, and anyone in radio range reaches the parsers above it. The
@@ -275,7 +282,7 @@ Each names its consumer.
 | B2 | A phone discovers, reads and writes the characteristics apps declare, and subscribes to their notifications and indications | the vendor's phone app | 2 |
 | B3 | An app declares its services as data; Erlang processes answer writes, set values and send notifications | the vendor's app on erXos | 2 |
 | B4 | A byte stream between a phone and an app, which phone terminal apps for Nordic's UART service open | serial tools; the console | 3 |
-| B5 | A characteristic may require an encrypted link, or an authenticated one, reached by LE Secure Connections pairing and bonding | Wi-Fi provisioning, the console | 4 |
+| B5 | A characteristic may require an encrypted link, or an authenticated one, reached by LE Secure Connections pairing and bonding | Wi-Fi provisioning | 4 |
 | B6 | A pairing is made only in a window someone with the right opened, and no bond is replaced by pairing | every characteristic that requires a bond | 4 |
 | B7 | Every byte from the controller and every PDU from a peer is parsed by a bounded parser with a fuzz target; a malformed one ends at most its link, or restarts the controller | the machine's integrity against anyone in radio range | all |
 | B8 | The trusted base parses no radio bytes | the system domain's integrity ([design.md](design.md#decisions)) | 1 |
@@ -507,9 +514,8 @@ Stages 1 to 3 need no Security Manager: until stage 4 the link answers
 every SMP PDU with Pairing Failed, Pairing Not Supported (`0x05`), and the
 gate refuses every `encrypted` and `authenticated` access with
 Insufficient Authentication, which is the right answer for a server with
-no key for the peer (GAP 10.3.1). The phone console is part of stage 3's service but
-is offered only once stage 4 exists, since its characteristics are
-`bonded` ([The console](#the-console)).
+no key for the peer (GAP 10.3.1). The console, `bleuart`, is stage 3's: its
+service's accesses are `open` ([The console](#the-console)).
 
 ## Domains and authority
 
@@ -533,14 +539,14 @@ the release otherwise only loads, declared per script
   `bt_connections_max`), the patch file and the manufacturer it applies
   to where the board's manifest names one (on the Pi 4,
   `-erx_bt patch 'BCM4345C0.hcd' -erx_bt patch_manufacturer 15`, the
-  manufacturer `0x000f` its ROM reports, [The bring-up](#the-bring-up)), and the service the console serves, if
-  any (the opt-in of [Decisions](#decisions), 2: absent from every
-  manifest erXos ships). They are application keys of `erx_bt` in OTP's
+  manufacturer `0x000f` its ROM reports, [The bring-up](#the-bring-up)), and the services it serves, which the
+  build derives from the manifest's `ble` rows
+  ([Declarations](#declarations-abigatt)). They are application keys of `erx_bt` in OTP's
   own form, `-erx_bt Key Value` among the row's `init` arguments, which
   `application:get_env/2` reads, as the network domain's row sets
   `-erx_net interfaces` (`config/manifest/qemu-virt-development.txt`):
   `name`, `appearance`, `connections`, `patch`, a file of `erx_bt`'s
-  `priv` directory, `patch_manufacturer` and `console`. The host name is
+  `priv` directory, `patch_manufacturer` and `services`. The host name is
   the host part of the domain's node name up to its first dot, so
   `bt@pi.example.com` advertises `pi`
   ([design-system.md](design-system.md#identifiers)). The release's boot
@@ -575,8 +581,8 @@ domain's row to its grant, its login facet and its host key facet
 ([design-ssh.md](design-ssh.md#invariants), H3): it refuses a device, a
 partition window, a second `line` grant, and any facet but the `line`
 grant and the store's grant, and a release manifest refuses the
-development store. The phone console runs in a domain of its own,
-`btconsole`, a client of the `ble` facet ([The console](#the-console)).
+development store. The console, `bleuart`, runs in a domain of its own,
+a client of the `ble` facet ([The console](#the-console)).
 
 ### The controller's line
 
@@ -1641,9 +1647,13 @@ reads a declaration at run time, so it is not an input to fuzz.
 
 Which services a machine serves is the manifest's: each `ble` facet row
 names, in its `services` parameter, the services its grantee handles,
-the app template's row those installed apps may handle, and
-the Bluetooth domain's row names its console's; the domain serves exactly
-these. The packer sorts a `services` set into strict byte order and
+and the app template's row those installed apps may handle; the domain
+serves exactly these, less those whose every holder is a switched row
+switched off when the domain starts, since its `services` argument is
+derived at each start from the grants of the rows that will run
+([design-apps.md](design-apps.md#switched-services)). So a service whose
+holder is off is neither served nor advertised, and switching that
+holder on or off restarts the Bluetooth domain. The packer sorts a `services` set into strict byte order and
 refuses a name twice or more than 8 names, and the boot view takes the
 packed set only in that order
 ([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)).
@@ -1766,7 +1776,7 @@ parameter identity 2 boolean optional boolean checked_by ble_grant
 
 A phone's identity address is the one name of it that stays across its
 connections, so it lets a handler follow one phone over time; only a
-handler that needs that asks for it, the phone console among them, and
+handler that needs that asks for it, and
 the facet tells the registry so at each attach it forwards, so the
 registry gives the `identity` field to that grant's handlers and to no
 other. A phone that connects from its identity address rather than a
@@ -2020,9 +2030,9 @@ own session, whose public functions the SDK lists
   through the facet the new incarnation mints.
 * **`erx_gatt_serial`**, the serial service over `erx_gatt_service`
   ([For apps](#for-apps)): `erx_gatt_serial:start_link(Service, Owner)`
-  starts the handler of `Service`, `nus` or `console`, the two
-  declarations of the UART service's shape, an `rx` written and a `tx`
-  notified, for attaching and notifying, registered in the session under its module's
+  starts the handler of `Service`, a declaration of the UART
+  service's shape, an `rx` written and a `tx` notified, `nus` among
+  them, for attaching and notifying, registered in the session under its module's
   name, which sends `Owner` `{serial, Conn, Bytes}` messages and the
   `connected` and `disconnected` events; `erx_gatt_serial:send(Conn,
   Bytes)` calls it.
@@ -2294,109 +2304,171 @@ commands; an app that needs every byte uses `write` with response.
 
 ### The console
 
-The phone console is the serial service made a **login line**, as an SSH
-connection is ([design-ssh.md](design-ssh.md#an-ssh-connection-is-a-line)):
-`erx_bt_console` handles the `console` service, a declaration with the
-UART service's UUIDs whose `rx` and `tx` require `bonded`, and
-each phone's stream is a line that logs a person in through the system
-domain's `login` facet ([design-login.md](design-login.md)) and then
-masters a tty of the new session. `erx_bt_console` runs in a configured
-domain of its own, `btconsole` ([Decisions](#decisions), 8), a client of
-the stream `erx_gatt_serial:start_link(console, Owner)` gives ([For
-apps](#for-apps)), as the QEMU suite's echo is of `nus`'s. Its row holds
-two grants and nothing else, which the manifest check holds it to: the
-`ble` facet with `services` naming `console` alone and `identity` true,
-and the login facet
-with `line` `tty_line`, `logins` 8 and the one operation
-`login_passphrase` ([Who holds it](design-login.md#who-holds-it)). The
-Bluetooth domain holds no login facet. `btconsole` takes its login
-facet's end, which a crash of the login service brings, as its own end:
-the domain ends, and with it every phone's console process, and the
-manifest restarts it with a new facet
-([Failure handling](design-login.md#failure-handling)). For each phone:
+**`bleuart` is a serial cable over the radio.** A BLE client that
+connects to the machine and opens Nordic's UART service gets a console
+line of the system console, as a terminal on a serial cable gets the
+UART: the same `Ctrl-G` menu, root logged in, root's sessions, the log
+lines, but never the system shell. There is no login, no pairing and no bond. The service is `nus`
+as declared above, with `open` accesses, so every phone terminal app for
+Nordic's UART service works unchanged.
 
-* **One process per phone.** The first write of a `Conn` starts the
-  phone's **console process**, which owns everything of that phone: its
-  login, and so its session, and the tty it masters. It ends when the
-  phone's link ends, which `erx_gatt_serial` reports, and its end ends
-  the login, the session and the tty
-  ([A session ends with what it was started
-  for](design-login.md#a-session-ends-with-what-it-was-started-for)).
-  It sets `process_flag(sensitive, true)` before it reads a byte, since
-  the passphrase passes through it, and reports through
-  `erx_report:status/2`.
-* **The prompt.** Before a login there is no tty, so the console process
-  reads lines itself through a pure core, `erx_bt_prompt`, which takes
-  each write as it arrives, in whatever pieces the phone cut it, and
-  returns the bytes to send and, at a line's end, the name or the
-  passphrase: it sends `login: `, takes bytes up to a CR, an LF or a
-  CR LF, echoing them; then `Password:`, taking bytes without echo. The
-  bounds are the login facet's own: a name that is a system identifier
-  ([design-system.md](design-system.md#identifiers)) and a passphrase up
-  to 1,024 bytes, from `erx_login.hrl`
-  ([Operations](design-login.md#operations)). A longer line, a NUL or a
-  byte outside the alphabet in the name is a failed attempt, without
-  asking the facet: the core discards the rest of the line, keeping
-  nothing of it, and asks again at its end. The process keeps the
-  passphrase only until the facet answers.
-* **The login.** It calls `login_passphrase(Name, Passphrase, Peer)`,
-  `Peer` being the `identity` of the link's `connected` event in text,
-  the bond's identity address, which a phone keeps across connections
-  while its connection address changes. No write of a link that is not
-  bonded reaches the console, by construction: `rx` requires `bonded`,
-  so the gate refuses such a write, a pairing link's before the store
-  has kept its bond among them, before the registry hands it out, and
-  every write the console takes comes with a `connected` event that
-  carries `identity`. `no_match`,
-  `limited` and `unavailable` are shown as `Login incorrect`,
-  `Too many attempts; try later` and `Login unavailable`. After 3 failed
-  attempts the process sends nothing more and drops the phone's writes
-  until the link ends, so a phone
-  retries only by reconnecting, and the facet's per-name and per-terminal
-  counts bind across connections.
-* **The tty.** On `{ok, Line}` it calls `open_tty` through the line with
-  a shell, `TERM` `dumb` and 80 columns by 24 rows, which `stty` changes,
-  and becomes the tty's master: its writes become `tty_input`, the
-  relay's `tty_output` become notifications through `erx_gatt_serial`,
-  and the link's end is `tty_hangup`. Echo, line editing and Ctrl-C are
-  the tty's line discipline's, as at the UART; a terminal app that
-  echoes locally shows a line twice, as on a serial line, until `stty
-  -echo`.
+The construction is a console line driven from another domain. The
+system console already takes each of its lines from a driver that speaks
+the console's driver messages
+([design-runtime.md](design-runtime.md#the-console-and-standard-io)),
+and it already serves more than one line, each with its own menu, login
+and connected terminal ([design-live.md](design-live.md#the-console)).
+`bleuart` is that driver for one more line, in a domain of its own:
 
-The line never logs anyone in without a passphrase, in any build, and
-never offers the system shell, which only the console's secure lines
-carry ([design.md](design.md#decisions)). Since a passphrase must not
-cross the air in clear and a login prompt must not be reachable by
-anyone nearby, the manifest check refuses a `console` service whose
-`rx` or `tx` is below `bonded`, which in turn needs stage 4, and a
-console row whose `ble` grant does not state `identity` true. The
-UART service and the console share UUIDs, so a machine serves one of
-them: a manifest that offers both `nus` and `console` is refused, as a
-second holder of one service is. A release build offers the console
-only when its manifest opts in, with the console's row, and no manifest
-erXos ships does: a build check over the shipped release manifests
-fails on one that names a console service ([Decisions](#decisions),
-2). Logins by passphrase need a passphrase checker, which is the
-vault's; none is built before it
-([design-login.md](design-login.md#risks-and-open-decisions), 1).
+```text
+ phone ---- radio ---- bt: ATT, the nus service ---- ble facet ---- bleuart: erx_bleuart
+                                                                        | console_line facet:
+                                                                        | input, taken, output,
+                                                                        | written, size, eof
+                                                                        v
+                                         system domain: erx_console, a line like the UART's
+```
+
+* **`bleuart`** is a configured `service` domain of the manifest, named
+  `bleuart` (node `bleuart@erxos`), of the principal that owns the
+  machine's services, on the BeamAsm image. Its release, `bleuart`,
+  ships `kernel`, `stdlib`, `erx`, `erx_bt_client` and `erx_bleuart`,
+  whose one process, `erx_bleuart`, is the line's driver. Its row holds
+  exactly two grants, which the manifest check holds it to: the `ble`
+  facet with `services` naming `nus` and no `identity`, and the system
+  domain's `console_line` facet. It holds no device, no file grant and
+  no login facet. Its row is switched
+  ([design-apps.md](design-apps.md#switched-services)).
+* **The console line** is the system console's line for the
+  `console_line` facet's grantee: an instance of the interface
+  `abi/services/console_line.txt` declares, which carries the console's
+  driver messages between the domains
+  ([design-live.md](design-live.md#the-console)), served by
+  `erx_console` to the one configured domain the manifest grants it to.
+  The console treats the line as it treats the host link's `console`
+  line: it has its own `Ctrl-G` menu, its own login and at most one
+  connected terminal. It is never secure, so it never carries the
+  system shell: in a development build the console logs `root` in at it
+  when it opens, which starts a session of root's
+  ([design-live.md](design-live.md#the-console), "Logging in"), and the
+  menu lists, connects to and starts root's sessions, without the `s`
+  entry. A session connected at the UART is refused at this line, as at
+  any second line, and the menu names the line that holds it.
+* **No radio byte enters the system domain.** The Bluetooth domain
+  parses the radio and hands `bleuart` each write's bytes; `bleuart`
+  passes them on as console input; the system domain parses only console
+  input, the same bytes a UART gives it, through the console's own
+  escape parser and the tty's line discipline (B8). The system domain
+  holds no `ble` grant, which `ble_grant` refuses.
+
+`erx_bleuart` is the stream `erx_gatt_serial:start_link(nus, Owner)`
+gives ([For apps](#for-apps)), joined to the console line, and keeps
+one fact, the client whose link holds the line, through a pure core,
+`erx_bleuart_core`:
+
+* **One client at a time.** The first client whose write reaches
+  `bleuart` holds the line until its link ends; every other link's
+  writes are dropped and it is sent nothing. A console line has one
+  terminal, as a serial port has one cable: two clients on one line
+  would each type into a shell the other sees, and the line's output
+  would wait on the slower radio. The Bluetooth domain's connection
+  limit is 1 by default ([The Bluetooth domain](#the-bluetooth-domain)),
+  so a second phone is not connected at all unless the board's row
+  raises it for other services.
+* **Input.** Each write's bytes are one `input` to the console, sent
+  only after the console has taken the last, as every console driver
+  sends ([design-runtime.md](design-runtime.md#the-console-and-standard-io));
+  writes that arrive meanwhile wait in `erx_gatt_serial`'s bounded queue,
+  past which the Bluetooth domain drops write commands, as ATT allows
+  ([For apps](#for-apps)). `bleuart` cannot see that loss and reports
+  none, as a UART without flow control loses bytes it never read.
+* **Output.** Each `output` the console sends is cut into notifications
+  on `tx` to the client holding the line, and answered `written` once
+  `erx_gatt_serial:send/2` has queued them or answered `{error, busy}`,
+  so a stalled phone delays the line by at most `bt_handler_timeout_ms`
+  and stops nothing. With no client, or a client that has not
+  subscribed, `written` is answered at once and the bytes go nowhere,
+  as bytes written to a UART with no cable plugged in do.
+* **Disconnect.** A client's disconnect changes nothing on the line, as
+  unplugging a serial cable changes nothing on the UART: the session
+  connected there runs on, the line's menu and login are where they
+  were, and the next client to write holds the line and sees what is
+  written from then on; `Ctrl-L` redraws an edited line.
+* **Size.** A NUS client has no way to report its size, so `bleuart`
+  sends none and the line is 80 by 24, which `stty` changes for the
+  session's tty, as at the UART.
+* **The line's end.** The line ends with `bleuart`'s domain, at a crash
+  or a `service bleuart stop`. A restart of the Bluetooth domain does
+  not end it: `erx_gatt_serial` attaches again through the facet the
+  new incarnation mints ([The client](#the-client)), and the client's
+  link, which the restart ended, is a disconnect. The facet's end is
+  the line's hang-up: the console logs the line out, ending the
+  sessions started at it, as a hang-up ends a UNIX login's jobs, and the
+  line is gone until `bleuart` starts again, when the console logs
+  `root` in at the new line.
+
+**What crosses as text.** The bytes a client writes are input on a
+console line, untrusted as the UART's are, and reach a session only
+through the tty's line discipline; the console's menu and log lines are
+written to the line through the line escape, as at every line (V9 of
+[design-live.md](design-live.md#invariants)). What a program writes is
+its output and reaches the phone unchanged, as it reaches the UART
+(V1): `bleuart` escapes nothing and filters nothing, since what shows
+text is the phone's terminal app, which is the operator's own terminal
+as the host's terminal is the UART's.
+
+**Off means not advertised.** The Bluetooth domain derives its served
+list at its start from the `ble` grants of the rows that will run
+([Declarations](#declarations-abigatt)), so with `bleuart` switched off
+it neither serves nor advertises `nus`, and a scanner sees no UART
+service. Switching it on or off restarts the Bluetooth domain first, so
+`service bleuart start` makes the next scan show the UART service and
+`service bleuart stop` makes it disappear
+([design-apps.md](design-apps.md#switched-services)). `service bleuart
+enable` and `disable` set `bleuart_enable` in `/etc/start.conf`, which
+the next boot applies.
+
+**Where it is offered.**
+
+* **A development build's own card**, the Raspberry Pi 4's development
+  manifest, runs `bleuart`, `enable YES`.
+* **The published card and QEMU's published medium**, packed from the
+  same manifest, carry `bleuart` disabled by its `published_enable NO`,
+  and an administrator at the board's console turns it on with `service
+  bleuart enable` and `service bleuart start`; the setting is kept on
+  the data partition across boots.
+* **A release build offers none**: the manifest check refuses a
+  `console_line` grant in a release manifest, so no release image has
+  the line, whatever its rows say.
+
+**Security, a published development-build limitation.** On a
+development build with `bleuart` on, anyone within radio range who
+connects to the machine's UART service gets root's session at the
+console, a root shell, without a passphrase, a pairing or any other
+proof, and can read whatever the line shows, log lines included. That
+is what the line is for, a serial cable that needs no plug, and what a
+development build is for, trusted code on a bench; the system shell
+stays out of reach, since the line is not secure. It is published with
+the development images, beside SSH's development keys
+([design-ssh.md](design-ssh.md#the-ssh-domain)), and is not a residual:
+`service bleuart stop` and `disable` turn it off, the published card
+ships it off, and a release build has no such line.
 
 **Tests.** Each with the seeded fault that proves it ran:
 
 | Test | Passing case | Seeded fault |
 | --- | --- | --- |
-| prompt (host) | a 33-byte name, a NUL and a 1,025-byte passphrase each count as a failed attempt without a facet call; the fourth attempt gets no prompt | the length bound removed |
-| prompt fuzz (host) | `erx_bt_prompt` fed arbitrary bytes cut at arbitrary points never raises, never yields a name or passphrase past its bound, and its output never holds a byte of a passphrase | the echo left on for the passphrase |
-| identity (host) | the `connected` event of a bonded link from a resolvable private address carries the bond's identity address, and two connections of one bond carry the same | the connection address passed as `identity` |
-| identity by grant (host) | a handler attached through a grant without `identity` hears a bonded link as bonded and never its identity; one whose grant asks hears it on the same link | the identity left in every handler's event |
-| bonded (host) | the gate refuses a `bonded` access on a link with an authenticated key that is no kept bond's, and passes it once the bond is kept | the bond check dropped from the gate |
-| serial shape (host) | `erx_gatt_serial` started for a service whose `rx` is not writable or whose `tx` is not notifiable is refused `{not_serial, Service}` | the shape check skipped |
-| manifest (host) | a `console` service at `authenticated` is refused; a console row whose grant does not state `identity` is refused; `nus` and `console` together are refused | any rule removed |
-| release manifests (build) | the shipped release manifests name no console; a sample that names one fails the check | the check's scan skipped |
-| Bumble (QEMU) | the stage 4 peer pairs by passkey, read from the `pair` file, writes `root`, the passphrase and `echo hello`, and reads `hello` in a notification; closing the link ends the session within 5 s | a wrong passphrase gets no shell, and a Just Works bond's write to `rx` is refused for insufficient authentication |
+| one client (host) | `erx_bleuart_core` with two links: the first link's writes become input and output reaches it alone; the second's writes are dropped, and after the first link ends the second's next write holds the line | the core taking every link's writes |
+| flow (host) | input is sent one message at a time, each after `taken`; output with no client or no subscription is answered `written` at once, and with a client after `send/2` answers | output held while no client is connected, which stops the console's line |
+| disconnect (host) | a link's end sends the console nothing | an `eof` sent at a disconnect, which logs the line out |
+| manifest (host) | a `bleuart` row holding any grant but its two is refused; a `console_line` grant to the system domain, to a session template or to a second domain is refused; a `console_line` grant in a release manifest is refused; `nus` named by `bleuart` and by the `apps` row's `gatt` is refused | any rule removed |
+| derived list (host) | the Bluetooth domain's `services`, derived with `bleuart` switched off, lacks `nus`, and with it on holds it | the derivation taking every grant whether its holder runs or not |
+| Bumble (QEMU) | a cell whose manifest runs `bleuart` in the echo's place, since both handle `nus`: a Bumble central connects with no pairing, subscribes to `tx`, writes `echo hello` and a CR, and reads `hello` in the notifications; `Ctrl-G` draws the menu with root's sessions and no `s` entry; the central disconnects and reconnects, writes a CR and gets the same session's prompt; `service bleuart stop` makes the next scan show no UART service and `service bleuart start` brings it back | the line marked secure, which shows the `s` entry; the Bluetooth domain left unrestarted at the switch, which keeps advertising the UART service after the stop |
 
 The Raspberry Pi 4's checklist repeats the Bumble case with a phone's
-terminal app, from a development manifest whose console takes the UART
-service's UUIDs.
+terminal app on the development card, and checks on the published card
+that a scan shows no UART service until `service bleuart enable` and
+`service bleuart start` are typed at the board's console.
 
 ## Stage 4: pairing and bonding
 
@@ -2585,7 +2657,7 @@ manage the machine, and the passkey is fresh for each pairing; no
 passkey is printed on a device or fixed in its configuration, since a
 static passkey leaks over repeated attempts. A machine with no such
 channel opens only `nodisplay` windows, so it serves `authenticated`
-characteristics, the console and Wi-Fi provisioning among them, to no
+characteristics, Wi-Fi provisioning among them, to no
 one; those wait for an out-of-band method of their own design, such as
 NFC or a code the phone scans ([Decisions](#decisions), 3).
 
@@ -2876,10 +2948,10 @@ a radio peer can do:
 
 | Adversary | Can | Cannot |
 | --- | --- | --- |
-| A radio peer, anyone in range | send any packet the controller forwards; connect while a slot is free and so hold it; read and write `open` characteristics; pair during a `nodisplay` window and so reach `encrypted` characteristics | reach an `encrypted` characteristic without a bond made in a window, or an `authenticated` one without the passkey the window showed; make the system domain parse a radio byte, since no `ble` grant names it; make the Bluetooth domain hold more than its bounds; replace a bond |
+| A radio peer, anyone in range | send any packet the controller forwards; connect while a slot is free and so hold it; read and write `open` characteristics; pair during a `nodisplay` window and so reach `encrypted` characteristics; on a development build with `bleuart` on, use root's session at its console line ([The console](#the-console)) | reach an `encrypted` characteristic without a bond made in a window, or an `authenticated` one without the passkey the window showed; make the system domain parse a byte of a radio protocol, since no `ble` grant names it, what a client types on `bleuart`'s line reaching it only as console input, as a UART's bytes do; make the Bluetooth domain hold more than its bounds; replace a bond |
 | An app holding a `ble` grant | attach to, set, notify and indicate the services its grant names, and answer the writes handed to it; keep its facet's requests in flight up to the row's `in_flight` | handle, set or notify a service its grant does not name, which its facet refuses before the registry sees it, an installed app's grant naming only the services admission gave it and no other app; take a service another app or a configured domain holds by installing a package that declares it, which admission refuses; set, notify or receive a phone's bytes on a service once its handler has ended, or leave values or buffered bytes for the service's next owner, since a service's state is its handler's; answer a write handed to another process; reach a link, the store or the controller except through the registry |
 | The controller, its closed firmware | everything a radio peer can; read every LTK erXos gives it; forge what a bonded peer could send | reach anything erXos does not send it: it sees the line, not the machine |
-| A compromised Bluetooth domain | everything the controller can; read the bonds; act as any bonded phone toward the apps it serves; see every byte of the console's lines, passphrases included | reach a device, a partition or a facet beyond its row's; log anyone in without the passphrase, which the vault checks |
+| A compromised Bluetooth domain | everything the controller can; read the bonds; act as any bonded phone toward the apps it serves; type into `bleuart`'s console line and read it, where `bleuart` runs, as any radio peer can | reach a device, a partition or a facet beyond its row's; reach the system domain but through the `ble` facet's grantees; open the system shell, which no line it reaches carries |
 
 The vault cannot keep a bond's key from the Bluetooth domain or the
 controller, which needs it in clear in LE Long Term Key Request Reply;
@@ -3050,8 +3122,8 @@ erx_bt_top                      one_for_all, intensity 0
       erx_bt_hci                the controller process, started last
 ```
 
-The phone console is no part of this tree: `erx_bt_console` and its
-`erx_gatt_serial` run in `btconsole` ([The console](#the-console)).
+The console is no part of this tree: `erx_bleuart` and its
+`erx_gatt_serial` run in `bleuart` ([The console](#the-console)).
 
 `erx_bt_top` restarts nothing: the mint's end, or `erx_bt_sup`'s past
 its own intensity, ends `erx_bt`, a permanent application, and so the
@@ -3117,6 +3189,9 @@ and stops in the reverse order, the controller process first.
 | a Pairing Request during the pairing wait | Pairing Failed, Repeated Attempts (`0x09`) | the wait has not passed; no line on `pair`, the window stays open |
 | a configuration write on a bonded link | Unlikely Error (`0x0E`) | the store is `unknown` or its `put` was not `ok` |
 | a configuration write on a link that holds a key | Insufficient Encryption (`0x0F`) | the link is not yet encrypted |
+| `bleuart`'s line, a write of a link that does not hold it | none: the bytes are dropped and the link is sent nothing | another client holds the line ([The console](#the-console)) |
+| the `console_line` facet | the line's hang-up, with a log line under `bleuart`'s domain id | an input over 4 KiB, a second input outstanding, a message of another shape ([design-live.md](design-live.md#the-console)) |
+| `service bleuart start` and the other commands | the start table's errnos ([design-apps.md](design-apps.md#how-a-command-is-judged)); `NAME does not exist in the system manifest` where the manifest has no `bleuart` row, as in every release manifest | |
 
 The ATT errors erXos sends are Table 3.4's: Invalid Handle, Read Not
 Permitted, Write Not Permitted, Invalid PDU, Insufficient Authentication,
@@ -3267,10 +3342,10 @@ an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
-service reaches the board's `bleuart` service
-([Decisions](#decisions), 7); the phone pairs by typing the passkey the
+service gets the console through `bleuart` ([The console](#the-console),
+[Decisions](#decisions), 7); the phone pairs by typing the passkey the
 `pair` file shows, reboots the machine, and reads an `authenticated`
-value again; the console logs in from the phone; a `reset` written
+value again; a `reset` written
 while a phone is connected is followed by a bring-up that reaches
 advertising. Its seeded failure is a line whose reset passes the grant's
 flow to the holding start: the controller then boots in download mode,
@@ -3452,16 +3527,13 @@ list ([todo-performance.md](todo-performance.md)):
    gives; and the development file in release builds, as FreeBSD's
    `hcsecd` keeps its link keys in `/var/db/hcsecd.keys` (`hcsecd.h:39`),
    which a copied medium yields whole.
-2. **Decided: release builds offer the phone console only by a manifest
-   opt-in, and every manifest erXos ships leaves it off.** It is a
-   login line reachable over the air by anyone who completed an
-   authenticated pairing in a window. A release build serves it only
-   when the Bluetooth row's console argument names the service, and
-   the manifests erXos ships do not; its characteristics are
-   `bonded`, which the manifest check requires; the normal login
-   limits of the login facet apply, as at every other line; and it
-   never offers the system shell, which only the console's secure lines
-   carry.
+2. **Decided: release builds offer no Bluetooth console.** `bleuart`
+   gives anyone in radio range root's session at a console line, with
+   no login, which only a development build's bench allows. The
+   manifest check refuses a `console_line` grant in a release manifest,
+   so no release image has the line, and the line is never secure in
+   any build, so it never carries the system shell
+   ([The console](#the-console)).
 3. **Decided: fresh passkeys, shown through a management channel the
    machine already trusts.** A `display` window shows each pairing's
    fresh passkey on the `pair` file, to an administrator's session or an
@@ -3469,7 +3541,7 @@ list ([todo-performance.md](todo-performance.md)):
    shown](#the-pairing-window)). A machine with no display and no such
    channel opens only `nodisplay` windows, whose Just Works bonds serve
    only services that declare `encrypted` or `open`. Authenticated
-   services on such a machine, the console and Wi-Fi provisioning among
+   services on such a machine, Wi-Fi provisioning among
    them, wait for an out-of-band method, by NFC or a code the phone
    scans, designed separately. Static passkeys printed on a device are
    excluded: they leak over repeated attempts.
@@ -3523,60 +3595,61 @@ list ([todo-performance.md](todo-performance.md)):
    considered](#alternatives-considered)). The QEMU suite's echo stays a
    test-only configured domain, which its release, carried only by a
    test image, runs.
-7. **Decided: no app handles the Pi 4's Nordic UART service, and its
-   cards carry the kiosk alone.** The Bluetooth track's demo
-   ([plan.md](plan.md#track-b-bluetooth)) and the board's checklist
-   have a terminal app on the phone reach Nordic's UART service on the
-   Pi 4. On the board that service belongs to a planned `bleuart`
-   service, not to an installed app, so the Pi 4's development
-   manifest's `apps` row offers no `ble` and no `gatt`, and both of its
-   cards carry the kiosk alone, whatever their kind
-   ([design-packaging.md](design-packaging.md#the-apps-row)). The echo package, `examples/echo`, declaring `gatt
+7. **Decided: the Raspberry Pi 4's development manifest runs `bleuart`,
+   on by default on the development card and off on the published
+   one, and its `apps` row offers no `ble`.** The Bluetooth track's
+   demo ([plan.md](plan.md#track-b-bluetooth)) and the board's
+   checklist have a terminal app on the phone talk to the Pi 4 over
+   Nordic's UART service, and that service is `bleuart`'s: the row is
+   switched, `enable YES` and `published_enable NO`
+   ([design-apps.md](design-apps.md#switched-services)), so a builder's
+   own card has the console at boot and the published card, packed from
+   the same manifest, has it only after `service bleuart enable` and
+   `service bleuart start` at the board's console. A machine serves
+   `nus` through one grant, so no app on the board may handle it, and
+   the `apps` row keeps `services display net` and `max 1`, with the
+   kiosk alone on every card, whatever its kind
+   ([design-packaging.md](design-packaging.md#the-apps-row)). The echo
+   stays a test-only configured domain of the QEMU suite
+   (decision 6), and the echo package, `examples/echo`, declaring `gatt
    nus` under decision 6, is the path an installed app takes to a GATT
-   service, and runs on QEMU, in the Bluetooth suite's app cell, under
+   service; it runs on QEMU, in the Bluetooth suite's app cell, under
    an `apps` row that offers `ble` and `gatt nus`
    ([Verification](#verification)).
 
-8. **Decided: the phone console runs in a configured domain of its own,
-   `btconsole`, holding a `ble` grant whose `services` names `console`,
-   as the QEMU suite's echo holds one naming `nus` (decision 6), and the
-   login facet; the Bluetooth domain holds no login facet.** The other
-   choice was the Bluetooth domain running `erx_bt_console` and holding
-   the login facet. An
-   installed app is no option: an app's principal holds only its
-   template's grants, and a login facet would let a package start any
-   enrolled principal's session, past the manifest opt-in of decision 2.
+8. **Decided: the Bluetooth console runs in a configured domain of its
+   own, `bleuart`, as the driver of a console line of the system
+   console, holding a `ble` grant whose `services` names `nus` and the
+   system domain's `console_line` facet.** The other places were the
+   Bluetooth domain and the system domain. The system domain is
+   excluded by B8: it would hold a `ble` grant and take a phone's bytes
+   from the radio stack's facet. The Bluetooth domain would put a
+   console line, root's session behind it, in the domain every radio
+   peer reaches through its parsers, and give the radio stack a grant
+   beyond its radio, which this section's rule for that domain refuses.
    Weighed:
    * **Against a compromised radio stack, nothing changes.** The
-     Bluetooth domain decrypts the link, so whichever domain runs the
-     console, a defect there reached by anyone in range sees each
-     phone's passphrase and session in clear, can type into a logged-in
-     tty, and can feed a separate console a stream of its own making,
-     guessing passphrases at the same per-name and per-terminal limits
-     it would meet holding the facet itself. The separation SSH has from
-     the network domain buys confidentiality because SSH's encryption
-     ends in the SSH domain; the link's ends in the radio stack.
+     Bluetooth domain carries every byte of the line, so a defect there
+     reached by anyone in range can type into and read the line
+     wherever the driver runs, which anyone in range can do through
+     `bleuart` anyway on a development build.
    * **Least authority and containment.** Apart, the Bluetooth domain
-     holds nothing but its radio grants, as this section's rule says of
-     a domain that parses what anyone in range sends, and its row check
-     loses the login facet's exception; a console defect, reachable
-     only by a phone that paired with a passkey, ends or takes the
-     console's domain and not the radio stack, its bonds or the other
-     services; and the console is one more client of the public `ble`
-     facet, with no handler inside the stack.
-   * **Cost.** Apart costs one configured domain, its runtime's memory
-     and boot time, and a lane hop for each write and each notification,
-     which at a typing person's rate is not measurable against the
-     link's own interval; together costs nothing beyond the login
-     facet's row on the Bluetooth domain.
-   * **Packaging** is the same: either is a manifest row, the opt-in of
-     decision 2.
+     holds nothing but its radio grants, and a defect in the driver
+     ends `bleuart`'s domain, which hangs the line up, not the radio
+     stack, its bonds or the other services.
+   * **Cost.** One configured domain, its runtime's memory and boot
+     time, and a lane hop for each write and each notification, which at
+     a typing person's rate is not measurable against the link's own
+     interval.
+   * **The switch** comes free: `bleuart` is a switched row of the start
+     table, which turns the console off and on without touching the
+     radio stack's row.
 
    A domain of its own is chosen. It buys no secrecy against the radio
-   stack, but it keeps the Bluetooth domain to its radio, keeps a
-   console defect out of the stack, and makes the console an ordinary
-   `ble` client, at the price of a domain and a hop that a typing rate
-   does not feel.
+   stack, but it keeps the Bluetooth domain to its radio and the
+   system domain free of radio-derived grants, makes the console an
+   ordinary client of the public `ble` facet, and gives the switch a
+   row of its own.
 
 ## Board probes
 

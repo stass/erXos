@@ -117,7 +117,7 @@ entries are in alphabetical order.
 * **connection agent**: `erx_connections`, the Erlang process in each domain that maps a new connection's two sides and opens a lane port for it. [Chapter 10, section 10.2.3](10-domains.md#1023-who-makes-a-connection)
 * **connection handle**: The small number the Bluetooth controller assigns to a connection and reuses after it ends. Not a kernel handle; see handle. [Chapter 19, section 19.2](19-bluetooth.md#192-where-the-parts-run)
 * **console group**: A shell's group leader on a tty, which the terminal relay hands input when the shell is in the foreground. [Chapter 20, section 20.4.2](20-shell.md#2042-the-terminal-relay)
-* **console line**: One of the two lines the system domain's console service serves: the UART, erXos's `/dev/console`, and the host link's `console` line. [Chapter 20, section 20.4.3](20-shell.md#2043-the-console)
+* **console line**: A line the system domain's console service serves: the UART, erXos's `/dev/console`, the host link's `console` line, and a line another domain drives, as `bleuart` does over Bluetooth. [Chapter 20, section 20.4.3](20-shell.md#2043-the-console)
 * **consumer (lane)**: The domain that reads a lane's ring and alone writes its reader page. [Chapter 10, section 10.2.1](10-domains.md#1021-a-lane)
 * **context switch**: Moving a core from one process or thread to another. [Chapter 1, section 1.3.3](01-operating-systems.md#133-the-context-switch)
 * **contiguous memory object**: A memory object whose pages are physically contiguous, inside the range a device can reach, used for the device's rings and buffers. [Chapter 8, section 8.7.2](08-kernel-interface.md#872-devices)

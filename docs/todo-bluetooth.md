@@ -165,12 +165,20 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
-* [Medium] bluetooth, the phone console's declaration and manifest rules (docs/design-bluetooth.md, "The
-  console"; docs/design-login.md, build order 8): `abi/gatt/console.txt`, the UART service's UUIDs with `rx` and
-  `tx` at `bonded`, lands with `btconsole`, and the manifest check refuses a `console` service whose `rx` or `tx`
-  is below `bonded`, a console row whose `ble` grant does not state `identity` true, and `nus` and `console`
-  together, each with a test that differs from a passing manifest in that rule alone. Until then `ble_grant`
-  consumes `identity` with no rule of its own beyond its declared kind.
+* [Medium] bluetooth, `bleuart`, the console as a driven console line (docs/design-bluetooth.md, "The
+  console"; docs/design-live.md, "The console"; docs/design-apps.md, "Switched services"): build the
+  `console_line` interface and `erx_console_line`, the `bleuart` domain and release with `erx_bleuart` and its
+  core, the Bluetooth domain's `services` derived from the rows that will run, and the start table's switched
+  rows, with their tests and the Bumble cell. The package retires the phone console it replaces. On master: the
+  manifest check's `btconsole` login holder (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`) and its case in
+  `test/host/manifest_domains_test.rb` (`BTCONSOLE_LOGIN`, `btconsole` in `LOGIN_DOMAINS`). On the unlanded
+  branch `login-8`: `erx_bt_prompt` with its tests and its fuzz target (`test/erlang/erx_bt_prompt_fuzz.erl`,
+  `tools/fuzz/erx_bt_prompt.rb`), the console core `erx_bt_console_core` with its login and session phases and
+  `erx_bt_console`, the `erx_bt_console` application and the `btconsole` release, the `console` GATT
+  declaration and its manifest rules, and the Raspberry Pi 4 manifest's phone-console rows (the `btconsole`
+  domain, its login grant and its phone-session budget). The `ble` grant's `identity` parameter loses its one
+  consumer with the phone console; delete it unless another handler needs a phone's identity address.
+  CLAUDE.md's fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each
   connection, each bond with no key, and the counters) is not declared in `abi/inspection.txt`, and the domain
   serves none of it; declare the path and serve it from the domain's agent, with `unknown` for a value the

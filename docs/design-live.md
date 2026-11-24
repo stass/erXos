@@ -201,7 +201,7 @@ with it.
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
 | **V5.** Code enters the system domain only through the install facet | the system domain's runtime loads only installed storage: its release's files and the install arena, which only `erx_code:install_beam/2` writes and which refuses every caller but `erx_code`; `erx_code` takes modules only from install facets, which name them by hash, and checks each blob against its hash; a service that loads bytes it received gets `{error, not_installed}`; nothing reapplies installs after a reboot | a second writer of the install arena, `erx_code` accepting modules from something other than an install facet, or a path that reapplies stored installs | a test that `code:load_binary/3` with bytes from a request fails in the system domain; a test that a domain's code facet cannot load into the system domain; a test that `install_beam/2` refuses other callers; a test that a blob one bit off its hash is refused |
-| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; the console's lines are the UART and the host link's `console` line alone; no session ever holds the facet, so no route into a session reaches the system shell, a terminal on a display included, since a terminal is a program of its session; the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read, at a console line and at a terminal on a display alike; a seeded console that grants the facet at a line that is not secure fails |
+| **V6.** Only the system shell types expressions into the system domain, and only a login at a secure line opens it | the console starts an Erlang shell in the system domain only under the system-shell facet, which it grants to a login by a system-shell principal at a line the manifest marks `secure`, holds itself, lends only to the system shell it connects at that line and to that shell's `/proc` tree, and ends with that login; the console's lines are the UART, the host link's `console` line and the line a configured domain drives through the `console_line` facet, which is never secure; no session ever holds the facet, so no route into a session reaches the system shell, a terminal on a display included, since a terminal is a program of its session; the inspector answers `[kernel, crash]`, the crash record, only to a call that presents the facet, and `/proc/kernel/crash` is that query rendered as a file, so the one check gates both forms; every session's shell, the command shell's `erl` builtin and every Erlang command run in the session's own domain | a shell or an evaluator started in the system domain by another path; a release build's console that starts a system shell without a login; a facet a session holds, or one that outlives its login; a system shell connected at another line | a release build's console shows a login, and a principal without the facet gets no system shell; `erl` in the console's command shell evaluates in the session's domain; a lock and a log out at the UART end its system shell; the system shell gets the crash record from `erx:inspect([kernel, crash], #{})` and from `/proc/kernel/crash`, while `root`'s session in a development build, whose inspect facet has scope `all`, gets `{error, scope}` from the call and `enoent` from the read, at a console line and at a terminal on a display alike; a seeded console that grants the facet at a line that is not secure fails; at a driven line root's menu has no `s` entry, and a seeded console that takes a driven line as secure fails |
 | **V7.** A console line reaches only the sessions of its principal | `erx_console` records one principal per line: the one the principal service confirmed at the line's login; the line's menu lists, connects to, interrupts and kills only the sessions the domain service records for that principal; a lock detaches the line and keeps the principal's name only for its unlock prompt, a log out clears the record, and only a login, which the vault checks, sets it again | a menu action or an attach that takes a session without checking its principal; a lock that leaves a session attached | two principals log in in turn at one line, and each menu shows and reaches only its own sessions; a locked line refuses every menu action, and its sessions run on, until the same principal logs in again; connecting a terminal already connected at another line is refused with that line named, where a seeded console that moves it fails |
 | **V8.** A program appears only under its session | a program has no domain id and no pid space of its own: it is a sub-space the session created and a port of the session's runtime, so the kernel's topology under `INSPECT` on the session's space and the session's agent are the only sources that know of it, and both place it under the session's path | a path for a program outside its session; a program with a domain id | an inspection test that starts a program and finds it under `[domains, Id, programs]` and nowhere under `[domains]` |
 | **V9.** Text labelled with its source is displayed only through the line escape, and written into `/proc` only through the field escape | each display of it builds its line with the escape: `erx_console`'s log lines and menu, `logger_simple_h`'s early log, `erx_render`, which prints inspection records, `ls`, which writes names at a terminal through it, and the host tool's printer; `ps` and `top` write names through the field escape wherever their output goes, so they hold nothing the line escape would change; the kernel's log escapes on entry with its own ASCII class; `erx_procfs` writes every field of a `/proc` file through the field escape, so `cat` of one shows no raw control | a renderer that prints a name or a value raw; a `/proc` file that writes a reporter's text unescaped; a class of characters missing from the table; a print path in the host tool that skips its printer; a log event that reaches a terminal by another handler | tests that send every C0 and C1 control, every `Cf`, `Zl`, `Zp`, unassigned and default-ignorable character, invalid and overlong UTF-8 and every CSI, OSC, DCS, APC, PM and SOS form through each display and each host command, in a log record, a domain's name and an inspected value; a fuzz target per escaper; a test that re-derives the classes from OTP's Unicode data and fails if `abi/terminal.txt` disagrees; the source check on the host tool's output calls, with a seeded violation |
@@ -853,12 +853,16 @@ requests to it. Neither system filters output.
 
 ### The console
 
-`erx_console` is the system domain's console service. It serves two
+`erx_console` is the system domain's console service. It serves
 **console lines**, the terminals at which an operator logs in and works:
-the UART, which is erXos's `/dev/console` as on UNIX, and the host link's
-`console` facet. Each has its own menu, its own login and at most one
-connected terminal, and the console treats them alike except where this
-section names the UART. A terminal on a display is no console line: it
+the UART, which is erXos's `/dev/console` as on UNIX; the host link's
+`console` facet; and, where the manifest grants it, the line a
+configured domain drives through the `console_line` facet, which the
+Bluetooth console, `bleuart`, drives
+([design-bluetooth.md](design-bluetooth.md#the-console)). Each has its
+own menu, its own login and at most one connected terminal, and the
+console treats them alike except where this section names the UART or
+the driven line. A terminal on a display is no console line: it
 is a program of a session, the master of one of the session's ttys
 ([design-display.md](design-display.md#the-terminal)), and the console
 has no part in it.
@@ -936,7 +940,41 @@ log service:
   ([design-fiasco.md](design-fiasco.md#the-console)).
 
 The host link shows its own session's output and the log lines the log
-service sends it, and nothing else.
+service sends it, and nothing else, and so does a driven line.
+
+**A line another domain drives.** The console takes each line from a
+driver that speaks its driver messages
+([design-runtime.md](design-runtime.md#the-console-and-standard-io)),
+and a line may have its driver in another domain. The
+`console_line` interface, which `abi/services/console_line.txt` declares
+citing this paragraph, carries six of them between the domains: from
+the driver `{input, N, Bytes}`, at most 4 KiB, `{size, Rows, Columns}`
+and `eof`; from the console `{taken, N}` and `{output, N, Bytes}`, at
+most 4 KiB; and from the driver again `{written, N}`. `erx_console`
+serves it as the service `console_line`, and the domain service mints
+the one grantee's facet at that domain's start, as for any service of
+the system domain; the facet checks the sender, each message's shape
+and size, and that the driver has at most one input outstanding, and
+forwards each message to a line endpoint, `erx_console_line`, a process
+of the system domain that is that line's driver as the console sees it,
+turning the six into the console's own `erx_console_input`,
+`erx_console_taken`, `erx_console_output`, `erx_console_written`,
+`erx_console_size` and `erx_console_eof`. So the console has one kind
+of driver, and nothing of it changes for a line whose driver is
+elsewhere. The numbers make the messages states, as the tty's are
+([The tty](#the-tty), "A lost answer does not stop a tty"): a message
+from the system domain can be dropped while the grantee's lane stays
+full, so each side sends its last unanswered message again each second,
+the endpoint its output and the driver its input, and a repeat already
+taken is answered again and changes nothing. A message the facet
+refuses, and the facet's end, are the line's hang-up: the endpoint
+sends the console `erx_console_eof`, and the console logs the line
+out, ending the sessions started at it, and drops the line, where the
+UART's end of input ends the runtime. A driven line is **never
+secure**: the manifest has no attribute that could mark it, so it never
+carries the system shell. The manifest check grants `console_line` to
+at most one configured domain, never to the system domain or a session
+template, and never in a release manifest.
 
 **Log lines and program output.** A log line is one write to the driver,
 whole, ending in CR-LF, between whatever else is written. It can land in
@@ -950,8 +988,9 @@ through the log service, `erx_syslog`, which takes the kernel's ring with
 
 * **Size.** The connected tty is told its line's size as
   `{tty_size, Rows, Columns}`: on the UART 80 by 24 unless the operator
-  sets another with `erx:console_size/2`, and on the host link what the
-  host tool reports.
+  sets another with `erx:console_size/2`, on the host link what the
+  host tool reports, and on a driven line what its driver sends, 80 by
+  24 until it sends one.
 * **Input.** Bytes go to the connected terminal's tty as
   `{tty_input, N, Bytes}`, whose line discipline decides what they mean
   ([The tty](#the-tty)). A UART's receive overrun, which no flow control
@@ -1075,7 +1114,9 @@ through the log service, `erx_syslog`, which takes the kernel's ring with
   and the console connects that session's tty at the line. In a development
   build the console logs `root` in at the UART at boot and at the host
   link's `console` line when the host opens it, each a login at a secure
-  line (**Secure lines**, above). At the UART the login starts root's
+  line (**Secure lines**, above), and at a driven line when its driver's
+  domain starts, a login at a line that is never secure, so root's
+  session there has the menu and no system shell. At the UART the login starts root's
   session, `root_1`, which takes the line once its tty names itself, so
   the first prompt a person answers is the session's command shell, and
   V6 holds in the session's own shells; the system domain's command shell,
@@ -4508,6 +4549,14 @@ faults that must make its tests fail where it has any.
   line's menu (V7). Seeded: a console that grants the system-shell facet
   at a line that is not secure; one that moves a terminal connected at
   another line.
+* **A driven line:** `erx_console_line` over a stub driver: input,
+  `taken`, output and `written` in order, an output repeated after a
+  dropped `written` taken once, an input over 4 KiB or a second input
+  outstanding refused as the line's hang-up, and the facet's end
+  logging the line out and ending only its sessions. Seeded: an
+  endpoint that passes a repeated output on as new bytes, which the
+  line shows twice; one that takes the facet's end as the UART's end of
+  input, which halts the runtime.
 * **Code:** hot loads with and without the install facet, atomic
   batches, and overlays across restarts.
   * `erx_domain_core:code_scope/3` over every principal and build flag,

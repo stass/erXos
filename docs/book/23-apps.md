@@ -182,8 +182,9 @@ QEMU `virt`'s development manifest has a row with four apps and the
 same two services (`config/manifest/qemu-virt-development.txt`). A board
 that lets apps handle Bluetooth services adds `ble` to `services` and a
 `gatt` line naming the services it offers, as the Bluetooth suite's QEMU
-cell does for the terminal echo; the Raspberry Pi 4's row offers none, since
-its Nordic UART service belongs to a planned `bleuart` service.
+cell does for the terminal echo; the Raspberry Pi 4's row offers none,
+since its Nordic UART service is the console's, `bleuart`'s (chapter
+[19](19-bluetooth.md)).
 
 From the row the build derives the **app template**, one session
 template every app's sessions use. Its release boots the system's

@@ -394,7 +394,7 @@ facets are processes of the system domain.
 A domain that holds no facet for a service has no way to reach it: a
 call that needs one fails with `no_facet` before it reaches anything.
 A front end reaches a session the same way: the session's **line**, to
-the web domain, the SSH domain or the phone console, is a facet the
+the web domain or the SSH domain, is a facet the
 session mints for that domain when the system domain names it at a
 login, lasts no longer than the login or host opening that asked for
 it, and is the one name
