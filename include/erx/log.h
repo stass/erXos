@@ -148,6 +148,17 @@ erx_status_t erx_log_format(erx_log_t *log, erx_log_level_t level,
 	erx_log_format((log), (level), (now_ns), "" __VA_ARGS__)
 
 /*
+ * Text that is not a format: the label, then exactly length bytes, as one
+ * record, every byte of both through erx_log_escape, NUL bytes included, so
+ * nothing is cut short at a NUL as %.*s would cut it. The label is the
+ * caller's own NUL-terminated text, such as a string literal. Text past the
+ * record's end is cut and flagged as erx_log_format's is. An unknown level
+ * is ERX_EINVAL; a log with no sequence number left is ERX_ELIMIT.
+ */
+erx_status_t erx_log_bytes(erx_log_t *log, erx_log_level_t level,
+    uint64_t now_ns, const char *label, const void *bytes, size_t length);
+
+/*
  * erx_log_read's work: copies whole records from the cursor into the
  * window, as many as fit, and advances the cursor past them. A cursor
  * older than the ring starts at the oldest record and reports how many

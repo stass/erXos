@@ -41,6 +41,7 @@ int main(int, char **);
 static void command_cut(char *);
 static void command_escape(char *);
 static void command_debug(char *);
+static void command_bytes(char *);
 static void command_format(char *);
 static void command_numbers(char *);
 static void command_oddity(char *);
@@ -192,6 +193,22 @@ command_format(char *cursor)
 	string[length] = '\0';
 	printf("format %d\n", (int)ERX_LOG_FORMAT(&driver_log, level, now_ns,
 	    "s=%s", (const char *)string));
+}
+
+/* bytes LEVEL NOW HEX: the bytes under the kernel lines' label. */
+static void
+command_bytes(char *cursor)
+{
+	static uint8_t bytes[DRIVER_TEXT_MAX];
+	erx_log_level_t level;
+	uint64_t now_ns;
+	size_t length;
+
+	level = (erx_log_level_t)unsigned_field(&cursor);
+	now_ns = unsigned_field(&cursor);
+	length = decode_hex(field(&cursor), bytes, sizeof(bytes));
+	printf("bytes %d\n", (int)erx_log_bytes(&driver_log, level, now_ns,
+	    "fiasco: ", bytes, length));
 }
 
 /*
@@ -386,6 +403,8 @@ main(int argc, char **argv)
 			command_rate(cursor);
 		else if (strcmp(name, "debug") == 0)
 			command_debug(cursor);
+		else if (strcmp(name, "bytes") == 0)
+			command_bytes(cursor);
 		else if (strcmp(name, "format") == 0)
 			command_format(cursor);
 		else if (strcmp(name, "numbers") == 0)

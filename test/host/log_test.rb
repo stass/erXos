@@ -20,6 +20,7 @@ class LogTest < Minitest::Test
   M = LogModel
   SEED = Integer(ENV.fetch('ERX_LOG_SEED', '20261103'), 10)
   CORE = 'kernel/core/log.c'
+  WARNING = 2
   HOSTED = 'liberx/backend/hosted/log.c'
   HOSTED_CORES = %w[kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c
                     build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
@@ -150,6 +151,18 @@ class LogTest < Minitest::Test
     [0, 5, 2**32 - 1].each do |level|
       assert_equal ['format -1', 'state 0 0 0 0'], run_driver(["format #{level} 0 41", 'state'])
     end
+  end
+
+  # The kernel lines' record: the label and then exactly the bytes given, so
+  # a NUL is escaped rather than ending the text as %.*s would end it.
+  def test_bytes_are_logged_whole_after_their_label_nul_included
+    records = read_records(["bytes #{WARNING} 5 610062", 'read 0 4096'])
+    assert_equal [['fiasco: a\\x00b', WARNING, 0]], records.map { |record| [record.text, record.level, record.flags] }
+    long = read_records(["bytes #{WARNING} 0 #{'1b' * 600}", 'read 0 4096']).fetch(0)
+    assert_equal M::TRUNCATED, long.flags
+    assert_equal "fiasco: #{'\\x1B' * ((M::TEXT_MAX - 8) / 4)}", long.text
+    assert_equal ['bytes -1', 'state 0 0 0 0'], run_driver(['bytes 0 0 41', 'state'])
+    assert_equal 'bytes -7', run_driver(["cursor #{M::SEQ_LAST}", "bytes #{WARNING} 0 41"]).last
   end
 
   def test_format_conversions_and_the_format_itself_are_escaped
@@ -357,7 +370,8 @@ class LogTest < Minitest::Test
       'text is not checked' => ['if (erx_terminal_ascii_safe[(uint8_t)text[index]] == 0)', 'if (false)'],
       'the last sequence number is used' => ['if (log->next_seq == UINT64_MAX)', 'if (false)'],
       'shorter text may follow a cut' => ['	text->truncated = result.consumed < length;', '	text->truncated = false;'],
-      'a cut text is not flagged' => ['.flags = text->truncated ? ERX_LOG_RECORD_TRUNCATED : 0,', '.flags = 0,']
+      'a cut text is not flagged' => ['.flags = text->truncated ? ERX_LOG_RECORD_TRUNCATED : 0,', '.flags = 0,'],
+      'bytes stop at their first NUL' => ['erx_log_text_add(&text, bytes, length);', 'erx_log_text_string(&text, bytes);']
     }
     mutants.each_with_index do |(name, (original, replacement)), index|
       assert_equal 1, source.scan(original).size, "mutant #{name} must edit one place"
@@ -560,6 +574,9 @@ class LogTest < Minitest::Test
     expectations = {
       ['escape 09 16'] => ["escape 1 4 #{hex('\\x09')}"],
       ['escape 1b 3'] => ['escape 0 0 -'],
+      ["bytes #{WARNING} 5 610062", 'read 0 4096'] =>
+        ['bytes 0', 'read 0 1 0 48 1',
+         "record 0 5 #{WARNING} 0 48 #{hex('fiasco: a\\x00b')} #{hex("#0 0.000000 warning fiasco: a\\x00b\n")}", 'end 48'],
       ['debug 1 0 505 -'] => ['debug -1'],
       ["cursor #{M::SEQ_LAST}", 'debug 1 2 1 62'] => ['debug -7'],
       ['format 3 0 61', 'read 2 4096'] => ['format 0', 'read -1 2 0 0 0', 'end 0'],

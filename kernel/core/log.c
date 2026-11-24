@@ -417,6 +417,23 @@ erx_log_level_known(erx_log_level_t level)
 	}
 }
 
+erx_status_t
+erx_log_bytes(erx_log_t *log, erx_log_level_t level, uint64_t now_ns,
+    const char *label, const void *bytes, size_t length)
+{
+	erx_log_text_t text;
+
+	if (!erx_log_level_known(level))
+		return (ERX_EINVAL);
+	if (!erx_log_text_open(log, &text))
+		return (ERX_ELIMIT);
+
+	erx_log_text_string(&text, label);
+	erx_log_text_add(&text, bytes, length);
+	erx_log_raw_append(log, &text, level, now_ns);
+	return (ERX_OK);
+}
+
 /*
  * Reads [.*][l|ll|z]C from a format, past its '%'. Whether the combination
  * means anything is for erx_log_conversion to decide; a format ending inside
