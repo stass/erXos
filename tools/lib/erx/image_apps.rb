@@ -48,13 +48,13 @@ module Erx
     KEY_FILE_MAX = 16 * 1024
 
     # A package an image carries: its file, by absolute path, and what the file check
-    # found in it (AppPack::Described). Its name is an app name, so no name it carries
-    # spells another manifest row.
-    Package = Data.define(:path, :name, :memory, :sha256, :license) do
-      def initialize(path:, name:, memory:, sha256:, license:)
+    # found in it (AppPack::Described), gatt none unless given. Its name is an app name, so
+    # no name it carries spells another manifest row.
+    Package = Data.define(:path, :name, :memory, :sha256, :license, :gatt) do
+      def initialize(path:, name:, memory:, sha256:, license:, gatt: [].freeze)
         raise Error, "#{name.inspect} is not an app name" unless AppPackage::APPLICATION.match?(name)
 
-        super(path: File.expand_path(path), name: name, memory: memory, sha256: sha256, license: license)
+        super(path: File.expand_path(path), name: name, memory: memory, sha256: sha256, license: license, gatt: gatt)
       end
 
       # Where the package lies in the system partition, and its artifact's name.
@@ -97,11 +97,12 @@ module Erx
 
       # Each package's artifact for the manifest check (Manifest's check_packages) by
       # name: its header's hash, which binds the row to the file the system partition
-      # holds, so the artifact names no entry of the archive.
+      # holds, so the artifact names no entry of the archive, and the GATT services it
+      # declares, which the check holds to the apps row's gatt, none named by two packages.
       def artifacts
         packages.to_h do |package|
           [package.artifact_name, { 'kind' => ARTIFACT_KIND, 'name' => package.name, 'memory' => package.memory,
-                                    'sha256' => package.sha256.unpack1('H*') }.freeze]
+                                    'sha256' => package.sha256.unpack1('H*'), 'gatt' => package.gatt }.freeze]
         end
       end
     end

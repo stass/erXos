@@ -19,7 +19,7 @@ class ErxAppPackTest < Minitest::Test
 
   def test_a_declaration_parses_with_its_defaults
     declaration = parse("app doom\n  needs display\n  program \"bin/doom\" \"-iwad\" \"/app/share/freedoom1.wad\"\n")
-    assert_equal Package::Declaration.new(name: 'doom', needs: %w[display],
+    assert_equal Package::Declaration.new(name: 'doom', needs: %w[display], gatt: [],
                                           start: Package::Program.new(path: 'bin/doom', args: %w[-iwad /app/share/freedoom1.wad]),
                                           license: '', memory: Package.codec.constant('app_memory_default'), version: 1),
                  declaration
@@ -38,6 +38,25 @@ class ErxAppPackTest < Minitest::Test
       "app x\n  applications x\n  license \"GPL-2.0 OR\"\n" => /not an SPDX expression/,
       "app X\n  applications x\n" => /not an app name/,
       "app x\n  applications x\napp y\n  applications y\n" => /exactly one app row/ }.each do |text, message|
+      error = assert_raises(Erx::Error, text) { parse(text) }
+      assert_match message, error.message, text
+    end
+  end
+
+  # gatt names the GATT services an app handles, and is how it takes ble: needs never
+  # names ble, and gatt holds at most the ble interface's services set, the bound the
+  # generator takes from abi/services/ble.txt.
+  def test_gatt_names_the_services_and_needs_never_names_ble
+    assert_equal %w[nus], parse("app echo\n  gatt nus\n  applications erx_echo\n").gatt
+    assert_equal [], parse("app echo\n  applications erx_echo\n").gatt
+    most = Package.codec.constant('service_ble_services_max')
+    assert_equal 8, most
+    names = (1..most).map { |index| "s#{index}" }
+    assert_equal names, parse("app echo\n  gatt #{names.join(' ')}\n  applications erx_echo\n").gatt
+    { "app x\n  needs ble\n  applications x\n" => /needs never names ble/,
+      "app x\n  gatt nus nus\n  applications x\n" => /names a value twice/,
+      "app x\n  gatt #{names.join(' ')} s9\n  applications x\n" => /gatt names 1 to 8 values/,
+      "app x\n  gatt Nus\n  applications x\n" => /GATT service name: "Nus"/ }.each do |text, message|
       error = assert_raises(Erx::Error, text) { parse(text) }
       assert_match message, error.message, text
     end
@@ -84,7 +103,7 @@ class ErxAppPackTest < Minitest::Test
     Dir.mktmpdir('erx-app-pack-test') do |work|
       check = lambda do |bytes, memory: 4_194_304|
         write(work, 'bin/x' => bytes)
-        declaration = Package::Declaration.new(name: 'x', needs: [], start: Package::Program.new(path: 'bin/x', args: []),
+        declaration = Package::Declaration.new(name: 'x', needs: [], gatt: [], start: Package::Program.new(path: 'bin/x', args: []),
                                                license: '', memory: memory, version: 1)
         Erx::AppPack.check_program(declaration, Erx::AppPack.image_files(work), runner: runner, root: root,
                                                                                 compiler: ENV.fetch('ERX_CLANG', 'clang'))

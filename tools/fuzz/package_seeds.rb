@@ -25,10 +25,10 @@ module Erx
     SIGNER = Signer.new(public_key: "\x11".b * 32, signature: "\x22".b * 64)
     SALT = "\x5a".b * 32
     ROOT_HASH = "\xa5".b * 32
-    ERLANG = AppPackage::Declaration.new(name: 'dashboard', needs: %w[display data],
+    ERLANG = AppPackage::Declaration.new(name: 'dashboard', needs: %w[display data], gatt: %w[nus],
                                          start: AppPackage::Applications.new(names: %w[erx_dashboard erx_charts]),
                                          license: 'BSD-2-Clause', memory: 67_108_864, version: 3)
-    NATIVE = AppPackage::Declaration.new(name: 'doom', needs: %w[display],
+    NATIVE = AppPackage::Declaration.new(name: 'doom', needs: %w[display], gatt: [],
                                          start: AppPackage::Program.new(path: 'bin/doom',
                                                                         args: ['-iwad', '', '/app/share/freedoom1.wad']),
                                          license: '', memory: 134_217_728, version: 1)

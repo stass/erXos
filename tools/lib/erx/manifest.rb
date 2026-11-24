@@ -2173,15 +2173,20 @@ module Erx
       # (Erx::ImageApps), as far as the host can judge it without the manifest check: each row's
       # input is a package artifact of this pack, which the build's file check decoded
       # under the row's own name; the rows number at most the apps row's max, so none
-      # without an apps row; and the declared memory of the enabled ones sums within the
-      # apps budget. Answers each row as a Package, sorted by name.
+      # without an apps row; the declared memory of the enabled ones sums within the
+      # apps budget; and admission's steps 7 and 8 hold over them (check_package_gatt).
+      # Answers each row as a Package, sorted by name.
       def check_packages
         packages = records('package').sort_by { |record| record.name.b }
         invalid("the package rows pass the apps row's max, #{@apps.max}", 'package') if packages.size > @apps.max
-        rows = packages.map do |record|
+        artifacts = packages.map do |record|
           package = artifact(record, 'input', 'package', field: 'package.input')
           invalid("package #{record.name}'s input is the package of #{package['name']}", 'package.input') unless
             package['name'] == record.name
+          [record, package]
+        end
+        check_package_gatt(artifacts.map { |record, package| [record.name, package.fetch('gatt')] })
+        rows = artifacts.map do |record, package|
           enabled = record.properties.key?('enable') && start_flags(record).positive?
           Package.new(name: record.name, sha256: package.fetch('sha256'), enabled: enabled, memory: package.fetch('memory'))
         end
@@ -2189,6 +2194,23 @@ module Erx
         invalid("the enabled packages declare #{memory} bytes, past the apps budget of #{@apps.memory}", 'package.enable') if
           memory > @apps.memory
         rows.freeze
+      end
+
+      # Admission's steps 7 and 8 (docs/design-packaging.md, "Admission", PK13) over the
+      # image's packages, each [name, gatt]: every GATT service a package declares is one
+      # the apps row's gatt offers, and no two packages declare one, so the boot admits
+      # every package the build let into the image.
+      def check_package_gatt(declared)
+        declared.each do |name, gatt|
+          invalid("package #{name} declares a GATT service twice", 'package.input') unless gatt.uniq.size == gatt.size
+          unoffered = gatt.find { |service| !@apps.gatt.include?(service) }
+          invalid("package #{name} declares the GATT service #{unoffered.inspect}, which the apps row's gatt does not offer",
+                  'package.input') if unoffered
+        end
+        holders = declared.flat_map { |name, gatt| gatt.map { |service| [service, name] } }.group_by(&:first)
+        service, shared = holders.find { |_service, held| held.size > 1 }
+        invalid("packages #{shared.map(&:last).join(' and ')} both declare the GATT service #{service.inspect}",
+                'package.input') if shared
       end
 
       # The ABI file's declaration of interface, or nil when no ABI file declares it.

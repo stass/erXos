@@ -93,7 +93,7 @@ class ErxPkgManifestTest < Minitest::Test
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     arguments = ManifestContextFixture.arguments(codec)
     packages = %w[clock quotes].to_h do |name|
-      ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => 4096, 'sha256' => 'ab' * 32 }]
+      ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => 4096, 'sha256' => 'ab' * 32, 'gatt' => [] }]
     end
     context = Erx::Manifest::Context.new(**arguments, platform: JSON.parse(File.read(File.join(ROOT, 'config/platforms/qemu-virt.json'))),
                                                       artifacts: arguments.fetch(:artifacts).merge(packages),

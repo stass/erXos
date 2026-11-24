@@ -152,7 +152,7 @@ module Erx
     def packages(source, codec, platform)
       arguments = ManifestContextFixture.arguments(codec)
       artifacts = %w[clock quotes].to_h do |name|
-        ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => 4096, 'sha256' => 'ab' * 32 }]
+        ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => 4096, 'sha256' => 'ab' * 32, 'gatt' => [] }]
       end
       context = Manifest::Context.new(**arguments, platform: platform, artifacts: arguments.fetch(:artifacts).merge(artifacts),
                                                    development_key: "\x07".b * 32)

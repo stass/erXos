@@ -88,7 +88,7 @@ class ImageAppsTest < Minitest::Test
     paths = %w[domains/erxos/bin/session.boot system/root].map(&:b)
     artifacts = Erx::ProductionImage.artifacts(paths, images: {}, boots: [Erx::ProductionImage.domain_boot('session')], apps: plan)
     assert_equal({ 'kind' => 'package', 'name' => 'dashboard', 'memory' => dashboard.memory,
-                   'sha256' => dashboard.sha256.unpack1('H*') }, artifacts.fetch('package-dashboard'))
+                   'sha256' => dashboard.sha256.unpack1('H*'), 'gatt' => [] }, artifacts.fetch('package-dashboard'))
     assert_equal 0, artifacts.fetch('session').fetch('entry')
 
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))

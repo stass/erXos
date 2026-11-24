@@ -1438,10 +1438,11 @@ class ManifestDomainsTest < Minitest::Test
 
   # The context with a package artifact for each name => declared memory of packages,
   # as Erx::ImageApps names them.
-  def with_packages(packages)
+  def with_packages(packages, gatt = {})
     arguments = ManifestContextFixture.arguments(@codec)
     artifacts = packages.to_h do |name, memory|
-      ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => memory, 'sha256' => 'ab' * 32 }]
+      ["package-#{name}", { 'kind' => 'package', 'name' => name, 'memory' => memory, 'sha256' => 'ab' * 32,
+                            'gatt' => gatt.fetch(name, []) }]
     end
     @context = Erx::Manifest::Context.new(**arguments.merge(platform: @platform, artifacts: arguments.fetch(:artifacts).merge(artifacts)))
   end
@@ -1478,6 +1479,24 @@ class ManifestDomainsTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 'package.enable',
             roomy + self.class.package('clock', enable: 'YES') + self.class.package('quotes', enable: 'YES'),
             message: /declare 69632 bytes, past the apps budget of 65536/)
+  end
+
+  # Admission's steps 7 and 8 in the build's run over the package rows
+  # (docs/design-packaging.md, "Admission", PK13): a package of the image declares only
+  # GATT services the apps row's gatt offers, and no two declare one. Seeds: a package
+  # declaring a service the row does not offer, and two declaring nus.
+  def test_a_package_row_declares_only_offered_gatt_services_none_twice
+    ble = "service ble\n  server @domain.beta\n  interface ble\n"
+    source = for_apps(@source + ble + self.class.apps(services: 'ble', gatt: 'nus', max: 2), 2)
+    rows = self.class.package('clock') + self.class.package('quotes')
+    with_packages({ 'clock' => 4096, 'quotes' => 4096 }, { 'clock' => %w[nus] })
+    admit(source + rows)
+    with_packages({ 'clock' => 4096, 'quotes' => 4096 }, { 'clock' => %w[nus], 'quotes' => %w[hrs] })
+    refused(Erx::Manifest::Invalid, 'package.input', source + rows,
+            message: /package quotes declares the GATT service "hrs", which the apps row's gatt does not offer/)
+    with_packages({ 'clock' => 4096, 'quotes' => 4096 }, { 'clock' => %w[nus], 'quotes' => %w[nus] })
+    refused(Erx::Manifest::Invalid, 'package.input', source + rows,
+            message: /packages clock and quotes both declare the GATT service "nus"/)
   end
 
   # Property 8's line clause (docs/design-system.md, "The manifest"; docs/design-bluetooth.md,

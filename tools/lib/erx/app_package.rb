@@ -7,6 +7,7 @@ require 'openssl'
 require_relative 'abi'
 require_relative 'bounded_file'
 require_relative 'error'
+require_relative 'gatt_decl'
 require_relative 'origin'
 
 module Erx
@@ -21,9 +22,10 @@ module Erx
     # the program's arguments. A declaration has exactly one.
     Applications = Data.define(:names)
     Program = Data.define(:path, :args)
-    # The declaration's fields; start is an Applications or a Program, license '' when
-    # app.txt names none.
-    Declaration = Data.define(:name, :needs, :start, :license, :memory, :version)
+    # The declaration's fields; start is an Applications or a Program, gatt the GATT
+    # services the app handles, [] when app.txt names none, and license '' when it
+    # names none.
+    Declaration = Data.define(:name, :needs, :gatt, :start, :license, :memory, :version)
     # A hash tree's bytes, its levels top first, the salt every hash was salted with, and
     # its root hash.
     Tree = Data.define(:bytes, :salt, :root_hash)
@@ -36,7 +38,12 @@ module Erx
     # A service's identifier, as the manifest spells it.
     NEED = /\A[a-z0-9][a-z0-9_-]{0,62}\z/
     DECIMAL = /\A[1-9][0-9]{0,19}\z/
-    FIELDS = %w[needs applications program memory version license].freeze
+    # A GATT service's name, as abi/gatt spells it; admission holds each to the names
+    # the board's apps row offers.
+    GATT_NAME = GattDecl::NAME
+    # The service only gatt takes (docs/design-packaging.md, "The declaration").
+    BLE = 'ble'
+    FIELDS = %w[needs gatt applications program memory version license].freeze
     U32_MAX = 0xffff_ffff
     U64_MAX = 0xffff_ffff_ffff_ffff
 
@@ -90,7 +97,8 @@ module Erx
         seen[keyword] = line
       end
       Declaration.new(name: identifier(row.line, row.line.tokens.last, APPLICATION, 'app name'),
-                      needs: fields['needs'] ? names(fields['needs'], NEED, 'need', limit: 'pkg_needs_max') : [],
+                      needs: needs(fields['needs']),
+                      gatt: fields['gatt'] ? names(fields['gatt'], GATT_NAME, 'GATT service name', limit: 'service_ble_services_max') : [],
                       start: start(row, fields), license: license(fields['license']),
                       memory: number(fields['memory'], minimum: codec.constant('app_memory_min'), maximum: U64_MAX,
                                                        default: codec.constant('app_memory_default')),
@@ -133,7 +141,7 @@ module Erx
     # The header of a package of declaration for the codec's architecture, sealed by
     # signer: anything with public_key, its 32-byte Ed25519 key, and sign(bytes), the
     # signature over bytes. The string table holds arch, name, license, a native app's
-    # program and args (each NUL-terminated), the needs and the applications, in that
+    # program and args (each NUL-terminated), the needs, the gatt and the applications, in that
     # order. The seal ends the header and the signature ends the seal (the reader's order
     # in abi/formats/package.txt), so the signature covers every byte of the header before
     # it, the key included. A block, when given, receives the fixed part's values once the
@@ -145,7 +153,7 @@ module Erx
                                           ['native', { 'program' => path, 'args' => args.map { |arg| "#{arg}\0" }.join }, []]
                                         end
       texts = { 'arch' => architecture, 'name' => declaration.name, 'license' => declaration.license, **start_texts }
-      strings = [*texts.values, *declaration.needs, *applications]
+      strings = [*texts.values, *declaration.needs, *declaration.gatt, *applications]
       references = string_references(strings)
       none = { 'offset' => 0, 'length' => 0 }
       root = { 'version' => codec.constant('pkg_version'), 'abi_version' => codec.abi_version,
@@ -154,8 +162,10 @@ module Erx
                'salt' => salt, 'root_hash' => root_hash, 'program' => none, 'args' => none,
                **texts.keys.zip(references.first(texts.size)).to_h }
       seal = { 'key' => signer.public_key, 'signature' => "\0".b * codec.schema.types.fetch('pkg_signature').size }
-      tables = { 'needs' => references.drop(texts.size).first(declaration.needs.size),
-                 'applications' => references.drop(texts.size + declaration.needs.size),
+      listed = references.drop(texts.size)
+      tables = { 'needs' => listed.first(declaration.needs.size),
+                 'gatt' => listed.drop(declaration.needs.size).first(declaration.gatt.size),
+                 'applications' => listed.drop(declaration.needs.size + declaration.gatt.size),
                  'strings' => strings.join.b, 'seal' => [seal] }
       unsigned = codec.encode_reader('pkg_reader', root, tables: tables, &edits)
       signed = unsigned.byteslice(0, unsigned.bytesize - seal.fetch('signature').bytesize)
@@ -184,6 +194,15 @@ module Erx
       line.fail!('a program argument holds no NUL') if args.any? { |arg| arg.include?("\0") }
       line.fail!('the program arguments are too long') if args.sum { |arg| arg.bytesize + 1 } > codec.constant('pkg_args_bytes_max')
       Program.new(path: path.freeze, args: args.map(&:freeze).freeze)
+    end
+
+    # The services of the apps row the app takes: never ble, which only gatt takes, so no
+    # app holds a ble grant that names nothing.
+    def needs(line)
+      return [] unless line
+
+      line.fail!("needs never names #{BLE}: gatt names the services an app handles") if line.words.drop(1).include?(BLE)
+      names(line, NEED, 'need', limit: 'pkg_needs_max')
     end
 
     def names(line, form, what, limit:)
@@ -223,6 +242,6 @@ module Erx
       words.first.to_i
     end
 
-    private_class_method :levels, :string_references, :start, :program, :names, :identifier, :license, :number
+    private_class_method :levels, :string_references, :start, :program, :needs, :names, :identifier, :license, :number
   end
 end

@@ -45,7 +45,7 @@ class ErxPkgHeaderTest < Minitest::Test
   # check sees; the native app's image is a few blocks, a tree of one level. Its program
   # is a minimal executable the loader accepts, since the packer plans it as the loader
   # will and refuses anything else.
-  ERLANG_APP = { 'app.txt' => "app hello\n  needs display data\n  applications erx_hello\n" \
+  ERLANG_APP = { 'app.txt' => "app hello\n  needs display data\n  gatt nus\n  applications erx_hello\n" \
                               "  license \"BSD-2-Clause\"\n  version 2\n",
                  'lib/erx_hello/ebin/erx_hello.app' => "{application, erx_hello, [{modules, []}]}.\n",
                  'lib/erx_hello/ebin/erx_hello.beam' => 'not compiled',
@@ -54,10 +54,10 @@ class ErxPkgHeaderTest < Minitest::Test
   NATIVE_APP = { 'app.txt' => "app tiny\n  memory 8388608\n  program \"bin/tiny\" \"-v\" \"\"\n",
                  'bin/tiny' => ElfFixture.valid,
                  'share/words' => "one\ntwo\n" * 1500 }.freeze
-  PACKED = [['hello.app', ERLANG_APP, { name: 'hello', arch: Seeds::ARCH, needs: %w[display data],
+  PACKED = [['hello.app', ERLANG_APP, { name: 'hello', arch: Seeds::ARCH, needs: %w[display data], gatt: %w[nus],
                                         start: Tuple.new([:applications, %w[erx_hello]]), license: 'BSD-2-Clause',
                                         version: 2, memory: 67_108_864 }],
-            ['tiny.app', NATIVE_APP, { name: 'tiny', arch: Seeds::ARCH, needs: [],
+            ['tiny.app', NATIVE_APP, { name: 'tiny', arch: Seeds::ARCH, needs: [], gatt: [],
                                        start: Tuple.new([:program, 'bin/tiny', ['-v', '']]), license: '',
                                        version: 1, memory: 8_388_608 }]].freeze
 
@@ -162,6 +162,7 @@ class ErxPkgHeaderTest < Minitest::Test
   def expected(declaration, start:)
     Tuple.new([:ok, { name: declaration.name, abi_version: Seeds.codec.abi_version, arch: Seeds::ARCH,
                       version: declaration.version, memory: declaration.memory, needs: declaration.needs,
+                      gatt: declaration.gatt,
                       start: start, license: declaration.license, key: Seeds::SIGNER.public_key,
                       signature: Seeds::SIGNER.signature,
                       header_length: Seeds.header(declaration, image_blocks: 3, tree_blocks: 1).bytesize,

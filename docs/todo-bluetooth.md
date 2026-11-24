@@ -259,10 +259,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [High] bluetooth and packaging, an installed app's `ble` grant (docs/design-bluetooth.md "The `ble` facet", "Who
   holds `ble`"; docs/design-packaging.md "The `apps` row", "The declaration", "Admission", PK13): designed, partly built.
   Built: the `apps` row's `gatt` field and the app template's derived `ble` row (`tools/lib/erx/manifest.rb`,
-  property 19 clause 1), the one template row `check_ble_grants` takes, and step 6's refusal of `ble` as a need
-  (`erx_pkg_manifest` reads no need of it). Missing: the
-  declaration's `gatt` field in `abi/formats/package.txt`, the SDK packer and the generated reader, its bound taken
-  from `abi/services/ble.txt`; admission's `Held` input and steps 7 and 8 (`erx_app_admit:admit/4`), kept by
+  property 19 clause 1), the one template row `check_ble_grants` takes, step 6's refusal of `ble` as a need
+  (`erx_pkg_manifest` reads no need of it, the packer refuses `needs ble`), the declaration's `gatt` field
+  (`abi/formats/package.txt`, bounded by `service_ble_services_max`, which the generator derives from
+  `abi/services/ble.txt`; the SDK packer; `erx_pkg_header`), and steps 7 and 8 in the build's run over the
+  `package` rows (`check_package_gatt`). Missing: admission's `Held` input and steps 7 and 8 (`erx_app_admit:admit/4`), kept by
   `erx_pkg` from its committed admissions and run in the recovery's and the build's order; the record's GATT
   services (`erx_principal`) and the narrowing in `erx_domain_core:app_session/4`; the `EPERM` and `EEXIST` closes;
   the recovery's publication without each app whose record it changes or whose package it no longer admits, before

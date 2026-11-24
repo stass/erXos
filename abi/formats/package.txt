@@ -45,12 +45,15 @@ enum pkg_kind u32
   value erlang 1
   value native 2
 
-# The header's fixed part. The strings it names lie in its string table; the needs
-# and applications are tables of string references. The image starts at the first
+# The header's fixed part. The strings it names lie in its string table; the needs,
+# the gatt and the applications are tables of string references. The gatt, the GATT
+# services the app handles (docs/design-packaging.md, "The declaration"), holds at most
+# the ble interface's services set, the bound the generator takes from
+# abi/services/ble.txt. The image starts at the first
 # block boundary at or after header_length and is image_blocks EROFS blocks long; the
 # hash tree follows it and is tree_blocks blocks long. The seal, the signer's key and
 # the signature over every byte of the header before the signature, ends the header.
-layout erx_pkg_header wire_le 8 176
+layout erx_pkg_header wire_le 8 184
   field magic pkg_magic 0
   field version u16 6
   field header_length u32 8
@@ -68,9 +71,10 @@ layout erx_pkg_header wire_le 8 176
   field program erx_mf_str 128
   field args erx_mf_str 136
   field needs erx_mf_span 144
-  field applications erx_mf_span 152
-  field strings erx_mf_span 160
-  field seal erx_mf_span 168
+  field gatt erx_mf_span 152
+  field applications erx_mf_span 160
+  field strings erx_mf_span 168
+  field seal erx_mf_span 176
 layout erx_pkg_seal wire_le 1 96
   field key pkg_key 0
   field signature pkg_signature 32
@@ -86,14 +90,16 @@ reader pkg_reader erx_pkg_header @pkg_header_max
   range root.applications.count 1 @pkg_applications_max when root.kind erlang
   value root.seal.count 1
   table needs erx_mf_str root.needs.offset root.needs.count @pkg_needs_max 4
+  table gatt erx_mf_str root.gatt.offset root.gatt.count @service_ble_services_max 4
   table applications erx_mf_str root.applications.offset root.applications.count @pkg_applications_max 4
   table seal erx_pkg_seal root.seal.offset root.seal.count 1 1
   string_table strings root.strings.offset root.strings.count @pkg_header_max
-  order needs applications strings seal
+  order needs gatt applications strings seal
   string root.arch.offset root.arch.length strings identifier 63
   string root.name.offset root.name.length strings identifier 63
   string root.license.offset root.license.length strings utf8 @pkg_license_max empty yes
   string root.program.offset root.program.length strings relative_path @pkg_program_max when root.kind native
   string root.args.offset root.args.length strings args @pkg_args_bytes_max empty yes
   string needs[].offset needs[].length strings identifier 63
+  string gatt[].offset gatt[].length strings identifier 63
   string applications[].offset applications[].length strings identifier 63

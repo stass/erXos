@@ -129,7 +129,7 @@ module Erx
       bytes.setbyte(at, bytes.getbyte(at) ^ 0x01)
       path = File.join(directory, File.basename(package.path))
       File.binwrite(path, bytes)
-      ImageApps::Package.new(path: path, name: package.name, memory: package.memory, license: package.license,
+      ImageApps::Package.new(path: path, name: package.name, memory: package.memory, license: package.license, gatt: package.gatt,
                              sha256: Digest::SHA256.digest(bytes.byteslice(0, header_length)))
     end
 

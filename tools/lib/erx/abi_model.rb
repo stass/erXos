@@ -249,10 +249,11 @@ module Erx
         faults = Signals.faults(by_kind, types, signals)
         calls = validate_calls(by_kind.fetch('call', []), types, constants, objects, rights)
         abi.fail!('calls require a complete architecture binding') if calls.any? && !architecture
+        services = validate_services(by_kind.fetch('service', []), types)
+        service_set_bounds(services, constants, abi.line)
         readers = by_kind.fetch('reader', []).map { |item| validate_reader(item, types, constants) }
         translations = validate_translations(by_kind.fetch('translation', []), types)
         elements = by_kind.fetch('elements', []).map { |item| validate_elements(item, types) }
-        services = validate_services(by_kind.fetch('service', []), types)
         projections = validate_projections(by_kind.fetch('projection', []), types)
         protocols = validate_protocols(by_kind.fetch('protocol', []), constants, signals: signals, errnos: errnos)
         inspection = validate_inspection(by_kind, types, rights, objects)
@@ -429,6 +430,20 @@ module Erx
           unique_values(statuses, label: 'status', line: by_kind.fetch('status').first.line)
         end
         constants
+      end
+
+      # Each set parameter's most values as service_<service>_<key>_max, so a format that
+      # carries such a set's names (a package's gatt, abi/formats/package.txt) takes its
+      # bound from the interface that declares it rather than stating it again.
+      def service_set_bounds(services, constants, line)
+        services.each do |service|
+          service.fetch(:parameters).each do |key, parameter|
+            next unless parameter.fetch(:cardinality) == 'set'
+
+            add_constant(constants, "service_#{service.fetch(:name)}_#{key}_max", parameter.fetch(:maximum_count),
+                         BASE_TYPES.fetch('u32'), line)
+          end
+        end
       end
 
       def add_constant(constants, name, value, type, line, description: nil)
