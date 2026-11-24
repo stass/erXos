@@ -425,6 +425,15 @@ module Erx
     # the build's identifier and facts among them, so no field is `unknown`.
     UNAME_A = %r{\AerXos erxos [0-9][0-9.]* (?:n[1-9][0-9]{0,9}-)?[0-9a-f]{12}(?:-dirty)? [A-Z][a-z]{2} [A-Z][a-z]{2} [ 1-3][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2} UTC [0-9]{4} qemu-virt/development fiasco-[0-9a-f]{12} arm64\r*\n\z}n
 
+    # A line typed at the command shell's `%` prompt, as the console shows it once the line
+    # has ended. The line editor reads one key at a time (docs/design-shell.md, "The
+    # console reads on demand") and echoes each, so its echo of a line with a `)` that
+    # pairs with a `(` moves the cursor back to the `(` and on again. It then redraws every
+    # ended line after cursor up and clear to the end, ESC [A ESC [J, which is matched; a
+    # plain echo matches too. The redraw moves up one row, as it does for a line that fits
+    # the console's width, as every line typed here does.
+    def typed_line(text) = /\A(?:\e\[A\e\[J)?% #{Regexp.escape(text)}\r*\n\z/n
+
     # The command shell on the console (docs/design-shell.md), started from the Erlang
     # shell: each line it shows, and what the person then types. The banner says it has
     # the input, so nothing is typed before; a variable, a loop that echoes it, a line
@@ -437,17 +446,18 @@ module Erx
     # host is the manifest's and whose version the build facts give (the source revision, its date, the configuration and the kernel), then
     # `uname -i` and `uname -K` alone; `dmesg | grep`, which finds the boot's littlefs line in
     # /proc/kernel/log after the console has written it; and exit, after which the Erlang shell answers again. Lines between
-    # the matched ones, such as the other applications, are passed over. The line editor
-    # echoes each line as typed and then redraws it after cursor movements, which no
-    # pattern here matches; it rings the bell at a `}` with no `{` on its line.
+    # the matched ones, such as the other applications, are passed over. A line typed at
+    # the `%` prompt is matched as typed_line/1 says; the continued line, whose prompt is
+    # empty, at its echo, where the line editor rings the bell at a `}` with no `{` on its
+    # line.
     COMMAND_SHELL = [
       ['rc-banner', /\Arc: the command shell; exit ends it\r*\n\z/n, "x=(a b c)\r"],
-      ['rc-assign', /\A% x=\(a b c\)\r*\n\z/n, "for(i in $x) echo $i\r"],
-      ['rc-loop', /\A% for\(i in \$x\) echo \$i\r*\n\z/n, nil],
+      ['rc-assign', typed_line('x=(a b c)'), "for(i in $x) echo $i\r"],
+      ['rc-loop', typed_line('for(i in $x) echo $i'), nil],
       ['rc-loop-a', /\Aa\r*\n\z/n, nil],
       ['rc-loop-b', /\Ab\r*\n\z/n, nil],
       ['rc-loop-c', /\Ac\r*\n\z/n, "{\r"],
-      ['rc-open', /\A% \{\r*\n\z/n, "echo con tinued}\r"],
+      ['rc-open', typed_line('{'), "echo con tinued}\r"],
       ['rc-continued-line', /\Aecho con tinued\}\a?\r*\n\z/n, nil],
       ['rc-continued', /\Acon tinued\r*\n\z/n, "echo a)\r"],
       ['rc-syntax-error', /\Arc: syntax error at line 1, column 7: unexpected '\)'\r*\n\z/n,
@@ -464,7 +474,7 @@ module Erx
       ['rc-uname-i', %r{\Aqemu-virt/development\r*\n\z}n, "uname -K\r"],
       ['rc-uname-k', /\Afiasco-[0-9a-f]{12}\r*\n\z/n, "dmesg | grep 'erx_lfs: volume mounted'\r"],
       ['rc-dmesg', /\A#[0-9]+ [0-9]+\.[0-9]{6} debug space [0-9]+: erx_lfs: volume mounted\r*\n\z/n, "exit\r"],
-      ['rc-exit', /\A% exit\r*\n\z/n, nil],
+      ['rc-exit', typed_line('exit'), nil],
       ['rc-returned', /\Aok\r*\n\z/n, "rc_ended.\r"],
       ['erlang-shell-again', /\Arc_ended\r*\n\z/n, nil]
     ].map { |name, pattern, type| { name: name, pattern: pattern, seconds: 30, **{ type: type }.compact }.freeze }.freeze

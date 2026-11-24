@@ -68,6 +68,28 @@ class MediumBootTest < Minitest::Test
     assert_raises(Erx::Error) { Boot.checkpoints(points[0..2], Choice.new(slot: :a, offset: 0, length: 64), release: release, domain: DOMAIN, grant: GRANT) }
   end
 
+  # The command shell's first lines as the console shows them: the line editor reads one
+  # key at a time (docs/design-shell.md, "The console reads on demand"), so at each `)` it
+  # pairs with a `(` the echo moves back to the `(` and on again, and once the line ends
+  # the editor redraws it. The assignment's and the loop's lines are a real transcript's;
+  # each is matched in its redraw, and the open brace's plain echo as it is.
+  def test_the_command_shell_lines_are_matched_in_the_line_editors_redraw
+    # back: the editor's move from after the `)` to its `(`, one column a character.
+    typed = lambda do |line, back:|
+      paren = line.index(')') + 1
+      "% #{line[0, paren]}#{"\b" * back}#{"\e[C" * back}#{line[paren..]}\r\n\e[A\e[J% #{line}\r\n"
+    end
+    serial = "rc: the command shell; exit ends it\r\n#{typed.call('x=(a b c)', back: 7)}" \
+             "#{typed.call('for(i in $x) echo $i', back: 9)}a\r\nb\r\nc\r\n% {\r\n"
+    points = Boot::COMMAND_SHELL.first(7)
+    Dir.mktmpdir('erx-command-shell-') do |directory|
+      path = File.join(directory, 'serial.log')
+      File.binwrite(path, serial)
+      transcript = Erx::Transcript.new(checkpoints: points)
+      assert transcript.consume(path, elapsed: 0.1), transcript.observed.map { |point| point.fetch('name') }.inspect
+    end
+  end
+
   # The shell reads stdlib's lists module from the system partition's image at the storage
   # node, opened on the system window with the layout of the node's system_image record, and
   # only its packed MD5 passes; a release without the module has nothing to read.
