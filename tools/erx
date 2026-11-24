@@ -689,22 +689,40 @@ module Erx
     # firmware boots from over the network (Netboot), and prints the build it staged and
     # the command line that serves DIR over TFTP (docs/design-platforms.md, "Netbooting
     # from a Mac").
+    #
+    # tools/erx netboot --key FILE [--http DIR] [--platform NAME]: the HTTP form, for a
+    # bootloader that fetches boot.sig and boot.img (docs/design-platforms.md, "The HTTP
+    # form"): stages the same boot files as a queue of one signed entry at DIR, a link,
+    # signed with the RSA-2048 key FILE, which never leaves it. tools/erx netboot serve
+    # serves DIR.
     def self.netboot_command(arguments)
       require 'etc'
       require_relative 'lib/erx/netboot'
       require_relative 'lib/erx/production_image'
-      tftp = Netboot::DEFAULT_ROOT
+      return netboot_serve(arguments.drop(1)) if arguments.first == 'serve'
+
+      tftp = nil
+      http = nil
+      key = nil
       name = Netboot::PLATFORM
       OptionParser.new do |flags|
         flags.on('--tftp DIR') { |value| tftp = value }
+        flags.on('--http DIR') { |value| http = value }
+        flags.on('--key FILE') { |value| key = value }
         flags.on('--platform NAME') { |value| name = value }
       end.parse!(arguments)
       no_arguments(arguments)
+      raise Error, 'netboot: --http stages for the HTTP form, which takes its signing key by --key FILE' if http && !key
+      raise Error, 'netboot: --key signs for the HTTP form, which --tftp does not serve' if tftp && key
+
       platform = Platform.load(root: ROOT, name: name)
       raise Error, "netboot: #{name}'s firmware boots from no boot partition, so it has no network boot root" unless
         BootPartition.boot_partition_medium?(platform)
 
-      staged = Netboot.stage(medium: File.join(ROOT, ProductionImage.packed_directory(platform)), root: tftp)
+      medium = File.join(ROOT, ProductionImage.packed_directory(platform))
+      return netboot_http(medium: medium, root: http || Netboot::DEFAULT_HTTP_ROOT, key: key, name: name) if key
+
+      staged = Netboot.stage(medium: medium, root: tftp || Netboot::DEFAULT_ROOT)
       tree = case staged.dirty
              in true then 'with changes'
              in false then 'unchanged'
@@ -717,6 +735,49 @@ module Erx
       Terminal.puts("netboot: serve it over TFTP with this line, INTERFACE being the Mac's interface on the cable " \
                     '(with Internet Sharing on, the bridge ifconfig shows with the shared address, often bridge100):')
       Terminal.puts("  #{Netboot.shell_line(server)}")
+      0
+    end
+
+    def self.netboot_http(medium:, root:, key:, name:)
+      require_relative 'lib/erx/fsimg'
+      staged = Netboot.stage_http(medium: medium, root: root, key: key, fsimg: Fsimg.locate(root: ROOT),
+                                  runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
+      Terminal.puts("netboot: #{staged.root} serves #{name}'s boot files of commit #{staged.commit || 'unknown'} " \
+                    "as one signed entry, #{BootPartition::KERNEL} SHA-256 #{staged.kernel}")
+      Terminal.puts("netboot: serve it with: tools/erx netboot serve --http #{Netboot.shell_line([staged.root])}")
+      0
+    end
+
+    # tools/erx netboot serve [--http DIR] [--bind ADDR] [--port N] [--prefix NAME]: the
+    # HTTP form's boot server (NetbootServer), answering /NAME/boot.sig and /NAME/boot.img
+    # of the queue the link DIR names, and nothing else, at ADDR:N, one connection at a
+    # time, until interrupted. ADDR is by default Internet Sharing's address on the Mac's
+    # side of the cable and NAME the EEPROM's HTTP_PATH.
+    def self.netboot_serve(arguments)
+      require_relative 'lib/erx/netboot_server'
+      http = Netboot::DEFAULT_HTTP_ROOT
+      bind = '192.168.2.1'
+      port = 8080
+      prefix = 'erxos'
+      OptionParser.new do |flags|
+        flags.on('--http DIR') { |value| http = value }
+        flags.on('--bind ADDR') { |value| bind = value }
+        flags.on('--port N', Integer) { |value| port = value }
+        flags.on('--prefix NAME') { |value| prefix = value }
+      end.parse!(arguments)
+      no_arguments(arguments)
+      link = File.expand_path(http)
+      server = NetbootServer::Server.new(queue: NetbootServer::LinkQueue.new(link), prefix: prefix,
+                                         log: ->(line) { Terminal.puts("netboot serve: #{line}") })
+      listener = begin
+        TCPServer.new(bind, port)
+      rescue SystemCallError => e
+        raise Error, "netboot serve: cannot listen on #{bind}:#{port}: #{e.class.name.split('::').last} " \
+                     '(with Internet Sharing on, the bridge on the cable holds 192.168.2.1)'
+      end
+      Terminal.puts("netboot serve: answering http://#{bind}:#{port}/#{prefix}/boot.sig and boot.img from the queue #{link} names")
+      trap('INT') { exit(0) }
+      server.listen(listener)
       0
     end
 

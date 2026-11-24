@@ -43,7 +43,7 @@ module Erx
       Response = Data.define(:status, :headers, :body)
 
       PHRASES = { 101 => 'Switching Protocols', 200 => 'OK', 303 => 'See Other', 400 => 'Bad Request',
-                  403 => 'Forbidden', 405 => 'Method Not Allowed', 414 => 'URI Too Long',
+                  403 => 'Forbidden', 404 => 'Not Found', 405 => 'Method Not Allowed', 414 => 'URI Too Long',
                   503 => 'Service Unavailable' }.freeze
 
       # The headers every file and every refusal carries (docs/design-web.md, "Security",
@@ -88,11 +88,18 @@ module Erx
 
       # The wire bytes of a response, with Content-Length and Connection: close.
       def encode(response)
-        lines = ["#{VERSION} #{response.status} #{PHRASES.fetch(response.status)}"]
-        response.headers.each { |name, value| lines << "#{name}: #{value}" }
-        lines << "Content-Length: #{response.body.bytesize}" unless response.status == 101
-        lines << 'Connection: close' unless response.status == 101
-        (lines.join(CRLF) + END_OF_HEAD).b + response.body.b
+        head(response.status, response.headers, length: response.status == 101 ? nil : response.body.bytesize) +
+          response.body.b
+      end
+
+      # The wire bytes of a response's head, for a body of length bytes sent after it, or
+      # sent apart from it, as netboot's boot server streams an image, with Content-Length
+      # and Connection: close; a length of nil, an upgrade's, writes neither.
+      def head(status, headers, length:)
+        lines = ["#{VERSION} #{status} #{PHRASES.fetch(status)}"]
+        headers.each { |name, value| lines << "#{name}: #{value}" }
+        lines.push("Content-Length: #{length}", 'Connection: close') unless length.nil?
+        (lines.join(CRLF) + END_OF_HEAD).b
       end
 
       # A file of the client's bundle.
