@@ -53,7 +53,6 @@
 #include <unistd.h>
 
 #include <sys/mman.h>
-#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -87,6 +86,16 @@
 #define PERIODIC_LEAD	10u
 /* B waits this long for a wake; a wait that reaches it lost its wake. */
 #define WAKE_PATIENCE_S	1
+/*
+ * A waits this long after B has released the lock inside its wait before stamping, so B
+ * is asleep when it is signalled: POSIX shows no thread's state, which the native
+ * handshake reads from the kernel.
+ */
+#define WAKE_SETTLE_US	UINT64_C(200)
+/* The run ends by SIGALRM after this long, so a stalled side ends it with no CLOCK line. */
+#define RUN_DEADLINE_S	300u
+/* The protect check's child ends with this when its write faults. */
+#define FAULTED		3
 /* share-equal's landing cell's parameters, which tools/lib/erx/benches/sched.rb declares. */
 #define SHARE_THREADS	4u
 #define SHARE_WINDOW_MS	1000u
@@ -109,7 +118,10 @@ static const char *benchmark;
 static size_t page_bytes;
 
 static char line[LINE_BYTES];
+/* Each cell's histogram, which a line carries. */
 static erx_bench_hist_t hist;
+/* The fast runs' warm-up and the read calibration's deltas, never a cell's. */
+static erx_bench_hist_t scratch;
 static erx_bench_reads_t read_pairs[READ_PAIRS];
 static erx_bench_token_t token;
 static erx_bench_round_t rounds[ROUNDS];
@@ -353,14 +365,14 @@ calibrate(void)
 
 	erx_bench_rounds_a(&token, clock_read, rounds, ROUNDS);
 	peer_thread_join(b);
-	offset = erx_bench_offset(rounds, ROUNDS, erx_bench_read_calibration(read_pairs, READ_PAIRS, &hist).increment);
+	offset = erx_bench_offset(rounds, ROUNDS, erx_bench_read_calibration(read_pairs, READ_PAIRS, &scratch).increment);
 	return (offset);
 }
 
 static void
 print_clock(const erx_bench_pair_t *pair, size_t npairs)
 {
-	const erx_bench_read_cal_t reads = erx_bench_read_calibration(read_pairs, READ_PAIRS, &hist);
+	const erx_bench_read_cal_t reads = erx_bench_read_calibration(read_pairs, READ_PAIRS, &scratch);
 	/* A timed wait takes its deadline in nanoseconds, so it rounds to one. */
 	const erx_bench_calibration_t clock = { .clock = clock_name, .frequency_hz = clock_hz,
 	    .increment = reads.increment, .read_cost = reads.read_cost,
@@ -440,16 +452,16 @@ fast_run(const peer_op_t *op)
 	uint64_t ticks;
 
 	for (size_t at = 0; at < ERX_BENCH_HIST_BUCKETS; at++)
-		hist.count[at] = 0;
-	hist.samples = 0;
+		scratch.count[at] = 0;
+	scratch.samples = 0;
 	for (uint32_t warm = 0; warm < ERX_BENCH_FAST_WARMUP; warm++) {
 		if (!batch_run(op, 1, &ticks)) {
 			run.wrong = true;
 			return (run);
 		}
-		erx_bench_hist_add(&hist, ticks);
+		erx_bench_hist_add(&scratch, ticks);
 	}
-	run.batch = erx_bench_batch_for(erx_bench_hist_median(&hist));
+	run.batch = erx_bench_batch_for(erx_bench_hist_median(&scratch));
 	for (; run.taken < ERX_BENCH_FAST_SAMPLES; run.taken++) {
 		if (!batch_run(op, run.batch, &ticks)) {
 			run.wrong = true;
@@ -731,25 +743,37 @@ touch_check(void)
 	return (unmap_one(0) && right);
 }
 
-/* A write to page, which must end the process that makes it with SIGSEGV or SIGBUS. */
+static void
+fault_exit(int signal)
+{
+	(void)signal;
+	_exit(FAULTED);
+}
+
+/* A write to page, which must fault: the child that makes it ends with FAULTED from its handler. */
 static bool
 write_faults(uint8_t *page)
 {
-	const struct rlimit no_core = { 0, 0 };
 	const pid_t child = fork();
 	int status;
 
 	if (child < 0)
 		peer_fail("no process for the protect check");
 	if (child == 0) {
-		(void)setrlimit(RLIMIT_CORE, &no_core);
+		struct sigaction fault;
+
+		memset(&fault, 0, sizeof(fault));
+		fault.sa_handler = fault_exit;
+		sigemptyset(&fault.sa_mask);
+		if (sigaction(SIGSEGV, &fault, NULL) != 0 || sigaction(SIGBUS, &fault, NULL) != 0)
+			_exit(1);
 		page_fill(page, 1);
 		_exit(0);
 	}
 	while (waitpid(child, &status, 0) < 0)
 		if (errno != EINTR)
 			peer_fail("the protect check's process could not be reaped");
-	return (WIFSIGNALED(status) && (WTERMSIG(status) == SIGSEGV || WTERMSIG(status) == SIGBUS));
+	return (WIFEXITED(status) && WEXITSTATUS(status) == FAULTED);
 }
 
 /* A written page reads back after read-only and back, and a write to a read-only page faults. */
@@ -816,20 +840,24 @@ park_deadline(void)
 	erx_bench_sample_t top[ERX_BENCH_LARGEST];
 	size_t on_time = 0;
 	uint32_t k = 0;
+	size_t taken = 0;
 	bool refused = false;
 
-	for (size_t n = 0; n < ERX_BENCH_PERIODIC_SAMPLES && !refused; n++) {
+	while (taken < ERX_BENCH_PERIODIC_SAMPLES && !refused) {
 		const struct timespec at = monotonic_at(erx_bench_periodic_deadline(first, period, k));
 		int answer;
 
 		while ((answer = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &at, NULL)) == EINTR)
 			continue;
-		stamps[n] = (erx_bench_stamp_t){ .k = k, .returned = clock_read() };
 		refused = answer != 0;
-		k = erx_bench_periodic_next(first, period, k, stamps[n].returned);
+		if (refused)
+			break;
+		stamps[taken] = (erx_bench_stamp_t){ .k = k, .returned = clock_read() };
+		k = erx_bench_periodic_next(first, period, k, stamps[taken].returned);
+		taken++;
 	}
-	erx_bench_periodic_classify(first, period, stamps, ERX_BENCH_PERIODIC_SAMPLES, &periodic);
-	for (size_t at = 0; at < ERX_BENCH_PERIODIC_SAMPLES; at++) {
+	erx_bench_periodic_classify(first, period, stamps, taken, &periodic);
+	for (size_t at = 0; at < taken; at++) {
 		const uint64_t deadline = erx_bench_periodic_deadline(first, period, stamps[at].k);
 
 		if (stamps[at].returned >= deadline)
@@ -886,7 +914,10 @@ wake_b(uint64_t total)
 	pthread_mutex_unlock(&shake.lock);
 }
 
-/* A's side: per sample, once B waits, stamp and poke, then take B's stamp less A's. */
+/*
+ * A's side: per sample, once B waits and WAKE_SETTLE_US later, stamp and poke, then take
+ * B's stamp less A's. A sample includes B taking the lock back from A.
+ */
 static size_t
 wake_a(uint32_t total, uint64_t *raw)
 {
@@ -899,6 +930,8 @@ wake_a(uint32_t total, uint64_t *raw)
 
 		while (shake.waiting != number && !shake.lost)
 			pthread_cond_wait(&shake.answer, &shake.lock);
+		for (const uint64_t settled = clock_read() + clock_hz * WAKE_SETTLE_US / 1000000; clock_read() < settled;)
+			continue;
 		poked = clock_read();
 		shake.poked = number;
 		pthread_cond_signal(&shake.poke);
@@ -1150,6 +1183,7 @@ main(int argc, char **argv)
 	page_bytes = (size_t)page;
 	/* A write to an echo that ended fails with EPIPE, which the run reports. */
 	signal(SIGPIPE, SIG_IGN);
+	alarm(RUN_DEADLINE_S);
 	clock_choose();
 	erx_bench_read_pairs(clock_read, read_pairs, READ_PAIRS);
 	peer_say("erx: bench: timing\n");

@@ -157,14 +157,20 @@ module Erx
     def guest(name) = GUESTS.fetch(name) { raise Error, "bench: #{name} has no native bench guest" }
 
     # The build flags of the root, or of the task: the test hooks, the landing profiles'
-    # sizes and the guest's deadline, which test/guest/native_bench takes from them alone,
+    # sizes and the guest deadline, which test/guest/native_bench takes from them alone,
     # and a seed's flags for that side.
     def flags(seeded: [], deadline_seconds: LANDING_DEADLINE_SECONDS)
-      fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
-      ['-DERX_FIASCO_TEST_HOOKS', "-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
-       "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u",
-       "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u", "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"",
+      ['-DERX_FIASCO_TEST_HOOKS', *profile_flags, "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"",
        "-DERX_BENCH_UNFAULTED=\"#{VM_UNFAULTED}\"", "-DERX_BENCH_DEADLINE_S=#{deadline_seconds}u", *seeded].freeze
+    end
+
+    # The landing profiles' sizes as -D flags, which every bench guest's C, and the peer
+    # bench's, takes from them alone.
+    def profile_flags
+      fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
+      ["-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
+       "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u", "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u",
+       "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u"].freeze
     end
 
     # The profile each operation of benchmark ran at, in its landing form.

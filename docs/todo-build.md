@@ -147,7 +147,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   boot's items first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
-  other systems' logs and the analyser's captures; `bench/peer/erx_peer_bench.c`;
+  other systems' logs and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
+  landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
+  side's first compile; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
+  the reader's closed clock set has no name for its `CLOCK_MONOTONIC` fallback, which the design says is
+  recorded as such; its fast-run, sweep-print and spinner loops moved into `test/guest/bench` beside
+  the cell summary, so they are one implementation with the native guest's;
   the L4Re, FreeBSD and Linux images and L4Re's IPC benchmark pinned in the fetch step; the two GPIO responders.
   Includes the development-only Fiasco patch that stamps the interrupt entry
   ([design-bench.md](design-bench.md#the-interrupt-entrys-stamp)), the check of the Glasgow's stock applets for the
