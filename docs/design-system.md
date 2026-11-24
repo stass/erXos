@@ -2877,7 +2877,8 @@ with what its grant names. The pieces:
   `?ERX_LINES`, which the domain service reads; the facet-name check
   takes such a name as a line, which the source may provide and pass to
   `erx_domain:line/4` though no manifest row names it; and the manifest
-  check refuses a `service` or `facet` row of such an interface.
+  check refuses a `service` or `facet` row of such an interface, and a
+  `service` row named as one.
 * **The grant's quantities.** No facet row states a line's grant, so the
   interface does, with a `quantity` line for each of the five a facet row
   carries ([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)),

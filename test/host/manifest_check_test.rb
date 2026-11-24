@@ -1516,6 +1516,17 @@ class ManifestCheckTest < Minitest::Test
     refused(Erx::Manifest::Invalid, 'service.interface', @source + service, message: /of drive, a drive window's grant/)
   end
 
+  # No service row takes the name of an interface no row grants, drive or a session's
+  # line, whatever its own interface: the domain service declares drive for each drive
+  # window's serving row and keys a line's grant by its name, so a service of the same
+  # name would share the grant records' names (docs/design-drives.md, "Manifest rows").
+  def test_a_service_named_after_an_unrowed_interface_is_refused
+    { 'drive' => /named drive, a drive window's grant/, 'tty_line' => /named tty_line, a session's line/ }.each do |name, message|
+      service = "service #{name}\n  server @domain.network\n  interface files\n"
+      refused(Erx::Manifest::Invalid, 'service.name', @source + service, message: message)
+    end
+  end
+
   # A second service record whose public name is system, under another label, on
   # another server, since property 5 refuses two names alike on one server first.
   def test_a_second_system_service_is_refused

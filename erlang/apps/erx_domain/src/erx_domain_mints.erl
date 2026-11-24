@@ -812,10 +812,11 @@ mint_request(Key, {ServerId, GranteeId}, Tag, #{rows := Rows} = State) ->
 %% The limits of the grant Key as its server mints it and its grantee holds it: its facet
 %% row's, and for a grant of an input service, which states no rights
 %% (abi/services/input.txt), rights ro, so its server serves it read-only and its grantee
-%% holds it so (installed_facet/3).
-grant_limits({_, Name} = Key, #{inputs := Inputs} = State) ->
-    #{limits := Limits} = grant_entry(Key, State),
-    case lists:member(Name, Inputs) of
+%% holds it so (installed_facet/3). Both read the record's service, never the key's
+%% installed name, which for a drive is {drive, N}.
+grant_limits(Key, #{inputs := Inputs} = State) ->
+    #{service := Service, limits := Limits} = grant_entry(Key, State),
+    case lists:member(Service, Inputs) of
         true -> Limits#{rights => ro};
         false -> Limits
     end.
@@ -829,8 +830,9 @@ session_limits(Limits, false) -> maps:remove(session, Limits).
 %% service, the pid with the rights of the grant's limits (grant_limits/2), which the
 %% manifest states and no reply of the server's sets (docs/design-files.md, "Rights
 %% beneath an entry"); for any other service, the pid alone.
-installed_facet(Pid, {_, Name} = Key, #{files := Files, inputs := Inputs} = State) ->
-    case lists:member(Name, Files ++ Inputs) of
+installed_facet(Pid, Key, #{files := Files, inputs := Inputs} = State) ->
+    #{service := Service} = grant_entry(Key, State),
+    case lists:member(Service, Files ++ Inputs) of
         true -> erx_fs_grants:facet(Pid, grant_limits(Key, State));
         false -> Pid
     end.

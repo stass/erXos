@@ -3126,16 +3126,21 @@ module Erx
       # session's line, whose grant the domain service mints only for the grantee the system
       # domain names (docs/design-system.md, "A session's lines"), or served_by drive, whose
       # only grants are the drive window rows (docs/design-drives.md, "Manifest rows"); so no
-      # facet row grants one either: a facet row names a service row.
+      # facet row grants one either: a facet row names a service row. Nor is a service row
+      # named as such an interface, whatever its own: the domain service keys a line's grant
+      # and declares a drive window's grant by the interface's name, so a service of that
+      # name would share the grant records' names.
       def check_no_line_services(service_rows)
         schema = @codec.schema
-        unrowed = schema.session_lines.to_h { |service| [service.fetch(:number), "#{service.fetch(:name)}, a session's line"] }
-                        .merge(schema.drive_grants.to_h { |service| [service.fetch(:number), "#{service.fetch(:name)}, a drive window's grant"] })
+        unrowed = schema.session_lines.map { |service| [service, "a session's line"] } +
+                  schema.drive_grants.map { |service| [service, "a drive window's grant"] }
+        by_number = unrowed.to_h { |service, what| [service.fetch(:number), "#{service.fetch(:name)}, #{what}"] }
+        by_name = unrowed.to_h { |service, what| [service.fetch(:name), "#{service.fetch(:name)}, #{what}"] }
         service_rows.each do |row|
-          what = unrowed[row.fetch('interface')]
-          next unless what
-
-          invalid("service #{row.fetch('name')} is of #{what}, which no manifest row grants", 'service.interface')
+          name = row.fetch('name')
+          invalid("service #{name} is named #{by_name[name]}, which no manifest row grants", 'service.name') if by_name.key?(name)
+          what = by_number[row.fetch('interface')]
+          invalid("service #{name} is of #{what}, which no manifest row grants", 'service.interface') if what
         end
       end
 

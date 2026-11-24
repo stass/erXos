@@ -797,7 +797,8 @@ The manifest check refuses:
 * more drives on one USB domain's controllers than `usb_drives_max`;
 * a `media` facet row with rights `rx`;
 * a `service` row or a `facet` row of the interface `drive`, whose only
-  grants are the drive windows.
+  grants are the drive windows, and a `service` row named `drive`, the
+  service of every drive window's grant record.
 
 The media domain's row allows it no sub-spaces (`spaces none`), since
 FAT and EROFS run in its own processes; a row that serves littlefs
