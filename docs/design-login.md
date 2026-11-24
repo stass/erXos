@@ -317,6 +317,56 @@ answers `unavailable` and no front end logs anyone in by passphrase.
 Before the vault, a development build checks root's passphrase with the
 development checker ([Risks and open decisions](#risks-and-open-decisions), 1).
 
+**The development checker** is `erx_passphrase_check`, a process of the
+principal service in the system domain and its one passphrase check:
+`check(network, Name, Passphrase, Terminal)` answers `match`,
+`no_match`, `limited`, `unavailable` or `badarg`, and nothing else. It
+sets `process_flag(sensitive, true)` in its `init/1`, before it
+registers, its worker sets it before it touches the passphrase, and its
+`format_status/1` shows the queue's length and the number of counters,
+never a request, a name or a terminal. In a build that is not a
+development build (`erx_build:development/0`) it answers `unavailable`
+to every check and reads nothing, as `erx_ssh` answers
+`not_development`; a release manifest also holds no `record_volume`
+window, so a release build has no `login_keys` tree to read. In a
+development build:
+
+* **Limits.** It counts failures by name, whether or not the name is a
+  principal's, and by terminal. A check whose name has had 5 failures,
+  or whose terminal has had 5, less than 60 s after that counter's last
+  failure, answers `limited` with no derivation. Each `no_match` adds
+  one to both counters; a counter whose last failure is 60 s old starts
+  again at one, and every counter that old is dropped at each failure,
+  so no more counters live than derivations fit in a minute.
+* **One derivation at a time.** Checks wait in one queue, and one
+  worker process at a time reads root's record and derives. The limits
+  are applied as a check leaves the queue, so the failures of the
+  checks ahead of it count against it.
+* **Root's record** is the `login_keys` tree's `root_passphrase`, read
+  for every check through the system domain's grant, at most 53 bytes,
+  one past the record's largest
+  ([design-ssh.md](design-ssh.md#roots-passphrase-on-the-medium)): the
+  rounds, the 32-byte hash and a salt of 1 to 16 bytes, which
+  `erx_passphrase_hash:decode/1` reads after one length check, since the
+  bytes come from another domain. An empty file, a failed read, no grant
+  and a record that does not decode answer `unavailable` to every name
+  and count nothing, so that answer never depends on the name.
+* **The same answer for a stranger.** Every check the limits pass
+  derives exactly once, with the passphrase it was given, under root's
+  salt and rounds, whatever the name, so every name costs the same work
+  and takes the same time, and the vault's dummy file and login envelope
+  have nothing to hide here. The answer is `match` only when the name is
+  `root` and the derived hash equals the record's in a comparison that
+  reads all 32 bytes whatever they hold; any other name, given root's
+  passphrase or not, answers `no_match`, as a wrong passphrase does.
+* **The derivation** is crypt(3)'s SHA-256 (`$5$`, FreeBSD's
+  `lib/libcrypt/crypt-sha256.c`), over `erx_bytes:sha256/1`, the
+  primitive the system domain already has, so the system domain gains no
+  library. A passphrase of 1 to 256 bytes is derived; another, or a name
+  that is not 1 to 255 bytes, answers `badarg` with no derivation and no
+  count, since crypt's cost grows with the square of the passphrase's
+  length. A worker that ends without an answer answers `unavailable`.
+
 ### Secrets
 
 The system domain receives three secrets through the facet: a
@@ -576,9 +626,7 @@ login moves onto the facet with the web's network front end.
      holding a salted hash written on the host, under the vault's counts
      and the same answer for a stranger, refused in every release build
      as the `record_volume` window is, and deleted with the record volume
-     at the vault's stage. Its hash form is the package's choice; a
-     crypt(3) SHA-512 string, which FreeBSD writes for `$6$`, is
-     familiar, unverified against a source here. Its cost: a stopgap
+     at the vault's stage. Its cost: a stopgap
      decoder with a fuzz target, and a hash anyone holding the card can
      try offline, as anyone holding it can read the card.
 
@@ -586,6 +634,18 @@ login moves onto the facet with the web's network front end.
    root's login keys on the medium, takes one package, and lets the phone
    console and SSH's keyboard-interactive be tested before the vault;
    the vault replaces it behind the principal service's one check.
+   Its details are [The passphrase check](#the-passphrase-check)'s and
+   [design-ssh.md](design-ssh.md#roots-passphrase-on-the-medium)'s: a
+   file `passphrase_hash` on the record volume, beside
+   `authorized_keys`, of one crypt(3) SHA-256 string, `$5$`, written on
+   the host by `tools/erx passphrase-hash`. The form is SHA-256 crypt
+   and not SHA-512 crypt (`$6$`, which FreeBSD's `crypt(3)` reads as
+   well) because the system domain has SHA-256 in `erx_bytes` and no
+   SHA-512, and the vault's OpenSSL stays out of the system domain.
+   Both were read in FreeBSD 14.3.0's `lib/libcrypt` (`crypt.3`,
+   SHA-256 `5f875e711f67f2d9...`; `crypt-sha256.c`, `8e8ac7a99c19b43b...`;
+   `misc.c`, `27f5bce6a7cb27d8...`), whose test vectors both of erXos's
+   implementations pass.
 2. **Display logins.** Decision 14 of
    [design-display.md](design-display.md#risks-and-decisions) settles
    what shows the prompt and which domain sees the passphrase. If a
