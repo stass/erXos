@@ -23,26 +23,29 @@ the four is answered `{error, einval}`, and one past `in_flight` requests forwar
 unanswered `{error, busy}`. Each admitted request goes to its window, the one the
 grant answered it, and to no other, and the window's answer goes back to its caller.
 
-It ends when its window ends, when the facet ends, both of which it monitors, when the
-facet ends it for the next ask, or when it passes `max_heap_size`, off-heap binaries
-counted; its end ends nothing of the window or the medium. Its charge of the facet's
+It ends when its window ends, when the facet ends, even while it waits on the grant's
+answer, both of which it monitors, when the facet ends it for the next ask, or when it
+passes the grant's `max_heap_size`, off-heap binaries counted; its end ends nothing of
+the window or the medium. Its charge of the facet's
 account and its pause while the share is spent wait on erx_facet's account
 (docs/todo-storage.md, the erx_media item).
 """.
 
 -export([start/2]).
 
+%% The facet's grant's limits, the grant record's alone, and the facet.
 -type limits() :: #{grantee := pos_integer(), max_request := pos_integer(), in_flight := pos_integer(),
-                    exports := module(), facet := pid(), max_heap_size => non_neg_integer()}.
+                    max_heap_size := pos_integer(), exports := module(), facet := pid()}.
 
 -doc """
 Starts a proxy of Grant's window for the facet and grantee Limits name, which waits
-for the facet's forward of `window`. Unlinked: the proxy monitors the facet instead.
+for the facet's forward of `window`, under the grant's `max_heap_size` in words.
+Unlinked: the proxy monitors the facet instead.
 """.
 -spec start(pid(), limits()) -> pid().
-start(Grant, #{facet := Facet} = Limits) when is_pid(Grant), is_pid(Facet) ->
-    Heap = #{size => maps:get(max_heap_size, Limits, 0), kill => true, error_logger => false,
-             include_shared_binaries => true},
+start(Grant, #{facet := Facet, max_heap_size := Words} = Limits)
+  when is_pid(Grant), is_pid(Facet), is_integer(Words), Words > 0 ->
+    Heap = #{size => Words, kill => true, error_logger => false, include_shared_binaries => true},
     spawn_opt(fun() -> init(Grant, Limits) end, [{max_heap_size, Heap}]).
 
 init(Grant, #{facet := Facet} = Limits) ->
@@ -54,10 +57,9 @@ init(Grant, #{facet := Facet} = Limits) ->
             exit(normal)
     end.
 
-%% The grant's answer to the facet's ask. A grant that ends first ends the proxy, by
-%% the call's exit.
+%% The grant's answer to the facet's ask passed on, and on a window the proxy serves it.
 window(Grant, From, #{grantee := Grantee, exports := Exports} = Limits) ->
-    case gen_server:call(Grant, window, infinity) of
+    case grant_answer(Grant, Limits) of
         {ok, Window} when is_pid(Window) ->
             WindowMonitor = monitor(process, Window),
             ok = Exports:export(self(), [send], Grantee),
@@ -65,6 +67,23 @@ window(Grant, From, #{grantee := Grantee, exports := Exports} = Limits) ->
             loop(Limits#{window => Window, window_monitor => WindowMonitor, outstanding => #{}});
         Answer ->
             gen:reply(From, Answer)
+    end.
+
+%% The grant's answer to `window`, waited on together with the facet's end: a grant
+%% may hold the ask until a medium ends, and a facet that ends meanwhile, or a grant
+%% that ends before it answers, ends the proxy unexported. The facet answers the
+%% grant's end, as any forward's, `{error, failed}`.
+grant_answer(Grant, #{facet_monitor := FacetMonitor}) ->
+    Alias = monitor(process, Grant, [{alias, demonitor}]),
+    Grant ! {'$gen_call', {self(), [alias | Alias]}, window},
+    receive
+        {[alias | Alias], Answer} ->
+            demonitor(Alias, [flush]),
+            Answer;
+        {'DOWN', Alias, process, Grant, _Reason} ->
+            exit(normal);
+        {'DOWN', FacetMonitor, process, _Facet, _Reason} ->
+            exit(normal)
     end.
 
 loop(#{window := Window, window_monitor := WindowMonitor, facet_monitor := FacetMonitor,

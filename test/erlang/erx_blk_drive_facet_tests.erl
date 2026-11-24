@@ -38,6 +38,7 @@ window(Test) ->
 
 %% A drive grant serving a stand-in window, and a facet in front of it for ?GRANTEE.
 setup(InFlight) ->
+    [persistent_term:erase(Key) || {{?MODULE, exported, _} = Key, _} <- persistent_term:get()],
     {ok, Grant} = erx_blk_drive:start_link(),
     unlink(Grant),
     Test = self(),
@@ -128,6 +129,71 @@ the_next_ask_and_the_facet_s_end_end_the_proxy_test() ->
     after
         cleanup(S)
     end.
+
+%% A facet that ends while its proxy waits on the grant ends that proxy at once: the proxy
+%% leaves the grant unmonitored, and when the grant answers the held ask with the next
+%% medium's window no proxy exports itself to the grantee.
+the_facet_s_end_mid_ask_ends_the_waiting_proxy_test() ->
+    S = #{facet := Facet, grant := Grant, window := Window} = setup(8),
+    try
+        {ok, First} = call(Facet, window),
+        %% The second ask's proxy waits on the grant, which waits on the old medium's end.
+        Second = spawn_call(Facet, window),
+        ?assertMatch(ok, receive {erx_blk_drive, end_medium, medium} -> ok after 500 -> none end),
+        ?assertMatch([_], monitors_of(Grant)),
+        exit(Facet, kill),
+        ?assertMatch(ok, receive {answer, Second, down} -> ok after 500 -> none end),
+        ?assertEqual([], settled(fun() -> monitors_of(Grant) end, [])),
+        Test = self(),
+        Next = spawn(fun() -> window(Test) end),
+        ok = erx_blk_drive:serve(Grant, Next, {self(), next}),
+        exit(Window, kill),
+        _ = sys:get_state(Grant),
+        timer:sleep(50),
+        ?assertEqual(lists:sort([Facet, First]), exported()),
+        exit(Next, kill)
+    after
+        cleanup(S)
+    end.
+
+%% The processes monitoring Grant, the test's own call monitors excluded.
+monitors_of(Grant) ->
+    {monitored_by, By} = process_info(Grant, monitored_by),
+    [P || P <- By, P =/= self()].
+
+%% Fun's value once it is Expected, or its last value after half a second.
+settled(Fun, Expected) -> settled(Fun, Expected, 50).
+settled(Fun, _Expected, 0) -> Fun();
+settled(Fun, Expected, Tries) ->
+    case Fun() of
+        Expected -> Expected;
+        _ -> timer:sleep(10), settled(Fun, Expected, Tries - 1)
+    end.
+
+%% The facets and proxies exported to the grantee since setup.
+exported() ->
+    lists:sort([P || {{?MODULE, exported, P}, _} <- persistent_term:get()]).
+
+%% The proxy runs under the grant's max_heap_size, and the facet monitors the proxy it
+%% has. A grant that names no max_heap_size starts no facet, so no proxy runs unbounded.
+the_proxy_runs_under_the_grant_s_heap_bound_test() ->
+    S = #{facet := Facet} = setup(8),
+    try
+        {ok, Proxy} = call(Facet, window),
+        ?assertMatch({max_heap_size, #{size := 131072, kill := true, include_shared_binaries := true}},
+                     process_info(Proxy, max_heap_size)),
+        ?assert(lists:member(Facet, element(2, process_info(Proxy, monitored_by))))
+    after
+        cleanup(S)
+    end.
+
+a_grant_without_a_heap_bound_starts_no_facet_test() ->
+    ?assertMatch({error, _},
+                 erx_facet:start(erx_blk_drive_facet,
+                                 #{grantee => ?GRANTEE, ends_with => [self()], operations => [window],
+                                   max_request => 65536, in_flight => 8,
+                                   find => fun() -> none end, exports => ?MODULE},
+                                 #{exports => ?MODULE})).
 
 %% The mint grants a request of drive in the system domain's envelope for a number its
 %% records name, refuses one they do not, and drops every other shape.
