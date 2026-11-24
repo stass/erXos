@@ -429,7 +429,7 @@ share_spinner(uint64_t index)
 		while (last < end) {
 			const uint64_t now = erx_fiasco_counter();
 
-			erx_bench_window_pass(&kept, now - last, lost_after);
+			erx_bench_window_read(&kept, end - share_plan.window, end, last, now, lost_after);
 			last = now;
 		}
 		share_windows[index][window] = kept;

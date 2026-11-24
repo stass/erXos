@@ -101,13 +101,13 @@ module Erx
     # is missing, misplaced or one too many.
     def windows(lines, windows:, threads:)
       places = (0...windows).to_a.product((0...threads).to_a)
+      refusing('WINDOW') { need(lines.size <= places.size, 'past the last window and thread is one too many') }
       samples = lines.map { |text| window(text) }
       refusing('WINDOW') do
         places.each_with_index do |(window, thread), index|
           need(samples[index], "for window #{window}, thread #{thread} is missing")
           need(samples[index].values_at(*WINDOW_PLACE) == [window, thread], "for window #{window}, thread #{thread} is misplaced")
         end
-        need(samples.size == places.size, 'past the last window and thread is one too many')
       end
       BenchRecord.frozen(samples.map { |sample| sample.slice(*WINDOW_COUNTS) }.each_slice(threads).to_a)
     end
@@ -275,7 +275,7 @@ module Erx
       status = fields['status']
       need(GUEST_STATUSES.include?(status), 'field status is not one a guest reports')
       need(frequency?(fields['frequency_hz']), 'field frequency_hz is not a frequency')
-      return sustained_cell(fields, benchmark: benchmark, profile: profile, lines: windows) if profile.name == 'sustained'
+      return sustained_cell(fields, benchmark: benchmark, operation: operation, profile: profile, lines: windows) if profile.name == 'sustained'
 
       need(windows.empty?, 'follows WINDOW lines but is not a sustained cell')
       need((TICKED - fields.keys).empty?, 'lacks a required field')
@@ -289,7 +289,7 @@ module Erx
     # A sustained cell (docs/design-bench.md, "A sustained cell"): its samples are its
     # windows, each thread's counts from the WINDOW lines before it, and it carries no tick
     # statistic. A measured cell in which a thread made no pass in a window is failed.
-    def sustained_cell(fields, benchmark:, profile:, lines:)
+    def sustained_cell(fields, benchmark:, operation:, profile:, lines:)
       need((fields.keys & TICK_STATISTICS).empty?, 'holds a tick statistic, which a sustained cell has none of')
       conditions = conditions(fields['conditions'])
       threads, window_ms = conditions.parameters.values_at('threads', 'window-ms')
@@ -300,7 +300,7 @@ module Erx
       status, reason = fields.values_at('status', 'reason')
       idle = idle(kept) if status == 'measured'
       status, reason = 'failed', "thread #{idle.last} made no pass in window #{idle.first}" if idle
-      BenchRecord::Cell.new(benchmark: benchmark, operation: fields['operation'], conditions: conditions, profile: profile,
+      BenchRecord::Cell.new(benchmark: benchmark, operation: operation, conditions: conditions, profile: profile,
                             status: status, reason: reason, counts: counts(fields['counts']),
                             detail: { 'frequency_hz' => fields['frequency_hz'], 'windows' => kept })
     end

@@ -66,13 +66,22 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   validator's check that a histogram holds the line's sample count removed, is run by hand and kept nowhere;
   make it a test that runs a fixed number of inputs from a fixed seed against the faulted validator, so the
   target's one invariant is shown to catch what it guards.
-* [Medium] benchmarks, `sched` ([design-bench.md](design-bench.md#2-sched-how-a-cpu-is-shared)): `native_task`'s
-  `MODE_SHARE` runs the recording spinners, its `share` case runs four of them, and `tools/lib/erx/share_windows.rb`
-  reads their windows. Still to build: the native bench guest launching them for `share-equal`, `share-tasks` and
-  `band-work`, a `BENCH` line, a measurement and a record for a sustained cell, and the quantum case's seed as a
-  sensitivity run of the `bench` suite. Still to decide: a lost turn's "twenty loop periods", since a pass of the
-  loop takes less than a counter tick under HVF, so the loop period reads as one tick and the count takes in
-  interrupts within a turn.
+* [Medium] benchmarks, `sched` ([design-bench.md](design-bench.md#2-sched-how-a-cpu-is-shared)): the native bench
+  guest runs `share-equal`'s landing cell, `native_task`'s `MODE_SHARE` writing its `WINDOW` lines. Still to build:
+  `share-tasks` (task B in `MODE_SPIN` taking its CPU), `band-work`, the full matrix's cells, and the quantum case's
+  seed as a sensitivity run of the `bench` suite. Three facts are written twice and should be derived: the root's
+  `THREADS` and `WINDOW_MS` (`test/guest/native_bench/sched.c`) against the landing cell of
+  `tools/lib/erx/benches/sched.rb`, which the host refuses when they differ, and `MODE_SHARE`'s `SHARE_WARMUP_MS`
+  against the sustained profile's warm-up, which `SHARE_ARGUMENT` has no field for. `NativeBench.asked` asks every
+  boot of more than one CPU for the pair of CPU 0 and the last, so the sched root calibrates a pair its one-CPU cell
+does not read across; the pairs should follow from the cells that time across two CPUs. From the review of the
+sustained cell: a lost turn's ticks count whole in one window, not split over the windows it spans, so a thread
+starved across a window's end shows a share of 0 in one window and near 1 in the next (`bench_window.c`); the fuzz
+target exercises the WINDOW validator but not a sustained BENCH line with its windows through `BenchMeasurement.boot`;
+a failed cell's reason does not name the task's status (`sched.c`); a failed task that wrote some WINDOW lines is
+rejected, not failed with the windows before its end; the detail has two shapes chosen by the profile in several
+places, guest and host; the task reads the root's slice from `ERX_FIASCO_ROOT_SLICE_US`, not from what its root
+configured; and `NativeBench` builds native_task's program beside `NativeTask`'s own builder.
 * [Medium] benchmarks, `nullcall` ([design-bench.md](design-bench.md#3-nullcall-the-decoder-refusal-round-trip)):
   FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,

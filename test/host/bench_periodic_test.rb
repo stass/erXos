@@ -53,7 +53,9 @@ class BenchPeriodicTest < Minitest::Test
        "\t\twhile (atomic_load_explicit(&token->answered, memory_order_acquire) != number)\n\t\t\t;\n" \
        "\t\tconst uint64_t c = read();\n"],
     'a gap of exactly half the slice counted lost' =>
-      ['test/guest/bench/bench_window.c', 'if (gap > lost_after) {', 'if (gap >= lost_after) {']
+      ['test/guest/bench/bench_window.c', 'if (gap > lost_after) {', 'if (gap >= lost_after) {'],
+    'a pass counted for a gap from before the window to past its end' =>
+      ['test/guest/bench/bench_window.c', 'if (last >= start || now < end)', 'if (start <= end)']
   }.freeze
 
   def setup

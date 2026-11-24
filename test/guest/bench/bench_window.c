@@ -27,10 +27,12 @@ gap_of(erx_bench_window_t *window, uint64_t gap, uint64_t lost_after)
 }
 
 void
-erx_bench_window_pass(erx_bench_window_t *window, uint64_t gap, uint64_t lost_after)
+erx_bench_window_read(erx_bench_window_t *window, uint64_t start, uint64_t end, uint64_t last, uint64_t now,
+    uint64_t lost_after)
 {
-	window->iterations++;
-	gap_of(window, gap, lost_after);
+	if (last >= start || now < end)
+		window->iterations++;
+	gap_of(window, now - last, lost_after);
 }
 
 erx_bench_window_t

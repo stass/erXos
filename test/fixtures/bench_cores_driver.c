@@ -412,23 +412,24 @@ print_lines(void)
 /*
  * A lost turn is a gap longer than half the slice: a gap of exactly half is a pass, one tick
  * more a lost turn whose ticks the window's waited holds; a window no read fell in is one
- * gap of its length and no pass.
+ * gap of its length and no pass, and so is a read past its end whose gap began before it.
  */
 static bool
 window_case(void)
 {
 	const uint64_t half = erx_bench_window_lost_after(UINT64_C(24000000), 1000);
 	erx_bench_window_t kept = { 0, 0, 0, 0 };
-	erx_bench_window_t empty;
+	erx_bench_window_t empty, starved = { 0, 0, 0, 0 };
 
-	erx_bench_window_pass(&kept, 3, half);
-	erx_bench_window_pass(&kept, half, half);
-	erx_bench_window_pass(&kept, half + 1, half);
-	erx_bench_window_pass(&kept, 5, half);
+	erx_bench_window_read(&kept, 1000, 100000, 1000, 1003, half);
+	erx_bench_window_read(&kept, 1000, 100000, 1003, 1003 + half, half);
+	erx_bench_window_read(&kept, 1000, 100000, 1003 + half, 1004 + 2 * half, half);
+	erx_bench_window_read(&kept, 1000, 100000, 1004 + 2 * half, 1009 + 2 * half, half);
+	erx_bench_window_read(&starved, 1000, 2000, 999, 2500, half);
 	empty = erx_bench_window_empty(UINT64_C(24000000), half);
 	return (half == 12000 && kept.iterations == 4 && kept.longest == half + 1 && kept.lost == 1 &&
 	    kept.waited == half + 1 && empty.iterations == 0 && empty.longest == UINT64_C(24000000) &&
-	    empty.lost == 1 && empty.waited == UINT64_C(24000000));
+	    empty.lost == 1 && empty.waited == UINT64_C(24000000) && starved.iterations == 0 && starved.longest == 1501);
 }
 
 int

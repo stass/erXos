@@ -24,8 +24,13 @@ typedef struct {
 
 /* Half of a slice of slice_us microseconds, in ticks of a counter at hz: a longer gap is a lost turn. */
 uint64_t	erx_bench_window_lost_after(uint64_t hz, uint64_t slice_us);
-/* Adds one pass of the loop whose read ended a gap of gap ticks. */
-void	erx_bench_window_pass(erx_bench_window_t *window, uint64_t gap, uint64_t lost_after);
+/*
+ * Adds the gap from read last to read now to the window [start, end) whose end now has not
+ * yet passed, or the first read past it. The read is a pass of the window when it fell in
+ * the window or its gap began there: a gap from before the window to past its end is no pass.
+ */
+void	erx_bench_window_read(erx_bench_window_t *window, uint64_t start, uint64_t end, uint64_t last,
+    uint64_t now, uint64_t lost_after);
 /* A window no read fell in: one gap of its whole length, length ticks, with no pass. */
 erx_bench_window_t	erx_bench_window_empty(uint64_t length, uint64_t lost_after);
 
