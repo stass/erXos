@@ -20,10 +20,10 @@ require 'fileutils'
 class BenchPeriodicTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[test/guest/bench/bench_hist.c test/guest/bench/bench_periodic.c test/guest/bench/bench_clock.c
-               test/guest/bench/bench_line.c
+               test/guest/bench/bench_line.c test/guest/bench/bench_window.c
                test/fixtures/bench_cores_driver.c].freeze
   EXPECTED = ['hist ok', 'stall ok', 'early ok', 'sweep ok', 'tick ok', 'offset ok', 'cell ok', 'drift ok', 'reads ok',
-              'median ok', 'rounds ok'].freeze
+              'median ok', 'rounds ok', 'window ok'].freeze
 
   # name => [file, original, replacement]; each must turn a line of EXPECTED into a failure.
   MUTANTS = {
@@ -51,7 +51,9 @@ class BenchPeriodicTest < Minitest::Test
        "\t\tconst uint64_t b = atomic_load_explicit(&token->b, memory_order_relaxed);\n" \
        "\t\tnumber++;\n\t\tatomic_store_explicit(&token->sent, number, memory_order_release);\n" \
        "\t\twhile (atomic_load_explicit(&token->answered, memory_order_acquire) != number)\n\t\t\t;\n" \
-       "\t\tconst uint64_t c = read();\n"]
+       "\t\tconst uint64_t c = read();\n"],
+    'a gap of exactly half the slice counted lost' =>
+      ['test/guest/bench/bench_window.c', 'if (gap > lost_after) {', 'if (gap >= lost_after) {']
   }.freeze
 
   def setup

@@ -8,10 +8,11 @@ require 'json'
 require 'optparse'
 require_relative '../lib/erx/bench_measurement'
 
-# The BENCH and CLOCK line validators (Erx::BenchMeasurement.cell and .clock) over mutated
-# lines, as a guest could print them.
-# Each input either raises Erx::Error and nothing else, or answers a clock group or a
-# cell whose histogram holds no more samples than its profile asked for. Whether its
+# The BENCH, CLOCK and WINDOW line validators (Erx::BenchMeasurement.cell, .clock and
+# .window) over mutated lines, as a guest could print them.
+# Each input either raises Erx::Error and nothing else, or answers a clock group, a
+# window of a line within its bound, or a cell whose histogram holds no more samples than
+# its profile asked for. Whether its
 # answers are right is test/host/bench_line_test.rb's.
 module Erx
   module BenchLineFuzz
@@ -57,7 +58,17 @@ module Erx
       "CLOCK #{JSON.generate(fields.merge(overrides.transform_keys(&:to_s)))}"
     end
 
-    def seeds = PROFILES.keys.map { |operation| line(operation) } + [clock_line]
+    # A valid WINDOW line, a thread's window as a spinner writes it, and overrides merged over it.
+    def window_line(**overrides)
+      fields = { 'window' => 0, 'thread' => 2, 'iterations' => 81_234_567, 'longest' => 98_765, 'lost' => 250,
+                 'waited' => 18_000_000 }
+      "WINDOW #{JSON.generate(fields.merge(overrides.transform_keys(&:to_s)))}"
+    end
+
+    # The longest WINDOW line a spinner writes: its last window and thread, every count at its most.
+    def longest_window_line = window_line(window: 9, thread: 7, **MEASUREMENT::WINDOW_COUNTS.to_h { |name| [name, (1 << 64) - 1] })
+
+    def seeds = PROFILES.keys.map { |operation| line(operation) } + [clock_line, window_line, longest_window_line]
 
     # A seed's text mutated: bytes changed, cut or inserted, and the histogram's first
     # bucket repeated.
@@ -83,6 +94,12 @@ module Erx
 
     def exercise(text)
       return MEASUREMENT.clock(text) if text.start_with?('CLOCK')
+      if text.start_with?('WINDOW')
+        MEASUREMENT.window(text)
+        raise 'an accepted WINDOW line past its bound' if text.bytesize > MEASUREMENT::WINDOW_LINE_BYTES
+
+        return
+      end
 
       cell = MEASUREMENT.cell(text, benchmark: 'wake', profiles: PROFILES)
       samples = cell.summary.fetch('samples', 0)
@@ -113,5 +130,5 @@ if $PROGRAM_NAME == __FILE__
   end.parse!(ARGV)
   raise OptionParser::InvalidArgument, 'budget of 1..60 seconds' unless options[:seconds].between?(1, 60)
 
-  puts "BENCH and CLOCK line validators: #{Erx::BenchLineFuzz.run(**options)} inputs"
+  puts "BENCH, CLOCK and WINDOW line validators: #{Erx::BenchLineFuzz.run(**options)} inputs"
 end

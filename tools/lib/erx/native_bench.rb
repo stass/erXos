@@ -69,7 +69,7 @@ module Erx
       'periodic' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 2000, runs: 1)
     }.freeze
     FAILED_LINE = /^erx: bench: .* FAILED/n
-    GUEST_LINE = /\A(?:BENCH|CLOCK) /n
+    GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
     module_function
 

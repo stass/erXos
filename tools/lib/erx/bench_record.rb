@@ -246,13 +246,15 @@ module Erx
         BenchRecord.check(BenchRecord.plain_hash?(detail), 'detail is not a map')
         BenchRecord.check(BenchRecord.histogram?(detail.fetch('histogram', [])),
                           'histogram is not ascending [low, last, count] buckets')
-        histogram = detail.fetch('histogram', [])
-        BenchRecord.check(status != 'measured' || histogram.sum { |_, _, count| count } == profile.samples,
+        BenchRecord.check(BenchRecord.windows?(detail.fetch('windows', [])),
+                          'windows are not counts by window and thread, the same threads in every window')
+        BenchRecord.check(profile.name == 'sustained' || !detail.key?('windows'), 'a cell that is not sustained has windows')
+        BenchRecord.check(status != 'measured' || BenchRecord.samples(profile, detail) == profile.samples,
                           'a measured cell lacks samples its profile asked for: it holds every sample or is partial')
         BenchRecord.extremes(detail)
         BenchRecord.check(status != 'measured' || (counts['lost'].zero? && counts['early'].zero?),
                           'a cell with a lost wake or an early return is failed, not measured')
-        BenchRecord.check(!NO_SUMMARY.include?(status) || detail.fetch('histogram', []).empty?,
+        BenchRecord.check(!NO_SUMMARY.include?(status) || BenchRecord.samples(profile, detail).zero?,
                           "a #{status} cell has no samples")
         BenchRecord.check(status != 'measured' || BenchRecord.uncertainty_bounded?(detail),
                           'a measured cell has an uncertainty above a tenth of its median')
@@ -265,6 +267,7 @@ module Erx
       # A cell whose status has no summary claims nothing.
       def summary
         return {} if NO_SUMMARY.include?(status)
+        return BenchRecord.sustained_summary(self) if profile.name == 'sustained'
 
         histogram = detail.fetch('histogram', [])
         { 'samples' => histogram.sum { |_, _, count| count }, 'partial' => status != 'measured' }
@@ -307,6 +310,45 @@ module Erx
     end
 
     def percentiles(histogram) = PERCENTILES.transform_values { |p| percentile(histogram, p) }
+
+    WINDOW_COUNTS = %w[iterations longest lost waited].freeze
+
+    # A cell's samples: a sustained cell's windows, any other's histogram's samples.
+    def samples(profile, detail)
+      return detail.fetch('windows', []).size if profile.name == 'sustained'
+
+      detail.fetch('histogram', []).sum { |_, _, count| count }
+    end
+
+    # By window, each thread's counts, the same number of threads in every window.
+    def windows?(value)
+      value.is_a?(Array) && value.all? { |threads| threads.is_a?(Array) && !threads.empty? } &&
+        value.map(&:size).uniq.size <= 1 &&
+        value.flatten(1).all? do |kept|
+          kept.is_a?(Hash) && kept.keys.sort == WINDOW_COUNTS.sort && kept.values.all? { |count| count.is_a?(Integer) && !count.negative? }
+        end
+    end
+
+    # A sustained cell's summary (docs/design-bench.md, "A sustained cell"): by window and
+    # thread its share of the CPU, its longest gap and its lost turns; by window the
+    # smallest share over the largest; and the longest gap over all windows, the statistic
+    # a comparison judges, an exact tick count with no bucket. A share is the part of the
+    # window a thread was not kept off the CPU for half a slice or more, and none below
+    # 0: a lost turn that began before its window counts whole in the window it ended in.
+    def sustained_summary(cell)
+      windows = cell.detail.fetch('windows', [])
+      summary = { 'samples' => windows.size, 'partial' => cell.status != 'measured' }
+      return summary if windows.empty?
+
+      ticks = cell.conditions.parameters.fetch('window-ms') * cell.detail.fetch('frequency_hz') / 1000r
+      by_window = windows.map do |threads|
+        shares = threads.map { |kept| [1 - (kept.fetch('waited') / ticks), 0].max.to_f.round(6) }
+        { 'shares' => shares, 'ratio' => shares.max.zero? ? 0.0 : (shares.min / shares.max).round(6),
+          'longest' => threads.map { |kept| kept.fetch('longest') }, 'lost' => threads.map { |kept| kept.fetch('lost') } }
+      end
+      summary.merge('windows' => by_window,
+                    'longest' => { 'value' => windows.flatten(1).map { |kept| kept.fetch('longest') }.max })
+    end
 
     # The history repository records are written to: ERX_BENCH_HISTORY, or
     # ~/erxos-history (docs/design-bench.md, "The record").

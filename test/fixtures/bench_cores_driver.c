@@ -20,6 +20,7 @@
 #include "bench_hist.h"
 #include "bench_line.h"
 #include "bench_periodic.h"
+#include "bench_window.h"
 
 #define	RUN_MAX	512
 
@@ -400,6 +401,34 @@ print_lines(void)
 	bool fits = erx_bench_line_clock(line, length + 1, &clock) == length;
 	bool cut = erx_bench_line_clock(line, length, &clock) == 0 && line[0] == '\0';
 	printf("boundary %s\n", length != 0 && fits && cut ? "ok" : "bad");
+
+	/* The longest WINDOW line a spinner writes: its last window and thread, every count at its most. */
+	const erx_bench_window_t most = { UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX };
+
+	if (erx_bench_line_window(line, sizeof(line), 9, 7, &most) != 0)
+		printf("%s\n", line);
+}
+
+/*
+ * A lost turn is a gap longer than half the slice: a gap of exactly half is a pass, one tick
+ * more a lost turn whose ticks the window's waited holds; a window no read fell in is one
+ * gap of its length and no pass.
+ */
+static bool
+window_case(void)
+{
+	const uint64_t half = erx_bench_window_lost_after(UINT64_C(24000000), 1000);
+	erx_bench_window_t kept = { 0, 0, 0, 0 };
+	erx_bench_window_t empty;
+
+	erx_bench_window_pass(&kept, 3, half);
+	erx_bench_window_pass(&kept, half, half);
+	erx_bench_window_pass(&kept, half + 1, half);
+	erx_bench_window_pass(&kept, 5, half);
+	empty = erx_bench_window_empty(UINT64_C(24000000), half);
+	return (half == 12000 && kept.iterations == 4 && kept.longest == half + 1 && kept.lost == 1 &&
+	    kept.waited == half + 1 && empty.iterations == 0 && empty.longest == UINT64_C(24000000) &&
+	    empty.lost == 1 && empty.waited == UINT64_C(24000000));
 }
 
 int
@@ -416,7 +445,7 @@ main(int argc, char **argv)
 		{ "hist", hist_case }, { "stall", stall_case }, { "early", early_case },
 		{ "sweep", sweep_case }, { "tick", tick_case }, { "offset", offset_case },
 		{ "cell", cell_case }, { "drift", drift_case }, { "reads", reads_case },
-		{ "median", median_case }, { "rounds", rounds_case },
+		{ "median", median_case }, { "rounds", rounds_case }, { "window", window_case },
 	};
 
 	for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)

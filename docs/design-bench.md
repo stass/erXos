@@ -481,7 +481,7 @@ largest; and the longest gap over all windows, the statistic a
 comparison judges ([Comparison](#comparison)). Its windows are few, three
 or five, so it reports no percentile: the percentile rule gives none
 under 20 samples. The window's length is a workload parameter of the
-cell (`window_ms`), the warm-up is the profile's, in milliseconds, and
+cell (`window-ms`), the warm-up is the profile's, in milliseconds, and
 both become ticks at the cell's frequency, which is the boot's `CLOCK`
 line's, since every thread reads the same counter.
 
@@ -955,10 +955,10 @@ and needs no calibration.
 
 `tools/lib/erx/benches/sched.rb` declares the three operations with their
 profiles and correct results; the landing cell, `share-equal` at load
-`idle`, placement `other-cpu`, parameters `threads` 4 and `window_ms`
+`idle`, placement `other-cpu`, parameters `threads` 4 and `window-ms`
 1,000; the full matrix's cells, `share-equal` with `threads` 2 and 4,
 `share-tasks` with `threads` 1 at load `task-spinners`, each at
-`window_ms` 10,000, and `band-work` at `idle` and `task-spinners`,
+`window-ms` 10,000, and `band-work` at `idle` and `task-spinners`,
 placement `service-cpu`; and the counterpart of
 [Other systems](#other-systems-on-the-same-raspberry-pi-4).
 

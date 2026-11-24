@@ -21,6 +21,7 @@
 #include "bench_clock.h"
 #include "bench_hist.h"
 #include "bench_periodic.h"
+#include "bench_window.h"
 
 #define	ERX_BENCH_LARGEST	16
 
@@ -103,5 +104,8 @@ typedef struct {
  */
 size_t erx_bench_line_cell(char *buf, size_t size, const erx_bench_cell_t *cell);
 size_t erx_bench_line_clock(char *buf, size_t size, const erx_bench_calibration_t *clock);
+/* A sustained cell's WINDOW line for thread's window (docs/design-bench.md, "A sustained cell"). */
+size_t erx_bench_line_window(char *buf, size_t size, uint32_t window, uint32_t thread,
+    const erx_bench_window_t *kept);
 
 #endif

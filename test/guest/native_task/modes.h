@@ -42,8 +42,6 @@
 #define SHARE_WINDOW_MS_MAX	60000u
 /* The sustained profile's warm-up, in both its forms, before the first window starts. */
 #define SHARE_WARMUP_MS		2000u
-/* A gap longer than this many loop periods is a turn the spinner lost. */
-#define SHARE_LOST_LOOPS	20u
 /*
  * MODE_SHARE's statuses when it ends early: an argument out of the bounds above, its first
  * thread not moved to CPU 0, a spinner that published no window within SHARE_PATIENCE_MS of its

@@ -27,6 +27,8 @@
 #include "liberx/backend/fiasco/umtx.h"
 #include "liberx/backend/fiasco/vm.h"
 #include "liberx/generated/calls.h"
+#include "test/guest/bench/bench_line.h"
+#include "test/guest/bench/bench_window.h"
 #include "test/guest/native_task/modes.h"
 
 #define PAGE		((uint64_t)ERX_PAGE_SIZE)
@@ -383,24 +385,15 @@ mode_turns(void)
 }
 
 /*
- * MODE_SHARE (docs/design-bench.md, "2. `sched`: how a CPU is shared"). Each recording spinner
- * reads the counter in a loop on the one CPU it shares with the others. A gap is the ticks
- * between two of its reads, the first counted from the plan's start, before any spinner
- * started, so a spinner that starts late shows the wait as a gap. A short gap is a pass of its
- * own loop, a long one a turn of another thread or an interrupt. Its loop period is its
- * shortest gap of a tick or more in the warm-up, which the counter's resolution bounds from
- * below. For each window it keeps its passes, its longest gap and its gaps over
- * SHARE_LOST_LOOPS loop periods, and publishes them; the read that passes a window's end is
- * that window's last, and a window no read fell in was one gap, its whole length, with no
- * pass. The windows are fixed before any spinner starts, so every spinner's windows are the
- * same span of the counter.
+ * MODE_SHARE (docs/design-bench.md, "A sustained cell"). Each recording spinner reads the
+ * counter in a loop on the one CPU it shares with the others. A gap is the ticks between two
+ * of its reads, the first counted from the plan's start, before any spinner started, so a
+ * spinner that starts late shows the wait as a gap. test/guest/bench/bench_window.c keeps
+ * what each window holds of the gaps: a gap longer than half the slice the root configures
+ * is a lost turn. The read that passes a window's end is that window's last, and a window no
+ * read fell in was one gap, its whole length, with no pass. The windows are fixed before any
+ * spinner starts, so every spinner's windows are the same span of the counter.
  */
-typedef struct {
-	uint64_t	iterations;
-	uint64_t	longest;	/* ticks */
-	uint64_t	lost;		/* gaps over SHARE_LOST_LOOPS loop periods */
-} share_window_t;
-
 typedef struct {
 	uint64_t	start;		/* the counter before the first spinner starts */
 	uint64_t	first;		/* the first window's start, after the warm-up */
@@ -409,9 +402,7 @@ typedef struct {
 } share_plan_t;
 
 static share_plan_t share_plan;
-static share_window_t share_windows[SHARE_SPINNERS_MAX][SHARE_WINDOWS_MAX];
-/* By spinner: its loop period, UINT64_MAX when the warm-up gave it no gap of a tick or more. */
-static uint64_t share_loops[SHARE_SPINNERS_MAX];
+static erx_bench_window_t share_windows[SHARE_SPINNERS_MAX][SHARE_WINDOWS_MAX];
 /* By spinner: how many of its windows are published, each released after its record. */
 static _Atomic uint32_t share_published[SHARE_SPINNERS_MAX];
 
@@ -424,30 +415,21 @@ share_window_end(uint32_t window)
 static void
 share_spinner(uint64_t index)
 {
-	uint64_t last = share_plan.start, loop = UINT64_MAX, lost_after;
+	const uint64_t lost_after = erx_bench_window_lost_after(erx_fiasco_counter_hz(), ERX_FIASCO_ROOT_SLICE_US);
+	uint64_t last = share_plan.start;
 
-	while (last < share_plan.first) {
-		const uint64_t now = erx_fiasco_counter();
-
-		if (now != last && now - last < loop)
-			loop = now - last;
+	/* The warm-up keeps only its last read before the first window, so a late start is window 0's gap. */
+	for (uint64_t now = erx_fiasco_counter(); now < share_plan.first; now = erx_fiasco_counter())
 		last = now;
-	}
-	share_loops[index] = loop;
-	lost_after = loop > UINT64_MAX / SHARE_LOST_LOOPS ? UINT64_MAX : loop * SHARE_LOST_LOOPS;
 	for (uint32_t window = 0; window < share_plan.windows; window++) {
 		const uint64_t end = share_window_end(window);
-		share_window_t kept = { .longest = last < end ? 0 : share_plan.window };
+		erx_bench_window_t kept = last < end ? (erx_bench_window_t){ 0, 0, 0, 0 } :
+		    erx_bench_window_empty(share_plan.window, lost_after);
 
 		while (last < end) {
 			const uint64_t now = erx_fiasco_counter();
-			const uint64_t gap = now - last;
 
-			kept.iterations++;
-			if (gap > kept.longest)
-				kept.longest = gap;
-			if (gap > lost_after)
-				kept.lost++;
+			erx_bench_window_pass(&kept, now - last, lost_after);
 			last = now;
 		}
 		share_windows[index][window] = kept;
@@ -456,42 +438,8 @@ share_spinner(uint64_t index)
 	erx_fiasco_sleep_forever();
 }
 
-/* One line of SHARE_LINE_BYTES at most, built from text and decimal numbers. */
+/* A WINDOW line and its newline, well inside one task write (docs/design-bench.md, "A sustained cell"). */
 #define SHARE_LINE_BYTES	160u
-/* The longest window line: its text, four 20-digit numbers and two of one digit, and its newline. */
-_Static_assert(sizeof("share: window 9 spinner 7 iterations  longest  lost  loop \n") - 1 + 4 * 20 <= SHARE_LINE_BYTES,
-    "a window line fits its buffer");
-_Static_assert(SHARE_WINDOWS_MAX <= 10 && SHARE_SPINNERS_MAX <= 10, "a window and a spinner are one digit each");
-
-typedef struct {
-	char	bytes[SHARE_LINE_BYTES];
-	size_t	used;
-} share_line_t;
-
-static void
-share_text(share_line_t *line, const char *text)
-{
-	for (; *text != '\0' && line->used < SHARE_LINE_BYTES; text++)
-		line->bytes[line->used++] = *text;
-}
-
-/* Appends " name value". */
-static void
-share_number(share_line_t *line, const char *name, uint64_t value)
-{
-	char digits[20];
-	size_t count = 0;
-
-	share_text(line, " ");
-	share_text(line, name);
-	share_text(line, " ");
-	do {
-		digits[count++] = (char)('0' + value % 10);
-		value /= 10;
-	} while (value != 0);
-	while (count > 0 && line->used < SHARE_LINE_BYTES)
-		line->bytes[line->used++] = digits[--count];
-}
 
 /* Blocks until spinner has published every window, or the patience after the last one's end runs out. */
 static bool
@@ -513,9 +461,10 @@ share_wait(uint32_t spinner, uint64_t hz)
 
 /*
  * The first thread, on CPU 0, starts the spinners on cpu and, once they have published every
- * window, writes through the task's write one line of the run and then one per window and
- * spinner in that order, which tools/lib/erx/share_windows.rb reads: no line is written while
- * a window runs. It ends with 0 once every line is written.
+ * window, writes through the task's write one WINDOW line per window and spinner, window by
+ * window and spinner by spinner, which tools/lib/erx/bench_measurement.rb reads: no line is
+ * written while a window runs. The root names the cell. It ends with 0 once every line is
+ * written.
  */
 static int64_t
 mode_share(uint64_t argument)
@@ -523,7 +472,7 @@ mode_share(uint64_t argument)
 	const uint32_t spinners = (uint32_t)(argument >> 8) & 0xffu, cpu = (uint32_t)(argument >> 16) & 0xffu;
 	const uint32_t windows = (uint32_t)(argument >> 24) & 0xffu;
 	const uint64_t window_ms = argument >> 32, hz = erx_fiasco_counter_hz();
-	share_line_t line = { .used = 0 };
+	char line[SHARE_LINE_BYTES];
 	uint64_t thread;
 
 	if (spinners == 0 || spinners > SHARE_SPINNERS_MAX || cpu >= 64 || windows == 0 || windows > SHARE_WINDOWS_MAX ||
@@ -544,28 +493,14 @@ mode_share(uint64_t argument)
 	for (uint32_t spinner = 0; spinner < spinners; spinner++)
 		if (!share_wait(spinner, hz))
 			return (SHARE_STARVED);
-	share_text(&line, "share: run");
-	share_number(&line, "hz", hz);
-	share_number(&line, "spinners", spinners);
-	share_number(&line, "cpu", cpu);
-	share_number(&line, "windows", windows);
-	share_number(&line, "window_ms", window_ms);
-	share_text(&line, "\n");
-	erx_fiasco_task_write(line.bytes, line.used);
 	for (uint32_t window = 0; window < windows; window++)
 		for (uint32_t spinner = 0; spinner < spinners; spinner++) {
-			const share_window_t *const kept = &share_windows[spinner][window];
+			/* One byte for the newline, which takes the place of the line's NUL. */
+			size_t used = erx_bench_line_window(line, sizeof(line), window, spinner,
+			    &share_windows[spinner][window]);
 
-			line.used = 0;
-			share_text(&line, "share:");
-			share_number(&line, "window", window);
-			share_number(&line, "spinner", spinner);
-			share_number(&line, "iterations", kept->iterations);
-			share_number(&line, "longest", kept->longest);
-			share_number(&line, "lost", kept->lost);
-			share_number(&line, "loop", share_loops[spinner]);
-			share_text(&line, "\n");
-			erx_fiasco_task_write(line.bytes, line.used);
+			line[used++] = '\n';
+			erx_fiasco_task_write(line, used);
 		}
 	return (0);
 }

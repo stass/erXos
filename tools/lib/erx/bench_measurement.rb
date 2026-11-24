@@ -55,7 +55,10 @@ module Erx
     # What a guest may report; the host alone decides timed_out, rejected and not_run.
     GUEST_STATUSES = %w[measured partial unsupported failed].freeze
     GUEST_CLOCKS = %w[counter virtual].freeze
-    REQUIRED = %w[benchmark operation conditions frequency_hz status samples histogram largest counts].freeze
+    REQUIRED = %w[benchmark operation conditions frequency_hz status samples counts].freeze
+    # The tick statistics: every profile's line but a sustained one's carries the first two.
+    TICKED = %w[histogram largest].freeze
+    TICK_STATISTICS = (TICKED + %w[min max uncertainty raw phases excess]).freeze
     # The optional fields, and the profile each belongs to (nil: any profile).
     OPTIONAL = { 'reason' => nil, 'min' => nil, 'max' => nil, 'uncertainty' => nil, 'raw' => 'expensive',
                  'phases' => 'periodic', 'excess' => 'periodic' }.freeze
@@ -70,11 +73,53 @@ module Erx
     PAIRS = 64
     CPU = (0..255)
     OFFSET = (-(1 << 63)..((1 << 63) - 1))
+    # A sustained cell's WINDOW line (docs/design-bench.md, "A sustained cell"): one
+    # thread's window, the whole line at most WINDOW_LINE_BYTES.
+    WINDOW_LINE_BYTES = 160
+    WINDOW_PLACE = %w[window thread].freeze
+    WINDOW_COUNTS = BenchRecord::WINDOW_COUNTS
+    THREADS = (1..8)
+    WINDOW_MS = (1..60_000)
 
     # The cell one BENCH line reports for benchmark, whose operations profiles maps to
     # the BenchRecord::Profile each ran at. Raises Erx::Error naming the first field that
     # is wrong; the line's text is never quoted.
-    def cell(text, benchmark:, profiles:) = refusing('BENCH') { bench_cell(text, benchmark: benchmark, profiles: profiles) }
+    # A sustained cell's windows are its WINDOW lines, the lines between the boot's
+    # previous BENCH line and this one.
+    def cell(text, benchmark:, profiles:, windows: [])
+      refusing('BENCH') { bench_cell(text, benchmark: benchmark, profiles: profiles, windows: windows) }
+    end
+
+    # One thread's window from a WINDOW line: its window and thread, and its passes,
+    # longest gap, lost turns and the ticks they took. Raises Erx::Error naming the first
+    # wrong field; the line's text is never quoted.
+    def window(text) = refusing('WINDOW') { window_sample(text) }
+
+    # A sustained cell's windows from its WINDOW lines: exactly one for each of windows
+    # windows and threads threads, window by window and thread by thread, in the order
+    # written. By window, each thread's counts. Raises Erx::Error naming the first line that
+    # is missing, misplaced or one too many.
+    def windows(lines, windows:, threads:)
+      places = (0...windows).to_a.product((0...threads).to_a)
+      samples = lines.map { |text| window(text) }
+      refusing('WINDOW') do
+        places.each_with_index do |(window, thread), index|
+          need(samples[index], "for window #{window}, thread #{thread} is missing")
+          need(samples[index].values_at(*WINDOW_PLACE) == [window, thread], "for window #{window}, thread #{thread} is misplaced")
+        end
+        need(samples.size == places.size, 'past the last window and thread is one too many')
+      end
+      BenchRecord.frozen(samples.map { |sample| sample.slice(*WINDOW_COUNTS) }.each_slice(threads).to_a)
+    end
+
+    # The first [window, thread] in which a thread made no pass, or nil.
+    def idle(windows)
+      windows.each_with_index do |threads, window|
+        thread = threads.index { |kept| kept.fetch('iterations').zero? }
+        return [window, thread] if thread
+      end
+      nil
+    end
 
     # The clock group one CLOCK line reports, frozen through. Each pair of CPUs, lower
     # first, a cell was stamped across has its offset interval before the cells and after
@@ -103,10 +148,12 @@ module Erx
     # rejected, whatever its lines said. The cells come in asked's order, and each refused
     # line's reason is returned in refused, never its text.
     def boot(lines, asked)
-      clocks, benches = lines.partition { |text| text.is_a?(String) && text.b.start_with?('CLOCK ') }
-      answers = benches.map do |text|
-        judged { asked_cell(cell(text, benchmark: asked.benchmark.name, profiles: asked.profiles), asked) }
+      clocks, others = lines.partition { |text| line_of?(text, 'CLOCK') }
+      benches, trailing = with_windows(others)
+      answers = benches.map do |text, windows|
+        judged { asked_cell(cell(text, benchmark: asked.benchmark.name, profiles: asked.profiles, windows: windows), asked) }
       end
+      answers << 'WINDOW lines are followed by no BENCH line' unless trailing.empty?
       accepted, refused = answers.partition { |answer| answer.is_a?(Array) }
       reported = accepted.group_by(&:first).transform_values { |pairs| pairs.map(&:last) }
       calibration = clocks.size == 1 ? judged { calibrated(clocks.first, asked) } : 'the boot has not exactly one CLOCK line'
@@ -120,6 +167,16 @@ module Erx
         end
       end
       { clock: group, cells: cells, refused: refused + [calibration].grep(String) }
+    end
+
+    def line_of?(text, kind) = text.is_a?(String) && text.b.start_with?("#{kind} ")
+
+    # Each line but a WINDOW line, with the WINDOW lines between it and the line before
+    # it, and the WINDOW lines no other line follows.
+    def with_windows(lines)
+      chunks = lines.slice_after { |text| !line_of?(text, 'WINDOW') }.to_a
+      trailing = chunks.last&.all? { |text| line_of?(text, 'WINDOW') } ? chunks.pop : []
+      [chunks.map { |chunk| [chunk.last, chunk[0...-1]] }, trailing]
     end
 
     # The block's answer, or the reason it was refused.
@@ -206,8 +263,9 @@ module Erx
       raise Error, "#{kind} line #{e.reason}"
     end
 
-    def bench_cell(text, benchmark:, profiles:)
-      fields = decode(text, kind: 'BENCH', required: REQUIRED, known: REQUIRED + OPTIONAL.keys)
+    def bench_cell(text, benchmark:, profiles:, windows:)
+      fields = decode(text, kind: 'BENCH', required: REQUIRED, known: REQUIRED + TICKED + OPTIONAL.keys,
+                      max_bytes: LINE_BYTES)
       need(fields['benchmark'] == benchmark, 'field benchmark is not the benchmark run')
       operation = profiles.keys.find { |name| name == fields['operation'] }
       need(operation, 'field operation is not one the benchmark declares')
@@ -217,6 +275,10 @@ module Erx
       status = fields['status']
       need(GUEST_STATUSES.include?(status), 'field status is not one a guest reports')
       need(frequency?(fields['frequency_hz']), 'field frequency_hz is not a frequency')
+      return sustained_cell(fields, benchmark: benchmark, profile: profile, lines: windows) if profile.name == 'sustained'
+
+      need(windows.empty?, 'follows WINDOW lines but is not a sustained cell')
+      need((TICKED - fields.keys).empty?, 'lacks a required field')
       # The cell itself holds a measured cell to every sample, the reason to its
       # character set and the extremes to their buckets, whether read from a line or a file.
       BenchRecord::Cell.new(benchmark: benchmark, operation: operation, conditions: conditions(fields['conditions']),
@@ -224,8 +286,36 @@ module Erx
                             detail: detail(fields, profile: profile.name, samples: samples))
     end
 
+    # A sustained cell (docs/design-bench.md, "A sustained cell"): its samples are its
+    # windows, each thread's counts from the WINDOW lines before it, and it carries no tick
+    # statistic. A measured cell in which a thread made no pass in a window is failed.
+    def sustained_cell(fields, benchmark:, profile:, lines:)
+      need((fields.keys & TICK_STATISTICS).empty?, 'holds a tick statistic, which a sustained cell has none of')
+      conditions = conditions(fields['conditions'])
+      threads, window_ms = conditions.parameters.values_at('threads', 'window-ms')
+      need(threads.is_a?(Integer) && THREADS.cover?(threads), 'field conditions.parameters.threads is not a thread count')
+      need(window_ms.is_a?(Integer) && WINDOW_MS.cover?(window_ms),
+           'field conditions.parameters.window-ms is not a window length')
+      kept = windows(lines, windows: fields['samples'], threads: threads)
+      status, reason = fields.values_at('status', 'reason')
+      idle = idle(kept) if status == 'measured'
+      status, reason = 'failed', "thread #{idle.last} made no pass in window #{idle.first}" if idle
+      BenchRecord::Cell.new(benchmark: benchmark, operation: fields['operation'], conditions: conditions, profile: profile,
+                            status: status, reason: reason, counts: counts(fields['counts']),
+                            detail: { 'frequency_hz' => fields['frequency_hz'], 'windows' => kept })
+    end
+
+    def window_sample(text)
+      need(text.is_a?(String) && text.bytesize <= WINDOW_LINE_BYTES, "is longer than #{WINDOW_LINE_BYTES} bytes")
+      fields = decode(text, kind: 'WINDOW', required: WINDOW_PLACE + WINDOW_COUNTS, known: WINDOW_PLACE + WINDOW_COUNTS,
+                            max_bytes: WINDOW_LINE_BYTES)
+      need(WINDOW_PLACE.all? { |name| count?(fields[name]) }, 'field window or thread is not a count')
+      need(WINDOW_COUNTS.all? { |name| tick?(fields[name]) }, 'field iterations, longest, lost or waited is not a 64-bit count')
+      fields
+    end
+
     def clock_group(text)
-      fields = decode(text, kind: 'CLOCK', required: CLOCK_FIELDS, known: CLOCK_FIELDS)
+      fields = decode(text, kind: 'CLOCK', required: CLOCK_FIELDS, known: CLOCK_FIELDS, max_bytes: LINE_BYTES)
       need(GUEST_CLOCKS.include?(fields['clock']), 'field clock is not a guest clock')
       need(frequency?(fields['frequency_hz']), 'field frequency_hz is not a frequency')
       need(tick?(fields['increment']) && fields['increment'].positive?, 'field increment is not a positive tick count')
@@ -240,11 +330,11 @@ module Erx
 
     # The JSON object of a kind's line: printable ASCII, bounded, no key twice, every
     # required key and no unknown one, frozen.
-    def decode(text, kind:, required:, known:)
+    def decode(text, kind:, required:, known:, max_bytes:)
       prefix = "#{kind} "
       need(text.is_a?(String) && text.b.start_with?(prefix), "does not begin with #{kind} and a space")
       body = text.b.delete_prefix(prefix)
-      need(body.bytesize <= LINE_BYTES, 'is longer than 64 KiB')
+      need(body.bytesize <= max_bytes, "is longer than #{max_bytes} bytes")
       need(body.each_byte.all? { |byte| byte.between?(0x20, 0x7e) }, 'holds a byte that is not printable ASCII')
       # No field's character set needs an escape, and a decoded \u escape could be invalid
       # UTF-8; json also reads /* */ comments. Refusing both keeps the bytes the values.
@@ -360,7 +450,7 @@ module Erx
     def need(valid, reason) = valid || raise(BenchRecord::Invalid, reason)
 
     private_class_method :measured, :judged, :verdict, :clock_free_failure?, :stripped, :refusing, :bench_cell,
-                         :clock_group, :decode, :asked_cell, :calibrated, :unreported, :handshake?, :quantized,
+                         :clock_group, :decode, :line_of?, :with_windows, :sustained_cell, :window_sample, :asked_cell, :calibrated, :unreported, :handshake?, :quantized,
                          :parsed, :conditions, :tick?, :count?, :frequency?, :pairs, :cpu_pair?, :interval?, :ends?,
                          :parameter?, :counts, :detail, :histogram, :largest, :raw, :phases, :need
   end

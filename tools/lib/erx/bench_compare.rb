@@ -30,6 +30,9 @@ module Erx
     # their comparison inconclusive. A board runs alone, and deterministic time does not
     # depend on the host.
     SHARED_HOST = %w[qemu-hvf qemu-tcg host].freeze
+    # A sustained cell's longest gap is its tail, judged against the 99th percentile's
+    # threshold (docs/design-bench.md, "Comparison").
+    THRESHOLD_OF = { 'longest' => 'p99' }.freeze
 
     # The cell fields two sides must agree on, in the order a refusal names them: the
     # operation, every member of its Conditions, and its profile sizes.
@@ -42,7 +45,7 @@ module Erx
     module_function
 
     def threshold(environment, statistic)
-      ADVISORY.dig(environment.kind, statistic) or
+      ADVISORY.dig(environment.kind, THRESHOLD_OF.fetch(statistic, statistic)) or
         raise Error, "no advisory threshold for #{statistic} in #{environment.kind}"
     end
 
@@ -102,12 +105,12 @@ module Erx
     end
 
     # The baseline's range of the statistic, widened by one histogram bucket at each end;
-    # deterministic mode's band has no width.
+    # deterministic mode's band, and an exact statistic's, which has no bucket, have no width.
     def band(baseline, statistic)
       values = baseline.map { |side| side.cell.summary.fetch(statistic) }
       low, high = values.minmax_by { |value| value.fetch('value') }
       widen = baseline.first.record.environment.kind == 'qemu-det' ? 0 : 1
-      [low.fetch('value') - (widen * low.fetch('bucket')), high.fetch('value') + (widen * high.fetch('bucket'))]
+      [low.fetch('value') - (widen * low.fetch('bucket', 0)), high.fetch('value') + (widen * high.fetch('bucket', 0))]
     end
 
     def judged(band, baseline, candidate, statistic, threshold, rate)

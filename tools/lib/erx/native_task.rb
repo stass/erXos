@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require_relative 'bench_measurement'
 require_relative 'boot_image'
 require_relative 'crash_frame'
 require_relative 'error'
@@ -10,7 +11,6 @@ require_relative 'native_root'
 require_relative 'qemu'
 require_relative 'qemu_cells'
 require_relative 'runner'
-require_relative 'share_windows'
 
 module Erx
   # A second task on QEMU (docs/design-fiasco.md, "The root service", "Task exit",
@@ -22,9 +22,13 @@ module Erx
   module NativeTask
     MEMORY_MIB = 512
     PROGRAM_PATH = 'boot/native-task'
+    # The share case's spinners and windows, which the root is built with.
+    SHARE_SPINNERS = 4
+    SHARE_WINDOWS = 3
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH,
                     'test/guest/native_task/guest.c'].freeze
-    PROGRAM_SOURCES = [*NativeRoot::TASK, 'test/guest/native_task/program.c'].freeze
+    PROGRAM_SOURCES = [*NativeRoot::TASK, *%w[bench_hist bench_line bench_window].map { |name| "test/guest/bench/#{name}.c" },
+                       'test/guest/native_task/program.c'].freeze
     # The race's boots of a task take the time, under TCG above all.
     RACE_SECONDS = 400
     # The yield case's 1000 hand-overs on one CPU: a yield that keeps the CPU to the end of
@@ -81,10 +85,20 @@ module Erx
     # Holds each fault's crash frame to its line. Each frame lies after the address
     # line the root said for it, and it is not the machine's last word: the suite's
     # later lines are what the transcript checks.
+    # The share case's spinners wrote one WINDOW line per window and spinner, which the
+    # benchmarks' reader holds to the sizes the case asked for; every spinner must run in
+    # each window. How long its gaps are is the sched benchmark's measurement, not a verdict.
+    def judge_share(serial)
+      lines = serial.b.split(/\r?\n/n).grep(/\AWINDOW /n)
+      windows = BenchMeasurement.windows(lines, windows: SHARE_WINDOWS, threads: SHARE_SPINNERS)
+      idle = BenchMeasurement.idle(windows)
+      raise Error, "share: spinner #{idle.last} made no pass in window #{idle.first}" if idle
+    end
+
     def judge(serial)
       judge_log(serial)
       judge_write(serial)
-      ShareWindows.judge(serial)
+      judge_share(serial)
       statuses = serial.b.scan(ADDRESS_LINE).flatten
       raise Error, "#{statuses.size} address lines, not #{FAULTS.size}" unless statuses.size == FAULTS.size
 
@@ -161,7 +175,7 @@ module Erx
       private
 
       def image(fiasco)
-        flags = ['-DERX_FIASCO_TEST_HOOKS']
+        flags = ['-DERX_FIASCO_TEST_HOOKS', "-DERX_SHARE_SPINNERS=#{SHARE_SPINNERS}u", "-DERX_SHARE_WINDOWS=#{SHARE_WINDOWS}u"]
         native = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
                                 fiasco: fiasco)
         program = native.build_task(name: 'native-task', sources: PROGRAM_SOURCES, directory: File.join(@build, 'program'), flags: flags)

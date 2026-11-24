@@ -16,7 +16,8 @@ require_relative '../../tools/fuzz/bench_line'
 class BenchGuestLinesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   SOURCES = %w[test/guest/bench/bench_hist.c test/guest/bench/bench_periodic.c test/guest/bench/bench_clock.c
-               test/guest/bench/bench_line.c test/fixtures/bench_cores_driver.c].freeze
+               test/guest/bench/bench_line.c test/guest/bench/bench_window.c
+               test/fixtures/bench_cores_driver.c].freeze
   PROFILES = Erx::BenchLineFuzz::PROFILES
 
   def guest_lines
@@ -35,7 +36,7 @@ class BenchGuestLinesTest < Minitest::Test
   end
 
   def test_the_guests_lines_pass_the_hosts_validator
-    fast, periodic, costly, clock, boundary = guest_lines
+    fast, periodic, costly, clock, boundary, window = guest_lines
     cell = Erx::BenchMeasurement.cell(fast, benchmark: 'wake', profiles: PROFILES)
     assert_equal [40, 1000, 1199], cell.summary.values_at('samples', 'min', 'max')
     assert_equal({ 'threads' => 2, 'mode' => 'spin' }, cell.conditions.parameters)
@@ -48,5 +49,7 @@ class BenchGuestLinesTest < Minitest::Test
     assert_equal [[-40, 12], [-35, 15], nil, [-(1 << 63), (1 << 63) - 1]],
                  calibration.fetch('pairs').flat_map { |pair| pair.values_at('before', 'after') }
     assert_equal 'boundary ok', boundary
+    assert_operator window.bytesize, :<=, Erx::BenchMeasurement::WINDOW_LINE_BYTES
+    assert_equal [9, 7, (1 << 64) - 1], Erx::BenchMeasurement.window(window).values_at('window', 'thread', 'waited')
   end
 end

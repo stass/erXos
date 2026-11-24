@@ -289,3 +289,17 @@ erx_bench_line_clock(char *buf, size_t size, const erx_bench_calibration_t *cloc
 	close_value(&t, "]");
 	return (finish(&t));
 }
+
+size_t
+erx_bench_line_window(char *buf, size_t size, uint32_t window, uint32_t thread, const erx_bench_window_t *kept)
+{
+	text_t t = start(buf, size, "WINDOW");
+
+	number(&t, "window", window);
+	number(&t, "thread", thread);
+	number(&t, "iterations", kept->iterations);
+	number(&t, "longest", kept->longest);
+	number(&t, "lost", kept->lost);
+	number(&t, "waited", kept->waited);
+	return (finish(&t));
+}

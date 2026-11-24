@@ -51,8 +51,11 @@
  * The share case: the sched benchmark's landing cell of share-equal, four spinners for three
  * 1 s windows (docs/design-bench.md, "The gates").
  */
-#define SHARE_SPINNERS		4u
-#define SHARE_WINDOWS		3u
+#if !defined(ERX_SHARE_SPINNERS) || !defined(ERX_SHARE_WINDOWS)
+#error "the build passes the share case's sizes, which tools/lib/erx/native_task.rb holds its lines to"
+#endif
+#define SHARE_SPINNERS		ERX_SHARE_SPINNERS
+#define SHARE_WINDOWS		ERX_SHARE_WINDOWS
 #define SHARE_WINDOW_MS		1000u
 
 void erx_fiasco_root_main(void);
