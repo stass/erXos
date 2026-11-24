@@ -22,6 +22,7 @@ class ErxBtGattClientTest < Minitest::Test
   DEADLINE_SECONDS = '300'
   CLIENT = 'erlang/apps/erx_bt_client/src/erx_gatt.erl'
   SERIAL = 'erlang/apps/erx_bt_client/src/erx_gatt_serial.erl'
+  SERVICE = 'erlang/apps/erx_bt_client/src/erx_gatt_service.erl'
 
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
@@ -63,7 +64,11 @@ class ErxBtGattClientTest < Minitest::Test
              replacement: "{serial, Written, Bytes} ->\n" \
                           "            Conn = case get(first) of undefined -> put(first, Written), Written; " \
                           "First -> First end,\n",
-             catching_case: 'the echo app answers each link on its own link')
+             catching_case: 'the echo app answers each link on its own link'),
+    Seed.new(fault: 'a handler attaching without waiting for its domain to hold ble',
+             path: SERVICE, anchor: "    _ = erx_facets:await(ble, none, ?ERX_BT_ATTACH_WAIT_MS),\n",
+             replacement: '',
+             catching_case: 'a handler started before its domain holds ble attaches once it does')
   ].freeze
 
   def test_client_cases_pass_under_eunit

@@ -522,10 +522,14 @@ development card carries the terminal echo as a second package, so the
 board's checklist exercises this path
 ([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)); the
 published card carries the kiosk alone. The `apps` row's `gatt` field,
-the package's own field, install's checks and the narrowing of each
-session are designed and not built. The serial service's library,
-`erx_gatt_serial`, is built and tested on the host against the registry;
-no domain of a suite or a board attaches to it yet.
+the package's own field, the checks of the packages an image carries
+and the narrowing of each session are built; the checks of an install
+at run time are designed and not built. The serial service's library,
+`erx_gatt_serial`, is built and tested on the host against the
+registry, and on QEMU two handlers attach to it and echo a peer's
+64 KiB: a test domain's, and the echo package's, `examples/echo`, from
+a medium whose `apps` row offers `nus`. No board card carries the echo
+package yet.
 
 A service has at most one handler, the process that attached to it. The
 registry's `attach` makes the caller the handler, refuses a second one,

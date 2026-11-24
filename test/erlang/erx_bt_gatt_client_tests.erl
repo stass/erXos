@@ -88,7 +88,11 @@ serial_test_() ->
       fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end,
       fun(_) -> {"a serial handler of console answers console alone", fun console_serial_answers_its_service_alone/0}
       end,
-fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
+            fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
+      fun(_) -> {"a handler started before its domain holds ble attaches once it does", fun start_waits_for_the_facet/0}
+      end,
+      fun(_) -> {"a handler started before its domain holds ble attaches once it does", fun start_waits_for_the_facet/0}
+      end,
       fun(_) -> {"the echo app answers each link on its own link", fun echo_answers_each_link_alone/0} end]}.
 
 %% A service whose rx the phone cannot write, or whose tx the machine cannot notify, is no
@@ -183,6 +187,40 @@ echo_answers_each_link_alone() ->
     after 100 -> ok
     end,
     kill(Echo).
+
+%% An app's applications may start before the domain service has installed the session's
+%% ble facet: the echo started while the domain holds no ble attaches once the facet is
+%% installed, within bt_attach_wait_ms, and echoes. The registry of facets is emptied as
+%% erx_facets keeps it before any install, and erx_connections is a stand-in for the
+%% connection agent, which answers a waiter once an installation has followed its read.
+start_waits_for_the_facet() ->
+    Facet = erx_facets:find(ble),
+    persistent_term:put({erx, facets}, {erx_facets:generation(), #{}}),
+    Agent = spawn(fun connection_agent/0),
+    register(erx_connections, Agent),
+    Test = self(),
+    Starter = spawn(fun() -> Test ! {started, erx_echo:start_link()}, receive stop -> ok end end),
+    timer:sleep(200),
+    erx_facets:install(#{ble => Facet}),
+    receive {started, Started} -> ?assertMatch({ok, _}, Started) after ?WAIT_MS * 3 -> error(no_start) end,
+    {Link, _Conn} = joined_link(),
+    echoed(Link, 9, <<"late">>),
+    [kill(P) || P <- [Starter, Agent]].
+
+%% The connection agent's answer to changed/1: ok once the registry's generation has
+%% passed the one the waiter read.
+connection_agent() ->
+    receive
+        {'$gen_call', From, {changed, Generation}} ->
+            spawn(fun() -> changed_after(From, Generation) end),
+            connection_agent()
+    end.
+
+changed_after(From, Generation) ->
+    case erx_facets:generation() > Generation of
+        true -> gen:reply(From, ok);
+        false -> timer:sleep(10), changed_after(From, Generation)
+    end.
 
 %% Link writes Bytes to nus's rx as request Id: the write is answered ok and Bytes come
 %% back to Link as one notification of tx.

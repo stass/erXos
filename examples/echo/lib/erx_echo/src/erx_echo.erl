@@ -14,7 +14,7 @@ The handler attaches through the session's `ble` grant, which names only the GAT
 services the package declares (`gatt nus`) and admission kept, so an app without that
 grant fails its start with the attach's refusal, `not_granted`, and answers nothing.
 Once attached it logs `erx_echo: echoing nus`. A send that fails, to a phone that left
-or did not subscribe to `tx`, drops those bytes; the echo never shows them.
+or did not subscribe to `tx`, drops those bytes; the echo logs none of them.
 """.
 
 -behaviour(application).

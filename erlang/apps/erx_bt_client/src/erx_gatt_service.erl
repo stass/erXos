@@ -7,7 +7,9 @@ The behaviour of one GATT service's handler over the `ble` facet (docs/design-bl
 "The client"): a gen_server that attaches to its service through erx_gatt:attach/1 and
 turns each event erx_gatt:event/2 admits into a callback of its module.
 
-**Starting.** start_link/3,4 attach, then call `Module:init(Args, Table)`, `Table` the
+**Starting.** start_link/3,4 wait, at most `bt_attach_wait_ms`, for the domain to hold
+`ble`, since an app's applications may start before the domain service has installed
+the session's facets; then they attach, then call `Module:init(Args, Table)`, `Table` the
 service's characteristics as the attach answered them. It answers `{ok, Values, State}`,
 and the start sets each characteristic of `Values`, a map from characteristic to value,
 before it answers `{ok, Pid}`; or `{error, Reason}`, which fails the start with `Reason`
@@ -40,6 +42,8 @@ through the new facet at once instead of spending its intensity on the dead one.
 """.
 
 -behaviour(gen_server).
+
+-include("generated/erx_abi.hrl").
 
 -export([start_link/3, start_link/4, call/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -76,6 +80,7 @@ call(Server, Request) ->
 
 -doc false.
 init({Service, Module, Args}) ->
+    _ = erx_facets:await(ble, none, ?ERX_BT_ATTACH_WAIT_MS),
     case erx_gatt:facet() of
         none ->
             {stop, not_granted};

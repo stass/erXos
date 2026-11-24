@@ -308,7 +308,8 @@ module Erx
 
       check = lambda do |_text|
         seen = DisplayDomain.await_log(log, wait_seconds: APP_SECONDS) { |text| text.match?(ECHOING) }
-        raise Error, "the system did not admit the #{APP_NAME} package" unless seen.match?(ADMITTED)
+        raise Error, "the #{APP_NAME} app logged no attach of nus within #{APP_SECONDS} s" unless seen.match?(ECHOING)
+      raise Error, "the system did not admit the #{APP_NAME} package" unless seen.match?(ADMITTED)
 
         serial.call
       end
@@ -436,9 +437,10 @@ module Erx
       end
     end
 
-    # Boots the image under HVF with one CPU against Bumble's controllers. Returns
-    # { "hvf-1cpu" => 'passed' }; a boot that does not reach the bring-up's facts, the echo's
-    # start or the serial row's pass raises.
+    # Boots the echo domain's image, then the app cell's medium, each under HVF with one CPU
+    # against Bumble's controllers. Returns { "hvf-1cpu" => 'passed', "hvf-1cpu-app" =>
+    # 'passed' }; a boot that does not reach the bring-up's facts, the echo's start or the
+    # serial row's pass raises.
     class Run
       CELL_CPUS = 1
 
@@ -513,7 +515,7 @@ module Erx
         boot = File.join(directory, 'boot')
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: CELL_CPUS,
                                                          manifest_source: @app_manifest, memory_mib: @machine.memory_mib)
-        log = File.join(boot, 'serial.log')
+        log = Qemu.serial_log(boot)
         served(directory, ->(serial) { BtDomain.app_checkpoints(points, log: log, serial: serial) }) do |checkpoints, line|
           qemu.run(platform: @machine.platform, accel: QemuCells::LOCAL_ACCELERATOR, cpus: CELL_CPUS, image: image,
                    memory_mib: @machine.memory_mib, directory: boot, dtb: tree, disks: disks, line: line,

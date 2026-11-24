@@ -28,7 +28,7 @@ other GATT service and no other app's.
 `nus` and sends each `{serial, Conn, Bytes}` back with
 `erx_gatt_serial:send(Conn, Bytes)`, to the link the bytes came from and
 no other. Once its handler has attached it logs `erx_echo: echoing nus`.
-It shows nothing of what a phone writes. Without the grant its start
+It logs nothing of what a phone writes. Without the grant its start
 fails with the attach's refusal and the session ends.
 
 ## Where it runs
@@ -36,8 +36,8 @@ fails with the attach's refusal and the session ends.
 The Bluetooth suite's app cell boots QEMU `virt` with the package in
 the image, enabled, under an `apps` row that offers `ble` and `gatt
 nus`, and Bumble's serial peer writes 64 KiB through it
-(`tools/lib/erx/bt_domain.rb`). The Raspberry Pi 4's development card
-carries it as its second package (decision 7).
+(`tools/lib/erx/bt_domain.rb`). Decision 7 has the Raspberry Pi 4's
+development card carry it as its second package.
 
 The host test `test/host/erx_bt_gatt_client_test.rb` runs the module
 over the serial service against the real registry: two links' writes

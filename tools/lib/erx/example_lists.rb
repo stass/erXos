@@ -19,11 +19,11 @@ module Erx
     # Each file that may name an example, with the design text that names it.
     EXEMPT = {
       'tools/lib/erx/example_fetch.rb' => 'docs/design-packaging.md#examples, the fetch step that obtains an example',
+      'tools/lib/erx/bt_domain.rb' => "docs/design-bluetooth.md#on-qemu-against-bumble, the app cell's echo package",
       'tools/lib/erx/doom_program.rb' => "docs/design.md's dependency table, status example: Doom in the published media",
       'tools/lib/erx/example_lists.rb' => 'this check, which names the directory it scans for',
       'tools/lib/erx/image_apps.rb' => "docs/design-packaging.md#the-apps-row, the card's kiosk (ImageApps.packed_kiosk)",
       'tools/lib/erx/kiosk.rb' => 'docs/design-packaging.md#verification-and-testing, the kiosk cell',
-      'tools/lib/erx/bt_domain.rb' => "docs/design-bluetooth.md#decisions, 7: the Bluetooth suite's app cell boots the echo",
       'tools/lib/erx/qemu_suites/kiosk.rb' => 'docs/design-packaging.md#verification-and-testing, the kiosk cell'
     }.freeze
 

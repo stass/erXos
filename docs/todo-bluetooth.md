@@ -29,16 +29,24 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   packet until the deadline.
 
 * [High] bluetooth, the serial service on the board (docs/design-bluetooth.md "On the board", Decisions 7): the
-  QEMU suite's serial row passes (`tools/lib/erx/bt_domain.rb`, `test/bt/peer/serial_peer.py`), but no board run
-  has echoed `nus` to a phone. Decision 7 has the Pi 4's development card carry the echo as a second package,
-  enabled, with `max 2`, and its `apps` row offer `gatt nus` alone; no package of the echo exists, and the
-  installed app's `ble` grant (the item below) is not built, so the board's `blew nus` run waits on both.
-* [Medium] bluetooth, a handler started at boot (`erlang/apps/erx_bt_client/src/erx_gatt_service.erl`, `init/1`;
-  docs/design-bluetooth.md "The client"): a domain reports ready only once its boot script's applications have
-  started, and the domain service installs `ble` only after that, so a handler an app's start starts at once
-  stops `not_granted`. `erx_gatt_echo_test` answers its start and then waits for the facet itself; every handler
-  app would have to. Settle it in `erx_gatt_service` (start, then await the facet and attach in
-  `handle_continue`) or state the rule in the design.
+  QEMU suite's serial row passes through the echo domain and through the echo package, `examples/echo`, in its
+  app cell (`tools/lib/erx/bt_domain.rb`, `test/bt/peer/serial_peer.py`), but no board run has echoed `nus` to a
+  phone. Decision 7 has the Pi 4's development card carry the echo as a second package, enabled, with `max 2`,
+  and its `apps` row offer `gatt nus` alone: `ProductionImage#published_apps` adds the kiosk alone, and
+  `config/manifest/raspi4b-development.txt`'s `apps` row has `max 1`, `services display net` and no `gatt`, so the
+  board's `blew nus` run waits on the card.
+* [Medium] bluetooth, a phone's bytes in crash reports (`erx_gatt_service`, `erx_gatt_serial`, `examples/echo`):
+  the handler has no `format_status/1`, so a serial handler that crashes inside a `send` (the Bluetooth domain's
+  restart ends the facet mid-call) logs its last request, the bytes with it, and the echo's crash report lists its
+  queued `{serial, Conn, Bytes}`; for the console service those are what a user types. Strip payloads as
+  `erx_bt_link` does, and have the echo catch a `send/2` exit.
+* [Low] bluetooth suite, the app cell (`BtDomain::Run#app_boot`): a third copy of the medium boot of
+  `Kiosk::Run#boot` and `MediumBoot::Run`, without the boot value's checkpoint those insert
+  (`MediumBoot.boot_value_checkpoint`); fold the three into one MediumBoot helper. Also: nothing at the landing
+  gate packs `examples/echo` through the SDK (`erx_app_build_test.rb` packs the dashboard alone), so a call the
+  SDK does not make public fails only in this suite; the design's two-package rows (`echo_a`, `echo_b`, the `cp`
+  install) wait for the run-time install; `Manifest::Edit.offering` writes `gatt` for any service, though only
+  `ble` takes one; design-packaging.md "Examples" does not list the echo.
 * [Medium] bluetooth, a handler attached mid-connection sends at the default MTU (`erx_gatt_serial`; the item
   "what a handler hears" below): the registry does not replay a link's MTU at `attach`, so after a restart of the
   serial handler `send/2` cuts at 20 octets until the phone's next Exchange MTU, which most phones send once.
@@ -199,7 +207,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   board part runs the domain on UART0, where it has brought the controller up and advertised to a phone's scan.
   On the board a Mac connects and reconnects, and its log shows an MTU of 185 and GAP and GATT; blew
   (`tools/ble_board_check.rb`) discovers NUS and has a read of NUS RX refused (erxos-history, pi4/2026-11-23-ble-gatt, commit 6de9bf7). Still open on the board: the echo
-  through an app, which waits for an installed app's `ble` grant (below) and decision 7's second package; a NUS write
+  through an app, which waits for the card to carry decision 7's second package (the serial item above); a NUS write
   and its notification answered by that app; and pairing, which needs a characteristic that asks for encryption or a
   peer that starts pairing itself (whether macOS starts pairing only at an Insufficient Authentication answer is unverified, and blew has no
   pairing command).
