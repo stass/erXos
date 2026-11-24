@@ -243,6 +243,8 @@ bool erx_fiasco_test_thread_caps_gone(uint32_t);
 bool erx_fiasco_test_pool_slots_gone(void);
 uint32_t erx_fiasco_test_pool_free(void);
 uint64_t erx_fiasco_test_dropped(void);
+/* Every message the service received: a direct ring or ack leaves it unchanged. */
+uint64_t erx_fiasco_test_received(void);
 /*
  * How many of a task's messages the decoder refused (erx_fiasco_wire_decode): the root's
  * for ERX_CAP_SELF, else the task a space handle of the root's names, until its join;
@@ -255,7 +257,8 @@ int erx_fiasco_test_thread_priority(uint32_t, uint32_t, uint64_t);
  * The cheapest call Fiasco answers alone (docs/design-bench.md, "3. `nullcall`: the
  * decoder-refusal round trip"): an IPC call to the empty slot 0, which Fiasco answers
  * from its capability lookup without reaching an object (kernel/src/kern/syscalls.cpp,
- * sys_ipc_wrapper). Its result is Fiasco's IPC error, ERX_FIASCO_TEST_EMPTY_SLOT_ERROR (l4sys's L4_IPC_ENOT_EXISTENT) for an empty slot.
+ * sys_ipc_wrapper). Its result is Fiasco's IPC error, ERX_FIASCO_TEST_EMPTY_SLOT_ERROR
+ * (l4sys's L4_IPC_ENOT_EXISTENT) for an empty slot.
  */
 #define ERX_FIASCO_TEST_EMPTY_SLOT_ERROR	UINT64_C(4)
 uint64_t erx_fiasco_test_empty_slot_call(void);
