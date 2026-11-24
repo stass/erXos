@@ -180,7 +180,7 @@ class DoomProgramTest < Minitest::Test
     asked = [kind.development, kind.test(test_programs: added), kind.published].to_h do |medium|
       image = builder(Erx::ProductionImage::Machine.development(PLATFORM))
       image.define_singleton_method(:domain_boots) { |_source, given: []| given }
-      image.define_singleton_method(:own_apps) { |_examples| Erx::ImageApps.none }
+      image.define_singleton_method(:own_apps) { |_kind| Erx::ImageApps.none }
       image.define_singleton_method(:assemble) { |doom:, **| throw :assembled, doom }
       [medium.name, catch(:assembled) { image.build_medium(directory: '/nonexistent', kind: medium, manifest_source: '') }]
     end
@@ -199,7 +199,7 @@ class DoomProgramTest < Minitest::Test
     unfetched = builder(Erx::ProductionImage::Machine.development(PLATFORM))
     unfetched.instance_variable_set(:@root, @root)
     unfetched.define_singleton_method(:domain_boots) { |_source, given: []| given }
-    unfetched.define_singleton_method(:own_apps) { |_examples| Erx::ImageApps.none }
+    unfetched.define_singleton_method(:own_apps) { |_kind| Erx::ImageApps.none }
     error = assert_raises(Erx::Error) do
       unfetched.build_medium(directory: File.join(@root, 'medium'), kind: kind.published, manifest_source: '')
     end

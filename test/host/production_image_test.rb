@@ -131,23 +131,21 @@ class ProductionImageTest < Minitest::Test
 
   # What each kind carries, as build_medium hands it to the one build (MediumProbe): a
   # development medium its builder's apps alone; a test medium those and its test code,
-  # marked as test code; a published medium its own apps, the kiosk, and the Doom
+  # marked as test code; a published medium its own apps (own_apps) and the Doom
   # example, each on Machine.development, as pack_platform packs it. A card carries its own
-  # apps whatever its kind, the kiosk alone when published and the kiosk with the echo on
-  # the development card, and Doom only when published.
+  # apps whatever its kind, and Doom only when published.
   def test_each_medium_kind_carries_what_its_rule_gives
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
     builders = Erx::ImageApps.plan([CLOCK], enable: [])
     none = Erx::ImageApps.none
     test = KIND.test(test_roots: [TEST_ROOT], test_programs: TEST_PROGRAM)
     plain = { doom: false, test_code: false, test_roots: [], added: [] }
-    kiosk = [:own, Erx::ImageApps::KIOSK]
     {
       [PLATFORM, KIND.development, builders] => { apps: builders, **plain },
       [PLATFORM, test, builders] => { apps: builders, doom: false, test_code: true, test_roots: [TEST_ROOT], added: ['bin/probe'] },
-      [PLATFORM, KIND.published, none] => { apps: kiosk, **plain, doom: true },
-      [pi, KIND.development, none] => { apps: [*kiosk, Erx::ImageApps::ECHO], **plain },
-      [pi, KIND.published, none] => { apps: kiosk, **plain, doom: true }
+      [PLATFORM, KIND.published, none] => { apps: :own, **plain, doom: true },
+      [pi, KIND.development, none] => { apps: :own, **plain },
+      [pi, KIND.published, none] => { apps: :own, **plain, doom: true }
     }.each do |(platform, kind, apps), carried|
       machine = Erx::ProductionImage::Machine.development(platform)
       image = MediumProbe.new(root: ROOT, runner: nil, compiler: '', linker: '', machine: machine, fiasco: Object.new,
@@ -157,11 +155,11 @@ class ProductionImageTest < Minitest::Test
   end
 
   # An image builder that stops at the one build and returns what build_medium handed it,
-  # its own apps (own_apps) named :own followed by the examples it was asked to pack.
+  # its own apps (own_apps) named :own.
   class MediumProbe < Erx::ProductionImage
-    Own = Data.define(:examples)
+    OWN = Erx::ImageApps.plan([], enable: [], local: false)
 
-    def own_apps(examples) = Own.new(examples: examples)
+    def own_apps(_kind) = OWN
 
     def carried(kind:, apps:)
       catch(:assembled) { build_medium(directory: '/nonexistent', kind: kind, manifest_source: '', apps: apps) }
@@ -172,7 +170,7 @@ class ProductionImageTest < Minitest::Test
     def domain_boots(_manifest_source, given: []) = given
 
     def assemble(apps:, doom:, test_code:, test_roots:, added:, **)
-      throw :assembled, { apps: apps.is_a?(Own) ? [:own, *apps.examples] : apps, doom: doom, test_code: test_code, test_roots: test_roots,
+      throw :assembled, { apps: apps.equal?(OWN) ? :own : apps, doom: doom, test_code: test_code, test_roots: test_roots,
                           added: added.entries.map { it.fetch('path') } }
     end
   end
@@ -266,7 +264,7 @@ class ProductionImageTest < Minitest::Test
 
     PUBLISHED = Erx::ImageApps.plan([], enable: [], local: false)
 
-    def own_apps(_examples)
+    def own_apps(_kind)
       calls << :own_apps
       PUBLISHED
     end
@@ -281,14 +279,14 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
-  # Which examples each medium packs as its own apps (own_examples): none on QEMU's
-  # development medium, the kiosk on QEMU's published medium and the published card, and
-  # the kiosk with the Bluetooth echo on the development card (docs/design-bluetooth.md,
-  # decision 7), so the card the website offers gains no app.
+  # Which examples each medium that carries its own apps packs (own_examples): the kiosk on
+  # QEMU's published medium and the published card, and the kiosk with the Bluetooth echo
+  # on the development card (docs/design-bluetooth.md, decision 7), so the card the website
+  # offers gains no app.
   def test_only_the_development_card_carries_the_echo_beside_the_kiosk
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
     kiosk = [Erx::ImageApps::KIOSK]
-    { [PLATFORM, KIND.development] => [], [PLATFORM, KIND.published] => kiosk, [pi, KIND.published] => kiosk,
+    { [PLATFORM, KIND.published] => kiosk, [pi, KIND.published] => kiosk,
       [pi, KIND.development] => [*kiosk, Erx::ImageApps::ECHO] }.each do |(platform, kind), examples|
       assert_equal examples, Erx::ProductionImage.own_examples(kind, platform), "#{platform.name}'s #{kind.name} medium"
     end
@@ -307,7 +305,7 @@ class ProductionImageTest < Minitest::Test
                                      machine: Erx::ProductionImage::Machine.development(pi), fiasco: Object.new,
                                      runtime: nil, jit_runtime: nil)
     builds = 2.times.map do
-      apps = Dir.mktmpdir('erx-card-apps-home-') { |home| with_home(home) { image.own_apps(Erx::ProductionImage.own_examples(KIND.development, pi)) } }
+      apps = Dir.mktmpdir('erx-card-apps-home-') { |home| with_home(home) { image.own_apps(KIND.development) } }
       [apps, apps.packages.map { |package| Digest::SHA256.file(package.path).hexdigest }]
     end
     apps, digests = builds.first

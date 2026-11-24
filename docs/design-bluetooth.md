@@ -3268,7 +3268,7 @@ an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
-service echoes through the echo package the development card carries
+service echoes through an app, once the board has a home for one
 ([Decisions](#decisions), 7); the phone pairs by typing the passkey the
 `pair` file shows, reboots the machine, and reads an `authenticated`
 value again; the console logs in from the phone; a `reset` written
@@ -3531,21 +3531,17 @@ list ([todo-performance.md](todo-performance.md)):
    checklist have a terminal app on the phone echo through an app on
    the Pi 4. Under decision 6 the echo is a package declaring `gatt
    nus`, and the Pi 4's development manifest's `apps` row offers it with
-   `services display net ble` and `gatt nus`. A card trusts no key
-   ([design-packaging.md](design-packaging.md#the-apps-row)), so no
-   package its build does not add can reach the board. The choices: the board's
+   `services display net ble` and `gatt nus`. But that row has `max 1`,
+   and its card trusts no key and carries the kiosk alone, whatever its
+   kind ([design-packaging.md](design-packaging.md#the-apps-row)), so no
+   second package can reach the board. The choices: the board's
    development card carries the echo as a second package of the image,
    enabled, with `max 2`, which the display pays for with one more
    pixel area of 8 MiB; or a configured domain in the Pi 4's development
    manifest runs the echo with a `ble` row of its own naming `nus`, as
    the QEMU suite does. The second package is chosen, since it is the
    path an app takes on every other machine and exercises the install
-   check on the board; the published card keeps the kiosk alone. Both
-   cards are built from the one manifest, so the published card's row
-   offers `ble` and `gatt nus` too: no package it carries declares
-   `gatt`, so no session there holds `ble`, and it serves `nus` as it
-   serves any service no app handles, answering reads from the declared
-   values and refusing writes.
+   check on the board; the published card keeps the kiosk alone.
 
 8. **Decided: the phone console runs in a configured domain of its own,
    `btconsole`, holding a `ble` grant whose `services` names `console`,

@@ -136,9 +136,8 @@ module Erx
     #   Checks::TEST_PROGRAMS_ENTRY), and new is private, so no positional construction
     #   passes test code where the checks do not read it.
     # A card, the medium of a board the firmware boots from a boot partition, is the
-    # website's whatever its kind: it carries its own apps (own_examples) and no
-    # builder's, trusts no key, carries no test code, and Doom only when it is the
-    # published kind.
+    # website's whatever its kind: it carries the published medium's apps and trust and
+    # no test code, and Doom only when it is the published kind.
     MediumKind = Data.define(:name, :test_roots, :test_programs) do
       private_class_method :new, :[]
 
@@ -488,7 +487,7 @@ module Erx
 
     # Where own_apps packs a medium's own packages, one directory per
     # platform, replaced whole on every build of it.
-    OWN_APPS_DIRECTORY = 'build/own-apps'
+    PUBLISHED_APPS_DIRECTORY = 'build/published-apps'
 
     # `tools/erx pack`'s one build: Fiasco for platform (Fiasco#build_for), then the
     # production image into packed_directory, cleared first, on Machine.development, since
@@ -532,9 +531,8 @@ module Erx
       on_own_board(machine)
       self.class.check_medium(kind, machine: machine, apps: apps)
 
-      examples = self.class.own_examples(kind, machine.platform)
-      own = !examples.empty?
-      apps = own_apps(examples) if own
+      own = self.class.own_apps?(kind, machine.platform)
+      apps = own_apps(kind) if own
       built = assemble(directory: directory, manifest_source: manifest_source, added: kind.test_programs,
                        test_code: kind.test_code?, machine: machine, domains: domain_boots(manifest_source), apps: apps,
                        record: false, test_roots: kind.test_roots, doom: kind.published?)
@@ -552,12 +550,12 @@ module Erx
     # (own_apps) and no builder's: the published kind, and a card, the medium of a
     # board the firmware boots from a boot partition, which is the website's whatever its
     # kind (docs/design-packaging.md, "The shipped manifests").
-    def self.own_apps?(kind, platform) = !own_examples(kind, platform).empty?
+    def self.own_apps?(kind, platform) = kind.published? || BootPartition.boot_partition_medium?(platform)
 
     # Refuses a medium of kind (MediumKind) on machine with apps (ImageApps::Plan) its
     # kind does not take, before anything is built: the published kind on any machine but
     # Machine.development, a medium that carries its own apps (own_apps?) with any package,
-    # signer or --local of its builder's, since it carries its own alone, and a card with
+    # signer or --local of its builder's, since it carries the kiosk alone, and a card with
     # test code, since the website offers it.
     def self.check_medium(kind, machine:, apps:)
       platform = machine.platform
@@ -575,7 +573,7 @@ module Erx
     # Refuses a published medium of platform, the card or QEMU's medium the website offers,
     # whose checked manifest (its report, manifest) trusts a key for packages installed
     # later, a signer row or the builder's development package key: the medium trusts its
-    # own packages by their rows' hashes alone, so no downloaded medium trusts its builder's key,
+    # kiosk by its row's hash alone, so no downloaded medium trusts its builder's key,
     # whatever a build hands the manifest check (docs/design-packaging.md, "The shipped
     # manifests").
     def self.check_published_trust(platform, manifest)
@@ -586,31 +584,28 @@ module Erx
       raise Error, "the published #{platform.name} medium trusts no package key, but its manifest trusts #{trusted.join(' and ')}"
     end
 
-    # A medium's own packages (docs/design-packaging.md, "The shipped manifests"): the
-    # app examples of the tree at examples, as own_examples names them, each enabled and
-    # packed as ImageApps.packed packs it, sealed by the published package key, so two
-    # builders' media of one commit carry the same bytes. The plan holds no signer row
-    # and is no local image, so the medium trusts its packages by their rows' hashes
-    # (check_published_trust).
-    def own_apps(examples)
-      work = self.class.clear_directory(root: @root, path: File.join(@root, OWN_APPS_DIRECTORY, @machine.platform.name))
-      packages = examples.map do |example|
+    # The own packages of a medium of kind (MediumKind) that carries its own apps
+    # (own_apps?; docs/design-packaging.md, "The shipped manifests"): own_examples',
+    # each enabled and packed as ImageApps.packed packs it, sealed by the published
+    # package key, so two builders' media of one commit carry the same bytes. The plan
+    # holds no signer row and is no local image, so the medium trusts its packages by
+    # their rows' hashes (check_published_trust).
+    def own_apps(kind)
+      work = self.class.clear_directory(root: @root, path: File.join(@root, PUBLISHED_APPS_DIRECTORY, @machine.platform.name))
+      packages = self.class.own_examples(kind, @machine.platform).map do |example|
         directory = FileUtils.mkdir_p(File.join(work, File.basename(example))).first
         ImageApps.packed(directory, example: example, root: @root, runner: @runner, compiler: @compiler, linker: @linker).package
       end
       ImageApps.plan(packages, enable: packages.map(&:name))
     end
-
-    # The app examples a medium of kind (MediumKind) for platform carries as its own
-    # apps (own_apps), the one rule of what a medium the website offers holds: none on
-    # a builder's medium for a board without a card, which carries its builder's apps; the
-    # kiosk, ImageApps::KIOSK, on QEMU's published medium and the published card; and the
-    # kiosk with the Bluetooth echo, ImageApps::ECHO, on a development card
-    # (docs/design-bluetooth.md, decision 7), which the board's apps row offers ble for.
+    
+    # The examples a medium of kind for platform carries as its own apps (own_apps): the
+    # kiosk, ImageApps::KIOSK, on every such medium, and beside it on a development card
+    # the Bluetooth echo, ImageApps::ECHO (docs/design-bluetooth.md, decision 7), which
+    # the board's apps row offers ble for; the published card and QEMU's published
+    # medium carry the kiosk alone.
     def self.own_examples(kind, platform)
       card = BootPartition.boot_partition_medium?(platform)
-      return [].freeze unless card || kind.published?
-
       [ImageApps::KIOSK, *(ImageApps::ECHO if card && !kind.published?)].freeze
     end
 
@@ -769,8 +764,8 @@ module Erx
     # differences count as differing parts. build/gen's stamp must be the same after
     # both builds as at that comparison, so the builds read the tree it compared. Each
     # build packs the development medium (MediumKind), so the check needs no example
-    # fetched, with packages: a card carries its own, the development card's two, and
-    # QEMU's medium takes the kiosk as its builder's app, so both compare packages'
+    # fetched, with the kiosk: a card carries its own, as every card does, and QEMU's
+    # medium takes the published one as its builder's app, so both compare the package's
     # bytes. The published media, with Doom, are not compared (TODO.md, "the published
     # media and the Doom example").
     def check_reproducible(directory:)
@@ -783,7 +778,7 @@ module Erx
         @runtime.clean
         Bl31.clean(root: @root) if BootPartition.boot_partition_medium?(@machine.platform)
         card = BootPartition.boot_partition_medium?(@machine.platform)
-        build_medium(directory: File.join(directory, name), apps: card ? ImageApps.none : own_apps([ImageApps::KIOSK]))
+        build_medium(directory: File.join(directory, name), apps: card ? ImageApps.none : own_apps(MediumKind.published))
       end
       raise Error, 'build/gen was regenerated during the reproducibility check; run it again' unless generated_stamp == compared
 
