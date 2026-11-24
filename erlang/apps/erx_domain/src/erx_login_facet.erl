@@ -26,7 +26,8 @@ reads a request through it, so the facet's check of the grant's operations and
 admit/3 cannot read one request two ways.
 
 admit/3 is total (docs/design-login.md, "Secrets"): every request it does not
-take answers `badarg`, so the facet never ends with a request in its reason.
+take answers `badarg`, so no request ends the facet for the front end's other
+connections.
 It forwards `{login, Request, Caller, Grant}` to the erx_login it was minted
 in front of, Grant holding the row's line, logins and holder and the facet's
 own pid and grantee, none of which the front end supplies (G4, G5), and
@@ -93,10 +94,22 @@ operation(Request) ->
     end.
 
 -spec init(erx_facet:grant()) -> {ok, map()}.
-init(#{grantee := Grantee, behind := Service, line := Line, logins := Logins, holder := Holder}) ->
+init(#{grantee := Grantee, behind := Service, line := Text, logins := Logins, holder := Holder}) ->
     process_flag(sensitive, true),
+    Line = line(Text),
     {ok, #{service => Service,
            grant => #{facet => self(), grantee => Grantee, line => Line, logins => Logins, holder => Holder}}}.
+
+%% The session line a grant's row names, as the manifest gives it, its text
+%% (erx_domain_lib:configured/0): the name of ?ERX_LINES whose text it is, read with no
+%% atom made. Any other text starts no facet; the manifest check admits only its
+%% holder's line (docs/design-login.md, "Who holds it"), so this refuses only a manifest
+%% that check did not pass.
+line(Text) ->
+    case [Line || Line := _Quantities <- ?ERX_LINES, atom_to_binary(Line) =:= Text] of
+        [Line] -> Line;
+        [] -> exit(unknown_line)
+    end.
 
 -spec admit(term(), pid(), map()) -> {forward, pid(), tuple(), map()} | {refuse, badarg, map()}.
 admit(Request, Caller, #{service := Service, grant := Grant} = State) ->

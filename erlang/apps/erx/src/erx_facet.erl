@@ -319,22 +319,21 @@ init(Parent, Tag, Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant
             in_flight => maps:get(in_flight, Grant, ?IN_FLIGHT), exports => Exports,
             ends_with => Monitors, forwards => #{}, dropped => 0, refused => 0}).
 
-%% The exported facet's life. The loop's one end of its own is the leading atom of an end
-%% of ends_with; a crash, of the callback or of the loop, ends the facet with its reason's
-%% leading atom as well, so its grantee's callers and monitors see no term of a request
-%% (docs/design-domains.md, "A facet's end carries no terms").
+%% The exported facet's life: the loop, until a process or port of ends_with ends or the
+%% facet crashes, in its callback or in the loop, a crash logged with the callback's name
+%% and its reason's leading atom. Either reason is cut here, the one place a facet ends,
+%% to its leading atom, so its grantee's callers and monitors see no term of a service's
+%% or of a request (docs/design-domains.md, "A facet's end carries no terms").
 -spec serve(state()) -> no_return().
 serve(#{callback := Callback} = State) ->
-    try
-        loop(State)
-    catch
-        exit:End when is_atom(End) ->
-            exit(End);
-        _Class:Reason ->
-            Name = erx_report:reason_name(Reason),
-            logger:error("facet of ~ts crashed: ~ts", [Callback, Name]),
-            exit(Name)
-    end.
+    Reason = try
+                 loop(State)
+             catch
+                 _Class:Crash ->
+                     logger:error("facet of ~ts crashed: ~ts", [Callback, erx_report:reason_name(Crash)]),
+                     Crash
+             end,
+    exit(erx_report:reason_name(Reason)).
 
 %% The monitor of a process or port the facet ends with (is_end/1), and whether a local
 %% one has already ended.
@@ -344,7 +343,8 @@ monitor_end(Port) when is_port(Port) -> monitor(port, Port).
 ended(Pid) when is_pid(Pid) -> node(Pid) =:= node() andalso not is_process_alive(Pid);
 ended(Port) when is_port(Port) -> erlang:port_info(Port, id) =:= undefined.
 
--spec loop(state()) -> no_return().
+%% The reason of the end of ends_with that ends the facet.
+-spec loop(state()) -> term().
 loop(#{ends_with := EndsWith, forwards := Forwards, exports := Exports} = State) ->
     receive
         {[alias | Alias], Reply} when is_map_key(Alias, Forwards) ->
@@ -356,7 +356,7 @@ loop(#{ends_with := EndsWith, forwards := Forwards, exports := Exports} = State)
                 _ -> loop(request(Message, State))
             end;
         {'DOWN', Monitor, _Type, _End, Reason} when is_map_key(Monitor, EndsWith) ->
-            exit(erx_report:reason_name(Reason));
+            Reason;
         {'DOWN', Monitor, process, _Pid, _Reason} when is_map_key(Monitor, Forwards) ->
             loop(replied(Monitor, {error, failed}, State));
         {'DOWN', _Monitor, _Type, _Object, _Info} ->

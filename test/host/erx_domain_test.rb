@@ -191,7 +191,7 @@ class ErxDomainTest < Minitest::Test
     # reaches every grantee's monitor.
     Fault.new(name: 'a facet ending with a term',
               file: 'erlang/apps/erx/src/erx_facet.erl',
-              from: 'exit(erx_report:reason_name(Reason));', to: 'exit(Reason);',
+              from: 'exit(erx_report:reason_name(Reason)).', to: 'exit(Reason).',
               tests: 'erx_facet_tests', caught_by: 'ends_with_its_grant_test'),
     # The check of a call from another domain that erx_facet and erx_session_line share
     # (erx:call_from/3): one that does not compare its reply alias's domain lets the
@@ -212,12 +212,12 @@ class ErxDomainTest < Minitest::Test
               file: 'erlang/apps/erx/src/erx_facet.erl',
               from: '                false -> eperm', to: '                false -> ok',
               tests: 'erx_facet_tests', caught_by: 'admits_only_its_grants_operations_test'),
-# A facet whose callback crash ends it with the crash's reason whole hands a request
-# of one caller's, a passphrase, to every monitor of the facet.
-Fault.new(name: 'a facet that ends with its callback crash whole',
-          file: 'erlang/apps/erx/src/erx_facet.erl',
-          from: '            Name = erx_report:reason_name(Reason),', to: '            Name = Reason,',
-          tests: 'erx_facet_tests', caught_by: 'a_callback_crash_ends_the_facet_with_an_atom_test'),
+    # The same cut for a crash of the callback: a reason that holds one caller's request,
+    # a passphrase, would reach every monitor of the facet.
+    Fault.new(name: 'a facet ending with its callback crash whole',
+              file: 'erlang/apps/erx/src/erx_facet.erl',
+              from: 'exit(erx_report:reason_name(Reason)).', to: 'exit(Reason).',
+              tests: 'erx_facet_tests', caught_by: 'a_callback_crash_ends_the_facet_with_an_atom_test'),
     # A grant listing operations to a callback that cannot check them would admit them all.
     Fault.new(name: 'a facet started for operations no callback checks',
               file: 'erlang/apps/erx/src/erx_facet.erl',
@@ -226,7 +226,7 @@ Fault.new(name: 'a facet that ends with its callback crash whole',
     # A system-served grant that loses its row's operations reaches the facet granting none
     # it can check, so a callback without operation/1 starts and admits every operation.
     Fault.new(name: 'a served grant that drops its operations', file: SERVICE,
-              from: 'Checked#{operations => maps:get(operations, Limits, [])}', to: 'Checked',
+              from: 'Limits#{operations => maps:get(operations, Limits, [])}', to: 'maps:remove(operations, Limits)',
               tests: 'erx_domain_mints_srv_tests', caught_by: 'served_test'),
     # The system domain's namespace (docs/design-system.md, "A session takes the console"):
     # a wait answered before its files grant settles lets the start table read rc.conf

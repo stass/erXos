@@ -61,7 +61,7 @@ wait_unregistered(Name) ->
 matching() -> #{check => {match, 42}, start => {ok, session()}, mint => {ok, list_to_pid("<0.77.0>")}}.
 
 grant() -> grant(self(), 16).
-grant(Facet, Logins) -> #{facet => Facet, grantee => 7, line => ssh_line, logins => Logins, holder => <<"ssh">>}.
+grant(Facet, Logins) -> #{facet => Facet, grantee => 7, line => tty_line, logins => Logins, holder => <<"ssh">>}.
 
 %% A call as the facet forwards it, from Owner's connection.
 login(Owner, Request) -> login(Owner, Request, grant()).
@@ -88,7 +88,7 @@ a_match_starts_the_session_and_mints_the_grant_s_line_test_() ->
         Facet = self(),
         ?assertEqual([{check, <<"alice">>, <<"right">>, {<<"ssh">>, <<"peer">>}},
                       {start, 42, #{ends_with => [Owner, Facet]}},
-                      {mint, ssh_line, 9, 7, Facet}], seen())
+                      {mint, tty_line, 9, 7, Facet}], seen())
     end).
 
 one_login_per_owner_test_() ->

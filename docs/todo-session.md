@@ -5,6 +5,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] login, the principal-name alphabet (`erx_login_facet:user/1`, docs/design-login.md,
+  "Operations"): the facet admits a user name of a lowercase letter, then lowercase letters,
+  digits and underscores, written out in the facet, while a principal is named by a system
+  identifier (`erx_ident`, `[a-z0-9][a-z0-9_-]*`) and the manifest check holds the names
+  that start sessions to a rule of its own. One spec should state the alphabet a login names,
+  with the facet's guard and the manifest's rule generated from it, so a principal the
+  manifest admits is never one no front end can name.
+* [Medium] login, the connection-binding test (docs/design-login.md, "Verification"): a
+  `login_key` from a process other than the cookie's answering `no_match`, with the table keyed
+  by the facet's forward as its seeded fault, lands with the key login, since `login_key`
+  answers `unavailable` until the service verifies a key.
 * [Medium] session domain, programs: a program's anchor is a sub-space of the session,
   but nothing yet ends a session's programs with the session domain. Until something does, no test ends a
   session while one of its programs runs.

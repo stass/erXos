@@ -132,9 +132,9 @@ step({grace, Step}, #{rows := Rows} = T) ->
 step({down, Owner}, #{rows := Rows} = T) ->
     case Rows of
         %% A pending row answers its facet, which frees the forward's slot in flight;
-%% the answer goes to a caller that has ended.
-#{Owner := #{state := pending, from := From}} -> {free(Owner, T), [{reply, From, {error, unavailable}}]};
-#{Owner := _Row} -> {free(Owner, T), []};
+        %% the answer goes to a caller that has ended.
+        #{Owner := #{state := pending, from := From}} -> {free(Owner, T), [{reply, From, {error, unavailable}}]};
+        #{Owner := _Row} -> {free(Owner, T), []};
         #{} -> {T, []}
     end.
 

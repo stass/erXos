@@ -4,7 +4,7 @@
 -module(erx_domain_sup).
 -moduledoc """
 The domain service's supervisor (docs/design-system.md, "System services").
-It has four children. The service is one, temporary and significant, so it
+It has six children. The service is one, temporary and significant, so it
 is never restarted: its end, however it comes, kill included, shuts the supervisor
 down, which ends the permanent application and the system domain with it,
 outside an ordered end, as any fault of the system domain does. The
@@ -22,6 +22,12 @@ domain library again (docs/design-pcie.md, "Failure handling and restart").
 Beside them runs `/dev`'s control tree, erx_devfs, a permanent child that
 mounts itself at `/dev` in the system domain's namespace; it keeps no
 state, so a restarted one serves the same tree.
+
+The login service, erx_login, is a permanent child started before the
+service, so it has named itself the process behind `login` (erx_facet:serve/2)
+before the service mints any front end's facet (docs/design-login.md, "The
+service and its facet"). A restarted one starts with an empty table: the
+facets minted in front of the old one ended with it, with an atom.
 """.
 -behaviour(supervisor).
 
@@ -50,5 +56,8 @@ init([]) ->
     Dev = #{id => erx_devfs, start => {erx_devfs, start_link, []},
             restart => permanent, shutdown => brutal_kill, type => worker,
             modules => [erx_devfs]},
+    Login = #{id => erx_login, start => {erx_login, start_link, []},
+              restart => permanent, shutdown => 5000, type => worker,
+              modules => [erx_login]},
     {ok, {#{strategy => one_for_one, auto_shutdown => any_significant},
-          [Coordinator, Machine, Pci, Service, Dev]}}.
+          [Coordinator, Machine, Pci, Login, Service, Dev]}}.

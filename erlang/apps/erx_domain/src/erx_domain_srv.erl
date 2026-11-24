@@ -1216,10 +1216,10 @@ marked(#{}) -> none.
 %% domain (granted/3), goes with it, so the domain mounts what it is granted before the grants
 %% are installed (docs/design-system.md, "Facets a configured domain serves").
 grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) ->
-    {ok, #{pid := Pid, ref := Ref, facets := Facets, principal := Principal}} = erx_domain_core:fetch(Id, Core),
+    {ok, #{pid := Pid, ref := Ref, facets := Facets} = Domain} = erx_domain_core:fetch(Id, Core),
     Specs = maps:map(fun(_Name, {Behind, Limits}) -> {facet, erx_domain_facet, Behind, Limits#{behind => Behind}} end,
                      Facets),
-    Systems = maps:map(fun(Name, Grant) -> system_facet(Name, Grant, Principal, State) end, Served),
+    Systems = maps:map(fun(Name, Grant) -> system_facet(Name, Grant, Domain, State) end, Served),
     %% A spec never names a service of the table (facet/3), and the manifest grants a
     %% configured domain no spec, so the two never share a name.
     Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Specs, Systems)),
@@ -1228,14 +1228,19 @@ grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) -
     Pid ! {Ref, facets, Minted, Granted},
     State.
 
-%% The facet of a service the system domain serves, for a domain of Principal: the
-%% inspect facet, whose scope erx_domain_core:inspect_scope/3 alone decides
-%% (docs/design-live.md, "The inspect service"), an erx_domain_facet in front of the
-%% service's process, or, for a tree service, the grant its erx_fs_grants supervisor
-%% starts (mint/5).
-system_facet(inspect, {message, Behind, Limits}, Principal,
+%% The facet of a service the system domain serves, for Domain, the domain service's
+%% entry of the grantee: the inspect facet, whose scope erx_domain_core:inspect_scope/3
+%% alone decides from the domain's principal (docs/design-live.md, "The inspect
+%% service"), the login facet, an erx_domain_facet in front of the service's process,
+%% or, for a tree service, the grant its erx_fs_grants supervisor starts (mint/5).
+system_facet(inspect, {message, Behind, Limits}, #{principal := Principal},
              #{inspect_policy := #{roots := Roots, development := Development}}) ->
     {facet, erx_inspect_facet, Behind, Limits#{scope => erx_domain_core:inspect_scope(Principal, Roots, Development)}};
+system_facet(login, {message, Behind, Limits}, #{name := Name}, _State) ->
+    %% docs/design-login.md, "Who holds it": the row's line and logins, which the
+    %% manifest check holds to the holder's entry, and the holder's manifest name, which
+    %% names its terminals to the checker (G5); erx_login_facet:init/1 reads the line.
+    {facet, erx_login_facet, Behind, Limits#{behind => Behind, holder => erx_ident:to_binary(Name)}};
 system_facet(log, {message, Behind, Limits}, _Principal, _State) ->
     %% docs/design-log.md, "The log facet": Behind is erx_syslog_sup, and the callback
     %% finds erx_syslog at each request.
@@ -1260,7 +1265,7 @@ system_facet(pci, {message, Behind, Limits}, _Principal, _State) ->
     {facet, erx_pci_facet, Behind, Limits};
 system_facet(_Name, {message, Behind, Limits}, _Principal, _State) ->
     {facet, erx_domain_facet, Behind, Limits#{behind => Behind}};
-system_facet(machine, {tree, Grants, Limits}, Principal, State) ->
+system_facet(machine, {tree, Grants, Limits}, #{principal := Principal}, State) ->
     %% docs/design-system.md, "A session's request": the grant's own argument is its
     %% grantee's user name, which the tree's ctl handler passes to the coordinator, so the
     %% log line names whoever the grant was made for and no request names anyone.
@@ -1401,10 +1406,13 @@ served(Grantee, Rows) ->
                      end, Rows)).
 
 %% A message grant carries its row's operations, which the facet admits alone
-%% (erx_facet:start/3); a tree grant's row names none (dom_boot_view.c).
+%% (erx_facet:start/3), and the parameters its row states, each by its declared name
+%% (erx_domain_lib:configured/0), as the login facet's line and logins; a tree grant's
+%% row names no operations (dom_boot_view.c).
 served_grant(message, Behind, Limits) ->
     case grant({Behind, maps:with([max_request, in_flight], Limits)}) of
-        {ok, {Behind, Checked}} -> {ok, {message, Behind, Checked#{operations => maps:get(operations, Limits, [])}}};
+        {ok, {Behind, Checked}} -> {ok, {message, Behind, maps:merge(Limits#{operations => maps:get(operations, Limits, [])},
+                                                                     Checked)}};
         invalid -> invalid
     end;
 served_grant(tree, Grants, Limits) ->
