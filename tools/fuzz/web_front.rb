@@ -52,7 +52,10 @@ module Erx
       [head('GET / HTTP/1.1', 'Host' => AUTHORITY), head("GET /proc/x?token=#{TOKEN} HTTP/1.1", 'Host' => AUTHORITY),
        head('GET /ws HTTP/1.1', UPGRADE), head('GET /ws HTTP/1.1', UPGRADE.merge('Origin' => 'http://evil.example')),
        head('GET /app.js HTTP/1.1', 'Host' => AUTHORITY, 'Cookie' => "a=b; erx_web_8080=#{COOKIE}"),
-       head('POST / HTTP/1.1', 'Host' => AUTHORITY, 'Content-Length' => '3') + 'abc', *bound_seeds]
+       head('POST / HTTP/1.1', 'Host' => AUTHORITY, 'Content-Length' => '3') + 'abc',
+       head('GET /erxos/boot.sig HTTP/1.1', 'Host' => '192.168.2.1:8080'),
+       head('HEAD /erxos/boot.img HTTP/1.1', 'Host' => '192.168.2.1'),
+       *bound_seeds]
     end
 
     # Requests at the reader's bounds, a byte either side: request lines of LINE_MAX - 1

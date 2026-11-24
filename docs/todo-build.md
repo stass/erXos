@@ -129,16 +129,6 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   entries placed, a dropout over one entry's end and the next one's start, a log cut inside an entry, seeded with
   placement by the nearest naming line before and with the cut boot taken as timed out. Needs the boot set's item
   first. One implementer.
-* [Medium] tooling, the board's network boot (`tools/lib/erx/netboot.rb`,
-  [design-platforms.md](design-platforms.md#the-http-form)): netboot's HTTP form, which replaces the scratch
-  stager: an entry's FAT image by fsimg, read back through `FatVolume`, and its signature; the queue sibling with
-  `sets/` and numbered entries; `prepare` and `point`, with the HTTP `stage` made of them; the signing key opened
-  once without following a link and taken only as the user's own regular file with no group or other permission;
-  and the boot server's pure decision over `Web::Http.read` (two names, a download bound to one entry at its first
-  request, the queue's cursor), tested exhaustively against a fake bootloader, seeded with the image opened at its
-  own request, the cursor moved at the signature's request and the name check widened. The server's part waits on
-  [design-bench.md's open decision](design-bench.md#where-the-boot-server-runs), where the server runs; the
-  stager's part does not. One implementer.
 * [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, [design-bench.md](design-bench.md#the-walk)):
   the pure walk over the queue's names, tested exhaustively, seeded with the end deadline restarted at each naming
   line and with the return taken from any banner; the console reader with its byte and line limits; the ssh

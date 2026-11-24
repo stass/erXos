@@ -815,7 +815,7 @@ host serves over HTTP
   each copy's SHA-256 against the build record, points the root, a
   symbolic link, at the sibling in one rename, and removes every other
   sibling of its naming, the build it replaced included
-  (`tools/lib/erx/netboot.rb:58-82`). The board's EEPROM as configured on
+  (`tools/lib/erx/netboot.rb:79-98`). The board's EEPROM as configured on
   the desk boots over HTTP instead, with no TFTP entry in its boot order
   (`BOOT_ORDER=0xf17`: HTTP, then the card, then a restart): a FAT image
   `boot.img` and its `boot.sig`, an RSA-2048 signature by a key whose
@@ -828,6 +828,8 @@ host serves over HTTP
   server resolves its directory once, at its start, and serves every
   regular file in it whose name fits its grammar (`pi4_http_serve.rb:29`
   and `:76-84`), whatever the file is.
+  `Netboot`'s HTTP form and `tools/erx netboot serve` replace both
+  ([The network boot the stager drives](#the-network-boot-the-stager-drives)).
 * **Cycles are never measured.** The guest prints `cycles_per_tick` as
   `unknown` on every boot (`bench_print_clock`, `guest.c:205`). The Fiasco
   build sets `CONFIG_PERF_CNT_USER` (`config/fiasco/kernel.defconfig:17`),
@@ -1094,9 +1096,11 @@ the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
    is the found pair.
 
 **The pieces.** `Netboot`'s HTTP form has two steps:
-`prepare(sets:, names:, found:, key:)` writes a queue as a fresh sibling
+`prepare(root:, sets:, names:, key:, found:)` writes a queue as a fresh sibling
 of the served link, and `point(root:, target:)` renames the link, where
-`target` is a sibling, the found target or none (the link removed). Its
+`target` is a sibling, the found target or none (the link removed);
+`found` is the found target as `Netboot.found` reads it, or none for a
+stage, whose queue has no way back. Its
 `stage` is `prepare` of a one-entry queue, `point`, and the removal of
 stale siblings; a board run calls the first two under the lock it holds.
 The boot server's decision is pure: the request `Web::Http.read` gives,
@@ -1948,6 +1952,28 @@ its boot name, and a power cycle is the board's recovery for every other
 hang below the root
 ([design-fiasco.md, The Raspberry Pi 4](design-fiasco.md#the-raspberry-pi-4)).
 
+### The boot server in the tree
+
+The walk rests on three properties of the boot server: it answers only
+`boot.img` and `boot.sig`; it binds a download to one entry at its first
+request; and it serves a queue
+([design-platforms.md, The HTTP form](design-platforms.md#the-http-form)).
+The server on the desk, `pi4_http_serve.rb`, has none of them: it serves
+every regular file of its directory, resolves the directory once at its
+start, and answers each request from the directory as it is then
+(`pi4_http_serve.rb:29`, `:76-84`). It is replaced by one in the tree,
+`tools/erx netboot serve` (`NetbootServer`), whose pure decision reads
+requests through `Web::Http.read` (`tools/lib/erx/web_http.rb:64`), the
+host tool's bounded and fuzzed HTTP reader, and which answers one
+connection at a time. The alternative, the script outside the tree
+changed to the same contract, would leave the walk's guarantees and the
+key's resting on code the tree's tests and reviews do not reach, and the
+cost that kept the server out, a second reader of requests with its own
+fuzz target, is gone, since `Web::Http` is that reader. That the
+bootloader's requests fit `Web::Http`'s subset is unverified; the first
+boot through it settles it, and a request outside the subset widens
+`Web::Http` rather than adding a reader.
+
 ### The network boot the stager drives
 
 The HTTP boot the board's EEPROM uses comes into `Netboot` as its second
@@ -1968,30 +1994,6 @@ unchanged: a bench set is signed and checked as every staged build is,
 and a development build runs only trusted code, which a bench image is.
 
 ## Open decisions
-
-### Where the boot server runs
-
-The walk rests on three properties of the boot server: it answers only
-`boot.img` and `boot.sig`; it binds a download to one entry at its first
-request; and it serves a queue
-([design-platforms.md, The HTTP form](design-platforms.md#the-http-form)).
-The server on the desk, `pi4_http_serve.rb`, has none of them: it serves
-every regular file of its directory, resolves the directory once at its
-start, and answers each request from the directory as it is then
-(`pi4_http_serve.rb:29`, `:76-84`). Either it is replaced by one in the
-tree, `tools/erx netboot serve`, whose pure decision reads requests
-through `Web::Http.read` (`tools/lib/erx/web_http.rb:64`), the host
-tool's bounded and fuzzed HTTP reader, and which answers one connection
-at a time; or the script outside the tree is changed to the same
-contract, which the tree's tests and reviews then do not reach.
-**Recommendation: the server in the tree.** The cost that kept it out, a
-second reader of requests with its own fuzz target, is gone, since
-`Web::Http` is that reader, and the walk's guarantees and the key's rest
-on the server's code. That the bootloader's requests fit `Web::Http`'s
-subset is unverified; the first boot through it settles it, and a request
-outside the subset widens `Web::Http` rather than adding a reader. Until
-this is decided, the walk's and the HTTP form's implementation waits;
-the boot set, the boot name, the cycle probe and `BoardLog` do not.
 
 ### A hardware watchdog in the bench root
 

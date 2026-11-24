@@ -385,6 +385,30 @@ slot ...` line naming the boot the firmware handed over. `dnsmasq` logs
 each file it sends by its full path, which names your home directory:
 cut it from the paths before a log goes anywhere public.
 
+### Booting over HTTP
+
+A board whose EEPROM boots over HTTP (boot order `0xf17`) fetches
+`boot.sig` and then `boot.img` from `HTTP_HOST` under `HTTP_PATH`, and
+boots the image only when the signature verifies against the public key
+the EEPROM holds. Setting up that EEPROM is not covered here. With it in
+place, after `make pack PLATFORM=raspi4b`:
+
+```sh
+tools/erx netboot --key ~/keys/private.pem
+tools/erx netboot serve
+```
+
+The first packs the boot files the card's build record lists into one
+signed FAT image, its `cmdline.txt` ending in `erx.arg=` and a fresh
+boot name, and points `~/erxos-http` (`--http DIR` names another) at it.
+The key is the RSA-2048 private key whose public half the EEPROM holds;
+it must be a file you own with no permission for group or others
+(`chmod 600`), and it is read once, never copied. The second answers
+`/erxos/boot.sig` and `/erxos/boot.img` and no other name at
+`192.168.2.1:8080`, Internet Sharing's address on the cable (`--bind`,
+`--port` and `--prefix`, the EEPROM's `HTTP_PATH`, name others), and
+logs each request; Ctrl-C stops it. It keeps serving every later stage.
+
 ## When something fails
 
 * **Nothing on the console, green LED on.** The bootloader is too old:

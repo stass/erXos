@@ -1866,9 +1866,9 @@ the link at any moment, an interrupted stage's included, gives every
 download one image with its own signature. The server answers the board
 on its own link, whose requests are untrusted; it reads them through
 `Web::Http.read`, the host tool's bounded and fuzzed reader, and shows
-none of their bytes but through `LineEscape`. Where it runs, in the tree
-or as the script outside it, is an open decision of
-[design-bench.md](design-bench.md#where-the-boot-server-runs).
+none of their bytes but through `LineEscape`. It runs in the tree, as
+`tools/erx netboot serve`
+([design-bench.md, Decisions](design-bench.md#the-boot-server-in-the-tree)).
 
 The signature says only which image a network boot loaded. The card the
 bootloader falls back to after a refused or failed download is not
