@@ -203,13 +203,20 @@ module Erx
         Chokepoints::IncludeForm.new(
           name: 'include-form',
           rule: 'every include in erXos C names a header by a plain path, so no computed include or included ' \
-                'non-header carries text past the other rules; a CBMC harness alone also names its core',
+                'non-header carries text past the other rules; a CBMC harness also names its core, and the ' \
+                "peer bench the guests' bench sources",
           design: "#{KERNEL}#chokepoint-checks",
           scope: ERXOS_C,
           # A CBMC harness includes the core it checks, to reach its static
           # helpers; CBMC alone builds it, and the gate's include path finds
           # the core in kernel/core (docs/design-verification.md).
-          sites: [Chokepoints::Site.new(glob: 'test/cbmc/*.c', permits: /\A\s*"[a-z][a-z0-9_]*\.c"\s*\z/)],
+          sites: [Chokepoints::Site.new(glob: 'test/cbmc/*.c', permits: /\A\s*"[a-z][a-z0-9_]*\.c"\s*\z/),
+                  # The peer bench is the one file another system's compiler is given, so it
+                  # includes the guests' line, histogram, clock, sweep and window sources, which
+                  # these rules read where they are (docs/design-bench.md, "Other systems on the
+                  # same Raspberry Pi 4").
+                  Chokepoints::Site.new(glob: 'bench/peer/erx_peer_bench.c',
+                                        permits: %r{\A\s*"test/guest/bench/bench_[a-z]+\.c"\s*\z})],
           seed: { 'kernel/core/seeded.c' => "#define HIDDEN <l4/sys/ipc.h>\n#include HIDDEN\n",
                   'test/cbmc/seeded.c' => "#include \"../../kernel/core/cap.c\"\n" }
         ),
