@@ -521,8 +521,7 @@ app therefore never changes the table or the advertising data. The Pi 4's
 development card carries the terminal echo as a second package, so the
 board's checklist exercises this path
 ([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)); the
-published card carries the kiosk alone, and its build takes `ble` and
-`gatt` out of the `apps` row. The `apps` row's `gatt` field,
+published card carries the kiosk alone. The `apps` row's `gatt` field,
 the package's own field, the checks of the packages an image carries
 and the narrowing of each session are built; the checks of an install
 at run time are designed and not built. The serial service's library,

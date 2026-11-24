@@ -528,7 +528,7 @@ module Erx
     # code. The website's image (InteractiveBoot) goes through build, which asks for no
     # example, so it never carries Doom.
     def build_medium(directory:, kind: MediumKind.development, machine: @machine,
-                     manifest_source: self.class.medium_manifest(kind, machine.platform, root: @root), apps: ImageApps.none)
+                     manifest_source: machine.platform.manifest_source(@root), apps: ImageApps.none)
       on_own_board(machine)
       self.class.check_medium(kind, machine: machine, apps: apps)
 
@@ -612,21 +612,6 @@ module Erx
       return [].freeze unless card || kind.published?
 
       [ImageApps::KIOSK, *(ImageApps::ECHO if card && !kind.published?)].freeze
-    end
-
-    # The manifest a medium of kind (MediumKind) for platform is built from: the board's
-    # own (Platform#manifest_source), except that the published card's apps row offers no
-    # ble and no gatt (Manifest::Edit.without_ble). Both cards are built from the board's
-    # one manifest, whose row offers ble and gatt nus for the development card's echo,
-    # and the published card carries the kiosk alone, which handles no GATT service, so
-    # no row there grants ble and no session holds it (docs/design-bluetooth.md, decision
-    # 7). Its Bluetooth domain still serves every declared service until the served set
-    # is read from the rows (docs/todo-bluetooth.md).
-    def self.medium_manifest(kind, platform, root:)
-      source = platform.manifest_source(root)
-      return source unless kind.published? && BootPartition.boot_partition_medium?(platform)
-
-      Manifest::Edit.without_ble(source)
     end
 
     # The release medium for QEMU (ReleaseMedium) of built, an image this object packed, in

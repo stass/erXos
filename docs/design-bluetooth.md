@@ -3540,14 +3540,12 @@ list ([todo-performance.md](todo-performance.md)):
    manifest runs the echo with a `ble` row of its own naming `nus`, as
    the QEMU suite does. The second package is chosen, since it is the
    path an app takes on every other machine and exercises the install
-   check on the board; the published card keeps the kiosk alone and
-   offers no `ble`. Both cards are built from the one manifest, so the
-   published card's build takes `ble` out of the `apps` row's `services`
-   and drops its `gatt`, with the connection each app's session would
-   make to the Bluetooth domain (`ProductionImage.medium_manifest`,
-   `Manifest::Edit.without_ble`), as the website's image takes the whole
-   row out: no row grants `ble` there, so the Bluetooth domain serves no
-   service beyond GAP and GATT.
+   check on the board; the published card keeps the kiosk alone. Both
+   cards are built from the one manifest, so the published card's row
+   offers `ble` and `gatt nus` too: no package it carries declares
+   `gatt`, so no session there holds `ble`, and it serves `nus` as it
+   serves any service no app handles, answering reads from the declared
+   values and refusing writes.
 
 8. **Decided: the phone console runs in a configured domain of its own,
    `btconsole`, holding a `ble` grant whose `services` names `console`,

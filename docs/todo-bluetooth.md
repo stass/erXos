@@ -257,8 +257,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erx_bt_adv` integers); a fuzz target
   of the client's readers, `erx_gatt:event/2` and `answer/2` (`erlang/apps/erx_bt_client`; branch
   `bt-gatt-client`, commit bda412e16, has one written before the facet's redesign); and the served
-  services read from the manifest's rows, where `erx_bt_sup` serves every declared service, so the published
-  Pi 4 card, whose rows grant `ble` to no one, still serves `nus`, answering reads and refusing writes. Whether the
+  services read from the manifest's rows, where `erx_bt_sup` serves every declared service. Whether the
   registry's monitor of a handler in another domain fires when that handler or its domain ends is unverified.
 * [High] bluetooth and packaging, an installed app's `ble` grant (docs/design-bluetooth.md "The `ble` facet", "Who
   holds `ble`"; docs/design-packaging.md "The `apps` row", "The declaration", "Admission", PK13): designed, partly built.

@@ -103,9 +103,8 @@ principal system
 # (docs/design-bluetooth.md, decision 7), so the display domain's outer budget pays for
 # two pixel areas; the display, net and ble, which the build grants the app template; and
 # gatt nus, the one GATT service an app may handle, the echo's. The published card carries
-# the dashboard alone, which names no gatt, so its build takes ble out of services, gatt
-# with it, and one connection per app out of max_connections
-# (ProductionImage.medium_manifest; docs/design-bluetooth.md, decision 7). Each app is a
+# the dashboard alone, which names no gatt, so no session holds ble there, and it serves
+# nus as it serves any service no app handles (docs/design-bluetooth.md, decision 7). Each app is a
 # principal with a domains quota of one, so max_domains is the system principal's eight,
 # ntpd's and the two apps. max_connections, 28 with ntpd's session's, holds the 15 of the
 # network domain's comment, each app's session's five: its system connection, packages,

@@ -10,7 +10,7 @@ module Erx
     # How a harness changes a manifest: a number of a named record read, grown or set, the
     # record a reference names read (referenced), a reference pointed elsewhere, named records taken out (without), a facet's parameter
     # taken out (without_parameter), the session templates taken out (without_sessions), the apps row taken out with the room it took
-    # (without_apps), the apps row offering a service (offering) or no ble (without_ble), or a configured domain taken out with the records only it uses
+    # (without_apps), or a configured domain taken out with the records only it uses
     # (without_domain). Each reads the text with the manifest's own
     # reader (Frontend.read), changes the records it read, and writes them with its one
     # printer (Frontend.render), so an edit reaches a field only through its record and
@@ -186,22 +186,6 @@ module Erx
         changes = { %w[machine root_memory] => -apps.decimal('memory'), %w[machine max_domains] => -max,
                     %w[machine max_connections] => -max * (2 + services) }
         Frontend.render(grown(removed(source, [apps]), changes))
-      end
-
-      # text with its apps row offering no ble: ble taken out of its services and its gatt,
-      # the GATT services apps may handle over ble, with it, and max_connections shrunk by
-      # the connection each of the row's max apps makes to the Bluetooth domain, as
-      # without_apps reckons a session's connections; offering's inverse for ble. A row
-      # that does not offer ble is refused.
-      def without_ble(text)
-        source = Frontend.read(text)
-        apps = named(source, 'apps')
-        services = apps.properties.fetch('services', [])
-        raise Error, "the manifest's apps row offers no ble" unless services.any? { |token| token.value == 'ble' }
-
-        properties = apps.properties.except('gatt').merge('services' => services.reject { |token| token.value == 'ble' }.freeze).freeze
-        withdrawn = replaced(source, apps, Record.new(**apps.to_h, properties: properties).freeze)
-        Frontend.render(grown(withdrawn, { %w[machine max_connections] => -apps.decimal('max') }))
       end
 
       # text with its apps row offering service beside the services it offers and gatt as
