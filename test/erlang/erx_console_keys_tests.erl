@@ -105,6 +105,15 @@ every_bel_outside_a_string_is_ctrl_g_test() ->
                           ?assertEqual(Bels, length([P || P <- Pieces, P =:= ctrl_g]))
                   end, lists:seq(1, ?ROUNDS)).
 
+%% A loss inside an OSC string returns the line to the ground state, since what the
+%% terminal was sending is damaged: the next BEL is a typed Ctrl-G and opens the menu
+%% (docs/design-live.md, "Lost input"). So does a loss in every other state.
+a_loss_ends_a_string_test() ->
+    {[<<?ESC, "]11;rgb:00">>], string} = erx_console_keys:split(<<?ESC, "]11;rgb:00">>, erx_console_keys:new()),
+    ?assertEqual({[ctrl_g], ground}, erx_console_keys:split(<<?BEL>>, erx_console_keys:lost(string))),
+    [?assertEqual({State, ground}, {State, erx_console_keys:lost(State)})
+     || State <- [ground, escape, string, csi, {c2, ground}, {c2, string}]].
+
 %% A string reply, its controls in 7-bit form or in 8-bit form written as UTF-8: an OSC
 %% ended by BEL or ST, or a DCS, APC, PM or SOS ended by ST, whose body is any bytes but
 %% BEL, ESC, CAN, SUB and the 0x9C of the 8-bit ST.

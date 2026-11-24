@@ -1033,8 +1033,8 @@ redraw_if_listed(_Domain, State) ->
 %% character it fell among go with it, and the loss goes where the bytes would have
 %% gone: to the session that has the line, to the current group, or, while the menu
 %% has the line, nowhere, since the menu runs no line.
-driver_lost(State0 = #state{line = Line, sessions = Sessions}) ->
-    State = State0#state{keys = erx_console_keys:new(), pending = <<>>},
+driver_lost(State0 = #state{line = Line, sessions = Sessions, keys = Keys}) ->
+    State = State0#state{keys = erx_console_keys:lost(Keys), pending = <<>>},
     case Line of
         {session, Domain} ->
             #{Domain := #{master := Master}} = Sessions,

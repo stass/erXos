@@ -41,7 +41,7 @@ switches the terminal's keyboard mode can make Ctrl-G arrive as something else;
 both are residuals (TODO.md).
 """.
 
--export([new/0, split/2, next/2]).
+-export([new/0, lost/1, split/2, next/2]).
 -export_type([state/0, piece/0]).
 
 -define(BEL, 16#07).
@@ -61,6 +61,15 @@ both are residuals (TODO.md).
 -doc "The escape state of a line from which nothing has been read.".
 -spec new() -> state().
 new() -> ground.
+
+-doc """
+The escape state after a loss of the line's input, read in State: the ground state, as
+after `CAN`, since what the terminal was sending when the loss fell is damaged and can
+never end as it began (docs/design-live.md, "Lost input"). So a BEL after a loss inside
+a string is a typed Ctrl-G.
+""".
+-spec lost(state()) -> state().
+lost(_State) -> ground.
 
 -doc """
 Bytes, read at a line in State, as its pieces in order, and the state after them:
