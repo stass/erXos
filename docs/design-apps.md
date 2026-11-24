@@ -53,12 +53,22 @@ Decisions every reader of this document needs:
   at its own `service NAME start` or `restart`, or at the next boot, as
   FreeBSD's `pkg upgrade` leaves services alone
   ([Packaging](#packaging)).
+* **A system service may be switched, as `sshd` is on FreeBSD.** A
+  configured domain's row that carries `enable YES` or `enable NO` is a
+  **switched row**: the start table holds it beside the session rows,
+  `NAME_enable` in `/etc/start.conf` says whether it starts at boot, and
+  `service NAME enable|disable|start|stop|onestart` act on it as on an
+  app's row. The table decides only whether the manifest's row runs; the
+  manifest still fixes every grant, and the build proves the system with
+  the domain present and with it absent
+  ([Switched services](#switched-services)).
 
 **Is there one place that says when and where everything starts?** Yes,
 in the manifest, the packages' declarations and one file. The
 manifest's `domain` rows start the system's services, in the order the
-build computes, and the start table, the declared `start` rows with
-`/etc/start.conf` over them, starts everything else. `service -e`
+build computes, and the start table, the declared `start` rows and the
+switched `domain` rows with `/etc/start.conf` over them, says which of
+the rest start. `service -e`
 prints both, and `cat /etc/start.conf` every setting this machine has
 changed. Many machines share a configuration through their image, and
 the file holds one machine's departures from it
@@ -188,11 +198,12 @@ supervisor starts the keeper again within the row's intensity.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display, an intensity and start flags, and no limit, grant, device, service or code; the start flags are opaque data, bounded printable bytes that reach the session only as the value of one environment variable, `ERX_START_FLAGS`, which no shell, runtime or ERTS option parser reads ([The start table](#the-start-table)); the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; start flags delivered as runtime arguments or in a variable ERTS parses, such as `ERL_FLAGS`; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter`, the table and its keepers, every module of the start service's application but packaging's own (`erx_pkg*`, which [design-packaging.md](design-packaging.md#invariants) bounds), reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:system_namespace/0` (the wait before its first read of `start.conf`) and `erx_domain:server_settled/1` (the wait a keeper makes before it asks for a session on a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
+| **AP1.** Enabling, disabling or starting a row changes nothing the manifest check proved | a row carries a principal, a flag, a display, an intensity and start flags, and no limit, grant, device, service or code; the start flags are opaque data, bounded printable bytes that reach the session only as the value of one environment variable, `ERX_START_FLAGS`, which no shell, runtime or ERTS option parser reads ([The start table](#the-start-table)); the keeper's session is planned by `erx_dom_plan_session` from its principal's template index as every session is, and its facets pass the domain service's one funnel, which installs only rows of the manifest; so the manifest stays the only source of every domain row, device holder, service, budget, share, quota, limit and grant ([design-system.md](design-system.md#invariants), A10) | a row field that names a grant, a limit or a release; start flags delivered as runtime arguments or in a variable ERTS parses, such as `ERL_FLAGS`; a keeper that creates a domain by any call but `start_session/2` | a source check that `erx_starter`, the table and its keepers, every module of the start service's application but packaging's own (`erx_pkg*`, which [design-packaging.md](design-packaging.md#invariants) bounds), reaches the domain service only through `erx_domain:start_session/2`, `erx_domain:stop/2`, `erx_domain:switch/2` and `erx_domain:apply_switches/1`, which name a switched row of the manifest and carry nothing else, `erx_domain:system_namespace/0` (the wait before its first read of `start.conf`) and `erx_domain:server_settled/1` (the wait a keeper makes before it asks for a session on a display), both of which change nothing, reading a handle with `erx_domain:id/1` and `erx_domain:pid/1`, which reach nothing, with a seeded call of `erx_domain:create/1` |
 | **AP2.** A session exists without a person only by a row of the start table | the keepers of `erx_starter` are the only callers of `erx_domain:start_session/2` besides the console and the web login, and a keeper exists only for a row the boot or the row's own `start` or `restart` admitted, or for one `onestart`; a publication of the package set after the boot's admits no row ([When the file is read](#the-start-table)) | another boot-time starter | a source check that only `erx_console`, the web login and `erx_starter_keeper` call `erx_domain:start_session/2`, with a seeded call from another module; the source check of AP1; a QEMU test that boots a manifest with no `start` row and finds no session but the console's |
 | **AP3.** The table names only principals the manifest or an admitted package declares startable | a row exists only for a manifest `start` row or the start row of an admitted package ([design-packaging.md](design-packaging.md#the-start-tables-rows)); a `start.conf` line or a `ctl` command for a name with no such row is skipped or refused, so the data partition, the `etc` grant and the `start` grant only enable, disable or set the display, intensity and start flags of a declared row | a local line that adds a row | the merge's host test, a line for an unknown name skipped; seeded: a merge that adds a row for a principal with a template but no `start` row |
 | **AP4.** A display's session is the session of the row kept on it, and no other, across a restart of either domain | at most one kept row names each display: a row's supervisor starts only after the one admission ([The start table](#the-start-table)) finds no other kept row on its display, and the table's process admits one row at a time; only a row's keeper names a display with `display`; the domain service fixes the session mark in the record of that session's grant on the display and every mint of the record carries it ([design-system.md](design-system.md#facets-a-configured-domain-serves)) | an admission judged against the rows the file enables rather than the rows kept; a mark set by whichever session opens a window first; a re-mint that drops the mark | the merge's host test with two enabled rows on one display, the second refused; the judgement's test of a `start` on a kept row's display, refused, and on a stopped row's, admitted; the kiosk tests of [Verification and testing](#verification-and-testing), the display domain's restart among them |
 | **AP5.** A row whose display its principal cannot draw on never starts | the admission refuses a row whose display is not a `windows` service granted to its principal's template: at boot with `{no_grant, Display}` at `/proc/apps`, and at a `start` of a row a local setting gave such a display with `eperm`; the manifest check refuses such a manifest row (property 17) | a reserved display that stays blank because its session holds no grant there | the merge's host test; the judgement's host test; the QEMU test of a local line naming such a display |
+| **AP6.** Switching a system service decides only whether its manifest row runs | `switch/2` and `apply_switches/1` take names, and the domain service starts only the manifest's row of a name it holds as switched, with that row's grants, devices none, intensity and arguments; every argument it derives at a start comes from the grants of rows of the manifest; the manifest check proves every property with each switched row present and again with all of them absent ([Switched services](#switched-services)) | a switch that carries a field of the row; a configured domain with no `enable` that a command stops; a property that holds only while a switched row runs | the domain service's host test that `switch/2` of a name with no `enable` answers `{error, not_switched}` and stops nothing, seeded with a check that looks the name up among all configured rows; the manifest check over a manifest whose switched `bleuart` holds the Bluetooth domain's `nus`, which both passes accept, and over one whose `required` row holds a facet of a switched row's service, which the second pass refuses; seeded: the second pass skipped, which accepts the latter |
 
 ## Data model
 
@@ -627,10 +638,15 @@ holds only one machine's departures from them. Copying the file to
 another machine of the image copies those departures, and a line for a
 row that machine lacks is a problem there, skipped and reported.
 
-The configured domains are not rows of the table: they are the system
-itself, their order is computed, and their place is the manifest alone.
-`service -e` prints both, the configured domains in boot order and then
-the table, so one command shows everything that starts.
+A configured domain whose row carries no `enable` is not a row of the
+table: it is the system itself, its place in the boot order is
+computed, and it runs whenever the manifest holds it. A row that
+carries `enable` is a switched row of the table
+([Switched services](#switched-services)): its place in the boot order
+is still computed, and the table says only whether it runs.
+`service -e` prints both, the configured domains that start in boot
+order, switched rows the file or their default enables among them, and
+then the session rows, so one command shows everything that starts.
 
 ### Start flags
 
@@ -676,6 +692,126 @@ app and nothing else:
   as every setting does, and as on FreeBSD, where an `rc.d` script
   takes `NAME_flags` from the `rc.conf` it loaded when it runs
   (`rc.subr:1193-1197`).
+
+### Switched services
+
+FreeBSD ships `sshd` off and lets an administrator turn it on with
+`service sshd enable`; a system service that someone may want off, the
+SSH domain or the Bluetooth serial console `bleuart`
+([design-bluetooth.md](design-bluetooth.md#the-console)), needs the same
+switch. It is the start table's, with one new kind of row and nothing
+else new: a **switched row** is a configured domain's `domain` row that
+carries an `enable` default.
+
+```text
+domain bleuart
+  enable YES
+  published_enable NO
+  ...
+```
+
+The table holds a switched row under the domain's name, beside the
+session rows, and treats it as one: its variable name is the domain's
+name with each `-` replaced by `_`, `NAME_enable` in `/etc/start.conf`
+overrides its default, and the judgement, the commands, their `ctl`
+lines and errnos, `service -e`, `service -c` and `/proc/apps` are those
+of the sections above and of [How a command is judged](#how-a-command-is-judged).
+Two things differ, and both follow from the row being a configured
+domain rather than a principal's session:
+
+* **Its one field is `enable`.** A switched row has no display, no
+  start flags and no intensity of the table's: its restart intensity is
+  its manifest row's, and its arguments are the manifest's, which carry
+  authority as a session's start flags do not. A line setting
+  `NAME_display`, `NAME_flags`, `NAME_restarts` or
+  `NAME_restart_period_s` of a switched row is a problem, a field the
+  row does not have, and `service NAME enable display=D` answers
+  `einval`.
+* **Its action is the domain service's.** Where a session row's keeper
+  calls `erx_domain:start_session/2`, a switched row's command calls
+  `erx_domain:switch(Name, on)` or `erx_domain:switch(Name, off)`. On
+  starts the manifest's row as the boot starts a configured domain
+  ([design-system.md](design-system.md#boot)): the domain service
+  creates it from its row, gives it its grants and introductions, and
+  restarts it within its row's intensity, leaving it down beyond that as
+  any configured domain is left. Off ends it with `erx_domain:stop/2`,
+  as the host link's `domain` facet stops one, and the domain service
+  does not start it again. The domain service keeps one fact per
+  switched row, whether it is switched on, and nothing about the file:
+  every switched row is off until the start service switches it on.
+  So there is one restart policy for a configured domain, the domain
+  service's, and the start table never supervises one.
+
+What `start`, `stop`, `restart` and the `one` forms do follows: `start`
+of an enabled row switches it on, `ealready` if its domain runs or is
+starting; `stop` switches it off, `esrch` if it runs nothing; `restart`
+switches it off and on; `onestart` switches on a row that is not
+enabled, and its domain runs, restarted within its intensity, until a
+`stop` or `onestop` or the next boot. `enable` and `disable` only edit
+the file, as for every row. A switched row that is down shows `down` at
+`/proc/apps` until its `start` or the next boot.
+
+**At boot the rows that wait for the settings start after the read.**
+A switched row cannot start before `/etc/start.conf` is read, and the
+file lies on the data partition, which configured domains serve. So the
+domain service starts at step 3 of [Boot](design-system.md#boot) only
+the rows that do not wait for the settings, and the start service, once
+its boot read has answered, calls `erx_domain:apply_switches(On)` once,
+with the switched rows that read applied enabled; the domain service
+then starts, in boot order, the rows that wait. A row **waits for the
+settings** when it is switched; when its start depends on which
+switched rows run, which is so for a server one of whose arguments the
+build derives from the grants of its service, the Bluetooth domain's
+`services` being the one such argument
+([design-bluetooth.md](design-bluetooth.md#declarations-abigatt)), when
+a switched row holds a grant of that service; or when it holds a facet
+of a service a row that waits serves. The build computes the set, as it
+computes the boot order, and the domain service derives such an
+argument at the row's start from the grants of the rows that will run:
+those that do not wait, and the switched rows switched on. A read that
+cannot read the file gives the declared defaults, as for every row
+([The start table](#the-start-table)); a start service that has not
+applied the switches within the machine's boot timeout leaves the
+domain service to apply the declared defaults itself, with a log line,
+so a machine whose start service fails still starts the services its
+build declared on.
+
+**A switch restarts what derives from it.** When a switched row goes on
+or off, at a command or by `apply_switches`, a running row whose
+derived argument names one of its grants is restarted first, by the
+domain service's own stop and start, so that its new start derives the
+argument afresh: `service bleuart start` restarts the Bluetooth domain
+so that it serves and advertises `bleuart`'s service, and `service
+bleuart stop` restarts it without. Its clients take the restart as any
+restart of a server, through the grants the domain service mints again
+([design-system.md](design-system.md#facets-a-configured-domain-serves)).
+A row's own end within its intensity is not a switch and restarts
+nothing else.
+
+**What the manifest check holds a switched row to.** The row's
+variable name is unique among the table's variable names and does not
+begin with a digit, as for a `start` row (property 17), and package
+admission refuses an app name whose variable name is a switched row's.
+A switched row is not `required`, since a required row that an
+administrator may switch off ends the machine at the first `stop`; is
+not marked for rescue, nor is any row that waits for the settings,
+since the rescue configuration starts no row of the table; and holds no
+device and no partition window, so a device never waits for a
+command to be driven and no holder of one is ever off. The check proves
+every property with each switched row present, as for any row, and
+runs once more with all of them left out and every derived argument
+computed without their grants, so that no property holds only because
+a switched row runs. `published_enable`, which only a development
+manifest may carry, is the default the published medium's build packs
+in `enable`'s place ([design-packaging.md](design-packaging.md#the-apps-row)):
+the board's own media and the website's share one manifest and can
+differ in what they ship on. A release manifest gives each switched row
+its own default.
+
+A configured domain whose row carries no `enable` stays the system
+itself: every command for it answers `enoent` as `NAME is configured in
+the system manifest`, and only the manifest switches it, by holding the
+row or not.
 
 ## Algorithms and behavior
 
@@ -882,7 +1018,7 @@ that domain's namespace at the point where a session mounts its grant
 | --- | --- |
 | `service NAME enable [display=D] [restarts=N] [restart_period_s=S]` | writes `enable NAME` and the settings given to `ctl`, and the start service sets `NAME_enable="YES"` and those settings in `/etc/start.conf`, as [Who writes it](#the-start-table) says; it answers `NAME enabled in /etc/start.conf`, as FreeBSD's does (`rc.subr:1451-1454`), or the errno of `ctl`'s write: `enoent` for a name with no row, `einval` for a value that is a problem, `efbig` for an edit that would make the file longer than `start_conf_max`; it starts nothing, so the row starts at the next boot or at `service NAME start`, and no command for another row starts it. A display that the admission refuses, one a kept row holds or one not among the principal's `windows` services (for a package's app, those its admission kept), stays in the file: a `start` of the row answers `ebusy` or `eperm` and changes nothing, and the next boot leaves the row `refused` with its reason at `/proc/apps` |
 | `service NAME disable` | writes `disable NAME` to `ctl`, which sets `NAME_enable="NO"` in `/etc/start.conf`, and answers `NAME disabled in /etc/start.conf` (`rc.subr:1456-1459`); a row that runs runs on, kept by its supervisor, until `service NAME stop` or the next boot |
-| `service NAME start`, `stop`, `restart` | writes its line to `ctl` and answers from the write's errno alone, as [How a command is judged](#how-a-command-is-judged) decides it: `enotsup` as rc.subr(8) does, `Cannot 'start' NAME. Set NAME_enable to YES in /etc/start.conf or use 'onestart' instead of 'start'.`, with the command's own name for `stop` and `restart`, and status 0 (`rc.subr:1335-1342`); `ealready` as `NAME already running?` and `esrch` as `NAME not running?`, each with status 1; `enoent` as `NAME is configured in the system manifest` for a configured domain of `/proc/apps`'s boot order, and `NAME does not exist in the system manifest` otherwise. It makes no decision from what `/proc/apps` shows of the row |
+| `service NAME start`, `stop`, `restart` | writes its line to `ctl` and answers from the write's errno alone, as [How a command is judged](#how-a-command-is-judged) decides it: `enotsup` as rc.subr(8) does, `Cannot 'start' NAME. Set NAME_enable to YES in /etc/start.conf or use 'onestart' instead of 'start'.`, with the command's own name for `stop` and `restart`, and status 0 (`rc.subr:1335-1342`); `ealready` as `NAME already running?` and `esrch` as `NAME not running?`, each with status 1; `enoent` as `NAME is configured in the system manifest` for a configured domain of `/proc/apps`'s boot order whose row is not switched, and `NAME does not exist in the system manifest` otherwise. It makes no decision from what `/proc/apps` shows of the row |
 | `service NAME onestart [display=D]`, `onestop`, `onerestart` | writes the `one` form to `ctl`, which acts on a row whether or not it is enabled, and answers its errno as above |
 | `service NAME status`, `onestatus` | shows the row's state and reason from `/proc/apps`, the row as the boot or its own last command applied it, or `installed`; a session `onestart` started belongs to no row and is not shown; then, while a session of the row serves its tree, kept or started by `onestart`, the app's own words, the lines of `/svc/NAME/status` its parser accepts, as a FreeBSD script's `status_postcmd` adds its own, read at a deadline ([design-app-trees.md](design-app-trees.md#what-the-commands-show)); the exit status is the row's |
 | `service NAME CMD [ARG ...]`, for any other CMD | refuses, with its usage line, a word that carries an rc.subr prefix (`fast`, `force`, `one`, `quiet`) or is an rc.subr keyword (`rcvar`, `enabled`, `delete`, `describe`, `extracommands`, `poll`) and is not one of its own verbs; otherwise, for a row whose session serves its tree, kept or started by `onestart`, writes `CMD ARG ...` to the app's own `/svc/NAME/ctl`, as a FreeBSD script's `extra_commands` run its own verbs, and answers from that write alone, status 0 when it succeeds and 1 otherwise ([design-app-trees.md](design-app-trees.md#what-the-commands-show)) |
@@ -890,8 +1026,11 @@ that domain's namespace at the point where a session mounts its grant
 | `service -c [FILE]` | judges `/etc/start.conf`, or FILE, prints each problem with its line and the row's own name beside its variable, and exits 1 if there is one and 0 otherwise; it checks row names only where `/proc/apps` lists the rows and says so where it does not ([Checking before it counts](#the-start-table)) |
 | `service NAME purge` | removes the data of a name that no installed package holds, admitted or refused, so a name a refused package holds keeps its data until `rm` removes the package, every signer's but the image's own, `apps/NAME/image`, which no purge removes; for a name of the image's packages, the data of every installed package the name held, shadowed or not: purging a shadowed package's name removes its data while the package itself stays on the data partition until it is removed ([design-packaging.md](design-packaging.md#where-an-apps-files-lie)) |
 
-For a configured domain, `service` answers every request that it is
-configured in the system manifest; its state is at `[domains, Id]`.
+For a configured domain whose row is not switched, `service` answers
+every request that it is configured in the system manifest; its state
+is at `[domains, Id]`. A switched row takes every command of the table
+as [Switched services](#switched-services) says, and `service NAME
+status` shows its state from `/proc/apps`.
 
 **The start service's tree**, the service `start` of the system domain
 and an instance of `files`, which `erx_starter` serves with `erx_fs` and a
@@ -942,21 +1081,32 @@ since a `stop`, `disabled`, or `refused` with its refusal as the
 reason; and `installed` for a row of an admitted package that has no
 record, one a publication added after the boot's package set, to
 which no boot or command of its own has applied the file yet. A session `onestart` started belongs to no row and is not
-shown. An app's sessions are domains like any other at
+shown. A switched row is listed by its domain's name with `kind`
+`domain`, where a session row's is `session`, and its state comes from
+the domain service: `starting` and `running` while its domain does,
+`down` once the domain service has left it down, `stopped` or
+`disabled` when it is switched off, and `domain` its domain's id while
+one runs. An app's sessions are domains like any other at
 `[domains, Id]`. This is what the system observes of an app; what the
 app says about itself, and the commands it takes, are in its own tree at
 `/svc/NAME` ([design-app-trees.md](design-app-trees.md)).
 
-**Manifest rows**: `start`. Its packed record and the reader's bounds
+**Manifest rows**: `start`, and the `enable` and `published_enable`
+fields of a `domain` row. Their packed records and the reader's bounds
 are in `abi/manifest.txt`. The start service reads the `start` rows,
-the session templates and their `windows` grants through `erx_manifest`.
+the switched rows' names and defaults, the session templates and their
+`windows` grants through `erx_manifest`.
 
 **The ABI source**: the limits `start_rows_max`, `start_restarts_max`,
 `start_period_max_s` and `start_flags_max`, and the `start` row's
 default flags in its packed record.
 
 **Erlang**: `erx_domain:start_session/2`, whose second argument may
-name a display and give start flags.
+name a display and give start flags; `erx_domain:switch(Name, on |
+off)`, which starts or stops the switched row `Name` and answers
+`{error, not_switched}` for any other name; and
+`erx_domain:apply_switches(On)`, the boot's one call, refused after its
+first.
 
 **The session's environment**: `ERX_START_FLAGS`, a row's start flags,
 in every session a row or a `onestart` starts.
@@ -965,7 +1115,7 @@ in every session a row or a `onestart` starts.
 
 | Subsystem | Interaction |
 | --- | --- |
-| the domain service | makes a row's session from its principal's template; fixes the session mark in the record of the grant on the display a keeper's start names, and carries it in every mint of that record |
+| the domain service | makes a row's session from its principal's template; fixes the session mark in the record of the grant on the display a keeper's start names, and carries it in every mint of that record; starts and stops a switched row's domain at `switch/2`, starts the rows that wait for the settings after `apply_switches/1`, and restarts a row whose derived argument a switch changes |
 | the storage service | serves the `etc` tree, which holds `start.conf`, read-write to the system domain and read-write to the templates that hold `start`; roots an app's `data` grant at the app's own directory and a session's `home` grant at its user's home |
 | the display | serves every session that holds its grant, and under the single policy shows the windows of the display's session alone ([design-display.md](design-display.md#a-displays-session)) |
 
@@ -1257,7 +1407,23 @@ durability runs over the storage power-cut harness's simulated medium
 * a manual edit to `YES` and to `NO`: the shell's check of `/proc/apps`
   before writing `ctl`, which refuses a start the file has since
   enabled, or answers `already running?` from its cached state; a start
-  service that ends the kept session of a row its read finds disabled.
+  service that ends the kept session of a row its read finds disabled;
+* switched rows: the command judgement over every command and every
+  state of a switched row, including `down`, seeded with a judgement
+  that calls `start_session/2` for it; a `NAME_display` line for a
+  switched row, which must be a problem, seeded with a judgement that
+  applies it; the boot's `apply_switches/1` with the rows the read
+  enabled and, on a read that fails, the declared defaults, seeded with
+  a boot that passes the file's rows unread; the set of rows that wait
+  for the settings, computed over a fixture in which the Bluetooth
+  domain derives `services` from a switched holder and an always-on
+  `ble` holder follows it, seeded with a closure that leaves the
+  holder out, which starts it before its server;
+* a switch's derived restart, in the domain service's host test: `switch(bleuart, on)`
+  restarts the running Bluetooth domain with `services` naming
+  `bleuart`'s service and then starts `bleuart`, and `off` stops it and
+  restarts the Bluetooth domain without; seeded: a switch that restarts
+  nothing, which leaves the old `services`.
 
 **The manifest check.** One seeded manifest for each clause of property
 17: a `start` row for a principal with no template; rows for
@@ -1283,7 +1449,14 @@ whose arguments and environment leave room for every word the boot
 view reserved before but not for the variable at its longest, which the
 boot view refuses; seeded: a boot view that does not
 look for the key in a template's environment, which admits the second, and the
-variable left out of the reserve, which admits the third.
+variable left out of the reserve, which admits the third. For switched
+rows: one that is `required`, one marked for rescue, one that holds a
+device or a partition window, one whose variable name is a `start`
+row's, a rescue row that waits for the settings, and `published_enable`
+in a release manifest, each refused; its passing case is the Raspberry
+Pi 4's development manifest with `bleuart` switched; seeded: a check
+that compares only `start` rows' variable names, which admits a
+switched `clock` beside the app `clock`.
 
 **QEMU tests**, in the suites of the tracks that bring the parts:
 
@@ -1306,6 +1479,15 @@ variable left out of the reserve, which admits the third.
 * a session whose template holds no `start` grant finds no
   `/etc/start`, no `/etc/start.conf` and no `/apps`, and its
   `erx:cap(start)` is undefined;
+* a switched row: on QEMU `virt`'s Bluetooth suite manifest, `service
+  bleuart disable` and a reboot leave `bleuart` down and its service
+  unadvertised, `service bleuart onestart` runs it until the next boot,
+  `service bleuart enable` and a reboot start it, and a killed
+  `bleuart` is started again within its intensity while `service
+  bleuart stop` leaves it stopped; a published medium boots with it
+  disabled and `service -e` omits it; seeded: a boot that starts
+  switched rows at step 3, before the read, which starts the disabled
+  row;
 * the rescue configuration starts no row;
 * a kiosk booted five times without an ordered end, its app reaching
   ready each time, never reaches the rescue configuration; seeded: a
@@ -1350,6 +1532,9 @@ compiler, flags, workload and baseline.
 | **An app is a configured domain** | A configured domain is part of the system: it sits in the boot order, its group is a child of `system`, it may hold devices, and its restarts are the domain service's. An app is a principal's code, charged to that principal under `users` |
 | **A starter of its own**, with unit files, dependencies and socket activation | The domain service orders the system's services, OTP supervisors restart, and a session is already how a principal's code starts. A row and a keeper are what was missing |
 | **Restarts by the domain service** | It would give sessions a second owner. The keeper is to its session what the console is to a login's |
+| **A switched service as an app**: a principal, a session template holding the service's grants, and a `start` row | An app is charged to a principal under `users` and holds only what an app may; the SSH domain and `bleuart` are system services, configured domains in the boot order with the grants the manifest's row checks (the login facet, a console line), which no app template may hold |
+| **A switch outside the start table**: a `ctl` word of each service's own tree, or a manifest-only choice | Each service would carry its own on and off and its own persistence, and the administrator would meet two interfaces for one question, whether a thing starts at boot. FreeBSD answers it with one, `rc.conf` and `service`, for base daemons and packages alike |
+| **Switched rows started at step 3 from their defaults, and corrected at step 5** | A row the file disables would run from boot until the read, an SSH listener among them, and a server deriving from it would start twice. Starting what waits after the read starts each once |
 | **A settings file the start service serves**, judged whole at each write and stored by it | It is not a real file: its text changes only at a sync or a close, an editor that saves by renaming fails, and each departure from a file's behaviour must be documented and tested. A plain file that any tool edits, and that every read judges, needs none of that |
 | **FreeBSD's `/etc/rc.conf` itself**, by name | FreeBSD's file is `sh` that may set any variable and run any command, and its per-service variables carry authority (rc.conf(5)); erXos must refuse all of that (AP1), so the name would promise what the file does not do. The file borrows the assignment syntax and takes its own name |
 | **The manifest's own `start` syntax** for the file | An invented syntax: rc.conf(5)'s assignments are a standard that FreeBSD users, `sysrc` and editors already know |
@@ -1450,6 +1635,16 @@ Decisions:
     file is executed. Only that section and the reader depend on it.
 17. **No one-shot rows and no ordering between rows** until a consumer
     needs them ([Alternatives considered](#alternatives-considered)).
+18. **A system service is switched by the start table**: a configured
+    domain's row with an `enable` default is a row of the table, set by
+    `NAME_enable` and commanded by `service`, whose actions are the
+    domain service's start and stop of the manifest's row; the rows that
+    wait for the settings start after the boot's read, and a switch
+    restarts a server whose argument derives from it. The SSH domain and
+    `bleuart` are switched rows
+    ([Switched services](#switched-services),
+    [design-ssh.md](design-ssh.md#the-ssh-domain),
+    [design-bluetooth.md](design-bluetooth.md#the-console)).
 
 ## References
 

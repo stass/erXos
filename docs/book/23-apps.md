@@ -12,7 +12,8 @@
 > **Designed:** installing, updating and removing through `/apps`,
 > `mount` of a package, `service NAME purge`, `/proc/packages`, the
 > app's budget as a wall carved at each session's start, the `flags`
-> field, the SDK's host tools, `erx-app test`, and `/svc/NAME`.
+> field, the SDK's host tools, `erx-app test`, `/svc/NAME`, and
+> switched system services, the SSH domain and `bleuart` among them.
 
 **Background needed.** [Chapter 8](08-kernel-interface.md) (the
 kernel interface), [chapter 11](11-security.md) (facets, file grants,
@@ -146,6 +147,20 @@ table and `service` are built; chapter
 covers `service` as a command. The built `enable` also starts the row,
 where the design has it start nothing until the next boot or the
 row's own `start`.
+
+A system service someone may want off joins the same table. A
+configured domain's manifest row that carries an `enable` default, as
+the SSH domain's and the Bluetooth serial console's, `bleuart`, do, is
+a **switched row**: `ssh_enable="NO"` in the settings file keeps it
+from starting at boot, and `service ssh stop` and `service ssh start`
+end and start it now, as on FreeBSD. The table decides only whether
+the manifest's row runs; starting and stopping it are the domain
+service's, which restarts it within its row's intensity as it restarts
+any configured domain, and the manifest still fixes its grants. A
+switched row cannot start before the settings are read, so it and the
+domains that depend on it start after the read, once in each boot
+([design-apps.md, Switched services](../design-apps.md#switched-services)).
+This is designed and not built.
 
 ### 23.1.3 One row bounds every app
 
