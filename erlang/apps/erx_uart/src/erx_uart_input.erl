@@ -7,14 +7,14 @@
 %% erx_console_taken. A driver has at most one input message its owner has not taken: next/1
 %% gives the next message only once taken/1 has recorded the answer to the last, so the
 %% owner's mailbox holds at most one input message from the driver however late it is. A
-%% UART's line cannot wait, so the driver keeps draining into this store meanwhile, which
-%% holds at most Max bytes, one drain's: a byte that finds it full is dropped and becomes a
-%% loss. A loss takes no byte of room, so it is kept when the
-%% bytes fill the store, and losses with no byte between them, in the store or against the
-%% loss last sent, are one, so the store holds at most one loss between two of its bytes.
-%% Only a console's driver keeps a store: a line's driver, the host link's or a Bluetooth
-%% controller's, hands each drain up as it reads it, since its owner bounds what it holds
-%% and a dropped byte there would be silent.
+%% driver keeps draining into this store meanwhile, which holds at most Max bytes, one
+%% drain's, and reads no more bytes than room/1 says it has room for, leaving the rest in
+%% its device's FIFO; a byte that finds the store full is therefore a bug in the driver, and
+%% crashes it. A loss takes no byte of room, and losses with no byte between them, in the
+%% store or against the loss last sent, are one, so the store holds at most one loss
+%% between two of its bytes. Only a console's driver fills a store: a line's driver, the
+%% host link's or a Bluetooth controller's, hands each drain up as it reads it, since its
+%% owner bounds what it holds, so its store stays empty and only bounds its drains.
 %%
 %% The messages are the driver's: {erx_console_input, Bytes}, a run of bytes in the order
 %% read, and erx_console_lost, at the loss's place among them.
@@ -42,7 +42,7 @@
 new(Max) ->
     #input{max = Max}.
 
--doc "How many more bytes the store holds before a byte becomes a loss.".
+-doc "How many more bytes the store holds: a drain reads at most this many.".
 -spec room(input()) -> non_neg_integer().
 room(#input{bytes = Bytes, max = Max}) ->
     Max - Bytes.
@@ -56,8 +56,8 @@ take_in(lost, I = #input{after_loss = true}) ->
     I;
 take_in(lost, I = #input{held = Held}) ->
     I#input{held = [lost | Held], after_loss = true};
-take_in(_Byte, I = #input{bytes = Max, max = Max}) ->
-    take_in(lost, I);
+take_in(_Byte, #input{bytes = Max, max = Max}) ->
+    error(input_store_full);
 take_in(Byte, I = #input{held = Held, bytes = Bytes}) ->
     I#input{held = [Byte | Held], bytes = Bytes + 1, after_loss = false}.
 

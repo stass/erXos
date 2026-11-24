@@ -36,9 +36,17 @@
 %%
 %% One input message outstanding: the console's driver sends its next input message only
 %% after the console's erx_console_taken answers the last, and drains meanwhile into a store
-%% of one drain's bytes (erx_uart_input). A send takes a waiting answer between its bytes,
+%% of one drain's bytes (erx_uart_input). It reads no more input than the store can hold:
+%% every drain is bounded by the store's room (drain/3), so no caller can make it read a
+%% byte it would drop. A drain that stopped with the store full pauses the receive side
+%% (settled/1): it masks the receive and receive-timeout interrupts in IMSC, so the line
+%% raises nothing while the words wait in the FIFO, which QEMU's model holds back and
+%% silicon's marks with OE if it overruns, and the console's answer, once the store has room
+%% again, unmasks them and drains. Input is then lost only where the line loses it, to the
+%% FIFO's overrun, and that loss is marked. A send takes a waiting answer between its bytes,
 %% so output never waits on input being taken, nor input on output. A line's driver hands
-%% each drain up as read, as its owner bounds what it holds.
+%% each drain up as read, as its owner bounds what it holds, so its store stays empty and
+%% it never pauses.
 %%
 %% Sending: one byte per free FIFO slot. A full FIFO waits a millisecond at a time with the
 %% receive side still served. A UART at 115200 baud frees eleven slots a millisecond, so no
@@ -50,7 +58,7 @@
 -export([init/2, format_status/1]).
 -export([console_records/0, console_uart/1, baud_divisors/1, program/1]).
 %% Exported for its tests.
--export([drain/2, on_overrun/1]).
+-export([drain/3, on_overrun/1]).
 -export_type([step/0]).
 
 -include("generated/erx_hw_pl011.hrl").
@@ -73,8 +81,10 @@
 %% The reads that empty the receive side: the FIFO's 32 entries (2-6) and the holding
 %% register.
 -define(RX_DRAIN_READS, 33).
-%% The words one delivery's drain reads at most: two FIFO depths.
+%% The words one delivery's drain reads at most: two FIFO depths, the console's store's size.
 -define(DRAIN_WORDS, 64).
+%% IMSC's receive and receive-timeout interrupts, the only ones the driver unmasks.
+-define(RX_INTERRUPTS, (?ERX_HW_PL011_IMSC_RXIM_PUT(1) bor ?ERX_HW_PL011_IMSC_RTIM_PUT(1))).
 
 %% The driver's state: its device, its line, the process it serves, whether it makes a
 %% loss of an overrun, which only the console's driver does, the console's input not yet
@@ -86,9 +96,11 @@
                  input :: erx_uart_input:input(),
                  rx = drained :: rx()}).
 -type on_overrun() :: mark | pass.
-%% How a drain ended: with FR showing the receive side empty, or at its bound with words
-%% perhaps left, which the driver drains next without waiting for the line.
--type rx() :: drained | stopped.
+%% The receive side: drained, the last drain read FR empty, so the line delivers what comes
+%% next; stopped, the last drain stopped at its bound with words perhaps left and the store
+%% has room, so the driver drains on without waiting for the line; paused, the store is full,
+%% the receive interrupts are masked and the words wait in the FIFO for the console's answer.
+-type rx() :: drained | stopped | paused.
 
 %% One step of a driver's start over its UART (program/1), which run/3 performs: a
 %% register written whole or one field of it, the transmitter waited idle, one character
@@ -152,7 +164,7 @@ start(Spec, Owner, Ack, OnOverrun) ->
     {ok, Dev} = erx_device:open(Spec),
     lists:foreach(fun(Step) -> run(Dev, Clock, Step) end, Steps),
     {ok, Irq} = erx_irq_line:attach(Dev, ?RX_LINE),
-    ok = erx_device:write(Dev, imsc, ?ERX_HW_PL011_IMSC_RXIM_PUT(1) bor ?ERX_HW_PL011_IMSC_RTIM_PUT(1)),
+    ok = erx_device:write(Dev, imsc, ?RX_INTERRUPTS),
     proc_lib:init_ack(Ack),
     S = #driver{dev = Dev, irq = Irq, owner = Owner, on_overrun = OnOverrun,
                 input = erx_uart_input:new(?DRAIN_WORDS)},
@@ -424,40 +436,28 @@ answer_in_send(S) ->
     end.
 
 %% A delivery's drain, then its one acknowledgement: erx_irq_line takes one answer per
-%% notice, so a drain that continues one (more_input/1) acknowledges nothing.
+%% notice, so a drain that continues one (more_input/1) acknowledges nothing. A paused
+%% driver acknowledges a delivery that came before its mask and reads nothing.
 take_input(S = #driver{irq = Irq}) ->
     Next = deliver_input(S),
     ok = erx_irq_line:ack(Irq),
     Next.
 
 %% The rest of a drain that stopped at its bound, with no delivery and so no
-%% acknowledgement, if the driver continues it now (continues/1); else the driver as it is.
-more_input(S) ->
-    case continues(S) of
-        true -> deliver_input(S);
-        false -> S
-    end.
+%% acknowledgement.
+more_input(S = #driver{rx = stopped}) -> deliver_input(S);
+more_input(S) -> S.
 
 %% The loop's receive timeout: none while the driver continues a stopped drain.
-more_wait(S) ->
-    case continues(S) of
-        true -> 0;
-        false -> infinity
-    end.
+more_wait(#driver{rx = stopped}) -> 0;
+more_wait(_S) -> infinity.
 
-%% Whether the driver continues a stopped drain now: only once its store, made of
-%% ?DRAIN_WORDS bytes in start/4 so that a whole drain fits an empty one, has room for a
-%% whole drain, which a line's driver's empty store always has. A console that has not yet
-%% taken the message last sent leaves the words in the FIFO meanwhile, where QEMU's model
-%% holds the line's bytes back and silicon's FIFO marks an overrun with OE, rather than
-%% in drains that would find the store full and make a loss of bytes nothing lost.
-continues(#driver{rx = stopped, input = Input}) -> erx_uart_input:room(Input) >= ?DRAIN_WORDS;
-continues(#driver{rx = drained}) -> false.
-
-deliver_input(S = #driver{dev = Dev, on_overrun = OnOverrun}) ->
+deliver_input(S = #driver{rx = paused}) ->
+    S;
+deliver_input(S = #driver{dev = Dev, on_overrun = OnOverrun, input = Input}) ->
     ok = erx_device:write(Dev, icr, erx_device:read(Dev, mis)),
-    {Units, Rx} = drain(Dev, OnOverrun),
-    handed(Units, S#driver{rx = Rx}).
+    {Units, Rx} = drain(Dev, OnOverrun, Input),
+    settled(handed(Units, S#driver{rx = Rx})).
 
 %% One drain's units: a line's driver hands its bytes up at once; the console's puts them
 %% in the store and sends the next message if none waits.
@@ -468,7 +468,7 @@ handed(Units, S = #driver{on_overrun = mark, input = Input}) ->
     send_next(S#driver{input = erx_uart_input:add(Units, Input)}).
 
 taken(S = #driver{input = Input}) ->
-    send_next(S#driver{input = erx_uart_input:taken(Input)}).
+    settled(send_next(S#driver{input = erx_uart_input:taken(Input)})).
 
 send_next(S = #driver{owner = Owner, input = Input}) ->
     case erx_uart_input:next(Input) of
@@ -476,11 +476,37 @@ send_next(S = #driver{owner = Owner, input = Input}) ->
         {Message, Next} -> Owner ! Message, S#driver{input = Next}
     end.
 
-%% The units the receive side holds, in order, read until FR shows it empty (drained) or
-%% ?DRAIN_WORDS words are read (stopped).
--spec drain(erx_device:device(), on_overrun()) -> {[erx_uart_input:unit()], rx()}.
-drain(Dev, OnOverrun) ->
-    drain(Dev, OnOverrun, ?DRAIN_WORDS, []).
+%% The receive side once a drain or an answer has changed the store: a drain that stopped
+%% with no room left in the store pauses, masking the receive interrupts so that the words
+%% wait in the FIFO; a paused driver whose store has room again unmasks them and drains.
+%% Only the console's driver pauses: a line's driver's store stays empty.
+settled(S = #driver{rx = stopped, dev = Dev, input = Input}) ->
+    case erx_uart_input:room(Input) of
+        0 ->
+            ok = erx_device:write(Dev, imsc, 0),
+            S#driver{rx = paused};
+        _ ->
+            S
+    end;
+settled(S = #driver{rx = paused, dev = Dev, input = Input}) ->
+    case erx_uart_input:room(Input) of
+        0 ->
+            S;
+        _ ->
+            ok = erx_device:write(Dev, imsc, ?RX_INTERRUPTS),
+            deliver_input(S#driver{rx = stopped})
+    end;
+settled(S = #driver{rx = drained}) ->
+    S.
+
+%% The units the receive side holds, in order, read until FR shows it empty (drained) or as
+%% many words are read as Input, the store they go to, has room for bytes (stopped). A
+%% word's loss takes no room, so the drain never gives the store a byte it cannot hold,
+%% whoever calls it; a line's driver's store stays empty, so its drains read ?DRAIN_WORDS.
+-spec drain(erx_device:device(), on_overrun(), erx_uart_input:input()) ->
+          {[erx_uart_input:unit()], drained | stopped}.
+drain(Dev, OnOverrun, Input) ->
+    drain(Dev, OnOverrun, erx_uart_input:room(Input), []).
 
 %% Reading DR pops a byte, so each word is read once and decoded from that word.
 drain(_Dev, _OnOverrun, 0, Units) ->

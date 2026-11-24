@@ -517,7 +517,10 @@ no way of cutting the reply into pieces makes a `Ctrl-G`. It has host
 tests and a fuzz target.
 
 A UART has no flow control on the console's line, so a fast paste can
-overrun its receive FIFO. The driver reports each loss as an event of
+overrun its receive FIFO. Its driver reads no more input than it can
+hold for the console, so while the console is behind the bytes wait in
+the FIFO, its interrupts masked, and only the FIFO's own overrun loses
+any. The driver reports each loss as an event of
 its own, in order with the bytes, and the console passes it on, to its
 own shell or as `tty_lost` to a session's tty, so the loss reaches the
 line editor between the keys typed before and after it

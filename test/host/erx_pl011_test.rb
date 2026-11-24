@@ -47,21 +47,29 @@ class ErxPl011Test < Minitest::Test
              replacement: '{mark, 1} -> [Byte, lost];',
              catching_case: 'overrun_is_placed_before_the_byte_after_the_loss_test'),
     Seed.new(fault: 'the drain reading past two FIFO depths',
-             anchor: 'drain(Dev, OnOverrun, ?DRAIN_WORDS, []).',
+             anchor: 'drain(Dev, OnOverrun, erx_uart_input:room(Input), []).',
              replacement: 'drain(Dev, OnOverrun, 2 * ?DRAIN_WORDS, []).',
              catching_case: 'a_wedged_receive_is_drained_a_bounded_amount_test'),
+    Seed.new(fault: "a drain ignoring its store's room",
+             anchor: 'drain(Dev, OnOverrun, erx_uart_input:room(Input), []).',
+             replacement: 'drain(Dev, OnOverrun, ?DRAIN_WORDS, []).',
+             catching_case: 'a_drain_reads_no_more_than_its_store_has_room_for_test'),
     Seed.new(fault: 'a drain stopped at its bound left for an interrupt that never comes',
-             anchor: "        true -> 0;\n",
-             replacement: "        true -> infinity;\n",
+             anchor: 'more_wait(#driver{rx = stopped}) -> 0;',
+             replacement: 'more_wait(#driver{rx = stopped}) -> infinity;',
              catching_case: 'a_drain_stopped_at_its_bound_is_continued_without_an_interrupt_test'),
     Seed.new(fault: 'a continued drain acknowledging the line, which delivered nothing',
-             anchor: "        true -> deliver_input(S);\n",
-             replacement: "        true -> take_input(S);\n",
+             anchor: 'more_input(S = #driver{rx = stopped}) -> deliver_input(S);',
+             replacement: 'more_input(S = #driver{rx = stopped}) -> take_input(S);',
              catching_case: 'a_drain_stopped_at_its_bound_is_continued_without_an_interrupt_test'),
-    Seed.new(fault: "the console's stopped drain continued into a store without room",
-             anchor: 'continues(#driver{rx = stopped, input = Input}) -> erx_uart_input:room(Input) >= ?DRAIN_WORDS;',
-             replacement: 'continues(#driver{rx = stopped}) -> true;',
-             catching_case: 'a_console_s_stopped_drain_waits_for_room_test')
+    Seed.new(fault: 'a full store left with its receive interrupts unmasked',
+             anchor: "            ok = erx_device:write(Dev, imsc, 0),\n",
+             replacement: '',
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test'),
+    Seed.new(fault: "the receive interrupts left masked on the console's answer",
+             anchor: "            ok = erx_device:write(Dev, imsc, ?RX_INTERRUPTS),\n",
+             replacement: '',
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test')
   ].freeze
 
   def test_console_uart_cases_pass_under_eunit
@@ -76,7 +84,8 @@ class ErxPl011Test < Minitest::Test
       assert_equal 1, source.scan(seed.anchor).size, "seed anchor for #{seed.fault} is not unique"
       output, status = run_cases({ PL011 => source.sub(seed.anchor) { seed.replacement } })
       refute status.success?, "#{seed.fault}: the cases passed"
-      assert_match(/#{Regexp.escape(seed.catching_case)}[^\n]*\*failed\*/, output, seed.fault)
+      # A crash report of the driver can come between the case name and its verdict.
+      assert_match(/#{Regexp.escape(seed.catching_case)}\.\.\.(?:(?!\n  erx_pl011_tests:).)*\*failed\*/m, output, seed.fault)
     end
   end
 

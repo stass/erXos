@@ -31,11 +31,20 @@ class ErxMiniUartTest < Minitest::Test
              file: DRIVER, anchor: 'Count = ?FIFO_BYTES - Read,', replacement: 'Count = ?FIFO_BYTES - 1 + 0 * Read,',
              catching_case: 'overrun_seen_by_a_send_is_marked_test'),
     Seed.new(fault: 'the drain reading past four FIFO depths',
-             file: DRIVER, anchor: 'drain(S, Units, ?DRAIN_MAX) ->', replacement: 'drain(S, Units, 64) ->',
+             file: DRIVER, anchor: '-define(DRAIN_MAX, 32).', replacement: '-define(DRAIN_MAX, 64).',
              catching_case: 'wedged_receive_is_drained_a_bounded_amount_test'),
+    Seed.new(fault: "a drain ignoring its store's room",
+             file: DRIVER, anchor: 'drain(S, erx_uart_input:room(Input), []).', replacement: 'drain(S, ?DRAIN_MAX, []).',
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test'),
     Seed.new(fault: 'the driver sending a message per drain without waiting for its answer',
              file: STORE, anchor: "next(I = #input{waiting = true}) ->\n    {none, I};\n", replacement: '',
-             catching_case: 'a_stalled_console_holds_one_message_and_one_drain_test')
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test'),
+    Seed.new(fault: 'a full store left with the level line unmasked, delivering again after each acknowledgement',
+             file: DRIVER, anchor: "            ok = erx_device:write(Dev, ier, 0),\n", replacement: '',
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test'),
+    Seed.new(fault: "the receive interrupt left masked on the console's answer",
+             file: DRIVER, anchor: "            ok = enable_receive(Dev),\n", replacement: '',
+             catching_case: 'a_late_console_leaves_its_input_in_the_fifo_test')
   ].freeze
 
   def test_receive_cases_pass_under_eunit

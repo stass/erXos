@@ -188,25 +188,33 @@ format_status_shows_only_the_reasons_name_test() ->
 %% damaged line out whole (docs/design-live.md, "Lost input").
 overrun_is_placed_before_the_byte_after_the_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual({[$a, $b, lost, $c, $\n], drained}, erx_pl011:drain(dev, mark)).
+    ?assertEqual({[$a, $b, lost, $c, $\n], drained}, erx_pl011:drain(dev, mark, erx_uart_input:new(64))).
 
 %% A framing, parity or break bit is no loss: the byte goes up as read, a break's NUL a byte.
 other_errors_are_no_loss_test() ->
     script_receive([?ERX_HW_PL011_DR_FE_MASK bor $a, ?ERX_HW_PL011_DR_PE_MASK bor $b,
                     ?ERX_HW_PL011_DR_BE_MASK, $\n]),
-    ?assertEqual({[$a, $b, 0, $\n], drained}, erx_pl011:drain(dev, mark)).
+    ?assertEqual({[$a, $b, 0, $\n], drained}, erx_pl011:drain(dev, mark, erx_uart_input:new(64))).
 
 %% A line's driver, the host link's or a Bluetooth controller's, makes no loss: its bytes
 %% are a protocol's, which checks its own frames.
 a_line_s_driver_makes_no_loss_test() ->
     script_receive([$a, $b, ?ERX_HW_PL011_DR_OE_MASK bor $c, $\n]),
-    ?assertEqual({[$a, $b, $c, $\n], drained}, erx_pl011:drain(dev, pass)).
+    ?assertEqual({[$a, $b, $c, $\n], drained}, erx_pl011:drain(dev, pass, erx_uart_input:new(64))).
 
 %% A device whose RXFE never sets: a drain reads at most 64 words, two FIFO depths, and
 %% returns, saying it stopped, so the driver serves its mailbox before it drains again.
 a_wedged_receive_is_drained_a_bounded_amount_test() ->
     erx_device:script(#{{fr, rxfe} => [0], dr => [$x]}),
-    ?assertEqual({lists:duplicate(64, $x), stopped}, erx_pl011:drain(dev, pass)).
+    ?assertEqual({lists:duplicate(64, $x), stopped}, erx_pl011:drain(dev, pass, erx_uart_input:new(64))).
+
+%% A drain reads no more words than its store has room for bytes, leaving the rest in the
+%% FIFO, and a word's loss takes no room: a store with room for two takes "a", the loss
+%% and "b" of an OE word, and stops.
+a_drain_reads_no_more_than_its_store_has_room_for_test() ->
+    script_receive([$a, ?ERX_HW_PL011_DR_OE_MASK bor $b, $c]),
+    Store = erx_uart_input:add(lists:duplicate(62, $x), erx_uart_input:new(64)),
+    ?assertEqual({[$a, lost, $b], stopped}, erx_pl011:drain(dev, mark, Store)).
 
 %% A paste longer than a drain, its bytes arriving as the drain reads, so the FIFO never
 %% reads empty: the delivery's drain stops at its bound and the words left raise no
@@ -220,9 +228,9 @@ a_drain_stopped_at_its_bound_is_continued_without_an_interrupt_test() ->
     ?assertEqual(1, Acks).
 
 %% The same paste on the console's line, the console taking each message only once the
-%% driver is quiet: the driver continues a stopped drain only into a store with room for
-%% a whole drain, leaving the words in the FIFO until the console's answer, so every byte
-%% goes up and none becomes a loss.
+%% driver is quiet: the driver drains no more than its store has room for, pausing with the
+%% words left in the FIFO until the console's answer, so every byte goes up and none becomes
+%% a loss.
 a_console_s_stopped_drain_waits_for_room_test() ->
     Spec = (spec(16#9000000, 16#1000, 1, 48000000))#{stand_in => self()},
     {Input, Acks} = played({console, Spec}),
@@ -257,7 +265,7 @@ played(Record) ->
 
 play(Driver, Fifo, Seen = {Input, Acks, Unanswered}) ->
     receive
-        {erx_device, Driver, {write, imsc, Unmasked}} when Unmasked =/= 0 ->
+        {erx_device, Driver, {write, imsc, Unmasked}} when Unmasked =/= 0, element(1, Fifo) =:= before_start ->
             {before_start, Paste} = Fifo,
             answer(Driver, ok),
             play(Driver, {started, Paste}, Seen);
@@ -314,18 +322,110 @@ play(Driver, Fifo, Seen = {Input, Acks, Unanswered}) ->
 answer(Driver, Answer) ->
     Driver ! {erx_device, Answer}.
 
-%% The console stalled, its driver's one input message not yet taken, while 200 bytes
-%% arrive in drains of at most 64: the store holds one drain's bytes and one loss for the
-%% rest, kept though its bytes fill it, and sends them in order, one per answer.
-a_stalled_console_holds_one_drain_and_one_loss_test() ->
+%% A console that answers late while a paste arrives in bursts of ten bytes, each burst
+%% reaching the FIFO once a drain has read it empty and raising the line (late/1): the
+%% driver reads no more than its store has room for, masks its receive interrupts while
+%% the store is full and leaves the words in the FIFO, which holds them, as QEMU's model
+%% holds the line's bytes back, and on the console's answer unmasks them and drains. So
+%% every byte goes up, none as a loss, one message at a time, and the line ends unmasked.
+a_late_console_leaves_its_input_in_the_fifo_test() ->
+    Spec = (spec(16#9000000, 16#1000, 1, 48000000))#{stand_in => self()},
     Paste = [$a + N rem 26 || N <- lists:seq(0, 199)],
-    {First, Rest} = lists:split(64, Paste),
-    {Sent, Waiting} = erx_uart_input:next(erx_uart_input:add(First, erx_uart_input:new(64))),
-    ?assertEqual({erx_console_input, list_to_binary(First)}, Sent),
-    Stalled = lists:foldl(fun erx_uart_input:add/2, Waiting, chunks(Rest, 64)),
-    ?assertMatch({none, _}, erx_uart_input:next(Stalled)),
-    ?assertEqual([{erx_console_input, list_to_binary(lists:sublist(Rest, 64))}, erx_console_lost],
-                 answered(Stalled)).
+    #{input := Input, imsc := Imsc, masks := Masks} = late({console, Spec}, chunks(Paste, 10)),
+    ?assertEqual([{erx_console_input, list_to_binary(Paste)}], joined(Input)),
+    ?assert(Masks > 0),
+    ?assert(Imsc).
+
+%% Starts the driver of Record over a played PL011 whose bursts Bursts reach its FIFO one at
+%% a time, the next whenever FR shows the FIFO empty, and whose line is the level of RIS
+%% under IMSC: a burst sets RIS, as the receive timeout does for words still waiting when
+%% a delivery is acknowledged, ICR clears it, and the line is delivered when it is high and
+%% the last delivery has been acknowledged, at most 100 times. This process is the driver's console too:
+%% it answers an input message with erx_console_taken only once the driver has been quiet
+%% for 100 ms, and fails the case on a second message sent before the answer or on the
+%% driver's crash. Returns the input messages in order, whether IMSC ends unmasked and how
+%% many times it was masked after the start.
+late(Record, Bursts) ->
+    Driver = proc_lib:spawn(erx_pl011, init, [Record, self()]),
+    _ = monitor(process, Driver),
+    try
+        late_play(Driver, #{fifo => [], bursts => Bursts, imsc => false, ris => false,
+                            out => false, started => false, masks => 0, acks => 0,
+                            input => [], unanswered => false})
+    after
+        exit(Driver, kill)
+    end.
+
+late_play(Driver, Line) ->
+    receive
+        {erx_device, Driver, Call} ->
+            {Answer, Next} = late_answer(Call, Line),
+            answer(Driver, Answer),
+            late_play(Driver, late_raise(Driver, Next));
+        Message when element(1, Message) =:= erx_console_input; Message =:= erx_console_lost ->
+            ?assertNot(maps:get(unanswered, Line)),
+            late_play(Driver, Line#{input := [Message | maps:get(input, Line)], unanswered := true});
+        {'DOWN', _, process, Driver, Reason} ->
+            error({driver_down, Reason})
+    after 100 ->
+            case Line of
+                #{unanswered := true} ->
+                    Driver ! erx_console_taken,
+                    late_play(Driver, Line#{unanswered := false});
+                #{input := Input} ->
+                    Line#{input := lists:reverse(Input)}
+            end
+    end.
+
+late_answer({read_field, fr, rxfe}, Line = #{fifo := [], bursts := [Burst | Rest]}) ->
+    {1, Line#{fifo := Burst, bursts := Rest, ris := true}};
+late_answer({read_field, fr, rxfe}, Line = #{fifo := Fifo}) ->
+    {case Fifo of [] -> 1; _ -> 0 end, Line};
+late_answer({read, dr}, Line = #{fifo := [Byte | Rest]}) ->
+    {Byte, Line#{fifo := Rest}};
+late_answer({read, ris}, Line = #{ris := Ris}) ->
+    {rx_bits(Ris), Line};
+late_answer({read, mis}, Line = #{ris := Ris, imsc := Imsc}) ->
+    {rx_bits(Ris andalso Imsc), Line};
+late_answer({write, icr, Bits}, Line) ->
+    {ok, Line#{ris := maps:get(ris, Line) andalso Bits band rx_bits(true) =:= 0}};
+late_answer({write, imsc, 0}, Line = #{started := true, masks := Masks}) ->
+    {ok, Line#{imsc := false, masks := Masks + 1}};
+late_answer({write, imsc, 0}, Line) ->
+    {ok, Line#{imsc := false}};
+late_answer({write, imsc, _Unmasked}, Line) ->
+    {ok, Line#{imsc := true, started := true}};
+late_answer({read_field, ibrd, baud_divint}, Line) ->
+    {26, Line};
+late_answer({read_field, fbrd, baud_divfrac}, Line) ->
+    {3, Line};
+late_answer({ack, 0}, Line = #{acks := Acks, ris := Ris, fifo := Fifo}) ->
+    ?assert(Acks < 100),
+    {ok, Line#{out := false, acks := Acks + 1, ris := Ris orelse Fifo =/= []}};
+late_answer({read, _Register}, Line) ->
+    {0, Line};
+late_answer({read_field, _Register, _Field}, Line) ->
+    {0, Line};
+late_answer(_Write, Line) ->
+    {ok, Line}.
+
+%% The line delivered when RIS shows under IMSC and no delivery waits for its acknowledgement.
+late_raise(Driver, Line = #{ris := true, imsc := true, out := false}) ->
+    Driver ! {erx_irq, {stand_in, self()}, 0},
+    Line#{out := true};
+late_raise(_Driver, Line) ->
+    Line.
+
+%% The receive and receive-timeout interrupts' bits, as RIS, MIS and ICR place them.
+rx_bits(true) -> ?ERX_HW_PL011_ICR_RXIC_MASK bor ?ERX_HW_PL011_ICR_RTIC_MASK;
+rx_bits(false) -> 0.
+
+%% A full store takes a loss, which needs no room, and refuses a byte with a crash, since a
+%% driver that gives it one has read more than room/1 allowed.
+a_full_store_refuses_a_byte_test() ->
+    Full = erx_uart_input:add(lists:duplicate(64, $x) ++ [lost], erx_uart_input:new(64)),
+    ?assertEqual(0, erx_uart_input:room(Full)),
+    ?assertError(input_store_full, erx_uart_input:add([$y], Full)).
 
 %% Losses with no byte between them are one, in the store and against the loss last sent.
 losses_with_no_byte_between_are_one_test() ->

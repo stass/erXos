@@ -108,32 +108,102 @@ overrun_after_a_data_read_is_placed_one_byte_sooner_test() ->
 input_without_an_overrun_has_no_loss_test() ->
     ?assertEqual([{input, <<"ls\n">>}], delivered({[], "ls\n", []})).
 
-%% The console stalled: no erx_console_taken while 200 bytes arrive over seven deliveries.
-%% The driver sends one message, its first drain's 32 bytes, keeps the next drain's 32 in its
-%% store and one loss for the rest, and sends them in order, one per answer.
-a_stalled_console_holds_one_message_and_one_drain_test() ->
-    Self = self(),
-    Driver = proc_lib:spawn_link(erx_mini_uart, init, [Self, #{stand_in => Self}]),
+%% A console that answers late while a paste arrives in bursts of ten bytes, each burst
+%% reaching the FIFO once a drain has read it empty (late/1): the driver reads no more than
+%% its store has room for, masks its receive interrupt in IER while the store is full, so
+%% the level line, which a byte in the FIFO holds raised, delivers nothing meanwhile, and on
+%% the console's answer unmasks it and drains. So every byte goes up, none as a loss, one
+%% message at a time, the line is not delivered again and again while the store is full,
+%% and it ends unmasked.
+a_late_console_leaves_its_input_in_the_fifo_test() ->
     Paste = [$a + N rem 26 || N <- lists:seq(0, 199)],
+    #{input := Input, ier := Ier, masks := Masks} = late(chunks(Paste, 10)),
+    ?assertEqual([{input, list_to_binary(Paste)}], joined(Input)),
+    ?assert(Masks > 0),
+    ?assert(Ier).
+
+%% Starts the driver over a played mini UART whose bursts Bursts reach its FIFO one at a
+%% time, the next whenever LSR shows the FIFO empty, and whose line is a level: raised while
+%% the FIFO holds a byte and IER's receive interrupt is enabled, and delivered when raised
+%% and the last delivery has been acknowledged. This process is the console too: it answers
+%% an input message with erx_console_taken only once the driver has been quiet for 100 ms,
+%% and fails the case on a second message sent before the answer, on more deliveries than a
+%% burst each would need, or on the driver's crash. Returns the input messages in order,
+%% whether IER ends enabled and how many times it was masked after the start.
+late(Bursts) ->
+    Self = self(),
+    Driver = proc_lib:spawn(erx_mini_uart, init, [Self, #{stand_in => Self}]),
+    _ = monitor(process, Driver),
     try
-        {_, _} = serve(Driver, {[], [], []}, {read, lsr}, []),
-        {Stalled, _} = lists:foldl(fun(_, {Acc, Fifo}) ->
-                                           Driver ! {erx_irq, {stand_in, Self}, 0},
-                                           {Events, Next} = serve(Driver, Fifo, ack, [], hold),
-                                           {Acc ++ Events, Next}
-                                   end, {[], {[], Paste, []}}, lists:seq(1, 7)),
-        {First, Rest} = lists:split(32, Paste),
-        ?assertEqual([{input, list_to_binary(First)}], sent(Stalled)),
-        Driver ! erx_console_taken,
-        {After, _} = serve(Driver, {[], [], []}, lost, []),
-        ?assertEqual([{input, list_to_binary(lists:sublist(Rest, 32))}, lost], sent(After)),
-        receive {erx_console_input, _} = Late -> error({sent_after_the_store, Late})
-        after 100 -> ok
-        end
+        late_play(Driver, #{fifo => [], bursts => Bursts, ier => false, out => false,
+                            started => false, masks => 0, acks => 0, input => [],
+                            unanswered => false})
     after
-        unlink(Driver),
         exit(Driver, kill)
     end.
+
+late_play(Driver, Line) ->
+    receive
+        {erx_device, Driver, Call} ->
+            {Answer, Next} = late_answer(Call, Line),
+            Driver ! {erx_device, Answer},
+            late_play(Driver, late_raise(Driver, Next));
+        {erx_console_input, Bytes} ->
+            late_play(Driver, late_input({input, Bytes}, Line));
+        erx_console_lost ->
+            late_play(Driver, late_input(lost, Line));
+        {ack, Driver, _InitAck} ->
+            late_play(Driver, Line);
+        {'DOWN', _, process, Driver, Reason} ->
+            error({driver_down, Reason})
+    after 100 ->
+            case Line of
+                #{unanswered := true} ->
+                    Driver ! erx_console_taken,
+                    late_play(Driver, Line#{unanswered := false});
+                #{input := Input} ->
+                    Line#{input := lists:reverse(Input)}
+            end
+    end.
+
+late_input(Message, Line = #{unanswered := false, input := Input}) ->
+    Line#{input := [Message | Input], unanswered := true}.
+
+late_answer({read, lsr}, Line = #{fifo := [], bursts := [Burst | Rest]}) ->
+    {?TX, Line#{fifo := Burst, bursts := Rest}};
+late_answer({read, lsr}, Line = #{fifo := []}) ->
+    {?TX, Line};
+late_answer({read, lsr}, Line) ->
+    {?READY bor ?TX, Line};
+late_answer({read, io}, Line = #{fifo := [Byte | Rest]}) ->
+    {Byte, Line#{fifo := Rest}};
+late_answer({write, ier, 0}, Line = #{started := true, masks := Masks}) ->
+    {ok, Line#{ier := false, masks := Masks + 1}};
+late_answer({write, ier, 0}, Line) ->
+    {ok, Line#{ier := false}};
+late_answer({write_field, ier, rxie, Enabled}, Line) ->
+    {ok, Line#{ier := Enabled =:= 1, started := true}};
+late_answer({ack, _Line}, Line = #{acks := Acks}) ->
+    ?assert(Acks < 100),
+    {ok, Line#{out := false, acks := Acks + 1}};
+late_answer(_Write, Line) ->
+    {ok, Line}.
+
+%% The level line delivered while raised, once the last delivery is acknowledged.
+late_raise(Driver, Line = #{fifo := [_ | _], ier := true, out := false}) ->
+    Driver ! {erx_irq, {stand_in, self()}, 0},
+    Line#{out := true};
+late_raise(_Driver, Line) ->
+    Line.
+
+%% The input messages, each run of bytes joined into one.
+joined([{input, A}, {input, B} | Rest]) -> joined([{input, <<A/binary, B/binary>>} | Rest]);
+joined([Message | Rest]) -> [Message | joined(Rest)];
+joined([]) -> [].
+
+chunks([], _Size) -> [];
+chunks(List, Size) when length(List) =< Size -> [List];
+chunks(List, Size) -> {Chunk, Rest} = lists:split(Size, List), [Chunk | chunks(Rest, Size)].
 
 %% The marks a drain keeps, one per overrun not yet placed, each the bytes still to read
 %% before its loss: a byte that is the last before a mark is followed by the loss; a FIFO

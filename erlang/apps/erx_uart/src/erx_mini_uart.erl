@@ -16,7 +16,7 @@
 %% receive interrupt needs them. The BCM2711's manual prints the receive enable at a
 %% different bit than RXIE's, and says nothing of RX_ERRATA, so both are unverified on
 %% silicon. The receive interrupt is level, raised while the receive FIFO holds a byte, so
-%% one delivery drains the FIFO, to empty or ?DRAIN_MAX bytes, and the line is acknowledged
+%% one delivery drains the FIFO, to empty or as far as its store has room, at most ?DRAIN_MAX bytes, and the line is acknowledged
 %% after it; a byte left or arriving during the drain raises the line again. Bytes typed
 %% before the driver started are drained once after the interrupt is enabled.
 %%
@@ -39,9 +39,13 @@
 %%
 %% One input message outstanding: the driver sends its next input message only after the
 %% console's erx_console_taken answers the last, and drains meanwhile into a store of one
-%% drain's bytes, where a byte that finds it full becomes a loss (erx_uart_input). A send
-%% takes a waiting answer between its bytes, so output never waits on input being taken, nor
-%% input on output.
+%% drain's bytes (erx_uart_input). It reads no more input than the store can hold: every
+%% drain is bounded by the store's room (drain/1), whether a delivery, a continuation or a
+%% send's poll calls it. A drain that stopped with the store full pauses the receive side
+%% (settled/1): IER masks the receive interrupt, the bytes wait in the FIFO, and the
+%% console's answer, once the store has room again, enables it and drains. Input is then lost
+%% only to the FIFO's overrun, which is marked as above. A send takes a waiting answer
+%% between its bytes, so output never waits on input being taken, nor input on output.
 %%
 %% Logging: the driver logs a warning only when its mailbox is empty, after a delivery has been drained and acknowledged or a send
 %% has finished, so a pending interrupt is always served before the log call; a byte that
@@ -59,7 +63,8 @@
 %% longer than the receive FIFO lasts, so there input still depends on the delivery.
 %%
 %% A drain stops after ?DRAIN_MAX bytes, four FIFO depths, so neither a device whose
-%% DATA_READY never clears nor input faster than the driver reads holds it: the line, still
+%% DATA_READY never clears nor input faster than the driver reads holds it: the driver
+%% serves its mailbox and then continues the drain, as erx_pl011 does, the line, still
 %% raised, delivers again, and a send writes its byte.
 
 -module(erx_mini_uart).
@@ -83,7 +88,10 @@
 %% have shown an overrun since it started, the overrun count the last warning logged (0
 %% before any), a mark for each loss not yet placed, the bytes still to read before it, in
 %% the order the losses were seen (add_mark/2), how many data reads came since the last read
-%% of LSR, and the input not yet sent (erx_uart_input).
+%% of LSR, the input not yet sent (erx_uart_input), and the receive side as erx_pl011 keeps
+%% it: drained, the last drain read the FIFO empty; stopped, it stopped at its bound and the
+%% store has room, so the driver drains on; paused, the store is full and IER masks the
+%% receive interrupt until the console's answer.
 -record(driver, {dev :: erx_device:device(),
                  irq :: erx_irq_line:handle(),
                  console :: pid(),
@@ -91,7 +99,8 @@
                  reported = 0 :: non_neg_integer(),
                  marks = [] :: [pos_integer()],
                  data_reads = 0 :: 0..1,
-                 input = erx_uart_input:new(?DRAIN_MAX) :: erx_uart_input:input()}).
+                 input = erx_uart_input:new(?DRAIN_MAX) :: erx_uart_input:input(),
+                 rx = drained :: drained | stopped | paused}).
 
 -spec start_link(Console :: pid()) -> {ok, pid(), Terminal :: boolean()}.
 start_link(Console) ->
@@ -104,10 +113,14 @@ init(Console, Spec) ->
     {ok, Dev} = erx_device:open(Spec),
     ok = erx_device:write(Dev, ier, 0),
     {ok, Irq} = erx_irq_line:attach(Dev, ?RX_LINE),
-    ok = erx_device:write_field(Dev, ier, rx_errata, 3),
-    ok = erx_device:write_field(Dev, ier, rxie, 1),
+    ok = enable_receive(Dev),
     proc_lib:init_ack({ok, self(), true}),
     loop(deliver_input(#driver{dev = Dev, irq = Irq, console = Console})).
+
+%% IER's receive interrupt enabled, as the driver's start and its unpause do (settled/1).
+enable_receive(Dev) ->
+    ok = erx_device:write_field(Dev, ier, rx_errata, 3),
+    ok = erx_device:write_field(Dev, ier, rxie, 1).
 
 -doc """
 Its existence is what makes proc_lib's crash report of this process hide its terms
@@ -183,12 +196,16 @@ number(Word, Bits) ->
             error
     end.
 
-%% Serves the messages waiting; with none left, logs the overruns due and waits for one.
+%% Serves the messages waiting; with none left, continues a drain that stopped at its bound,
+%% as erx_pl011 does, or logs the overruns due and waits for one.
 loop(S) ->
     receive
         Message -> loop(handle(Message, S))
     after 0 ->
-            idle(report_overruns(S))
+            case S of
+                #driver{rx = stopped} -> loop(deliver_input(S));
+                _ -> idle(report_overruns(S))
+            end
     end.
 
 idle(S) ->
@@ -264,13 +281,42 @@ take_input(S = #driver{irq = Irq}) ->
     ok = erx_irq_line:ack(Irq),
     Next.
 
-%% One drain's units into the store, and the next message sent if none waits.
+%% One drain's units into the store, and the next message sent if none waits. A paused
+%% driver reads nothing: a delivery that came before its mask is acknowledged, and a send's
+%% poll, which still reads LSR and so keeps every overrun's mark, drains nothing.
+deliver_input(S = #driver{rx = paused}) ->
+    S;
 deliver_input(S0) ->
-    {Units, S = #driver{input = Input}} = drain(S0, [], 0),
-    send_next(S#driver{input = erx_uart_input:add(Units, Input)}).
+    {Units, Rx, S = #driver{input = Input}} = drain(S0),
+    settled(send_next(S#driver{input = erx_uart_input:add(Units, Input), rx = Rx})).
 
 taken(S = #driver{input = Input}) ->
-    send_next(S#driver{input = erx_uart_input:taken(Input)}).
+    settled(send_next(S#driver{input = erx_uart_input:taken(Input)})).
+
+%% The receive side once a drain or an answer has changed the store: a drain that stopped
+%% with no room left pauses, writing IER whole to 0, since the interrupt is a level that a
+%% byte in the FIFO keeps raised and an acknowledgement withheld instead would hold the
+%% auxiliary block's shared line from the SPI controllers on it; a paused driver whose store
+%% has room again enables the interrupt and drains. The marks and the data reads since the
+%% last read of LSR stay as they were across the pause.
+settled(S = #driver{rx = stopped, dev = Dev, input = Input}) ->
+    case erx_uart_input:room(Input) of
+        0 ->
+            ok = erx_device:write(Dev, ier, 0),
+            S#driver{rx = paused};
+        _ ->
+            S
+    end;
+settled(S = #driver{rx = paused, dev = Dev, input = Input}) ->
+    case erx_uart_input:room(Input) of
+        0 ->
+            S;
+        _ ->
+            ok = enable_receive(Dev),
+            deliver_input(S#driver{rx = stopped})
+    end;
+settled(S = #driver{rx = drained}) ->
+    S.
 
 send_next(S = #driver{console = Console, input = Input}) ->
     case erx_uart_input:next(Input) of
@@ -278,20 +324,24 @@ send_next(S = #driver{console = Console, input = Input}) ->
         {Message, Next} -> Console ! Message, S#driver{input = Next}
     end.
 
-%% The units the receive FIFO gives, in order, until it reads empty or ?DRAIN_MAX bytes
-%% are read.
-drain(S, Units, ?DRAIN_MAX) ->
-    {lists:append(lists:reverse(Units)), S};
-drain(S0 = #driver{dev = Dev}, Units, Count) ->
+%% The units the receive FIFO gives, in order, until it reads empty (drained) or as many
+%% bytes are read as the store has room for (stopped), at most ?DRAIN_MAX, the store's size.
+%% A loss takes no room, so no caller can make a drain give the store a byte it cannot hold.
+drain(S = #driver{input = Input}) ->
+    drain(S, erx_uart_input:room(Input), []).
+
+drain(S, 0, Units) ->
+    {lists:append(lists:reverse(Units)), stopped, S};
+drain(S0 = #driver{dev = Dev}, Room, Units) ->
     {Lsr, S = #driver{marks = Marks}} = read_lsr(S0),
     case ?ERX_HW_MINI_UART_LSR_DATA_READY_GET(Lsr) of
         0 ->
             {Received, Left} = received(empty, Marks),
-            {lists:append(lists:reverse([Received | Units])), S#driver{marks = Left}};
+            {lists:append(lists:reverse([Received | Units])), drained, S#driver{marks = Left}};
         1 ->
             Byte = ?ERX_HW_MINI_UART_IO_DATA_GET(erx_device:read(Dev, io)),
             {Received, Left} = received(Byte, Marks),
-            drain(S#driver{marks = Left, data_reads = 1}, [Received | Units], Count + 1)
+            drain(S#driver{marks = Left, data_reads = 1}, Room - 1, [Received | Units])
     end.
 
 %% The units a drain appends, and the marks left, after the byte Byte it read or after a

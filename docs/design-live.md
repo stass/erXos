@@ -1172,19 +1172,37 @@ tty has no room for, and a character the line editor's bounds refuse. A
 command line that lost bytes anywhere must never run: `cd /tmp` with its
 `/tmp` lost, followed by `rm -rf *`, is the case to prevent.
 
-**What FreeBSD does.** uart(4) puts one entry, `UART_STAT_OVERRUN` with
-data byte 0, in its receive buffer after the bytes the FIFO held, and
-when the buffer is full writes it over the last entry
-(`sys/dev/uart/uart_core.c:322-335`, freebsd-src `releng/15.0` commit
-`2b7df8c1`). `uart_tty_intr` hands that NUL to the line discipline with
-`TRE_OVERRUN` (`sys/dev/uart/uart_tty.c:336-352`), and `ttydisc_rint`
-acts only on `TRE_BREAK`, `TRE_FRAMING` and `TRE_PARITY`
-(`sys/kern/tty_ttydisc.c:1028-1052`); `TRE_OVERRUN`
+**What FreeBSD does.** uart(4) reads the FIFO into a receive ring of
+max(384, three FIFO depths) entries (`sys/dev/uart/uart_core.c:635`,
+freebsd-src `releng/15.0` commit `2b7df8c1`), and its line discipline
+mostly holds input back rather than dropping it. `uart_tty_intr` hands
+the ring's entries to `ttydisc_rint` one at a time; a byte that does not
+fit the input queue is refused, and uart(4) keeps it in the ring, stops
+handing entries up and, under `CRTS_IFLOW`, drops RTS
+(`sys/dev/uart/uart_tty.c:335-352`), until reads have drained the queue
+to 10%, or nothing in it is a finished line (`sys/kern/tty.c:136`,
+`sys/kern/tty_ttydisc.c:428-431`), and
+`uart_tty_inwakeup` raises RTS again and resumes
+(`uart_tty.c:222-237`). `ttydisc_rint` drops a byte only when nothing in
+the full queue is readable, so that a queue full of an unfinished line
+cannot stall, and that drop is unmarked
+(`sys/kern/tty_ttydisc.c:1220-1236`). Input is otherwise lost only where
+the line loses it: once the ring is full the FIFO, no longer read,
+overruns (the low-level drivers' receive loops are not checked here). An
+overrun the FIFO reports puts one entry, `UART_STAT_OVERRUN` with data
+byte 0, in the ring, or, when the ring is full, in its one spare slot,
+where the next entry overwrites it, so the mark is lost
+(`sys/dev/uart/uart_bus.h:176-221`); the overrun is counted in
+`sc_rxoverruns` and the receiver flushed, losing the FIFO's bytes
+too (`uart_core.c:322-335`).
+`uart_tty_intr` hands that NUL to the line discipline with `TRE_OVERRUN`,
+and `ttydisc_rint` acts only on `TRE_BREAK`, `TRE_FRAMING` and
+`TRE_PARITY` (`sys/kern/tty_ttydisc.c:1028-1052`); `TRE_OVERRUN`
 (`sys/kern/ttydisc.h:68`) is read nowhere in the tty layer. So a FreeBSD
 reader gets a NUL byte where the UART lost input, which the line
 discipline then treats as any typed NUL: it echoes it, erases it and
-charges it to the queue. Bytes the line discipline drops for room are
-dropped unmarked (`sys/kern/tty_ttydisc.c:1220-1236`).
+charges it to the queue. erXos's console drivers hold input back the same
+way, in the FIFO, below.
 
 **The construction: a loss travels as the end of input does.** At every
 hop where the end of input is a message or answer of its own, in order
@@ -1269,20 +1287,21 @@ whole.
 
 A drain is finite: the mini UART's reads at most 32 bytes, four FIFO
 depths, and the PL011's at most 64 words, two FIFO depths, so a device
-that never reports its FIFO empty holds neither driver. The mini UART's
-interrupt is a level, raised while its FIFO holds a byte, so the line,
-still raised, delivers again. The PL011's is raised when its FIFO reaches
-its level, and the driver clears it before the drain (Arm DDI 0183G,
-3-17), so the words a drain stopped at its bound leaves cross no level
-again: QEMU's model raises the interrupt only when the FIFO goes from
-empty to one word and takes no byte into a full FIFO (`hw/char/pl011.c`,
-`pl011_fifo_rx_put`, `pl011_can_receive`), and silicon raises at most
-the receive timeout once the line is idle. The PL011's driver therefore
-continues a stopped drain itself, with no delivery to acknowledge, once
-the messages already waiting are served and its pending store (below)
-has room for a whole drain; until then the words wait in the FIFO, which
-QEMU's model holds back and silicon's marks with `OE` if it overruns, so
-a continued drain never makes a loss of bytes the line did not lose.
+that never reports its FIFO empty holds neither driver; and no drain
+reads more bytes than the driver's pending store (below) has room for.
+A drain that stopped at its bound with room left in the store is
+continued by the driver itself, with no delivery to acknowledge, once
+the messages already waiting are served. The PL011 needs that: its
+interrupt is raised when its FIFO reaches its level, and the driver
+clears it before the drain (Arm DDI 0183G, 3-17), so the words a drain
+stopped at its bound leaves cross no level again: QEMU's model raises
+the interrupt only when the FIFO goes from empty to one word and takes
+no byte into a full FIFO (`hw/char/pl011.c`, `pl011_fifo_rx_put`,
+`pl011_can_receive`), and silicon raises at most the receive timeout
+once the line is idle. The mini UART's interrupt is a level, raised
+while its FIFO holds a byte, so its line, still raised, would deliver
+again; it continues a stopped drain the same way, and both drivers keep
+one rule.
 
 **One input message outstanding per driver.** A driver has at most one
 input message the console has not taken. The console answers each
@@ -1290,19 +1309,53 @@ input message the console has not taken. The console answers each
 `erx_console_taken`, as `erx_console_written` answers output, and a driver
 sends its next input message only after that answer, so the console's
 mailbox holds at most one input message from its driver, whatever the
-console's delay. A UART's line cannot wait, so its driver keeps draining
-the FIFO while it waits for the answer, into a pending store of at most
-one drain's bytes, 32 for the mini UART and 64 for the PL011, and a byte
-that finds the store full is dropped and marked: the store holds at most
-one loss between two of its bytes, kept when its bytes fill it, and sent
-in its place. On the answer it sends what the store holds, bytes and
-losses in order, one message at a time, each again after its answer. So
-the UART's FIFO is served as fast as before, and a console that falls
-behind costs input that is marked, never memory. A source that can wait,
-`erx_stdio` reading a pipe, simply reads no more until the answer. A
-driver waits for the answer without stopping its output: it serves
+console's delay. While it waits, a driver keeps draining the FIFO into a
+pending store of one drain's bytes, 32 for the mini UART and 64 for the
+PL011, but reads no more input than the store can hold, as `erx_stdio`
+reads no more of a pipe until the answer. Every drain is bounded by the
+store's room inside the drain itself, so a delivery's drain, a
+continued drain and a send's poll of the receive side alike leave in the
+FIFO what the store cannot take; a byte that finds the store full is a
+bug, and crashes the driver. A loss takes no room, and losses with no
+byte between them are one, so the store holds at most one loss between
+two of its bytes.
+
+A drain that stops with the store full pauses the receive side: the
+driver masks its receive interrupts at the device, the PL011's receive
+and receive-timeout interrupts in `IMSC` and the mini UART's in `IER`,
+still acknowledges each delivery that comes, and on the answer that
+leaves the store room again unmasks them and drains. Masking at the
+device, rather than withholding the acknowledgement, keeps the line
+free: the mini UART's interrupt is a level that a byte in its FIFO keeps
+raised, so unmasked it would deliver again after every acknowledgement,
+and on the Raspberry Pi 4 it shares the auxiliary block's line with the
+SPI controllers ([design-shared-devices.md](design-shared-devices.md#lines-inside-a-domain)),
+which a withheld acknowledgement would hold as well. While the driver is
+paused the bytes wait in the FIFO. QEMU's PL011 model takes no byte into
+a full FIFO and so holds the line's bytes back; a silicon FIFO overruns,
+and the driver marks that loss as above, so a console that falls behind
+costs input only where the line itself loses it, marked, and never
+memory, as long as the driver is its UART's one reader and writer. On
+the Raspberry Pi 4 it is not yet: a polled write of Fiasco's to the mini
+UART reads `LSR`, clearing its overrun bit, and saves and restores `IER`
+around the write (`fiasco/kernel/src/lib/uart/uart_16550.cc`, `write`),
+so it can hide a loss and undo a pause or its end, a residual of
+[TODO.md](../TODO.md). The mini UART keeps its marks and its count of data reads since
+the last read of `LSR` across a pause, and a send's reads of `LSR`, which
+clear its overrun bit, still go through its one reader of `LSR`, so an
+overrun during a pause is placed as any other. That the PL011 marks an
+overrun with `OE` on silicon is unverified, since QEMU's model sets no
+`OE`. On the answer the driver sends what the store holds, bytes and
+losses in order, one message at a time, each again after its answer.
+
+A driver waits for the answer without stopping its output: it serves
 `{erx_console_output, From, Bytes}` while input waits, so output never
-depends on input being taken.
+depends on input being taken, and a paused driver reads nothing, so a
+noisy line costs it no more than a delivery's acknowledgement. The
+**liveness invariant** is the console's: on a person's terminal, as
+both UART drivers' lines are, it answers a driver's input message as soon as it handles it, waiting on no group and on no tty, so
+a paused driver resumes as soon as the console runs, whatever its groups
+and sessions do.
 
 A driver of another line, the host link's or a Bluetooth controller's,
 makes no loss, since its protocol checks its own frames, and the host
@@ -1530,7 +1583,8 @@ after it, however the input was cut into deliveries.
   a write-only open, and `eagain` when another reader took the unit, the
   open may not read or `N` is not the relay's signal number.
 * Storage is finite at every hop: a drain reads at most 32 bytes or 64
-  words; a driver has one input message outstanding and holds at most
+  words, and no more bytes than its driver's store has room for; a
+  driver has one input message outstanding and holds at most
   one drain's bytes, with at most one loss between two of them, while it
   waits for `erx_console_taken`, so the console's mailbox holds at most one
   input message from its driver however long the console is delayed; a
@@ -1601,7 +1655,8 @@ fail, so the case proves the code under it ran.
 | `erx_pl011_tests`: a data word with `OE` set | `erx_console_lost` before that word's byte | the loss sent after the byte |
 | the same, a fake device whose `RXFE` never sets | each drain reads at most 64 words and returns | the drain bound removed |
 | the same, a played line's driver whose FIFO, after the start's drain, holds a 150-byte paste and reads empty only after it | every byte goes up after one delivery, with one acknowledgement | the stopped drain left for an interrupt; the continued drain acknowledging the line |
-| the same paste on a played console's driver, each message taken only once the driver is quiet | every byte goes up, with no `erx_console_lost` | the stopped drain continued into a store without room for a drain |
+| the same paste on a played console's driver, each message taken only once the driver is quiet | every byte goes up, with no `erx_console_lost` | none of its own: the late console's row seeds what it covers |
+| the same, a drain into a store with room for two bytes, the FIFO holding `a`, `b` with `OE` and `c` | the drain gives `a`, the loss and `b`, and stops | the drain reading past the store's room |
 | `erx_console_master_tests`, the system line through the real group and `edlin`: `ab`, a loss, `c` and Enter | no line is returned; the bell rings | the console answering an ask with the loss after the next byte |
 | the same, a loss after the first byte of a two-byte UTF-8 character | that byte is dropped and the loss answered | the cut byte answered as a character |
 | the same, a group that asks nothing while 10 KiB, then a loss, then more arrive | the console holds one tty's bound; what it dropped is one loss, which the next read meets before the later bytes | the store's drop not marked as a loss |
@@ -1611,7 +1666,7 @@ fail, so the case proves the code under it ran.
 | the system console, a pipe giving `a` CR `b` LF `c` CR LF, read by `io:get_line/1` and by `io:get_chars/2` of one character | the bytes reach the group unchanged; the character read gets CR | the pipe given the terminal's `ICRNL` |
 | the same, a pipe giving `a` BEL `b` LF, read by `io:get_line/1` and by `io:get_chars/2` of one character after `a` | the line is `a`, BEL, `b`; the character read gets BEL; no menu opens | menu recognition run on a pipe |
 | the system console on a terminal, CR, LF and CR LF each after a word | CR and LF each end the line; CR LF ends it and then an empty line | `ICRNL` cleared for a terminal |
-| `erx_mini_uart_tests` and `erx_pl011_tests`, the console stalled: no `erx_console_taken` while 200 bytes arrive | one message outstanding; the store holds one drain's bytes and one loss for the rest, sent in order after the answer | the driver sending a message per drain without waiting |
+| `erx_mini_uart_tests` and `erx_pl011_tests`, a late console: 200 bytes arrive in bursts of ten, each once a drain reads the FIFO empty, and each message is taken only once the driver is quiet | every byte goes up, with no `erx_console_lost` and one message outstanding at a time; the receive interrupts are masked while the store is full and unmasked at the end; the mini UART's level line is not delivered again and again | a drain ignoring the store's room (the store's crash); the interrupts left masked on the answer; a full store left unmasked (the PL011's mask never written; the mini UART's level line delivered after every acknowledgement); a message per drain without waiting |
 | `erx_console_keys_tests`: a loss inside an OSC string, then `Ctrl-G` | the menu opens | the parser's state kept across the loss |
 | `erx_tty_master_tests`: a session has the line; bytes, a loss, bytes | `{tty_input, 0, _}`, `{tty_lost, 1}`, `{tty_input, 2, _}` | the loss sent without a number of the sequence |
 | `erx_tty_link_tests`: numbers 0, 1, 3; then 2; then `{tty_lost, x}`; then a loss after a hangup | 3 is taken after a loss at its place; 2 is refused and counted; the bad shape is dropped and counted; the late loss is ignored | the gap check removed, so 3 is taken with no loss |
