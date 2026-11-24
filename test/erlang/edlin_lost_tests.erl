@@ -246,6 +246,22 @@ a_group_damages_the_next_request_with_a_stray_loss_test() ->
         ?assertEqual(none, answer(Reader))
     end).
 
+%% Through a group: a stray loss is held for the next request even after the user has
+%% discarded the request it damaged, since nothing tells which request the lost bytes
+%% were for. Ctrl-U empties the damaged line, the line typed after it finishes, and the
+%% next request starts damaged.
+a_group_holds_a_stray_loss_past_the_users_discard_test() ->
+    with_group(fun(Group, Driver) ->
+        First = reader(Group),
+        feed(Group, Driver, ["ls"]),
+        Group ! {Driver, {read, make_ref(), lost}},
+        feed(Group, Driver, ["\^U", "pwd\r"]),
+        ?assertEqual("pwd\n", answer(First)),
+        Next = reader(Group),
+        feed(Group, Driver, ["x\r"]),
+        ?assertEqual(none, answer(Next))
+    end).
+
 %% Through a group: an answer with characters to an ask that is not outstanding is input
 %% the group cannot place, so it damages as a stray loss does rather than being dropped.
 a_group_damages_with_stray_characters_test() ->

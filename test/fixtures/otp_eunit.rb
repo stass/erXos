@@ -22,15 +22,16 @@ module OtpEunit
 
   # Compiles sources, root-relative paths of the tree's OTP modules, those in late into a
   # directory of their own, and test, the root-relative path of the EUnit module, under work,
-  # an existing directory, and runs the test module there.
-  def self.run(work, sources:, test:, late: [])
+  # an existing directory, and runs the test module there. replaced maps a root-relative path
+  # of sources to the text compiled in its place, a seeded fault.
+  def self.run(work, sources:, test:, late: [], replaced: {})
     late_dir = File.join(work, 'late')
     FileUtils.mkdir_p(late_dir)
     compiled = [[sources - late + [test], work], [late, late_dir]].reject { |paths, _| paths.empty? }
     compiled.each do |paths, out|
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERLC'),
                                        *include_flags(sources), '-o', out,
-                                       *paths.map { |path| File.join(ROOT, path) }, stdin_data: '')
+                                       *paths.map { |path| source_path(work, path, replaced) }, stdin_data: '')
       return Result.new(passed: false, output: output) unless status.success?
     end
     output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE, ENV.fetch('ERX_ERL'), '-noshell', '-nostick',
@@ -39,6 +40,16 @@ module OtpEunit
     report_path = File.join(work, 'eunit.out')
     report = File.exist?(report_path) ? File.read(report_path) : ''
     Result.new(passed: status.success? && report.match?(/All \d+ tests passed/), output: output + report)
+  end
+
+  # Where path is compiled from: the tree's file, or the text replaced gives it, written
+  # under work with the same base name, so the module keeps its name.
+  def self.source_path(work, path, replaced)
+    return File.join(ROOT, path) unless replaced.key?(path)
+
+    dir = File.join(work, 'replaced')
+    FileUtils.mkdir_p(dir)
+    File.join(dir, File.basename(path)).tap { |copy| File.write(copy, replaced.fetch(path)) }
   end
 
   # Each source's application's src and include directories, for its -include and
@@ -57,5 +68,5 @@ module OtpEunit
       "halt(case eunit:test(#{test_module}, [verbose]) of ok -> 0; _ -> 1 end)."
   end
 
-  private_class_method :include_flags, :eval_text
+  private_class_method :source_path, :include_flags, :eval_text
 end
