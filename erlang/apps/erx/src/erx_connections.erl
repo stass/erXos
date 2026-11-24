@@ -53,11 +53,11 @@ start(Kernel, System) ->
 %% first thread runs, and answers once erx_dist's owner has brought the domain's entry up,
 %% so the caller finds the connection to the domain's node there: erx_dist:export/3 to
 %% the domain succeeds from the answer on. The caller is then sent {system_side_ended, Id,
-%% Reason}, Reason the port's exit reason, if the side ends before close_side/2 closes it. {error, noconnection} for a side that
-%% ends before its entry is up; {error, noproc} where no agent runs, the runtime being no
-%% node; the lane driver's or net_kernel's refusal otherwise, and badarg for a domain
-%% whose side is open or opening already, or asked by any process but the agent's
-%% installer (become_installer/0), as grant/1 is.
+%% Reason}, Reason the port's exit reason, if the side ends before close_side/2 closes
+%% it. {error, noconnection} for a side that ends before its entry is up; {error, noproc}
+%% where no agent runs, the runtime being no node; the lane driver's or net_kernel's
+%% refusal otherwise, and badarg for a domain whose side is open or opening already, or
+%% asked by any process but the agent's installer (become_installer/0), as grant/1 is.
 -spec open_side(pos_integer(), side_values()) -> {ok, port()} | {error, term()}.
 open_side(Id, Values) ->
     call({open_side, Id, Values}).

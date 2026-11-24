@@ -20,8 +20,10 @@
 %%
 %% The owner of the system connection halts the domain when the connection ends, since
 %% the domain has no services without it and could tell no one. The agent and net_kernel
-%% live as long as the runtime: in every domain, the end of either halts it, but for an
-%% ordered stop of net_kernel, which ends the agent quietly (erx_connections).
+%% live as long as the runtime: in every domain, the end of either halts it. An ordered
+%% stop of net_kernel is the one exception: it ends the agent (erx_connections) and the
+%% system connection's owner (exit_action/3) quietly, so init halts the runtime with its
+%% own status.
 -module(erx_dist).
 -moduledoc false.
 
@@ -29,6 +31,7 @@
          address/1, unavailable/2]).
 -export([boot/0, limits/0, supervised/0, names_dropped/0, export/3, exports/1, owner/1, aliases/0,
          exports_refused/0, atoms_refused/0]).
+-export([exit_action/3]).
 
 -include_lib("kernel/include/net_address.hrl").
 -include_lib("kernel/include/dist.hrl").
@@ -144,11 +147,12 @@ address(Id, Host) ->
     #net_address{address = Id, host = Host, protocol = erx, family = erx}.
 
 %% net_kernel calls accept/1 at each of its starts, and again to restart an agent that
-%% ended; only the first call of a runtime starts one. The agent lives as long as the runtime (docs/design-runtime.md, "Connections in ERTS"):
-%% a domain's domain pid keeps its pid for the domain's life, and the system domain's
-%% agent holds every open system side, so a second call halts the runtime instead. The
-%% persistent term, written once per runtime, is what tells the calls apart, so neither a
-%% restarted agent nor a restarted net_kernel ever starts a second agent.
+%% ended; only the first call of a runtime starts one. The agent lives as long as the
+%% runtime (docs/design-runtime.md, "Connections in ERTS"): a domain's domain pid keeps
+%% its pid for the domain's life, and the system domain's agent holds every open system
+%% side, so a second call halts the runtime instead. The persistent term, written once
+%% per runtime, is what tells the calls apart, so neither a restarted agent nor a
+%% restarted net_kernel ever starts a second agent.
 accept(System) ->
     case persistent_term:get(?AGENT_STARTED, false) of
         false ->
@@ -182,12 +186,12 @@ accept_connection(AcceptPid, Connection, MyNode, _Allowed, _SetupTime) ->
 %% The connection's owner: takes the port from the acceptor, has net_kernel mark the peer
 %% pending, makes the port the controller of the peer's entry, runs the port's input task
 %% once for the frames that came before, reports the node up as dist_util does, and tells
-%% the acceptor of an introduced connection once net_kernel has inserted it. Every
-%% way it ends, a refusal or a crash included, goes through ended/2, so the system
-%% connection's owner halts the domain on each, except net_kernel's shutdown, the
-%% runtime's ordered end, which it follows (exited/4). It acts on {Kernel, disconnect}, which
-%% names net_kernel by a pid any peer can write; a message from another domain arrives
-%% as {erx_origin, D, Msg} (edit 16) and reaches only its catch-all.
+%% the acceptor of an introduced connection once net_kernel has inserted it. Every way
+%% it ends, a refusal or a crash included, goes through ended/2, so the system
+%% connection's owner halts the domain on each but net_kernel's shutdown, the runtime's
+%% ordered end, which it follows (exited/4). It acts on {Kernel, disconnect}, which names
+%% net_kernel by a pid any peer can write; a message from another domain arrives as
+%% {erx_origin, D, Msg} (edit 16) and reaches only its catch-all.
 owner(Kernel, AcceptPid, MyNode, Connection) ->
     process_flag(trap_exit, true),
     try
@@ -261,15 +265,39 @@ owner_loop(Kernel, DHandle, Connection) ->
             owner_loop(Kernel, DHandle, Connection)
     end.
 
-%% An exit signal to the owner. net_kernel traps exits, so its shutdown comes only from
-%% its supervisor, in the runtime's ordered end (erx_connections:kernel_ended/1 says when
-%% else): the owner follows it, as the agent does, so the runtime ends as it was told, init
-%% halting it with its own status, and not as for a lost system connection. Any other exit,
-%% the port's or net_kernel's crash, ends the connection.
-exited(Kernel, Kernel, shutdown, _Connection) ->
-    exit(shutdown);
-exited(_Kernel, _From, Reason, Connection) ->
-    ended(Connection, Reason).
+%% An exit signal to the owner, from net_kernel, Kernel, or from anything else, the port
+%% included, acted on as exit_action/3 decides.
+exited(Kernel, From, Reason, Connection) ->
+    Origin = case From of
+                 Kernel -> kernel;
+                 _ -> other
+             end,
+    case exit_action(Origin, Reason, is_process_alive(Kernel)) of
+        follow ->
+            exit(shutdown);
+        await_kernel ->
+            receive
+                {'EXIT', Kernel, KernelReason} -> exited(Kernel, Kernel, KernelReason, Connection)
+            end;
+        ended ->
+            ended(Connection, Reason)
+    end.
+
+%% What the owner does at an exit signal from Origin, net_kernel (kernel) or anything else
+%% (other), with Reason, while net_kernel is or is not alive. net_kernel traps exits, so
+%% its shutdown comes only from its supervisor, in the runtime's ordered end
+%% (erx_connections:kernel_ended/1 says when else): the owner follows it, as the agent
+%% does, so init halts the runtime with its own status, not as for a lost system
+%% connection. net_kernel's end also ends every connection's port with
+%% net_kernel_terminated (erts_do_net_exits in dist.c), which can reach the owner first:
+%% the owner then awaits net_kernel's own exit, which its link brings, and decides on
+%% that. The owner follows or awaits only once net_kernel is exiting or gone,
+%% is_process_alive/1 false, so an 'EXIT' message a live process sent in net_kernel's
+%% name ends the connection like any other. Anything else ends the connection (ended/2).
+-spec exit_action(kernel | other, term(), boolean()) -> follow | await_kernel | ended.
+exit_action(kernel, shutdown, false) -> follow;
+exit_action(other, net_kernel_terminated, false) -> await_kernel;
+exit_action(_Origin, _Reason, _KernelAlive) -> ended.
 
 %% The owner's end, which closes the port it is linked to and takes the entry down.
 ended(#{system := true}, Reason) ->

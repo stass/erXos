@@ -1510,7 +1510,14 @@ with `shutdown`, which only its supervisor gives it: in the runtime's
 own ordered end, or after a sibling's crash in `net_sup` or
 `kernel_sup`. Both supervisors are `one_for_all` with intensity 0, so
 after a crash `kernel_sup` gives up and the runtime ends as well. The
-agent then ends quietly, so an ordered end ends as it was told, and a
+agent then ends quietly, and so does the system connection's owner,
+which is linked to `net_kernel` too, so an ordered end ends as it was
+told, `init` halting the runtime with its own status. `net_kernel`'s
+end also ends every connection's port with `net_kernel_terminated`,
+which can reach the owner before `net_kernel`'s own exit; the owner
+then awaits that exit and decides on its reason. Either counts only
+once `net_kernel` is exiting or gone, so an `'EXIT'` message a live
+process sends in its name ends the connection like any other end. A
 later start of `net_kernel` halts at its first accept, since the
 carrier starts one agent per runtime. This rests on that supervision
 tree: only a local `supervisor:terminate_child` with no restart would
@@ -1831,10 +1838,12 @@ unmapped them or ended, never on a timer while a party lives
 The system connection is never closed from this side while the domain
 runs: a malformed frame or a failed check on it, or any other end of its
 port or its owner, halts the domain instead, with status 69
-(`EX_UNAVAILABLE`),
-since the domain has no services without that connection and could tell
-no one; when the system domain ends it, the domain service stops the
-domain ([design-system.md](design-system.md#ending-a-domain)). The
+(`EX_UNAVAILABLE`), since the domain has no services without that
+connection and could tell no one. The one exception is `net_kernel`'s
+`shutdown` in the runtime's ordered end, which the owner follows, as
+the agent does (above). When the system domain ends the connection, the
+domain service stops the domain
+([design-system.md](design-system.md#ending-a-domain)). The
 system domain's side closes the same way: at a domain's end the domain
 service has its agent finish that side and end its port with
 `{domain_down, D, Info}`, so every system-domain process linked to or

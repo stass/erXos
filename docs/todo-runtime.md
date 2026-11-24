@@ -905,11 +905,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `max_domains` to it, so creates past it, or earlier while slots stay unsettled, fail
   with `{system_side, _}`. Bound `max_domains` in the manifest reader, or size the sinks
   from the manifest.
-* [Low] Runtime, `erx_dist.erl` (the system connection's owner): a domain's own ordered
-  end, `init:stop()`, shuts `net_kernel` down, which takes the system connection's owner
-  with it, and the owner halts the domain with status 69 rather than 0. Let the owner
-  follow an ordered stop of `net_kernel` quietly, as `erx_connections` does, or have the
-  domain's ordered end halt with its own status first.
 * [Medium] Runtime, `erx_connections.erl` (`kernel_ended/1`): the agent ends quietly on
   any `shutdown` of `net_kernel`, which is safe only while `net_sup` and `kernel_sup` stay
   `one_for_all` with intensity 0: a local `supervisor:terminate_child` of `net_sup` or
@@ -917,9 +912,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   system domain no side reports reach the domain service. Make it hold by construction:
   quiet only when the runtime's ordered end is under way (a mark written on that path),
   halt otherwise. erx_dist's owner follows net_kernel's shutdown the same way
-  (`erx_dist:exited/4`) and shares the gap. Also tighten `{system_side_ended, Id, Reason}`,
-  which any local process can send
-  to the service: carry the side's monitor reference, or check the sender is the agent.
+  (`erx_dist:exit_action/3`) and shares the gap; the owner follows it only once net_kernel
+  is exiting or gone, but the agent follows any `{'EXIT', Kernel, shutdown}`, one a live
+  local process sends included, so the two decide the same signal two ways until the
+  mark makes one decision of it. Also tighten `{system_side_ended, Id,
+  Reason}`, which any local process can send to the service: carry the side's monitor
+  reference, or check the sender is the agent.
 * [Medium] runtime, `erts_internal_dist_spawn_request_4` in `otp/erts/emulator/beam/dist.c`:
   design-domains.md ("The funnel", step 4) has the sender's peer check a spawn request's
   control term with the funnel's grammar before writing it, answering an option of another

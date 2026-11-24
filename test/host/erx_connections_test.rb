@@ -8,11 +8,13 @@ require 'tmpdir'
 require_relative '../fixtures/erlang_build'
 require_relative '../../tools/lib/erx/host_os'
 
-# Runs the EUnit cases of a domain's connection agent (docs/design-runtime.md,
-# "Connections in ERTS"), test/erlang/erx_connections_tests.erl, compiled with
-# warnings as errors on stock's emulator (ERX_ERL and ERX_ERLC, which make check
-# supplies): the agent's answers to its domain pid's records over stand-in ports,
-# its failure paths and the records it drops. erx_area's NIF is the host stand-in
+# Runs the EUnit cases of a domain's connection agent and of erx_dist's connection
+# owner (docs/design-runtime.md, "Connections in ERTS"), compiled with warnings as
+# errors on stock's emulator (ERX_ERL and ERX_ERLC, which make check supplies):
+# test/erlang/erx_connections_tests.erl, the agent's answers to its domain pid's
+# records over stand-in ports, its failure paths and the records it drops, and
+# test/erlang/erx_dist_tests.erl, the owner's exit decision and its following of the
+# runtime's ordered end. erx_area's NIF is the host stand-in
 # (test/display/erx_area_stand_in.c), so a case can hold a real area resource.
 class ErxConnectionsTest < Minitest::Test
   APPLICATIONS = %w[erx].freeze
