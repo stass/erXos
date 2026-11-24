@@ -529,7 +529,7 @@ at run time are designed and not built. The serial service's library,
 registry, and on QEMU two handlers attach to it and echo a peer's
 64 KiB: a test domain's, and the echo package's, `examples/echo`, from
 a medium whose `apps` row offers `nus`. No board card carries the echo
-package yet.
+package.
 
 A service has at most one handler, the process that attached to it. The
 registry's `attach` makes the caller the handler, refuses a second one,

@@ -400,8 +400,8 @@ Eshell V17.1.1 (type help(). for help)
   macOS's log shows an ATT MTU of 185 and the GAP and GATT services; the
   Mac's `blew` discovers Nordic's UART service and has a read of its
   write-only characteristic refused, which `tools/ble_board_check.rb`
-  scripts. No app serves the UART service on the card yet, so a write to
-  it is answered Unlikely Error and no echo can be checked yet; pairing has
+  scripts. The UART service on the card waits for the planned `bleuart`
+  service, so a write to it is answered Unlikely Error and no echo can be checked; pairing has
   not run on the board.
 
 **Display and input**

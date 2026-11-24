@@ -121,7 +121,7 @@ module Erx
     # app serves NUS. blew gives the ATT error only as CoreBluetooth's message, and the
     # match on message text assumes an English locale.
     def write_outcome(output, code)
-      return outcome(:passed, 'an app takes the write') if code.zero?
+      return outcome(:passed, 'a handler takes the write') if code.zero?
       return outcome(:unknown, 'Unlikely Error: no handler answered') if output.include?('Unlikely error')
 
       outcome(:failed, 'the write failed')

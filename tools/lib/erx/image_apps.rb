@@ -43,7 +43,7 @@ module Erx
     # The kiosk: the app the Raspberry Pi 4's card carries, enabled (ProductionImage#published_apps),
     # and the kiosk suite boots on QEMU virt (Kiosk), both as packed_kiosk packs it.
     KIOSK = 'examples/dashboard'
-    # The Bluetooth echo, decision 7's second package (docs/design-bluetooth.md,
+    # The Bluetooth echo, the installed-app echo of decisions 6 and 7 (docs/design-bluetooth.md,
     # "Decisions"), which the Bluetooth suite's app cell boots on QEMU virt (BtDomain).
     ECHO = 'examples/echo'
     KEY_BYTES = 32

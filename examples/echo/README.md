@@ -36,8 +36,9 @@ fails with the attach's refusal and the session ends.
 The Bluetooth suite's app cell boots QEMU `virt` with the package in
 the image, enabled, under an `apps` row that offers `ble` and `gatt
 nus`, and Bumble's serial peer writes 64 KiB through it
-(`tools/lib/erx/bt_domain.rb`). Decision 7 has the Raspberry Pi 4's
-development card carry it as its second package.
+(`tools/lib/erx/bt_domain.rb`). No board card carries it: the Raspberry
+Pi 4's Nordic UART service belongs to a planned `bleuart` service
+(decision 7).
 
 The host test `test/host/erx_bt_gatt_client_test.rb` runs the module
 over the serial service against the real registry: two links' writes

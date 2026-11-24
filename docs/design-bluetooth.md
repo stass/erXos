@@ -2396,8 +2396,7 @@ vault's, or before it the open choice of
 
 The Raspberry Pi 4's checklist repeats the Bumble case with a phone's
 terminal app, from a development manifest whose console takes the UART
-service's UUIDs in the echo's place, so the published card keeps the
-echo of decision 7.
+service's UUIDs.
 
 ## Stage 4: pairing and bonding
 
@@ -3268,7 +3267,7 @@ an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
-service reaches the board's planned `bleuart` service, once it is built
+service reaches the board's `bleuart` service
 ([Decisions](#decisions), 7); the phone pairs by typing the passkey the
 `pair` file shows, reboots the machine, and reads an `authenticated`
 value again; the console logs in from the phone; a `reset` written
@@ -3305,8 +3304,8 @@ list ([todo-performance.md](todo-performance.md)):
   word of `ctl` would cut it, if a measurement says the wait matters;
 * a phone's write reaching a handler and its answer coming back across
   two domains, measured by a peer script that times write requests
-  through the suite's echo handler on QEMU, and on the board once it
-  has one ([Decisions](#decisions), 7);
+  through the suite's echo handler on QEMU, and on the board through
+  `bleuart` ([Decisions](#decisions), 7);
 * `erx_pl011`'s wait of 1 ms at a time while its transmit FIFO is full
   (`erx_pl011.erl:45`, `:236-243`), which bursts of notifications and a
   patch download meet.
@@ -3532,9 +3531,7 @@ list ([todo-performance.md](todo-performance.md)):
    service, not to an installed app, so the Pi 4's development
    manifest's `apps` row offers no `ble` and no `gatt`, and both of its
    cards carry the kiosk alone, whatever their kind
-   ([design-packaging.md](design-packaging.md#the-apps-row)). Until
-   `bleuart` is built, the board serves `nus` as it serves any service
-   no app handles. The echo package, `examples/echo`, declaring `gatt
+   ([design-packaging.md](design-packaging.md#the-apps-row)). The echo package, `examples/echo`, declaring `gatt
    nus` under decision 6, is the path an installed app takes to a GATT
    service, and runs on QEMU, in the Bluetooth suite's app cell, under
    an `apps` row that offers `ble` and `gatt nus`
