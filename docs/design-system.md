@@ -258,9 +258,7 @@ manifest holds:
   The band and the three limits are Fiasco's alone and leave the
   manifest with it: erXos's kernel bounds a domain by its budget and
   grant (FD14, FD15), and nothing above the domain library reads them; its
-  restart intensity, whether it is `required`, and whether the rescue configuration starts it;
-  whether it is switched, by an `enable` default that the start table's
-  `NAME_enable` overrides ([design-apps.md](design-apps.md#switched-services)); its
+  restart intensity, whether it is `required`, and whether the rescue configuration starts it; its
   arguments and environment; its **devices**,
   given by unit ([Devices](#devices)), each by device-tree path or, for a
   PCIe function, by its place on a bus, with its compatible string, its
@@ -1040,10 +1038,7 @@ and 6 give way to the partial boot below.
    starts ERTS.
 3. **The system release** starts its services under one supervisor
    ([System services](#system-services)). The domain service then creates
-   the domains the manifest lists, in the manifest's boot order, but
-   those that wait for the machine's settings, the switched rows and
-   what depends on them, which step 5 starts
-   ([design-apps.md](design-apps.md#switched-services)): in the
+   the domains the manifest lists, in the manifest's boot order: in the
    default manifests the devices domain, the storage domains, the slot
    writer, the network domain, the vault's storage domain, the vault. The
    creation gives each the devices the manifest names for it, before its
@@ -1071,11 +1066,7 @@ and 6 give way to the partial boot below.
 5. **The start table.** Once the system domain's namespace is in place,
    by the rule a session's start waits on
    ([A session takes the console](#a-session-takes-the-console)), the
-   start service reads `start.conf`, hands the domain service the
-   switched rows that read enables, after which the domain service
-   starts, in boot order, the configured domains that wait for the
-   settings ([design-apps.md](design-apps.md#switched-services)), and
-   starts each enabled session row of the start table,
+   start service reads `start.conf` and starts each enabled row of the start table,
    the manifest's `start` rows with the machine's `start.conf` over them
    ([design-apps.md](design-apps.md#the-start-table)): the session of
    the principal the row names, with no login, and for a row that names

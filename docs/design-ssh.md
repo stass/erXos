@@ -254,17 +254,6 @@ no daemon under a release's build facts, as `erx_ssh_dev` does at stage
 development key. The system manifest lists the facet in the checked-in
 facet table with this section as its justification.
 
-The row is switched, as FreeBSD's `sshd` is
-([design-apps.md](design-apps.md#switched-services)): it carries
-`enable YES` in the shipped development manifests, so the domain
-listens on every development medium, the published ones included, and
-an administrator turns it off with `service ssh stop`, and for every
-later boot with `service ssh disable`, which sets `ssh_enable="NO"` in
-`/etc/start.conf`. A release manifest states its own default. Off, the
-domain does not run, so nothing listens on the SSH port and no login
-facet is held; nothing else waits on it, since no row holds a service
-it serves.
-
 The website offers three images, and each takes the SSH domain on its
 own terms; all are development builds:
 
