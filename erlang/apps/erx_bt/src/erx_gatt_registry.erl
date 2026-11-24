@@ -35,12 +35,17 @@ service's handler, the live links with their `Conn`, and the writes handed to ha
 """.
 
 -export([new/2, step/2]).
--export_type([core/0, input/0, action/0, limits/0]).
+-export_type([core/0, input/0, action/0, limits/0, security/0]).
 
 -type key() :: erx_gatt_db:key().
 -type level() :: erx_gatt_gate:level().
 -type from() :: gen_server:from().
--type security() :: #{level := level(), bonded := boolean()}.
+-doc """
+A link's security as it reports it: the level it reaches and whether it is bonded, with
+the bond's identity address exactly when it is.
+""".
+-type security() :: #{level := level(), bonded := false}
+                  | #{level := level(), bonded := true, identity := erx_smp_crypto:address()}.
 -doc "What a handler learns of a characteristic at `attach`: its maximum and its accesses.".
 -type limits() :: #{max := 0..512, access := #{erx_gatt_db:access() => level()}}.
 
@@ -132,9 +137,9 @@ link(_Link, #{conn := Conn}, {subscribed, {Service, Char}, Kind}, Core) ->
     {to_handler(Service, {subscribed, Conn, Char, Kind}, Core), Core};
 link(_Link, #{conn := Conn}, {mtu, Mtu}, Core) ->
     {to_handlers({mtu, Conn, Mtu}, Core), Core};
-link(Link, #{conn := Conn, address := Address} = Joined, {security, #{level := _, bonded := _} = Security}, Core) ->
-    {to_handlers({connected, Conn, connected(Address, Security)}, Core),
-     Core#core{links = (Core#core.links)#{Link := Joined#{security := Security}}}}.
+link(Link, #{conn := Conn, address := Address} = Joined, {security, Security}, Core) ->
+    Event = {connected, Conn, connected(Address, Security)},
+    {to_handlers(Event, Core), Core#core{links = (Core#core.links)#{Link := Joined#{security := Security}}}}.
 
 %% ---- a facet's operations ----
 
@@ -211,8 +216,13 @@ without_link(Link, Writes) ->
 
 %% ---- events ----
 
-connected(Address, #{level := Level, bonded := Bonded}) ->
-    #{address => Address, level => Level, bonded => Bonded}.
+%% A `connected` event's facts: the address the phone connected from and the link's
+%% security as it last reported it, a security() whose shape this match checks whole: its
+%% level and whether it is bonded, with the bond's identity exactly when it is.
+connected(Address, #{level := _, bonded := false} = Security) when map_size(Security) =:= 2 ->
+    Security#{address => Address};
+connected(Address, #{level := _, bonded := true, identity := _} = Security) when map_size(Security) =:= 3 ->
+    Security#{address => Address}.
 
 to_handler(Service, Event, #core{handlers = Handlers}) ->
     case Handlers of

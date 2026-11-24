@@ -52,13 +52,16 @@ requirements (Part H, 3.6.7), unless the phone has begun pairing or encryption, 
 may not interrupt (2.4.6).
 
 **The bond's lifecycle** is one field: `none`, a link with no kept bond's key; `{candidate,
-Rest, Ask}`, a resolved bond before its encryption; `{keeping, Held}`, a pairing's bond the
-store is asked to keep; `{kept, Write}`, a link encrypted with a kept bond's key. `bonded`
-is true exactly at `kept`. A configuration write that changes the configuration on a
-`kept` link goes to the store as `{subscriptions, S}` and is answered at the store's
-`kept`, its error Unlikely Error; one that comes while `keeping` is held until the store
-answers the `keep` and then goes to the store the same way; on any other link it is
-answered at once ("Bonds and the store").
+Rest, Ask}`, a resolved bond before its encryption; `{keeping, Identity, Held}`, a
+pairing's bond the store is asked to keep; `{kept, Identity, Write}`, a link encrypted with
+a kept bond's key. `Identity` is the bond's identity address, the resolved bond's or the
+one the phone distributed in the pairing. `bonded` is true exactly at `kept`, and only
+then does the registry hear the identity, so an unbonded link never reports one, and a
+phone's identity is the bond's, never the address it connected from. A configuration
+write that changes the configuration on a `kept` link goes to the store as
+`{subscriptions, S}` and is answered at the store's `kept`, its error Unlikely Error; one
+that comes while `keeping` is held until the store answers the `keep` and then goes to
+the store the same way; on any other link it is answered at once ("Bonds and the store").
 
 **A pairing's outcome has one ordering point**: the step in which the Security Manager
 ends its third phase sends `{keep, Tag, Bond, Subscriptions}` to the store and `{keeping,
@@ -162,7 +165,7 @@ the link's end, which disconnects it.
 """.
 -type action() :: {hci, {send, 0..3, binary()} | {ltk_reply, erx_smp_crypto:value() | none} | taken}
                 | {registry, {write, ref(), key(), binary()} | {subscribed, key(), subscription()}
-                             | {mtu, pos_integer()} | {security, #{level := erx_gatt_gate:level(), bonded := boolean()}}}
+                             | {mtu, pos_integer()} | {security, erx_gatt_registry:security()}}
                 | {window, to_window()}
                 | {store, {keep, tag(), erx_smp_core:bond(), #{key() => subscription()}}
                           | {subscriptions, #{key() => subscription()}} | {served, <<_:256>>}}
@@ -174,11 +177,12 @@ the link's end, which disconnects it.
 %% The bond's lifecycle (see the module's doc). A candidate's `Ask` is the Security
 %% Request's progress: the next look at the pairing wait, a `wait` the window has yet to
 %% answer, or done (sent, or skipped since the phone began pairing or encryption).
+-type identity() :: erx_smp_crypto:address().
 -type bond() :: none
-              | {candidate, #{hash := binary(), subscriptions := #{key() => subscription()}},
+              | {candidate, #{identity := identity(), hash := binary(), subscriptions := #{key() => subscription()}},
                  {look, time()} | asking | done}
-              | {keeping, none | configure()}
-              | {kept, none | {writing, ref()}}.
+              | {keeping, identity(), none | configure()}
+              | {kept, identity(), none | {writing, ref()}}.
 
 -record(core, {
     table :: erx_gatt_db:table(),
@@ -217,8 +221,10 @@ new(#{table := Table, values := Values, addresses := #{central := Central} = Add
       share := Share, acl_tx_max := AclTxMax, now := Now}) ->
     {Key, Bond} = case Resolved of
                       none -> {none, none};
-                      #{ltk := Ltk, level := Level, hash := Hash, subscriptions := Subscriptions} ->
-                          {{Ltk, Level}, {candidate, #{hash => Hash, subscriptions => Subscriptions}, {look, Now}}}
+                      #{ltk := Ltk, level := Level, identity := Identity, hash := Hash,
+                        subscriptions := Subscriptions} ->
+                          {{Ltk, Level}, {candidate, #{identity => Identity, hash => Hash,
+                                                       subscriptions => Subscriptions}, {look, Now}}}
                   end,
     #core{table = Table, values = Values, central = Central, bearer = erx_gatt_server:new(),
           key = Key, bond = Bond, smp = erx_smp_core:new(Addresses), share = Share, acl_tx_max = AclTxMax}.
@@ -270,7 +276,7 @@ input({window, {withdraw, _Tag} = Withdraw}, Now, Core) ->
 input({window, {wait, Ms}}, Now, #core{bond = {candidate, Rest, asking}} = Core) ->
     pairing_wait_answered(Ms, Now, Rest, Core);
 %% The link was encrypted while the window answered: it asks nothing more.
-input({window, {wait, _Ms}}, _Now, #core{bond = {kept, _}} = Core) ->
+input({window, {wait, _Ms}}, _Now, #core{bond = {kept, _Identity, _Write}} = Core) ->
     {[], Core};
 input({registry, {answer, Ref, Answer}}, Now, #core{write = {Ref, _}} = Core) ->
     att(erx_gatt_server:reply(Ref, Answer, server(Core), Core#core.bearer), Now, Core#core{write = none});
@@ -282,18 +288,18 @@ input({registry, {notify, From, Kind, Key, Value}}, Now, Core) ->
     notify(From, Kind, erx_gatt_server:notify(Kind, Key, Value, server(Core), Core#core.bearer), Now, Core);
 %% The store kept the pairing's bond: the key is a kept bond's, and a configuration write
 %% held meanwhile is kept as a bonded link's.
-input({store, {kept, ok}}, _Now, #core{bond = {keeping, Held}} = Core) ->
-    Kept = Core#core{bond = {kept, none}},
+input({store, {kept, ok}}, _Now, #core{bond = {keeping, Identity, Held}} = Core) ->
+    Kept = Core#core{bond = {kept, Identity, none}},
     {Written, Next} = case Held of
                           none -> {[], Kept};
                           {Ref, Key, Kind} -> keep_configuration(Ref, Key, Kind, Kept)
                       end,
     {security(Kept) ++ Written, Next};
-input({store, {kept, {error, Reason}}}, _Now, #core{bond = {keeping, _Held}} = Core) ->
+input({store, {kept, {error, Reason}}}, _Now, #core{bond = {keeping, _Identity, _Held}} = Core) ->
     {[{close, {store, Reason}}], Core};
 %% The store's answer to a bonded configuration write: its response, or Unlikely Error.
-input({store, {kept, Answer}}, Now, #core{bond = {kept, {writing, Ref}}} = Core) ->
-    Kept = Core#core{bond = {kept, none}},
+input({store, {kept, Answer}}, Now, #core{bond = {kept, Identity, {writing, Ref}}} = Core) ->
+    Kept = Core#core{bond = {kept, Identity, none}},
     att(erx_gatt_server:reply(Ref, Answer, server(Kept), Kept#core.bearer), Now, Kept);
 input({store, forgotten}, _Now, Core) ->
     {[{close, forgotten}], Core};
@@ -348,9 +354,10 @@ encrypted(Now, #core{encrypted = Was} = Core) ->
 %% its key: the subscriptions the table still declares go into the bearer, the registry
 %% hears each, and Service Changed is indicated when the table is not the one the bond
 %% was last served.
-proven(Now, #core{bond = {candidate, #{hash := Hash, subscriptions := Kept}, _Ask}, table = Table} = Core) ->
+proven(Now, #core{bond = {candidate, #{identity := Identity, hash := Hash, subscriptions := Kept}, _Ask},
+                  table = Table} = Core) ->
     {Restored, Bearer} = erx_gatt_server:restore(Kept, Table, Core#core.bearer),
-    Proven = Core#core{bond = {kept, none}, bearer = Bearer},
+    Proven = Core#core{bond = {kept, Identity, none}, bearer = Bearer},
     {Changed, Next} = case Hash =:= erx_gatt_db:hash(Table) of
                           true -> {[], Proven};
                           false -> service_changed(Now, Proven)
@@ -469,18 +476,18 @@ att_action({close, Reason}, _Now, Core) ->
 %% store keeps the pairing's bond it is held for that answer and then kept the same way;
 %% on a link with no kept bond's key it is answered at once. A keyed link not yet
 %% encrypted never gets here: the gate refuses the write.
-configuration(Ref, Key, Kind, _Now, #core{bond = {kept, none}} = Core) ->
+configuration(Ref, Key, Kind, _Now, #core{bond = {kept, _Identity, none}} = Core) ->
     keep_configuration(Ref, Key, Kind, Core);
-configuration(Ref, Key, Kind, _Now, #core{bond = {keeping, none}} = Core) ->
-    {[], Core#core{bond = {keeping, {Ref, Key, Kind}}}};
+configuration(Ref, Key, Kind, _Now, #core{bond = {keeping, Identity, none}} = Core) ->
+    {[], Core#core{bond = {keeping, Identity, {Ref, Key, Kind}}}};
 configuration(Ref, _Key, _Kind, Now, #core{bond = none} = Core) ->
     att(erx_gatt_server:reply(Ref, ok, server(Core), Core#core.bearer), Now, Core).
 
 %% Asks the store to keep the link's configuration with the change; the store's `kept`
 %% answers the write.
-keep_configuration(Ref, Key, Kind, #core{bond = {kept, none}, bearer = Bearer} = Core) ->
+keep_configuration(Ref, Key, Kind, #core{bond = {kept, Identity, none}, bearer = Bearer} = Core) ->
     {[{store, {subscriptions, (erx_gatt_server:subscriptions(Bearer))#{Key => Kind}}}],
-     Core#core{bond = {kept, {writing, Ref}}}}.
+     Core#core{bond = {kept, Identity, {writing, Ref}}}}.
 
 %% A notification is answered once queued, or `busy` at a full queue; an indication once
 %% the phone confirms it, within ATT's transaction timeout.
@@ -517,9 +524,10 @@ smp_action({key, Ltk, Level}, _Now, Core) ->
     {[], set_key(Ltk, Level, Core)};
 %% The ordering point: from this step the pairing is the store's, so the window hears
 %% `keeping` and no failure of the link's after it.
-smp_action({bonded, Bond}, _Now, #core{awaiting = Tag, bearer = Bearer, bond = none} = Core) when Tag =/= none ->
+smp_action({bonded, #{identity := Identity} = Bond}, _Now, #core{awaiting = Tag, bearer = Bearer, bond = none} = Core)
+  when Tag =/= none ->
     {[{store, {keep, Tag, Bond, erx_gatt_server:subscriptions(Bearer)}}, {window, {keeping, Tag}}],
-     Core#core{awaiting = none, bond = {keeping, none}}};
+     Core#core{awaiting = none, bond = {keeping, Identity, none}}};
 %% A failure reaches the window for the pairing the link last sent it to admit, before
 %% `keeping`, even while the verdict is on its way: the link cannot know the verdict, and
 %% the window takes a failure only of a pairing it opened, so one of a pairing it refused
@@ -547,14 +555,21 @@ key_level(none) -> none;
 key_level({_Ltk, Level}) -> Level.
 
 %% A link is its bond's once it is encrypted with a kept bond's key.
-bonded(#core{bond = {kept, _}}) -> true;
+bonded(#core{bond = {kept, _Identity, _Write}}) -> true;
 bonded(#core{}) -> false.
 
-%% The level the link reaches, `open` until it is encrypted and then its key's.
-security(#core{encrypted = false} = Core) ->
-    [{registry, {security, #{level => open, bonded => bonded(Core)}}}];
-security(#core{key = Key} = Core) ->
-    [{registry, {security, #{level => gate_key(Key), bonded => bonded(Core)}}}].
+%% What the registry hears of the link's security: the level it reaches, `open` until it
+%% is encrypted and then its key's, and whether it is bonded, with the bond's identity
+%% address exactly when it is.
+security(#core{encrypted = Encrypted, key = Key, bond = Bond}) ->
+    Level = case Encrypted of
+                false -> open;
+                true -> gate_key(Key)
+            end,
+    [{registry, {security, (bond_security(Bond))#{level => Level}}}].
+
+bond_security({kept, Identity, _Write}) -> #{bonded => true, identity => Identity};
+bond_security(_Bond) -> #{bonded => false}.
 
 %% ---- sending ----
 

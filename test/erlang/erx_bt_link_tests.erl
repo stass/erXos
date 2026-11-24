@@ -15,6 +15,13 @@
 
 -define(CENTRAL, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
 -define(PERIPHERAL, {random, <<16#D1, 16#E2, 16#F3, 16#A4, 16#B5, 16#C6>>}).
+%% The phone's identity address, as a bond keeps it and the pairing's Identity Address
+%% Information distributes it (type 1, random), most significant octet first as erx_smp_crypto
+%% holds an address; the PDU carries it least significant octet first.
+-define(IDENTITY, {random, <<16#C1, 16#C2, 16#C3, 16#C4, 16#C5, 16#C6>>}).
+%% Two resolvable private addresses (Vol 6 Part B, 1.3.2.2: the top bits 0b01) of one phone.
+-define(RPA1, {random, <<16#4A, 16#01, 16#02, 16#03, 16#04, 16#05>>}).
+-define(RPA2, {random, <<16#5B, 16#11, 16#12, 16#13, 16#14, 16#15>>}).
 -define(BOND_LTK, <<16#B0:128>>).
 -define(SHARE, 2).
 -define(ACL_TX_MAX, 27).
@@ -47,7 +54,7 @@ bonded(Level) -> core(#{bond => resolved(Level, #{})}).
 
 %% A bond the store resolved the phone's address to, with its kept subscriptions.
 resolved(Level, Subscriptions) ->
-    #{ltk => ?BOND_LTK, level => Level, identity => {random, <<16#C1, 16#C2, 16#C3, 16#C4, 16#C5, 16#C6>>},
+    #{ltk => ?BOND_LTK, level => Level, identity => ?IDENTITY,
       hash => <<0:256>>, subscriptions => Subscriptions}.
 
 %% A basic frame (Part A, 3.1) in one ACL packet, flagged first_flushable (Vol 4 Part E, 5.4.2).
@@ -198,7 +205,8 @@ write_waits_for_encryption_test() ->
     ?assertEqual([error_rsp(16#12, handle(enc_w), 16#0F)], on(4, Keyed)),
     ?assertEqual([], registry(Keyed)),
     {Encrypted, _} = run([ltk_request(), encryption_on(), Write], bonded(unauthenticated)),
-    ?assertEqual([{security, #{level => encrypted, bonded => true}}, {write, 1, {svc, enc_w}, <<"e">>}],
+    ?assertEqual([{security, #{level => encrypted, bonded => true, identity => ?IDENTITY}},
+                  {write, 1, {svc, enc_w}, <<"e">>}],
                  registry(Encrypted)).
 
 %% No answer within 5 s is Unlikely Error, and the late answer changes nothing.
@@ -262,8 +270,20 @@ indication_test() ->
 reconnection_reaches_bond_level_test() ->
     {Actions, Core} = run([ltk_request(), encryption_on()], bonded(authenticated)),
     ?assertEqual([{ltk_reply, ?BOND_LTK}], [A || {ltk_reply, _} = A <- Actions]),
-    ?assertEqual([{security, #{level => authenticated, bonded => true}}], registry(Actions)),
+    ?assertEqual([{security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}], registry(Actions)),
     ?assertMatch(#{encrypted := true, key := authenticated}, facts(Core)).
+
+%% A bonded link tells the registry its bond's identity address, never the address the
+%% phone connected from: two connections of one bond, each from its own resolvable
+%% private address, carry the same identity. (A link not yet bonded tells none:
+%% first_pairing_reaches_level_before_store_test.)
+bonded_link_reports_the_bonds_identity_test() ->
+    Reported = [registry(element(1, run([ltk_request(), encryption_on()],
+                                        core(#{addresses => #{central => Rpa, peripheral => ?PERIPHERAL},
+                                               bond => resolved(authenticated, #{})}))))
+                || Rpa <- [?RPA1, ?RPA2]],
+    ?assertEqual(lists:duplicate(2, [{security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}]),
+                 Reported).
 
 %% Secure Connections' request carries zero Rand and EDIV; any other, and every request on
 %% a link with no key, is answered Negative Reply.
@@ -363,7 +383,7 @@ first_pairing_reaches_level_before_store_test() ->
                  [A || {Role, _} = A <- Ended, Role =:= store orelse Role =:= window]),
     ?assertMatch({[], _}, core_step({withdraw, 1}, 0, Core)),
     {Kept, _} = core_step({kept, ok}, 0, Core),
-    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true}}}], Kept),
+    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}}], Kept),
     {Failed, _} = core_step({kept, {error, unavailable}}, 0, Core),
     ?assertEqual([{close, {store, unavailable}}], Failed).
 
@@ -393,7 +413,8 @@ resolved_bond_is_taken_on_at_encryption_test() ->
     ?assertEqual([<<16#0B, 0, 0>>, error_rsp(16#12, Config, 16#0F)], on(4, Before)),
     ?assertEqual([], registry(Before)),
     {At, _} = run([ltk_request(), encryption_on(), att(read(Config)), Notify], Core),
-    ?assertEqual([{security, #{level => encrypted, bonded => true}}, {subscribed, {svc, enc_n}, notify}],
+    ?assertEqual([{security, #{level => encrypted, bonded => true, identity => ?IDENTITY}},
+                  {subscribed, {svc, enc_n}, notify}],
                  registry(At)),
     ?assertEqual([{reply, caller, ok}], [A || {reply, _, _} = A <- At]),
     ?assertMatch([<<16#0B, 1, 0>>, <<16#1B, _:16, "n">>], on(4, At)).
@@ -520,7 +541,7 @@ configuration_write_while_keeping_waits_for_the_keep_test() ->
     {Held, Holding} = run([att(write(configuration(ind), <<2, 0>>))], Keeping),
     ?assertEqual([], on(4, Held) ++ [A || {store, _} = A <- Held]),
     {Bonded, Writing} = run([{kept, ok}], Holding),
-    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true}}},
+    ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
                   {store, {subscriptions, #{{svc, ind} => indicate}}}], Bonded),
     {Kept, _} = run([{kept, ok}], Writing),
     ?assertEqual([write_rsp()], on(4, Kept)),

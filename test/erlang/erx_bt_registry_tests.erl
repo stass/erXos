@@ -16,6 +16,7 @@
 -define(WAIT_MS, 2000).
 -define(GAP, #{name => <<"erxos">>, appearance => 16#03C1}).
 -define(ADDRESS, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
+-define(IDENTITY, {public, <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>}).
 
 %% ---- the core, case by case ----
 
@@ -52,10 +53,25 @@ attach_answers_the_limits_and_refuses_test() ->
 attach_hears_the_live_links_test() ->
     C = make_ref(),
     {Actions, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j},
-                          {link, ?L1, {security, #{level => encrypted, bonded => true}}},
+                          {link, ?L1, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
                           {facet, ?H1, {attach, a}, f}]),
-    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true}}},
+    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true,
+                                              identity => ?IDENTITY}}},
                  lists:last(Actions)).
+
+%% `connected` carries the bond's identity exactly when the link reports itself bonded,
+%% and the address the phone connected from in `address` either way.
+connected_carries_the_identity_of_a_bonded_link_alone_test() ->
+    C = make_ref(),
+    {Unbonded, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
+                              {link, ?L1, {security, #{level => encrypted, bonded => false}}}]),
+    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => false}}}],
+                 Unbonded),
+    {Bonded, _} = step({link, ?L1, {security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}},
+                       Core),
+    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true,
+                                               identity => ?IDENTITY}}}],
+                 Bonded).
 
 set_refusals_test() ->
     Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a}, f0}, {facet, ?H1, Op, f}]), A end,

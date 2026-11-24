@@ -39,7 +39,19 @@ class ErxBtGattClientTest < Minitest::Test
     Seed.new(fault: 'attach passing on the first attached refusal',
              path: CLIENT, anchor: '        {error, attached} = Refusal ->',
              replacement: '        {error, attached_never} = Refusal ->',
-             catching_case: 'attach_asks_again_until_the_previous_handler_has_gone')
+             catching_case: 'attach_asks_again_until_the_previous_handler_has_gone'),
+    Seed.new(fault: 'the serial handler started for nus whatever service it is given',
+             path: SERIAL, anchor: 'erx_gatt_service:start_link({local, ?MODULE}, Service, ?MODULE, {Service, Owner}).',
+             replacement: 'erx_gatt_service:start_link({local, ?MODULE}, nus, ?MODULE, {Service, Owner}).',
+             catching_case: 'a serial handler of console answers console alone'),
+    Seed.new(fault: 'the serial handler notifying nus whatever service it handles',
+             path: SERIAL, anchor: 'case erx_gatt:notify(Conn, Service, tx, Piece) of',
+             replacement: 'case erx_gatt:notify(Conn, nus, tx, Piece) of',
+             catching_case: 'a serial handler of console answers console alone'),
+    Seed.new(fault: "a connected event read with an identity on a link that is not bonded",
+             path: CLIENT, anchor: 'bonded := true, level := Level, identity := Identity} = Info})',
+             replacement: 'bonded := _, level := Level, identity := Identity} = Info})',
+             catching_case: 'event_from_the_facet_owner_alone')
   ].freeze
 
   def test_client_cases_pass_under_eunit

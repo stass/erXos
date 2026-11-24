@@ -70,8 +70,8 @@ class ErxBtLinkTest < Minitest::Test
              replacement: '{reply, Reply} -> queue(?ERX_L2CAP_CID_LE_SIGNALING, Reply, always, Core);',
              catching_case: 'signaling_answers_dropped_at_full_queue_test'),
     Seed.new(fault: "the refusal after the bond told to the window as the pairing's outcome",
-             anchor: '     Core#core{awaiting = none, bond = {keeping, none}}};',
-             replacement: '     Core#core{bond = {keeping, none}}};',
+             anchor: '     Core#core{awaiting = none, bond = {keeping, Identity, none}}};',
+             replacement: '     Core#core{bond = {keeping, Identity, none}}};',
              catching_case: 'done_refusal_not_an_outcome_test'),
     Seed.new(fault: 'a Reply the controller failed still taken as a Reply',
              anchor: 'hci({ltk_reply_complete, {failed, _Status}}, _Now, #core{ltk_answer = replied} = Core) ->',
@@ -91,9 +91,9 @@ class ErxBtLinkTest < Minitest::Test
              replacement: '    {[{store, {keep, Tag, Bond, erx_gatt_server:subscriptions(Bearer)}}],',
              catching_case: 'first_pairing_reaches_level_before_store_test'),
     Seed.new(fault: 'the configuration write answered before the store keeps it',
-             anchor: "configuration(Ref, Key, Kind, _Now, #core{bond = {kept, none}} = Core) ->\n" \
+             anchor: "configuration(Ref, Key, Kind, _Now, #core{bond = {kept, _Identity, none}} = Core) ->\n" \
                      '    keep_configuration(Ref, Key, Kind, Core);',
-             replacement: "configuration(Ref, _Key, _Kind, Now, #core{bond = {kept, none}} = Core) ->\n" \
+             replacement: "configuration(Ref, _Key, _Kind, Now, #core{bond = {kept, _Identity, none}} = Core) ->\n" \
                           '    att(erx_gatt_server:reply(Ref, ok, server(Core), Core#core.bearer), Now, Core);',
              catching_case: 'bonded_configuration_write_waits_for_the_store_test'),
     Seed.new(fault: 'the Security Request sent once the phone has begun encryption',
@@ -113,8 +113,10 @@ class ErxBtLinkTest < Minitest::Test
              replacement: '{Changed, Next} = case Hash =:= unserved of',
              catching_case: 'service_changed_at_reconnection_test'),
     Seed.new(fault: "a configuration write held while the store keeps the pairing's bond answered at once",
-             anchor: '    {[], Core#core{bond = {keeping, {Ref, Key, Kind}}}};',
-             replacement: '    att(erx_gatt_server:reply(Ref, ok, server(Core), Core#core.bearer), _Now, Core);',
+             anchor: "#core{bond = {keeping, Identity, none}} = Core) ->\n" \
+                     '    {[], Core#core{bond = {keeping, Identity, {Ref, Key, Kind}}}};',
+             replacement: "#core{bond = {keeping, _Identity, none}} = Core) ->\n" \
+                          '    att(erx_gatt_server:reply(Ref, ok, server(Core), Core#core.bearer), _Now, Core);',
              catching_case: 'configuration_write_while_keeping_waits_for_the_keep_test'),
     Seed.new(fault: 'the pairing not awaited from its `admit`, so a failure before the verdict is never told',
              anchor: '    {[{window, {admit, Tag, Central}}], Core#core{awaiting = Tag}};',
@@ -125,6 +127,18 @@ class ErxBtLinkTest < Minitest::Test
              anchor: 'phase(_Input, done, _State) -> {[], done};',
              replacement: "phase({withdraw, _}, done, _State) -> fail(?ERX_SMP_REASON_UNSPECIFIED_REASON, withdrawn);\n" \
                           'phase(_Input, done, _State) -> {[], done};',
+             catching_case: 'first_pairing_reaches_level_before_store_test'),
+    Seed.new(fault: 'the address the phone connected from passed as the bond\'s identity',
+             anchor: "identity := Identity, hash := Hash,\n" \
+                     "                        subscriptions := Subscriptions} ->\n" \
+                     '                          {{Ltk, Level}, {candidate, #{identity => Identity,',
+             replacement: "identity := _Identity, hash := Hash,\n" \
+                          "                        subscriptions := Subscriptions} ->\n" \
+                          '                          {{Ltk, Level}, {candidate, #{identity => Central,',
+             catching_case: 'bonded_link_reports_the_bonds_identity_test'),
+    Seed.new(fault: 'an identity reported for a link that is not bonded',
+             anchor: 'bond_security(_Bond) -> #{bonded => false}.',
+             replacement: 'bond_security(_Bond) -> #{bonded => false, identity => {random, <<0:48>>}}.',
              catching_case: 'first_pairing_reaches_level_before_store_test')
   ].freeze
 

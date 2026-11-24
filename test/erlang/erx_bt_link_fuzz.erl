@@ -16,7 +16,8 @@
 %% * every step of a controller message answers `{hci, taken}` first;
 %% * a link that holds a key tells the registry of no subscription before it is encrypted,
 %%   so a resolved bond's subscriptions and a configuration write wait for the key;
-%% * no `subscriptions` or `served` goes to the store from a link that is not its bond's.
+%% * no `subscriptions` or `served` goes to the store from a link that is not its bond's;
+%% * the registry hears an identity with a link's security exactly when it is bonded.
 %%
 %% A step that ends the link starts a new one. The seed comes from make check-fuzz.
 
@@ -106,6 +107,8 @@ step(Input, Now, {Core, AclTxMax, Owed}, Table) ->
     [verdict({store_write_not_bonded, Input}) || {store, {Kind, _}} <- Actions, Kind =/= keep,
                                                  not maps:get(bonded, erx_bt_link_core:facts(Next))
                                                      orelse not Encrypted],
+    [verdict({identity_not_bonded, Input}) || {registry, {security, Security}} <- Actions,
+                                              maps:is_key(identity, Security) =/= maps:get(bonded, Security)],
     Answered = case Input of
                    {store, {kept, _}} -> maps:remove(store, Owed);
                    {window, {wait, _}} -> maps:remove(wait, Owed);

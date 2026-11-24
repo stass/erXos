@@ -27,6 +27,9 @@
 -define(CENTRAL, {random, ?CENTRAL_ADDRESS}).
 -define(PERIPHERAL, {random, ?OWN_ADDRESS}).
 -define(BOND_LTK, <<16#B0:128>>).
+%% The identity address identity() distributes (type 1, random), decoded: most significant
+%% octet first, where the PDU sends it least significant octet first.
+-define(DISTRIBUTED, {random, <<16#C1, 16#C2, 16#C3, 16#C4, 16#C5, 16#C6>>}).
 -define(BOND, #{ltk => ?BOND_LTK, level => authenticated, identity => ?CENTRAL, hash => <<0:256>>,
                 subscriptions => #{{svc, n} => notify}}).
 -define(NAME, {16#40, 1}).
@@ -82,7 +85,7 @@ just_works_pairing_to_the_store_test() ->
         ?assertEqual({Link, {keeping, Tag}}, addressed(erx_bt_fs)),
         Link ! {window, {withdraw, Tag}},
         Link ! {store, {kept, ok}},
-        ?assertEqual({security, #{level => encrypted, bonded => true}}, told(erx_gatt_srv)),
+        ?assertEqual({security, #{level => encrypted, bonded => true, identity => ?DISTRIBUTED}}, told(erx_gatt_srv)),
         ?assertEqual([], [Code || <<_:16, 6:16/little, 16#05, Code>> <- sent()]),
         ?assertEqual(nothing, next(erx_bt_fs))
     end).
@@ -132,7 +135,7 @@ reconnection_with_a_kept_bond_test() ->
         ?assertEqual({ltk_reply, ?BOND_LTK}, from_link()),
         hci(Link, {ltk_reply_complete, ok}),
         hci(Link, {encryption_change, 0, 16#40, 1}),
-        ?assertEqual({security, #{level => authenticated, bonded => true}}, told(erx_gatt_srv)),
+        ?assertEqual({security, #{level => authenticated, bonded => true, identity => ?CENTRAL}}, told(erx_gatt_srv)),
         ?assertEqual({subscribed, {svc, n}, notify}, told(erx_gatt_srv)),
         ?assertEqual({reply, ok}, Notify()),
         ?assertMatch([<<_:16, 4:16/little, 16#1B, _:16, "x">>], sent()),

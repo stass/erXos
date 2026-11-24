@@ -16,6 +16,7 @@
 -define(OTHER, 9).
 -define(WAIT_MS, 2000).
 -define(ADDRESS, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
+-define(IDENTITY, {public, <<16#00, 16#1B, 16#DC, 16#0A, 16#0B, 16#0C>>}).
 -define(GAP, #{name => <<"erxos">>, appearance => 0}).
 
 %% ---- the event reader ----
@@ -31,7 +32,13 @@ event_from_the_facet_owner_alone_test() ->
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {write, R, C, <<"rx">>, <<>>}})),
     Connected = #{address => ?ADDRESS, bonded => false, level => open},
     ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected}})),
-    ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{extra => 1}}})).
+    ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{extra => 1}}})),
+    %% `identity` comes exactly with `bonded` true, and is an address.
+    Bonded = Connected#{bonded => true, identity => ?IDENTITY},
+    ?assertEqual({ok, {connected, C, Bonded}}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Bonded}})),
+    [?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Info}}))
+     || Info <- [Connected#{identity => ?IDENTITY}, Connected#{bonded => true},
+                 Bonded#{identity => {random, <<1, 2, 3>>}}, Bonded#{extra => 1}]].
 
 %% ---- attach and the owner's answers, over a facet that answers a script ----
 
@@ -76,11 +83,13 @@ serial_test_() ->
       fun(_) -> {"a write to an owner that is behind is refused", fun owner_behind_refuses/0} end,
       fun(_) -> {"send cuts at Mtu - 3", fun send_cuts_at_the_mtu/0} end,
       fun(_) -> {"send asks again while the link is busy", fun send_waits_while_busy/0} end,
-      fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end]}.
+      fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end,
+      fun(_) -> {"a serial handler of console answers console alone", fun console_serial_answers_its_service_alone/0}
+      end]}.
 
 write_reaches_the_owner() ->
     {Link, Conn} = joined_link(),
-    {ok, _} = erx_gatt_serial:start_link(self()),
+    {ok, _} = erx_gatt_serial:start_link(nus, self()),
     Bytes = binary:copy(<<"x">>, 100),
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, Bytes}},
     receive {serial, Conn, Got} -> ?assertEqual(Bytes, Got) after ?WAIT_MS -> error(no_serial) end,
@@ -89,7 +98,7 @@ write_reaches_the_owner() ->
 owner_behind_refuses() ->
     {Link, _Conn} = joined_link(),
     Owner = spawn(fun() -> receive stop -> ok end end),
-    {ok, _} = erx_gatt_serial:start_link(Owner),
+    {ok, _} = erx_gatt_serial:start_link(nus, Owner),
     [Owner ! {filler, N} || N <- lists:seq(1, 16)],
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, <<"late">>}},
     receive {from_link, Link, {registry, {answer, 7, Answer}}} -> ?assertEqual({error, 16#80}, Answer)
@@ -101,7 +110,7 @@ owner_behind_refuses() ->
 
 send_cuts_at_the_mtu() ->
     {Link, Conn} = joined_link(),
-    {ok, _} = erx_gatt_serial:start_link(self()),
+    {ok, _} = erx_gatt_serial:start_link(nus, self()),
     erx_gatt_srv ! {erx_bt_link, Link, {mtu, 50}},
     mtu_heard(Conn, 50, 100),
     Sender = sender(Conn, binary:copy(<<"abcdefghij">>, 10)),
@@ -112,7 +121,7 @@ send_cuts_at_the_mtu() ->
 
 send_waits_while_busy() ->
     {Link, Conn} = joined_link(),
-    {ok, _} = erx_gatt_serial:start_link(self()),
+    {ok, _} = erx_gatt_serial:start_link(nus, self()),
     Sender = sender(Conn, <<"abc">>),
     First = notification(Link, {error, busy}),
     ?assertEqual(First, notification(Link, ok)),
@@ -120,19 +129,41 @@ send_waits_while_busy() ->
 
 forged_event_dropped() ->
     {_Link, Conn} = joined_link(),
-    {ok, Serial} = erx_gatt_serial:start_link(self()),
+    {ok, Serial} = erx_gatt_serial:start_link(nus, self()),
     Serial ! {erx_origin, ?OTHER, {write, make_ref(), Conn, rx, <<"forged">>}},
     Serial ! {write, make_ref(), Conn, rx, <<"bare">>},
     sync(),
     _ = sys:get_state(Serial),
     receive {serial, _, Bytes} -> error({forged, Bytes}) after 100 -> ok end.
 
+%% A serial handler started for `console` takes console's writes and notifies console's tx;
+%% a write of nus, which it was not started for, reaches no owner and is answered Unlikely
+%% Error, as a service with no handler is. The handler is unlinked so that its end fails
+%% the case rather than cancelling it.
+console_serial_answers_its_service_alone() ->
+    {Link, Conn} = joined_link(),
+    {ok, Serial} = erx_gatt_serial:start_link(console, self()),
+    unlink(Serial),
+    erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {console, rx}, <<"in">>}},
+    receive {serial, Conn, Got} -> ?assertEqual(<<"in">>, Got) after ?WAIT_MS -> error(no_serial) end,
+    receive {from_link, Link, {registry, {answer, 7, ok}}} -> ok after ?WAIT_MS -> error(no_answer) end,
+    erx_gatt_srv ! {erx_bt_link, Link, {write, 8, {nus, rx}, <<"other">>}},
+    receive {from_link, Link, {registry, {answer, 8, Answer}}} -> ?assertEqual({error, unlikely_error}, Answer)
+    after ?WAIT_MS -> error(no_answer)
+    end,
+    Sender = sender(Conn, <<"out">>),
+    ?assertEqual(<<"out">>, notification(Link, {console, tx}, ok)),
+    ?assertEqual(ok, sent(Sender)),
+    receive {serial, _, Bytes} -> error({other_service, Bytes}) after 100 -> ok end.
+
 %% ---- fixtures ----
 
-%% The registry serving every declared service, with the relaying facet installed as ble.
+%% The registry serving every declared service and console(), with the relaying facet
+%% installed as ble.
 start_registry() ->
     persistent_term:put(erx_dist_owner, ?BT),
-    {ok, Registry} = erx_gatt_srv:start_link(?GAP, [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()]),
+    Served = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()] ++ [console()],
+    {ok, Registry} = erx_gatt_srv:start_link(?GAP, Served),
     unlink(Registry),
     Facet = spawn(fun() -> relaying_facet(#{}) end),
     erx_facets:install(#{ble => Facet}),
@@ -194,10 +225,23 @@ joined_link() ->
 pass_on(Test) ->
     receive Message -> Test ! {from_link, self(), Message}, pass_on(Test) end.
 
-%% The next notification of tx the registry asks Link for, answered Answer.
-notification(Link, Answer) ->
+%% A stand-in for the phone console's service (docs/design-bluetooth.md, "The console"):
+%% nus's serial shape under its own name, each UUID nus's with its first octet inverted so
+%% the table holds each once.
+console() ->
+    #{uuid := Uuid, characteristics := Chars} = Nus = erx_gatt_decl:service(nus),
+    Nus#{name => console, uuid => other_uuid(Uuid),
+         characteristics => [C#{uuid => other_uuid(U)} || #{uuid := U} = C <- Chars]}.
+
+other_uuid(<<First, Rest/binary>>) -> <<(First bxor 16#FF), Rest/binary>>.
+
+%% The next notification of nus's tx the registry asks Link for, answered Answer.
+notification(Link, Answer) -> notification(Link, {nus, tx}, Answer).
+
+%% The next notification of Key the registry asks Link for, answered Answer.
+notification(Link, Key, Answer) ->
     receive
-        {from_link, Link, {'$gen_call', From, {notify, notify, {nus, tx}, Piece}}} ->
+        {from_link, Link, {'$gen_call', From, {notify, notify, Key, Piece}}} ->
             gen_server:reply(From, Answer),
             Piece
     after ?WAIT_MS -> error(no_notification)
@@ -215,6 +259,6 @@ sync() -> _ = sys:get_state(erx_gatt_srv), ok.
 %% The serial handler has taken Conn's mtu event, which reaches it through the relay.
 mtu_heard(Conn, Mtu, Tries) ->
     case sys:get_state(erx_gatt_serial) of
-        {handler, erx_gatt_serial, _, _, {serial, _, #{Conn := Mtu}}} -> ok;
+        {handler, erx_gatt_serial, _, _, {serial, _, _, #{Conn := Mtu}}} -> ok;
         _ when Tries > 0 -> timer:sleep(10), mtu_heard(Conn, Mtu, Tries - 1)
     end.

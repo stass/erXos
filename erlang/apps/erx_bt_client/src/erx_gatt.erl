@@ -32,7 +32,10 @@ and answer/2 are total over any term and make no atom.
 
 -export([attach/1, set/3, notify/4, indicate/4, reply/2]).
 -export([facet/0, event/2, answer/2]).
--export_type([table/0, event/0, answer/0]).
+-export_type([table/0, event/0, answer/0, address/0]).
+
+-doc "A Bluetooth device address: its type and its 48 bits.".
+-type address() :: {public | random, <<_:48>>}.
 
 -doc "A service's characteristics as attach answers them: each one's maximum and accesses.".
 -type table() :: #{atom() => #{max := 0..512, access := #{atom() => atom()}}}.
@@ -40,9 +43,13 @@ and answer/2 are total over any term and make no atom.
 -doc "A handler's answer to a write: ok, an ATT Application Error, or Value Not Allowed.".
 -type answer() :: ok | {error, ?ERX_ATT_APPLICATION_ERROR_MIN..?ERX_ATT_APPLICATION_ERROR_MAX | value_not_allowed}.
 
--doc "An event the registry sends a handler, its envelope off.".
--type event() :: {connected, Conn :: reference(), #{address := {public | random, <<_:48>>}, bonded := boolean(),
-                                                   level := atom()}}
+-doc """
+An event the registry sends a handler, its envelope off. `connected` carries `identity`,
+the bond's identity address, exactly when `bonded` is true.
+""".
+-type event() :: {connected, Conn :: reference(), #{address := address(), level := atom(), bonded := false}
+                                                | #{address := address(), level := atom(), bonded := true,
+                                                    identity := address()}}
                | {mtu, Conn :: reference(), Mtu :: pos_integer()}
                | {subscribed, Conn :: reference(), Char :: atom(), none | notify | indicate}
                | {write, Req :: reference(), Conn :: reference(), Char :: atom(), Value :: binary()}
@@ -155,9 +162,12 @@ is_characteristic({Char, #{max := Max, access := Access} = Limits}) ->
 is_characteristic(_Characteristic) ->
     false.
 
-is_event({connected, Conn, #{address := Address, bonded := Bonded, level := Level} = Info})
+is_event({connected, Conn, #{address := Address, bonded := false, level := Level} = Info})
   when map_size(Info) =:= 3 ->
-    is_reference(Conn) andalso is_address(Address) andalso is_boolean(Bonded) andalso is_atom(Level);
+    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level);
+is_event({connected, Conn, #{address := Address, bonded := true, level := Level, identity := Identity} = Info})
+  when map_size(Info) =:= 4 ->
+    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level) andalso is_address(Identity);
 is_event({mtu, Conn, Mtu}) ->
     is_reference(Conn) andalso is_integer(Mtu) andalso Mtu >= ?ERX_ATT_MTU_DEFAULT;
 is_event({subscribed, Conn, Char, Kind}) ->

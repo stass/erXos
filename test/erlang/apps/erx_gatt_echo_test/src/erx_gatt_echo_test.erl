@@ -49,7 +49,7 @@ echo_init(Parent) ->
         {ok, _Facet} -> ok;
         NoFacet -> exit({no_facet, NoFacet})
     end,
-    {ok, _Serial} = erx_gatt_serial:start_link(self()),
+    {ok, _Serial} = erx_gatt_serial:start_link(nus, self()),
     echo().
 
 echo() ->

@@ -45,7 +45,11 @@ module ErxBtLinkFuzz
                       '    att(erx_gatt_server:reply(Ref, ok, server(Core), Core#core.bearer), Now, Core).',
               replacement: "configuration(_Ref, Key, Kind, _Now, #core{bond = none} = Core) ->\n" \
                            '    {[{store, {subscriptions, #{Key => Kind}}}], Core}.',
-              verdict: '{store_write_not_bonded,')
+              verdict: '{store_write_not_bonded,'),
+    Fault.new(fault: "a bonded link's security told to the registry without the bond's identity",
+              anchor: 'bond_security({kept, Identity, _Write}) -> #{bonded => true, identity => Identity};',
+              replacement: 'bond_security({kept, _Identity, _Write}) -> #{bonded => true};',
+              verdict: '{identity_not_bonded,')
   ].freeze
 
   module_function

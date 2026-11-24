@@ -4,14 +4,18 @@
 -module(erx_gatt_serial).
 -moduledoc """
 The serial service (docs/design-bluetooth.md, "Stage 3: the serial service", "For
-apps"): the handler of `nus` (abi/gatt/nus.txt), an erx_gatt_service registered under
-this module's name, which turns the service into a byte stream for each phone.
+apps" and "The console"): the handler of one declared service of the serial shape, a
+characteristic `rx` a phone writes and `tx` the machine notifies, such as `nus`
+(abi/gatt/nus.txt) or the phone console's `console`. It is an erx_gatt_service
+registered under this module's name, so a domain runs one, which turns its service,
+and no other, into a byte stream for each phone.
 
 * Each write of `rx` is answered `ok` at once and becomes `{serial, Conn, Bytes}` to the
   owner, while the owner's queue holds fewer than `bt_write_queue` messages; past that
   the write is answered the Application Error `?OWNER_BUSY` and its bytes are dropped,
   so a phone that writes faster than the owner reads cannot grow the owner's queue
-  without bound. The owner also hears `{connected, Conn, Info}` and `{disconnected, Conn}`.
+  without bound. The owner also hears `{connected, Conn, Info}`, `Info` as erx_gatt's
+  `connected` event gives it, `identity` included, and `{disconnected, Conn}`.
 * send/2 cuts its bytes into notifications of `tx` of at most `Mtu - 3` octets each,
   `Mtu` the link's bearer MTU as its last `mtu` event gave it, 23 until one comes, and
   returns once all are queued for the link, in order. A notification refused `busy`, the
@@ -29,7 +33,7 @@ byte uses and repeats. The handler ends with its owner.
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/1, send/2]).
+-export([start_link/2, send/2]).
 -export([init/1, handle_write/4, handle_event/2, handle_call/3, handle_info/2]).
 
 %% How often a notification the link's full queue refused is asked again.
@@ -37,14 +41,15 @@ byte uses and repeats. The handler ends with its owner.
 %% The Application Error a write of rx is answered while the owner is behind.
 -define(OWNER_BUSY, ?ERX_ATT_APPLICATION_ERROR_MIN).
 
--record(serial, {owner :: pid(), mtus = #{} :: #{reference() => pos_integer()}}).
+-record(serial, {service :: atom(), owner :: pid(), mtus = #{} :: #{reference() => pos_integer()}}).
 
 -doc """
-Starts the handler of `nus`, linked to the caller, for `Owner`, which hears the stream.
+Starts the handler of `Service`, linked to the caller, for `Owner`, which hears the
+stream. The facet refuses a service its grant does not name.
 """.
--spec start_link(pid()) -> gen_server:start_ret().
-start_link(Owner) when is_pid(Owner) ->
-    erx_gatt_service:start_link({local, ?MODULE}, nus, ?MODULE, Owner).
+-spec start_link(atom(), pid()) -> gen_server:start_ret().
+start_link(Service, Owner) when is_atom(Service), is_pid(Owner) ->
+    erx_gatt_service:start_link({local, ?MODULE}, Service, ?MODULE, {Service, Owner}).
 
 -doc "Sends `Bytes` to the phone of link `Conn` as notifications of `tx`.".
 -spec send(reference(), binary()) -> ok | {error, busy | gone | atom()}.
@@ -52,9 +57,9 @@ send(Conn, Bytes) when is_reference(Conn), is_binary(Bytes) ->
     erx_gatt_service:call(?MODULE, {send, Conn, Bytes}).
 
 -doc false.
-init(Owner) ->
+init({Service, Owner}) ->
     erlang:monitor(process, Owner),
-    {ok, #{}, #serial{owner = Owner}}.
+    {ok, #{}, #serial{service = Service, owner = Owner}}.
 
 -doc false.
 handle_write(Conn, rx, Bytes, #serial{owner = Owner} = Serial) ->
@@ -79,10 +84,10 @@ handle_event({subscribed, _Conn, _Char, _Kind}, Serial) ->
     {ok, Serial}.
 
 -doc false.
-handle_call({send, Conn, Bytes}, _From, #serial{mtus = Mtus} = Serial) ->
+handle_call({send, Conn, Bytes}, _From, #serial{service = Service, mtus = Mtus} = Serial) ->
     Room = maps:get(Conn, Mtus, ?ERX_ATT_MTU_DEFAULT) - 3,
     Deadline = erlang:monotonic_time(millisecond) + ?ERX_BT_HANDLER_TIMEOUT_MS,
-    {reply, notify_all(Conn, Bytes, Room, Deadline), Serial}.
+    {reply, notify_all(Conn, Service, Bytes, Room, Deadline), Serial}.
 
 -doc false.
 handle_info({'DOWN', _Monitor, process, Owner, _Reason}, #serial{owner = Owner}) ->
@@ -90,22 +95,23 @@ handle_info({'DOWN', _Monitor, process, Owner, _Reason}, #serial{owner = Owner})
 handle_info(_Info, Serial) ->
     {ok, Serial}.
 
-%% Notifies Bytes in pieces of at most Room octets, each once the link's queue takes it.
-notify_all(_Conn, <<>>, _Room, _Deadline) ->
+%% Notifies Bytes on tx of link Conn's Service in pieces of at most Room octets, each
+%% once the link's queue takes it.
+notify_all(_Conn, _Service, <<>>, _Room, _Deadline) ->
     ok;
-notify_all(Conn, Bytes, Room, Deadline) ->
+notify_all(Conn, Service, Bytes, Room, Deadline) ->
     Size = min(Room, byte_size(Bytes)),
     <<Piece:Size/binary, Rest/binary>> = Bytes,
-    case notify(Conn, Piece, Deadline) of
-        ok -> notify_all(Conn, Rest, Room, Deadline);
+    case notify(Conn, Service, Piece, Deadline) of
+        ok -> notify_all(Conn, Service, Rest, Room, Deadline);
         {error, _} = Refusal -> Refusal
     end.
 
-notify(Conn, Piece, Deadline) ->
-    case erx_gatt:notify(Conn, nus, tx, Piece) of
+notify(Conn, Service, Piece, Deadline) ->
+    case erx_gatt:notify(Conn, Service, tx, Piece) of
         {error, busy} = Busy ->
             case erlang:monotonic_time(millisecond) < Deadline of
-                true -> timer:sleep(?BUSY_RETRY_MS), notify(Conn, Piece, Deadline);
+                true -> timer:sleep(?BUSY_RETRY_MS), notify(Conn, Service, Piece, Deadline);
                 false -> Busy
             end;
         Answer ->
