@@ -17,7 +17,8 @@ require_relative '../fixtures/erlang_build'
 # cases must fail on it, which shows they exercise what they guard.
 class ErxSyslogTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  APPLICATIONS = %w[erx].freeze
+  # erx_session holds the tty every console reads its input through (erx_tty).
+  APPLICATIONS = %w[erx erx_session].freeze
   TESTS = %w[test/erlang/erx_syslog_tests.erl test/erlang/erx_console_handoff_tests.erl].freeze
   CASES = %w[erx_syslog_tests erx_console_handoff_tests].freeze
   ERX_LOG = 'erlang/apps/erx/src/erx_log.erl'

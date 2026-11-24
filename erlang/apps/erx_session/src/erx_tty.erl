@@ -76,7 +76,8 @@ have nothing to act on, since a master reports no breaks or parity errors
 and takes no flow control.
 """.
 
--export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3, lost/1,
+-export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3,
+         input_room/1, lost/1,
          output/3, read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, read_input/2, status/3,
          hangup/1, waiting/1, dropped/1]).
 -export_type([tty/0, termios/0, open/0, timer/0, room/0, action/0]).
@@ -390,6 +391,19 @@ input(Bytes, {Free, Kept, Stopped}, #tty{received = Before} = Tty0)
                                                out_stopped = false}),
     {merge(lists:reverse(Keyed)) ++ Settled, Rest,
      {Tty1#tty.echo_room, Kept, Tty1#tty.out_stopped}, Tty2}.
+
+-doc """
+How many more bytes input/3 takes before its bound drops one, under a termios
+without PARMRK, which doubles a received 0xff: what an owner that must lose
+nothing, the console of a pipe, gives it at most.
+""".
+-spec input_room(tty()) -> non_neg_integer().
+input_room(#tty{ready = Ready, line = Line} = Tty) ->
+    Reserve = case on(icanon, Tty) of
+                  true -> 1;
+                  false -> 0
+              end,
+    max(0, ?MAX_INPUT - byte_size(Ready#units.bytes) - byte_size(Line#units.bytes) - Reserve).
 
 -doc """
 Input was lost here (docs/design-live.md, "Lost input"): a loss goes where

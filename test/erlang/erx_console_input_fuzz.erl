@@ -1,11 +1,11 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% Random bytes in random chunks through erx_console:input/2. Whatever arrives, it returns,
-%% what it holds back is less than one character, its text is UTF-8, and what it says agrees
-%% with reference/1, a reader of the whole input that shares no code with it, so a byte that
-%% is not part of a character is checked as latin-1 wherever the chunks fell. The seed comes
-%% from make check-fuzz.
+%% Random bytes through erx_console:chars/2 a byte at a time, as the console answers a
+%% group's ask from its tty. Whatever arrives, it returns, what it holds back is less than
+%% one character, its text is UTF-8, and what it says agrees with reference/1, a reader of
+%% the whole input that shares no code with it, so a byte that is not part of a character
+%% is checked as latin-1 wherever it fell. The seed comes from make check-fuzz.
 
 -module(erx_console_input_fuzz).
 -export([run/1]).
@@ -23,48 +23,35 @@ run([Seed]) ->
     io:format("fuzz: ~p rounds ok~n", [?ROUNDS]).
 
 round_of(Bytes) ->
-    {Events, Left} = feed(chunks(Bytes), <<>>, []),
+    {Chars, Left} = feed(Bytes, <<>>, []),
     true = byte_size(Left) < 4,
     %% Only a character cut short waits, so a key typed reaches the group at once.
     case Left of
         <<>> -> ok;
         _ -> {incomplete, <<>>, Left} = unicode:characters_to_binary(Left)
     end,
-    lists:foreach(fun({data, Bin}) -> true = is_binary(unicode:characters_to_binary(Bin));
-                     (_) -> ok
-                  end, Events),
-    case said(Events, Left) =:= reference(Bytes) of
+    true = is_binary(unicode:characters_to_binary(Chars)),
+    case said(Chars, Left) =:= reference(Bytes) of
         true -> ok;
-        false -> error({disagrees_with_reference, Bytes, Events, Left})
+        false -> error({disagrees_with_reference, Bytes, Chars, Left})
     end.
 
-feed([], Pending, Acc) ->
-    {lists:append(lists:reverse(Acc)), Pending};
-feed([Chunk | Chunks], Pending, Acc) ->
-    {Events, Left} = erx_console:input(Pending, Chunk),
-    feed(Chunks, Left, [Events | Acc]).
+feed(<<>>, Held, Acc) ->
+    {iolist_to_binary(lists:reverse(Acc)), Held};
+feed(<<Byte, Rest/binary>>, Held, Acc) ->
+    {Chars, Left} = erx_console:chars(Held, Byte),
+    feed(Rest, Left, [Chars | Acc]).
 
-%% What the events say, then what is held back as the console reads it at end of input: each
+%% What the text says, then what is held back as the console reads it at end of input: each
 %% byte latin-1, whose code points are the byte values.
-said(Events, Left) ->
-    lists:flatmap(fun({data, Bin}) -> [Char || <<Char/utf8>> <= Bin];
-                     (Event) -> [Event]
-                  end, Events) ++ binary_to_list(Left).
+said(Chars, Left) ->
+    [Char || <<Char/utf8>> <= Chars] ++ binary_to_list(Left).
 
-%% The reference: one pass with the compiler's own UTF-8 matching. A control byte is its
-%% event, a character is itself, and any other byte reads as latin-1.
+%% The reference: one pass with the compiler's own UTF-8 matching. A character is itself,
+%% and any other byte reads as latin-1.
 reference(<<>>) -> [];
-reference(<<3, Rest/binary>>) -> [interrupt | reference(Rest)];
-reference(<<26, Rest/binary>>) -> [suspend | reference(Rest)];
 reference(<<Char/utf8, Rest/binary>>) -> [Char | reference(Rest)];
 reference(<<Byte, Rest/binary>>) -> [Byte | reference(Rest)].
-
-chunks(<<>>) ->
-    [];
-chunks(Bytes) ->
-    Size = rand:uniform(byte_size(Bytes)),
-    <<Chunk:Size/binary, Rest/binary>> = Bytes,
-    [Chunk | chunks(Rest)].
 
 random_bytes() ->
     << <<(rand:uniform(256) - 1)>> || _ <- lists:seq(1, rand:uniform(?MAX_LENGTH)) >>.

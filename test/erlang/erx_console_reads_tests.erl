@@ -181,6 +181,26 @@ a_flushed_loss_damages_the_read_test() ->
                          ?assertEqual("pwd\n", line())
                  end).
 
+%% A terminal relay never drives the system console, which ends the runtime at its line's
+%% end and has no hangup to end at: the console refuses one as it starts, and the relay
+%% ends with it.
+a_system_console_refuses_a_relay_test() ->
+    Test = self(),
+    process_flag(trap_exit, true),
+    Result = erx_console:start_link(
+               #{role => system, user => none, first_shell => none,
+                 driver => fun(C) ->
+                                   {ok, Relay} = erx_session_relay:start_link(C, Test, #{}),
+                                   Test ! {relay, Relay},
+                                   {ok, Relay, relay}
+                           end}),
+    Relay = receive {relay, R} -> R after ?WAIT_MS -> error(no_relay) end,
+    Ref = monitor(process, Relay),
+    Down = receive {'DOWN', Ref, process, Relay, _} -> down after ?WAIT_MS -> lives end,
+    flush(),
+    ?assertMatch({error, {bad_driver, _}}, Result),
+    ?assertEqual(down, Down).
+
 %%% The console, the relay and the stand-in shell
 
 with_console(Case) ->

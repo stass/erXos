@@ -22,7 +22,7 @@ domain pid or facet ends gives the line back.
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([export/3, owner/1, shell/0, marker/1, log/2]).
+-export([export/3, owner/1, shell/0, pipe_shell/1, marker/1, log/2]).
 
 %% How long the test waits for something it expects before it fails: only a failing case
 %% waits it out, so it is long enough for a host loaded many times over, and within the
@@ -50,6 +50,91 @@ shell_loop() ->
         eof -> ok;
         Line -> io:put_chars(["sys:", Line]), shell_loop()
     end.
+
+%% The shell of a console reading a pipe: each line it reads goes to the test; after
+%% "char" it reads one character, which goes to the test too, and after "wait" it reads
+%% nothing more until the test says go.
+pipe_shell(Test) ->
+    Group = self(),
+    spawn_link(fun() -> group_leader(Group, self()), Test ! {pipe_shell, self()}, pipe_loop(Test) end).
+
+pipe_loop(Test) ->
+    case io:get_line("") of
+        eof ->
+            ok;
+        "wait\n" = Line ->
+            Test ! {read, Line},
+            receive go -> pipe_loop(Test) end;
+        "char\n" = Line ->
+            Test ! {read, Line},
+            Test ! {read, io:get_chars("", 1)},
+            pipe_loop(Test);
+        Line ->
+            Test ! {read, Line},
+            pipe_loop(Test)
+    end.
+
+%% A pipe's driver: it says when the console has taken its input message.
+pipe_driver(Test) ->
+    fun(Console) ->
+            Pid = spawn_link(fun Loop() ->
+                                     receive
+                                         {erx_console_output, From, _Bytes} ->
+                                             Console ! {erx_console_written, From},
+                                             Loop();
+                                         erx_console_taken ->
+                                             Test ! taken,
+                                             Loop()
+                                     end
+                             end),
+            {ok, Pid, false}
+    end.
+
+%% The console of a pipe (docs/design-live.md, "Both consoles read on demand"): the bytes
+%% reach the group as the pipe gave them, a CR and a BEL among them, with no menu though
+%% the config asks for one, since no person is at the line; and a message its tty has no
+%% room for is answered only once the group has read enough of it, so the pipe is held
+%% back and never cut.
+pipe_test_() ->
+    {timeout, 60, fun pipe/0}.
+
+pipe() ->
+    process_flag(trap_exit, true),
+    Test = self(),
+    {ok, Console} = erx_console:start_link(#{role => session, menu => true, user => none,
+                                             driver => pipe_driver(Test),
+                                             first_shell => {?MODULE, pipe_shell, [Test]}}),
+    Shell = receive {pipe_shell, S} -> S after ?WAIT_MS -> error(no_shell) end,
+    try
+        %% The group's own line reading ends a line at CR as at LF; the character read
+        %% shows the CR the pipe gave.
+        pipe_input(Console, <<"a\rb\nchar\n\r">>),
+        ?assertEqual([{read, "a\n"}, {read, "b\n"}, {read, "char\n"}, {read, "\r"}],
+                     [pipe_read() || _ <- lists:seq(1, 4)]),
+        %% A BEL opens no menu: the group's line reading drops it as stock's does a
+        %% control character, and the character read gets it.
+        pipe_input(Console, <<"x", $\^G, "y\nchar\n", $\^G>>),
+        ?assertEqual([{read, "xy\n"}, {read, "char\n"}, {read, [$\^G]}], [pipe_read() || _ <- lists:seq(1, 3)]),
+        pipe_input(Console, <<"wait\n">>),
+        ?assertEqual({read, "wait\n"}, pipe_read()),
+        Long = binary:copy(<<"x">>, 6000),
+        Console ! {erx_console_input, <<Long/binary, "\n">>},
+        ?assertEqual(not_taken, receive taken -> taken after ?QUIET_MS -> not_taken end),
+        Shell ! go,
+        ?assertEqual({read, binary_to_list(Long) ++ "\n"}, pipe_read()),
+        ?assertEqual(taken, receive taken -> taken after ?WAIT_MS -> not_taken end)
+    after
+        unlink(Console),
+        exit(Console, kill)
+    end.
+
+%% Bytes from the pipe, sent as its driver sends them: the next only once these are taken.
+pipe_input(Console, Bytes) ->
+    Console ! {erx_console_input, Bytes},
+    receive taken -> ok after ?WAIT_MS -> error(not_taken) end.
+
+pipe_read() ->
+    receive {read, Line} -> {read, Line} after ?WAIT_MS -> none end.
 
 %% The fake driver: the line's bytes go to the test, and each write is done at once.
 driver(Test) ->

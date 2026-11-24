@@ -19,8 +19,9 @@ require_relative '../fixtures/line_editor'
 # its line as a system domain's does. `user` is erx_test_user, so no group runs stock's
 # code when the tree's is loaded. The seeded faults (docs/design-live.md, "Lost input",
 # Verification): a console that answers a loss on the system line after the next input,
-# one that keeps a character's leading byte across a loss, and an escape state kept
-# across a loss, by the console or by erx_console_keys:lost/1.
+# one that keeps a character's leading byte across a loss, an escape state kept across a
+# loss, by the console or by erx_console_keys:lost/1, and for a pipe's console, its tty
+# given ICRNL, its driver answered at once whatever the tty's room, and the menu run.
 class ErxConsoleMasterTest < Minitest::Test
   APPLICATIONS = %w[erx erx_files erx_domain erx_session].freeze
   TESTS = %w[test/erlang/erx_test_user.erl test/erlang/erx_tty_master_tests.erl
@@ -30,14 +31,25 @@ class ErxConsoleMasterTest < Minitest::Test
   KEYS = 'erlang/apps/erx/src/erx_console_keys.erl'
   # The console's input clause and its loss clause, and the same with the loss held
   # until the next input has been delivered.
-  TAKEN = "    Driver ! erx_console_taken,\n    {noreply, typed(Bytes, State)};"
-  LATE_TAKEN = "    Driver ! erx_console_taken,\n    {noreply, case erase(seeded_loss) of " \
-               "true -> driver_lost(typed(Bytes, State)); undefined -> typed(Bytes, State) end};"
-  LOST = "    Driver ! erx_console_taken,\n    {noreply, driver_lost(State)};"
-  HELD_LOST = "    Driver ! erx_console_taken,\n    put(seeded_loss, true),\n    {noreply, State};"
-  CUT = 'State = State0#state{keys = erx_console_keys:lost(Keys), pending = <<>>},'
-  KEPT_KEYS = 'State = State0#state{keys = Keys, pending = <<>>},'
-  KEPT_CUT = 'State = State0#state{keys = erx_console_keys:lost(Keys)},'
+  TAKEN = '{noreply, serve(typed(Bytes, unanswered(State)))};'
+  LATE_TAKEN = '{noreply, serve(case erase(seeded_loss) of ' \
+               'true -> driver_lost(typed(Bytes, unanswered(State))); ' \
+               'undefined -> typed(Bytes, unanswered(State)) end)};'
+  LOST = '{noreply, serve(driver_lost(unanswered(State)))};'
+  HELD_LOST = 'put(seeded_loss, true), {noreply, serve(unanswered(State))};'
+  KEYS_LOST = 'State = State0#state{keys = erx_console_keys:lost(Keys)},'
+  KEPT_KEYS = 'State = State0#state{keys = Keys},'
+  # The loss's read drops the bytes held for the group, and the same keeping them.
+  CUT = "damage(Group, State0 = #state{asks = Asks}) ->\n    State = drop_held(Group, State0),"
+  KEPT_CUT = "damage(Group, State0 = #state{asks = Asks}) ->\n    State = State0,"
+  # A pipe's tty set as a terminal's, for CR; a pipe answered at once whatever its
+  # tty's room; and a pipe's console that runs the menu.
+  PIPE_TERMIOS = '(erx_tty:termios(erx_tty:new()))#{iflag := [], oflag := [], lflag := []}'
+  PIPE_ICRNL = '(erx_tty:termios(erx_tty:new()))#{iflag := [icrnl], oflag := [], lflag := []}'
+  PIPE_ROOM = 'true -> min(byte_size(Unread), erx_tty:input_room(Tty));'
+  NO_ROOM = 'true -> byte_size(Unread);'
+  PIPE_MENU = 'menu = Terminal andalso maps:get(menu, Config, Role =:= system),'
+  ANY_MENU = 'menu = maps:get(menu, Config, Role =:= system),'
 
   def test_master_cases_pass_under_eunit
     output, status = eunit
@@ -55,7 +67,22 @@ class ErxConsoleMasterTest < Minitest::Test
   end
 
   def test_a_console_that_keeps_the_escape_state_across_a_loss_fails
-    assert_seed_fails({ CONSOLE => { CUT => KEPT_KEYS } }, 'erx_console_master_tests:a_loss_ends_a_terminal_reply/0')
+    assert_seed_fails({ CONSOLE => { KEYS_LOST => KEPT_KEYS } },
+                      'erx_console_master_tests:a_loss_ends_a_terminal_reply/0')
+  end
+
+  def test_a_pipe_read_with_icrnl_fails
+    assert_seed_fails({ CONSOLE => { PIPE_TERMIOS => PIPE_ICRNL } }, /erx_console_master_tests: pipe\.\.\.\*failed\*/,
+                      also: '{read,"\\n"}')
+  end
+
+  def test_a_pipe_answered_at_once_fails
+    assert_seed_fails({ CONSOLE => { PIPE_ROOM => NO_ROOM } }, /erx_console_master_tests: pipe\.\.\.\*failed\*/,
+                      also: 'not_taken')
+  end
+
+  def test_a_pipe_with_the_menu_fails
+    assert_seed_fails({ CONSOLE => { PIPE_MENU => ANY_MENU } }, /erx_console_master_tests: pipe\.\.\.\*failed\*/)
   end
 
   def test_an_escape_state_kept_across_a_loss_fails

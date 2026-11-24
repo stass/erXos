@@ -9,7 +9,7 @@ require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
 
-# The fuzz target of erx_console:input/2, the one parser of console input bytes, compiled
+# The fuzz target of erx_console:chars/2, the one decoder of console input bytes, compiled
 # from source and run alone on stock's emulator (ERX_ERL and ERX_ERLC, the oracle's), so it
 # needs no hosted build and stock's own terminal driver still starts under -noshell. It runs
 # the module as it is, then a copy whose latin-1 branch answers wrong, which must fail: that
@@ -35,7 +35,7 @@ module ErxConsoleInputFuzz
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok$/)
     output, status = fuzz(source.sub(LATIN1_BRANCH, WRONG_BRANCH), seed: seed)
     abort("the wrong latin-1 branch passed:\n#{output}") if status.success? || !output.include?('disagrees_with_reference')
-    puts 'erx_console:input/2 agrees with its reference, and a wrong latin-1 branch does not'
+    puts 'erx_console:chars/2 agrees with its reference, and a wrong latin-1 branch does not'
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round.

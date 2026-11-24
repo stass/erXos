@@ -36,7 +36,7 @@ and names in actions.
 """.
 
 -export([new/2, request/3, event/2]).
--export([holder/1, numbers/2, termios/1, signal_number/1]).
+-export([holder/1, numbers/2, termios/1, signal_number/1, event_name/1]).
 -export_type([core/0, request/0, event/0, answer/0, action/0]).
 
 %% Reads, writes and a read's count carry at most this many bytes.
@@ -527,8 +527,8 @@ carry(Actions, Core) ->
 
 carry_one({echo, Bytes}, Core) -> to_master(Bytes, Core);
 carry_one({signal, Signal}, Core) -> signal(Signal, Core);
-carry_one(info, Core) -> {notify(info, Core), Core};
-carry_one(winch, Core) -> {notify(winch, Core), Core};
+carry_one(info, Core) -> {notify(event_name(info), Core), Core};
+carry_one(winch, Core) -> {notify(event_name(winch), Core), Core};
 carry_one(flush_output, Core) -> flush(Core);
 carry_one(flushed_loss, Core) -> {flushed_loss(Core), Core};
 carry_one(stop_output, #core{link = Link} = Core) ->
@@ -544,7 +544,7 @@ carry_one({timer_cancel, _} = Cancel, Core) -> {[Cancel], Core}.
 signal(Signal, #core{signal = N} = Core0) ->
     Core1 = count(Signal, Core0#core{signal = N + 1}),
     {Parked, Core2} = park(Core1),
-    {Parked ++ notify(event_name(Signal), Core2), Core2}.
+    {Parked ++ notify(event_name({signal, Signal}), Core2), Core2}.
 
 %% A flush dropped a loss, which erx_tty reports ahead of the signal it
 %% belongs to. Only the console reads lines for groups, so only it is told,
@@ -554,12 +554,23 @@ signal(Signal, #core{signal = N} = Core0) ->
 %% cooked termios the job's line is the tty's, which the flush dropped
 %% whole, and a raw-mode program editing its own line gets a loss only as
 %% the NUL it reads, as on FreeBSD, which flushes that NUL with the rest.
-flushed_loss(#core{holder = console} = Core) -> notify(lost, Core);
+flushed_loss(#core{holder = console} = Core) -> notify(event_name(flushed_loss), Core);
 flushed_loss(#core{holder = {job, _, _, _}}) -> [].
 
-event_name(sigint) -> interrupt;
-event_name(sigtstp) -> suspend;
-event_name(sigquit) -> quit.
+-doc """
+The event an erx_tty action makes for the tty's holder, `{erx_tty_event, Group, Event}`:
+a signal key's, `lost` for a flush that dropped a loss, VSTATUS's `info` and a size
+change's `winch`. The one mapping, which the relay tells its holder by and a console
+reading a tty of its own carries out by (erx_console).
+""".
+-spec event_name({signal, sigint | sigtstp | sigquit} | flushed_loss | info | winch) ->
+          interrupt | suspend | quit | lost | info | winch.
+event_name({signal, sigint}) -> interrupt;
+event_name({signal, sigtstp}) -> suspend;
+event_name({signal, sigquit}) -> quit;
+event_name(flushed_loss) -> lost;
+event_name(info) -> info;
+event_name(winch) -> winch.
 
 notify(Event, #core{holder = {job, Tag, Shell, _}}) ->
     [{send, Shell, {erx_tty_event, Tag, Event}}];
