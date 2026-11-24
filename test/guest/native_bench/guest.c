@@ -378,7 +378,10 @@ erx_fiasco_root_main(void)
 	say_name();
 	erx_bench_read_pairs(erx_fiasco_counter, pairs, READ_PAIRS);
 	deadline_ns = erx_fiasco_clock_ns() + (uint64_t)ERX_BENCH_DEADLINE_S * NS_PER_SECOND;
-#ifndef ERX_BENCH_SEED_NO_DEADLINE
+#ifdef ERX_BENCH_SEED_NO_DEADLINE
+	/* The deadline's seed: the thread is never started, so only QEMU's deadline ends a hang. */
+	(void)deadline_main;
+#else
 	bench_thread_start(DEADLINE_THREAD, 0, ERX_THREAD_CLASS_WORKER, deadline_main);
 #endif
 	bench_say("erx: bench: timing\n");

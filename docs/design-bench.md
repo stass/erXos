@@ -978,8 +978,12 @@ line: a board boot that ends `erx: end off` has halted the board, and the
 run says its power needs cycling.
 
 **The guest's deadline.** Before its cells the bench root starts one
-thread of its own, at the root's top priority, that sleeps until the
-boot's deadline. If the cells have not finished by then it prints
+thread of its own, at the root's band as every thread of the root runs
+(the backend refuses `erx_thread_set_urgency`, [above](#what-the-existing-tools-do)),
+that sleeps until the boot's deadline. A cell that spins on its CPU
+shares that CPU with it at the slice's end, so the thread runs within a slice of its deadline;
+a cell running at the band's ceiling, which would keep it from running,
+is not a case the bench has. If the cells have not finished by then it prints
 `erx: bench: boot NAME deadline` and ends the machine with a reset;
 whichever of it and the done path ends first takes the end path's one
 caller. Every cell the boot did not report is `timed_out`, as at a QEMU
