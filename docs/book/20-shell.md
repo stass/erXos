@@ -395,9 +395,10 @@ target. `-r` is designed and not built.
 > program such as `sshd` or a terminal window rather than a serial
 > line.
 
-erXos's line discipline lives in the session, not the kernel, as one
+erXos's line discipline lives in user mode, not the kernel, as one
 pure state machine, the Erlang
-module `erx_tty` in `erlang/apps/erx_session/src` ([design-live.md, The
+module `erx_tty` in `erlang/apps/erx/src`, which a session's ttys run and
+so does the system console, reading a tty of its own ([design-live.md, The
 tty](../design-live.md#the-tty)). Each function takes an event and the
 tty's state and returns what to do and the next state:
 

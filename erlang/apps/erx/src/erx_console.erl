@@ -268,8 +268,8 @@
                 held = #{} :: #{pid() => binary()}}).
 
 %% Both consoles read on demand (docs/design-live.md, "Lost input"): a unit at a time,
-%% a byte or a loss, and only for an ask of the current group, keeping for each group
-%% the leading bytes of a character read for it whose other bytes have not been read.
+%% a byte or a loss, and only for an ask of the current group. The leading bytes of a
+%% character read for a group are the state's, not the reader's (`held`).
 %%
 %% The console of a session's tty reads its relay as libedit reads a tty
 %% (docs/design-shell.md, "The console reads on demand"): through its one open. It
@@ -708,7 +708,7 @@ info({ready, Open, [in], N}, State = #state{reader = {relay, Relay = #{open := O
     read_for_ask(N, State#state{reader = {relay, Relay#{watching := false}}});
 info({erx_tty_event, Group, Event}, State = #state{reader = {relay, _}}) ->
     {noreply, tty_event(Group, Event, State)};
-info({erx_console_size, Rows, Columns}, State = #state{tty = TTY, size = Held})
+info({erx_console_size, Rows, Columns}, State = #state{tty = TTY, size = Was})
   when is_integer(Rows), is_integer(Columns),
        Rows >= 1, Rows =< ?ERX_CONSOLE_SIDE_MAX, Columns >= 1, Columns =< ?ERX_CONSOLE_SIDE_MAX ->
     Size = {Rows, Columns},
@@ -717,7 +717,7 @@ info({erx_console_size, Rows, Columns}, State = #state{tty = TTY, size = Held})
     %% Only a size that differs from the one held is a change, so a repeated
     %% report sends the shell nothing (docs/design-shell.md, "Window size"); a line
     %% handed to a session passes the size on to it instead.
-    [resized(State1) || Size =/= Held, State1#state.line =:= system],
+    [resized(State1) || Size =/= Was, State1#state.line =:= system],
     {noreply, session_size(State1)};
 info({erx_console_size, _Rows, _Columns}, State) ->
     {noreply, State};
@@ -1494,7 +1494,7 @@ next_read(State = #state{reader = {relay, _}}) -> watch(State);
 next_read(State = #state{reader = {own, _}}) -> serve(State).
 
 %% What the relay tells the console of a key or a flush on its tty, made while Group was
-%% the current group, or `none`. Each event the relay core's mapping makes is handled by
+%% the current group, or `none`. Each event erx_tty:event_name/1 makes is handled by
 %% name, and the console's own tty makes the same events through it (own_action/2); an
 %% event of a relay that knows more is logged.
 tty_event(Group, Event, State) when Event =:= interrupt; Event =:= suspend; Event =:= quit ->

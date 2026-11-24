@@ -7,8 +7,9 @@ The line discipline (docs/design-live.md, "The tty"): the decisions of one
 tty as a pure state machine. Each call takes the tty and one event and
 returns the next tty and what to do, as a list of actions in order. The
 process that owns the tty, the terminal relay or a console that reads a
-tty of its own (erx_console), carries the actions out and owns the timers,
-so time reaches the machine only as timer/2.
+tty of its own (erx_console), carries the actions out; the relay owns the
+timers, so time reaches the machine only as timer/2, and the console
+starts none.
 
 Behaviour follows FreeBSD 15.1's line discipline, sys/kern/tty_ttydisc.c,
 redesigned as a fold over the bytes rather than translated: a received byte
