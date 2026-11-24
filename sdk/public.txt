@@ -5,6 +5,8 @@
 # exports; tools/erx sdk export writes the SDK's erlang/public.txt with
 # each module line expanded to its exports, one MODULE:FUNCTION/ARITY a
 # line, sorted.
+erx_gatt_serial:send/2
+erx_gatt_serial:start_link/2
 erx_prog_handler:start/1
 erx_ui:close/1
 erx_ui:open/1

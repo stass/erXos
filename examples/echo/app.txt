@@ -1,0 +1,4 @@
+app echo
+  gatt nus
+  applications erx_echo
+  license "BSD-2-Clause"

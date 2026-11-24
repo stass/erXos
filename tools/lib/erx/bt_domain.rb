@@ -4,9 +4,12 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 require 'socket'
+require_relative 'boot_record'
 require_relative 'bumble'
+require_relative 'display_domain'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'image_apps'
 require_relative 'manifest_edit'
 require_relative 'medium_boot'
 require_relative 'output_directory'
@@ -189,6 +192,30 @@ module Erx
       MediumBoot.grown(medium, memory: 0, domains: 0, connections: 1)
     end
 
+    # The app cell (docs/design-bluetooth.md, "On QEMU against Bumble", and "Decisions", 7):
+    # the echo as decision 7's second package, examples/echo (ImageApps::ECHO), which
+    # declares gatt nus, lies in the image's system partition enabled, and answers through
+    # its own session's ble grant, which the build derives from the apps row and the
+    # domain service narrows to the package's gatt. APP_NAME is its package's name,
+    # ADMITTED and ECHOING the lines the system logs at its admission and the app once its
+    # handler has attached nus, and APP_SECONDS how long the shell's check waits for both.
+    APP_CELL = '-app'
+    APP_NAME = 'echo'
+    APP_GATT = %w[nus].freeze
+    ADMITTED = /packages: admitted #{APP_NAME}\r?\n/n
+    ECHOING = /erx_echo: echoing nus/n
+    APP_SECONDS = 240
+
+    # The app cell's manifest from the development manifest's text, source, on platform: as
+    # manifest, without the echo domain's rows, and with the apps row offering ble beside
+    # its services and APP_GATT as its gatt (Manifest::Edit.offering), so the one grant of
+    # ble for nus is the app template's.
+    def self.app_manifest(source, platform:)
+      lined = Manifest::Edit.with_unit(source, LINE_UNIT, holder: 'system', units: platform.record.fetch('units'))
+      medium = MediumBoot.manifest(lined, row: ROWS + line_grant(line_device(platform)), domains: 1, domain_memory: MEMORY)
+      Manifest::Edit.offering(medium, service: 'ble', gatt: APP_GATT)
+    end
+
     # The line typed at the Erlang shell, one expression per element: the wait for the
     # domain (PcieDomain::WAIT); BtFacts, run at the domain, its controller process's
     # bring-up facts (erx_bt_hci:facts/0) printed there as a string, or none before the
@@ -270,6 +297,22 @@ module Erx
            check_echo(text)
            serial.call
          } }.freeze].freeze
+    end
+
+    # The app cell's checkpoints: the production checkpoints, the last at the command shell,
+    # which waits in the serial log at log for the echo's ECHOING line, checks that the
+    # system admitted the package (ADMITTED), and then runs the serial row through the app
+    # (serial). points must end at the command shell.
+    def app_checkpoints(points, log:, serial:)
+      raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
+
+      check = lambda do |_text|
+        seen = DisplayDomain.await_log(log, wait_seconds: APP_SECONDS) { |text| text.match?(ECHOING) }
+        raise Error, "the system did not admit the #{APP_NAME} package" unless seen.match?(ADMITTED)
+
+        serial.call
+      end
+      [*points[0...-1], points.last.merge(verify: check, verify_seconds: APP_SECONDS + Serial::BOUND_SECONDS).freeze].freeze
     end
 
     # Bumble's apps/controllers.py, unmodified, with its two controllers joined by its local
@@ -409,41 +452,96 @@ module Erx
         @qemu = qemu
         @machine = MediumBoot.machine(platform)
         @manifest = BtDomain.manifest(platform.manifest_source(@root), platform: platform)
+        @app_manifest = BtDomain.app_manifest(platform.manifest_source(@root), platform: platform)
       end
 
-      # Packs the test image, which carries ECHO_BOOT, once, then boots it.
+      # The cells' names: the echo domain's, then the app cell's.
+      def self.cells
+        cell = "#{QemuCells::LOCAL_ACCELERATOR}-#{CELL_CPUS}cpu"
+        [cell, "#{cell}#{APP_CELL}"].freeze
+      end
+
+      # Packs the test image, which carries ECHO_BOOT, once, and boots it; then packs the
+      # app cell's medium, which carries the echo package, and boots it.
       def call(jobs: 4, build: true)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        directory = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bt/image'))
-        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
-        built = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, machine: @machine,
-                                    fiasco: fiasco)
-                               .build_test_image(directory: directory, added: nothing, domains: [ECHO_BOOT],
-                                                 manifest_source: @manifest)
-        accel = QemuCells::LOCAL_ACCELERATOR
-        boot(accel, built)
-        { "#{accel}-#{CELL_CPUS}cpu" => 'passed' }
+        echo_cell, app_cell = Run.cells
+        echo_boot(echo_cell, fiasco)
+        app_boot(app_cell, fiasco)
+        { echo_cell => 'passed', app_cell => 'passed' }
       end
 
       private
 
-      # One boot to the command shell, then the lines' answers and the serial row, with the
-      # controllers served for its length; their log is bumble.log in the boot's owner-only
-      # directory, beside the peer's. Their deadline outlasts QEMU's, the checkpoints'
-      # seconds and the serial row's, by their own wait to listen and a minute for QEMU's
-      # start.
-      def boot(accel, built)
-        cell = "#{accel}-#{CELL_CPUS}cpu"
-        path = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bt', cell))
-        directory = OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
+      # The echo domain's cell: one boot of the test image to the command shell, then the
+      # lines' answers and the serial row.
+      def echo_boot(cell, fiasco)
+        image = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bt/image'))
+        nothing = ProductionImage::Added.new(entries: [].freeze, inputs: [].freeze, imports: {}.freeze)
+        built = production(fiasco).build_test_image(directory: image, added: nothing, domains: [ECHO_BOOT],
+                                                    manifest_source: @manifest)
+        directory = cell_directory(cell)
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: CELL_CPUS,
                                                          manifest_source: @manifest, memory_mib: @machine.memory_mib,
                                                          test_image: true)
+        served(directory, ->(serial) { BtDomain.checkpoints(points, serial: serial) }) do |checkpoints, line|
+          qemu.run(platform: @machine.platform, accel: QemuCells::LOCAL_ACCELERATOR, cpus: CELL_CPUS, image: built.single,
+                   memory_mib: @machine.memory_mib, directory: directory, line: line, checkpoints: checkpoints)
+        end
+      end
+
+      # The app cell: the echo package (ImageApps::ECHO) packed as the card packs an
+      # example and added to a medium of app_manifest, enabled; the harness plays the
+      # firmware (MediumBoot.firmware_tree) and boots the medium's committed slot to the
+      # command shell, where the echo's line and the serial row are checked
+      # (BtDomain.app_checkpoints).
+      def app_boot(cell, fiasco)
+        directory = cell_directory(cell)
+        package = ImageApps.packed(FileUtils.mkdir_p(File.join(directory, 'package')).first, example: ImageApps::ECHO,
+                                                                                            root: @root, runner: @runner,
+                                                                                            compiler: @compiler, linker: @linker).package
+        apps = ImageApps.plan([package], enable: [APP_NAME])
+        built, written = production(fiasco).build_medium(directory: File.join(directory, 'image'), manifest_source: @app_manifest,
+                                                         apps: apps)
+        medium = written.fresh(directory: directory)
+        choice = BootRecord.read(medium)
+        image = BootRecord.extract(medium, choice, output: File.join(directory, 'slot.boot'))
+        disks = [QemuPlan::Disk.new(path: medium)].freeze
+        tree = MediumBoot.firmware_tree(runner: @runner, qemu: @qemu, machine: @machine, image: image, disks: disks,
+                                        choice: choice, cpus: CELL_CPUS, directory: directory)
+        boot = File.join(directory, 'boot')
+        points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: CELL_CPUS,
+                                                         manifest_source: @app_manifest, memory_mib: @machine.memory_mib)
+        log = File.join(boot, 'serial.log')
+        served(directory, ->(serial) { BtDomain.app_checkpoints(points, log: log, serial: serial) }) do |checkpoints, line|
+          qemu.run(platform: @machine.platform, accel: QemuCells::LOCAL_ACCELERATOR, cpus: CELL_CPUS, image: image,
+                   memory_mib: @machine.memory_mib, directory: boot, dtb: tree, disks: disks, line: line,
+                   checkpoints: checkpoints)
+        end
+      end
+
+      def production(fiasco) = ProductionImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                                                   machine: @machine, fiasco: fiasco)
+
+      def qemu = Qemu.new(root: @root, runner: @runner, program: @qemu)
+
+      # The cell's owner-only directory under build/bt, emptied.
+      def cell_directory(cell)
+        path = ProductionImage.clear_directory(root: @root, path: File.join(@root, 'build/bt', cell))
+        OutputDirectory.prepare(root: @root, path: path, mode: 0o700)
+      end
+
+      # Bumble's controllers served for a boot's length, their log bumble.log in directory
+      # beside the peer's, and the block given the checkpoints that points_for answers for
+      # the serial row's lambda and the line to join to the first controller. Their deadline
+      # outlasts QEMU's, the checkpoints' seconds and the serial row's, by their own wait to
+      # listen and a minute for QEMU's start.
+      def served(directory, points_for)
         Bumble.use(root: @root, runner: @runner) do |environment|
           serial = nil
-          checkpoints = BtDomain.checkpoints(points, serial: -> { serial.call })
           # serial is set below, once the controllers' ports are known, before any checkpoint runs.
+          checkpoints = points_for.call(-> { serial.call })
           seconds = checkpoints.sum { |point| point.fetch(:seconds) + point.fetch(:verify_seconds, 0) } +
                     Controllers::LISTEN_SECONDS + 60
           Controllers.serve(environment, log: File.join(directory, 'bumble.log'), seconds: seconds,
@@ -451,9 +549,7 @@ module Erx
             serial = lambda do
               Serial.run(environment, root: @root, port: ports.peer, directory: directory, timeout_program: @runner.timeout_program)
             end
-            Qemu.new(root: @root, runner: @runner, program: @qemu)
-                .run(platform: @machine.platform, accel: accel, cpus: CELL_CPUS, image: built.single, memory_mib: @machine.memory_mib,
-                     directory: directory, line: QemuPlan::Line.new(port: ports.line), checkpoints: checkpoints)
+            yield checkpoints, QemuPlan::Line.new(port: ports.line)
           end
         end
       end

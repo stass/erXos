@@ -23,6 +23,7 @@ module Erx
       'tools/lib/erx/example_lists.rb' => 'this check, which names the directory it scans for',
       'tools/lib/erx/image_apps.rb' => "docs/design-packaging.md#the-apps-row, the card's kiosk (ImageApps.packed_kiosk)",
       'tools/lib/erx/kiosk.rb' => 'docs/design-packaging.md#verification-and-testing, the kiosk cell',
+      'tools/lib/erx/bt_domain.rb' => "docs/design-bluetooth.md#decisions, 7: the Bluetooth suite's app cell boots the echo",
       'tools/lib/erx/qemu_suites/kiosk.rb' => 'docs/design-packaging.md#verification-and-testing, the kiosk cell'
     }.freeze
 

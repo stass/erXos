@@ -14,7 +14,9 @@ require_relative '../fixtures/erlang_build'
 # case named for it.
 class ErxBtGattClientTest < Minitest::Test
   APPLICATIONS = %w[erx_bt erx_bt_client].freeze
-  TESTS = %w[test/erlang/erx_bt_gatt_client_tests.erl].freeze
+  # The echo app of examples/echo, built here as its package's module over the client.
+  ECHO = 'examples/echo/lib/erx_echo/src/erx_echo.erl'
+  TESTS = ['test/erlang/erx_bt_gatt_client_tests.erl', ECHO].freeze
   STAND_INS = { 'erlang/apps/erx/src/erx_dist.erl' => 'test/erlang/host_dist/erx_dist.erl',
                 'erlang/apps/erx/src/erx_bytes.erl' => 'test/erlang/host_bytes/erx_bytes.erl' }.freeze
   DEADLINE_SECONDS = '300'
@@ -55,7 +57,13 @@ class ErxBtGattClientTest < Minitest::Test
     Seed.new(fault: "a connected event read with an identity on a link that is not bonded",
              path: CLIENT, anchor: 'bonded := true, level := Level, identity := Identity} = Info})',
              replacement: 'bonded := _, level := Level, identity := Identity} = Info})',
-             catching_case: 'event_from_the_facet_owner_alone')
+             catching_case: 'event_from_the_facet_owner_alone'),
+    Seed.new(fault: 'the echo sending every write to the first link to have written',
+             path: ECHO, anchor: "{serial, Conn, Bytes} ->\n",
+             replacement: "{serial, Written, Bytes} ->\n" \
+                          "            Conn = case get(first) of undefined -> put(first, Written), Written; " \
+                          "First -> First end,\n",
+             catching_case: 'the echo app answers each link on its own link')
   ].freeze
 
   def test_client_cases_pass_under_eunit

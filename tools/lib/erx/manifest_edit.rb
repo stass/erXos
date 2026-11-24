@@ -188,6 +188,22 @@ module Erx
         Frontend.render(grown(removed(source, [apps]), changes))
       end
 
+      # text with its apps row offering service beside the services it offers and gatt as
+      # the GATT services apps may handle, and max_connections grown by the connection
+      # each of the row's max apps makes to service's server, as without_apps reckons a
+      # session's connections. A row that offers service already is refused.
+      def offering(text, service:, gatt:)
+        source = Frontend.read(text)
+        apps = named(source, 'apps')
+        services = apps.properties.fetch('services', []).map(&:value)
+        raise Error, "the manifest's apps row offers #{service} already" if services.include?(service)
+
+        words = ->(names) { names.map { |name| ABI::Token.new(value: name.dup.freeze, quoted: false).freeze }.freeze }
+        properties = apps.properties.merge('services' => words.call([*services, service]), 'gatt' => words.call(gatt)).freeze
+        offered = replaced(source, apps, Record.new(**apps.to_h, properties: properties).freeze)
+        Frontend.render(grown(offered, { %w[machine max_connections] => apps.decimal('max') }))
+      end
+
       # source with each [record, field] of growth grown by its number.
       def grown(source, growth) = changed(source, growth) { |record, field, added| record.decimal(field) + added }
 

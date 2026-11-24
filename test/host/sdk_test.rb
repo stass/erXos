@@ -74,7 +74,7 @@ class SdkTest < Minitest::Test
   end
 
   def test_the_export_holds_the_public_applications_their_functions_and_its_record
-    assert_equal %w[erx erx_memdraw erx_ui erx_win], Dir.children(File.join(sdk, 'erlang/lib')).sort
+    assert_equal %w[erx erx_bt_client erx_memdraw erx_ui erx_win], Dir.children(File.join(sdk, 'erlang/lib')).sort
     assert File.file?(File.join(sdk, 'erlang/lib/erx_ui/ebin/erx_ui.beam'))
     assert File.file?(File.join(sdk, 'erlang/lib/erx_ui/ebin/erx_ui.app'))
     assert File.file?(File.join(sdk, 'erlang/lib/erx/include/generated/erx_abi.hrl'))

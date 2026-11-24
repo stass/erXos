@@ -88,7 +88,8 @@ serial_test_() ->
       fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end,
       fun(_) -> {"a serial handler of console answers console alone", fun console_serial_answers_its_service_alone/0}
       end,
-      fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end]}.
+fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
+      fun(_) -> {"the echo app answers each link on its own link", fun echo_answers_each_link_alone/0} end]}.
 
 %% A service whose rx the phone cannot write, or whose tx the machine cannot notify, is no
 %% serial line: the start is refused, its caller, linked, lives on, and no serial handler
@@ -166,6 +167,29 @@ console_serial_answers_its_service_alone() ->
     ?assertEqual(<<"out">>, notification(Link, {console, tx}, ok)),
     ?assertEqual(ok, sent(Sender)),
     receive {serial, _, Bytes} -> error({other_service, Bytes}) after 100 -> ok end.
+
+%% The echo app of examples/echo over the serial service: a write from each of two links
+%% comes back on that link alone, the second link's first, so an echo that sent every
+%% write to the first link to have written would send the first link's bytes to the
+%% second. Nothing else is notified on either link.
+echo_answers_each_link_alone() ->
+    {LinkA, _ConnA} = joined_link(),
+    {LinkB, _ConnB} = joined_link(),
+    {ok, Echo} = erx_echo:start_link(),
+    unlink(Echo),
+    echoed(LinkB, 7, <<"from b">>),
+    echoed(LinkA, 8, <<"from a">>),
+    receive {from_link, _, {'$gen_call', _, {notify, notify, _, Piece}}} -> error({notified_again, Piece})
+    after 100 -> ok
+    end,
+    kill(Echo).
+
+%% Link writes Bytes to nus's rx as request Id: the write is answered ok and Bytes come
+%% back to Link as one notification of tx.
+echoed(Link, Id, Bytes) ->
+    erx_gatt_srv ! {erx_bt_link, Link, {write, Id, {nus, rx}, Bytes}},
+    receive {from_link, Link, {registry, {answer, Id, ok}}} -> ok after ?WAIT_MS -> error({no_answer, Id}) end,
+    ?assertEqual(Bytes, notification(Link, ok)).
 
 %% ---- fixtures ----
 

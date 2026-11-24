@@ -1,0 +1,10 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+{application, erx_echo,
+ [{description, "erXos example: Nordic's UART service echoed back to each phone"},
+  {vsn, "1"},
+  {modules, [erx_echo]},
+  {registered, [erx_echo, erx_echo_sup]},
+  {applications, [kernel, stdlib, erx_bt_client]},
+  {mod, {erx_echo, []}}]}.

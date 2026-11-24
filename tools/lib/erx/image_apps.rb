@@ -43,6 +43,9 @@ module Erx
     # The kiosk: the app the Raspberry Pi 4's card carries, enabled (ProductionImage#published_apps),
     # and the kiosk suite boots on QEMU virt (Kiosk), both as packed_kiosk packs it.
     KIOSK = 'examples/dashboard'
+    # The Bluetooth echo, decision 7's second package (docs/design-bluetooth.md,
+    # "Decisions"), which the Bluetooth suite's app cell boots on QEMU virt (BtDomain).
+    ECHO = 'examples/echo'
     KEY_BYTES = 32
     # The most bytes of a signer's key file; a PEM Ed25519 public key takes about 115.
     KEY_FILE_MAX = 16 * 1024
@@ -107,9 +110,9 @@ module Erx
       end
     end
 
-    # The kiosk as packed_kiosk packs it: its Package, the copy of KIOSK it was packed
+    # An example as packed packs it: its Package, the copy of the example it was packed
     # from, and the AppPack::Sdk it was packed over.
-    PackedKiosk = Data.define(:package, :app, :sdk)
+    Packed = Data.define(:package, :app, :sdk)
 
     module_function
 
@@ -141,22 +144,26 @@ module Erx
                       signer: signer, runner: runner, root: root, compiler: compiler)
     end
 
-    # The kiosk (KIOSK) of the tree at root as the card and the kiosk suite take it, a
-    # PackedKiosk, in the empty directory work: a copy of KIOSK at work/app, so the
-    # packer's ebin/ never lands in the source tree, packed over the SDK the tree exports
-    # under work/sdk (exported_sdk) into work/packages, and sealed by the published package
-    # key (PackageKey.published), so no builder's own key enters the bytes: every builder
-    # of one clean tree packs the same package (the copy takes KIOSK as it lies on disk).
-    def packed_kiosk(work, root:, runner:, compiler:, linker:)
+    # The kiosk (KIOSK) of the tree at root as the card and the kiosk suite take it, as
+    # packed packs it.
+    def packed_kiosk(work, root:, runner:, compiler:, linker:) = packed(work, example: KIOSK, root:, runner:, compiler:, linker:)
+
+    # The app example at example of the tree at root (KIOSK, ECHO) as an image takes it, a
+    # Packed, in the empty directory work: a copy of example at work/app, so the packer's
+    # ebin/ never lands in the source tree, packed over the SDK the tree exports under
+    # work/sdk (exported_sdk) into work/packages, and sealed by the published package key
+    # (PackageKey.published), so no builder's own key enters the bytes: every builder of
+    # one clean tree packs the same package (the copy takes example as it lies on disk).
+    def packed(work, example:, root:, runner:, compiler:, linker:)
       raise Error, "#{work} is not an empty directory" unless Dir.exist?(work) && Dir.empty?(work)
 
       app = File.join(work, 'app')
-      FileUtils.cp_r(File.join(root, KIOSK), app)
+      FileUtils.cp_r(File.join(root, example), app)
       sdk = exported_sdk(FileUtils.mkdir_p(File.join(work, 'sdk')).first, root: root, runner: runner, compiler: compiler,
                                                                    linker: linker)
       package, = gather([app], into: FileUtils.mkdir_p(File.join(work, 'packages')).first, sdk: sdk,
                                signer: PackageKey.published, runner: runner, root: root, compiler: compiler)
-      PackedKiosk.new(package: package, app: app, sdk: sdk)
+      Packed.new(package: package, app: app, sdk: sdk)
     end
 
     # The SDK the tree at root exports with stock's compiler into directory/sdk, its native
