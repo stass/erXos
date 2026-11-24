@@ -852,7 +852,10 @@ terminate report shows `gen`'s text for its state, data and reason, and
 `gen_server`'s an empty sys log, where stock shows them raw. `group`'s
 `format_status/1` hides the shell history, the line being typed, the driver's
 waiting input, the sys log and `edlin`'s kill buffer, which the group keeps in its state; stock's crashes on every call. The
-`gen_statem` and `group` failures are upstream bugs.
+`gen_statem` and `group` failures are upstream bugs. Hiding is for reports, which leave the domain:
+`process_info/2`, `sys:get_state/1`, `sys:trace/2`, `sys:log/2` and tracing are not reports and show a
+process's terms whole, to its own domain's code only, since the domain is the trust boundary and a `sys`
+call from another domain arrives in the `erx_origin` envelope and is never answered.
 
 Nothing changes in `erl_ptab.c`: processes take their pids as stock ERTS
 allocates them. Nothing changes in the node table's keys, the decoder's test
