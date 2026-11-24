@@ -14,11 +14,13 @@ checks every count, span, index and string before a field is read:
   template the row names: the facet row granted to it for the service
   named `packages_service`, the one granted to it for the service named
   `system_service`, or `none` in a manifest that holds no such service,
-  and for each service of the row, its name,
+  for each service of the row but ble, its name,
   whether its interface is `windows`, and the facet row granted to the
-  template for it, each an index the build packed in the row and the
-  boot view checked (docs/design-packaging.md, "The template's rows by
-  index");
+  template for it, and, as `ble`, the template's ble row with the GATT
+  services its `services` parameter offers, the apps row's `gatt`, or
+  `none` when the row offers no ble, each an index the build packed in
+  the row and the boot view checked (docs/design-packaging.md, "The
+  template's rows by index");
 * `reserved`: the names no app may take, those of the manifest's
   principal, domain, service and facet rows, sorted;
 * `packages`: the image's packages, each its app's name, the SHA-256 of
@@ -65,7 +67,7 @@ system_config(Manifest) ->
         throw:{?MODULE, Error} -> {error, Error}
     end.
 
--doc "What admission reads of a manifest (`erx_app_admit:admit/3`).".
+-doc "What admission reads of a manifest (`erx_app_admit:admit/4`).".
 -spec admission(config()) -> erx_app_admit:manifest().
 admission(#{apps := Apps, reserved := Reserved, packages := Packages}) ->
     #{apps => Apps, reserved => Reserved,
@@ -84,20 +86,44 @@ config(Manifest) ->
 %% app_services, so the services a need may name are that table's rows less the
 %% ble service's: an app takes that grant only through its declaration's gatt,
 %% never as a need (docs/design-packaging.md, "Admission", step 6), so a need of
-%% ble finds no service here and admission refuses it.
+%% ble finds no service here and admission refuses it. The ble service's facet
+%% row is the template's ble row, which the build derives with the apps row's
+%% gatt as its services parameter: its index and that set are the apps row's ble.
 apps(_View, []) ->
     none;
 apps(View, [#{memory := Memory, max := Max, packages_facet := Packages, system_facet := System}]) ->
     Services = list_to_tuple(rows(View, services)),
+    {Needs, Ble} = lists:partition(fun({Service, _Facet}) -> need(Service) end,
+                                   [{element(Index + 1, Services), Facet}
+                                    || #{service := Index, facet := Facet} <- rows(View, app_services)]),
     #{memory => Memory,
       max => Max,
       packages_row => Packages,
       system_row => System,
-      services => [service(View, element(Index + 1, Services), Facet)
-                   || #{service := Index, facet := Facet} <- rows(View, app_services),
-                      need(element(Index + 1, Services))]}.
+      services => [service(View, Service, Facet) || {Service, Facet} <- Needs],
+      ble => ble(View, Ble)}.
 
 need(#{interface := Interface}) -> Interface =/= ?ERX_SERVICE_BLE.
+
+%% The apps row names at most one ble service: the build's ble_grant names the
+%% one service of the ble interface ble, and the template takes one facet of a
+%% service name.
+ble(_View, []) ->
+    none;
+ble(View, [{_Service, Facet}]) ->
+    #{row => Facet, gatt => gatt(View, Facet)}.
+
+%% The values of the facet row's services parameter: of its parameter rows,
+%% those under the ble interface's key for it, each an identifier's string. The
+%% reader checked that the facet rows' parameter spans partition
+%% facet_parameters in facet order, so a row's parameters follow those of the
+%% rows before it.
+gatt(View, Facet) ->
+    {Before, [#{parameters := #{count := Count}} | _]} = lists:split(Facet, rows(View, facets)),
+    First = lists:sum([Counted || #{parameters := #{count := Counted}} <- Before]),
+    Parameters = lists:sublist(rows(View, facet_parameters), First + 1, Count),
+    [checked(erx_manifest:string(View, Bytes))
+     || #{key := ?ERX_SERVICE_BLE_SERVICES_KEY, bytes := Bytes} <- Parameters].
 
 service(View, #{interface := Interface} = Row, Facet) ->
     #{name => name(View, Row),

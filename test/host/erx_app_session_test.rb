@@ -21,17 +21,24 @@ class ErxAppSessionTest < Minitest::Test
   # caught_by must fail.
   Fault = Data.define(:name, :edits, :caught_by)
 
-  PLAN_HEAD = "app_session(Name, \#{entry := Entry, memory := Memory, rows := Kept}, \#{first := First}, " \
-              "TemplateRows) ->\n"
-  KEPT_ROWS = 'rows => [Row || {Index, Row} <- TemplateRows, lists:member(Index, Kept)]'
+  PLAN_HEAD = "app_session(Name, \#{entry := Entry, memory := Memory, rows := Kept, ble := Ble}, " \
+              "\#{first := First}, TemplateRows) ->\n"
+  KEPT_ROWS = 'rows => [Granted || {Index, Row} <- TemplateRows, Granted <- granted(Index, Row, Kept, Ble)]'
+  NARROWED = 'Limits#{services := [Service || Service <- Offered, lists:member(Service, Gatt)]}'
 
   FAULTS = [
     Fault.new(name: 'a plan that grants every row of the template',
-              edits: [[KEPT_ROWS, 'rows => [Row || {_Index, Row} <- TemplateRows, Kept =/= x]']],
+              edits: [[KEPT_ROWS, 'rows => [Row || {_Index, Row} <- TemplateRows, Kept =/= x, Ble =/= x]']],
               caught_by: 'the_rows_are_packages_system_and_the_needs_test'),
+    Fault.new(name: "a plan that passes the ble row's set whole",
+              edits: [[NARROWED, 'Limits#{services := Offered ++ (Gatt -- Gatt)}']],
+              caught_by: 'the_ble_row_names_the_records_services_test'),
+    Fault.new(name: "a plan that grants the record's services, not their intersection with the row's",
+              edits: [[NARROWED, 'Limits#{services := Gatt ++ (Offered -- Offered)}']],
+              caught_by: 'the_ble_row_is_never_wider_than_the_templates_test'),
     Fault.new(name: "a scope computed from the template's key",
               edits: [[PLAN_HEAD,
-                       "app_session(Name, \#{entry := Entry, memory := Memory, rows := Kept}, " \
+                       "app_session(Name, \#{entry := Entry, memory := Memory, rows := Kept, ble := Ble}, " \
                        "\#{template := Template}, TemplateRows) ->\n    First = Template,\n"]],
               caught_by: 'every_scope_names_the_apps_principal_test'),
     Fault.new(name: "a plan that grants an image package the template's whole row set",
@@ -42,8 +49,8 @@ class ErxAppSessionTest < Minitest::Test
               caught_by: 'one_header_admitted_both_ways_gives_one_plan_test'),
     Fault.new(name: 'a session given the apps budget for its memory',
               edits: [[PLAN_HEAD,
-                       "app_session(Name, \#{entry := Entry, rows := Kept}, \#{first := First, memory := Memory}, " \
-                       "TemplateRows) ->\n"]],
+                       "app_session(Name, \#{entry := Entry, rows := Kept, ble := Ble}, " \
+                       "\#{first := First, memory := Memory}, TemplateRows) ->\n"]],
               caught_by: 'the_memory_is_the_declared_one_test')
   ].freeze
 

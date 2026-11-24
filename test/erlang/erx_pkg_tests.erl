@@ -9,8 +9,9 @@ plan, erx_pkg_plan; the path table, erx_pkg_io; and the package process,
 erx_pkg, under erx_pkg_sup, over a simulated medium with the real
 admission and with registration and publication stubbed. The package files
 come from test/host/erx_pkg_test.rb, in ERX_PKG_FILES: dashboard.bin,
-clock.bin and other.bin, each a well-formed package of that app name sealed
-by the Ed25519 key whose public half is key.bin.
+clock.bin, other.bin and relay.bin, each a well-formed package of that app
+name sealed by the Ed25519 key whose public half is key.bin; dashboard, other
+and relay declare the GATT service nus, other and pulse hrm, clock none.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
@@ -94,13 +95,14 @@ setup(Options) ->
     {Io, Config}.
 
 %% The facts admission reads: an apps row that offers every test package's
-%% needs, display and data, within its budget; a principal named other, so
-%% admission refuses the package of that name; and the image's package
-%% dashboard.
+%% needs, display and data, within its budget, and the GATT service nus in its
+%% ble row; a principal named other, so admission refuses the package of that
+%% name; and the image's package dashboard.
 manifest() ->
     #{apps => #{memory => 128 * ?MIB, max => 8, packages_row => 0, system_row => 3,
                 services => [#{name => <<"display">>, windows => true, row => 1},
-                             #{name => <<"data">>, windows => false, row => 2}]},
+                             #{name => <<"data">>, windows => false, row => 2}],
+                ble => #{row => 4, gatt => [<<"hrm">>, <<"nus">>]}},
       reserved => [<<"system">>, <<"other">>],
       packages => [<<"dashboard">>]}.
 
@@ -235,6 +237,29 @@ medium_route_test() ->
     ?assert(is_process_alive(Io)),
     ?assertEqual({ok, <<>>}, erx_pkg_io:read(installed, <<"clock.app">>, 1, 1 bsl 30, 1)),
     Lifetime ! stop.
+
+%% Step 8 in the recovery's order: the image's dashboard, judged first, holds nus,
+%% so the installed relay, which declares it too, is refused, and clock, which
+%% declares none, is admitted beside it; only dashboard's and pulse's admissions keep
+%% the ble row. other, refused by its name, holds nothing, so pulse, judged after it,
+%% takes hrm.
+held_in_recovery_order_test() ->
+    {_Io, Config} = setup([]),
+    erx_pkg_medium:put(installed, <<"relay.app">>, file("relay")),
+    erx_pkg_medium:put(installed, <<"pulse.app">>, file("pulse")),
+    {ok, Sup} = erx_pkg_sup:start_link(Config),
+    wait_recovered(),
+    #{packages := Records} = erx_pkg:packages(),
+    ?assertMatch(#{{installed, <<"relay.app">>} := #{state := refused,
+                                                     reason := {gatt_taken, <<"nus">>, <<"dashboard">>}},
+                   {installed, <<"clock.app">>} := #{state := admitted},
+                   {installed, <<"pulse.app">>} := #{state := admitted}},
+                 Records),
+    ?assertEqual([{<<"dashboard">>, #{row => 4, gatt => [<<"nus">>]}}, {<<"clock">>, none},
+                  {<<"pulse">>, #{row => 4, gatt => [<<"hrm">>]}}],
+                 [{Name, Ble} || {Name, _Place, _Entry, #{ble := Ble}}
+                                     <- ets:lookup_element(erx_pkg_stubs, registered, 2)]),
+    stop(Sup).
 
 overflow_test() ->
     %% A medium answers at most the names asked for, and whether more remain.

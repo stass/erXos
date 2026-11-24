@@ -982,7 +982,7 @@ app_session() ->
                 signer => image, sha256 => <<0:256>>, extent => 1},
     ok = erx_principal:register_app(#{name => <<"clock">>, place => installed, checked => Checked,
                                       admitted => #{signer => image, memory => ?APP_MEMORY,
-                                                    rows => [1], display => none}}),
+                                                    rows => [1], ble => none, display => none}}),
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
     Ref = make_ref(),

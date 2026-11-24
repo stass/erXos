@@ -41,7 +41,8 @@ stubs_log() ->
 manifest() ->
     #{apps => #{memory => 128 * ?MIB, max => 8, packages_row => 0, system_row => 3,
                 services => [#{name => <<"display">>, windows => true, row => 1},
-                             #{name => <<"data">>, windows => false, row => 2}]},
+                             #{name => <<"data">>, windows => false, row => 2}],
+                ble => #{row => 4, gatt => [<<"nus">>]}},
       reserved => [<<"system">>],
       packages => [<<"dashboard">>]}.
 

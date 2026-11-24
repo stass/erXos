@@ -14,8 +14,9 @@ The recovery, in order:
 
 1. begins the lifetime at erx_pkg_io, which empties the path table;
 2. for each image package, in name order: reads its header, runs the file
-   check under its `package` row's hash, admits it, sends its path entry
-   and registers its principal;
+   check under its `package` row's hash, admits it beside the GATT services
+   of the packages committed before it, sends its path entry and registers
+   its principal;
 3. reads the listing of `packages/`, at most `ERX_PKG_SCAN_MAX` entries; a
    listing with more is `overflow` and nothing in it is acted on, and a
    listing not yet readable, before the packages grant is in place, or one
@@ -86,7 +87,7 @@ whether that was all of them.
 
 -type action() :: begin_lifetime
                 | {header, place(), binary()}
-                | {admit, erx_pkg_header:checked()}
+                | {admit, erx_pkg_header:checked(), erx_app_admit:held()}
                 | {path_entry, place(), binary(), entry()}
                 | {register, published()}
                 | list
@@ -194,18 +195,18 @@ step({header, Place, File}, {ok, Length, Bytes}, Plan)
   when is_integer(Length), is_binary(Bytes) ->
     case erx_pkg_header:check_file({File, Length, Bytes}, authority(Place, File, Plan)) of
         {ok, Checked} ->
-            emit({admit, Checked}, Plan#{judged := {Place, File, Checked}});
+            emit({admit, Checked, held(Plan)}, Plan#{judged := {Place, File, Checked}});
         {error, Reason} ->
             entry(Place, File, refused, unauthenticated(Place, {file, Reason}), [], Plan)
     end;
 step({header, Place, File}, {error, Reason}, Plan) ->
     entry(Place, File, refused, unauthenticated(Place, {read, Reason}), [], Plan);
-step({admit, Checked}, {ok, Admitted}, #{judged := {Place, File, Checked}} = Plan) ->
+step({admit, Checked, _Held}, {ok, Admitted}, #{judged := {Place, File, Checked}} = Plan) ->
     #{header := #{name := Name}} = Checked,
     entry(Place, File, accepted(Checked), authenticated(Place, Checked, admitted, none),
           [{register, #{name => Name, place => Place, checked => Checked, admitted => Admitted}}],
           publishing(Place, Checked, Admitted, Plan#{judged := none}));
-step({admit, Checked}, {error, Reason}, #{judged := {Place, File, Checked}} = Plan) ->
+step({admit, Checked, _Held}, {error, Reason}, #{judged := {Place, File, Checked}} = Plan) ->
     entry(Place, File, accepted(Checked), authenticated(Place, Checked, refused, Reason), [],
           Plan#{judged := none});
 step({path_entry, _, _, _}, ok, #{after_entry := [Register]} = Plan) ->
@@ -262,6 +263,13 @@ accepted(#{sha256 := Sha256, extent := Extent, header := #{header_length := Head
 entry(Place, File, Entry, Record, AfterEntry, #{records := Records} = Plan) ->
     emit({path_entry, Place, File, Entry},
          Plan#{records := Records#{{Place, File} => Record}, after_entry := AfterEntry}).
+
+%% What step 8 of admission judges a package by (erx_app_admit:held/0): the GATT
+%% services of each package the plan has committed, in the recovery's order the
+%% image's packages before the installed ones, so a service goes to the first
+%% package judged that declares it. A package refused, or not yet judged, holds none.
+held(#{published := Published}) ->
+    #{Name => Gatt || #{name := Name, admitted := #{ble := #{gatt := Gatt}}} <- Published}.
 
 publishing(Place, #{header := #{name := Name}} = Checked, Admitted,
            #{published := Published} = Plan) ->

@@ -12,7 +12,7 @@
 > **Designed:** installing, updating and removing through `/apps`,
 > `mount` of a package, `service NAME purge`, `/proc/packages`, the
 > app's budget as a wall carved at each session's start, the `flags`
-> and `gatt` fields, the app's own `ble` grant, the SDK's host tools, `erx-app test`, and `/svc/NAME`.
+> field, the SDK's host tools, `erx-app test`, and `/svc/NAME`.
 
 **Background needed.** [Chapter 8](08-kernel-interface.md) (the
 kernel interface), [chapter 11](11-security.md) (facets, file grants,
@@ -361,8 +361,9 @@ admission's question: does what the app declares fit the `apps` row?
 
 ### 23.3.1 A subset test
 
-`erx_app_admit:admit/3` is a pure function of the file check's answer,
-the manifest and the boot's registry of app principals
+`erx_app_admit:admit/4` is a pure function of the file check's answer,
+the manifest, the boot's registry of app principals and the GATT
+services the apps admitted before it hold
 ([design-packaging.md, Admission](../design-packaging.md#admission)).
 It answers with the facet rows the app keeps, or with the first of
 these questions that fails, as an error naming it:
@@ -377,7 +378,12 @@ these questions that fails, as an error naming it:
    find a free entry among the `max`?
 5. Is the memory a whole number of pages, at least 4 MiB and at most
    the `apps` row's?
-6. Is each need a service of the `apps` row?
+6. Is each need a service of the `apps` row other than `ble`, which
+   only the declaration's `gatt` takes?
+7. Is each GATT service the declaration names one the row's `gatt`
+   offers?
+8. Is none of them held by another app's admitted package? The
+   app's own is left out, so an update keeps its services.
 
 Follow the dashboard through it on the Raspberry Pi. Its header was
 built against the image's ABI for the same architecture. Its name,

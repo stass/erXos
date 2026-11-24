@@ -16,7 +16,7 @@ of the start service's application, and a call taken between two actions,
 `packages/0`'s, waits for one action, never for the whole recovery. The
 recovery's decisions are erx_pkg_plan's; this process carries out each
 action it gives: every request on the packages through erx_pkg_io, named
-by this pid as its lifetime, admission through `erx_app_admit:admit/3`,
+by this pid as its lifetime, admission through `erx_app_admit:admit/4`,
 registration through `erx_principal:register_app/1`, and the publication
 through `erx_starter:packages/2`. A failed change stops the process, which
 ends the lifetime: erx_pkg_io refuses every later request of it, and the
@@ -182,8 +182,8 @@ effect({delete, File}, _State) ->
     erx_pkg_io:request({delete, self(), File});
 effect({path_entry, Place, File, Entry}, _State) ->
     erx_pkg_io:request({path_entry, self(), Place, File, Entry});
-effect({admit, #{header := #{name := Name}} = Checked}, #{config := #{manifest := Manifest}}) ->
-    case erx_app_admit:admit(Checked, Manifest, erx_principal:app_registry()) of
+effect({admit, #{header := #{name := Name}} = Checked, Held}, #{config := #{manifest := Manifest}}) ->
+    case erx_app_admit:admit(Checked, Manifest, erx_principal:app_registry(), Held) of
         {ok, _} = Admitted ->
             logger:notice("packages: admitted ~ts", [Name]),
             Admitted;

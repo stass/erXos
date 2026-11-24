@@ -17,10 +17,12 @@ holds, numbered for the whole boot (`erx_dom_apps_place`), so a record is
 keyed by its name and holds its entry. An entry is never freed within a
 boot: there is no unregister, and a name keeps its entry and signer until
 the machine reboots, so the names and entries the registry holds stay
-within `max` (PK9). A record holds five things and nothing else: the
+within `max` (PK9). A record holds six things and nothing else: the
 app's entry; its signer; its declared memory, which each of its sessions'
 own budgets holds; the indices of the app template's facet rows its
-admission kept, which each of its sessions is granted
+admission kept, which each of its sessions is granted whole; the `ble` row
+with the GATT services its admission gave it, to which each session's grant
+of that row is narrowed (PK13), or `none`
 (erx_domain_core:app_session/4); and the app's record (erx:app_record/0)
 each of its sessions is sent once its namespace is in place, the place of
 its package's file, its header's layout and what it starts
@@ -39,6 +41,7 @@ starts a session of one (AP2).
                  signer := erx_pkg_header:authenticator(),
                  memory := pos_integer(),
                  rows := [non_neg_integer()],
+                 ble := none | erx_app_admit:ble(),
                  app := erx:app_record()}.
 
 -doc """
@@ -77,7 +80,7 @@ new(Max) when is_integer(Max), Max >= 0 ->
     #{max => Max, names => #{}}.
 
 -doc """
-`Apps` with the record of `Package`'s app: the signer, memory and rows of
+`Apps` with the record of `Package`'s app: the signer, memory, rows and ble of
 its admission and the app's record of its place and header, with whether
 its program has a window, which it has when the admission kept a
 `windows` service (docs/design-packaging.md, "Starting an app"), written in
@@ -88,13 +91,14 @@ own signer only.
 """.
 -spec register(erx_pkg_plan:published(), apps()) -> {ok, apps()} | {error, reason()}.
 register(#{name := Name, place := Place, checked := #{header := #{layout := Layout, start := Start}},
-           admitted := #{signer := Signer, memory := Memory, rows := Rows, display := Display}},
+           admitted := #{signer := Signer, memory := Memory, rows := Rows, ble := Ble, display := Display}},
          #{max := Max, names := Names} = Apps) ->
     case erx_app_admit:entry(Name, Signer, Max, registry(Apps)) of
         {ok, Entry} ->
             App = #{place => place(Place, Name), layout => Layout, start => Start,
                     window => Display =/= none},
-            Record = #{entry => Entry, signer => Signer, memory => Memory, rows => Rows, app => App},
+            Record = #{entry => Entry, signer => Signer, memory => Memory, rows => Rows, ble => Ble,
+                       app => App},
             {ok, Apps#{names := Names#{Name => Record}}};
         {error, _} = Refused ->
             Refused

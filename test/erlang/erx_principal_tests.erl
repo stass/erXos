@@ -14,10 +14,12 @@ against seeded faults.
 -include_lib("eunit/include/eunit.hrl").
 
 -define(MIB, 1048576).
+%% The ble row an admission kept, with the GATT services it admitted.
+-define(BLE, #{row => 3, gatt => [<<"nus">>]}).
 
 admitted(Signer, Memory) ->
     #{signer => Signer, memory => Memory,
-      rows => [0, 2], display => <<"display">>}.
+      rows => [0, 2], ble => ?BLE, display => <<"display">>}.
 
 -define(LAYOUT, #{image_offset => 4096, image_length => 8192, tree_offset => 12288,
                   tree_length => 4096, salt => <<0:256>>, root_hash => <<1:256>>}).
@@ -37,7 +39,7 @@ register(Name, Admitted, Apps) ->
 
 %% The record `Name`'s registration as an installed package writes.
 record(Name, Entry, Signer, Memory) ->
-    #{entry => Entry, signer => Signer, memory => Memory, rows => [0, 2],
+    #{entry => Entry, signer => Signer, memory => Memory, rows => [0, 2], ble => ?BLE,
       app => #{place => {packages, [<<Name/binary, ".app">>]}, layout => ?LAYOUT, start => ?START,
                window => true}}.
 

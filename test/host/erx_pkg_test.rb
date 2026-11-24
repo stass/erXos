@@ -77,17 +77,20 @@ class ErxPkgTest < Minitest::Test
     text.sub(FID) { STAND_IN_FID }
   end
 
-  # key.bin and the three packages, each sealed by a fresh Ed25519 key.
+  # key.bin and the five packages, each sealed by a fresh Ed25519 key, each declaring the
+  # GATT services beside its name.
   def write_packages(work)
     signer = Erx::AppPackage::Signer.new(OpenSSL::PKey.generate_key('ED25519'))
     File.binwrite(File.join(work, 'key.bin'), signer.public_key)
-    %w[dashboard clock other].each do |name|
-      File.binwrite(File.join(work, "#{name}.bin"), package(name, signer: signer).prefix)
+    { 'dashboard' => %w[nus], 'clock' => [], 'other' => %w[hrm], 'relay' => %w[nus], 'pulse' => %w[hrm] }
+      .each do |name, gatt|
+      File.binwrite(File.join(work, "#{name}.bin"), package(name, gatt: gatt, signer: signer).prefix)
     end
   end
 
-  def package(name, signer:)
-    Seeds.sample(name, declaration: Seeds::ERLANG.with(name: name), image_blocks: 3, tree_blocks: 1, signer: signer)
+  def package(name, gatt:, signer:)
+    Seeds.sample(name, declaration: Seeds::ERLANG.with(name: name, gatt: gatt), image_blocks: 3, tree_blocks: 1,
+                       signer: signer)
   end
 
   def eunit

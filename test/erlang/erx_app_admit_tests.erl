@@ -33,7 +33,7 @@ check_case(Directory, Name, Length, Signer, Context, Expected) ->
                  {error, _} -> Expected
              end,
     ?assertEqual(Answer, erx_app_admit:admit(checked(Decoded, Signer), manifest(Context),
-                                             registry(Context))).
+                                             registry(Context), held(Context))).
 
 %% The file check's answer for a header and its signer, with the two fields
 %% admission does not read, the header's SHA-256 and extent, left out.
@@ -41,17 +41,22 @@ checked(Header, Signer) ->
     #{header => Header, signer => Signer}.
 
 %% The facts of a manifest whose apps row offers two windows services and
-%% one data service to at most four apps sharing 128 MiB, and whose image
-%% carries the package kiosk. The row indices are those
+%% one data service to at most four apps sharing 128 MiB, whose template's
+%% ble row offers the GATT services hrm and nus, and whose image carries the
+%% package kiosk; with no_ble, the row offers no ble. The row indices are those
 %% test/host/erx_app_admit_test.rb names: packages 7, display 8, data 9,
-%% panel 10 and system 11. Its system principal is system, as the shipped manifests'.
+%% panel 10, system 11 and ble 12. Its system principal is system, as the shipped manifests'.
 manifest(no_apps) ->
     (manifest(base))#{apps := none};
+manifest(no_ble) ->
+    #{apps := Apps} = Manifest = manifest(base),
+    Manifest#{apps := Apps#{ble := none}};
 manifest(_) ->
     #{apps => #{memory => 128 * ?MIB, max => 4, packages_row => 7, system_row => 11,
                 services => [#{name => <<"display">>, windows => true, row => 8},
                              #{name => <<"data">>, windows => false, row => 9},
-                             #{name => <<"panel">>, windows => true, row => 10}]},
+                             #{name => <<"panel">>, windows => true, row => 10}],
+                ble => #{row => 12, gatt => [<<"hrm">>, <<"nus">>]}},
       reserved => [<<"system">>, <<"alice">>, <<"storage">>, <<"display">>,
                    <<"data">>, <<"panel">>, <<"net">>, <<"files">>],
       packages => [<<"kiosk">>]}.
@@ -66,6 +71,12 @@ registry(_) ->
     #{<<"clock">> => #{entry => 0, signer => <<"vendor">>},
       <<"chess">> => #{entry => 2, signer => <<"vendor">>}}.
 
+%% The GATT services the admitted packages hold: clock's package holds hrm.
+%% chess, which the registry holds, holds none, as a removed app's package
+%% holds nothing, whatever the registry keeps.
+held(_) ->
+    #{<<"clock">> => [<<"hrm">>]}.
+
 %% The entry rule registration takes its entry by: a new name takes the
 %% lowest entry no name holds, below a held one too; a held name keeps its own.
 entry_rule_test_() ->
@@ -76,10 +87,10 @@ entry_rule_test_() ->
 %% which the domain library's plan of the app's session would refuse.
 unaligned_memory_test_() ->
     Header = #{name => <<"pager">>, abi_version => ?ERX_ABI_VERSION,
-               arch => ?ERX_ARCH_MACHINE_ARCH_BYTES, needs => []},
+               arch => ?ERX_ARCH_MACHINE_ARCH_BYTES, needs => [], gatt => []},
     Admit = fun(Memory) ->
                     erx_app_admit:admit(checked(Header#{memory => Memory}, development),
-                                        manifest(base), registry(base))
+                                        manifest(base), registry(base), held(base))
             end,
     [?_assertEqual({error, {memory, 64 * ?MIB + 1}}, Admit(64 * ?MIB + 1)),
      ?_assertEqual({error, {memory, 64 * ?MIB + ?ERX_PAGE_SIZE div 2}},
@@ -92,8 +103,8 @@ unaligned_memory_test_() ->
 %% identifier), so these headers are written here rather than decoded.
 bad_names_test_() ->
     Header = #{abi_version => ?ERX_ABI_VERSION, arch => ?ERX_ARCH_MACHINE_ARCH_BYTES,
-               memory => 64 * ?MIB, needs => []},
+               memory => 64 * ?MIB, needs => [], gatt => []},
     [?_assertEqual({error, {bad_name, Name}},
                    erx_app_admit:admit(checked(Header#{name => Name}, development),
-                                       manifest(base), registry(base)))
+                                       manifest(base), registry(base), held(base)))
      || Name <- [<<"Clock">>, <<"a/b">>, <<"a.b">>, <<"-ab">>, <<"_ab">>, <<"a", 1, "b">>, <<>>]].

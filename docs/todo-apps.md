@@ -43,7 +43,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the `apps` service, and clause 7's refusal of a source facet naming it, which wait for that service;
   clause 4, which needs `app_memory_default` for property 12's planner; the rest of clause 5: the enabled
   packages' session outer budgets in the `apps` budget sum, an enabled row meeting property 17's display
-  and planning clauses, and admission on the host (`erx_app_admit:admit/3` on the packed manifest);
+  and planning clauses, and admission on the host (`erx_app_admit:admit/4` on the packed manifest);
   clause 1's inspect scope; clause 2's counts in the principal table, the session-name atoms and each
   server's connections, which the Phase 1 manifest check sums for no principal (QEMU virt's manifest reckons the
   storage, network and display domains' connection quotas and `max_connections` by hand, in its comments,
@@ -208,7 +208,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     admission refuses a display the principal may not draw on;
   * names: a row's variable name is its principal's name with each `-` replaced by `_`; the manifest check
     (property 17) refuses a `start` row whose principal's name begins with a digit or whose variable name is
-    another row's, and admission (`erx_app_admit:admit/3`, rule 3) an app name that does either against the
+    another row's, and admission (`erx_app_admit:admit/4`, rule 3) an app name that does either against the
     manifest's `start` rows, the image's packages and the registry, with `{variable_taken, N, Other}`;
     problems at `/proc/apps` and `service -c` show the row's own name beside its variable;
   * commands: `ctl` gains `restart`, `onestart`, `onestop` and `onerestart`, and its `enable NAME

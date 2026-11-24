@@ -41,7 +41,7 @@ state is a bug of the caller and fails with a badmatch.
          session_name/3, session_reserved/1, names_quota/0, system_user/0, app_session/4]).
 -export([inspect_scope/3, inspect_view/2]).
 -export_type([state/0, domain/0, origin/0, info/0, slogan/0, inspect_scope/0, inspect_entry/0,
-              app_session/1, session_row/0, intensity/0, reached/0, restart/0]).
+              app_session/0, template_row/0, session_row/0, intensity/0, reached/0, restart/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -90,10 +90,15 @@ state is a bug of the caller and fails with a badmatch.
                             state := booting | running | ending} | none}.
 %% The plan of an app's session (app_session/4): the app's entry and principal, the
 %% prefix of the session's name, the session's own memory and the app template's
-%% facet rows the session holds, each as the caller gave it.
--type app_session(Row) :: #{entry := non_neg_integer(), principal := pos_integer(),
-                            prefix := binary(),
-                            memory := pos_integer(), rows := [Row]}.
+%% facet rows the session holds, each as the caller gave it but the ble row, whose
+%% services the plan narrows.
+-type app_session() :: #{entry := non_neg_integer(), principal := pos_integer(),
+                         prefix := binary(),
+                         memory := pos_integer(), rows := [template_row()]}.
+%% A facet row of the app template as the domain service keeps it: its service's
+%% name, its server, and its limits, each parameter among them under its
+%% abi/services name (erx_domain_lib:configured/0).
+-type template_row() :: {atom(), non_neg_integer() | system, map()}.
 %% A crash's slogan as the domain wrote it, untrusted text, or why its crash area could not be read.
 -type slogan() :: binary() | {unreadable, atom() | {status, integer()}}.
 -opaque state() :: #{host := binary(), next_id := pos_integer(),
@@ -189,7 +194,11 @@ each {Index, Row} by its index in the manifest's facet table:
   set follows from it;
 * the memory is the declared one the record holds, the session's own budget;
 * the rows are those of TemplateRows whose index the record kept, the
-  `packages` row and one for each need, and no other.
+  `packages` row and one for each need, each whole, and the `ble` row when
+  the record holds one, its `services` replaced by the intersection of the
+  row's set and the record's GATT services, so the grant never names a
+  service the row does not offer, whatever the record holds, and names only
+  the services admission gave the app (PK13); and no other.
 
 Nothing of the plan depends on the record's signer, so one header admitted
 as an image package and as an installed one gives one plan (PK10). The
@@ -198,11 +207,19 @@ in the entry erx_app_admit:entry/4 gives below the registry's max, Apps'
 count, from an admission against the same manifest, so its rows are the
 template's.
 """.
--spec app_session(binary(), erx_principal:app(), erx_domain_lib:apps(), [{non_neg_integer(), Row}]) ->
-          app_session(Row).
-app_session(Name, #{entry := Entry, memory := Memory, rows := Kept}, #{first := First}, TemplateRows) ->
+-spec app_session(binary(), erx_principal:app(), erx_domain_lib:apps(), [{non_neg_integer(), template_row()}]) ->
+          app_session().
+app_session(Name, #{entry := Entry, memory := Memory, rows := Kept, ble := Ble}, #{first := First}, TemplateRows) ->
     #{entry => Entry, principal => First + Entry, prefix => Name, memory => Memory,
-      rows => [Row || {Index, Row} <- TemplateRows, lists:member(Index, Kept)]}.
+      rows => [Granted || {Index, Row} <- TemplateRows, Granted <- granted(Index, Row, Kept, Ble)]}.
+
+%% A template row as the session holds it: the ble row narrowed to the record's
+%% services, a kept row whole, any other not at all. The ble index is never in
+%% Kept, so a ble row without its services parameter is granted to no session.
+granted(Index, {Name, Server, #{services := Offered} = Limits}, _Kept, #{row := Index, gatt := Gatt}) ->
+    [{Name, Server, Limits#{services := [Service || Service <- Offered, lists:member(Service, Gatt)]}}];
+granted(Index, Row, Kept, _Ble) ->
+    [Row || lists:member(Index, Kept)].
 
 -doc """
 The name Principal's next session takes: Prefix_N for the lowest N from 1 whose

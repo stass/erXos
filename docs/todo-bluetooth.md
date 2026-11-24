@@ -262,10 +262,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   property 19 clause 1), the one template row `check_ble_grants` takes, step 6's refusal of `ble` as a need
   (`erx_pkg_manifest` reads no need of it, the packer refuses `needs ble`), the declaration's `gatt` field
   (`abi/formats/package.txt`, bounded by `service_ble_services_max`, which the generator derives from
-  `abi/services/ble.txt`; the SDK packer; `erx_pkg_header`), and steps 7 and 8 in the build's run over the
-  `package` rows (`check_package_gatt`). Missing: admission's `Held` input and steps 7 and 8 (`erx_app_admit:admit/4`), kept by
-  `erx_pkg` from its committed admissions and run in the recovery's and the build's order; the record's GATT
-  services (`erx_principal`) and the narrowing in `erx_domain_core:app_session/4`; the `EPERM` and `EEXIST` closes;
+  `abi/services/ble.txt`; the SDK packer; `erx_pkg_header`), steps 7 and 8 in the build's run over the
+  `package` rows (`check_package_gatt`) and in admission (`erx_app_admit:admit/4`), whose `Held` the recovery
+  derives from the packages it committed, in its order (`erx_pkg_plan`), the template's `ble` row as
+  `erx_pkg_manifest` reads it, the record's `ble` (`erx_principal`) and the narrowing in
+  `erx_domain_core:app_session/4`. Missing: `Held` at a run-time install and update, which wait for those paths
+  (`erx_pkg_plan:install/3`); the `EPERM` and `EEXIST` closes;
   the recovery's publication without each app whose record it changes or whose package it no longer admits, before
   it registers (`erx_pkg_plan:recover/2`, PK7); a service's state as its handler's (docs/design-bluetooth.md "A
   service belongs to its handler"): the registry's `{handler, Service, Handler | none}` to every link and the

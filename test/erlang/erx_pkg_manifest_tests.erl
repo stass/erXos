@@ -24,11 +24,12 @@ key(Byte) ->
 %% The apps row of AbiManifestFixture.packages with max Max: the app
 %% template's packages row is facet 2, not facet 1, granted to the system
 %% domain, its display and data rows are 3 and 4, not facet 0, which grants
-%% display to the other template, and its system row is 5.
+%% display to the other template, and its system row is 5. It offers no ble.
 apps(Max) ->
     #{memory => ?MIB, max => Max, packages_row => 2, system_row => 5,
       services => [#{name => <<"display">>, windows => true, row => 3},
-                   #{name => <<"data">>, windows => false, row => 4}]}.
+                   #{name => <<"data">>, windows => false, row => 4}],
+      ble => none}.
 
 %% The names of its principal, domain, services and facet rows, sorted.
 reserved() ->
@@ -69,16 +70,23 @@ refused_test() ->
 packed_manifest_test() ->
     {ok, #{apps := #{memory := 137363456, max := 4, packages_row := Packages, system_row := System,
                      services := [#{name := <<"display">>, windows := true, row := Display},
-                                  #{name := <<"net">>, windows := false, row := Net}]},
+                                  #{name := <<"net">>, windows := false, row := Net}],
+                     ble := none},
            packages := [#{name := <<"clock">>, enabled := true}, #{name := <<"quotes">>, enabled := false}],
            signers := [{<<"ops">>, _}]}} = erx_pkg_manifest:system_config(manifest("admitted")),
     ?assertEqual(4, length(lists:usort([Packages, System, Display, Net]))).
 
 %% The same row offering ble with gatt nus: the template's ble row is no
-%% service a need may name, so admission refuses a need of ble (step 6).
+%% service a need may name, so admission refuses a need of ble (step 6); it is
+%% the row of the row's ble, a row of its own, and its services parameter is
+%% the set steps 7 and 8 judge a declaration's gatt by.
 ble_is_no_need_test() ->
-    {ok, #{apps := #{services := Services}}} = erx_pkg_manifest:system_config(manifest("ble")),
-    ?assertEqual([<<"display">>, <<"net">>], [Name || #{name := Name} <- Services]).
+    {ok, #{apps := #{packages_row := Packages, system_row := System, services := Services,
+                     ble := #{row := Ble, gatt := Gatt}}}} =
+        erx_pkg_manifest:system_config(manifest("ble")),
+    ?assertEqual([<<"display">>, <<"net">>], [Name || #{name := Name} <- Services]),
+    ?assertEqual([<<"nus">>], Gatt),
+    ?assertEqual(5, length(lists:usort([Packages, System, Ble | [Row || #{row := Row} <- Services]]))).
 
 library(Max) ->
     {ok, #{template => 0, first => 2, max => Max, memory => ?MIB}}.

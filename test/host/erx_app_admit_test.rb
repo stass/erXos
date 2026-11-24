@@ -32,11 +32,20 @@ class ErxAppAdmitTest < Minitest::Test
   # step 6 dropped, which admits a need the row lacks; root no longer kept by session naming;
   # steps 4 and 5 swapped, which answers memory for a name another signer holds; the
   # identifier rule reduced to its length bound, which admits any byte; the file check's signer
-  # ignored, the admitted package carrying `development` whatever key signed it.
+  # ignored, the admitted package carrying `development` whatever key signed it. And PK13's: steps
+  # 7 and 8 each dropped; step 8 counting the app's own package, which refuses every update;
+  # a crafted header's repeated name kept twice.
   FAULTS = {
     'signer ignored' => Fault.new(file: MODULE, from: '      signer => Signer}.', to: '      signer => development}.'),
     'step 6 dropped' => Fault.new(file: MODULE, from: '[] -> refuse({not_offered, Need})',
                                   to: '[] -> #{row => 0, windows => false}'),
+    'step 7 dropped' => Fault.new(file: MODULE, from: '[Service | _] -> refuse({gatt_not_offered, Service})',
+                                  to: '[_ | _] -> ok'),
+    'step 8 dropped' => Fault.new(file: MODULE, from: '[Service | _] -> refuse({gatt_taken, Service, map_get(Service, Holders)})',
+                                  to: '[_ | _] -> ok'),
+    'own name counted as taken' => Fault.new(file: MODULE, from: 'check_gatt_free(Gatt, maps:remove(Name, Held))',
+                                             to: 'check_gatt_free(Gatt, Held)'),
+    'gatt not taken as a set' => Fault.new(file: MODULE, from: 'Gatt = lists:usort(Declared)', to: 'Gatt = Declared'),
     'root not kept' => Fault.new(file: DOMAIN_CORE, from: "session_reserved(?SYSTEM_PREFIX) ->\n    true;\n", to: ''),
     'steps 4 and 5 swapped' =>
       Fault.new(file: MODULE,
@@ -71,11 +80,13 @@ class ErxAppAdmitTest < Minitest::Test
   MAX_NAME = 60 # 63 bytes less the 3 of "_64", erx_domain_core's names quota as a pooled suffix
   # The app template's facet rows in the EUnit module's manifest: packages, then the apps
   # row's services display (windows), data and panel (windows), then system, which every
-  # admitted app holds.
-  PACKAGES, DISPLAY, DATA, PANEL, SYSTEM = 7, 8, 9, 10, 11
+  # admitted app holds, then ble, which offers the GATT services hrm and nus.
+  PACKAGES, DISPLAY, DATA, PANEL, SYSTEM, BLE = 7, 8, 9, 10, 11, 12
 
-  def package(name, needs: %w[display data], memory: 64 * MIB, edits: ->(values) { values })
-    declaration = Seeds::ERLANG.with(name: name, needs: needs, memory: memory)
+  # A package's declaration, with gatt written as given: the packer refuses a repeated name,
+  # so one that repeats is a crafted header's.
+  def package(name, needs: %w[display data], gatt: [], memory: 64 * MIB, edits: ->(values) { values })
+    declaration = Seeds::ERLANG.with(name: name, needs: needs, gatt: gatt, memory: memory)
     Seeds.sample(name, declaration: declaration, image_blocks: 3, tree_blocks: 1, edits: edits)
   end
 
@@ -97,7 +108,27 @@ class ErxAppAdmitTest < Minitest::Test
      [package('min_memory', memory: Seeds.codec.constant('app_memory_min')), :development, :base,
       ok([PACKAGES, DISPLAY, DATA], 'display', memory: Seeds.codec.constant('app_memory_min'))],
      [package('max_memory', memory: 128 * MIB), :development, :base,
-      ok([PACKAGES, DISPLAY, DATA], 'display', memory: 128 * MIB)]]
+      ok([PACKAGES, DISPLAY, DATA], 'display', memory: 128 * MIB)]] + gatt_accepted
+  end
+
+  # Steps 7 and 8 admit: a service the row offers and no other app holds; the services the
+  # app's own package holds, as an update keeps them; a crafted header's repeated name, once.
+  def gatt_accepted
+    [[package('beacon', gatt: %w[nus]), :development, :base, ok([PACKAGES, DISPLAY, DATA], 'display', gatt: %w[nus])],
+     [package('clock', gatt: %w[hrm nus]), 'vendor', :base, ok([PACKAGES, DISPLAY, DATA], 'display', gatt: %w[hrm nus])],
+     [package('twice', gatt: %w[nus nus]), :development, :base, ok([PACKAGES, DISPLAY, DATA], 'display', gatt: %w[nus])]]
+  end
+
+  # Step 7 refuses a service the row does not offer, every service of a row without ble;
+  # step 8 one another app's package holds; each step judges the whole set before the next.
+  def gatt_refused
+    [[package('battery', gatt: %w[bas]), :development, :base, error(Tuple.new([:gatt_not_offered, 'bas']))],
+     [package('beacon', gatt: %w[nus]), :development, :no_ble, error(Tuple.new([:gatt_not_offered, 'nus']))],
+     [package('heart', gatt: %w[nus hrm]), :development, :base, error(Tuple.new([:gatt_taken, 'hrm', 'clock']))],
+     [package('nettie', needs: %w[net], gatt: %w[bas]), :development, :base, # 6 before 7
+      error(Tuple.new([:not_offered, 'net']))],
+     [package('pulse', gatt: %w[hrm zzz]), :development, :base, # 7 before 8
+      error(Tuple.new([:gatt_not_offered, 'zzz']))]]
   end
 
   def refused
@@ -129,7 +160,8 @@ class ErxAppAdmitTest < Minitest::Test
       earlier_check_answers
   end
 
-  # For each two adjacent checks of the six, a header both refuse, answered by the earlier.
+  # For each two adjacent checks of the first six, a header both refuse, answered by the earlier
+  # (gatt_refused holds 6 before 7 and 7 before 8).
   def earlier_check_answers
     abi = Seeds.codec.abi_version
     newer_abi = ->(values) { values.merge('abi_version' => abi + 1) }
@@ -141,11 +173,14 @@ class ErxAppAdmitTest < Minitest::Test
      [package('clock', memory: Seeds.codec.constant('app_memory_min') - 1), :development, :base, # 4 before 5
       error(Tuple.new([:signer_changed, 'clock']))],
      [package('high', needs: %w[net], memory: (128 * MIB) + 1), :development, :base, # 5 before 6
-      error(Tuple.new([:memory, (128 * MIB) + 1]))]]
+      error(Tuple.new([:memory, (128 * MIB) + 1]))]] + gatt_refused
   end
 
-  def ok(rows, display, memory: 64 * MIB)
-    Tuple.new([:ok, { rows: (rows + [SYSTEM]).sort, display: display, memory: memory }])
+  # An admission's answer: the kept rows with system, and the ble row with the services
+  # admitted, or none when the declaration names no gatt.
+  def ok(rows, display, memory: 64 * MIB, gatt: [])
+    ble = gatt.empty? ? :none : { row: BLE, gatt: gatt }
+    Tuple.new([:ok, { rows: (rows + [SYSTEM]).sort, ble: ble, display: display, memory: memory }])
   end
 
   def error(reason) = Tuple.new([:error, reason])

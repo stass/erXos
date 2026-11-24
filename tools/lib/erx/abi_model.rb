@@ -432,16 +432,20 @@ module Erx
         constants
       end
 
-      # Each set parameter's most values as service_<service>_<key>_max, so a format that
+      # Each set parameter's most values as service_<service>_<parameter>_max, so a format that
       # carries such a set's names (a package's gatt, abi/formats/package.txt) takes its
-      # bound from the interface that declares it rather than stating it again.
+      # bound from the interface that declares it rather than stating it again; and its
+      # number as service_<service>_<parameter>_key, the key of its rows in a facet's parameter
+      # table, so a reader of the manifest (erx_pkg_manifest, the app template's ble row)
+      # finds the set's values by the interface's own number.
       def service_set_bounds(services, constants, line)
         services.each do |service|
           service.fetch(:parameters).each do |key, parameter|
             next unless parameter.fetch(:cardinality) == 'set'
 
-            add_constant(constants, "service_#{service.fetch(:name)}_#{key}_max", parameter.fetch(:maximum_count),
-                         BASE_TYPES.fetch('u32'), line)
+            prefix = "service_#{service.fetch(:name)}_#{key}"
+            add_constant(constants, "#{prefix}_max", parameter.fetch(:maximum_count), BASE_TYPES.fetch('u32'), line)
+            add_constant(constants, "#{prefix}_key", parameter.fetch(:number), BASE_TYPES.fetch('u32'), line)
           end
         end
       end
