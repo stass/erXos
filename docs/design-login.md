@@ -324,7 +324,10 @@ principal service in the system domain and its one passphrase check:
 sets `process_flag(sensitive, true)` in its `init/1`, before it
 registers, its worker sets it before it touches the passphrase, and its
 `format_status/1` shows the queue's length and the number of counters,
-never a request, a name or a terminal. In a build that is not a
+never a request, a name or a terminal. A check is a message to the
+checker's alias, not a `gen_server` call, so no exit of a caller's wait
+ever holds one; a checker that is not running, or ends before it
+answers, answers `unavailable`. In a build that is not a
 development build (`erx_build:development/0`) it answers `unavailable`
 to every check and reads nothing, as `erx_ssh` answers
 `not_development`; a release manifest also holds no `record_volume`
@@ -339,7 +342,10 @@ development build:
   again at one, and every counter that old is dropped at each failure,
   so no more counters live than derivations fit in a minute.
 * **One derivation at a time.** Checks wait in one queue, and one
-  worker process at a time reads root's record and derives. The limits
+  worker process at a time reads root's record and derives, asking
+  again while the tree answers `eagain`, within a deadline of 30 s after
+  which the worker is killed and the check answers `unavailable`,
+  counting nothing. The limits
   are applied as a check leaves the queue, so the failures of the
   checks ahead of it count against it.
 * **Root's record** is the `login_keys` tree's `root_passphrase`, read

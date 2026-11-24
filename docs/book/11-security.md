@@ -687,8 +687,8 @@ the user writes on the host into a file beside those keys on the card.
 The storage domain reads the line and hands the system domain only a
 fixed record of rounds, salt and hash; the principal service's one
 check derives for every name alike, under the vault's limits of 5
-failures a minute per name and per terminal and one derivation at a
-time, so a stranger's name gets the same answer, after the same work,
+failures per name and per terminal, each less than a minute after the
+last, and one derivation at a time, so a stranger's name gets the same answer, after the same work,
 as a wrong passphrase, and a release build answers no passphrase at
 all ([design-login.md](../design-login.md#the-passphrase-check)).
 

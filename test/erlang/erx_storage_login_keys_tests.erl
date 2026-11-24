@@ -83,6 +83,29 @@ the_keys_of_the_file_are_root_test() ->
     ?assertEqual({ok, <<(key(1))/binary, (key(2))/binary>>}, grant_read(Holder)),
     ?assertEqual([], logs()).
 
+settled_passphrase(Holder) ->
+    case erx_storage_login_keys:answer(Holder, root_passphrase) of
+        {error, eagain} -> timer:sleep(10), settled_passphrase(Holder);
+        Answer -> Answer
+    end.
+
+%% root_passphrase is the record of the line, read with the keys; nothing is logged.
+the_passphrase_line_is_root_passphrase_test() ->
+    {Holder, _} = start(reader("passphrase")),
+    {ok, Record} = settled_passphrase(Holder),
+    ?assertMatch({ok, #{rounds := 5000, salt := <<"saltstring">>}}, erx_passphrase_hash:decode(Record)),
+    ?assertEqual({ok, <<(key(1))/binary, (key(2))/binary>>}, settled(Holder)),
+    {ok, Tree} = erx_storage_login_keys:init(Holder),
+    {ok, File, _} = erx_storage_login_keys:walk(root, <<"root_passphrase">>, Tree),
+    ?assertEqual({ok, Record}, erx_storage_login_keys:read(File, 0, 53, Tree)),
+    ?assertEqual([], logs()).
+
+%% A line the decoder refuses is an empty root_passphrase, logged by its reason alone.
+a_refused_passphrase_line_is_an_empty_file_with_its_reason_test() ->
+    {Holder, _} = start(reader("passphrase_refused")),
+    ?assertEqual({ok, <<>>}, settled_passphrase(Holder)),
+    ?assertEqual([<<"passphrase_hash: not a $5$ SHA-256 crypt string">>], logs()).
+
 %% No sector is read until root is first asked for, so a boot whose session has
 %% imported its keys never reads the medium.
 no_sector_is_read_until_root_is_asked_test() ->
@@ -104,10 +127,10 @@ a_held_reader_leaves_root_answering_eagain_until_it_is_released_test() ->
     ?assertEqual({error, eagain}, erx_storage_login_keys:root_answer(Holder)),
     ?assertEqual({error, eagain}, grant_read(Holder)),
     {ok, Tree} = erx_storage_login_keys:init(Holder),
-    ?assertEqual({error, eagain}, erx_storage_login_keys:getattr(file, Tree)),
+    ?assertEqual({error, eagain}, erx_storage_login_keys:getattr({file, root}, Tree)),
     Reader ! release,
     ?assertEqual({ok, <<(key(1))/binary, (key(2))/binary>>}, settled(Holder)),
-    {ok, #{size := Size}} = erx_storage_login_keys:getattr(file, Tree),
+    {ok, #{size := Size}} = erx_storage_login_keys:getattr({file, root}, Tree),
     ?assertEqual(102, Size).
 
 a_file_the_decoder_refuses_is_an_empty_root_with_its_finding_test() ->
@@ -133,17 +156,17 @@ a_killed_reader_is_eio_not_an_empty_root_test() ->
     exit(Reader, kill),
     ?assertEqual({error, eio}, settled(Holder)),
     ?assertEqual({error, eio}, grant_read(Holder)),
-    ?assertEqual([<<"authorized_keys: read failed">>], logs()).
+    ?assertEqual([<<"authorized_keys: read failed">>, <<"passphrase_hash: read failed">>], logs()).
 
 a_failed_sector_read_is_eio_test() ->
     {Holder, _} = start(fun(_Sector) -> {error, eio} end),
     ?assertEqual({error, eio}, settled(Holder)),
-    ?assertEqual([<<"authorized_keys: read failed">>], logs()).
+    ?assertEqual([<<"authorized_keys: read failed">>, <<"passphrase_hash: read failed">>], logs()).
 
 a_reader_that_raises_is_eio_test() ->
     {Holder, _} = start(fun(_Sector) -> error(window_gone) end),
     ?assertEqual({error, eio}, settled(Holder)),
-    ?assertEqual([<<"authorized_keys: read failed">>], logs()).
+    ?assertEqual([<<"authorized_keys: read failed">>, <<"passphrase_hash: read failed">>], logs()).
 
 %% A query that names no alias is dropped, not a crash of the holder.
 a_query_without_an_alias_is_dropped_test() ->
@@ -158,20 +181,20 @@ a_result_after_the_reader_s_end_changes_nothing_test() ->
     Reader = receive {held, Pid} -> Pid end,
     exit(Reader, kill),
     ?assertEqual({error, eio}, settled(Holder)),
-    Holder ! {Monitor, {result, {keys, [key(7)], []}}},
+    Holder ! {Monitor, {result, {{keys, [key(7)], []}, read_failed}}},
     ?assertEqual({error, eio}, erx_storage_login_keys:root_answer(Holder)).
 
 a_second_result_changes_nothing_test() ->
     {Holder, Monitor} = start(reader("absent")),
     ?assertEqual({ok, <<>>}, settled(Holder)),
-    Holder ! {Monitor, {result, {keys, [key(7)], []}}},
+    Holder ! {Monitor, {result, {{keys, [key(7)], []}, read_failed}}},
     Holder ! {'DOWN', Monitor, process, self(), killed},
     ?assertEqual({ok, <<>>}, erx_storage_login_keys:root_answer(Holder)).
 
 a_result_under_another_tag_is_dropped_test() ->
     {Holder, _} = start(held("found")),
     Reader = receive {held, Pid} -> Pid end,
-    Holder ! {make_ref(), {result, {keys, [key(7)], []}}},
+    Holder ! {make_ref(), {result, {{keys, [key(7)], []}, read_failed}}},
     ?assertEqual({error, eagain}, erx_storage_login_keys:root_answer(Holder)),
     Reader ! release,
     ?assertEqual({ok, <<(key(1))/binary, (key(2))/binary>>}, settled(Holder)).
@@ -181,10 +204,10 @@ reads_stay_within_the_file_test() ->
     {Holder, _} = start(reader("found")),
     _ = settled(Holder),
     {ok, Tree} = erx_storage_login_keys:init(Holder),
-    ?assertEqual({ok, binary:part(key(2), 0, 10)}, erx_storage_login_keys:read(file, 51, 10, Tree)),
-    ?assertEqual({ok, key(2)}, erx_storage_login_keys:read(file, 51, 817, Tree)),
-    ?assertEqual({ok, <<>>}, erx_storage_login_keys:read(file, 102, 817, Tree)),
-    ?assertEqual({error, enoent}, erx_storage_login_keys:walk(file, <<"root">>, Tree)),
+    ?assertEqual({ok, binary:part(key(2), 0, 10)}, erx_storage_login_keys:read({file, root}, 51, 10, Tree)),
+    ?assertEqual({ok, key(2)}, erx_storage_login_keys:read({file, root}, 51, 817, Tree)),
+    ?assertEqual({ok, <<>>}, erx_storage_login_keys:read({file, root}, 102, 817, Tree)),
+    ?assertEqual({error, enoent}, erx_storage_login_keys:walk({file, root}, <<"root">>, Tree)),
     ?assertEqual({error, enoent}, erx_storage_login_keys:walk(root, <<"other">>, Tree)).
 
 %% start_mint/0 starts the mint on the block service's record_volume window, which the

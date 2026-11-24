@@ -888,9 +888,10 @@ system domain receives only a fixed record.**
   reads the line through a cursor and answers the record
   `erx_passphrase_hash` lays out, `<<Rounds:32, Hash:32/binary,
   Salt/binary>>`, 37 to 52 bytes. The tree serves it as a second file,
-  `root_passphrase`, of mode 0400. A file that is absent or refused is
-  served empty, with one log record of the storage domain naming the
-  file and one reason: `no passphrase_hash`, `longer than 128 bytes`,
+  `root_passphrase`, of mode 0400. A file that is absent is served
+  empty, and since most media hold none, its absence is not logged. A
+  refused file is served empty, with one log record of the storage
+  domain naming the file and one reason: `longer than 128 bytes`,
   `not a $5$ SHA-256 crypt string`, the volume's refusals above, or
   `read failed`, which, as for the keys, answers `eio` and not an empty
   file. No byte of the file is logged.
