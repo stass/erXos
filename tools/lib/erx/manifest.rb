@@ -2323,7 +2323,8 @@ module Erx
       # driver-control interface stops and starts another domain's drivers, so only the
       # system domain holds one (property 8), and a facet of the input interface reads every
       # key pressed on its devices, so only a display domain holds one (check_input_grants);
-      # the network's facets are property 15's
+      # a login facet goes only to a front end of docs/design-login.md's table, as that
+      # table states it (check_login_grants); the network's facets are property 15's
       # (check_network_grants), and the files, inspect and code receivers' floors property
       # 16's (check_files_grants, check_inspect_grants, check_code_grants). Each facet's parameters are resolved
       # against its service's declarations (facet_parameters), and its operations against
@@ -2376,6 +2377,7 @@ module Erx
         check_input_grants(rows, tables)
         operations = records('facet').zip(sources).map { |record, row| facet_operations(record, row, service_rows) } +
                      derived.map { [] }
+        check_login_grants(rows, packed.map(&:first), operations, tables)
         order = rows.each_index.sort_by { |at| [rows.fetch(at).fetch('name'), *grantee.call(rows.fetch(at))] }
         facets = order.zip(spans(order.map { |at| operations.fetch(at) }, 'facet_operations'),
                            spans(order.map { |at| packed.fetch(at).last }, 'facet_parameters')).map do |at, named, stated|
@@ -2418,7 +2420,8 @@ module Erx
       # check_display_grants, which reads pixels, session and front, and range-checks windows and
       # clipboard as their declarations bound them. line_grant is property 8's line clause,
       # check_line_grants, which reads device, rate and flow and range-checks rate. ble_grant is
-      # check_ble_grants, which reads services. net_grant is
+      # check_ble_grants, which reads services. login_grant is check_login_grants, which
+      # holds line and logins to the holder's entry of LOGIN_HOLDERS. net_grant is
       # property 15's parameter clause, check_net_ports, which reads a net facet's ports and
       # listen; its sockets and buffers their declarations alone bound, and the grant
       # enforces all four at run time (abi/services/net.txt). files_grant takes a files
@@ -2431,6 +2434,7 @@ module Erx
       GRANT_CHECKERS = { 'windows_grant' => %w[windows pixels clipboard session front].freeze,
                          'line_grant' => %w[device rate flow].freeze,
                          'ble_grant' => %w[services].freeze,
+                         'login_grant' => %w[line logins].freeze,
                          'net_grant' => %w[sockets buffers ports listen].freeze,
                          'files_grant' => %w[rights tree].freeze }.freeze
 
@@ -2651,6 +2655,77 @@ module Erx
       # A ble grant as a refusal names it: the app template's row by the apps row's gatt,
       # which its services come from, since no source line states the row.
       def ble_grant_named(row, tables) = app_template?(row, tables) ? "the apps row's gatt" : "ble grant #{row.fetch('name')}"
+      # A login front end's entry: the session line its logins mint, the operations its row
+      # lists, by name, and its bound on rows of the login service's table.
+      LoginHolder = Data.define(:line, :operations, :logins)
+
+      # The login facet's holders, by configured domain name: the table of
+      # docs/design-login.md, "Who holds it", the allow-list check_login_grants holds every
+      # login row to.
+      LOGIN_HOLDERS = {
+        'ssh' => LoginHolder.new(line: 'tty_line', operations: %w[cookie key_ok login_key login_passphrase].freeze, logins: 128),
+        'web' => LoginHolder.new(line: 'web_line', operations: %w[login_passphrase].freeze, logins: 16),
+        'btconsole' => LoginHolder.new(line: 'tty_line', operations: %w[login_passphrase].freeze, logins: 8)
+      }.freeze
+
+      # login_grant (docs/design-login.md, "Who holds it"). Every service whose checker is
+      # login_grant is served by the system domain, whose login service checks what a front
+      # end forwards, so no configured domain serves the login interface and receives a
+      # person's passphrase or key as a login. Each grant of one goes to a configured domain LOGIN_HOLDERS names, at most one
+      # row a holder, with exactly its entry's line, operations and logins: no row on the
+      # system domain, a session template, the Bluetooth domain or any other domain. The
+      # entries' lines are served_by session interfaces, so no rule checks line against
+      # ?ERX_LINES. facets, values and operations are parallel arrays: each facet row, its
+      # resolved parameters by key and its operation numbers (facet_operations).
+      def check_login_grants(facets, values, operations, tables)
+        checked = ->(service) { grant_checker(service.fetch('interface')) == 'login_grant' }
+        served = tables.fetch('services').find { |row| checked.call(row) && row.fetch('server') != @codec.constant('mf_none') }
+        invalid("service #{served.fetch('name')} is served by a configured domain, not the system domain", 'service.server') if served
+        holders = facets.zip(values, operations).filter_map do |row, given, numbers|
+          service = tables.fetch('services').fetch(row.fetch('service'))
+          next unless checked.call(service)
+
+          holder = fetch_login_holder(row, tables)
+          check_login_row("login grant #{row.fetch('name')} to domain #{holder}", holder, given,
+                          login_operation_names(service, numbers))
+          holder
+        end
+        twice = holders.tally.find { |_holder, count| count > 1 }
+        invalid("domain #{twice.first} holds more than one login grant", 'facet.grantee') if twice
+      end
+
+      # The configured domain a login row is granted to, by name, which LOGIN_HOLDERS lists,
+      # or the row is refused. normalize_facets refuses a grant to the system domain first,
+      # as it does every facet of a service the system domain serves.
+      def fetch_login_holder(row, tables)
+        named = "login grant #{row.fetch('name')}"
+        invalid("#{named} is granted to a session template or the system domain, which is no login front end", 'facet.grantee') unless
+          row.fetch('grantee_kind') == grantee_kind('domain')
+        holder = domain_name(tables, row.fetch('grantee'))
+        invalid("#{named} is granted to domain #{holder}, which docs/design-login.md lists as no login front end", 'facet.grantee') unless
+          LOGIN_HOLDERS.key?(holder)
+        holder
+      end
+
+      # A login row's operation numbers by the names its interface declares for them.
+      def login_operation_names(service, numbers)
+        declared = service_declaration(service.fetch('interface')).fetch(:operations).invert
+        numbers.map { |number| declared.fetch(number) }
+      end
+
+      # A login row against its holder's entry of LOGIN_HOLDERS: the same line, operations
+      # and logins.
+      def check_login_row(named, holder, given, names)
+        entry = LOGIN_HOLDERS.fetch(holder)
+        invalid("#{named} mints #{given.fetch('line')}, where #{holder}'s login row mints #{entry.line}", 'facet.parameter') unless
+          given.fetch('line') == entry.line
+        invalid("#{named} allows #{given.fetch('logins')} logins, where #{holder}'s login row allows #{entry.logins}", 'facet.parameter') unless
+          given.fetch('logins') == entry.logins
+        extra = names - entry.operations
+        invalid("#{named} lists #{extra.join(', ')}, which #{holder}'s login row does not", 'facet.operations') unless extra.empty?
+        missing = entry.operations - names
+        invalid("#{named} omits #{missing.join(', ')}, which #{holder}'s login row lists", 'facet.operations') unless missing.empty?
+      end
 
       # A line grant's device by its role: a UART's grant states rate, which its
       # declaration holds to 115200, and flow, none or rts_cts; a virtio console's states

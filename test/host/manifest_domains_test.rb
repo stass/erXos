@@ -1737,4 +1737,68 @@ class ManifestDomainsTest < Minitest::Test
                  "  parameter b 2 u64 one range 1 2 checked_by windows_grant\n")
     end
   end
+
+  # The login front ends of docs/design-login.md, "Who holds it", and two domains that are
+  # none: the Bluetooth domain and another, each a configured domain of its name.
+  LOGIN_DOMAINS = %w[ssh web btconsole bluetooth alpha].freeze
+
+  # The login service, served by server, and the domains LOGIN_DOMAINS names.
+  def with_login(server: 'system')
+    with_domains(*LOGIN_DOMAINS.map { |name| self.class.domain(name) }) + self.class.session +
+      "service login\n  server #{server}\n  interface login\n"
+  end
+
+  # A login facet row named name to grantee, a manifest token (system, @domain.NAME or
+  # @session.PRINCIPAL), listing operations, minting line and allowing logins.
+  def login_grant(name, grantee:, operations:, line:, logins:)
+    "facet #{name}\n  grantee #{grantee}\n  service @service.login\n  operations #{operations}\n" \
+      "  max_request 131072\n  in_flight 8\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n" \
+      "  parameter line \"#{line}\"\n  parameter logins #{logins}\n"
+  end
+
+  # Each front end's row as the table states it.
+  SSH_LOGIN = { grantee: '@domain.ssh', operations: 'cookie,key_ok,login_key,login_passphrase', line: 'tty_line',
+                logins: 128 }.freeze
+  WEB_LOGIN = { grantee: '@domain.web', operations: 'login_passphrase', line: 'web_line', logins: 16 }.freeze
+  BTCONSOLE_LOGIN = { grantee: '@domain.btconsole', operations: 'login_passphrase', line: 'tty_line', logins: 8 }.freeze
+
+  # login_grant (docs/design-login.md, "Who holds it"): each front end's row, as the
+  # table states it, packs, the three together and each alone.
+  def test_a_login_grant_to_each_front_end_packs
+    holders = [SSH_LOGIN, WEB_LOGIN, BTCONSOLE_LOGIN]
+    view = @codec.open('manifest', admit(with_login + holders.each_with_index.map { |row, at| login_grant("lg#{at}", **row) }.join).bytes)
+    assert_equal 3, rows(view, 'facets').count { |row| view.string(row.fetch('name')).start_with?('lg') }
+    holders.each { |row| admit(with_login + login_grant('lg', **row)) }
+  end
+
+  # Each seeded violation differs from an accepted row in one thing and is refused: the
+  # service served by a configured domain; a row to a domain the table does not list (the
+  # Bluetooth domain, another) or to a session template; a row whose line, logins or
+  # operations (one more, one fewer) differ from its holder's; and two rows for one
+  # holder. A row to the system domain is refused by normalize_facets's rule that the
+  # system domain takes no facet of its own service, before the login check.
+  def test_a_login_grant_is_held_to_its_front_end_s_row
+    web = ->(**change) { login_grant('lg', **WEB_LOGIN, **change) }
+    ssh = ->(**change) { login_grant('lg', **SSH_LOGIN, **change) }
+    {
+      ['service.server', with_login(server: '@domain.alpha') + web.call] => /service login is served by a configured domain/,
+      ['facet.grantee', with_login + web.call(grantee: '@domain.bluetooth')] =>
+        /login grant lg is granted to domain bluetooth, which docs\/design-login.md lists as no login front end/,
+      ['facet.grantee', with_login + web.call(grantee: '@domain.alpha')] => /login grant lg is granted to domain alpha/,
+      ['facet.grantee', with_login + web.call(grantee: '@session.system')] => /login grant lg is granted to a session template/,
+      ['facet.grantee', with_login + web.call(grantee: 'system')] => /the system domain takes no facet of its own service/,
+      ['facet.parameter', with_login + web.call(line: 'tty_line')] =>
+        /login grant lg to domain web mints tty_line, where web's login row mints web_line/,
+      ['facet.parameter', with_login + web.call(logins: 17)] => /login grant lg to domain web allows 17 logins, where web's login row allows 16/,
+      ['facet.parameter', with_login + ssh.call(logins: 64)] => /allows 64 logins, where ssh's login row allows 128/,
+      ['facet.operations', with_login + web.call(operations: 'cookie,login_passphrase')] =>
+        /login grant lg to domain web lists cookie, which web's login row does not/,
+      ['facet.operations', with_login + ssh.call(operations: 'key_ok,login_key,login_passphrase')] =>
+        /login grant lg to domain ssh omits cookie, which ssh's login row lists/,
+      ['facet.grantee', with_login + login_grant('lga', **WEB_LOGIN) + login_grant('lgb', **WEB_LOGIN)] =>
+        /domain web holds more than one login grant/
+    }.each do |(field, source), message|
+      refused(Erx::Manifest::Invalid, field, source, message: message)
+    end
+  end
 end
