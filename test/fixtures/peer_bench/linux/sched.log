@@ -1,0 +1,16 @@
+erx: bench: timing
+WINDOW {"window":0,"thread":0,"iterations":13241724,"longest":452774,"lost":82,"waited":18150449}
+WINDOW {"window":0,"thread":1,"iterations":13420259,"longest":360189,"lost":85,"waited":18288217}
+WINDOW {"window":0,"thread":2,"iterations":13410670,"longest":443288,"lost":84,"waited":18393320}
+WINDOW {"window":0,"thread":3,"iterations":13318784,"longest":613665,"lost":83,"waited":18283842}
+WINDOW {"window":1,"thread":0,"iterations":13766338,"longest":288157,"lost":83,"waited":18012379}
+WINDOW {"window":1,"thread":1,"iterations":13884283,"longest":288075,"lost":84,"waited":18086135}
+WINDOW {"window":1,"thread":2,"iterations":13722422,"longest":216668,"lost":83,"waited":17938112}
+WINDOW {"window":1,"thread":3,"iterations":13736596,"longest":216598,"lost":83,"waited":17940253}
+WINDOW {"window":2,"thread":0,"iterations":13830024,"longest":216835,"lost":84,"waited":17997791}
+WINDOW {"window":2,"thread":1,"iterations":13732625,"longest":288109,"lost":83,"waited":17853009}
+WINDOW {"window":2,"thread":2,"iterations":13747794,"longest":216780,"lost":83,"waited":17924929}
+WINDOW {"window":2,"thread":3,"iterations":13858013,"longest":216797,"lost":83,"waited":17941080}
+BENCH {"benchmark":"sched","operation":"share-equal","conditions":{"load":"idle","placement":"other-cpu","parameters":{"threads":4,"window-ms":1000},"clock":"counter","batch":1},"frequency_hz":24000000,"status":"measured","samples":3,"counts":{"lost":0,"early":0,"missed":0}}
+CLOCK {"clock":"counter","frequency_hz":24000000,"increment":1,"read_cost":0,"wait_rounding":1,"cycles_per_tick":"unknown","pairs":[{"cpus":[0,15],"before":[-2,2],"after":[-4,4]}]}
+erx: bench: done

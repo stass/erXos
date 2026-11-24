@@ -30,7 +30,8 @@ module Erx
                 "system-register reads, the barrier, counter and cache-maintenance helpers of liberx's " \
                 'backends and the DMA architecture layer, ' \
                 "musl's cancellation-point labels, erx_net's checksum fence, and the test programs and " \
-                "fixtures that plant instructions, the raspi4b suite's firmware stand-in and the header probe",
+                "fixtures that plant instructions, the raspi4b suite's firmware stand-in, the header probe " \
+                "and the peer bench's counter reads",
           design: "#{KERNEL}#chokepoint-checks",
           scope: INLINE_ASM_SCOPE,
           pattern: ASM_KEYWORD,
@@ -55,6 +56,10 @@ module Erx
             Chokepoints::Site.new(glob: 'musl/src/thread/erxos/syscall_cp.c'),
             # LOADED_ONCE, an empty statement that pins a loaded word in a register.
             Chokepoints::Site.new(glob: 'erlang/apps/erx_net/c_src/erx_inet_csum.c'),
+            # counter_ticks and counter_frequency, the peer bench's reads of the counter on the other
+            # systems it is compared with; it is built there from its source alone, where no
+            # generated read exists, and no erXos image holds it.
+            Chokepoints::Site.new(glob: 'bench/peer/erx_peer_bench.c'),
             # rewrite_helper's instruction barrier after another thread rewrote its code.
             Chokepoints::Site.new(glob: 'test/guest/native_task/program.c'),
             # The stack proof's host fixtures, which plant the instructions its extractor must
