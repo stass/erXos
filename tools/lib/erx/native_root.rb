@@ -280,9 +280,9 @@ module Erx
     # A task's program over archives, at task.ld's fixed addresses, with its receipt, as
     # build_domain_runtime_receipted gives the runtime's: what a production image's packer
     # takes for a program it carries in a release (the programs suite's, ProductionImage's
-    # Added entries).
-    def build_task_receipted(name:, sources:, directory:, archives:)
-      program = build(name: name, sources: sources, directory: directory, archives: archives, strip_debug: true,
+    # Added entries). flags are compile flags beyond the tree's, such as a test program's define.
+    def build_task_receipted(name:, sources:, directory:, archives:, flags: [])
+      program = build(name: name, sources: sources, directory: directory, archives: archives, flags: flags, strip_debug: true,
                       script: TASK_LINK_SCRIPT, link_flags: TASK_LINK_FLAGS, place: nil)
       receipted(program, sources: sources, script: TASK_LINK_SCRIPT, directory: directory)
     end
@@ -304,10 +304,10 @@ module Erx
       objects = compile_all(sources: sources, directory: directory, flags: flags)
       libraries = LIBRARIES.map { |library| @fiasco.user_library(library) }
       program = File.join(directory, name)
-      flags = [*(place ? self.class.place_flags(place, ram_first: @platform.ram_first) : []), *link_flags]
+      link = [*(place ? self.class.place_flags(place, ram_first: @platform.ram_first) : []), *link_flags]
       # --trace lists every input the link loads on standard output, the receipt's record of
       # them (PackProvenance.link_inputs); a link that fails raises before a receipt names it.
-      @runner.run([@linker, *self.class.link_options(script: script, flags: flags, strip_debug: strip_debug), '--trace',
+      @runner.run([@linker, *self.class.link_options(script: script, flags: link, strip_debug: strip_debug), '--trace',
                    '-o', program, *objects,
                    *self.class.archive_group(archives, boot_core: @fiasco.boot_core_archive, libraries: libraries)],
                   name: "native-root-#{name}-link", deadline: 60, chdir: @source, stdout: inputs_path(program))

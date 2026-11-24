@@ -62,6 +62,7 @@ module Erx
         liberx/backend/fiasco/cache.h
         liberx/backend/fiasco/console.c
         liberx/backend/fiasco/console.h
+        liberx/backend/fiasco/console_warn.c
         liberx/backend/fiasco/end.c
         liberx/backend/fiasco/end_how.c
         liberx/backend/fiasco/end_how.h

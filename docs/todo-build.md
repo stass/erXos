@@ -301,6 +301,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   every OCI image `deps.lock` pins, so a host pulls the oracle toolchain of each platform although its engine
   runs only its own. Fetch only the image whose platform is the local engine's architecture
   (`DependencySchema::OCI_PLATFORMS`), unless `--source` names another.
+* [Medium] Test media harnesses, `tools/lib/erx/native_console_ring.rb` and `tools/lib/erx/kiosk.rb`:
+  both build a test program over musl's libc.a as a medium's `Added` (`program`,
+  `Kiosk::Run#front_program`), splice the boot value's checkpoint after the image's identity
+  (`checkpoints`), and boot a medium through its boot record and firmware tree (`boot`), each
+  copied. One `ProductionImage` or `MediumBoot` helper for each would leave one place to change.
 * [Medium] check-fuzz, Ruby drivers (`tools/lib/erx/fuzz_drivers.rb`): a driver can leave the gate by declaring
   itself `# erx-gate: fuzz helper`, and `make check` stays green unless the driver is one of the floor in
   `test/host/gate_baseline_test.rb`. Move the four helpers (`tools/fuzz/run_pack.rb`, `manifest_seeds.rb`,

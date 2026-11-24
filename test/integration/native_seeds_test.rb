@@ -5,6 +5,7 @@
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
+require_relative '../../tools/lib/erx/native_console_ring'
 require_relative '../../tools/lib/erx/native_irq'
 require_relative '../../tools/lib/erx/native_kernel_trap'
 require_relative '../../tools/lib/erx/native_semaphore_race'
@@ -112,6 +113,15 @@ class NativeSeedsTest < Minitest::Test
   # which a kernel that kills the faulting thread and returns never does.
   def test_a_kernel_trap_ends_a_release_kernel
     serial = File.binread(Erx::NativeKernelTrap::Run.new(root: ROOT).call(accel: 'hvf', build: true))
+    assert_equal({ trap_dumps: 1, panics: 1 },
+                 { trap_dumps: serial.scan('EXCEPTION:').size, panics: serial.scan('Panic: kernel trap').size })
+  end
+
+  # A seed of the kernel's own: a release test kernel whose marked receive warns once,
+  # which the root must log as a kernel record and nothing else may show, and then
+  # overflows the ring and traps, whose stop must write the loss, the dump and the panic.
+  def test_the_kernels_lines_reach_the_log
+    serial = File.binread(Erx::NativeConsoleRing::Run.new(root: ROOT).call(build: true))
     assert_equal({ trap_dumps: 1, panics: 1 },
                  { trap_dumps: serial.scan('EXCEPTION:').size, panics: serial.scan('Panic: kernel trap').size })
   end

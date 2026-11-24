@@ -125,12 +125,12 @@ module Erx
                              tools/lib/erx/trust_store.rb].freeze
     TEST_ROOTS_ENTRY = /\btest_roots:/
     # Programs a medium adds to its domain release make it a test image too
-    # (ProductionImage::MediumKind.test's test_programs). Only the QEMU cell that starts one
-    # from rc on the medium (TEST_PROGRAMS_BUILDERS, the kiosk suite's front cell) passes
-    # that keyword, and only the medium's kind and build (TEST_PROGRAMS_DEFINER) take it. The
-    # check reads lines, as the test image one does, so it catches the keyword as written
-    # in a call, not a name assembled from pieces.
-    TEST_PROGRAMS_BUILDERS = %w[tools/lib/erx/kiosk.rb].freeze
+    # (ProductionImage::MediumKind.test's test_programs). Only the QEMU cells that start one
+    # from rc on the medium (TEST_PROGRAMS_BUILDERS, the kiosk suite's front cell and the
+    # kernel lines case) pass that keyword, and only the medium's kind and build
+    # (TEST_PROGRAMS_DEFINER) take it. The check reads lines, as the test image one does, so
+    # it catches the keyword as written in a call, not a name assembled from pieces.
+    TEST_PROGRAMS_BUILDERS = %w[tools/lib/erx/kiosk.rb tools/lib/erx/native_console_ring.rb].freeze
     TEST_PROGRAMS_DEFINER = 'tools/lib/erx/production_image.rb'
     TEST_PROGRAMS_ENTRY = /\btest_programs:/
     # Each rule that only some tools sources may name an entry point: its pattern, the

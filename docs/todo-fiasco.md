@@ -473,6 +473,23 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] Kernel lines case, `tools/lib/erx/fiasco.rb` (`Fiasco.new(kernel:)`, `kernel_path`):
+  a Fiasco object given a test kernel packs it into any medium built through it, and only
+  `MediumKind.test`'s `test_programs` marks a medium as test code, so a development medium built
+  with such an object would carry `ERX_TEST_KERNEL_WARN`'s branch unmarked; only the one caller,
+  `native_console_ring.rb`, keeps it out today. The kernel belongs in `MediumKind.test` (a
+  `test_kernel:` that implies test code), passed to `ProductionImage` as `BootImage.new(kernel:)`
+  takes one, so a test kernel is a test medium by construction; the image's kernel receipt and
+  build facts then name the test kernel too.
+* [Medium] Kernel lines case, `tools/lib/erx/native_console_ring.rb`: the case builds only the
+  release test kernel, so the "Kernel lines" row's development cell (the loss line and the
+  debugger's first output) and its seed, the close at `Jdb::open_debug_console` removed, have no
+  run. A development-kind cell of the same case closes it.
+* [Low] Ring console core, `erx_console_ring_write` (`kernel/core/console_ring.c`): once the ring
+  is full, the newline that opens each Fiasco warning (`WARNX`) is a line of its own that the core
+  counts as lost, and the warning's text is counted again, so the loss line overstates the lines
+  lost (a run of 256 warnings, 69 written out, reported 362 lost). A segment that only ends an
+  empty line should be neither stored nor counted; the case should then pin N.
 * [Low] Fiasco kernel, `Uart::startup` in `fiasco/kernel/src/drivers/uart-libuart.cpp` (`dyn_uart`):
   when the kernel options' `uart.compatible_id` names no driver in the kernel's device table, or
   is empty because `bootstrap` found no console UART, `init_uart_instance` leaves `_uart` null and

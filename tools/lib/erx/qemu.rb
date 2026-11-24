@@ -633,9 +633,11 @@ module Erx
     # Fiasco warns this way (fiasco/kernel/src/kern/receiver.cpp, set_reply_cap) when a
     # thread receives a call while its reply slot still holds an earlier caller. The
     # root's service does so only once its table of faults is full
-    # (liberx/backend/fiasco/reply_slots.h), and the warning goes straight to the UART
-    # from a newline, so it splits whatever line it lands in where no checkpoint can
-    # rejoin it.
+    # (liberx/backend/fiasco/reply_slots.h). Until the console's driver takes the UART the
+    # warning goes to it raw from a newline, splitting whatever line it lands in where no
+    # checkpoint can rejoin it; from then on it arrives as a kernel record, its text
+    # escaped (docs/design-fiasco.md, "The kernel's lines"). The pattern is not anchored,
+    # so it finds the warning in either form.
     REPLY_OVERWRITTEN = /Application bug: reply capability overwritten!/n
     REQUIRED_KEYS = %i[name pattern seconds].freeze
     OPTIONAL_KEYS = %i[verify verify_seconds type].freeze

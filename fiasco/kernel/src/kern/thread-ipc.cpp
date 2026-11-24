@@ -1,5 +1,7 @@
 // Modified by erXos: a receive from the thread itself whose timeout hit
-// before it would wait yields the time slice (docs/design-fiasco.md, "Scheduling").
+// before it would wait yields the time slice (docs/design-fiasco.md, "Scheduling"),
+// and a test kernel's seeded warning at the marked one (ERX_TEST_KERNEL_WARN,
+// tools/lib/erx/native_console_ring.rb); no other kernel builds it.
 INTERFACE [debug]:
 
 #include "tb_entry.h"
@@ -837,7 +839,32 @@ Thread::do_ipc_receive(bool have_receive, Thread *partner, Sender *sender,
         // of its priority, and reports the timeout when it runs again.
         else if (sender == this
                  && ipc_state == (Thread_receive_wait | Thread_timeout))
-          yield_timeslice();
+          {
+#ifdef ERX_TEST_KERNEL_WARN
+            // The test kernel of tools/lib/erx/native_console_ring.rb only: a
+            // yield whose tag carries the define's label is the marked
+            // receive. The first prints one warning, which the ring holds for
+            // the root's take; the second prints 256 warnings of 57 bytes,
+            // more than three times the ring's 4 KiB, so lines are lost,
+            // and then loads from address 8 in kernel mode, as
+            // ERX_TEST_KERNEL_TRAP's seed does, whose stop closes the ring.
+            static_assert(ERX_TEST_KERNEL_WARN != 0,
+                          "an ordinary yield carries label 0");
+            if (regs->tag().proto() == ERX_TEST_KERNEL_WARN)
+              {
+                static unsigned marked;
+                if (marked++ == 0)
+                  WARN("erx: console ring warning\n");
+                else
+                  {
+                    for (unsigned line = 0; line < 256; ++line)
+                      WARN("erx: console ring overflow %03u\n", line);
+                    (void)*reinterpret_cast<Mword const volatile *>(Mword{8});
+                  }
+              }
+#endif
+            yield_timeslice();
+          }
       }
   }
 

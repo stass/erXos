@@ -124,9 +124,11 @@ module Erx
     # compiler is the LLVM clang that builds the C17 cores' archive; the
     # resource headers it compiles with must be those the reviewed LLVM
     # profile admits (ToolchainProvenance.llvm). With linker, LLVM's ld.lld, it is also the
-    # toolchain that builds Fiasco and L4Re (FiascoToolchain).
+    # toolchain that builds Fiasco and L4Re (FiascoToolchain). kernel, when given, is the
+    # kernel an image packs in kernel_path's place: a test kernel (build_test_kernel).
     def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                   compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+                   compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), kernel: nil)
+      @kernel = kernel
       @root = File.expand_path(root)
       @runner = runner
       @compiler = compiler
@@ -294,8 +296,9 @@ module Erx
       File.join(@build, 'images/bootstrap.raw')
     end
 
-    # The kernel and sigma0 the recipe packs, once built.
-    def kernel_path = File.join(self.class.kernel_directory(root: @root, kind: BuildKind::DEVELOPMENT), 'fiasco')
+    # The kernel and sigma0 the recipe packs, once built: the kernel given to new, or the
+    # development kernel.
+    def kernel_path = @kernel || File.join(self.class.kernel_directory(root: @root, kind: BuildKind::DEVELOPMENT), 'fiasco')
     def sigma0_path = File.join(@build, 'users/bin/arm64_armv8a/std/l4f/sigma0')
 
     # The kernel's name as uname -K shows it (BuildFacts): fiasco- and the first 12
