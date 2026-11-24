@@ -7,7 +7,8 @@
 %% records of a 32-bit big-endian length and that many bytes. For each record this prints
 %% "ok" when erx_manifest:fuzz/1 accepts it and "error REASON FIELD" when it refuses it.
 %% A manifest it accepts has every row of every table fetched and folded, and a fetch past
-%% a table's end refused; an exception anywhere is a reader bug, never bad input.
+%% a table's end refused, and every facet row's parameter span gives its count of rows;
+%% an exception anywhere is a reader bug, never bad input.
 
 -module(erx_manifest_fuzz).
 -export([run/1]).
@@ -36,6 +37,7 @@ verdict(Record) ->
         {ok, View} ->
             {ok, _} = ?M:header(View),
             lists:foreach(fun(Table) -> rows(View, Table) end, ?TABLES),
+            {ok, ok} = ?M:fold(View, facets, fun(Facet, ok) -> span(View, Facet) end, ok),
             %% The package process's reader answers every manifest the generated reader
             %% accepts, refusing only an apps row without its app template's rows.
             case erx_pkg_manifest:system_config(Record) of
@@ -47,6 +49,12 @@ verdict(Record) ->
           when is_atom(Reason), is_binary(Field), is_integer(Offset) ->
             <<"error ", (atom_to_binary(Reason))/binary, " ", Field/binary, "\n">>
     end.
+
+%% A facet row's parameter span gives its count of parameter rows.
+span(View, #{parameters := #{count := Count} = Span}) ->
+    {ok, Rows} = ?M:span(View, facet_parameters, Span),
+    Count = length(Rows),
+    ok.
 
 %% Every row of Table fetches, the fold visits each once, and the row past the end is refused.
 rows(View, Table) ->

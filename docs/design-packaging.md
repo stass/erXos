@@ -1225,9 +1225,13 @@ removes, refuses or replaces. It reserves no entry and answers none:
 registration takes the entry the same rule (`erx_app_admit:entry/4`)
 gives the name when the package is committed, the one check 4 found,
 since the package process alone admits and registers, one package at a
-time. It answers `{ok, Admitted}`, the indices of the facet rows kept,
-the `packages` and `system` rows, one for each need and the `ble` row
-for a declaration that names `gatt`, the GATT services it names, the start row's
+time. It answers `{ok, Admitted}`, the indices of the facet rows kept
+whole, the `packages` and `system` rows and one for each need; for a
+declaration that names `gatt`, the `ble` row and the GATT services it
+names, held apart from the kept rows as `ble`, so the `ble` row reaches
+a session only narrowed to those services, through the one clause of
+`erx_domain_core:app_session/4` that grants it, and never whole through
+the kept rows ([An app's session](#an-apps-session)); the start row's
 display, the declared memory, its `serves`, which the registry entry
 keeps for the session's plan
 ([design-app-trees.md](design-app-trees.md#serving-erx_svc)), and the

@@ -181,6 +181,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Low] ABI, the generated C manifest reader has no span accessor: `liberx/system/dom_boot_view.c`
+  (`boot_facet_parameters`' caller) and `liberx/backend/core/boot_manifest.c` each turn a facet row's
+  `parameters` span into a first index by hand (`(offset - header offset) / ERX_MF_PARAMETER_SIZE`),
+  where the Erlang reader gives a span's records through `erx_manifest:span/3`; a generated
+  `erx_manifest_<table>_span` would give both C readers that one idiom.
 * [Low] ABI, the manifest test fixtures (`test/fixtures/abi_manifest_fixture.rb`,
   `test/fixtures/abi_erlang_fixture.rb`, `test/fixtures/erx_abi_reader_tests.erl`, and
   `test/host/abi_schema_test.rb`'s header size, `496`): their byte offsets

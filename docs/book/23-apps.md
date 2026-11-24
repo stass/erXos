@@ -419,7 +419,9 @@ Once a package is admitted and committed, the package process
 registers the app as a principal, `erx_principal:register_app/1`, in
 one of the `max` entries the domain library keeps for apps. The record
 holds the app's name, its signer, its declared memory and the rows
-admission kept. An app's principal has no credentials, so no one logs
+admission kept, and, for an app whose declaration names `gatt`, the
+template's `ble` row with those GATT services, held apart from the
+kept rows so that it is never granted whole. An app's principal has no credentials, so no one logs
 in as one and no login starts its sessions: the start table's session
 keepers are its only starters.
 
@@ -448,12 +450,17 @@ from the app template, under the app's principal, named from the app's
 own pool: `dashboard_1`. Its facets are the template's `packages` and
 `system` grants and the rows admission kept, and no other, each
 minted for the app's principal: an app that names only `display`
-holds no `net`. The build's proof still counts every app as holding
-every service of the row, so the subset only narrows what the proof
-allows. This is built: the session's plan, `erx_domain_core:app_session/4`,
-keeps only the kept rows, and its host tests
+holds no `net`. The `ble` row is the one row a session holds narrowed:
+its `services` parameter becomes the GATT services the app's
+declaration names, of those the template's row offers, so an app that
+handles `nus` reaches no other service of the radio. The build's proof
+still counts every app as holding every service of the row, so the
+subset only narrows what the proof allows. This is built: the session's
+plan, `erx_domain_core:app_session/4`, keeps only the kept rows and
+grants the `ble` row only narrowed, and its host tests
 (`test/erlang/erx_app_session_tests.erl`) catch seeded faults such as
-a plan that grants every row of the template. Two things around it are open: the pixel area of an app
+a plan that grants every row of the template or the `ble` row's whole
+set. Two things around it are open: the pixel area of an app
 session's display connections is still sized for the template, and
 the domain service's own test of an app session's start is written
 and not yet run.

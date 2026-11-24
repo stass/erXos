@@ -46,7 +46,8 @@ class ErxPkgManifestTest < Minitest::Test
   # row's name; and the development key accepted in a release manifest. And an app_services
   # row's service and facet fields read for each other, which hands admission the wrong
   # service and row. And the ble service's row read as a need's, which lets a need of ble
-  # take the template's whole ble grant.
+  # take the template's whole ble grant. And the reader's span off by one record, which
+  # hands the ble row a neighbour's parameters for its services set.
   FAULTS = {
     'principals not reserved' => Fault.new(file: MODULE, from: RESERVED, to: '[domains, services, facets]'),
     'domains not reserved' => Fault.new(file: MODULE, from: RESERVED, to: '[principals, services, facets]'),
@@ -55,6 +56,8 @@ class ErxPkgManifestTest < Minitest::Test
     'service and row swapped' => Fault.new(file: MODULE, from: '#{service := Index, facet := Facet}',
                                            to: '#{service := Facet, facet := Index}'),
     'ble offered as a need' => Fault.new(file: MODULE, from: 'Interface =/= ?ERX_SERVICE_BLE', to: 'Interface =/= -1'),
+    'span off by one' => Fault.new(file: READER, from: '{Relative div Stride, Counted};',
+                                   to: '{Relative div Stride + 1, Counted};'),
     'development key in a release' =>
       Fault.new(file: READER, from: RELEASE_END,
                 to: RELEASE_END.sub("\n#{' ' * 24}}", "},\n#{DEVELOPMENT_KEY}"))

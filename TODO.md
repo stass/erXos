@@ -75,7 +75,7 @@ goes to the document of the subsystem its component pointer names.
 * [Fiasco](docs/todo-fiasco.md#bugs-by-subsystem): Fiasco, the release kernel, and `liberx`'s Fiasco backend: 0.2's work, the patches, the boot and the build.
   56 items (27 Medium, 29 Low).
 * [liberx and the ABI](docs/todo-liberx.md#bugs-by-subsystem): liberx and its program layer, the ABI and its generators, the domain library.
-  89 items (39 Medium, 50 Low).
+  90 items (39 Medium, 51 Low).
 * [Domains and the system manifest](docs/todo-domains.md#bugs-by-subsystem): the domain service, domains, the code service, facets, the system manifest and its checks, the funnel.
   60 items (1 High, 34 Medium, 25 Low).
 * [Network](docs/todo-network.md#bugs-by-subsystem): the network stack (`erx_net`), WiFi and HTTPS clients.

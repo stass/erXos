@@ -633,7 +633,7 @@ module Erx
         prefix_export = specification.extent ? ['-export([open_prefix/1]).'] : []
         lines = [NOTICE, "-module(#{module_name}).",
                  '-moduledoc "Bounded structural reader over immutable ABI bytes; policy admission is separate.".',
-                 '-export([read/1, open/1, header/1, count/2, fetch/3, string/2, fold/4, fuzz/1]).',
+                 '-export([read/1, open/1, header/1, count/2, fetch/3, span/3, string/2, fold/4, fuzz/1]).',
                  *prefix_export,
                  '-export_type([view/0, error/0]).', '',
                  '-record(view, {schema = ?MODULE :: module(), bytes :: binary()}).',
@@ -937,13 +937,48 @@ module Erx
                 Count = path_value(maps:get(count, Table), Header, Header),
                 ensure(is_integer(Index) andalso Index >= 0 andalso Index < Count,
                        index, <<"table">>, 0),
-                Offset = path_value(maps:get(offset, Table), Header, Header) +
-                         Index * maps:get(size, Table),
-                Type = maps:get(type, Table),
-                Record = decode(Type, Bytes, Offset, <<"table">>),
-                check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
-                Record
+                record_at(Name, Table, Index, Bytes, Header, Reader)
             end).
+
+        -doc """
+        The checked records of table `Name` that `Span`, a span field of
+        another record, names: its `offset`, the byte offset of its first
+        record, and its `count`. A span that does not fall on the table's
+        records, whole, is an error, as the open check's slice rule says.
+        """.
+        -spec span(view(), atom(), #{offset := non_neg_integer(), count := non_neg_integer()}) ->
+            {ok, [map()]} | {error, error()}.
+        span(View, Name, Span) ->
+            attempt(fun() ->
+                {Bytes, Reader, Header} = view_data(View),
+                Table = record_table(Name, Reader),
+                Total = path_value(maps:get(count, Table), Header, Header),
+                Stride = maps:get(size, Table),
+                {First, Count} =
+                    case Span of
+                        #{offset := Offset, count := Counted}
+                          when is_integer(Offset), is_integer(Counted), Counted >= 0 ->
+                            Relative = Offset - path_value(maps:get(offset, Table), Header, Header),
+                            ensure(Relative >= 0 andalso Relative rem Stride =:= 0 andalso
+                                   Relative div Stride =< Total andalso
+                                   Counted =< Total - Relative div Stride,
+                                   slice, <<"span">>, 0),
+                            {Relative div Stride, Counted};
+                        _ ->
+                            fail(slice, <<"span">>, 0)
+                    end,
+                [record_at(Name, Table, Index, Bytes, Header, Reader)
+                 || Index <- lists:seq(First, First + Count - 1)]
+            end).
+
+        %% The record at Index of Table, which the caller bounded.
+        record_at(Name, Table, Index, Bytes, Header, Reader) ->
+            Offset = path_value(maps:get(offset, Table), Header, Header) +
+                     Index * maps:get(size, Table),
+            Type = maps:get(type, Table),
+            Record = decode(Type, Bytes, Offset, <<"table">>),
+            check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
+            Record.
 
         -doc "Resolve a bounded reference into the manifest's string table.".
         -spec string(view(), #{offset := non_neg_integer(), length := non_neg_integer()}) ->
@@ -1133,12 +1168,7 @@ module Erx
                 false -> {ok, Accumulator};
                 true ->
                     Parsed = attempt(fun() ->
-                        Offset = path_value(maps:get(offset, Table), Header, Header) +
-                                 Index * maps:get(size, Table),
-                        Type = maps:get(type, Table),
-                        Record = decode(Type, Bytes, Offset, <<"table">>),
-                        check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
-                        Record
+                        record_at(Name, Table, Index, Bytes, Header, Reader)
                     end),
                     case Parsed of
                         {ok, Record} ->
