@@ -387,8 +387,8 @@ as it leaves out the domains `site_leaves_out` names
 no display domain for `services` to name and the site machine's 256 MiB
 no room for the row's memory. The Raspberry Pi 4's card, the medium of a
 board the firmware boots from a boot partition, is the other image the
-website offers, and boots to the kiosk: it keeps the board's row and
-carries one package, `examples/dashboard`, enabled, which its own build
+website offers, and boots to the kiosk: it keeps the board's row, and
+the published card carries one package, `examples/dashboard`, enabled, which its own build
 packs from the tree as the kiosk suite does (`ImageApps.packed`)
 and the row binds by its header's hash. A development card carries a
 second, the Bluetooth echo, `examples/echo`, enabled, packed the same

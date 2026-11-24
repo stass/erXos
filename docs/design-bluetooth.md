@@ -3239,7 +3239,7 @@ stages' peers:
 | 2 | `examples/run_gatt_client.py` and `apps/gatt_dump.py` | every attribute of the expected table is discovered, with its handle; `open` values read as set; `encrypted` ones answer Insufficient Authentication | the gate allows every read: the `encrypted` value is read |
 | 2 | `test/bt/peer/gatt_peer.py`: writes, a write past the maximum, a subscription, notifications, an indication and its confirmation, a long write | each answers as declared; the handler sees each write once, in order | the link takes a second request before the handler answered the first |
 | 3 | `test/bt/peer/serial_peer.py`: 64 KiB through `erx_gatt_echo_test` with `write` with response | every byte comes back in order | `erx_gatt_serial:send/2` cutting at `Mtu` rather than `Mtu - 3` |
-| 3 | decision 7's echo package, `examples/echo`, declaring `gatt nus`, in the system partition of a medium whose `apps` row offers `ble` and `gatt nus` in place of the echo domain's grant, enabled, so it starts at boot; once it logs that it echoes, `serial_peer.py` | every byte comes back through the app | the session's `ble` row narrowed to no service: the echo's start is refused and nothing comes back |
+| 3 | decision 7's echo package, `examples/echo`, declaring `gatt nus`, in the system partition of a medium whose `apps` row offers `ble` and `gatt nus` in place of the echo domain's grant, enabled, so it starts at boot; once it logs that it echoes, `serial_peer.py` | every byte comes back through the app | the session's `ble` row narrowed to no service (`erx_domain_core:granted/4`): the echo's serial handler stops `not_granted`, its session ends, and the cell fails at the echo's attach |
 | 3 | an app's grant, in a cell whose manifest offers `ble` and `gatt nus` in its `apps` row in place of the echo domain's grant: two test packages over `erx_gatt_echo_test`, `echo_a` and `echo_b`, each declaring `gatt nus`; `cp echo_a.app /apps/`, `service echo_a start`, then `serial_peer.py`; `cp echo_b.app /apps/`; `rm /apps/echo_a.app`, `cp echo_b.app /apps/`, `service echo_b start`, then `serial_peer.py` again | the bytes come back through `echo_a`; `echo_b`'s first copy fails with `EEXIST` and `/apps` holds no `echo_b.app`; after the removal its copy succeeds and the bytes come back through it | admission's check of the other apps' services removed: `echo_b`'s first copy succeeds |
 | 3 | the same cell, owners changing while a phone stays connected: with `echo_a` running, `test/bt/peer/gatt_peer.py` sends a Prepare Write of `rx` and waits for the harness; the harness runs `rm /apps/echo_a.app`, `cp echo_b.app /apps/` and `service echo_b start`; the peer then sends Execute Write and, after it, `serial_peer.py`'s stream; then `service echo_b restart` and the stream again | Execute Write is answered Unlikely Error and none of the prepared bytes comes back on `tx`; `echo_b`'s start attaches within `bt_attach_wait_ms`, after the removal and after the restart, and each stream comes back through `echo_b` whole | the link's write carrying the handler at Execute Write (the prepared bytes come back through `echo_b`); the registry ignoring a handler's end (`echo_b`'s start fails `{attached, nus}` at the deadline, and the stream gets Unlikely Error) |
 | 4 | `apps/pair.py --mode le --sc true --mitm true --io keyboard C tcp-client:...`, where the device configuration `C` fixes the peer's address and names its key store, `"keystore": "JsonKeyStore:K"` (`bumble/keys.py:198-206`, `:272-285`); the harness reads the passkey from the `pair` file and writes it to `pair.py`'s standard input, which `input()` reads (`apps/pair.py:102-107`, `:159-168`) | `bonded ... authenticated`; then `apps/gatt_dump.py --device-config C --encrypt` reads an `authenticated` value; after the Bluetooth domain restarts, it reads it again | the LTK reply sending a key of the wrong bond: encryption fails |
@@ -3268,7 +3268,7 @@ an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
-service echoes through an app, once the board has a home for one
+service echoes through the echo package the development card carries
 ([Decisions](#decisions), 7); the phone pairs by typing the passkey the
 `pair` file shows, reboots the machine, and reads an `authenticated`
 value again; the console logs in from the phone; a `reset` written
@@ -3531,17 +3531,21 @@ list ([todo-performance.md](todo-performance.md)):
    checklist have a terminal app on the phone echo through an app on
    the Pi 4. Under decision 6 the echo is a package declaring `gatt
    nus`, and the Pi 4's development manifest's `apps` row offers it with
-   `services display net ble` and `gatt nus`. But that row has `max 1`,
-   and its card trusts no key and carries the kiosk alone, whatever its
-   kind ([design-packaging.md](design-packaging.md#the-apps-row)), so no
-   second package can reach the board. The choices: the board's
+   `services display net ble` and `gatt nus`. A card trusts no key
+   ([design-packaging.md](design-packaging.md#the-apps-row)), so no
+   package its build does not add can reach the board. The choices: the board's
    development card carries the echo as a second package of the image,
    enabled, with `max 2`, which the display pays for with one more
    pixel area of 8 MiB; or a configured domain in the Pi 4's development
    manifest runs the echo with a `ble` row of its own naming `nus`, as
    the QEMU suite does. The second package is chosen, since it is the
    path an app takes on every other machine and exercises the install
-   check on the board; the published card keeps the kiosk alone.
+   check on the board; the published card keeps the kiosk alone. Both
+   cards are built from the one manifest, so the published card's row
+   offers `ble` and `gatt nus` too: no package it carries declares
+   `gatt`, so no session there holds `ble`, and it serves `nus` as it
+   serves any service no app handles, answering reads from the declared
+   values and refusing writes.
 
 8. **Decided: the phone console runs in a configured domain of its own,
    `btconsole`, holding a `ble` grant whose `services` names `console`,

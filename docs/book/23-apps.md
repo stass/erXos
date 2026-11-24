@@ -162,8 +162,8 @@ apps
 ```
 
 It says that all apps together share 131 MiB, that one boot holds at
-most two apps, and that an app may ask for the display, the network
-and Bluetooth, and handle the serial service `nus` alone, nothing else ([design-packaging.md, The `apps` row](../design-packaging.md#the-apps-row)).
+most two apps, and that an app may ask for the display and the network
+and handle the Bluetooth serial service `nus`, nothing else ([design-packaging.md, The `apps` row](../design-packaging.md#the-apps-row)).
 QEMU `virt`'s development manifest has a row with four apps and the
 display and network services (`config/manifest/qemu-virt-development.txt`).
 A board that lets apps handle Bluetooth services adds `ble` to `services`

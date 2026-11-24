@@ -85,13 +85,13 @@ limits display
 # and 40 KiB; the PCIe domain, 25 MiB and outer 1 MiB; the USB domain, 32 MiB and outer
 # 1 MiB; and the Bluetooth domain, 32 MiB and outer 1 MiB: 319 MiB and 40 KiB in all.
 # The system baseline is QEMU virt's 46 MiB.
-# root_memory, 497 MiB and 36 KiB before ntpd's principal adds its own (its comment),
+# root_memory, 505 MiB and 40 KiB before ntpd's principal adds its own (its comment),
 # admits the baseline, the principal's 319 MiB and 40 KiB, the apps row's 131 MiB, the SD
 # controller's 1 MiB of DMA memory, GENET's 1 MiB of device memory and the VL805's 1 MiB
 # of contiguous memory with 6 MiB no one is promised, and lies well below what the
 # smallest Pi 4 the record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
 principal system
-  memory 326144000
+  memory 334536704
   grant @share.users
   domains 8
   names 64
@@ -103,7 +103,8 @@ principal system
 # (docs/design-bluetooth.md, decision 7), so the display domain's outer budget pays for
 # two pixel areas; the display, net and ble, which the build grants the app template; and
 # gatt nus, the one GATT service an app may handle, the echo's. The published card carries
-# the dashboard alone, which names no gatt, so no session holds ble there. Each app is a
+# the dashboard alone, which names no gatt, so no session holds ble there, and it serves
+# nus as it serves any service no app handles (docs/design-bluetooth.md, decision 7). Each app is a
 # principal with a domains quota of one, so max_domains is the system principal's eight,
 # ntpd's and the two apps. max_connections, 28 with ntpd's session's, holds the 15 of the
 # network domain's comment, each app's session's five: its system connection, packages,
@@ -120,7 +121,7 @@ machine
   console "/soc/serial@7e215040"
   hostlink "/soc/serial@7e201600"
   platform "raspi4b"
-  root_memory 559976448
+  root_memory 568369152
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
