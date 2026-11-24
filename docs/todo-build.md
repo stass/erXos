@@ -97,10 +97,12 @@ rejected, not failed with the windows before its end; the detail has two shapes 
 places, guest and host; the task reads the root's slice from `ERX_FIASCO_ROOT_SLICE_US`, not from what its root
 configured; and `NativeBench` builds native_task's program beside `NativeTask`'s own builder.
 * [Medium] benchmarks, `nullcall` ([design-bench.md](design-bench.md#3-nullcall-the-decoder-refusal-round-trip)):
-  FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
+  the `kernel` cell as the act L4Re's `syscallbench` times, its thread-control operation read from
+  Fiasco's source; then FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,
   touch, protect, decommit, release, map and child operations: the native landing cells time one page of the first
-  six from the benchmark's test task; the 64- and 512-page sizes, `map` and `mem-child` are not built.
+  six from the benchmark's test task; the 64- and 512-page sizes, `map`, `mem-child` and `commit-touch` are not
+  built.
 * [Medium] benchmarks, the landing matrix's deterministic boot ([design-bench.md](design-bench.md#the-gates)): not
   built. That the native guests boot in deterministic mode as the production image does is unverified; until the
   native bench image does, `tools/erx check-qemu --suite bench` runs no deterministic cell, rather than expecting one
@@ -146,7 +148,7 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   from the first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
-  other systems' logs and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
+  other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
   landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
   side's first compile; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
   the reader's closed clock set has no name for its `CLOCK_MONOTONIC` fallback, which the design says is
@@ -159,22 +161,37 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   L4Re's pins, its build and its importer come from the L4Re guest package below, built for the board's platform.
 * [Medium] benchmarks, the comparison under HVF, erXos's side
   ([design-bench.md](design-bench.md#other-systems-in-qemu-under-hvf)): the system in every guest environment's name
-  (`BenchRecord::Environment`, `NativeBench::Landing#environment` passing `erxos`), the refusal of a comparison across
-  systems, `tools/erx bench NAME --systems LIST` booting each system's guest in rounds through `QemuPlan.argv` and
-  writing one run per boot, and the side-by-side table across environments that differ only in their system. Tests:
-  the system's environment case of the verification table. Lands first; the two guest packages plug a boot step each
-  into its session.
+  (`BenchRecord::Environment`, `NativeBench::Landing#environment` passing `erxos`), with every system-specific fact in
+  `subject`; the `monotonic` and `cycles` clocks and the `mean` summary form, which no comparison accepts;
+  `tools/erx bench NAME --systems LIST` booting each system's guest in rounds of turning order, in one-CPU and
+  four-CPU forms, through `QemuPlan.argv` and writing one run per boot; the C and Erlang side-by-side tables, which
+  convert no `cycles`. Tests: the
+  system's environment, a `mean` through the record and `cycles` stays cycles cases of the verification table. Lands
+  first; the guest packages plug a boot step each into its session.
 * [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)): Alpine 3.24.4's
-  `vmlinuz-virt`, its configuration and `musl-dev` pinned in `deps.lock`; the static `aarch64-linux-musl` build of
-  `bench/peer/erx_peer_bench.c` with erXos's clang and `ld.lld`, and its process-1 power-off; the Ruby `newc` writer
-  of the initramfs; the boot step, after a probe of whether QEMU loads the zboot kernel directly (if not, the
-  payload's inflation checked against the pin's decoded hash). Needs `erx_peer_bench` landed. Tests: Linux's guest
-  and, if built, the zboot payload, on one-CPU cells.
-* [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): first a clean-room
-  facts record of ipcbench's output, counters and build options, written by a separate agent that alone reads its
-  source; then L4Re's repositories, upstream Fiasco `50bbe8a9` and ipcbench `14868232` pinned in `deps.lock` at the
-  manifest's paths; the out-of-tree build with L4Re's own `gmake`, erXos's clang and `config/fiasco/kernel.defconfig`;
-  the boot step; and the importer shared with the board. Tests: L4Re's importer and L4Re's guest.
+  `vmlinuz-virt`, its configuration and `musl-dev` pinned in `deps.lock` by versioned URL and SHA-256, fetched
+  before the build, which runs offline; the static `aarch64-linux-musl` build of `bench/peer/erx_peer_bench.c` with
+  erXos's clang and `ld.lld`, its C table's counterparts (pipe round trips, the `/proc` wake handshake, the `vm`
+  calls with erXos's untimed checks), `/proc` mounted and its process-1 power-off; the Ruby `newc` writer of the
+  initramfs; the boot step, after a probe of whether QEMU loads the zboot kernel directly (if not, the payload's
+  inflation checked against the pin's decoded hash). Needs `erx_peer_bench` landed. Tests: Linux's guest and, if
+  built, the zboot payload, on one-CPU cells, each run written and read back through `BenchRecord`.
+* [Medium] benchmarks, Linux's Erlang guest under HVF ([design-bench.md](design-bench.md#linuxs-erlang-guest)): a
+  guest export of the Linux oracle (the installed stock OTP 29.1.2 tree and the libraries its programs load, listed
+  in the workload phase and copied by the exporter, [design-host-oracle.md](design-host-oracle.md#native-workspace-and-artifact-export));
+  the initramfs carrying it with `/etc/hosts`; `erx_peer_bench`'s launcher role (loopback up, `/proc` and `/sys`,
+  `epmd -daemon`, two nodes started through `erlexec`, power-off); `bench/erx_xdomain_bench.erl`'s echo target
+  chosen by the boot, compiled by the host's stock `erlc`; the `ERX_ORACLE` identity check. Needs the xdomain bench
+  module and the Linux guest's boot step landed. Tests: Linux's Erlang guest, with its record read back.
+* [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): L4Re's repositories
+  at the manifest's paths, resolved to the exact closure the first build names, upstream Fiasco `50bbe8a9` and
+  ipcbench `14868232`, each a `git` source in `deps.lock` with its commit; the build in the oracle's offline
+  container with L4Re's own make, the image's gcc and `config/fiasco/kernel.defconfig`, `bootstrap.elf` and
+  `globalconfig.out` exported, the build record (pins, hashes, resolved configuration, toolchain, boot arguments)
+  written beside them; the one-CPU boot step with its `Benchmarks done.` checkpoint; and the importer, written from
+  the facts record alone (`~/erxos-scratch/reports/ipcbench-facts.md`), shared with the board, and its fuzz target.
+  Waits on the open decision on ipcbench's unmarked files. Tests: L4Re's importer, the ipcbench line reader and
+  L4Re's guest.
 
 ## Stopgap replacements
 

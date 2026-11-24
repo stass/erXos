@@ -783,10 +783,18 @@ development host, L4Re and Linux boot in the same QEMU machine as
 erXos's bench images, with the same processors and memory, each in turn
 over several rounds of one session. The system is part of where a run
 happened, so no comparison can turn one system's number into a verdict
-on another's; the systems meet only in a side-by-side table. Linux is a
+on another's; the systems meet only in side-by-side tables, one for each
+layer. The C table sets the kernels' own paths beside each other: a
+system call, a round trip between two threads and between two address
+spaces, a wake, memory calls and a shared CPU. There Linux is a
 distribution's stock kernel with erXos's small benchmark program as its
 only user program, and L4Re is built by its own build system from the
-revision erXos's kernel came from, running its own IPC benchmark.
+revision erXos's kernel came from, running its own IPC benchmark, whose
+cycle counts stay cycles and are never converted. The Erlang table sets
+erXos's message between two domains beside stock OTP on the same Linux:
+two nodes, two operating-system processes, exchanging the same 64-byte
+message over Erlang distribution, and two processes within one node
+beside erXos's exchange within one domain.
 
 The same Raspberry Pi 4 also boots stock L4Re, FreeBSD and Linux, with
 the same firmware settings, and each runs the counterpart of an
