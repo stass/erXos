@@ -32,6 +32,7 @@
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/boot_args.h"
 #include "liberx/backend/fiasco/console.h"
+#include "liberx/backend/fiasco/lock.h"
 #include "liberx/backend/fiasco/log.h"
 #include "liberx/backend/fiasco/root_layout.h"
 #include "liberx/backend/fiasco/root_open.h"
@@ -64,6 +65,12 @@ static char boot_name[NAME_DIGITS + 1];
 static _Atomic uint32_t bench_ending;
 /* When the deadline thread ends the boot, on erx_fiasco_clock_ns's clock. */
 static uint64_t deadline_ns;
+/*
+ * Every line of the root goes out whole under this lock, so no line lands inside another,
+ * a BENCH or CLOCK line and its naming line go out together, and the end's line, whose
+ * writer keeps the lock, is the last.
+ */
+static erx_fiasco_lock_t console_lock;
 static erx_bench_token_t token;
 static erx_bench_round_t rounds[ROUNDS];
 static erx_bench_reads_t pairs[READ_PAIRS];
@@ -82,18 +89,22 @@ length_of(const char *text)
 void
 bench_say(const char *text)
 {
+	erx_fiasco_lock(&console_lock);
 	erx_fiasco_console_write(text, length_of(text));
+	erx_fiasco_unlock(&console_lock);
 }
 
 /*
  * The one way a boot ends: the first caller prints its last line, text, and ends the
- * machine with a reset; any later caller sleeps, so the console never shows two ends.
+ * machine with a reset, keeping the console's lock, so no line follows; any later caller
+ * sleeps, so the console never shows two ends.
  */
 static _Noreturn void
 end_with(const char *text, size_t length)
 {
 	if (atomic_exchange_explicit(&bench_ending, 1, memory_order_acq_rel) != 0)
 		erx_fiasco_sleep_forever();
+	erx_fiasco_lock(&console_lock);
 	erx_fiasco_console_write(text, length);
 	erx_fiasco_end(ERX_FIASCO_END_ASKED_RESET, NULL);
 }
@@ -104,11 +115,15 @@ bench_fail(const char *text)
 	end_with(text, length_of(text));
 }
 
-/* "erx: bench: boot NAME", then " form" when form is given, as one console write. */
+#define NAMING_HEAD	"erx: bench: boot "
+/* The longest naming line: its head, the name, " deadline" and the line end. */
+#define NAMING_BYTES	(sizeof(NAMING_HEAD) + NAME_DIGITS + sizeof(" deadline"))
+
+/* NAMING_HEAD NAME, then " form" for form "done" or "deadline", and the line end. */
 static size_t
 naming_line(char *out, const char *form)
 {
-	static const char head[] = "erx: bench: boot ";
+	static const char head[] = NAMING_HEAD;
 	size_t length = 0;
 
 	for (size_t at = 0; at < sizeof(head) - 1; at++)
@@ -124,15 +139,21 @@ naming_line(char *out, const char *form)
 	return (length);
 }
 
-/* The longest naming line: its head, the name, " deadline" and the line end. */
-#define NAMING_BYTES	(sizeof("erx: bench: boot ") + NAME_DIGITS + sizeof(" deadline"))
-
+/* The naming line, written by a holder of console_lock. */
 static void
-say_name(void)
+write_name(void)
 {
 	char text[NAMING_BYTES];
 
 	erx_fiasco_console_write(text, naming_line(text, NULL));
+}
+
+static void
+say_name(void)
+{
+	erx_fiasco_lock(&console_lock);
+	write_name();
+	erx_fiasco_unlock(&console_lock);
 }
 
 /* The boot's end with its naming line's form, done or deadline, as its last line. */
@@ -245,8 +266,10 @@ print_line(size_t length)
 	if (length == 0 || length >= sizeof(line) - 1)
 		bench_fail("erx: bench: a line did not fit FAILED\n");
 	line[length] = '\n';
+	erx_fiasco_lock(&console_lock);
 	erx_fiasco_console_write(line, length + 1);
-	say_name();
+	write_name();
+	erx_fiasco_unlock(&console_lock);
 }
 
 void

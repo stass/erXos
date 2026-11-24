@@ -120,10 +120,20 @@ class NativeBenchTest < Minitest::Test
   def test_bench_done_takes_the_two_naming_end_forms
     done = Erx::NativeBench.checkpoints(deadline_seconds: 1).find { |point| point.fetch(:name) == 'bench-done' }.fetch(:pattern)
     name = Erx::NativeBench::QEMU_BOOT_NAME
-    assert_match done, "erx: bench: boot #{name} done"
-    assert_match done, "erx: bench: boot #{name} deadline\r"
-    ["erx: bench: boot #{name}", 'erx: bench: done', "erx: bench: boot #{name[1..]} done", "erx: bench: boot #{name} donee"]
-      .each { |line| refute_match done, line }
+    # Each line as Qemu's transcript gives it to a checkpoint, with its line end.
+    assert_match done, "erx: bench: boot #{name} done\n"
+    assert_match done, "erx: bench: boot #{name} deadline\r\n"
+    ["erx: bench: boot #{name}\n", "erx: bench: done\n", "erx: bench: boot #{name[1..]} done\n",
+     "erx: bench: boot #{name} donee\n", "x erx: bench: boot #{name} done\n"].each { |line| refute_match done, line }
+  end
+
+  # A seeded boot's cells are judged as the landing boot's are: those a boot the guest
+  # ended at its deadline did not report are timed_out, not not_run.
+  def test_a_runs_unreported_cells_are_timed_out_only_when_the_guests_deadline_ended_it
+    asked = Erx::NativeBench.asked(Erx::BenchSuite.benchmark('nullcall'), cpus: 4)
+    ended = ->(timed_out) { Erx::NativeBench.cells({ lines: [], timed_out: timed_out }, asked).map(&:status).uniq }
+    assert_equal ['timed_out'], ended.call("the guest's deadline ended the boot")
+    assert_equal ['not_run'], ended.call(nil)
   end
 
   # Under QEMU every boot is named with thirty-two zeros on its command line, and a boot

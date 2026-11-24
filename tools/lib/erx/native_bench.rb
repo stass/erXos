@@ -109,8 +109,9 @@ module Erx
     # (docs/design-bench.md, "The boot name"), on its command line.
     QEMU_BOOT_NAME = '0' * 32
     QEMU_COMMAND_LINE = "erx.arg=#{QEMU_BOOT_NAME}".freeze
-    # The root's naming line at its end, done or deadline.
-    END_LINE = /^erx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
+    # The root's naming line at its end, done or deadline, as one line of the serial log,
+    # with or without its line end: QEMU's bench-done checkpoint and timed_out's one pattern.
+    END_LINE = /\Aerx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
     FAILED_LINE = /^erx: bench: .* FAILED/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
@@ -121,16 +122,19 @@ module Erx
     def checkpoints(deadline_seconds:)
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
        { name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
-       { name: 'bench-done', pattern: /\Aerx: bench: boot [0-9a-f]{32} (?:done|deadline)\r*\z/n,
-         seconds: deadline_seconds + DEADLINE_MARGIN_SECONDS }].freeze
+       { name: 'bench-done', pattern: END_LINE, seconds: deadline_seconds + DEADLINE_MARGIN_SECONDS }].freeze
     end
 
     # Why the boot of serial timed out: the guest ended it at its deadline; nil when it
     # ended done.
     def timed_out(serial)
-      ended = END_LINE.match(serial.b)
+      ended = serial.b.each_line.lazy.filter_map { |line| END_LINE.match(line) }.first
       "the guest's deadline ended the boot" if ended && ended[:form] == 'deadline'
     end
+
+    # The cells a run of the image (Run#call) reports for asked: those of a boot the guest
+    # ended at its deadline that it did not report are timed_out.
+    def cells(run, asked) = BenchMeasurement.boot(run.fetch(:lines), asked, timed_out: !run[:timed_out].nil?).fetch(:cells)
 
     # The BENCH and CLOCK lines of a serial log, each without its line end. They are the
     # guest's, untrusted: BenchMeasurement.boot is their one judge.
@@ -264,7 +268,7 @@ module Erx
         accel = boot.kind.delete_prefix('qemu-')
         missed = NativeBench.guest(benchmark.name).seeds.reject do |seed|
           seeded = @run.call(benchmark.name, accel: accel, cpus: boot.cpus, seed: seed)
-          seed.caught.call(BenchMeasurement.boot(seeded.fetch(:lines), asked).fetch(:cells))
+          seed.caught.call(NativeBench.cells(seeded, asked))
         end
         recorded.merge(seeds_missed: missed.map(&:name))
       end
