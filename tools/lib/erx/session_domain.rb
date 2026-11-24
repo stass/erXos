@@ -46,11 +46,11 @@ module Erx
   # halt(3) ends the session's domain: the console writes `session root_1 ended:
   # {halt,3}` and logs root in again, and the new session, root_1 again in a new domain,
   # takes the line. The menu lists it, refuses "start a session" past the principal's
-  # domain quota, which the storage, network, web, display, PCIe and USB domains and the session fill, and gives the line to
+  # domain quota, which the manifest's configured domains and the session fill, and gives the line to
   # the system shell, whose `ps` lists the domain service and whose `cat` reads
   # /data/across through the system domain's own `data` facet. Its Erlang shell answers
   # node() as system@erxos, shows root_1's init process with its runtime attributes, which
-  # the session's agent answers to the system domain's query worker (SESSION_PROCESS), and
+  # the session's agent answers to the system domain's query worker (session_process), and
   # ends the storage domain with exit(DomainPid, kill); once
   # the domain's restart has installed a new `data` grant, a new read of /data/across
   # answers the line the session wrote (RESTART_STORAGE). exit(DomainPid, kill) of the
@@ -66,21 +66,21 @@ module Erx
     ESC = ProductionImage::Run::ESC
     MENU_LEFT = ProductionImage::Run::MENU_LEFT
     ERL = ProductionImage::Run::ERL_LINE
-    # The domain ids root's sessions take. The development manifest configures six domains,
-    # display, network, pcie, storage, usb and web, and the console's login starts root's
-    # first session; those seven starts take the ids above the system domain's, 5 to 11, so
-    # root's next session takes 12 (NEXT_SESSION), and each later start of a session or of
-    # a configured domain takes the next, a refused one too, since admission spends the id.
-    #
-    # Of the seven, the five configured rows holding no pci device start first, at 5 to 9.
-    # The boot holds usb, whose xHCI is a pci device, until the device service has answered
-    # the PCIe domain's report (docs/design-pcie.md, "The hold at boot"), and the domain
-    # service holds the login's session until the system release's boot has ended
-    # (erx_domain_srv), so the two take 10 and 11 in whichever order their holds end:
-    # root's first session is one of FIRST_SESSIONS.
-    BOOT_STARTS = 7
-    FIRST_SESSIONS = [10, 11].freeze
-    NEXT_SESSION = MediumBoot::CONFIGURED_ID + BOOT_STARTS
+    # The domain ids root's sessions take, read from the manifest the cell boots (Ids.of).
+    # The boot starts each configured domain row and the session the console's login starts
+    # for root, each taking the next id from CONFIGURED_ID on, in an order the boot's holds
+    # decide: the domain service holds the login's session until the system release's boot
+    # has ended (erx_domain_srv), and the rows holding a pci device until the device service
+    # has answered the PCIe domain's report (docs/design-pcie.md, "The hold at boot"), so
+    # root's first session takes one of the boot's ids (first_sessions). Root's next session
+    # takes the id after them (next_session), and each later start of a session or of a
+    # configured domain takes the next, a refused one too, since admission spends the id.
+    Ids = Data.define(:boot_starts) do
+      def self.of(manifest_source) = new(boot_starts: Manifest::Frontend.read(manifest_source).records.fetch('domain', []).size + 1)
+
+      def first_sessions = (MediumBoot::CONFIGURED_ID...next_session)
+      def next_session = MediumBoot::CONFIGURED_ID + boot_starts
+    end
     # A domain id no domain takes in a boot of this cell, which starts far fewer: a path
     # that names it answers `scope` at every scope, root's `all` among them, as a domain
     # outside the scope does (docs/design-live.md, "The /proc tree").
@@ -166,8 +166,8 @@ module Erx
     # installed a `data` grant other than the one the registry held before; a read before
     # that reaches the dead grant and answers eio.
     # Typed at the system domain's Erlang shell: the record of root_1's init process, the
-    # first process of every runtime, in the session's second domain (relogin-listed).
-    SESSION_PROCESS = "erx:i([processes, {pid, #{NEXT_SESSION}, 0, 0}]).\r".freeze
+    # first process of every runtime, in the session domain whose id is id.
+    def self.session_process(id) = "erx:i([processes, {pid, #{id}, 0, 0}]).\r"
     # erx:i/1's reductions line, whose value only the session's runtime reports; a
     # missed or refused answer shows a status in its place.
     SESSION_REDUCTIONS = /\A +reductions +runtime +[0-9]+\r*\n\z/n
@@ -199,7 +199,8 @@ module Erx
     TOP = "top -b\r"
     TOP_FIRST = /\Arun queue: [0-9]+;  up [0-9]+\+[0-9]{2}:[0-9]{2}:[0-9]{2}    /n
     TOP_MEMORY = /\AMem \(root pool\): [0-9]+[KMG] Total, [0-9]+[KMG] Free\r*\n\z/n
-    TOP_BUDGET = /\ADomain (?:#{FIRST_SESSIONS.join('|')}) budget(?: \([^)]+\)| \[[a-z ]+\])?: /n
+    # Its line for the session's domain, one of ids.first_sessions.
+    def self.top_budget(ids) = /\ADomain (?:#{ids.first_sessions.to_a.join('|')}) budget(?: \([^)]+\)| \[[a-z ]+\])?: /n
     # `cat /proc/status` at root_1's command shell: the machine's record through the
     # session's /proc tree, its uptime line first.
     PROC_STATUS = "cat /proc/status\r"
@@ -366,10 +367,12 @@ module Erx
     end
 
     # The production checkpoints to the system's command shell, then the cell, on an image
-    # that began at boot_time on the host's clock. points must end at the command shell.
-    def root_session_checkpoints(points, boot_time:)
+    # that began at boot_time on the host's clock, from manifest_source, the manifest the
+    # image boots. points must end at the command shell.
+    def root_session_checkpoints(points, boot_time:, manifest_source:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
+      ids = Ids.of(manifest_source)
       shell = ProductionImage::Run::ERLANG_SHELL
       [*points,
        session_shell('root_1-shell', "ls /data && echo data-listed\r"),
@@ -385,7 +388,7 @@ module Erx
        { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: TOP }.freeze,
        { name: 'session-top', pattern: TOP_FIRST, seconds: 60 }.freeze,
        { name: 'session-top-memory', pattern: TOP_MEMORY, seconds: 30 }.freeze,
-       { name: 'session-top-budget', pattern: TOP_BUDGET, seconds: 30, type: PROC_STATUS }.freeze,
+       { name: 'session-top-budget', pattern: top_budget(ids), seconds: 30, type: PROC_STATUS }.freeze,
        { name: 'session-proc-status', pattern: PROC_UPTIME, seconds: 60, type: START_LISTED }.freeze,
        { name: 'session-start-listed', pattern: line('start-listed'), seconds: 60, type: START_CTL_REFUSED }.freeze,
        { name: 'session-start-ctl-refused', pattern: line('start-ctl-refused-invalid argument'), seconds: 60, type: SERVICE_E }.freeze,
@@ -411,7 +414,7 @@ module Erx
        { name: 'root_1-ended', pattern: line('session root_1 ended: {halt,3}'), seconds: 60 }.freeze,
        session_shell('relogin-shell', CTRL_G),
        { name: 'relogin-menu', pattern: CTRL_G_MENU, seconds: 30 }.freeze,
-       { name: 'relogin-listed', pattern: menu_entry(1, 'root_1', NEXT_SESSION), seconds: 30 }.freeze,
+       { name: 'relogin-listed', pattern: menu_entry(1, 'root_1', ids.next_session), seconds: 30 }.freeze,
        { name: 'start-entry', pattern: menu_line('n', 'start a session'), seconds: 30, type: 'n' }.freeze,
        { name: 'start-refused', pattern: /\Aerx_console: cannot start a session: /n, seconds: 60, type: 's' }.freeze,
        { name: 'system-shell', pattern: MENU_LEFT, seconds: 30, type: COUNT_SERVICE }.freeze,
@@ -419,7 +422,7 @@ module Erx
        { name: 'system-data', pattern: line('across'), seconds: 60, type: ERL }.freeze,
        shell.merge(name: 'system-erlang-shell', type: "node().\r").freeze,
        { name: 'system-node', pattern: answer('system@erxos'), seconds: 60, type: WALL_SET }.freeze,
-       { name: 'system-wall-set', pattern: answer('true'), seconds: 60, type: SESSION_PROCESS }.freeze,
+       { name: 'system-wall-set', pattern: answer('true'), seconds: 60, type: session_process(ids.next_session) }.freeze,
        { name: 'session-process', pattern: SESSION_REDUCTIONS, seconds: 60,
          type: RESTART_STORAGE + with_data(READ_ACROSS, guard: 'Grant =/= Old') }.freeze,
        { name: 'storage-regranted', pattern: answer(ACROSS_READ), seconds: 180, type: KILL_SESSION }.freeze,
@@ -428,7 +431,7 @@ module Erx
        { name: 'killed-relogin-menu', pattern: CTRL_G_MENU, seconds: 30 }.freeze,
        # After the relogin's id, the refused start (start-refused) and the storage domain's
        # restart (storage-regranted) each spend one, so the relogin after the kill is the third.
-       { name: 'killed-relogin-listed', pattern: menu_entry(1, 'root_1', NEXT_SESSION + 3), seconds: 30,
+       { name: 'killed-relogin-listed', pattern: menu_entry(1, 'root_1', ids.next_session + 3), seconds: 30,
          type: ESC }.freeze,
        { name: 'killed-relogin-left', pattern: MENU_LEFT, seconds: 30, type: ERL }.freeze,
        shell.merge(name: 'relogin-erlang-shell', type: with_data(READ_ACROSS)).freeze,
@@ -497,7 +500,7 @@ module Erx
                      .run(platform: @machine.platform, accel: accel, cpus: count, remote: remote, image: built.single,
                           memory_mib: @machine.memory_mib,
                           disks: [QemuPlan::Disk.new(path: medium)],
-                          checkpoints: SessionDomain.root_session_checkpoints(points, boot_time: boot_time),
+                          checkpoints: SessionDomain.root_session_checkpoints(points, boot_time: boot_time, manifest_source: @manifest),
                           **web_check(accel, count, built, directory: File.join(directory, 'boot')))
         SessionDomain.burst_whole!(File.binread(report.fetch('serial_log')))
       end

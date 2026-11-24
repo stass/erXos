@@ -103,7 +103,7 @@ goes to the document of the subsystem its component pointer names.
 * [Website and book](docs/todo-site.md#bugs-by-subsystem): the website, the book and the user guide.
   21 items (5 Medium, 16 Low).
 * [Build, tooling and tests](docs/todo-build.md#bugs-by-subsystem): the build, the host tools, the test harnesses and the gates.
-  126 items (60 Medium, 66 Low).
+  127 items (60 Medium, 67 Low).
 
 ## Security residuals
 

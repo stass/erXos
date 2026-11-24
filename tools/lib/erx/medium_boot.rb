@@ -106,7 +106,8 @@ module Erx
 
     # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
-    # configured domains take the first three in boot order, which is name order: erts,
+    # medium manifest's configured domains, the site manifest's (Platform#site_manifest_source)
+    # and the cell's erts row, take the first ids in boot order, which is name order: erts,
     # network, storage; the cell's two creates the library refuses the next two, and its
     # seven domains the seven after.
     SYSTEM_DOMAIN_ID = 4

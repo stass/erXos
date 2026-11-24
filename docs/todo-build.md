@@ -992,6 +992,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] `tools/lib/erx/medium_boot.rb` `Footprint`: `LoadOnly` is prepended to `ReleaseFiles` as a whole, so the configured
   storage and network domains of the footprint image boot with erx_blk and erx_net only loaded; check whether the storage domain
   fails at boot there (erx_storage needs erx_blk started) and whether the cell's figures assume it.
+* [Low] qemu suites, the medium manifest's domain ids (`tools/lib/erx/medium_boot.rb` `NETWORK_ID`, `STORAGE_ID`, and
+  the ids `device_give.rb`, `system_domain.rb` and `system_domain_regrant.rb` count from them): hand-kept from the
+  rows' name order (erts, network, storage), so a domain the site manifest keeps that sorts before storage moves them.
+  Derive them from the manifest each cell boots, as `SessionDomain::Ids` does.
 
 ## Security residuals
 

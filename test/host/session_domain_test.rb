@@ -10,6 +10,10 @@ require_relative '../../tools/lib/erx/session_domain'
 class SessionDomainTest < Minitest::Test
   Suite = Erx::SessionDomain
   MENU = "\e\\\e[0m\r\nerx_console: Ctrl-G menu\r\n  s  system shell\r\nEsc returns. \e\\\e[0m\r\n"
+  ROOT = File.expand_path('../..', __dir__)
+  # The manifest the session_domain cell boots, QEMU virt's development one.
+  DEVELOPMENT_SOURCE = Erx::Platform.development(ROOT).manifest_source(ROOT).freeze
+  SHELL_POINTS = [{ name: 'release-shell', pattern: /x/n, seconds: 30 }].freeze
 
   def lines(range) = range.map { |number| Suite.burst_line(number) }.join
 
@@ -45,6 +49,35 @@ class SessionDomainTest < Minitest::Test
 
   def test_a_point_list_that_does_not_end_at_the_shell_is_refused
     points = [{ name: 'image-identity', pattern: /y/n, seconds: 30 }]
-    assert_raises(Erx::Error) { Suite.root_session_checkpoints(points, boot_time: Time.at(0)) }
+    assert_raises(Erx::Error) { Suite.root_session_checkpoints(points, boot_time: Time.at(0), manifest_source: DEVELOPMENT_SOURCE) }
+  end
+
+  def pattern(points, name) = points.find { |point| point.fetch(:name) == name }.fetch(:pattern)
+
+  def menu_entry(id) = "  1* root_1 (domain #{id})\r\n"
+
+  # The boot starts each configured domain row of the cell's manifest and the login's
+  # session, each taking the next id above the system domain's, so the relogin takes the
+  # id after them, and the relogin after the kill the third after that; the rows are
+  # counted here from the text, not through the harness's manifest reader.
+  def assert_sessions_follow_the_boot(source)
+    after_boot = Erx::MediumBoot::CONFIGURED_ID + source.scan(/^domain /).size + 1
+    points = Suite.root_session_checkpoints(SHELL_POINTS, boot_time: Time.at(0), manifest_source: source)
+    assert_match pattern(points, 'relogin-listed'), menu_entry(after_boot)
+    refute_match pattern(points, 'relogin-listed'), menu_entry(after_boot - 1)
+    assert_match pattern(points, 'killed-relogin-listed'), menu_entry(after_boot + 3)
+    wall_set = points.find { |point| point.fetch(:name) == 'system-wall-set' }
+    assert_equal "erx:i([processes, {pid, #{after_boot}, 0, 0}]).\r", wall_set.fetch(:type)
+  end
+
+  def test_the_relogin_takes_the_id_after_the_boots_starts
+    assert_sessions_follow_the_boot(DEVELOPMENT_SOURCE)
+  end
+
+  # A domain row the manifest gains, a copy of the media row by another name, moves every
+  # session id after the boot by one.
+  def test_a_domain_row_more_moves_the_sessions_ids
+    row = DEVELOPMENT_SOURCE[/^domain media\n(?:  .*\n)+/].sub('domain media', 'domain extra')
+    assert_sessions_follow_the_boot(DEVELOPMENT_SOURCE + row)
   end
 end
