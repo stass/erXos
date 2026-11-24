@@ -3598,13 +3598,16 @@ domain gets its whole set of drives or none, never a part.
 
 * **The USB domain** reads its `usb` drives when its places start and
   starts one drive grant, `erx_blk_drive`, for each; a ready medium takes
-  the lowest free number among them, and the device service's
-  introduction of the media domain hands over the grant of each row's
-  number ([design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)).
+  the lowest free number among them, and each row's grant reaches the
+  media domain as the facet the domain service mints for that row
+  through the USB domain's drive mint, which refuses a number these
+  records do not name
+  ([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
   On a refusal its places log the reason and start no grant, so every
   ready medium shows `no drive`.
 * **A block device's driver**, `erx_blk`, reads its `block` drive. With
-  one, it serves its device's medium as that drive: one grant, one
+  one, it serves its device's medium as that drive: one grant, started
+  by the device process and occupied by it, the drive mint, one
   window of role `drive` over the whole medium under a medium
   reference, and no partition table read
   ([design-drives.md](design-drives.md#a-drive-and-its-medium)). With

@@ -32,6 +32,12 @@ Decisions every reader needs:
   media domain, the grant first ends and restarts the medium's block
   service, so an earlier mount's requests are gone before a new mount
   starts and no medium is mounted twice at once.
+* **The row is the grant.** A drive's window row is itself the grant
+  that carries the drive to the media domain: the domain service mints,
+  through the drive's serving domain, a facet whose one request asks for
+  the medium's window, as it mints any configured domain's service for
+  its grantee, and again for each new incarnation of either domain
+  ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
 * **One media domain holds every drive.** It holds no device, no window
   of the boot medium and nothing but the drives' grants, and it serves
   one files service, `media`, which sessions mount at `/media`.
@@ -160,6 +166,18 @@ the superblock by matching tags, not by offset (`lfs.c:4496-4520`).
 * Windows reach their holders as grants of the domain that serves them,
   again after that domain's restart
   ([design-system.md](design-system.md#devices), "Partition windows").
+* The grant records of a configured domain's services: the domain
+  service introduces the grantee to the server, asks the server's mint
+  for a facet bound to the grantee and installs it in the grantee's
+  registry, again for each new incarnation of either
+  ([design-system.md](design-system.md#facets-a-configured-domain-serves));
+  a facet admits only its grantee's requests of the operations its
+  interface lists ([design-domains.md](design-domains.md#facets)); a
+  pid reaches another domain only in a frame its own domain sends, which
+  exports it there with `send` alone
+  ([design-domains.md](design-domains.md#exports)); and a server started
+  with `{erx_serve, any}` takes another domain's calls
+  ([design-domains.md](design-domains.md#erlang-interface)).
 * `erx_fs`, its grants and its keepers, which answer a waiting read or
   write later and answer `eio` when they end, and its freezing
   checkpoint, which closes mutation admission at every grant
@@ -219,7 +237,9 @@ the superblock by matching tags, not by offset (`lfs.c:4496-4520`).
   only through its escape; a link on a drive is never followed.
 * **DR-R7. No new mechanism.** Drives reach their files through windows,
   grants, one files service, `erx_fs` keepers and its freeze, the
-  littlefs port and a `status` and `ctl` pair, each named here.
+  littlefs port and a `status` and `ctl` pair, each named here; a
+  drive's grant reaches the media domain through the grant records,
+  mints and facets every configured domain's service uses.
 * **DR-R8. Authority.** Which domains see the drives is the manifest's
   `media` facet rows' and nothing else's: a domain granted `media` sees
   every drive, with its row's rights, and a domain not granted it sees
@@ -322,7 +342,10 @@ updating or loading code from a drive.
 * **DR-R7.** [The mechanisms used](#what-it-builds-on) are all
   existing. The names this design adds are a window role, `drive`; the
   grant's restart of a block service asked twice, and the medium
-  reference that `erx_blk`'s device process checks for it, USB's rule; one service, `media`,
+  reference that `erx_blk`'s device process checks for it, USB's rule;
+  the interface `drive`, one grant of it for each drive window row, its
+  mint and its facet ([How the grant reaches the media
+  domain](#how-the-grant-reaches-the-media-domain)); one service, `media`,
   with its durability facet, and its mount point and `nofollow` mark in
   `erx_ns`'s table of facets; the decoder's source entry, `erx_erofs:mount_source/2`; the
   probe's table, `abi/formats/probe.txt`; two limits, `media_volumes_max`
@@ -330,7 +353,10 @@ updating or loading code from a drive.
   argument forms of the shell's `mount` and `umount`; and the modules of
   `erx_media`.
 * **DR-R8.** A session reaches `/media` only through a `media` facet
-  the manifest grants it, and the tree it serves holds every drive.
+  the manifest grants it, and the tree it serves holds every drive. The
+  media domain holds the drives because each drive's window row names
+  it, and no other row grants `drive`
+  ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
 * **DR-R9.** `mount` and `umount` are `erx_ns:bind/2,3` and
   `erx_ns:unmount/1` ([Placing a volume](#placing-a-volume)).
 
@@ -345,6 +371,9 @@ updating or loading code from a drive.
   process is the mount, and the medium's supervisor ends it.
 * A record of mounted media that must survive a restart: asking again
   restarts the medium's block service.
+* A handover of its own for drive grants, and a manifest row to declare
+  each: a drive window row is a grant, carried by the grant records,
+  mints and facets every configured domain's service uses.
 * A second-signature condition in a release: a release writes one
   format, so no other format it writes can be found.
 * A placement rule per format: every format runs in its volume's
@@ -393,11 +422,41 @@ whole capacity ([design-storage.md](design-storage.md#data-model)),
 writable unless the boot is a trial, when the write path refuses every
 write to it with `erofs` (U4). The drive's grant, `erx_blk_drive`,
 answers one request, `window`: `{ok, Window}`, the pid of the medium's
-window, or `{error, no_medium}` while the drive holds none. The grant
-lives as long as its serving domain, learns of each window as the
-medium's block service starts it, and forgets it when the window ends
-([design-usb.md](design-usb.md#concurrency)). Holding the grant is
-holding whatever medium the drive holds, whole.
+window, or `{error, no_medium}` while the drive holds none. It learns of
+each window as the medium's block service starts it, and forgets it when
+the window ends ([design-usb.md](design-usb.md#concurrency)). Holding
+the grant is holding whatever medium the drive holds, whole.
+
+**One occupant.** The grant is the drive's one record of which medium
+it holds, and it takes a medium only from a serve whose issuer is the
+drive's **occupant**, the one process that may land media in it. A
+drive without an occupant takes none. The two kinds of drive differ only
+in how long an occupation lasts:
+
+* **A USB drive is a place.** Its grant lives as long as the USB domain.
+  The function of a unit whose medium becomes ready occupies it with
+  `occupy/2`, which answers `taken` unless the drive has no occupant and
+  holds no medium, and holds it for that one medium: until the medium's
+  window ends, or until the function ends first.
+* **A block drive is its device.** Its grant is started by the device
+  process, linked to it, and occupied by it from its start for its whole
+  life, so the occupation does not lapse between one block service and
+  the next under a fresh reference, and every serve the grant takes is
+  that process's. The grant ends with the device process, as the
+  window does; the device's next process, after a restart through its
+  driver-control facet or the domain's own, starts a fresh grant, whose
+  first ask answers its first window. Nothing of the earlier mount
+  reaches the device by then: its window ended with the old process,
+  and the device is reset before the next one posts anything
+  ([design-system.md](design-system.md#drivers), "Resets").
+
+So a serve that arrives after its occupation ended, from a function that
+ended before its medium was served or from a medium that no longer holds
+the drive, finds no occupant of its issuer and is dropped, and the drive
+it named is free at once rather than held by a window that is ending.
+Who may send a serve at all is the serving domain's own processes: the
+grant serves its own domain alone
+([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
 
 The first ask for a medium's window answers the window its block
 service started. A later ask comes only from a drive process or a media
@@ -452,6 +511,141 @@ finish, and that drive process has ended, so the writer of `eject` gets
 `eio`; a finish whose flush was refused `gone` leaves its FAT volume
 `ro dirty` at the next mount.
 
+### How the grant reaches the media domain
+
+A drive's grant is a process of its **serving domain**, the configured
+domain whose units hold the drive's device: the USB domain, or a block
+drive's holder. The media domain is another domain, and a process
+reaches a process of another domain only through a name that domain's
+own runtime handed out: the system domain cannot hand the media domain
+a pid of the USB domain's, since a pid it encodes is not its own and
+exports nothing ([design-domains.md](design-domains.md#exports)). So
+the grant needs the route every service of a configured domain already
+takes to its grantees, and the construction is that **a drive window
+row is a grant**:
+
+```text
+ manifest:  window diskN, role drive, device D, holder media
+              |  the domain service reads it as a grant of `drive`
+              v
+ system domain: grant record {media, {drive, N}}: introduce -> mint -> install
+              |                        |
+              |   serving domain       v
+              |     drive mint ---> facet for the media domain, one operation: window
+              |                        |  forwards each ask
+              |                        v
+              |     drive grant, erx_blk_drive (occupied as above)
+              |                        |  {ok, Window}
+              v                        v
+ media domain: registry {drive, N} = facet pid;  Window, exported to it alone
+```
+
+1. **The row is the grant.** The domain service reads each window row
+   of the `drive` role as one grant
+   ([design-system.md](design-system.md#facets-a-configured-domain-serves),
+   "A drive window as a grant"): of the interface `drive`, from the
+   serving domain to the row's holder, the media domain, installed in
+   the media domain's registry under the name `{drive, N}`, N the row's
+   drive number, taken from the manifest and never from a report. No
+   service or facet row names it, as no row names a session's lines: the
+   window row already says which device serves the drive, and so which
+   domain, and who holds it, and a second row would be a copy that has
+   to agree with it. The grant's record moves through the states every
+   configured domain's grant does: the two domains are introduced, the
+   serving domain's mint is asked for a facet, the facet is installed,
+   and the record starts again for each new incarnation of either
+   domain, under the same deadline and with the same `failed` state.
+2. **The facet asks for the window and nothing else.** The serving
+   domain names one mint for `drive`, `erx_blk_drive:start_mint/1`,
+   before it reports ready. The USB domain's places start it as a child
+   after their drive grants; a block drive's holder starts it in
+   `erx_blk_sup` before the device process, so it outlives a restart of
+   the driver, since a mint's end ends its domain
+   ([design-system.md](design-system.md#facets-a-configured-domain-serves),
+   "Providers"). A mint request carries the drive's number in its limits, `drive => N`,
+   beside the interface's one operation, `window`, as the operations the
+   grant lists, and the `erx_facet` defaults for the rest, 4 KiB a
+   request and 16 in flight. The mint refuses a number its
+   domain's own drive records do not name
+   ([design-fiasco.md](design-fiasco.md#drive-records)), which leaves
+   the grant `failed`, and otherwise starts a facet, an `erx_facet` bound
+   to the media domain and ending with its connection, whose callback is
+   `erx_blk_drive_facet` and whose interface lists one operation,
+   `window`. The facet forwards each `window` to the drive's grant as it
+   finds it at that ask, among the places' grants for a USB drive, from
+   the device process for a block drive, and answers `{error,
+   no_medium}` itself while the drive has no grant, as while a block
+   driver is stopped. It never holds a grant's pid between asks, so a
+   block driver's restart, which starts a fresh grant, changes nothing
+   for the facet. Every other request the behaviour refuses before the
+   callback sees it ([design-domains.md](design-domains.md#facets)).
+3. **The window reaches the media domain in the answer.** The grant's
+   answer, `{ok, Window}`, travels to the media domain in the facet's
+   reply, a frame of the serving domain's, so the serving domain's
+   runtime exports the window's pid toward the media domain with `send`
+   alone, and toward no other domain. A drive's window is started with
+   `{erx_serve, any}` ([design-domains.md](design-domains.md#erlang-interface)),
+   so it takes the media domain's calls, each only when the names its
+   reply goes to are the caller's own domain's. It takes none from a
+   domain it was never handed to: the funnel drops a frame to it from
+   any domain it was not exported toward. The window checks no caller
+   beyond that, as a drive's grant checks none: holding the window is
+   holding its sectors.
+
+What follows from the construction:
+
+* **The holder reaches only `window`.** The media domain holds the
+  facet's pid and the windows' pids, never the grant's. The grant is a
+  server of its own domain alone, started without `{erx_serve, any}`, so
+  a call that reached it from another domain would arrive in its
+  envelope and be dropped as an unknown message. `occupy/2` and
+  `serve/3` are calls of the serving domain's own processes, and a
+  holder cannot keep media off its drives by serving its own pid.
+* **Restarts need nothing new.** A restarted media domain is a new
+  incarnation, for which the record mints a new facet. Its first ask
+  reaches the grant that answered the old incarnation, so the grant
+  ends the medium's block service first ([A drive and its
+  medium](#a-drive-and-its-medium)). The old incarnation's facet ended
+  with its connection, and so did the export of every window it was
+  handed, so nothing of the old mount can reach a window afterwards. A
+  restarted serving domain starts fresh grants and a fresh mint, its old
+  windows having ended with it; the record mints its facets again for
+  the media domain at its ready report. A restarted drive process in a
+  running media domain asks through the facet its domain already holds.
+* **The media domain's drives are its registry's.** The media domain
+  learns of no drive any other way: it gets no drive record
+  ([design-fiasco.md](design-fiasco.md#drive-records)), and the root of
+  `/media` lists the `{drive, N}` names its registry holds at the
+  request ([Paths](#paths)). A drive whose serving domain is restarting,
+  or whose grant failed, is not listed until its facet is installed
+  again.
+* **Authority is the manifest's.** The drives are held by their window
+  rows' holder, which the manifest check holds to the media domain, and
+  served by the domain the manifest places their devices in. Nothing
+  else grants `drive`: the manifest check refuses a service row and a
+  facet row of the interface, and the domain service's facet funnel,
+  which takes only the manifest's service names, refuses a spec that
+  names `{drive, N}`, so the media domain hands no drive on
+  ([design-domains.md](design-domains.md#facets), "The facet table").
+* **What it costs.** One connection carries every drive of one serving
+  domain: it takes one of the media domain's `connections`, one of the
+  serving domain's and one of the machine's `max_connections`, as a
+  facet row's grant does. A `window` crosses the facet once for each
+  walk that finds a new medium, so the facet adds nothing per sector; a
+  sector request crosses once, to the window, as a client's request to
+  a storage domain's window does
+  ([design-storage.md](design-storage.md#data-model), "The block
+  service"), and its reply carries at most the transport's
+  `max_sectors`, 32 KiB on USB and 4 KiB on virtio, which the serving
+  domain's and the media domain's `max_frame` must carry: the USB
+  and media domains' are 128 KiB on QEMU `virt`.
+
+A facet in front of the grant costs one process per drive and media
+domain incarnation and one local hop per ask. It buys what the grant
+would otherwise need code of its own for: the export toward the media
+domain alone, the end with the media domain's connection, the operation
+check, and the request limits, each the behaviour's.
+
 ### Manifest rows
 
 A drive is one window row: role `drive`, no partition, the drive's
@@ -476,10 +670,10 @@ the manifest gains later names it only once its list admits it.
   and its place in the
   boot order. It holds no unit and no other window, and no facet of any
   other service, the system domain's `start` and `machine` trees and
-  every storage domain's tree among them. Its drives' grants come from
-  its drive windows, through the device service's introduction
-  ([design-usb.md](design-usb.md#media-and-drives)), never through a
-  facet row.
+  every storage domain's tree among them. Its drives' grants are its
+  drive windows themselves, each a grant of the interface `drive`
+  ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)),
+  never a service or facet row.
 * **A block drive holder's list:** the one unit that places the drive's
   device and no other device; the one driver-control service it serves
   the system domain, as every unit's holder does
@@ -489,7 +683,9 @@ the manifest gains later names it only once its list admits it.
   which the manifest check admits exactly when the holder's units hold a
   PCIe function, so only when the drive's device is one, as an NVMe or a
   virtio-blk-pci drive's is; its facets of the system domain's `log`;
-  and its place in the boot order. It is a configured domain, and it
+  and its place in the boot order. It also serves its drive's grant,
+  which the drive's window row makes, and no row of its own. It is a
+  configured domain, and it
   holds no window and serves no other service, so the domain that
   drives the device parses nothing a medium holds and nothing else of
   the machine sits with the device
@@ -509,7 +705,9 @@ The manifest check refuses:
   drive record, and a row naming a block drive's holder that the
   holder's list does not admit;
 * more drives on one USB domain's controllers than `usb_drives_max`;
-* a `media` facet row with rights `rx`.
+* a `media` facet row with rights `rx`;
+* a `service` row or a `facet` row of the interface `drive`, whose only
+  grants are the drive windows.
 
 The media domain's row allows it no sub-spaces (`spaces none`), since
 FAT and EROFS run in its own processes; a row that serves littlefs
@@ -977,8 +1175,12 @@ session the manifest grants it mounts at `/media`:
   disk1/
 ```
 
-The root lists every drive the manifest names, whether or not it holds a
-medium, so `ls /media` shows the machine's drives. A walk of `diskN`
+The root lists every drive whose grant the media domain's registry holds
+at the request, `{drive, N}` as `diskN`, whether or not it holds a
+medium, so `ls /media` shows the machine's drives, but for one whose
+serving domain is restarting or whose grant failed
+([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
+A walk of `diskN`
 asks the drive process for the drive's medium; when the drive's grant
 answers a window, the drive process starts that medium's supervisor and
 waits for the reader to have read the table and started the volume
@@ -1166,10 +1368,22 @@ it whose failure the domain's restart intensity counts.
 
 * **The drive process** takes the tree's requests for its drive and its
   medium's events one at a time. It never reads a sector: it asks the
-  drive's grant for the window, monitors the window, starts and ends the
+  drive's grant for the window, through the facet it reads from the
+  registry at that ask, monitors the window, starts and ends the
   medium's supervisor, finishes its volumes at an eject, and holds each
   volume's pid and outcome. Two sessions walking a new medium at once
-  both wait for the one reading, and the second finds it done.
+  both wait for the one reading, and the second finds it done. Its ask
+  waits at most the grant's 60 s; any answer but `{ok, Window}`, the
+  facet's `{error, busy}` and `{error, failed}` among them, is no medium
+  at that walk.
+* **The drive's facet** forwards an ask and takes the next one at once,
+  so a held ask holds up no other; at most its limit in flight wait at
+  the grant, and an ask past them is refused `{error, busy}`. A grant
+  answers a held ask with the window it holds when the old window ends;
+  an ask whose caller gave up is answered to an alias that has ended,
+  which delivers nothing. The grant takes a serve and an ask in the order
+  they reach it, and a serve only from its occupant
+  ([A drive and its medium](#a-drive-and-its-medium), "One occupant").
 * **The medium's reader** reads the table, starts the volume processes
   and ends. Each volume process probes and mounts in its own time; a
   walk into a volume still mounting waits for it.
@@ -1212,13 +1426,21 @@ it whose failure the domain's restart intensity counts.
 | a FAT volume removed while written | its next mount: the dirty flag | nothing | that volume read-only, `ro dirty`, until repaired on another machine |
 | the drive process ends | `erx_media_sup` | that drive's medium mounts | `eio` on its open files; the next walk mounts the medium afresh, its block service restarted first |
 | the media domain ends | the domain service | every drive's mounts | `/media` answers `eio` until the restarted domain's re-grant; open files keep answering `eio`; each medium mounts afresh at its next walk |
-| the serving domain ends (the USB domain, a block device's driver domain) | the drive grant's end | that domain's drives' media | as a removal; the restarted domain's drive grants reach the media domain as every window's grant reaches its holder, with fresh windows |
+| the serving domain ends (the USB domain, a block device's driver domain) | the windows' end, seen as `noconnection` | that domain's drives' media, its facets with its connection | as a removal, and its drives leave the `/media` listing; the restarted domain's ready report has its drives' facets minted again, and they return, with fresh windows |
+| a block drive's driver stopped or restarted through its driver-control facet | the window's end, with the device process | that drive's medium mounts, and its grant | `medium none` while it is stopped, the facet answering `no_medium`; after its start the next walk mounts the medium afresh from the fresh grant's first window |
+| a drive's grant fails: the mint refuses it, or the introduction, mint or installation passes its deadline | the domain service's grant record, which logs it | nothing of a medium | the drive is not listed at `/media` until either domain's next incarnation makes the record afresh |
 
 ## Refusals and error results
 
 | Call or input | Answer | When |
 | --- | --- | --- |
 | a drive grant's `window` | `{error, no_medium}` | the drive holds no ready medium |
+| the drive's facet's `window` | `{error, no_medium}`; `{error, busy}`; `{error, failed}` | the drive has no grant now, a block driver being stopped; its limit in flight is reached; the grant ended before it answered |
+| any other request to the drive's facet | `{error, badarg}`, or dropped unanswered | it names no operation of `drive`, before the callback sees it; it is no call of the grantee's ([design-domains.md](design-domains.md#facets)) |
+| a mint request for `drive` | refused, the grant `failed` | it names a drive the serving domain's drive records do not name |
+| a ready report that provides `drive` | refused, logged and counted | no drive window lies on the reporting domain's devices |
+| a create spec that names `{drive, N}` | `{error, {bad_spec, facets}}` | always: `drive` is no manifest service's name |
+| a `serve/3` to a drive grant | dropped, its window's monitor forgotten | its issuer is not the drive's occupant, or the drive has none |
 | `erx_media_table:read/2` | `{refused, Finding}`: `gpt header`, `gpt array`, `gpt metadata`, `past the end`, `overlap`, `backwards`, `before the first usable sector` | the scheme's checks; each finding names the copy or the entries |
 | `erx_media_table:place/3` | `{error, erange}` | a request that reaches past its volume |
 | a littlefs port's program or erase | an error answer | the volume is read-only or finished |
@@ -1252,7 +1474,11 @@ neither an Erlang defect in a parser nor littlefs's port reaches a
 device, the data partition, the vault or the slots. Erlang parsers fail
 processes, not memory, and each runs under its own heap bound; volumes
 that together exhaust the media domain's memory end the media domain,
-which its restart recovers ([Time and memory](#time-and-memory)).
+which its restart recovers ([Time and memory](#time-and-memory)). The
+media domain reaches a serving domain only through each drive's facet,
+whose one operation is `window`, and the windows it was handed, which
+hold a medium's sectors and nothing else of that domain
+([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).
 
 Three things lie outside what this design can confine, and qualify every
 statement above:
@@ -1305,6 +1531,9 @@ so a pass shows the code under test ran.
 | the writable rule over every combination of format, written formats also found, flush answer and dirty flag | the `also` condition removed, so the doubly formatted volume mounts writable; every flush answer but `ok` taken as `enotsup` |
 | a selected format whose mount fails: the FAT32 volume holding EROFS's magic is `none failed` and nothing is written | a fall-through to the next format found, which mounts it as FAT |
 | the drive process and the media tree, under `erx_media_sup` against a fake drive grant and window: a medium's mount, a listing, a read; the window's end, after which an open fid answers `eio` and `diskN` lists `status` and `ctl`; a new window, mounted at the next walk; a volume process killed, the others still served; a volume past its memory bound; the drive process killed with a write outstanding, after which the next walk mounts the medium afresh and the outstanding write is answered before the new mount's first read | the drive process not monitoring the window, so the open fid reads after the end; a volume process started as a permanent child, so the kill restarts it; `max_heap_size` given `media_volume_bytes` as words unconverted, so a volume eight times its allowance is not ended; the grant answering the old window again without its restart, so the old write reaches the window after the new mount's read |
+| the drive grant's occupant, over `erx_blk_drive:step/2` by name: a place with no occupant drops a serve; a function that occupied a place and ended before its serve leaves it free, its late serve dropped and the next function's `occupy/2` answered `ok`; a block grant occupied by its device process takes that process's serve of a second window, under a fresh reference, after its first window ended, and takes it before that end is seen, its held asks answered from the second window | the clause that lets a grant with no occupant take any serve restored, so the late serve lands and the next `occupy/2` answers `taken`; a block grant's occupation freed at its window's end, so the second serve is dropped and the disk is never mounted again |
+| the drive mint and facet, `erx_blk_drive:start_mint/1` and `erx_blk_drive_facet`, over fake grants in one domain and a grantee stand-in: a mint for a recorded drive answers a facet whose `window` reaches that drive's grant and answers its window; a request other than `window` refused `badarg` with nothing reaching the grant; a mint for a drive the records do not name refused; a block drive's grant ended and started again, after which the facet's next `window` reaches the new grant; while none runs, `no_medium` | the facet keeping the grant's pid from its mint, so after the restart every ask answers `failed`; the facet forwarding every request, so `{occupy, Pid}` reaches the grant; the mint taking any number, so a drive of another domain is minted |
+| the domain service's grant records, `erx_domain_mints`, over a manifest with two USB drives and a block drive: three records, each served by the domain that holds its drive's device, installed under `{drive, N}` in the media domain's registry with `drive => N` and the operation `window` in its limits; each minted again at the media domain's next incarnation and at its serving domain's; a ready report that provides `drive` from a domain no drive window lies on refused | the server keyed on the window's holder, so the media domain is asked to mint its own drive; the provider admission skipped for `drive`, so the refused report is taken |
 | the restart handoff over `erx_blk`'s device process and a fake device: a request the old window forwards after the reference ended is answered `gone` and never issued; a write issued before the restart completes before the new window's first request; an `eject` whose last finish's flush races the restart answers `eio` and the FAT volume mounts next `ro dirty` or clean, never torn | the reference check removed, so the late request is issued; the restart taken while a write is issued, so the new window's read is issued before it; `eject` answering `ok` after its drive process ended |
 | `eject` over two FAT volumes and a littlefs volume of one medium, with writers on every volume running through it: every write answered `ok` before the eject is on the fake window before its last flush, every write after a volume's finish answers `eio`, and the FAT images pass fsimg's verify | the finish not closing its volume, so a write to an already finished volume is answered `ok` and never flushed; `eject` answering before the last finish's flush |
 | the media service's freezing checkpoint with writers on two drives: it answers once every volume has finished, later writes answer `erofs` | the media tree answering the checkpoint before its volumes' finishes |
@@ -1343,7 +1572,7 @@ when the names and hashes equal the harness's.
 
 | Case | Seeded fault that must fail it |
 | --- | --- |
-| a FAT16 and a FAT32 stick on an MBR, a FAT32 stick with no table and a FAT32 stick on a GPT, each listed and read | the no-table rule dropped, so the bare stick shows no volume |
+| a FAT16 and a FAT32 stick on an MBR, a FAT32 stick with no table and a FAT32 stick on a GPT, each listed and read | the no-table rule dropped, so the bare stick shows no volume; a drive's window started without `{erx_serve, any}`, so the media domain's first read of a stick times out and it shows `medium idle failed` |
 | a FAT12 stick fsimg writes, refused `none format` with `sN_fat 12`, its bytes unchanged | the probe's FAT type dropped, so the stick mounts |
 | an EROFS stick, uncompressed, fsimg's | the volume module mounting with `erx_erofs:mount/2`, which no layout opens |
 | a littlefs stick of erXos's geometry, written by the harness's littlefs tool, on a development build | the owner's placement check removed, while the port asks for a block past the volume |
@@ -1356,7 +1585,8 @@ when the names and hashes equal the harness's.
 | a session's `mount /media/disk0/s1 /mnt`, the stick's files read through `/mnt` and their hashes equal, then `umount /mnt`, after which `/mnt` is gone and `/media/disk0/s1` still reads | `mount` binding the drive's directory instead of the volume, so `/mnt` lists `status` and `ctl` |
 | a second virtio disk of the `drive` role, served by a block driver domain of its own, listed and read | the block service reading the boot layout on a `drive` device |
 | the same virtio disk read again after the media domain is restarted, with nothing detached | the grant answering every ask after the first `no_medium`, so the disk is not mounted again |
-
+| the same virtio disk read again after its driver is restarted through `/dev`'s `ctl`, with the media domain running | the facet holding the grant it found at its mint, so every later ask answers `failed` and the disk is not mounted again |
+| a stick read, then the USB domain restarted: an open file answers `eio`, `disk0` leaves the `/media` listing and comes back once the restarted domain reports ready, and the stick reads equal | the grant record not following the serving domain's new incarnation, so `disk0` never comes back |
 At the milestone gate, images that the FreeBSD oracle guest's
 `newfs_msdos` and `gpart`, and the Linux oracle guest's `mkfs.fat`,
 `mkfs.erofs` and `sgdisk`, write, each treated as hostile, are read
@@ -1429,6 +1659,60 @@ loses: a fixed drive, which cannot be taken out, would stay unusable
 after any restart of the media domain, and every user would replug
 after one. Restarting the block service on a second ask gives the same
 order with nothing to replug.
+
+**No grant across domains: the media domain holds the drives'
+devices.** It would need no route between domains. It loses DR-R2
+outright: every parser of a stranger's bytes would run beside a
+DMA-capable controller, and the USB domain's HID functions and hubs
+with them.
+
+**An introduction of the device service's own that hands each grant
+over.** The device service would connect the media domain to each
+serving domain and pass it the grant's pid. It loses: the system domain
+cannot pass another domain's pid on, since only the pid's own domain
+exports it, and what is left, introducing, minting, installing, a
+deadline and a fresh start for each incarnation, is the grant record
+every configured domain's service already has.
+
+**A service row and a facet row for each drive.** The serving domain's
+`service` row of `drive` and a `facet` row granting it to the media
+domain would put drives through the grant records with no rule of their
+own. It loses to deriving them: both rows restate the window row, which
+already names the device, and so the server, and the holder, and a
+check that the three agree would be a list of places to keep in step.
+
+**The grant's own pid handed over, the grant unwrapping `window`.** The
+grant would serve other domains itself and take only `window` from
+them. It loses: the export toward the grantee alone, the end with the
+grantee's connection, the operation check and the request limits would
+be the grant's own code rather than the facet behaviour's, and
+`occupy/2` and `serve/3` would sit one unwrap away from the holder.
+
+**The facet as the grant.** Each mint would start the drive's grant
+itself. It loses: the grant's memory that it answered a window must
+outlive the media domain's incarnation, whose restart is the case that
+memory exists for.
+
+**The medium as a file of the serving domain's tree.** As the USB
+domain's input tree serves `hid0`, it would serve `disk0` as a file,
+granted by a facet row, and the media domain would read sectors as file
+reads. It loses: every sector request would pass a file grant and its
+framing in the serving domain on top of the window, the restart's order
+would still need the medium reference, and the window's protocol
+already crosses domains. A stream of records is a file's natural shape;
+a medium's sectors are the block service's.
+
+**A token from `occupy/2` that every serve carries.** It loses: the
+issuer's pid already names the occupation, so a token closes no case
+the pid leaves open, and a block drive would still need an occupation
+that outlives each of its windows.
+
+**A window bound to the client it was handed to.** The window would
+refuse every domain but the grantee whose ask it answered. It loses:
+the export already confines the window to the domains it was handed to,
+and held asks answered together after an end may come from two
+incarnations of the media domain, of which only the live one can reach
+it.
 
 **A tree per volume.** Each volume its own tree and grant would make
 the namespace's own `exdev`, statfs and qid rules apply and give

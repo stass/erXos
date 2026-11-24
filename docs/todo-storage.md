@@ -43,8 +43,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      3. `erx_blk` serving a `block` device's medium as a drive: `erx_blk_service` reads its `block`
         drive; with one it starts the grant and one window of role `drive` over the whole medium and
         reads no table; with none it reads the layout; on a refusal it serves no window and logs why.
-        Host tests over a fake device for each of the three, seeded with a service that reads the
-        table beside the drive; the QEMU case of a second virtio disk waits for step 4.
+        The grant is started by the device process, linked to it and occupied by it for its life
+        (design-drives.md, "One occupant"), and `erx_blk_drive:step/2`'s clause that lets a grant
+        with no occupant take a serve from any issuer goes, with that section's occupant host test
+        and its two seeds; the module's doc's "an unoccupied grant takes a serve from any issuer"
+        goes with it. Host tests over a fake device for each of the three, seeded with a service
+        that reads the table beside the drive; the QEMU case of a second virtio disk waits for step 4.
   3. `erx_media_table` (MBR, GPT with both copies and the metadata rule, none, whole-table refusal,
      `place/3`) and `erx_media_probe` with `abi/formats/probe.txt`, pure, with their fuzz targets and
      seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name;
@@ -52,9 +56,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   4. The `erx_media` application: the drive process, the medium supervisor and reader, the volume
      process with its probe and memory bound, the media tree with `status`, `ctl` and the two-volume
      `exdev` rule, the writable rule over the formats the build writes, the finish shared by `eject` and the freezing
-     checkpoint; the device service's introduction of the media domain, which hands it each drive's
-     grant, and the rule that a holder's envelope reaches only the grant's `window` (a holder can call
-     `occupy/2` and `serve/3` on a bare pid today, which would let it keep media off its own drives);
+     checkpoint; the drive grants of design-drives.md's "How the grant reaches the media domain":
+     `abi/services/drive.txt`, one operation `window`, marked `served_by drive` (a value the closed
+     set of `tools/lib/erx/abi_contracts.rb` gains), the domain service's grant for each drive
+     window row and its admission of `drive` in a ready report (`erx_domain_mints`, design-system.md's
+     "A drive window as a grant"), `erx_blk_drive:start_mint/1` and `erx_blk_drive_facet` with the
+     USB places' mint child, a drive's window started with `{erx_serve, any}`, which needs edit 59
+     ([todo-runtime.md](todo-runtime.md), "Runtime, origins", its item 3), the facet table
+     check passing `served_by drive` as it passes a session's lines, the manifest check's refusal of
+     a service or facet row of `drive`, and one more of the media and serving domains'
+     `connections` and of `max_connections` for each drive grant in the board manifests, with the
+     host tests and QEMU cases those sections' tables name;
      the release check that `erx_media` lies only in the media domain's release, which names
      no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the resolver's no-follow rule
      as a `nofollow` mark a provider carries, the provider `{facet, media}` marked by `erx_ns` by the
@@ -64,10 +76,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
      here too. QEMU virt's development manifest names its media domain, the service `media` and the
      drive `disk0` on the xhci row, so its USB domain serves a stick as `disk0`; the domain runs
-     nothing yet. The introduction needs a design first: design-storage.md and design-usb.md name it
-     ("as it introduces any window's holder"), but no window holder in another domain is introduced
-     today, and no design states how the device service learns a drive's grant from the serving
-     domain, how it hands the grant over, or where the holder's envelope is narrowed to `window`.
+     nothing yet, and its `connections` of 1 and the USB domain's of 2 leave no room for the drive
+     grant's connection between them.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume: its read path, then its batches, dirty flag
      and finish.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside

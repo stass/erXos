@@ -2532,6 +2532,23 @@ policy, as it grants `code_objects`, to every live session whose
 template holds the start service's tree, `start`, with rights `rw`, and
 to no other grantee, the system domain included.
 
+**A drive window as a grant.** Each window row of the `drive` role is a
+grant of its own, which no service or facet row declares
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
+Its server is the configured domain whose units hold the row's device,
+its grantee the row's holder, the media domain, its service the
+interface `drive`, which `abi/services` marks `served_by drive`, and the
+name it is installed under `{drive, N}`, N the row's drive number, from
+the manifest, never from a report. Its limits are the interface's one
+operation, `window`, as the operations the grant lists, and
+`drive => N`, so the mint learns which drive it mints for, with the
+`erx_facet` defaults for the rest. A configured domain's ready report
+may provide `drive` exactly when a drive window lies on one of its
+devices, as if a service row declared it; a report of any other domain
+that names it is refused as a name no row declares. From then the
+grant's record follows its pair as a facet row's does, and moves on the
+same events.
+
 **One operation per grant.** For each grant, named by its grantee (a
 configured domain, the system domain or a live session) and its service's
 name, the domain service keeps one record. The
@@ -4283,7 +4300,9 @@ check built
 ([design-packaging.md](design-packaging.md#an-apps-session)). A
 window is a grant of the block driver's domain, which the device service
 introduces to the window's holder over a connection once the holder
-runs. The slot
+runs; a drive window is the grant of [A drive window as a
+grant](#facets-a-configured-domain-serves), which the domain service's
+grant records carry as they carry a facet row's. The slot
 writer and the block driver's domain each get, from the domain library, a
 read-only view of the machine page, so each reads the boot value itself:
 the slot writer never takes it from the update service, and the block

@@ -2495,7 +2495,14 @@ session's line has no manifest row, service or facet: its interface,
 marked `served_by session`, names it, every session serves it, and the
 domain service grants it only on a request that names its grantee
 ([design-system.md](design-system.md#a-sessions-lines)), so `web_line`
-and `tty_line` are instances of interfaces of those names. The
+and `tty_line` are instances of interfaces of those names. A drive's
+grant has no service or facet row either: its interface, `drive`,
+marked `served_by drive`, names it, and the domain service grants it
+for each drive window row of the manifest, from the domain that holds
+the drive's device to the window's holder, under `{drive, N}`
+([design-system.md](design-system.md#facets-a-configured-domain-serves),
+"A drive window as a grant"). The facet table check passes both kinds
+of name as it passes a manifest service's. The
 build generates from the manifest the table of service names, and the
 domain service's one funnel for a domain's facets,
 `erx_domain_srv:facets/2`, through which every create spec and every

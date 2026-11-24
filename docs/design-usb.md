@@ -629,11 +629,16 @@ of one of the domain's controllers, whose role is `drive`, which names
 no partition, whose `drive` field is the drive's number, and whose
 holder is the media domain. The row's device picks only the domain: a
 drive is written against one of the domain's controllers, any one, and
-serves media on all of them. The device service introduces the media
-domain to the USB domain as it introduces any window's holder, and the
-grant it hands over is a **drive grant**: a process of the USB domain,
-`erx_blk_drive`, made for that one row and living as long as the USB
-domain. The USB domain knows its rows from its records, one
+serves media on all of them. The row is itself the grant that carries
+the drive to the media domain: the domain service mints, through the
+USB domain's drive mint, a facet whose one request, `window`, it
+forwards to the drive's **drive grant**, and installs the facet in the
+media domain's registry under `{drive, N}`, again for each new
+incarnation of either domain
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)).
+The drive grant is a process of the USB domain, `erx_blk_drive`, made
+for that one row and living as long as the USB domain, and serves its
+own domain alone. The USB domain knows its rows from its records, one
 `-erx_record drive usb N` for each drive the manifest names on its
 controllers ([design-fiasco.md](design-fiasco.md#drive-records)): at
 its start its places start one drive grant for each, and a medium that
@@ -656,10 +661,12 @@ mounted twice at once
 ([design-drives.md](design-drives.md#a-drive-and-its-medium)). The window is an ordinary window of the
 block service, whose sectors are the medium's, answering `{read, Sector,
 Count}`, `{write, Sector, Bytes}` and `flush` with the block service's
-answers, and it ends when its medium ends. Holding a drive grant is
-holding whatever medium that drive holds, whole, as holding a
-window is holding its sectors, so the grant checks no caller and names nothing
-else. What the media domain does with it, from the table to the files
+answers, and it ends when its medium ends. It is started with
+`{erx_serve, any}`, so it serves the media domain, toward which the
+facet's reply exports it. Holding a drive's facet is holding whatever
+medium that drive holds, whole, as holding a window is holding its
+sectors, so the grant checks no caller and names nothing else: the facet
+in front of it admits only its grantee's `window`. What the media domain does with it, from the table to the files
 at `/media/diskN`, is [design-drives.md](design-drives.md)'s.
 
 Drive numbers name drives across the machine, as macOS's `diskN` does:
@@ -3399,7 +3406,10 @@ in the controller's mailbox and, for input, in their own number's stream,
 which only they write. A drive grant answers from the window it was last
 told of, which the medium's block service sends each of the drive's
 grants as its windows start, and which the grant forgets when it sees
-that window end; a media domain that receives a window that ends a
+that window end; it takes a window only from the function that
+occupies the drive, so a late serve of a function that has ended lands
+nowhere ([design-drives.md](design-drives.md#a-drive-and-its-medium),
+"One occupant"); a media domain that receives a window that ends a
 moment later finds its first request failing and ends that medium's
 mounts, the same as if the medium had gone after the request.
 
@@ -3424,7 +3434,7 @@ mounts, the same as if the medium had gone after the request.
 | a control transfer not answered in 5 s | the controller process's deadline | the transfer, answered `timeout` after Stop Endpoint and Set TR Dequeue Pointer past it | the caller's; EP0 is open again |
 | a command not answered in 5 s, an event that fails the form's checks, the controller's host system error, host controller error or halt while it runs, read from `USBSTS` on an interrupt or once a second, an all-ones read from a function that left the bus among them, a wait of the install past its deadline | the controller process | the controller process | the bus group restarts; `negotiate/2` resets the controller and returns every buffer; every device is enumerated again; places survive, so each input number carries `release` and each medium's windows end; past `usb_bus_restarts_max` restarts in `usb_bus_restart_window_ms` the controller is given up, the places still served ([The process tree](#the-process-tree)) |
 | a stream, the input tree's mint or the places end | `erx_usb_places_sup`, then `erx_usb`'s top supervisor, each of intensity 0 | the places, the top supervisor, the permanent application and the domain | the domain service restarts the domain, which holds its units again and runs every controller afresh. The domain ends rather than restart its places within itself because the places serve its input files, whose grants the domain service mints only for a new incarnation of the domain ([design-system.md](design-system.md#facets-a-configured-domain-serves)): places made again in the same incarnation would serve no reader |
-| a register access that aborts (the controller fell off its bus) | the kernel, on erXos's kernel; on Fiasco an SError ends the task of the next thread to enter user mode on its CPU, which need not be the USB domain's, and the controller's next deadline fails it | the USB domain, by the fault, on erXos's kernel; the controller process on Fiasco | the domain service restarts the domain, which gets its unit again; the display's readers see their files end and start again when the tree is granted again, and each drive's holder is introduced again, as for a block driver's domain |
+| a register access that aborts (the controller fell off its bus) | the kernel, on erXos's kernel; on Fiasco an SError ends the task of the next thread to enter user mode on its CPU, which need not be the USB domain's, and the controller's next deadline fails it | the USB domain, by the fault, on erXos's kernel; the controller process on Fiasco | the domain service restarts the domain, which gets its unit again; the display's readers see their files end and start again when the tree is granted again, and each drive's facet is minted again for the media domain, as for a block drive's domain |
 | a configuration access below the root port with the link down | the bridge driver's link reads, before and after | the access, answered `link_down`; the function's position is reported gone | none of its own; an abort that does arrive ends the PCIe domain on erXos's kernel, as the next row |
 | the PCIe domain ends | the domain service | the enumerator and the bridge driver | the domain restarts; with the link up and the VL805's firmware present the bridge driver resets nothing and running functions are unchanged; otherwise it turns the link off cleanly, brings the bridge up again and asks for the firmware |
 | an over-current change | the port's status | nothing | cleared and logged once per attempt; the port follows its status |

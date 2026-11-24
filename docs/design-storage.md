@@ -413,11 +413,16 @@ copies the frame out of its lane once, into its own memory, and the
 storage domain supplies no memory beyond the lane the client's budget
 paid for ([design-domains.md](design-domains.md#connections)). A client
 in the driver's own domain receives the NIF's binary itself, with no copy
-beyond the NIF's one. A drive's holder, the media domain, is handed a
+beyond the NIF's one. A drive's holder, the media domain, reaches a
 **drive grant** instead, a process of the domain that serves the drive's
 media that answers one request, `window`: the pid of the window covering
 the whole of the medium the drive holds now, or `{error, no_medium}`
-([design-drives.md](design-drives.md#a-drive-and-its-medium)). A window answers one request at a time per client in
+([design-drives.md](design-drives.md#a-drive-and-its-medium)). It
+reaches it through a facet of that domain, which the drive's window row
+grants it and whose one operation is `window`; the window comes in the
+facet's reply, which exports it to the media domain, and is started with
+`{erx_serve, any}`, so it serves the media domain's calls
+([design-drives.md](design-drives.md#how-the-grant-reaches-the-media-domain)). A window answers one request at a time per client in
 order, so a client's own requests in flight bound what the service holds
 for it, and a client that stops reading its lane blocks only its own
 window.
