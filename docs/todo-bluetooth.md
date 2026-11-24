@@ -158,15 +158,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   rows and `start` row in the Raspberry Pi 4's development manifest, `published_enable` in the packer, the
   `bleuart` release with `erx_bleuart`), the login facet's `root_line` with its holder row and its release-manifest
   refusal, `ble_grant`'s admission of a `start` row's template whose principal's `domains` quota is 1, by kind and
-  identity, `erx_gatt_serial`'s `serial_lost` and `subscribed`, the registry's replay of `mtu` and `subscribed` at
-  an attach, `erx_gatt_service` answering its start before it awaits its grant, the store's and the registry's end
-  ending the domain, the link's end past
-  `bt_write_queue`, the registry's `{advertised, Services}` and the HCI core's `{advertising_data, Data}`, with
-  their tests, the Bumble cell and probe B-P7. The package retires the phone console it replaces. On master: the
+  identity, with their tests, the Bumble cell and probe B-P7. The package retires the phone console it replaces. On master: the
   manifest check's `btconsole` login holder (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), whose row `bleuart`'s
   takes, and its case in `test/host/manifest_domains_test.rb` (`BTCONSOLE_LOGIN`, `btconsole` in `LOGIN_DOMAINS`).
-  The unlanded branch `login-8`, the phone console, is superseded and does not land. Delete the `ble` grant's
-  `identity` parameter (`abi/services/ble.txt`, the registry), which the design no longer has. CLAUDE.md's
+  The unlanded branch `login-8`, the phone console, is superseded and does not land. CLAUDE.md's
   fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each
   connection, each bond with no key, and the counters) is not declared in `abi/inspection.txt`, and the domain

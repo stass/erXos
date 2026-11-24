@@ -323,9 +323,10 @@ enum gatt_configuration u16
   value notify 0x0001
   value indicate 0x0002
 limit gap_device_name_max u16 248
-# The write commands that wait behind the handler's answer on a link; past it a command is
-# discarded and counted (docs/design-bluetooth.md, "What a radio peer can make the domain
-# spend"; ATT 3.3.2).
+# The write commands that wait behind the handler's answer on a link; past it a command
+# ends the link, although ATT would let it be discarded (3.3.2), since a discarded write is
+# a silent gap in a handler's stream (docs/design-bluetooth.md, "What a radio peer can
+# make the domain spend").
 limit bt_write_queue u8 16
 # The time a handler has to answer a write before the phone is answered Unlikely Error,
 # a bound erXos sets (docs/design-bluetooth.md, "The `ble` facet"), and ATT's transaction timeout

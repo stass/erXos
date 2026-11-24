@@ -21,6 +21,7 @@ class ErxBleFacetTest < Minitest::Test
   DEADLINE_SECONDS = '300'
   FACET = 'erlang/apps/erx_bt/src/erx_ble_facet.erl'
   SRV = 'erlang/apps/erx_bt/src/erx_gatt_srv.erl'
+  CORE = 'erlang/apps/erx_bt/src/erx_gatt_registry.erl'
 
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
@@ -29,19 +30,14 @@ class ErxBleFacetTest < Minitest::Test
              path: FACET, anchor: 'forward(lists:member(Service, Services), Request, Caller, Grant)',
              replacement: 'forward(true, Request, Caller, Grant)',
              catching_case: 'a_request_naming_another_service_is_refused_test'),
-    Seed.new(fault: "the registry's pid kept from the facet's first request, so the request after a restart fails",
-             path: FACET, anchor: "    case whereis(erx_gatt_srv) of\n",
-             replacement: "    put(registry, case get(registry) of undefined -> whereis(erx_gatt_srv); Kept -> Kept end),\n" \
-                          "    case get(registry) of\n",
-             catching_case: 'the_facet_outlives_a_registry_restart_test'),
     Seed.new(fault: "the handler taken from the forwarded call's From, so the events go to the facet",
              path: SRV, anchor: "handle_call({facet, Caller, Op}, From, Srv) ->\n    step({facet, Caller, Op, From}, Srv).",
              replacement: "handle_call({facet, _Caller, Op}, {Facet, _} = From, Srv) ->\n    step({facet, Facet, Op, From}, Srv).",
              catching_case: 'the_caller_hears_the_events_and_alone_answers_its_writes_test'),
-    Seed.new(fault: 'every attach forwarded as asking for the identity, whatever the grant states',
-             path: FACET, anchor: '{attach, Service, Identity};',
-             replacement: '{attach, Service, true};',
-             catching_case: 'bonded_identity_reaches_only_a_grant_that_states_it_test'),
+    Seed.new(fault: "a bonded link's identity address left in the connected event",
+             path: CORE, anchor: '    #{address => Address, level => Level, bonded => true}.',
+             replacement: '    Security#{address => Address}.',
+             catching_case: 'bonded_identity_reaches_no_handler_test'),
     Seed.new(fault: 'a reply of any shape forwarded, so the facet bounds no answer',
              path: FACET, anchor: 'answer(_Answer) -> false.', replacement: 'answer(_Answer) -> true.',
              catching_case: 'a_request_of_no_operation_s_shape_is_refused_badarg_test')

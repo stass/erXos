@@ -7,18 +7,17 @@ The behaviour of one GATT service's handler over the `ble` facet (docs/design-bl
 "The client"): a gen_server that attaches to its service through erx_gatt:attach/1 and
 turns each event erx_gatt:event/2 admits into a callback of its module.
 
-**Starting.** start_link/3,4 wait, at most `bt_attach_wait_ms`, for the domain to hold
-`ble`, since an app's applications may start before the domain service has installed
-the session's facets; then they attach, then call `Module:init(Args, Table)`, `Table` the
-service's characteristics as the attach answered them. It answers `{ok, Values, State}`,
-and the start sets each characteristic of `Values`, a map from characteristic to value,
-before it answers `{ok, Pid}`; or `{error, Reason}`, which fails the start with `Reason`
-and ends the server normally, so a linked caller that does not trap exits lives on. An
-attach that fails stops the start with its refusal, `{error, attached}` past the
-deadline among them, so the app's supervisor sees a start that failed and restarts it
-within its intensity. The registry sends the
-`connected` events it replays to a new handler straight to it, so they may arrive before
-the attach's answer; gen_server reads none of them until init has returned.
+**Starting.** start_link/3,4 answer `{ok, Pid}` at once, since a session's grants are
+installed only after its start has finished and it has reported ready
+(docs/design-system.md, "Waiting for a grant"). The server then waits for its grant,
+erx_facets:await(ble, none, infinity), attaches, and calls `Module:init(Args, Table)`,
+`Table` the service's characteristics as the attach answered them. It answers `{ok,
+Values, State}`, and the server sets each characteristic of `Values`, a map from
+characteristic to value, before it takes any event; or `{error, Reason}`, which stops the
+server with `Reason`. An attach that fails stops it with its refusal, `attached` past the
+deadline among them, so the app's supervisor restarts it within its intensity. The
+registry sends the events it replays to a new handler straight to it, so they may arrive
+before the attach's answer; gen_server reads none of them until the start has finished.
 
 **Events.** A write calls `Module:handle_write(Conn, Char, Value, State)`, whose `{Answer,
 State}` is the write's reply, sent before the next message is read, so the module sees a
@@ -53,10 +52,8 @@ in the domain asks for them.
 
 -behaviour(gen_server).
 
--include("generated/erx_abi.hrl").
-
 -export([start_link/3, start_link/4, call/2]).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
+-export([init/1, handle_continue/2, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 
 -callback init(Args :: term(), Table :: erx_gatt:table()) ->
     {ok, Values :: #{atom() => binary()}, State :: term()} | {error, Reason :: term()}.
@@ -70,8 +67,8 @@ in the domain asks for them.
 
 %% facet_monitor: the monitor of the facet; origin: the facet's owner, whose envelope the
 %% events arrive in.
--record(handler, {module :: module(), facet_monitor :: reference(), origin :: non_neg_integer(),
-                  state :: term()}).
+-record(handler, {module :: module(), facet_monitor = none :: reference() | none,
+                  origin = none :: non_neg_integer() | none, state :: term()}).
 
 -doc "Starts the handler of `Service`, linked to the caller.".
 -spec start_link(atom(), module(), term()) -> gen_server:start_ret().
@@ -90,28 +87,32 @@ call(Server, Request) ->
 
 -doc false.
 init({Service, Module, Args}) ->
-    _ = erx_facets:await(ble, none, ?ERX_BT_ATTACH_WAIT_MS),
-    case erx_gatt:facet() of
-        none ->
-            {stop, not_granted};
-        {Facet, Origin} ->
+    {ok, #handler{module = Module}, {continue, {start, Service, Args}}}.
+
+%% The start after the answer: the grant awaited, the attach, and each characteristic of
+%% the module's Values set, or the stop with why the start failed.
+-doc false.
+handle_continue({start, Service, Args}, #handler{module = Module} = Handler) ->
+    case erx_facets:await(ble, none, infinity) of
+        {ok, Facet} ->
+            Origin = erx:owner(Facet),
             Monitor = erlang:monitor(process, Facet),
             case erx_gatt:attach(Service) of
                 {ok, Table} ->
                     started(Module:init(Args, Table), Service,
-                            #handler{module = Module, facet_monitor = Monitor, origin = Origin});
+                            Handler#handler{facet_monitor = Monitor, origin = Origin});
                 {error, Reason} ->
-                    {stop, Reason}
-            end
+                    {stop, Reason, Handler}
+            end;
+        {error, Reason} ->
+            {stop, Reason, Handler}
     end.
 
-%% The start's end: each characteristic of Values set and the handler running, or the
-%% module's refusal.
 started({ok, Values, State}, Service, Handler) ->
     [ok = erx_gatt:set(Service, Char, Value) || Char := Value <- maps:iterator(Values, ordered)],
-    {ok, Handler#handler{state = State}};
-started({error, Reason}, _Service, _Handler) ->
-    {error, Reason}.
+    {noreply, Handler#handler{state = State}};
+started({error, Reason}, _Service, Handler) ->
+    {stop, Reason, Handler}.
 
 -doc false.
 handle_call({call, Request}, From, #handler{module = Module, state = State} = Handler) ->

@@ -52,7 +52,7 @@ class ErxBtFsTest < Minitest::Test
     Seed.new(fault: "the window started without the store's state, so it opens over a store that refuses changes",
              anchor: '    start_link(erx_bt_store:known()).',
              replacement: '    start_link(read).',
-             catching_case: 'the_window_starts_with_the_store_and_restarts_with_it_test'),
+             catching_case: 'the_window_starts_with_the_store_and_ends_with_it_test'),
     Seed.new(fault: "a confirmed forget not told to the window, so it refuses until the store's next start",
              file: TREE,
              anchor: '        ok = gen_server:call(Fs, {store, read}),',

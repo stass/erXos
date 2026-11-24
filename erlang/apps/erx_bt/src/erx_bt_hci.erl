@@ -96,6 +96,11 @@ handle_info({erx_bt_line_rx, Bytes}, #hci{rest = Rest} = State) ->
     end;
 handle_info({erx_bt_link, Name, Request}, State) ->
     step_noreply({request, Name, Request}, State);
+%% The registry's word that the advertised services changed (docs/design-bluetooth.md,
+%% "Advertising"): the scan response, the name and the appearance, does not change.
+handle_info({advertised, Input}, State) ->
+    #{advertising_data := Data} = erx_bt_adv:data(Input),
+    step_noreply({advertising_data, Data}, State);
 handle_info({'DOWN', Monitor, process, _Pid, _Reason}, #hci{monitors = Monitors, links = Links} = State) ->
     case maps:take(Monitor, Monitors) of
         {Name, Rest} ->

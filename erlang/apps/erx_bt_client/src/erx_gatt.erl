@@ -15,7 +15,7 @@ shape is `{error, badarg}`. A domain that holds no `ble` facet is answered
 have reached the registry, so it asks again every `bt_attach_retry_ms` until
 `bt_attach_wait_ms` has passed since its first ask. set/3, notify/4 and indicate/4 exit
 the caller with `{not_attached, Service}` at `{error, not_attached}`: the caller is no
-longer the service's handler, after the registry's restart, and only a new attach, which
+longer the service's handler, and only a new attach, which
 its supervisor's restart makes, makes it one again. Each waits with the timeout
 `infinity`, since an indication waits on the phone's confirmation; the call's monitor
 ends the wait when the facet ends.
@@ -44,13 +44,10 @@ and answer/2 are total over any term and make no atom.
 -type answer() :: ok | {error, ?ERX_ATT_APPLICATION_ERROR_MIN..?ERX_ATT_APPLICATION_ERROR_MAX | value_not_allowed}.
 
 -doc """
-An event the registry sends a handler, its envelope off. `connected` carries `identity`,
-the bond's identity address, only when `bonded` is true and the handler's grant asks for it.
+An event the registry sends a handler, its envelope off. No `connected` carries a bond's
+identity address: `address` is the one the phone connected from.
 """.
--type event() :: {connected, Conn :: reference(), #{address := address(), level := atom(), bonded := false}
-                                                | #{address := address(), level := atom(), bonded := true}
-                                                | #{address := address(), level := atom(), bonded := true,
-                                                    identity := address()}}
+-type event() :: {connected, Conn :: reference(), #{address := address(), level := atom(), bonded := boolean()}}
                | {mtu, Conn :: reference(), Mtu :: pos_integer()}
                | {subscribed, Conn :: reference(), Char :: atom(), none | notify | indicate}
                | {write, Req :: reference(), Conn :: reference(), Char :: atom(), Value :: binary()}
@@ -58,8 +55,9 @@ the bond's identity address, only when `bonded` is true and the handler's grant 
 
 -doc """
 Makes the caller the handler of `Service`: answers each of its characteristics' maximum
-and accesses. The caller then hears `connected` for each live link, when it handles no
-other service yet, and every later event of its services.
+and accesses. The caller then hears, for each live link, `connected` and the link's `mtu`
+when it changed, when it handles no other service yet, and a `subscribed` for each of the
+service's characteristics the phone configured, then every later event of its services.
 """.
 -spec attach(atom()) -> {ok, table()} | {error, atom()}.
 attach(Service) ->
@@ -163,15 +161,9 @@ is_characteristic({Char, #{max := Max, access := Access} = Limits}) ->
 is_characteristic(_Characteristic) ->
     false.
 
-is_event({connected, Conn, #{address := Address, bonded := false, level := Level} = Info})
+is_event({connected, Conn, #{address := Address, bonded := Bonded, level := Level} = Info})
   when map_size(Info) =:= 3 ->
-    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level);
-is_event({connected, Conn, #{address := Address, bonded := true, level := Level} = Info})
-  when map_size(Info) =:= 3 ->
-    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level);
-is_event({connected, Conn, #{address := Address, bonded := true, level := Level, identity := Identity} = Info})
-  when map_size(Info) =:= 4 ->
-    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level) andalso is_address(Identity);
+    is_reference(Conn) andalso is_address(Address) andalso is_boolean(Bonded) andalso is_atom(Level);
 is_event({mtu, Conn, Mtu}) ->
     is_reference(Conn) andalso is_integer(Mtu) andalso Mtu >= ?ERX_ATT_MTU_DEFAULT;
 is_event({subscribed, Conn, Char, Kind}) ->

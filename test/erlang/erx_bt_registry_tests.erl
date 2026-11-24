@@ -13,6 +13,8 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+-export([init/1]).
+
 -define(WAIT_MS, 2000).
 -define(GAP, #{name => <<"erxos">>, appearance => 16#03C1}).
 -define(ADDRESS, {random, <<16#C0, 16#FF, 16#EE, 16#12, 16#34, 16#56>>}).
@@ -38,58 +40,79 @@ pid(N) -> list_to_pid("<0." ++ integer_to_list(N) ++ ".0>").
 step(Input, Core) -> erx_gatt_registry:step(Input, Core).
 
 steps(Inputs) ->
-    lists:foldl(fun(Input, {_, Core}) -> step(Input, Core) end, {[], erx_gatt_registry:new(?GAP, services())}, Inputs).
+    lists:foldl(fun(Input, {_, Core}) -> step(Input, Core) end, {[], erx_gatt_registry:new(?GAP, services(), [])}, Inputs).
 
 attach_answers_the_limits_and_refuses_test() ->
-    {Actions, _} = steps([{facet, ?H1, {attach, a, true}, from}]),
+    {Actions, _} = steps([{facet, ?H1, {attach, a}, from}]),
     ?assertEqual([{monitor, ?H1}, {reply, from, {ok, #{x => #{max => 4, access => #{write => open, notify => open}}}}}],
                  Actions),
     ?assertMatch({[{reply, f2, {error, attached}}], _},
-                 steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H2, {attach, a, true}, f2}])),
+                 steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H2, {attach, a}, f2}])),
     %% A handler of two services is monitored once.
     ?assertMatch({[{reply, f2, {ok, _}}], _},
-                 steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H1, {attach, b, true}, f2}])).
+                 steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H1, {attach, b}, f2}])).
 
 attach_hears_the_live_links_test() ->
     C = make_ref(),
     {Actions, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j},
                           {link, ?L1, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
-                          {facet, ?H1, {attach, a, true}, f}]),
-    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true,
-                                              identity => ?IDENTITY}}},
+                          {facet, ?H1, {attach, a}, f}]),
+    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true}}},
                  lists:last(Actions)).
 
-%% `connected` carries the bond's identity exactly when the link reports itself bonded,
-%% and the address the phone connected from in `address` either way.
-connected_carries_the_identity_of_a_bonded_link_alone_test() ->
+%% An attach while a phone stays connected hears `connected`, then the link's MTU and the
+%% configuration of the service's characteristic, in that order; after the link's end an
+%% attach hears none of them (docs/design-bluetooth.md, "Host tests of the cores").
+attach_replays_a_connected_link_test() ->
     C = make_ref(),
-    {Unbonded, Core} = steps([{facet, ?H1, {attach, a, true}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
+    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {mtu, 247}},
+              {link, ?L1, {subscribed, {a, x}, notify}}, {link, ?L1, {subscribed, {b, y}, indicate}}],
+    {Actions, _} = steps(Joined ++ [{facet, ?H1, {attach, a}, f}]),
+    ?assertEqual([{connected, C, #{address => ?ADDRESS, level => open, bonded => false}}, {mtu, C, 247},
+                  {subscribed, C, x, notify}],
+                 [Event || {event, To, Event} <- Actions, To =:= ?H1]),
+    %% A handler of another service has heard connected and the MTU, and hears only the
+    %% configuration of the service it attaches.
+    {Second, _} = steps(Joined ++ [{facet, ?H1, {attach, a}, f}, {facet, ?H1, {attach, b}, f2}]),
+    ?assertEqual([{subscribed, C, y, indicate}], [Event || {event, To, Event} <- Second, To =:= ?H1]),
+    %% A configuration written back to none is not replayed.
+    {Unsubscribed, _} = steps(Joined ++ [{link, ?L1, {subscribed, {a, x}, none}}, {facet, ?H1, {attach, a}, f}]),
+    ?assertEqual([connected, mtu], [element(1, Event) || {event, To, Event} <- Unsubscribed, To =:= ?H1]),
+    {Ended, _} = steps(Joined ++ [{down, ?L1}, {facet, ?H1, {attach, a}, f}]),
+    ?assertEqual([], [Event || {event, To, Event} <- Ended, To =:= ?H1]).
+
+%% A service that says `advertise` is advertised from its handler's attach until that
+%% handler's end, and a service that does not say it never changes the advertised set.
+advertised_follows_the_handlers_test() ->
+    Core = erx_gatt_registry:new(?GAP, services(), [a]),
+    Nothing = uuids([]),
+    A = uuids([<<16#00, 16#FF>>]),
+    ?assertEqual(Nothing, erx_gatt_registry:advertised(Core)),
+    {Attached, Handled} = step({facet, ?H1, {attach, a}, f}, Core),
+    ?assertEqual({advertised, A}, lists:last(Attached)),
+    ?assertEqual(A, erx_gatt_registry:advertised(Handled)),
+    {Other, Both} = step({facet, ?H2, {attach, b}, f}, Handled),
+    ?assertEqual([], [Action || {advertised, _} = Action <- Other]),
+    {OtherDown, _} = step({down, ?H2}, Both),
+    ?assertEqual([], OtherDown),
+    ?assertEqual({[{advertised, Nothing}], Nothing},
+                 begin {Down, Gone} = step({down, ?H1}, Both), {Down, erx_gatt_registry:advertised(Gone)} end).
+
+%% `connected` never carries a bond's identity address: a bonded link shows itself bonded,
+%% and the address the phone connected from in `address` either way.
+connected_carries_no_identity_test() ->
+    C = make_ref(),
+    {Unbonded, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
                               {link, ?L1, {security, #{level => encrypted, bonded => false}}}]),
     ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => false}}}],
                  Unbonded),
     {Bonded, _} = step({link, ?L1, {security, #{level => authenticated, bonded => true, identity => ?IDENTITY}}},
                        Core),
-    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true,
-                                               identity => ?IDENTITY}}}],
+    ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true}}}],
                  Bonded).
 
-%% A handler whose attach did not ask for the identity hears a bonded link as bonded, and
-%% never its identity, while one that asked hears it on the same link.
-identity_reaches_only_the_handler_that_asked_test() ->
-    C = make_ref(),
-    Bonded = #{level => authenticated, bonded => true, identity => ?IDENTITY},
-    {Actions, _} = steps([{facet, ?H1, {attach, a, false}, f1}, {facet, ?H2, {attach, b, true}, f2},
-                          {join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {security, Bonded}}]),
-    Told = fun(H) -> lists:last([Info || {event, To, {connected, _, Info}} <- Actions, To =:= H]) end,
-    ?assertEqual(#{address => ?ADDRESS, level => authenticated, bonded => true}, Told(?H1)),
-    ?assertEqual(Bonded#{address => ?ADDRESS}, Told(?H2)),
-    {Late, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {security, Bonded}},
-                       {facet, ?H1, {attach, a, false}, f1}]),
-    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true}}},
-                 lists:last(Late)).
-
 set_refusals_test() ->
-    Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a, true}, f0}, {facet, ?H1, Op, f}]), A end,
+    Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a}, f0}, {facet, ?H1, Op, f}]), A end,
     ?assertEqual({reply, f, ok}, Set({set, a, x, <<1, 2, 3, 4>>})),
     ?assertEqual({reply, f, {error, too_long}}, Set({set, a, x, <<1, 2, 3, 4, 5>>})),
     ?assertEqual({reply, f, {error, no_such_characteristic}}, Set({set, a, y, <<>>})),
@@ -98,7 +121,7 @@ set_refusals_test() ->
 
 notify_refusals_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a, true}, f0}],
+    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}],
     ?assertMatch({[{request, _, {notify, notify, {a, x}, <<1>>}, f}], _},
                  steps(Joined ++ [{facet, ?H1, {notify, C, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, {error, gone}}], _}, steps(Joined ++ [{facet, ?H1, {notify, make_ref(), a, x, <<1>>}, f}])),
@@ -109,7 +132,7 @@ notify_refusals_test() ->
 %% of none, is refused not_attached, and nothing reaches a link.
 set_notify_and_indicate_only_from_the_handler_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a, true}, f0}, {facet, ?H2, {attach, b, true}, f1}],
+    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}, {facet, ?H2, {attach, b}, f1}],
     Refused = {error, not_attached},
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {set, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {notify, C, a, x, <<1>>}, f}])),
@@ -124,7 +147,7 @@ write_without_a_handler_is_unlikely_error_test() ->
 
 subscription_goes_to_its_service_alone_test() ->
     C = make_ref(),
-    {Actions, _} = steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H2, {attach, b, true}, f2},
+    {Actions, _} = steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H2, {attach, b}, f2},
                           {join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {subscribed, {b, y}, indicate}}]),
     ?assertEqual([{event, ?H2, {subscribed, C, y, indicate}}], Actions).
 
@@ -149,7 +172,7 @@ alphabet() ->
 %% write, the link's end and a late answer fit in four steps.
 every_sequence_of_four_keeps_the_model_test_() ->
     {timeout, 300, fun() ->
-        Empty = erx_gatt_registry:new(?GAP, services()),
+        Empty = erx_gatt_registry:new(?GAP, services(), [a]),
         {Model, Core} = lists:foldl(fun(Symbol, {M, C}) ->
                                             Input = input(Symbol, M),
                                             {Actions, Next} = step(Input, C),
@@ -178,7 +201,7 @@ input({join, L}, #model{joined = J, ended = E}) ->
         false -> {join, L, conn(L), #{address => ?ADDRESS}, from}
     end;
 input({write, L, Key}, #model{writes = N}) -> {write, L, 1, Key, <<1>>, {req, N}};
-input({attach, H, S}, _M) -> {facet, H, {attach, S, true}, from};
+input({attach, H, S}, _M) -> {facet, H, {attach, S}, from};
 input({set, H, V}, _M) -> {facet, H, {set, a, x, V}, from};
 input({notify, L}, _M) -> {facet, ?H1, {notify, conn(L), a, x, <<1>>}, from};
 input({reply, H}, #model{writes = N}) -> {facet, H, {reply, {req, N - 1}, ok}, from};
@@ -214,7 +237,7 @@ check({facet, Caller, {reply, Req, _}, From}, Actions, #model{delivered = D} = M
             ?assertEqual([{reply, From, ok}], Actions),
             M
     end;
-check({facet, Caller, {attach, S, true}, From}, Actions, #model{handlers = H} = M) ->
+check({facet, Caller, {attach, S}, From}, Actions, #model{handlers = H} = M) ->
     case H of
         #{S := _} -> ?assertEqual([{reply, From, {error, attached}}], Actions), M;
         #{} ->
@@ -224,6 +247,7 @@ check({facet, Caller, {attach, S, true}, From}, Actions, #model{handlers = H} = 
                         false -> map_size(M#model.joined)
                     end,
             ?assertEqual(Hears, length([ok || {event, P, {connected, _, _}} <- Actions, P =:= Caller])),
+            ?assertEqual(advertising(H, H#{S => Caller}), [A || {advertised, _} = A <- Actions]),
             M#model{handlers = H#{S => Caller}}
     end;
 check({facet, Caller, Op, From}, Actions, #model{handlers = H} = M)
@@ -249,7 +273,7 @@ check({down, P}, Actions, #model{joined = J, handlers = H, delivered = D, ended 
             M#model{joined = maps:remove(P, J), ended = [P | E],
                     delivered = #{R => W || R := {_, L, _} = W <- D, L =/= P}};
         #{} ->
-            ?assertEqual([], Actions),
+            ?assertEqual(advertising(H, #{S => X || S := X <- H, X =/= P}), Actions),
             M#model{handlers = #{S => X || S := X <- H, X =/= P},
                     delivered = #{R => W || R := {X, _, _} = W <- D, X =/= P}}
     end;
@@ -259,6 +283,15 @@ check({link, L, {security, _}}, Actions, #model{joined = J} = M) ->
         #{} -> ?assertEqual([], Actions)
     end,
     M.
+
+%% The one action that tells the controller process the advertised set changed, as the
+%% handlers change from Before to After: `a` alone says advertise.
+advertising(Before, After) ->
+    case {is_map_key(a, Before), is_map_key(a, After)} of
+        {Same, Same} -> [];
+        {false, true} -> [{advertised, uuids([<<16#00, 16#FF>>])}];
+        {true, false} -> [{advertised, uuids([])}]
+    end.
 
 events_only_to_handlers(Actions, #model{handlers = H}) ->
     Handlers = lists:usort(maps:values(H)),
@@ -283,7 +316,7 @@ join_races_sets() ->
     Test = self(),
     Set = fun(Ns) -> [ok = erx_gatt_srv:facet(self(), {set, a, x, <<N:16>>}, ?WAIT_MS) || N <- Ns] end,
     Setter = spawn_link(fun() ->
-                                {ok, _} = erx_gatt_srv:facet(self(), {attach, a, true}, ?WAIT_MS),
+                                {ok, _} = erx_gatt_srv:facet(self(), {attach, a}, ?WAIT_MS),
                                 Set(lists:seq(1, 100)),
                                 Test ! first_sets,
                                 receive go -> ok end,
@@ -338,20 +371,53 @@ notification_answered() ->
     ?assertEqual(ok, caller_answer(H2)).
 
 %% What the advertising carries (docs/design-bluetooth.md, "Advertising"): the UUIDs of
-%% the served services abi/gatt marks `advertise`, and GAP's name and appearance. Every
-%% declared service is served (erx_bt_sup), so the declared set must fit the advertising
-%% data, which erx_bt_adv:data/1 refuses with badarg.
+%% the served services abi/gatt marks `advertise` that have a handler, and GAP's name and
+%% appearance; the controller process, registered as erx_bt_hci, hears `{advertised,
+%% Input}` at nus's attach and at its handler's end, and nothing for a service that does
+%% not say `advertise`. Every declared service is served (erx_bt_sup), so the declared set
+%% must fit the advertising data, which erx_bt_adv:data/1 refuses with badarg.
 advertised_test() ->
     Nus = erx_gatt_decl:service(nus),
-    ?assertEqual(maps:put(uuids, [maps:get(uuid, Nus)], ?GAP), advertised([Nus | services()])),
-    ?assertEqual(maps:put(uuids, [], ?GAP), advertised(services())),
-    Declared = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()],
-    #{advertising_data := _} = erx_bt_adv:data(advertised(Declared)).
-
-advertised(Services) ->
-    {ok, Pid} = erx_gatt_srv:start_link(?GAP, Services),
+    {ok, Pid} = erx_gatt_srv:start_link(?GAP, [Nus | services()]),
     unlink(Pid),
-    try erx_gatt_srv:advertised() after stop(Pid) end.
+    true = register(erx_bt_hci, self()),
+    try
+        ?assertEqual(uuids([]), erx_gatt_srv:advertised()),
+        Other = handler_stand_in(self(), a),
+        Handler = handler_stand_in(self(), nus),
+        Advertised = uuids([maps:get(uuid, Nus)]),
+        receive {advertised, Input} -> ?assertEqual(Advertised, Input) after ?WAIT_MS -> error(no_advertised) end,
+        ?assertEqual(Advertised, erx_gatt_srv:advertised()),
+        exit(Other, kill),
+        exit(Handler, kill),
+        receive {advertised, Gone} -> ?assertEqual(uuids([]), Gone) after ?WAIT_MS -> error(no_advertised) end,
+        sync(),
+        receive {advertised, _} = Extra -> error({extra, Extra}) after 0 -> ok end
+    after
+        unregister(erx_bt_hci),
+        stop(Pid)
+    end,
+    Declared = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()],
+    #{advertising_data := _} = erx_bt_adv:data(uuids([U || #{name := N, uuid := U} <- Declared, lists:member(N, erx_gatt_decl:advertised())])).
+
+%% The store and the registry are significant children of erx_bt_sup, whose end ends the
+%% domain (docs/design-bluetooth.md, "Concurrency"): the registry's end, under erx_bt_sup's
+%% own flags and specification, ends the supervisor rather than restarting it.
+the_registrys_end_ends_the_stack_test() ->
+    {ok, {Flags, Children}} = erx_bt_sup:init([]),
+    [Store, Registry] = [Spec || #{id := Id} = Spec <- Children, Id =:= erx_bt_store orelse Id =:= erx_gatt_srv],
+    ?assertMatch(#{restart := temporary, significant := true}, Store),
+    {ok, Sup} = supervisor:start_link(?MODULE, {Flags, [Registry]}),
+    unlink(Sup),
+    Down = monitor(process, Sup),
+    exit(whereis(erx_gatt_srv), kill),
+    receive {'DOWN', Down, process, Sup, Reason} -> ?assertEqual(shutdown, Reason)
+    after ?WAIT_MS -> stop(Sup), error(registry_restarted)
+    end.
+
+-doc false.
+init(Spec) ->
+    {ok, Spec}.
 
 %% GAP's values from the application keys: the configured name, the bare host name
 %% of the node name by default, the 248-octet bound, text alone, and a 16-bit appearance.
@@ -364,6 +430,9 @@ gap_from_the_keys_test() ->
     [?assertError({bad_name, Name}, erx_bt_sup:gap({ok, Name}, undefined, 'a@b'))
      || Name <- [<<Longest/binary, "a">>, <<16#FF>>, erxos]],
     [?assertError({bad_appearance, A}, erx_bt_sup:gap(undefined, {ok, A}, 'a@b')) || A <- [-1, 16#10000, foo]].
+
+%% GAP's values with the advertised Uuids.
+uuids(Uuids) -> maps:put(uuids, Uuids, ?GAP).
 
 %% Ends the registry and waits for its end, so the next case can register its own.
 stop(Pid) ->
@@ -405,7 +474,7 @@ joined_link_conn() ->
 %% `{do, Op}`, answering it to the test.
 handler_stand_in(Test, Service) ->
     Pid = spawn(fun() ->
-                        {ok, _} = erx_gatt_srv:facet(self(), {attach, Service, true}, ?WAIT_MS),
+                        {ok, _} = erx_gatt_srv:facet(self(), {attach, Service}, ?WAIT_MS),
                         Test ! {attached, self()},
                         handler_loop(Test)
                 end),

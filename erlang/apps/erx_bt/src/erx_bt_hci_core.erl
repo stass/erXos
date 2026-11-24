@@ -107,7 +107,12 @@ due command and the credited packets, whatever the controller does.
 **Advertising** is on exactly while connections are below the limit: the controller
 stops it when a connection completes, and the core enables it again whenever the slot is
 free and connections are below the limit. A connection that completes while the enable
-is sent came from that enable, so the enable's answer leaves advertising off.
+is sent came from that enable, so the enable's answer leaves advertising off. New
+advertising data, `{advertising_data, Data}`, waits until the core is ready and is then
+written with LE Set Advertising Data at the next free command slot, before an enable that
+is due, so the enable advertises it; a later input replaces data not yet written, so only
+the last is written. A controller that refuses it stops the core, whose restart writes
+the data the configuration then gives in the bring-up, before it enables advertising.
 
 **Time** is an input (docs/design.md, "Deadlines in state"): every step takes the
 current time in milliseconds, a deadline is that time plus its timeout, each deadline is
@@ -134,7 +139,8 @@ slice): this core sends what it is given.
 -type input() :: start | line_ready | written | expired
                | {event, erx_hci:event()}
                | {acl, handle(), 0..3, 0..3, binary()}
-               | {request, link(), request()}.
+               | {request, link(), request()}
+               | {advertising_data, binary()}.
 -type request() :: {send, 0..3, binary()} | {disconnect, byte()} | {ltk_reply, erx_hci:key() | none} | taken.
 -type action() :: line_reset | {write, binary()} | {ready, map()} | {link_up, link(), map()} | {link_down, link()}
                 | {to_link, link(), term()} | {stop, term()}.
@@ -166,6 +172,7 @@ slice): this core sends what it is given.
     serial = 0 :: non_neg_integer(),           % the connections so far, the last link's serial
     links = #{} :: #{handle() => #live{}},
     advertising = false :: boolean(),
+    advertising_data = none :: none | binary(),  % data given and not yet written
     disconnects = [] :: [{handle(), {asked, Reason :: byte()} | {taken, Deadline :: time()}}],  % live handles only
     replies = [] :: [{handle(), erx_hci:key() | none}],  % asked and not taken, live handles only
     facts = #{} :: map(),
@@ -293,6 +300,8 @@ untimed({event, Event}, Core) ->
     event(Event, Core);
 untimed({acl, Handle, Boundary, _Broadcast, Data}, Core) ->
     to_link(Handle, {acl, Boundary, Data}, Core);
+untimed({advertising_data, Data}, Core) when is_binary(Data) ->
+    {[], Core#core{advertising_data = Data}};
 untimed({request, Link, Request}, Core) ->
     case current(Link, Core) of
         {current, Live} -> request(Request, Link, Live, Core);
@@ -563,8 +572,8 @@ next_step(_Now, Core) ->
 %% at Now (the plan's step popped, the disconnect marked taken under its deadline, or the
 %% reply removed). Only feed/2 keeps that state; the other callers ask only whether a
 %% command is due. In the bring-up, its next step; once ready, the first disconnect asked
-%% for and not yet taken, else the first Long Term Key reply, else advertising while
-%% connections are below the limit.
+%% for and not yet taken, else the first Long Term Key reply, else new advertising data,
+%% else advertising while connections are below the limit.
 due(_Now, #core{stage = bringup, plan = [{command, Label, Command} | Plan]} = Core) ->
     {Label, Command, Core#core{plan = Plan}};
 due(Now, #core{stage = ready, disconnects = Disconnects} = Core) ->
@@ -575,7 +584,7 @@ due(Now, #core{stage = ready, disconnects = Disconnects} = Core) ->
              Core#core{disconnects = lists:keyreplace(Handle, 1, Disconnects, Taken)}};
         [] ->
             case reply(Core) of
-                none -> advertise(Core);
+                none -> advertising_data(Core);
                 Reply -> Reply
             end
     end;
@@ -589,6 +598,11 @@ reply(_Core) ->
 
 ltk_command(Handle, none) -> {le_long_term_key_request_negative_reply, Handle};
 ltk_command(Handle, Key) -> {le_long_term_key_request_reply, Handle, Key}.
+
+advertising_data(#core{advertising_data = none} = Core) ->
+    advertise(Core);
+advertising_data(#core{advertising_data = Data} = Core) ->
+    {advertising_update, {le_set_advertising_data, Data}, Core#core{advertising_data = none}}.
 
 advertise(#core{advertising = false, links = Links, limit = Limit} = Core) when map_size(Links) < Limit ->
     {advertise, {le_set_advertising_enable, true}, Core};

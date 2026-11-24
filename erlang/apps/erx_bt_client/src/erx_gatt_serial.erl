@@ -14,9 +14,11 @@ and no other, into a byte stream for each phone.
   owner, while the owner's queue holds fewer than `bt_write_queue` messages; past that
   the write is answered the Application Error `?OWNER_BUSY` and its bytes are dropped,
   so a phone that writes faster than the owner reads cannot grow the owner's queue
-  without bound. The owner also hears `{connected, Conn, Info}`, `Info` as erx_gatt's
-  `connected` event gives it, `identity` included when the grant asks for it, and
-  `{disconnected, Conn}`.
+  without bound, and the owner is sent `{serial_lost, Conn}` in their place, once for each
+  run of drops, so it always knows where its stream has a gap. The owner also hears
+  `{connected, Conn, Info}`, `Info` as erx_gatt's `connected` event gives it,
+  `{subscribed, Conn, Char, Kind}`, dropped while the owner's queue is past
+  `bt_write_queue` as a write's bytes are, and `{disconnected, Conn}`.
 * send/2 cuts its bytes into notifications of `tx` of at most `Mtu - 3` octets each,
   `Mtu` the link's bearer MTU as its last `mtu` event gave it, 23 until one comes, and
   returns once all are queued for the link, in order. A notification refused `busy`, the
@@ -24,10 +26,10 @@ and no other, into a byte stream for each phone.
   for at most `bt_handler_timeout_ms`; past that send/2 answers `{error, busy}` and the
   rest of the bytes are not sent. `{error, gone}` answers a link that has ended.
 
-The stream is as reliable as ATT makes it: a phone that writes faster than the owner
-reads loses the writes past the owner's `bt_write_queue`, silently for write commands
-(ATT 3.3.2) and with `?OWNER_BUSY` for write requests, which a phone that needs every
-byte uses and repeats. The handler ends with its owner.
+The stream never loses bytes without saying so: a gap is a `serial_lost` or the stream's
+end, since a phone whose write commands outrun its link loses the link past the link's
+own `bt_write_queue` (docs/design-bluetooth.md, "For apps"). The handler ends with its
+owner.
 """.
 
 -behaviour(erx_gatt_service).
@@ -42,7 +44,10 @@ byte uses and repeats. The handler ends with its owner.
 %% The Application Error a write of rx is answered while the owner is behind.
 -define(OWNER_BUSY, ?ERX_ATT_APPLICATION_ERROR_MIN).
 
--record(serial, {service :: atom(), owner :: pid(), mtus = #{} :: #{reference() => pos_integer()}}).
+%% lost: the links whose last write was dropped, so the owner has heard of the run of
+%% drops it began.
+-record(serial, {service :: atom(), owner :: pid(), mtus = #{} :: #{reference() => pos_integer()},
+                 lost = #{} :: #{reference() => true}}).
 
 -doc """
 Starts the handler of `Service`, linked to the caller, for `Owner`, which hears the
@@ -85,13 +90,16 @@ serial_shape(_Table) ->
     false.
 
 -doc false.
-handle_write(Conn, rx, Bytes, #serial{owner = Owner} = Serial) ->
-    case process_info(Owner, message_queue_len) of
-        {message_queue_len, Queued} when Queued < ?ERX_BT_WRITE_QUEUE ->
+handle_write(Conn, rx, Bytes, #serial{owner = Owner, lost = Lost} = Serial) ->
+    case keeps_up(Owner) of
+        true ->
             Owner ! {serial, Conn, Bytes},
-            {ok, Serial};
+            {ok, Serial#serial{lost = maps:remove(Conn, Lost)}};
+        _Behind when is_map_key(Conn, Lost) ->
+            {{error, ?OWNER_BUSY}, Serial};
         _Behind ->
-            {{error, ?OWNER_BUSY}, Serial}
+            Owner ! {serial_lost, Conn},
+            {{error, ?OWNER_BUSY}, Serial#serial{lost = Lost#{Conn => true}}}
     end.
 
 -doc false.
@@ -100,11 +108,20 @@ handle_event({connected, Conn, Info}, #serial{owner = Owner} = Serial) ->
     {ok, Serial};
 handle_event({mtu, Conn, Mtu}, #serial{mtus = Mtus} = Serial) ->
     {ok, Serial#serial{mtus = Mtus#{Conn => Mtu}}};
-handle_event({disconnected, Conn}, #serial{owner = Owner, mtus = Mtus} = Serial) ->
+handle_event({disconnected, Conn}, #serial{owner = Owner, mtus = Mtus, lost = Lost} = Serial) ->
     Owner ! {disconnected, Conn},
-    {ok, Serial#serial{mtus = maps:remove(Conn, Mtus)}};
-handle_event({subscribed, _Conn, _Char, _Kind}, Serial) ->
+    {ok, Serial#serial{mtus = maps:remove(Conn, Mtus), lost = maps:remove(Conn, Lost)}};
+handle_event({subscribed, _Conn, _Char, _Kind} = Subscribed, #serial{owner = Owner} = Serial) ->
+    _ = keeps_up(Owner) andalso (Owner ! Subscribed),
     {ok, Serial}.
+
+%% Whether the owner's queue holds fewer than bt_write_queue messages, so what a phone
+%% sends cannot grow it without bound.
+keeps_up(Owner) ->
+    case process_info(Owner, message_queue_len) of
+        {message_queue_len, Queued} -> Queued < ?ERX_BT_WRITE_QUEUE;
+        undefined -> false
+    end.
 
 -doc false.
 handle_call({send, Conn, Bytes}, _From, #serial{service = Service, mtus = Mtus} = Serial) ->

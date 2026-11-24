@@ -47,7 +47,7 @@ kill(Registry) ->
 with_facet(Services, Test) ->
     with_facet(Services, #{}, Test).
 
-%% The same for a grant that also states Extra, such as `identity`.
+%% The same for a grant that also states Extra.
 with_facet(Services, Extra, Test) ->
     Mint = spawn(fun() -> receive after infinity -> ok end end),
     Grant = Extra#{grantee => ?GRANTEE, ends_with => [Mint], operations => [], services => Services},
@@ -136,23 +136,12 @@ with_no_registry_a_request_is_refused_unavailable_test() ->
         ?assertEqual({error, badarg}, call(Facet, {attach, 1}))
     end).
 
-%% The registry's end takes its attachments, not the facet: after it, the facet refuses
-%% unavailable, and once a registry is registered again the next request reaches it,
-%% where the service has no handler.
-the_facet_outlives_a_registry_restart_test() ->
+%% A request made while no registry is registered, as while the domain stops, is refused
+%% unavailable.
+a_request_without_a_registry_is_unavailable_test() ->
     with_facet([<<"nus">>], fun(Facet) ->
-        Old = start_registry(),
-        ?assertMatch({ok, _}, call(Facet, {attach, nus})),
-        kill(Old),
-        ?assert(is_process_alive(Facet)),
-        ?assertEqual({error, unavailable}, call(Facet, {attach, nus})),
-        New = start_registry(),
-        try
-            ?assertMatch({ok, _}, call(Facet, {attach, nus})),
-            ?assertEqual({error, attached}, call(Facet, {attach, nus}))
-        after
-            kill(New)
-        end
+        ?assertEqual(undefined, whereis(erx_gatt_srv)),
+        ?assertEqual({error, unavailable}, call(Facet, {attach, nus}))
     end).
 
 %% The attaching caller hears a link's connection and the write handed to it; another
@@ -177,33 +166,22 @@ the_caller_hears_the_events_and_alone_answers_its_writes_test() ->
         exit(Link, kill)
     end).
 
-%% A bonded link's identity reaches the handler whose grant states `identity` true, and
-%% no other: the facet forwards each attach with its grant's statement, so the registry
-%% tells the one handler the identity and the other the link as bonded without it. A phone
-%% that connects from its identity address still shows it in `address`.
-bonded_identity_reaches_only_a_grant_that_states_it_test() ->
+%% No handler hears a bonded link's identity address: a phone that connects from its
+%% identity address shows it in `address`, and a bonded link shows itself bonded alone.
+bonded_identity_reaches_no_handler_test() ->
     Bonded = #{level => encrypted, bonded => true, identity => {random, <<16#C1, 2, 3, 4, 5, 6>>}},
-    Heard = fun(Extra) ->
-        with_registry([<<"nus">>], Extra, fun(Facet) ->
-            Test = self(),
-            ?assertMatch({ok, _}, call(Facet, {attach, nus})),
-            Link = stand_in_link(Test),
-            receive {joined, Link, _} -> ok after ?WAIT_MS -> error(no_join) end,
-            ?assertMatch({connected, _, #{level := open, bonded := false}},
-                         receive {connected, _, _} = Open -> Open after ?WAIT_MS -> none end),
-            Link ! {security, Bonded},
-            Event = receive {connected, _, _} = Connected -> Connected after ?WAIT_MS -> none end,
-            exit(Link, kill),
-            Event
-        end)
-    end,
-    ?assertMatch({connected, _, #{bonded := true, identity := {random, <<16#C1, 2, 3, 4, 5, 6>>}, address := ?ADDRESS}},
-                 Heard(#{identity => true})),
-    {connected, _, Silent} = Heard(#{}),
-    ?assertMatch(#{bonded := true, address := ?ADDRESS}, Silent),
-    ?assertNot(maps:is_key(identity, Silent)),
-    {connected, _, False} = Heard(#{identity => false}),
-    ?assertNot(maps:is_key(identity, False)).
+    with_registry([<<"nus">>], #{}, fun(Facet) ->
+        Test = self(),
+        ?assertMatch({ok, _}, call(Facet, {attach, nus})),
+        Link = stand_in_link(Test),
+        receive {joined, Link, _} -> ok after ?WAIT_MS -> error(no_join) end,
+        ?assertMatch({connected, _, #{level := open, bonded := false}},
+                     receive {connected, _, _} = Open -> Open after ?WAIT_MS -> none end),
+        Link ! {security, Bonded},
+        {connected, _, Heard} = receive {connected, _, _} = Connected -> Connected after ?WAIT_MS -> none end,
+        exit(Link, kill),
+        ?assertEqual(#{level => encrypted, bonded => true, address => ?ADDRESS}, Heard)
+    end).
 
 %% ---- the mint ----
 

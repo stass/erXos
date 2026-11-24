@@ -35,14 +35,12 @@ event_from_the_facet_owner_alone_test() ->
     Connected = #{address => ?ADDRESS, bonded => false, level => open},
     ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected}})),
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{extra => 1}}})),
-    %% `identity` comes only with `bonded` true, and is an address.
-    Bonded = Connected#{bonded => true, identity => ?IDENTITY},
+    Bonded = Connected#{bonded => true},
     ?assertEqual({ok, {connected, C, Bonded}}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Bonded}})),
-    %% A bonded link's event without `identity` is that of a handler whose grant did not ask.
-    ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{bonded => true}}})),
+    %% No event carries a bond's identity address.
     [?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Info}}))
-     || Info <- [Connected#{identity => ?IDENTITY}, Connected#{bonded => true, identity => <<1:48>>},
-                 Bonded#{identity => {random, <<1, 2, 3>>}}, Bonded#{extra => 1}]].
+     || Info <- [Connected#{identity => ?IDENTITY}, Bonded#{identity => ?IDENTITY}, Connected#{bonded => yes},
+                 Bonded#{extra => 1}]].
 
 %% ---- attach and the owner's answers, over a facet that answers a script ----
 
@@ -90,7 +88,9 @@ serial_test_() ->
       fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end,
       fun(_) -> {"a serial handler of console answers console alone", fun console_serial_answers_its_service_alone/0}
       end,
-            fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
+      fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
+      fun(_) -> {"a run of dropped writes is one serial_lost", fun dropped_writes_are_one_loss/0} end,
+      fun(_) -> {"the owner hears a link's subscription", fun subscription_reaches_the_owner/0} end,
       fun(_) -> {"a handler started before its domain holds ble attaches once it does", fun start_waits_for_the_facet/0}
       end,
       fun(_) -> {"no report of a handler that held a write shows its bytes", fun reports_show_no_bytes/0} end,
@@ -134,16 +134,66 @@ log(Event, #{config := #{test := Test}}) ->
     Test ! {logged, Event}.
 
 %% A service whose rx the phone cannot write, or whose tx the machine cannot notify, is no
-%% serial line: the start is refused, its caller, linked, lives on, and no serial handler
-%% runs. (The stand-in facet's relay stays attached for the ended handler, so the case
-%% does not start a second one.)
+%% serial line: the handler stops with the refusal, and no serial handler runs. (The
+%% stand-in facet's relay stays attached for the ended handler, so the case does not
+%% start a second one.)
 misshaped_refused() ->
-    ?assertEqual({error, {not_serial, misshaped}}, erx_gatt_serial:start_link(misshaped, self())),
+    {ok, Serial} = erx_gatt_serial:start_link(misshaped, self()),
+    unlink(Serial),
+    Monitor = monitor(process, Serial),
+    receive {'DOWN', Monitor, process, Serial, Reason} -> ?assertEqual({not_serial, misshaped}, Reason)
+    after ?WAIT_MS -> error(not_stopped)
+    end,
     ?assertEqual(undefined, whereis(erx_gatt_serial)).
+
+%% An owner whose queue holds bt_write_queue messages: each of three writes is answered
+%% 0x80 and one serial_lost stands for the three; a write the owner takes ends the run, so
+%% the next drop is a loss of its own (docs/design-bluetooth.md, "For apps").
+dropped_writes_are_one_loss() ->
+    {Link, Conn} = joined_link(),
+    Test = self(),
+    Owner = spawn(fun() -> receive go -> ok end, owner_loop(Test) end),
+    {ok, _} = erx_gatt_serial:start_link(nus, Owner),
+    _ = sys:get_state(erx_gatt_serial),
+    [Owner ! {filler, N} || N <- lists:seq(1, 16)],
+    [begin
+         erx_gatt_srv ! {erx_bt_link, Link, {write, Ref, {nus, rx}, <<Ref>>}},
+         receive {from_link, Link, {registry, {answer, Ref, Answer}}} -> ?assertEqual({error, 16#80}, Answer)
+         after ?WAIT_MS -> error(no_answer)
+         end
+     end || Ref <- [1, 2, 3]],
+    {messages, Held} = process_info(Owner, messages),
+    ?assertEqual([{serial_lost, Conn}], [M || M <- Held, is_stream(M)]),
+    Owner ! go,
+    ?assertEqual({serial_lost, Conn}, owner_heard()),
+    erx_gatt_srv ! {erx_bt_link, Link, {write, 4, {nus, rx}, <<"in">>}},
+    ?assertEqual({serial, Conn, <<"in">>}, owner_heard()),
+    exit(Owner, kill).
+
+%% The owner passes on the stream the serial handler sends it, its bytes and its gaps.
+owner_loop(Test) ->
+    receive
+        Message ->
+            _ = is_stream(Message) andalso (Test ! {owner, Message}),
+            owner_loop(Test)
+    end.
+
+is_stream(Message) -> element(1, Message) =:= serial orelse element(1, Message) =:= serial_lost.
+
+owner_heard() ->
+    receive {owner, Message} -> Message after ?WAIT_MS -> error(nothing_heard) end.
+
+subscription_reaches_the_owner() ->
+    {Link, Conn} = joined_link(),
+    {ok, _} = erx_gatt_serial:start_link(nus, self()),
+    _ = sys:get_state(erx_gatt_serial),
+    erx_gatt_srv ! {erx_bt_link, Link, {subscribed, {nus, tx}, notify}},
+    receive {subscribed, Conn, tx, notify} -> ok after ?WAIT_MS -> error(no_subscribed) end.
 
 write_reaches_the_owner() ->
     {Link, Conn} = joined_link(),
     {ok, _} = erx_gatt_serial:start_link(nus, self()),
+    _ = sys:get_state(erx_gatt_serial),
     Bytes = binary:copy(<<"x">>, 100),
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, Bytes}},
     receive {serial, Conn, Got} -> ?assertEqual(Bytes, Got) after ?WAIT_MS -> error(no_serial) end,
@@ -153,6 +203,7 @@ owner_behind_refuses() ->
     {Link, _Conn} = joined_link(),
     Owner = spawn(fun() -> receive stop -> ok end end),
     {ok, _} = erx_gatt_serial:start_link(nus, Owner),
+    _ = sys:get_state(erx_gatt_serial),
     [Owner ! {filler, N} || N <- lists:seq(1, 16)],
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, <<"late">>}},
     receive {from_link, Link, {registry, {answer, 7, Answer}}} -> ?assertEqual({error, 16#80}, Answer)
@@ -176,6 +227,7 @@ send_cuts_at_the_mtu() ->
 send_waits_while_busy() ->
     {Link, Conn} = joined_link(),
     {ok, _} = erx_gatt_serial:start_link(nus, self()),
+    _ = sys:get_state(erx_gatt_serial),
     Sender = sender(Conn, <<"abc">>),
     First = notification(Link, {error, busy}),
     ?assertEqual(First, notification(Link, ok)),
@@ -184,6 +236,7 @@ send_waits_while_busy() ->
 forged_event_dropped() ->
     {_Link, Conn} = joined_link(),
     {ok, Serial} = erx_gatt_serial:start_link(nus, self()),
+    _ = sys:get_state(Serial),
     Serial ! {erx_origin, ?OTHER, {write, make_ref(), Conn, rx, <<"forged">>}},
     Serial ! {write, make_ref(), Conn, rx, <<"bare">>},
     sync(),
@@ -198,6 +251,7 @@ console_serial_answers_its_service_alone() ->
     {Link, Conn} = joined_link(),
     {ok, Serial} = erx_gatt_serial:start_link(console, self()),
     unlink(Serial),
+    _ = sys:get_state(Serial),
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {console, rx}, <<"in">>}},
     receive {serial, Conn, Got} -> ?assertEqual(<<"in">>, Got) after ?WAIT_MS -> error(no_serial) end,
     receive {from_link, Link, {registry, {answer, 7, ok}}} -> ok after ?WAIT_MS -> error(no_answer) end,
@@ -226,11 +280,12 @@ echo_answers_each_link_alone() ->
     end,
     kill(Echo).
 
-%% An app's applications may start before the domain service has installed the session's
-%% ble facet: the echo started while the domain holds no ble attaches once the facet is
-%% installed, within bt_attach_wait_ms, and echoes. The registry of facets is emptied as
-%% erx_facets keeps it before any install, and erx_connections is a stand-in for the
-%% connection agent, which answers a waiter once an installation has followed its read.
+%% A session's grants are installed only after its start has finished: the echo started
+%% while the domain holds no ble answers its start at once, attaches once the facet is
+%% installed, and echoes (docs/design-bluetooth.md, "The client"). The registry of
+%% facets is emptied as erx_facets keeps it before any install, and erx_connections is
+%% a stand-in for the connection agent, which answers a waiter once an installation has
+%% followed its read.
 start_waits_for_the_facet() ->
     Facet = erx_facets:find(ble),
     persistent_term:put({erx, facets}, {erx_facets:generation(), #{}}),
@@ -238,9 +293,8 @@ start_waits_for_the_facet() ->
     register(erx_connections, Agent),
     Test = self(),
     Starter = spawn(fun() -> Test ! {started, erx_echo:start_link()}, receive stop -> ok end end),
-    timer:sleep(200),
+    receive {started, Started} -> ?assertMatch({ok, _}, Started) after ?WAIT_MS -> error(no_start) end,
     erx_facets:install(#{ble => Facet}),
-    receive {started, Started} -> ?assertMatch({ok, _}, Started) after ?WAIT_MS * 3 -> error(no_start) end,
     {Link, _Conn} = joined_link(),
     echoed(Link, 9, <<"late">>),
     [kill(P) || P <- [Starter, Agent]].
@@ -273,12 +327,16 @@ echoed(Link, Id, Bytes) ->
 %% installed as ble.
 start_registry() ->
     persistent_term:put(erx_dist_owner, ?BT),
+    {_Registry, Facet} = Started = start_registry_only(),
+    erx_facets:install(#{ble => Facet}),
+    Started.
+
+%% The registry and the relaying facet, not yet installed.
+start_registry_only() ->
     Served = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()] ++ [console(), misshaped()],
     {ok, Registry} = erx_gatt_srv:start_link(?GAP, Served),
     unlink(Registry),
-    Facet = spawn(fun() -> relaying_facet(#{}) end),
-    erx_facets:install(#{ble => Facet}),
-    {Registry, Facet}.
+    {Registry, spawn(fun() -> relaying_facet(#{}) end)}.
 
 stop({Registry, Facet}) ->
     [kill(P) || P <- [whereis(erx_gatt_serial), Facet, Registry], is_pid(P)],
@@ -299,13 +357,9 @@ relaying_facet(Relays) ->
                         #{Caller := Known} -> Known;
                         #{} -> spawn(fun() -> link(Caller), relay(Caller) end)
                     end,
-            gen_server:reply(From, erx_gatt_srv:facet(Relay, as_granted(Op), ?WAIT_MS)),
+            gen_server:reply(From, erx_gatt_srv:facet(Relay, Op, ?WAIT_MS)),
             relaying_facet(Relays#{Caller => Relay})
     end.
-
-%% The stand-in grant asks for the identity, as the ble facet forwards an attach.
-as_granted({attach, Service}) -> {attach, Service, true};
-as_granted(Op) -> Op.
 
 relay(Handler) ->
     receive Event -> Handler ! {erx_origin, ?BT, Event}, relay(Handler) end.
@@ -384,6 +438,6 @@ sync() -> _ = sys:get_state(erx_gatt_srv), ok.
 %% The serial handler has taken Conn's mtu event, which reaches it through the relay.
 mtu_heard(Conn, Mtu, Tries) ->
     case sys:get_state(erx_gatt_serial) of
-        {handler, erx_gatt_serial, _, _, {serial, _, _, #{Conn := Mtu}}} -> ok;
+        {handler, erx_gatt_serial, _, _, {serial, _, _, #{Conn := Mtu}, _}} -> ok;
         _ when Tries > 0 -> timer:sleep(10), mtu_heard(Conn, Mtu, Tries - 1)
     end.

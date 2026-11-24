@@ -22,10 +22,18 @@ class ErxBtRegistryTest < Minitest::Test
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
-    Seed.new(fault: "a bonded link's identity told to every handler, whatever its grant asked",
-             path: CORE, anchor: '        false -> (maps:remove(identity, Security))#{address => Address}',
-             replacement: '        false -> Security#{address => Address}',
-             catching_case: 'identity_reaches_only_the_handler_that_asked'),
+    Seed.new(fault: "a bonded link's identity address left in the connected event",
+             path: CORE, anchor: '    #{address => Address, level => Level, bonded => true}.',
+             replacement: '    Security#{address => Address}.',
+             catching_case: 'connected_carries_no_identity'),
+    Seed.new(fault: "the link's MTU dropped from the replay",
+             path: CORE, anchor: ' ++ [{mtu, Conn, Mtu} || New, Mtu =/= none] ++',
+             replacement: ' ++ [] ++',
+             catching_case: 'attach_replays_a_connected_link'),
+    Seed.new(fault: "the advertised set told at an attach only, so a handler's end leaves its UUID advertised",
+             path: CORE, anchor: '            {advertising(Core, Next), Next}',
+             replacement: '            {[], Next}',
+             catching_case: 'advertised_follows_the_handlers'),
     Seed.new(fault: "a service's values set and sent by any process, not only its handler",
              path: CORE, anchor: '        #{Service := Caller} -> ok;',
              replacement: '        #{Service := _} -> ok;',

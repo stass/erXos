@@ -23,8 +23,10 @@ answer that comes after its write timed out is dropped rather than taken for the
 write; and a handler sees one write of a link at a time, as ATT's
 sequential protocol has them (3.3.2). What arrives meanwhile waits in the bearer in order:
 at most one request, since a second request before the first's response ends the link,
-and at most `bt_write_queue` write commands, past which a command is discarded and
-counted. A prepared write is one per link, to one characteristic, at most its maximum; a
+and at most `bt_write_queue` write commands, past which a command ends the link
+(docs/design-bluetooth.md, "What a radio peer can make the domain spend"): ATT would let
+it be discarded (3.3.2), but a discarded write is a silent gap in a handler's stream. A
+prepared write is one per link, to one characteristic, at most its maximum; a
 Prepare Write past that, or to another characteristic, is Prepare Queue Full. Its parts
 are joined as they arrive, from an empty value, so the bearer holds at most the maximum
 and the handler receives the whole value at Execute Write, which answers Invalid Offset
@@ -57,11 +59,11 @@ ignored otherwise.
 What the link does: sends a PDU on the ATT channel; gives a write to the characteristic's
 handler, or a change of a configuration to whatever decides it, and passes the answer to
 `reply/4`; tells the handlers of a subscription, a new MTU or a confirmed indication;
-counts a discarded command; or ends the link.
+or ends the link.
 """.
 -type action() :: {send, binary()} | {write, ref(), key(), binary()} | {configure, ref(), key(), subscription()}
-                | {subscribed, key(), subscription()} | {mtu, pos_integer()} | {confirmed, key()} | discarded
-                | {close, request_outstanding}.
+                | {subscribed, key(), subscription()} | {mtu, pos_integer()} | {confirmed, key()}
+                | {close, request_outstanding | write_queue_full}.
 
 -type item() :: {request, erx_att:request()} | {write_command, erx_att:handle(), binary()}
               | {unsupported, 0..16#FF} | {invalid, 0..16#FF}.
@@ -198,7 +200,7 @@ arrive(Item, _Server, #bearer{awaiting = {_Ref, Awaited, _Change}, waiting = Wai
     case is_request(Item) of
         true when Requests =/= []; Awaited =/= command -> {[{close, request_outstanding}], Bearer};
         true -> {[], Bearer#bearer{waiting = queue:in(Item, Waiting)}};
-        false when Commands >= ?ERX_BT_WRITE_QUEUE -> {[discarded], Bearer};
+        false when Commands >= ?ERX_BT_WRITE_QUEUE -> {[{close, write_queue_full}], Bearer};
         false -> {[], Bearer#bearer{waiting = queue:in(Item, Waiting)}}
     end.
 

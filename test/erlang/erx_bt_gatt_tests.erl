@@ -488,11 +488,11 @@ second_request_before_the_response_ends_the_link_test() ->
     {_, _, B} = ask(write(12, <<"a">>), S, erx_gatt_server:new()),
     ?assertMatch({[], [{close, request_outstanding}], _}, ask(read(1), S, B)).
 
-commands_wait_behind_the_handler_and_overflow_is_discarded_test() ->
+commands_wait_behind_the_handler_and_overflow_ends_the_link_test() ->
     S = server(?OPEN),
     {[], [{write, _, {nus, rx}, <<0>>}], B0} = ask(write_cmd(12, <<0>>), S, erx_gatt_server:new()),
     B16 = lists:foldl(fun(N, B) -> {[], [], Next} = ask(write_cmd(12, <<N>>), S, B), Next end, B0, lists:seq(1, 16)),
-    ?assertMatch({[], [discarded], _}, ask(write_cmd(12, <<17>>), S, B16)),
+    ?assertMatch({[], [{close, write_queue_full}], _}, ask(write_cmd(12, <<17>>), S, B16)),
     %% A request waits behind the commands; the handler's answers release them in order.
     {[], [], B17} = ask(read(1), S, B16),
     {[{write, 2, {nus, rx}, <<1>>}], B18} = erx_gatt_server:reply(1, ok, S, B17),

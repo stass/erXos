@@ -26,6 +26,11 @@ class ErxBtGattTest < Minitest::Test
   Seed = Data.define(:fault, :module_path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
+    Seed.new(fault: "a write command past bt_write_queue discarded and the link kept",
+             module_path: SERVER,
+             anchor: "false when Commands >= ?ERX_BT_WRITE_QUEUE -> {[{close, write_queue_full}], Bearer};",
+             replacement: "false when Commands >= ?ERX_BT_WRITE_QUEUE -> {[], Bearer};",
+             catching_case: "commands_wait_behind_the_handler_and_overflow_ends_the_link_test"),
     Seed.new(fault: 'the bond check dropped from the gate, so a pairing link passes bonded',
              module_path: GATE,
              anchor: 'check(bonded, _Security) -> {error, insufficient_authentication}.',

@@ -35,6 +35,11 @@ class ErxBtHciTest < Minitest::Test
   Seed = Data.define(:fault, :module_path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
+    Seed.new(fault: 'new advertising data kept behind data not yet written, so the earlier is written',
+             module_path: CORE,
+             anchor: '    {[], Core#core{advertising_data = Data}};',
+             replacement: '    {[], Core#core{advertising_data = case Core#core.advertising_data of none -> Data; Kept -> Kept end}};',
+             catching_case: 'explored_advertising_data_test'),
     Seed.new(fault: 'the record length not checked against the bytes left',
              module_path: PATCH,
              anchor: "parse(_Bytes, Offset, _Records) ->\n    throw({truncated, Offset}).",

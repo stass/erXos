@@ -13,11 +13,14 @@ every link, and handlers stay attached across the group's restarts.
   each a write for a handler, a subscription, a new MTU or the link's security; a facet's
   operation, `facet/3`; and the `'DOWN'` of a link or a handler it monitors. For each of a
   link's writes it makes the fresh reference `Req` the handler receives.
-- **Actions.** Answers, monitors, events to handlers, `{registry, Message}` to a link, and
+- **Actions.** Answers, monitors, events to handlers, `{registry, Message}` to a link,
+  `{advertised, Input}` to the controller process when the services advertised change, and
   notification requests: `gen_server:send_request/4` to the link, labelled with the
   caller's `From`, so the link answers the request and the request's monitor answers for a
   link that ends first, with `{error, gone}` to the caller. Its collection of request ids
-  holds one per notification pending.
+  holds one per notification pending. The controller process, `erx_bt_hci`, is reached by
+  its registered name and missed while its group restarts, since a controller process asks
+  advertised/0 at its start, registered before it asks.
 - **Facets.** `facet/3` is the one entry of a `ble` facet's operations, with its caller
   and no grant: `erx_ble_facet`, the only path here from another domain, has checked the
   grant, and forwards the call with the grantee's process as the caller, so the forwarded
@@ -29,7 +32,6 @@ every link, and handlers stay attached across the group's restarts.
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(srv, {
-    advertised :: erx_bt_adv:input(),
     core :: erx_gatt_registry:core(),
     requests :: gen_server:request_id_collection()
 }).
@@ -40,10 +42,10 @@ start_link(Gap, Services) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, {Gap, Services}, []).
 
 -doc """
-What the controller process advertises (docs/design-bluetooth.md, "Advertising"): the
-UUIDs of the served services whose declarations say `advertise`, in the order served,
-and GAP's name and appearance, the values the table's Device Name and Appearance
-read, so the advertised name and GAP's are one.
+What the controller process advertises (docs/design-bluetooth.md, "Advertising"):
+erx_gatt_registry:advertised/1 of the registry's core, the UUIDs of the services that
+say `advertise` and have a handler now, and GAP's name and appearance, so the
+advertised name and GAP's are one.
 """.
 -spec advertised() -> erx_bt_adv:input().
 advertised() ->
@@ -63,8 +65,7 @@ join(Conn, Info) ->
 -doc """
 A `ble` facet's operation `Op` for `Caller`, the process that becomes a service's
 handler, hears its events and alone answers the writes handed to it:
-`{attach, Service, Identity}`, Identity whether the grant asks for a bonded link's
-identity, `{set, Service, Char, Value}`, `{notify | indicate, Conn, Service,
+`{attach, Service}`, `{set, Service, Char, Value}`, `{notify | indicate, Conn, Service,
 Char, Value}` or `{reply, Req, Answer}`. The answers and refusals are the facet's
 (docs/design-bluetooth.md, "Refusals and error results"). An indication answers once the
 phone confirms it or the link's 30 s transaction timeout fails it, so `Timeout` must
@@ -75,13 +76,11 @@ facet(Caller, Op, Timeout) ->
     gen_server:call(?MODULE, {facet, Caller, Op}, Timeout).
 
 init({Gap, Services}) ->
-    Marked = erx_gatt_decl:advertised(),
-    Uuids = [Uuid || #{name := Name, uuid := Uuid} <- Services, lists:member(Name, Marked)],
-    {ok, #srv{advertised = Gap#{uuids => Uuids}, core = erx_gatt_registry:new(Gap, Services),
+    {ok, #srv{core = erx_gatt_registry:new(Gap, Services, erx_gatt_decl:advertised()),
               requests = gen_server:reqids_new()}}.
 
-handle_call(advertised, _From, #srv{advertised = Advertised} = Srv) ->
-    {reply, Advertised, Srv};
+handle_call(advertised, _From, #srv{core = Core} = Srv) ->
+    {reply, erx_gatt_registry:advertised(Core), Srv};
 handle_call({join, Conn, Info}, {Link, _Tag} = From, Srv) ->
     step({join, Link, Conn, Info, From}, Srv);
 handle_call({facet, Caller, Op}, From, Srv) ->
@@ -124,6 +123,12 @@ perform({monitor, Pid}, Srv) ->
     Srv;
 perform({event, Handler, Event}, Srv) ->
     Handler ! Event,
+    Srv;
+perform({advertised, Input}, Srv) ->
+    case whereis(erx_bt_hci) of
+        undefined -> ok;
+        Controller -> Controller ! {advertised, Input}
+    end,
     Srv;
 perform({to_link, Link, Message}, Srv) ->
     Link ! {registry, Message},

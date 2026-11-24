@@ -41,12 +41,8 @@ run([Seed]) ->
         false -> error({too_few_forwarded, Forwarded})
     end.
 
-% The request the facet forwards: an attach with the grant's identity, every other as made.
-as_granted({attach, Service}) -> {attach, Service, false};
-as_granted(Request) -> Request.
-
-%% The grant the rounds are admitted under: the services of GRANTED, no identity.
-grant() -> #{services => ?GRANTED, identity => false}.
+%% The grant the rounds are admitted under: the services of GRANTED.
+grant() -> #{services => ?GRANTED}.
 
 idle() ->
     receive stop -> ok end.
@@ -58,7 +54,7 @@ round_of(Request, Registry, Caller) ->
            end,
     erlang:system_info(atom_count) =:= Atoms orelse error({atoms_made, Request}),
     Expected = verdict(Request, ?GRANTED),
-    Forwarded = as_granted(Request),
+    Forwarded = Request,
     Grant = grant(),
     case {Expected, Said} of
         {forward, {forward, Registry, {facet, Caller, Forwarded}, Grant}} -> forward;

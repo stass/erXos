@@ -207,8 +207,7 @@ the link's end, which disconnects it.
     current = [] :: [{0..3, binary()}],                   % the packets left of the frame being handed over
     queue = queue:new() :: queue:queue({erx_l2cap:cid(), binary()}),
     dropped = 0 :: non_neg_integer(),                     % frames on a channel the link does not serve
-    refused = 0 :: non_neg_integer(),                     % SMP and signaling answers met by a full queue
-    discarded = 0 :: non_neg_integer()                    % write commands past bt_write_queue
+    refused = 0 :: non_neg_integer()                      % SMP and signaling answers met by a full queue
 }).
 -opaque core() :: #core{}.
 
@@ -259,8 +258,7 @@ facts(#core{} = Core) ->
     #{key => key_level(Core#core.key), encrypted => Core#core.encrypted, bonded => bonded(Core),
       ltk_answer => Core#core.ltk_answer, pairing => Core#core.smp_deadline =/= none,
       mtu => erx_gatt_server:mtu(Core#core.bearer), queued => queue:len(Core#core.queue),
-      outstanding => Core#core.outstanding, dropped => Core#core.dropped, refused => Core#core.refused,
-      discarded => Core#core.discarded}.
+      outstanding => Core#core.outstanding, dropped => Core#core.dropped, refused => Core#core.refused}.
 
 %% ---- the inputs, by role ----
 
@@ -467,8 +465,6 @@ att_action({confirmed, _Key}, _Now, #core{indication = {service_changed, _}, tab
     {[{store, {served, erx_gatt_db:hash(Table)}}], Core#core{indication = none}};
 att_action({confirmed, _Key}, _Now, Core) ->
     {[], Core};
-att_action(discarded, _Now, #core{discarded = Discarded} = Core) ->
-    {[], Core#core{discarded = Discarded + 1}};
 att_action({close, Reason}, _Now, Core) ->
     {[{close, {att, Reason}}], Core}.
 

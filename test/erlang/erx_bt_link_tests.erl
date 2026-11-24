@@ -222,13 +222,16 @@ handler_deadline_test() ->
     ?assertEqual(infinity, erx_bt_link_core:next_deadline(Core2)).
 
 %% A second request before the first's response ends the link (Part F, 3.3.2); write
-%% commands past bt_write_queue behind a handler's answer are discarded and counted.
+%% a write command past bt_write_queue behind a handler's answer ends the link
+%% (docs/design-bluetooth.md, "What a radio peer can make the domain spend").
 one_request_and_command_queue_test() ->
     {Two, _} = run([att(write(handle(open_w), <<"a">>)), att(read(3))]),
     ?assertMatch([{att, request_outstanding}], closed(Two)),
     Commands = [att(write_cmd(handle(open_w), <<I>>)) || I <- lists:seq(0, 17)],
-    {_, Core} = run(Commands),
-    ?assertMatch(#{discarded := 1}, facts(Core)).
+    {Queued, _} = run(lists:droplast(Commands)),
+    ?assertEqual([], closed(Queued)),
+    {Overflow, _} = run(Commands),
+    ?assertEqual([{att, write_queue_full}], closed(Overflow)).
 
 %% ---- notifications ----
 

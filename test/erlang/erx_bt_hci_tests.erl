@@ -394,6 +394,120 @@ a_disconnect_not_completed_by_its_deadline_stops_test() ->
     {Quiet, []} = At(2200, {event, complete(16#200A, <<0>>)}, Advertising),
     ?assertEqual(infinity, erx_bt_hci_core:next_deadline(Quiet)).
 
+%% New advertising data (docs/design-bluetooth.md, "Advertising"): written with LE Set
+%% Advertising Data at the next free command slot; two inputs before the slot frees write
+%% only the later; one given during the bring-up is written once the core is ready.
+advertising_data_is_written_at_the_next_free_slot_test() ->
+    {_, Ready} = ready(1),
+    {Written, Actions} = going(step({advertising_data, <<2, 1, 6, 3, 2, 1, 2>>}, Ready)),
+    ?assertEqual([{write, set_advertising_data(<<2, 1, 6, 3, 2, 1, 2>>)}], Actions),
+    {Busy, []} = going(step({advertising_data, <<2, 1, 6>>}, Written)),
+    {Later, []} = going(step({advertising_data, <<2, 1, 7>>}, Busy)),
+    {Taken, []} = going(step(written, Later)),
+    {Answered, Next} = going(answer(Taken, complete(16#2008, <<0>>))),
+    ?assertEqual([{write, set_advertising_data(<<2, 1, 7>>)}], Next),
+    {Idle, []} = going(answer(element(1, going(step(written, Answered))), complete(16#2008, <<0>>))),
+    ?assertEqual(infinity, erx_bt_hci_core:next_deadline(Idle)),
+    {BringUp, _} = going(step(start, new(1))),
+    {Given, []} = going(step({advertising_data, <<2, 1, 9>>}, BringUp)),
+    {Core1, Actions1} = going(step(line_ready, Given)),
+    ?assertEqual([set_advertising_data(<<2, 1, 6>>), set_advertising_data(<<2, 1, 9>>)],
+                 [W || <<1, 16#2008:16/little, _/binary>> = W <- writes_until(16#200A, Actions1, Core1)]).
+
+%% A controller that refuses new advertising data stops the core, whose restart writes the
+%% configuration's data in the bring-up.
+refused_advertising_data_stops_test() ->
+    {_, Ready} = ready(1),
+    {Written, _} = going(step({advertising_data, <<2, 1, 6>>}, Ready)),
+    {Taken, []} = going(step(written, Written)),
+    ?assertMatch({_, [{stop, {step_failed, advertising_update, _}}]}, answer(Taken, complete(16#2008, <<16#12>>))).
+
+set_advertising_data(Data) ->
+    {Opcode, Parameters} = erx_hci:command({le_set_advertising_data, Data}),
+    erx_h4:command(Opcode, Parameters).
+
+%% Every write from Actions on, answering each command well, until the command Opcode is
+%% written.
+writes_until(Opcode, Actions, Core) ->
+    Writes = [W || {write, W} <- Actions],
+    case [Op || <<1, Op:16/little, _/binary>> <- Writes] of
+        [Opcode] -> Writes;
+        [Other] ->
+            {Written, []} = step(written, Core),
+            {Answered, Next} = answer(Written, complete(Other, good({Other, x}))),
+            Writes ++ writes_until(Opcode, Next, Answered)
+    end.
+
+%% The advertising data input explored: from a ready core of one connection, every
+%% sequence of up to three inputs of two data, interleaved with the writer taking its
+%% item, each command answered well, and a connection on handle 1 made and ended, twice
+%% at most. On every transition the core never stops, and each LE Set Advertising Data
+%% written carries the data last given, given since the last such write; at quiescence (the
+%% writer idle, no command unanswered, no deadline) the data last written is the data last
+%% given.
+-record(adv, {core, writer = idle, command = none, given = none, pending = false, written = none, inputs = 0,
+              connections = 0, live = false}).
+
+explored_advertising_data_test() ->
+    {_, Ready} = ready(1),
+    Start = #adv{core = Ready},
+    Count = adv_walk([Start], sets:from_list([adv_key(Start)], [{version, 2}]), 0),
+    ?assert(Count > 100).
+
+adv_walk([], _Seen, Count) ->
+    Count;
+adv_walk([World | Rest], Seen, Count) ->
+    adv_quiescent(World),
+    {Next, Seen1} = lists:foldl(fun(Input, {Queue, S}) ->
+                                        After = adv_step(Input, World),
+                                        Key = adv_key(After),
+                                        case sets:is_element(Key, S) of
+                                            true -> {Queue, S};
+                                            false -> {[After | Queue], sets:add_element(Key, S)}
+                                        end
+                                end, {Rest, Seen}, adv_inputs(World)),
+    adv_walk(Next, Seen1, Count + 1).
+
+adv_key(#adv{} = World) -> World.
+
+adv_inputs(#adv{writer = Writer, command = Command, inputs = Inputs, connections = Connections, live = Live}) ->
+    [{advertising_data, D} || Inputs < 3, D <- [<<2, 1, 6>>, <<2, 1, 7>>]] ++
+        [written || Writer =:= busy] ++
+        [{event, complete(Opcode, <<0>>)} || {Opcode, _} <- [Command], Writer =:= idle] ++
+        [{event, {le_connection_complete, 1, ?PEER}} || not Live, Connections < 2] ++
+        [{event, {disconnection_complete, 0, 1, 16#13}} || Live].
+
+adv_step(Input, #adv{core = Core} = World) ->
+    {Next, Actions} = step(Input, Core),
+    ?assertNotMatch([{stop, _}], Actions),
+    Observed = lists:foldl(fun adv_observe/2, adv_consume(Input, World#adv{core = Next}), Actions),
+    Observed.
+
+adv_consume({advertising_data, D}, #adv{inputs = N} = World) -> World#adv{given = D, pending = true, inputs = N + 1};
+adv_consume(written, World) -> World#adv{writer = idle};
+adv_consume({event, {command_complete, _, _, _}}, World) -> World#adv{command = none};
+adv_consume({event, {le_connection_complete, 1, _}}, #adv{connections = N} = World) ->
+    World#adv{live = true, connections = N + 1};
+adv_consume({event, {disconnection_complete, 0, 1, _}}, World) -> World#adv{live = false}.
+
+adv_observe({write, <<1, 16#2008:16/little, _Length, Data/binary>> = Packet},
+            #adv{given = Given, pending = Pending} = World) ->
+    ?assertEqual(set_advertising_data(Given), Packet),
+    ?assert(Pending),
+    World#adv{writer = busy, command = {16#2008, Data}, written = Given, pending = false};
+adv_observe({write, <<1, Opcode:16/little, _Length, Parameters/binary>>}, World) ->
+    World#adv{writer = busy, command = {Opcode, Parameters}};
+adv_observe(_Action, World) ->
+    World.
+
+adv_quiescent(#adv{writer = idle, command = none, core = Core, given = Given, written = Written}) ->
+    case erx_bt_hci_core:next_deadline(Core) of
+        infinity when Given =/= none -> ?assertEqual(Given, Written);
+        _ -> ok
+    end;
+adv_quiescent(_World) ->
+    ok.
+
 %% A connection that completes while the advertising enable is written and unanswered
 %% came from that enable: its answer leaves advertising off, and the disconnection
 %% enables it again.

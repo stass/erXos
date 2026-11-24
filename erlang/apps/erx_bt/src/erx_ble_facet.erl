@@ -16,13 +16,12 @@ domain's connection to the grantee. It refuses a grant to the system domain, whi
 manifest check refuses too (B8), so a row that check missed still grants nothing.
 
 The facet is the one check of a grant: init/1 keeps the services its grant's `services`
-parameter names, as the atoms of abi/gatt's declarations, so no request makes an atom,
-and whether its `identity` parameter asks for a bonded link's identity, which an attach
-it forwards carries, so the registry gives the identity to this grant's handler alone;
+parameter names, as the atoms of abi/gatt's declarations, so no request makes an atom;
 admit/3 refuses a request of no operation's shape with `badarg` and one naming any other
 service with `not_granted`, before the registry sees it. It finds the registry by its
-registered name at each request, refusing `unavailable` while none is registered, so a
-registry restart ends no facet and no facet holds a registry of an earlier start. It
+registered name at each request, refusing `unavailable` while none is registered, as
+while the domain stops: the registry's end ends `erx_bt_sup` and so the domain, and every
+facet with the mint (docs/design-bluetooth.md, "Concurrency"). It
 forwards `{facet, Caller, Request}`, Caller the grantee's process that made the call, so
 the forwarded call's `From` names the facet, and Caller becomes the handler, hears the
 events and alone answers the writes handed to it.
@@ -84,9 +83,8 @@ grant(_System, Grantee, Limits) ->
     end.
 
 -doc false.
-init(#{services := Names} = Limits) when is_list(Names) ->
-    {ok, #{services => [Service || Service <- erx_gatt_decl:names(), lists:member(atom_to_binary(Service), Names)],
-           identity => maps:get(identity, Limits, false) =:= true}}.
+init(#{services := Names}) when is_list(Names) ->
+    {ok, #{services => [Service || Service <- erx_gatt_decl:names(), lists:member(atom_to_binary(Service), Names)]}}.
 
 -doc false.
 admit(Request, Caller, #{services := Services} = Grant) ->
@@ -101,13 +99,8 @@ forward(false, _Request, _Caller, Grant) ->
 forward(true, Request, Caller, Grant) ->
     case whereis(erx_gatt_srv) of
         undefined -> {refuse, unavailable, Grant};
-        Registry -> {forward, Registry, {facet, Caller, as_granted(Request, Grant)}, Grant}
+        Registry -> {forward, Registry, {facet, Caller, Request}, Grant}
     end.
-
-%% The request as the registry takes it: an attach with whether the grant asks for a
-%% bonded link's identity; every other as made.
-as_granted({attach, Service}, #{identity := Identity}) -> {attach, Service, Identity};
-as_granted(Request, _Grant) -> Request.
 
 %% The service a request of an operation's shape names; reply for a reply, which names
 %% the write it answers instead; error for any other term.

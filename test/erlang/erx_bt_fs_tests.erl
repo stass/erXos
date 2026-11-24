@@ -180,21 +180,19 @@ ctl(Grant, Fid, Bytes) ->
     end.
 
 %% The window starts with the store's state, so a store whose start found no volume for
-%% its directory makes pair answer eio, and the store's restart restarts the window with the
-%% new store's state.
-the_window_starts_with_the_store_and_restarts_with_it_test() ->
+%% its directory makes pair answer eio; the store's end ends the window and the stack,
+%% whose restart is the domain's (docs/design-bluetooth.md, "Concurrency").
+the_window_starts_with_the_store_and_ends_with_it_test() ->
     under_sup(fun no_volume/1,
-              fun(Sup, Volume) ->
+              fun(Sup, _Volume) ->
                       Unread = grant(whereis(erx_bt_fs)),
                       ?assertEqual({error, eio}, open(maps:get(grant, Unread), 2)),
-                      ok = file:make_dir(Volume),
                       Monitor = monitor(process, maps:get(fs, Unread)),
+                      Stack = monitor(process, Sup),
                       exit(whereis(erx_bt_store), kill),
                       receive {'DOWN', Monitor, _, _, _} -> ok after 1000 -> erlang:error(window_not_ended) end,
-                      [Fs] = [Pid || {erx_bt_fs, Pid, _, _} <- supervisor:which_children(Sup)],
-                      Read = grant(Fs),
-                      ?assertMatch({ok, _, _}, open(maps:get(grant, Read), 2)),
-                      [exit(Grant, kill) || #{grant := Grant} <- [Unread, Read]]
+                      receive {'DOWN', Stack, _, _, _} -> ok after 1000 -> erlang:error(stack_not_ended) end,
+                      exit(maps:get(grant, Unread), kill)
               end).
 
 %% A store unknown since its start refuses ctl's `forget ADDRESS TYPE`, and `forget all` while
