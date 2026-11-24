@@ -338,11 +338,13 @@ granted_names(Grantee, State) ->
 The services of configured domains the manifest grants Grantee, as
 granted_names/2 finds them, each its name and its server row, sorted by name: the
 pair that names a service's interface, since two servers may each serve a service
-of one name.
+of one name. A drive grant, installed under {drive, N} and no service's name, is
+none of them: its grantee learns it from its registry.
 """.
 -spec granted_services(row() | system, state()) -> [{name(), row()}].
 granted_services(Grantee, #{grants := Grants}) ->
-    lists:usort([{Name, Server} || {Holder, Name} := #{server := Server} <- Grants, Holder =:= Grantee]).
+    lists:usort([{Name, Server} || {Holder, Name} := #{server := Server, service := Service} <- Grants,
+                                   Holder =:= Grantee, Name =:= Service]).
 
 -doc """
 Whether Grantee's namespace is in place: each of its grants of a files

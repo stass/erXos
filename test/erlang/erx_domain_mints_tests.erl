@@ -1043,3 +1043,11 @@ a_drive_grant_is_minted_again_for_a_new_grantee_test() ->
                       {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], erx_domain_mints:new(Config)),
     {Actions, _} = run([{ended, ?G, 6}, ready(?G, 8, #{}), {introduced, 2, ok}], State),
     ?assertMatch([{mint, 2, _, drive, 8, #{drive := 3}}], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]).
+
+%% A drive grant names no service of its grantee's: the media domain learns its drives from
+%% its registry, so granted_services/2 and granted_names/2 list only the grants installed
+%% under their service's name, and the domain service finds every listed one's interface.
+a_drive_grant_is_no_granted_service_test() ->
+    State = erx_domain_mints:new((drive_config())#{grants := [{?G, data, ?S, ?LIMITS}]}),
+    ?assertEqual([{data, ?S}], erx_domain_mints:granted_services(?G, State)),
+    ?assertEqual([data], erx_domain_mints:granted_names(?G, State)).
