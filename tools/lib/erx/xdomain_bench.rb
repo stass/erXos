@@ -160,7 +160,7 @@ module Erx
                     checkpoints: checkpoints, directory: directory), nil]
         rescue TranscriptTimeout => e
           # Qemu#run's report of the boot, which it writes however the boot ended.
-          [JSON.parse(File.read(File.join(directory, 'report.json'))), e.message]
+          [JsonInput.parse(File.binread(File.join(directory, 'report.json'), 1024 * 1024 + 1), max_bytes: 1024 * 1024, label: 'QEMU report'), e.message]
         end
         serial = File.expand_path(report.fetch('serial_log'), @root)
         { serial: serial, seconds: report['elapsed_seconds'], lines: XdomainBench.lines(File.binread(serial), timed_out: timed_out),
