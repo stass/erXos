@@ -54,10 +54,16 @@ without a response, and a `tx` the machine notifies.
 start_link(Service, Owner) when is_atom(Service), is_pid(Owner) ->
     erx_gatt_service:start_link({local, ?MODULE}, Service, ?MODULE, {Service, Owner}).
 
--doc "Sends `Bytes` to the phone of link `Conn` as notifications of `tx`.".
+-doc """
+Sends `Bytes` to the phone of link `Conn` as notifications of `tx`. A handler that is
+not running, or ends during the send, answers `{error, gone}`, so the caller's exit
+never carries the bytes.
+""".
 -spec send(reference(), binary()) -> ok | {error, busy | gone | atom()}.
 send(Conn, Bytes) when is_reference(Conn), is_binary(Bytes) ->
-    erx_gatt_service:call(?MODULE, {send, Conn, Bytes}).
+    try erx_gatt_service:call(?MODULE, {send, Conn, Bytes})
+    catch exit:_ -> {error, gone}
+    end.
 
 -doc false.
 init({Service, Owner}, Table) ->

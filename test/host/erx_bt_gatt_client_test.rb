@@ -68,7 +68,16 @@ class ErxBtGattClientTest < Minitest::Test
     Seed.new(fault: 'a handler attaching without waiting for its domain to hold ble',
              path: SERVICE, anchor: "    _ = erx_facets:await(ble, none, ?ERX_BT_ATTACH_WAIT_MS),\n",
              replacement: '',
-             catching_case: 'a handler started before its domain holds ble attaches once it does')
+             catching_case: 'a handler started before its domain holds ble attaches once it does'),
+    Seed.new(fault: "a handler's reports showing its last message and state",
+             path: SERVICE, anchor: 'handle_info/2, format_status/1]).',
+             replacement: 'handle_info/2]).',
+             catching_case: 'no report of a handler that held a write shows its bytes'),
+    Seed.new(fault: "a callback's raise stopping the handler with its reason and stack trace",
+             path: SERVICE,
+             anchor: '        Class:Reason -> {stop, {Class, erx_report:reason_name(Reason)}, Handler}',
+             replacement: 'Class:Reason:Stack -> erlang:raise(Class, Reason, Stack)',
+             catching_case: 'no report of a handler that held a write shows its bytes')
   ].freeze
 
   def test_client_cases_pass_under_eunit
@@ -83,7 +92,7 @@ class ErxBtGattClientTest < Minitest::Test
       assert_equal 1, source.scan(seed.anchor).size, "seed anchor for #{seed.fault} is not unique"
       output, status = run_cases({ seed.path => source.sub(seed.anchor) { seed.replacement } })
       refute status.success?, "#{seed.fault}: the cases passed"
-      assert_match(/#{Regexp.escape(seed.catching_case)}(?:(?!erx_bt_gatt_client_tests: ).)*?\*failed\*/m,
+      assert_match(/#{Regexp.escape(seed.catching_case)}(?:(?!erx_bt_gatt_client_tests: ).)*?\*(?:failed|timed out)\*/m,
                    output, seed.fault)
     end
   end

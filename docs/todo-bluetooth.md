@@ -34,11 +34,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   phone. The Pi 4's development card carries the echo beside the kiosk, enabled (`ProductionImage.own_examples`),
   under an `apps` row of `max 2` offering `ble` and `gatt nus` (decision 7); run the board checklist's `nus` echo
   from a phone or `blew` on a card of it.
-* [Medium] bluetooth, a phone's bytes in crash reports (`erx_gatt_service`, `erx_gatt_serial`, `examples/echo`):
-  the handler has no `format_status/1`, so a serial handler that crashes inside a `send` (the Bluetooth domain's
-  restart ends the facet mid-call) logs its last request, the bytes with it, and the echo's crash report lists its
-  queued `{serial, Conn, Bytes}`; for the console service those are what a user types. Strip payloads as
-  `erx_bt_link` does, and have the echo catch a `send/2` exit.
 * [Low] bluetooth suite, the app cell (`BtDomain::Run#app_boot`): a third copy of the medium boot of
   `Kiosk::Run#boot` and `MediumBoot::Run`, without the boot value's checkpoint those insert
   (`MediumBoot.boot_value_checkpoint`); fold the three into one MediumBoot helper. Also: nothing at the landing

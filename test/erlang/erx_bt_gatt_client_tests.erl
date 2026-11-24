@@ -12,6 +12,8 @@
 -module(erx_bt_gatt_client_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+-export([log/2]).
+
 -define(BT, 5).
 -define(OTHER, 9).
 -define(WAIT_MS, 2000).
@@ -91,9 +93,45 @@ serial_test_() ->
             fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end,
       fun(_) -> {"a handler started before its domain holds ble attaches once it does", fun start_waits_for_the_facet/0}
       end,
-      fun(_) -> {"a handler started before its domain holds ble attaches once it does", fun start_waits_for_the_facet/0}
-      end,
+      fun(_) -> {"no report of a handler that held a write shows its bytes", fun reports_show_no_bytes/0} end,
       fun(_) -> {"the echo app answers each link on its own link", fun echo_answers_each_link_alone/0} end]}.
+
+%% A phone's bytes reach no report: once the serial handler has taken a write, its
+%% status shows none of the bytes (sys:get_status/1 holds the sys log raw, as tracing
+%% does, so the log stays off), and when a call that carries them crashes it, neither
+%% gen_server's report, whose last message is that call, nor proc_lib's, nor the exit
+%% reason its monitor sees does.
+reports_show_no_bytes() ->
+    {Link, Conn} = joined_link(),
+    {ok, Serial} = erx_gatt_serial:start_link(nus, self()),
+    unlink(Serial),
+    Secret = <<"passphrase 0123456789">>,
+    erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, Secret}},
+    receive {serial, Conn, Secret} -> ok after ?WAIT_MS -> error(no_serial) end,
+    ?assertEqual(nomatch, binary:match(term_to_binary(sys:get_status(Serial)), Secret)),
+    Monitor = monitor(process, Serial),
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{test => self()}}),
+    try
+        ?assertExit(_, erx_gatt_service:call(Serial, {crash, Secret})),
+        receive {'DOWN', Monitor, process, Serial, Reason} -> ?assertEqual({error, function_clause}, Reason)
+        after ?WAIT_MS -> error(no_end)
+        end,
+        Reports = reports(Serial, []),
+        ?assertEqual(2, length(Reports)),
+        ?assertEqual(nomatch, binary:match(term_to_binary(Reports), Secret))
+    after
+        logger:remove_handler(?MODULE)
+    end.
+
+%% The reports logged by Pid, which a crash logs at once, so a short wait finds them all.
+reports(Pid, Reports) ->
+    receive {logged, #{meta := #{pid := Pid}} = Event} -> reports(Pid, [Event | Reports])
+    after 200 -> lists:reverse(Reports)
+    end.
+
+-doc false.
+log(Event, #{config := #{test := Test}}) ->
+    Test ! {logged, Event}.
 
 %% A service whose rx the phone cannot write, or whose tx the machine cannot notify, is no
 %% serial line: the start is refused, its caller, linked, lives on, and no serial handler
