@@ -74,10 +74,18 @@ class SessionDomainTest < Minitest::Test
     assert_sessions_follow_the_boot(DEVELOPMENT_SOURCE)
   end
 
+  # A start row starts a domain at boot, which the ids do not count.
+  def test_a_manifest_with_a_start_row_is_refused
+    source = "#{DEVELOPMENT_SOURCE}start extra\n  enable YES\n"
+    assert_raises(Erx::Error) { Suite.root_session_checkpoints(SHELL_POINTS, boot_time: Time.at(0), manifest_source: source) }
+  end
+
   # A domain row the manifest gains, a copy of the media row by another name, moves every
   # session id after the boot by one.
-  def test_a_domain_row_more_moves_the_sessions_ids
-    row = DEVELOPMENT_SOURCE[/^domain media\n(?:  .*\n)+/].sub('domain media', 'domain extra')
+  def test_an_added_domain_row_moves_the_session_ids
+    media = DEVELOPMENT_SOURCE[/^domain media\n(?:  .*\n)+/]
+    refute_nil media, 'the development manifest has no media row to copy'
+    row = media.sub('domain media', 'domain extra')
     assert_sessions_follow_the_boot(DEVELOPMENT_SOURCE + row)
   end
 end

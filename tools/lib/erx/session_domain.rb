@@ -72,13 +72,21 @@ module Erx
     # decide: the domain service holds the login's session until the system release's boot
     # has ended (erx_domain_srv), and the rows holding a pci device until the device service
     # has answered the PCIe domain's report (docs/design-pcie.md, "The hold at boot"), so
-    # root's first session takes one of the boot's ids (first_sessions). Root's next session
+    # root's first session takes one of the boot's ids (boot_ids). Root's next session
     # takes the id after them (next_session), and each later start of a session or of a
     # configured domain takes the next, a refused one too, since admission spends the id.
+    # A start or package row would start a domain at boot too, which the count leaves out,
+    # so a manifest with one is refused.
     Ids = Data.define(:boot_starts) do
-      def self.of(manifest_source) = new(boot_starts: Manifest::Frontend.read(manifest_source).records.fetch('domain', []).size + 1)
+      def self.of(manifest_source)
+        records = Manifest::Frontend.read(manifest_source).records
+        uncounted = %w[start package].select { |kind| records.key?(kind) }
+        raise Error, "the session ids count no #{uncounted.join(' or ')} row" unless uncounted.empty?
 
-      def first_sessions = (MediumBoot::CONFIGURED_ID...next_session)
+        new(boot_starts: records.fetch('domain', []).size + 1)
+      end
+
+      def boot_ids = (MediumBoot::CONFIGURED_ID...next_session)
       def next_session = MediumBoot::CONFIGURED_ID + boot_starts
     end
     # A domain id no domain takes in a boot of this cell, which starts far fewer: a path
@@ -199,8 +207,8 @@ module Erx
     TOP = "top -b\r"
     TOP_FIRST = /\Arun queue: [0-9]+;  up [0-9]+\+[0-9]{2}:[0-9]{2}:[0-9]{2}    /n
     TOP_MEMORY = /\AMem \(root pool\): [0-9]+[KMG] Total, [0-9]+[KMG] Free\r*\n\z/n
-    # Its line for the session's domain, one of ids.first_sessions.
-    def self.top_budget(ids) = /\ADomain (?:#{ids.first_sessions.to_a.join('|')}) budget(?: \([^)]+\)| \[[a-z ]+\])?: /n
+    # Its line for the session's domain, whose id is one of ids.
+    def self.top_budget(ids) = /\ADomain (?:#{ids.to_a.join('|')}) budget(?: \([^)]+\)| \[[a-z ]+\])?: /n
     # `cat /proc/status` at root_1's command shell: the machine's record through the
     # session's /proc tree, its uptime line first.
     PROC_STATUS = "cat /proc/status\r"
@@ -388,7 +396,7 @@ module Erx
        { name: 'session-build', pattern: BUILD_ID, seconds: 60, type: TOP }.freeze,
        { name: 'session-top', pattern: TOP_FIRST, seconds: 60 }.freeze,
        { name: 'session-top-memory', pattern: TOP_MEMORY, seconds: 30 }.freeze,
-       { name: 'session-top-budget', pattern: top_budget(ids), seconds: 30, type: PROC_STATUS }.freeze,
+       { name: 'session-top-budget', pattern: top_budget(ids.boot_ids), seconds: 30, type: PROC_STATUS }.freeze,
        { name: 'session-proc-status', pattern: PROC_UPTIME, seconds: 60, type: START_LISTED }.freeze,
        { name: 'session-start-listed', pattern: line('start-listed'), seconds: 60, type: START_CTL_REFUSED }.freeze,
        { name: 'session-start-ctl-refused', pattern: line('start-ctl-refused-invalid argument'), seconds: 60, type: SERVICE_E }.freeze,
