@@ -86,11 +86,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `liberx/system/dom_life.c`), so at rest the media domain's `connections` of 1 and the USB
      domain's of 2 hold the one drive connection between them beside the display's `usb_input`;
      a peer's restart, while its old row is still closing, needs one more on each, 2 and 3, which
-     the manifest's rows for other configured peers do not reckon either. `max_connections` grows
-     from 34 to 36: 13 rows at rest, and a restarted USB domain's three (its system connection,
-     `usb_input` and the drive's) beside its own, which the comment's "two a restarted configured
-     domain makes" already undercounts for the display (its system connection, `usb_input` and
-     root's session's display).
+     the manifest's rows for other configured peers do not reckon either.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume: its read path, then its batches, dirty flag
      and finish.
   6. EROFS: `erx_erofs` reading through its mount's source function, with `mount_source/2` beside

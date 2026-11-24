@@ -803,8 +803,8 @@ The manifest check refuses:
 
 The media domain's row allows it no sub-spaces (`spaces none`), since
 FAT and EROFS run in its own processes; a row that serves littlefs
-volumes allows the sub-spaces of their ports. The row serves the one service `media`, and gives the system domain its
-durability facet ([Finishing a volume](#finishing-a-volume)). The
+volumes allows the sub-spaces of their ports. The row serves the one
+service `media`, and gives the system domain its durability facet ([Finishing a volume](#finishing-a-volume)). The
 release check refuses a release other than the media domain's that names
 `erx_media`; a media domain's release that names `erx_storage`, whose
 `erx_littlefs` loads the NIF, or `erx_blk`, the block driver; and, in a
