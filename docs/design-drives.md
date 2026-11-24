@@ -731,21 +731,20 @@ the window stay what they are for the serving domain's own clients.
 
 A drive is one window row: role `drive`, no partition, the drive's
 number in its `drive` field, on the row of a `usb` device or of a
-`block` device, the media domain as its holder, and rights
-`read,write`. The packed row
+`block` device, the media domain as its holder. The packed row
 carries `mf_none` in its `partition` field, since the window covers
 whatever medium the drive holds, whole, and every window of another role
 carries `mf_none` in its `drive` field. The media domain is the
 configured domain that serves the service named `media`; the manifest
 names it no other way.
 
-A drive's rights are always `read,write`, because nothing would read a
-narrower right from the row: which sessions may write a drive is the
-rights of their `media` facet rows (DR-R8), and whether a volume is
-written is the writable rule's ([The writable rule](#the-writable-rule)).
-A read-only drive, a medium that the media domain itself may not write,
-has no consumer, so a row with rights `read` is refused rather than
-accepted and served writable
+A drive window, as every window, states no rights: the `drive` role is
+writable, so the media domain may write every drive. Which sessions may
+write a drive is the rights of their `media` facet rows (DR-R8), and
+whether a volume is written is the writable rule's
+([The writable rule](#the-writable-rule)). A read-only drive, a medium
+that the media domain itself may not write, has no consumer, so the
+manifest has no way to name one
 ([Open decisions](#open-decisions)).
 
 What the media domain and a block device's drive holder may hold is an
@@ -784,9 +783,8 @@ the manifest gains later names it only once its list admits it.
 
 The manifest check refuses:
 
-* a `drive` window with a partition, without a drive number, or with
-  rights other than `read,write`; a drive number on a window of another
-  role;
+* a `drive` window with a partition or without a drive number; a drive
+  number on a window of another role;
 * a drive number named twice;
 * a `block` device with a `drive` window and any other window;
 * a drive window held by a domain other than the media domain, or two
@@ -1841,13 +1839,16 @@ would learn of a medium's end only from a failed request or a request
 of its own made for the purpose, and each sector request would carry a
 number for the facet to look up.
 
-**Read-only drives.** A drive row's `read` right would reach the
-proxy, which would refuse every `write`, and the writable rule would
+**Read-only drives.** A read-only drive would be named by a role of
+its own that abi/manifest.txt does not mark `writable`; that fact
+would reach the proxy, which would refuse every `write`, and the writable rule would
 gain a condition, so a volume on such a drive mounts read-only. It
 loses for now: no manifest or board needs a medium that the media
 domain itself may not write, and what users may write is already the
-rights of each session's `media` facet row. It stays a small change if
-a consumer appears ([Open decisions](#open-decisions)).
+rights of each session's `media` facet row. It is a moderate change if
+a consumer appears: every place that tests for the `drive` role (the
+domain library's boot view, the manifest check and the manifest edit)
+would test for both ([Open decisions](#open-decisions)).
 
 **A tree per volume.** Each volume its own tree and grant would make
 the namespace's own `exdev`, statfs and qid rules apply and give
@@ -1909,10 +1910,10 @@ open:
 * **Read-only drives.** Whether a manifest may name a drive the media
   domain itself may not write, a stick that no session can change
   whatever its `media` rights, as a kiosk or an evidence reader might
-  want. The design refuses a drive row whose rights are not
-  `read,write` ([Manifest rows](#manifest-rows)). Recommendation: keep
-  the refusal until a board or a user asks for one; then the row's
-  `read` right becomes the grant's, the proxy answers every `write`
+  want. A window's role decides its writability, and the `drive` role
+  is writable ([Manifest rows](#manifest-rows)). Recommendation: keep
+  it so until a board or a user asks for one; then a drive role not
+  marked `writable` gives the grant read alone, the proxy answers every `write`
   `{error, erofs}`, and the writable rule mounts each volume of such a
   drive read-only, naming `drive` in its `status` line
   ([Read-only drives](#alternatives-considered)).

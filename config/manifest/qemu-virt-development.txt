@@ -328,49 +328,42 @@ window boot_a
   device "/virtio_mmio@a003e00"
   role boot_a
   partition 0
-  rights read,write
   image none
 window boot_b
   holder system
   device "/virtio_mmio@a003e00"
   role boot_b
   partition 0
-  rights read,write
   image none
 window system_a
   holder system
   device "/virtio_mmio@a003e00"
   role system_a
   partition 0
-  rights read,write
   image none
 window system_b
   holder system
   device "/virtio_mmio@a003e00"
   role system_b
   partition 0
-  rights read,write
   image none
 window boot_selection
   holder system
   device "/virtio_mmio@a003e00"
   role boot_selection
   partition 0
-  rights read,write
   image none
 window reset_count
   holder system
   device "/virtio_mmio@a003e00"
   role reset_count
   partition 0
-  rights read,write
   image none
 window system
   holder @domain.storage
   device "/virtio_mmio@a003e00"
   role system
   partition 0
-  rights read
   image none
 # record_volume: the whole record partition, the FAT volume that holds root's
 # authorized_keys, read-only for the storage domain, the system window's holder, which
@@ -381,14 +374,12 @@ window record_volume
   device "/virtio_mmio@a003e00"
   role record_volume
   partition 0
-  rights read
   image none
 window data
   holder @domain.storage
   device "/virtio_mmio@a003e00"
   role data
   partition 0
-  rights read,write
   image none
 image release
   device "/virtio_mmio@a003e00"
@@ -402,7 +393,6 @@ window release
   device "/virtio_mmio@a003e00"
   role verified_image
   partition 0
-  rights read
   image @image.release
 domain network
   principal @principal.system
@@ -590,6 +580,5 @@ window disk0
   holder @domain.media
   device "/pcie@10000000:0:2:0"
   role drive
-  rights read,write
   image none
   drive disk0

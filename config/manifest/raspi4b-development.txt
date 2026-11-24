@@ -168,14 +168,12 @@ window record_volume
   device "/emmc2bus/mmc@7e340000"
   role record_volume
   partition 0
-  rights read
   image none
 window data
   holder @domain.storage
   device "/emmc2bus/mmc@7e340000"
   role data
   partition 0
-  rights read,write
   image none
 # system: the booted slot's system partition, read-only for the storage domain, whose
 # block driver serves it (docs/design-fiasco.md, "The booted slot"), as on QEMU virt.
@@ -184,7 +182,6 @@ window system
   device "/emmc2bus/mmc@7e340000"
   role system
   partition 0
-  rights read
   image none
 # The system partition's image and tree, from the release image the packer writes
 # (docs/design-fiasco.md, "The booted slot"), handed to the system window's holder.

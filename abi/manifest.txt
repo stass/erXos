@@ -122,10 +122,11 @@ flags mf_device_flags u32
 # A partition window's role (docs/design-abi.md, "Devices and partition windows"): the
 # slots' boot and system partitions and the two records are the slot writer's, which
 # only the system domain holds in Phase 1 (docs/design-storage.md, PW1): a configured
-# domain holds only a configured role. A window of a role not marked writable grants
-# read alone, and its block driver refuses every write to it, so a role added with
-# neither attribute is the slot writer's and read-only. system is the one window on the
-# system partition of the slot the boot value names, and an unknown boot has none.
+# domain holds only a configured role. A window's role is the one source of its
+# writability: the block driver serves a window of a role marked writable read and
+# write, and refuses every write to any other, so a role added with neither attribute
+# is the slot writer's and read-only. system is the one window on the system partition
+# of the slot the boot value names, and an unknown boot has none.
 # verified_image is a window on one EROFS image of the booted slot
 # (docs/todo-system-partition.md, deletions). record_volume is the one window on the
 # whole record partition besides the slot writer's two, read-only, held by the domain
@@ -148,9 +149,6 @@ enum mf_window_role u32
   value system_b 10 writable
   value verified_image 11 configured
   value record_volume 12 configured
-flags mf_window_rights u32
-  bit read 0
-  bit write 1
 enum mf_parameter_kind u32
   value u64 1
   value i64 2
@@ -550,16 +548,13 @@ layout erx_mf_device wire_le 8 104
 # A drive window names in drive its drive, diskN as N, and in partition mf_none; every
 # other window names drive mf_none. Drive numbers are machine-wide (docs/design-drives.md,
 # "Manifest rows").
-layout erx_mf_window wire_le 8 32
+layout erx_mf_window wire_le 8 24
   field holder u32 0
   field device u32 4
   field role mf_window_role 8
   field partition u32 12
-  field rights mf_window_rights 16
-  field image u32 20
-  field drive u32 24
-  field reserved u32 28
-  zero reserved all
+  field image u32 16
+  field drive u32 20
 layout erx_mf_service wire_le 8 24
   field name erx_mf_str 0
   field server u32 8

@@ -126,7 +126,6 @@ window data
   device "/virtio_mmio@a003e00"
   role data
   partition 0
-  rights read,write
   image none
 ```
 

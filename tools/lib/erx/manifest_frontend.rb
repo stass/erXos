@@ -67,7 +67,7 @@ module Erx
         'domain' => %w[principal limits kind flags runtime release restarts restart_period_s args env],
         'session' => %w[limits runtime release args env],
         'unit' => %w[placement holder],
-        'window' => %w[holder device role partition rights image drive],
+        'window' => %w[holder device role partition image drive],
         'service' => %w[name server interface],
         'facet' => %w[name grantee service operations max_request in_flight reductions period_ns max_heap_size queue],
         'image' => %w[device input salt],

@@ -1784,9 +1784,12 @@ packed row names the device-row index either way.
 
 A window grants its holder one partition of a medium. `abi/manifest.txt`
 marks each window role a configured domain may hold `configured` and
-each role whose window may grant write `writable`, and the manifest
-check and the block driver read those attributes. Both fail closed: a
-role that carries neither is the slot writer's and read-only. A
+each role whose window grants write `writable`; the manifest check
+reads `configured` and the block driver `writable`. A window row states
+no rights: the block driver serves a window of a `writable` role read
+and write and any other read alone, so the role is the one source of a
+window's writability. Both fail closed: a role that carries neither is
+the slot writer's and read-only. A
 fixed-medium role's sectors come from the medium layout (`medium.txt`),
 and a `system` window's are those of the system partition of the slot
 that the boot value names, so an `unknown` boot gives none. A `drive`
@@ -1795,8 +1798,7 @@ its `drive` names a drive, `diskN`, numbered across the machine, and it
 covers whatever medium the drive holds, whole; every other window names
 no drive, `mf_none`
 ([design-drives.md](design-drives.md#manifest-rows)).
-A window grants at least read, and a window of a role not marked
-`writable` read alone; a manifest has at most one `system` window. No
+A manifest has at most one `system` window. No
 record contains a caller-selected sector range. Role/holder checks
 restrict boot partitions, system A and B and the records to the slot
 writer, the `system` window to the storage domain that serves `system`
@@ -2011,7 +2013,7 @@ image's format.
 | `domain NAME` | `principal`, `limits` references; `kind service\|secret`; `flags` flag list; `runtime`, `release` artifact references; `restarts`, `restart_period_s` integers; `args`, `env` vectors |
 | `session PRINCIPAL` | the session template of the principal its name names, so a principal has one; `limits` reference; `runtime`, `release` artifact references; `args`, `env` vectors |
 | `unit NAME` | `placement` string naming a complete checked platform unit; `holder` domain reference or `system` |
-| `window NAME` | `holder` domain reference; `device` checked platform-device string; `role` declared role name; `partition` integer; `rights` flag list |
+| `window NAME` | `holder` domain reference; `device` checked platform-device string; `role` declared role name; `partition` integer; `image` image reference or `none`; `drive` integer |
 | `service NAME` | `server` domain reference or `system`; `interface` qualified ABI service name |
 | `facet NAME` | `grantee`, `service` references; `operations` list; repeated `parameter KEY VALUE`; `max_request`, `in_flight`, `reductions`, `period_ns`, `max_heap_size`, `queue` integers |
 | `introduce FROM TO` | two domain references on the declaration line; no properties |

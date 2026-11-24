@@ -75,7 +75,7 @@ class ManifestCheckTest < Minitest::Test
 
   def window(role:, partition: 1, device: BLOCK, holder: 'system', image: 'none', name: 'seeded', drive: nil)
     "window #{name}\n  holder #{holder}\n  device \"#{device}\"\n  role #{role}\n#{"  partition #{partition}\n" if partition}" \
-      "  rights read\n  image #{image}\n#{"  drive #{drive}\n" if drive}"
+      "  image #{image}\n#{"  drive #{drive}\n" if drive}"
   end
 
   # A device-tree row without its window or line would give its driver zeros to open.
@@ -1265,7 +1265,7 @@ class ManifestCheckTest < Minitest::Test
   # not hold gpio.
   def test_a_pin_controller_holder_with_a_window_is_refused
     window = "window seeded\n  holder @domain.pins\n  device \"/emmc2bus/mmc@7e340000\"\n  role data\n  partition 0\n" \
-             "  rights read\n  image none\n"
+             "  image none\n"
     unheld = changed(pi_source.sub(/^window data\n(?:  .*\n)*/, ''))
     refused(Erx::Manifest::Invalid, 'unit.holder', unheld + pi_pins_domain + window + pi_unit('gpio', '@domain.pins'),
             pi_context, message: /domain pins .*a row of windows names it/)
@@ -1423,20 +1423,15 @@ class ManifestCheckTest < Minitest::Test
     end
   end
 
-  # The one system window: read-only, on the slot's system partition, held by the
-  # storage domain that holds the block device and so runs the block driver serving it.
-  def test_the_development_manifest_gives_one_read_only_system_window_to_the_storage_domain
+  # The one system window: on the slot's system partition, held by the storage domain
+  # that holds the block device and so runs the block driver serving it, read-only by
+  # its role (erx_blk_table_tests).
+  def test_the_development_manifest_gives_one_system_window_to_the_storage_domain
     view = @codec.open('manifest', admit.bytes)
     windows = (0...view.count('windows')).map { |at| view.fetch('windows', at) }
     system = windows.select { |row| row.fetch('role') == @codec.member('mf_window_role', 'system') }
     storage = (0...view.count('domains')).find { |at| view.string(view.fetch('domains', at).fetch('name')) == 'storage' }
-    assert_equal [[storage, @codec.member('mf_window_rights', 'read'), 0]],
-                 system.map { |row| row.values_at('holder', 'rights', 'partition') }
-  end
-
-  def test_a_writable_system_window_is_refused
-    refused(Erx::Manifest::Invalid, 'window.rights',
-            changed(@source.sub(/(window system\n(?:  .*\n)*?)  rights read\n/, "\\1  rights read,write\n")), message: /a window of a role not marked writable grants read alone/)
+    assert_equal [[storage, 0]], system.map { |row| row.values_at('holder', 'partition') }
   end
 
   def test_a_second_system_window_is_refused
@@ -1579,13 +1574,7 @@ class ManifestCheckTest < Minitest::Test
     windows = (0...view.count('windows')).map { |at| view.fetch('windows', at) }
     volume = windows.select { |row| row.fetch('role') == @codec.member('mf_window_role', 'record_volume') }
     storage = (0...view.count('domains')).find { |at| view.string(view.fetch('domains', at).fetch('name')) == 'storage' }
-    assert_equal [[storage, @codec.member('mf_window_rights', 'read')]], volume.map { |row| row.values_at('holder', 'rights') }
-  end
-
-  def test_a_writable_record_volume_window_is_refused
-    window = record_volume.sub("  rights read\n", "  rights read,write\n")
-    refused(Erx::Manifest::Invalid, 'window.rights', login_keys_source(window: window),
-            message: /a window of a role not marked writable grants read alone/)
+    assert_equal [storage], volume.map { |row| row.fetch('holder') }
   end
 
   def test_login_keys_served_by_another_domain_than_the_window_s_holder_is_refused
@@ -1674,9 +1663,14 @@ class ManifestCheckTest < Minitest::Test
     end
   end
 
-  def test_a_window_must_grant_read
-    refused(Erx::Manifest::Invalid, 'window.rights', @source + window(role: 'data', partition: 0).sub('rights read', 'rights none'),
-            message: /a window grants at least read/)
+  # A window's role alone decides whether it is served writable (erx_blk_window), so a
+  # window row has no rights: one naming them, here the data window naming read alone,
+  # would claim a read-only window the block driver serves writable.
+  def test_a_window_row_naming_rights_is_refused
+    data = @source[/^window data\n(?:  .*\n)*/]
+    stating_rights = data.sub('  image ', "  rights read\n  image ")
+    error = assert_raises(Erx::ABI::SchemaError) { admit(changed(@source.sub(data, stating_rights))) }
+    assert_match(/unknown or duplicate manifest property/, error.message)
   end
 
   # Every window lies on a block device or, as the media domain's drive window does, on a
@@ -1831,7 +1825,7 @@ end
     assert_equal [{ 'slot_offset' => 0, 'length' => 8192 }], (0...view.count('extents')).map { |at| view.fetch('extents', at) }
     windows = (0...view.count('windows')).map { |at| view.fetch('windows', at) }
     verified = windows.select { |row| row.fetch('role') == @codec.member('mf_window_role', 'verified_image') }
-    assert_equal [[0, @codec.member('mf_window_rights', 'read')]], verified.map { |row| row.values_at('image', 'rights') }
+    assert_equal [0], verified.map { |row| row.fetch('image') }
   end
 
   def test_an_image_input_must_be_an_image_artifact_of_the_pack
@@ -1857,9 +1851,7 @@ end
             message: /an image without a hash tree takes no salt/)
   end
 
-  def test_a_verified_image_window_is_read_only_and_names_its_image
-    refused(Erx::Manifest::Invalid, 'window.rights', @source.sub("  rights read\n  image @image.release", "  rights read,write\n  image @image.release"),
-            message: /a window of a role not marked writable grants read alone/)
+  def test_a_verified_image_window_names_its_image
     refused(Erx::Manifest::Invalid, 'window.image', @source.sub('image @image.release', 'image none'),
             message: /a verified-image window names its image/)
     refused(Erx::Manifest::Invalid, 'window.image', @source + window(role: 'data', partition: 0, image: '@image.release'),

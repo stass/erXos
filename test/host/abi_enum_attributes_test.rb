@@ -93,39 +93,35 @@ class AbiEnumAttributesTest < Minitest::Test
     end
   end
 
-  # One fact, both consumers: a copy of the ABI whose data role loses writable makes the
-  # manifest check refuse the development manifest's writable data window and
-  # erx_blk_table report a data window read-only, where the tree's ABI admits the one and
-  # reports the other writable. A consumer that kept its own list would not change.
-  def test_a_window_role_s_writable_fact_changes_both_consumers
+  # The writable fact reaches the block driver, its one consumer: a copy of the ABI whose
+  # data role loses writable makes erx_blk_table report a data window read-only, where
+  # the tree's ABI reports it writable. A driver that kept its own list would not change.
+  # The manifest check reads no writability, so it admits the manifest under both.
+  def test_a_window_role_s_writable_fact_reaches_the_block_driver
     Dir.mktmpdir('erx-abi-roles-') do |root|
       seed_roles(root) do |text|
         text.sub(/^(  value data 6 configured) writable$/, '\1').tap { |seeded| assert text != seeded, 'data is writable' }
       end
-      admit(manifest_source, Erx::ABI::Codec.new(tree_schema))
-      error = assert_raises(Erx::Manifest::Invalid) { admit(manifest_source, Erx::ABI::Codec.new(tree_schema(root))) }
-      assert_equal 'window.rights', error.field
+      [tree_schema, tree_schema(root)].each { |schema| admit(manifest_source, Erx::ABI::Codec.new(schema)) }
       assert_equal "false\n", blk_read_only(tree_schema, 'data')
       assert_equal "true\n", blk_read_only(tree_schema(root), 'data')
     end
   end
 
   # Both attributes fail closed: a role added with neither is read-only and the slot
-  # writer's, so a window of it grants read alone and only the system domain holds it.
+  # writer's, so the block driver serves a window of it read alone and only the system
+  # domain holds it.
   def test_a_window_role_added_without_attributes_is_read_only_and_the_system_domain_s
     Dir.mktmpdir('erx-abi-roles-') do |root|
       seed_roles(root) do |text|
         text.sub(/^(  value record_volume 12 .*\n)/, "\\1  value probe 13\n").tap { |seeded| assert text != seeded, 'probe added' }
       end
       codec = Erx::ABI::Codec.new(tree_schema(root))
-      probe = ->(holder, rights) { manifest_source + "window probe\n  holder #{holder}\n  device \"/virtio_mmio@a003e00\"\n" \
-                                                    "  role probe\n  partition 0\n  rights #{rights}\n  image none\n" }
-      admit(probe.call('system', 'read'), codec)
-      refusals = { 'window.rights' => probe.call('system', 'read,write'),
-                   'window.holder' => probe.call('@domain.storage', 'read') }
-      refusals.each do |field, source|
-        assert_equal field, assert_raises(Erx::Manifest::Invalid, field) { admit(source, codec) }.field
-      end
+      probe = ->(holder) { manifest_source + "window probe\n  holder #{holder}\n  device \"/virtio_mmio@a003e00\"\n" \
+                                            "  role probe\n  partition 0\n  image none\n" }
+      admit(probe.call('system'), codec)
+      error = assert_raises(Erx::Manifest::Invalid) { admit(probe.call('@domain.storage'), codec) }
+      assert_equal 'window.holder', error.field
       assert_equal "true\n", blk_read_only(tree_schema(root), 'probe')
     end
   end

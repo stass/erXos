@@ -32,14 +32,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   (`tools/lib/erx/abi_contracts.rb`) repeats `erx_mf_facet`'s field names and widths from
   `abi/manifest.txt`, and `facet_row` in `tools/lib/erx/manifest.rb` the key list; take both from the
   codec's layout.
-* [Medium] ABI, per-member enum attributes (fix the tool): the ABI spec language attaches no property to an
-  enum member, so which window roles of `mf_window_role` (`abi/manifest.txt`) are read-only and which belong
-  to the slot writer is written out twice, in the Ruby manifest check (`tools/lib/erx/manifest.rb`, its
-  slot-writer role list and `window_rights`'s read-only roles) and in `erx_blk_table:read_only/1`
-  (`erlang/apps/erx_blk/src/erx_blk_table.erl`). Extend the enum grammar with attributes per member, such as
-  `value system 8 read_only slot_writer=false`, each attribute declared once for its enum with a closed set
-  of values the generator validates, and generate them into Ruby and Erlang (which also gives Erlang enum
-  types), then delete both copies; a seeded member without a declared attribute fails the generator.
 
 ## Stopgap replacements
 

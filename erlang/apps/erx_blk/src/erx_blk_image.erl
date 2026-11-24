@@ -75,10 +75,10 @@ place(#{name := Name, format := ?ERX_MF_IMAGE_FORMAT_EROFS_UNCHECKED}, _Slot) ->
 place(#{name := Name}, _Slot) ->
     {error, {Name, format}}.
 
-%% The image a window names when it is the system domain's read-only verified_image
-%% window; the reader's rules and the packer's refuse a writable one, so none is served.
+%% The image a window names when it is the system domain's verified_image window,
+%% read-only by its role.
 image_window(#{holder := ?ERX_MF_NONE, role := ?ERX_MF_WINDOW_ROLE_VERIFIED_IMAGE,
-               rights := ?ERX_MF_WINDOW_RIGHTS_READ, image := Image}, Indices)
+               image := Image}, Indices)
   when Image =/= ?ERX_MF_NONE ->
     [Image | Indices];
 image_window(_Window, Indices) ->

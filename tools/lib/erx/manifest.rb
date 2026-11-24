@@ -3473,8 +3473,7 @@ module Erx
           device = window_device(record, devices)
           { 'holder' => holder_index(one(record, 'holder'), field: 'window.holder'),
             'device' => device, 'role' => role, 'partition' => window_partition(record, role),
-            'rights' => window_rights(record, role), 'image' => window_image(record, role),
-            'drive' => window_drive(record, role, devices.fetch(device)) }
+            'image' => window_image(record, role), 'drive' => window_drive(record, role, devices.fetch(device)) }
             .tap { |row| check_image_device(row, tables.fetch('images')) }
         end
         check_system_window(rows, tables)
@@ -3621,15 +3620,6 @@ module Erx
         end
         invalid('a window of a fixed role names partition 0', 'window.partition') unless number(record, 'partition').zero?
         0
-      end
-
-      def window_rights(record, role)
-        rights = flags(record, 'rights', 'mf_window_rights')
-        read = @codec.member('mf_window_rights', 'read')
-        invalid('a window grants at least read', 'window.rights') if (rights & read).zero?
-        writable = @codec.attribute?('mf_window_role', role, 'writable')
-        invalid('a window of a role not marked writable grants read alone', 'window.rights') if !writable && rights != read
-        rights
       end
 
       # The system window is held by a storage domain, the configured domain that holds

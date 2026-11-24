@@ -69,7 +69,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      admission path and account (design-domains.md's "Processes a facet starts", whose account
      `erx_facet` has yet to build: its residuals in TODO.md); the facet table check passing
      `served_by drive` as it passes a session's lines; the manifest check's refusal of a service or
-     facet row of `drive` and of a drive window whose rights are not `read,write`; and in each board
+     facet row of `drive`; and in each board
      manifest one more of the media domain's and the serving domain's `connections` and of
      `max_connections` for each pair of media and serving domain, however many drives it carries;
      with the host tests and QEMU cases those sections' tables name;
@@ -618,15 +618,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   grant carries slot writes from the storage domain to the system domain, so the rows
   describe a grant nothing implements. The slot writer needs that grant (a facet of the
   storage domain's driver, or the device service's window grants, PW1) before it writes.
-* [Medium] storage, window rights (`erlang/apps/erx_blk/src/erx_blk_window.erl`):
-  a window is read-only only by its role, not because it carries the
-  manifest window's `rights`, and the `system` window of
-  [design-storage.md](design-storage.md#the-system-tree) must be
-  read-only while the slot writer's window on the same partition is
-  writable. Carry `ro | rw`
-  from the manifest in the window and let a write require `rw`, so read-only
-  holds by construction (PW1's grants bring the per-client half).
-
 * [Low] storage, the boot-selection record (`abi/medium.txt`): the record and
   the reset count each have a MiB of their own, the layout's alignment taken as
   the erase unit; SD cards commonly erase 4 MiB, under which the record

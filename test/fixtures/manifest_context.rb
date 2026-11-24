@@ -143,7 +143,7 @@ module ManifestContextFixture
   def with_system_tree(source, holder:)
     substitute(source, BLOCK_UNIT, "\\1#{holder}") +
       "window system\n  holder #{holder}\n  device \"/virtio_mmio@a003e00\"\n  role system\n  partition 0\n" \
-      "  rights read\n  image none\nsystem_image\n  input @artifact.release\n" \
+      "  image none\nsystem_image\n  input @artifact.release\n" \
       "service system\n  server #{holder}\n  interface files\n"
   end
 
