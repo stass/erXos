@@ -9,11 +9,8 @@
 # was started for"). A facet row names two parameters: line, the session line the
 # grant's logins mint, one of the served_by session interfaces (?ERX_LINES), and logins,
 # the grant's bound on rows of the login service's table. login_grant holds every row to
-# docs/design-login.md's table of front ends ("Who holds it"), an allow-list: the SSH
-# domain with the tty_line, all four operations and 128 logins; the web domain with web_line, login_passphrase and 16; btconsole with
-# the tty_line, login_passphrase and 8; no row on any other domain and one row per
-# holder. The grant's quantities: max_request is 131072, the smallest power of two not
-# below a login_key with its 64 KiB exchange input, its caller's pid and alias, derived
+# docs/design-login.md's table of front ends ("Who holds it"), an allow-list. The grant's
+# quantities: max_request is 131072, the smallest power of two not below a login_key with its 64 KiB exchange input, its caller's pid and alias, derived
 # as a line's is; in_flight is 8, each passphrase login waiting on the checker's network
 # queue.
 service login 22

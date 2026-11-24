@@ -176,16 +176,14 @@ row lists, and any other is refused `eperm` before the callback sees it
 | `btconsole`, the phone console ([design-bluetooth.md](design-bluetooth.md#the-console)) | `tty_line` | `login_passphrase` | 8 |
 
 The manifest check holds the facet to that table, as an allow-list: it
-refuses a `login` row on any other domain, a row whose `line` or
-operations differ from its holder's, and more than one row per holder.
+refuses a `login` row on any other domain, a row whose `line`, operations or
+`logins` differ from its holder's, and more than one row per holder.
 The Bluetooth domain is not on it: it parses what anyone in range sends
 and holds only its radio grants.
 `tty_line` is the session line [design-system.md](design-system.md#a-sessions-lines)
 serves a front end whose connections master the session's ttys,
 `open_tty` and, with design-ssh.md's answer on jobs, `open_job`;
-design-ssh.md and design-system.md name it `tty_line`, served by
-`erx_tty_line`, and package 2 of the [Build order](#build-order)
-renames both, since the phone console masters ttys through it too. Whoever
+it is served by `erx_tty_line`, and named for what it serves, since the phone console masters ttys through it too. Whoever
 masters a tty of a logged-in session can already type any command its
 shell runs, so a front end that never opens a job gains nothing by being
 refused one, and one line interface serves SSH and the phone console

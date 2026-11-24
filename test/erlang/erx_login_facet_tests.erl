@@ -181,7 +181,6 @@ another_front_end_sees_no_passphrase_test_() ->
         Monitor = monitor(process, Other),
         call(Caller, passphrase(<<"leak", (?SENTINEL)/binary>>)),
         Reason = receive {'DOWN', Monitor, process, Other, R} -> R after 1000 -> timeout end,
-        ?assert(is_atom(Reason)),
-        ?assertNotEqual(timeout, Reason),
+        ?assertEqual(checker_crashed, Reason),
         ?assertEqual(nomatch, binary:match(term_to_binary(Reason), ?SENTINEL))
     end).

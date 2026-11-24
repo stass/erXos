@@ -70,12 +70,14 @@ What arrives is sorted by its shape before the callback sees a request:
 Every other message, a local one without an envelope included, is dropped
 and counted: a facet acts for its grantee alone.
 
-From its export on, a facet ends with an atom whatever ends it: a crash of
+From its export on, a facet ends with an atom whatever its loop ends with: a crash of
 its callback, in operation/1, admit/3 or message/2, or of the facet itself,
 ends it with the leading atom of the crash's reason too, logged with the
 callback's name and that atom alone, since the reason can hold the
 grantee's request. A callback still refuses what it does not take, since
-a crash ends the facet for every caller of its grantee's.
+a crash ends the facet for every caller of its grantee's. An exit signal, which the
+facet does not trap, ends it with the signal's own reason; the grantee's export is
+send alone, so only processes of the facet's own domain can send one.
 
 A grant's operations, the names its manifest row lists (erx_domain_lib:configured/0),
 are checked through the callback's operation/1, which maps a request or a message of
@@ -319,11 +321,10 @@ init(Parent, Tag, Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant
             in_flight => maps:get(in_flight, Grant, ?IN_FLIGHT), exports => Exports,
             ends_with => Monitors, forwards => #{}, dropped => 0, refused => 0}).
 
-%% The exported facet's life: the loop, until a process or port of ends_with ends or the
-%% facet crashes, in its callback or in the loop, a crash logged with the callback's name
-%% and its reason's leading atom. Either reason is cut here, the one place a facet ends,
-%% to its leading atom, so its grantee's callers and monitors see no term of a service's
-%% or of a request (docs/design-domains.md, "A facet's end carries no terms").
+%% The exported facet's life. loop/1 returns the reason an end of ends_with gave; a crash
+%% is logged by the callback's name and its reason's leading atom. Either way the facet
+%% exits with the reason's leading atom alone (docs/design-domains.md, "A facet's end
+%% carries no terms").
 -spec serve(state()) -> no_return().
 serve(#{callback := Callback} = State) ->
     Reason = try

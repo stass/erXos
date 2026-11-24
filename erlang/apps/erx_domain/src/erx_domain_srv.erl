@@ -1241,36 +1241,36 @@ system_facet(login, {message, Behind, Limits}, #{name := Name}, _State) ->
     %% manifest check holds to the holder's entry, and the holder's manifest name, which
     %% names its terminals to the checker (G5); erx_login_facet:init/1 reads the line.
     {facet, erx_login_facet, Behind, Limits#{behind => Behind, holder => erx_ident:to_binary(Name)}};
-system_facet(log, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(log, {message, Behind, Limits}, _Domain, _State) ->
     %% docs/design-log.md, "The log facet": Behind is erx_syslog_sup, and the callback
     %% finds erx_syslog at each request.
     {facet, erx_log_facet, Behind, Limits};
-system_facet(clock, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(clock, {message, Behind, Limits}, _Domain, _State) ->
     %% docs/design-time.md, "The clock facet": Behind is erx_clock_sup, and the
     %% callback finds erx_clock at each request and checks the grant's operations, sample
     %% or set, against what it decodes.
     {facet, erx_clock_facet, Behind, Limits};
-system_facet(install, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(install, {message, Behind, Limits}, _Domain, _State) ->
     %% docs/design-live.md, "Code from the host": Behind is erx_code_sup, and the callback
     %% finds erx_code at each request and checks the grant's operations against what the
     %% code service's reader admits; the facet loads into the system domain alone.
     {facet, erx_code_facet, Behind, Limits};
-system_facet(code_objects, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(code_objects, {message, Behind, Limits}, _Domain, _State) ->
     {facet, erx_code_objects_facet, Behind, Limits#{behind => Behind}};
-system_facet(pci_bus, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(pci_bus, {message, Behind, Limits}, _Domain, _State) ->
     %% docs/design-pcie.md, "Facets": the callback forwards each request, with its
     %% grantee, to the device service's PCIe process registered at that moment.
     {facet, erx_pci_bus_facet, Behind, Limits};
-system_facet(pci, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(pci, {message, Behind, Limits}, _Domain, _State) ->
     {facet, erx_pci_facet, Behind, Limits};
-system_facet(_Name, {message, Behind, Limits}, _Principal, _State) ->
+system_facet(_Name, {message, Behind, Limits}, _Domain, _State) ->
     {facet, erx_domain_facet, Behind, Limits#{behind => Behind}};
 system_facet(machine, {tree, Grants, Limits}, #{principal := Principal}, State) ->
     %% docs/design-system.md, "A session's request": the grant's own argument is its
     %% grantee's user name, which the tree's ctl handler passes to the coordinator, so the
     %% log line names whoever the grant was made for and no request names anyone.
     {tree, Grants, user_name(Principal, State), Limits};
-system_facet(_Name, {tree, Grants, Limits}, _Principal, _State) ->
+system_facet(_Name, {tree, Grants, Limits}, _Domain, _State) ->
     {tree, Grants, Limits}.
 
 %% How the system domain serves its service Name to a grantee: tree, an erx_fs grant,
@@ -1341,8 +1341,9 @@ mint_tree(Id, DomainPid, Name, Limits, Grant, Exports) ->
 %% name, with the code_objects facet every session holds by the domain service's own
 %% policy (code_objects_row/0), and none for a domain a request made: Behind is the process the service
 %% named for it with erx_facet:serve/2, which the system domain's services do as they
-%% start. For a message service Limits are the grant's limits that erx_facet applies,
-%% max_request and in_flight, checked as a spec's are (grant/1); for a tree service they
+%% start. For a message service Limits are its row's: the limits erx_facet applies,
+%% max_request and in_flight, checked as a spec's are (grant/1), its operations and
+%% its parameters; for a tree service they
 %% are the row's, which erx_fs_grants checks as it starts the grant. A service with no
 %% living process, or a grant whose limits fail that check, is left out and logged, so
 %% the domain finds the name absent,
@@ -1411,8 +1412,7 @@ served(Grantee, Rows) ->
 %% row names no operations (dom_boot_view.c).
 served_grant(message, Behind, Limits) ->
     case grant({Behind, maps:with([max_request, in_flight], Limits)}) of
-        {ok, {Behind, Checked}} -> {ok, {message, Behind, maps:merge(Limits#{operations => maps:get(operations, Limits, [])},
-                                                                     Checked)}};
+        {ok, {Behind, _Checked}} -> {ok, {message, Behind, Limits#{operations => maps:get(operations, Limits, [])}}};
         invalid -> invalid
     end;
 served_grant(tree, Grants, Limits) ->

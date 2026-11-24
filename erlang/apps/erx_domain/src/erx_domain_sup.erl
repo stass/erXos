@@ -27,7 +27,8 @@ The login service, erx_login, is a permanent child started before the
 service, so it has named itself the process behind `login` (erx_facet:serve/2)
 before the service mints any front end's facet (docs/design-login.md, "The
 service and its facet"). A restarted one starts with an empty table: the
-facets minted in front of the old one ended with it, with an atom.
+facets minted in front of the old one ended with it, with an atom, and
+nothing grants a front end a new one until its domain restarts (TODO.md).
 """.
 -behaviour(supervisor).
 

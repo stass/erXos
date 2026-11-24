@@ -5,6 +5,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] login, a message grant's parameters (`erx_domain_srv:served_grant/3`): the row's
+  parameters are merged into the grant map beside the keys the facet and its callback read
+  (`behind`, `holder`, `scope`, `worker`), which stay intact only because the domain service
+  writes them later and no interface the system domain serves declares a parameter of those
+  names. Carry parameters under one key, or have the ABI generator refuse reserved names.
+* [Low] erx_facet, the crash log line (`serve/1`): that a crash is logged by its callback's
+  name and its reason's leading atom alone has no test; add a capture-handler case with a
+  sentinel, as `erx_login_tests` has for the service.
 * [Medium] login, the principal-name alphabet (`erx_login_facet:user/1`, docs/design-login.md,
   "Operations"): the facet admits a user name of a lowercase letter, then lowercase letters,
   digits and underscores, written out in the facet, while a principal is named by a system
