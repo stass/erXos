@@ -161,7 +161,8 @@ a_loss_runs_no_line_test() ->
 
 %% A loss that a signal's flush drops reaches the console as the relay's `lost` event,
 %% ahead of the signal, and damages the read the signal leaves going: Ctrl-\ at the
-%% prompt does nothing more, so the line typed on after it does not finish.
+%% prompt does nothing more, so the line typed on after it does not finish until the
+%% user empties it with Ctrl-U.
 a_flushed_loss_damages_the_read_test() ->
     with_console(fun(Relay, Shell) ->
                          Shell ! {get_line, self()},
@@ -170,7 +171,9 @@ a_flushed_loss_damages_the_read_test() ->
                          lose(Relay),
                          type(Relay, <<28>>),
                          type(Relay, <<"x\r">>),
-                         ?assertEqual(timeout, line())
+                         ?assertEqual(timeout, line()),
+                         type(Relay, <<21, "pwd\r">>),
+                         ?assertEqual("pwd\n", line())
                  end).
 
 %%% The console, the relay and the stand-in shell
