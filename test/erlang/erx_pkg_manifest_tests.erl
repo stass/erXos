@@ -74,6 +74,12 @@ packed_manifest_test() ->
            signers := [{<<"ops">>, _}]}} = erx_pkg_manifest:system_config(manifest("admitted")),
     ?assertEqual(4, length(lists:usort([Packages, System, Display, Net]))).
 
+%% The same row offering ble with gatt nus: the template's ble row is no
+%% service a need may name, so admission refuses a need of ble (step 6).
+ble_is_no_need_test() ->
+    {ok, #{apps := #{services := Services}}} = erx_pkg_manifest:system_config(manifest("ble")),
+    ?assertEqual([<<"display">>, <<"net">>], [Name || #{name := Name} <- Services]).
+
 library(Max) ->
     {ok, #{template => 0, first => 2, max => Max, memory => ?MIB}}.
 

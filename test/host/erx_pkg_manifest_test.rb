@@ -45,7 +45,8 @@ class ErxPkgManifestTest < Minitest::Test
   # The design's seeded faults: each kind of reserved name dropped, which lets an app take a
   # row's name; and the development key accepted in a release manifest. And an app_services
   # row's service and facet fields read for each other, which hands admission the wrong
-  # service and row.
+  # service and row. And the ble service's row read as a need's, which lets a need of ble
+  # take the template's whole ble grant.
   FAULTS = {
     'principals not reserved' => Fault.new(file: MODULE, from: RESERVED, to: '[domains, services, facets]'),
     'domains not reserved' => Fault.new(file: MODULE, from: RESERVED, to: '[principals, services, facets]'),
@@ -53,6 +54,7 @@ class ErxPkgManifestTest < Minitest::Test
     'facets not reserved' => Fault.new(file: MODULE, from: RESERVED, to: '[principals, domains, services]'),
     'service and row swapped' => Fault.new(file: MODULE, from: '#{service := Index, facet := Facet}',
                                            to: '#{service := Facet, facet := Index}'),
+    'ble offered as a need' => Fault.new(file: MODULE, from: 'Interface =/= ?ERX_SERVICE_BLE', to: 'Interface =/= -1'),
     'development key in a release' =>
       Fault.new(file: READER, from: RELEASE_END,
                 to: RELEASE_END.sub("\n#{' ' * 24}}", "},\n#{DEVELOPMENT_KEY}"))
@@ -80,13 +82,14 @@ class ErxPkgManifestTest < Minitest::Test
       'none' => AbiManifestFixture.valid,
       'release_development' => AbiManifestFixture.packages(flags: 0),
       'two_apps' => AbiManifestFixture.packages(apps: 2),
-      'admitted' => admitted }
+      'admitted' => admitted, 'ble' => admitted(ble: true) }
   end
 
   # QEMU virt's development manifest, whose apps row offers the display and the network,
   # with the package quotes and the enabled package clock, the signer ops and a
-  # development key of 7s.
-  def admitted
+  # development key of 7s; with ble, the row offers the ble service too, served by the
+  # network domain, with gatt nus.
+  def admitted(ble: false)
     codec = Erx::ABI::Codec.new(Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: ROOT)))
     arguments = ManifestContextFixture.arguments(codec)
     packages = %w[clock quotes].to_h do |name|
@@ -96,6 +99,13 @@ class ErxPkgManifestTest < Minitest::Test
                                                       artifacts: arguments.fetch(:artifacts).merge(packages),
                                                       development_key: "\x07".b * 32)
     board = Erx::Platform.load(root: ROOT, name: 'qemu-virt').manifest_source(ROOT)
+    if ble
+      offered = "  services display net\n"
+      raise "QEMU virt's apps row no longer states #{offered.inspect}" unless board.include?(offered)
+
+      board = board.sub(offered, "  services display net ble\n  gatt nus\n") +
+              "service ble\n  server @domain.network\n  interface ble\n"
+    end
     rows = "package quotes\n  input @artifact.package-quotes\n" \
            "package clock\n  input @artifact.package-clock\n  enable YES\n" \
            "signer ops\n  key hex:#{'cd' * 32}\n"

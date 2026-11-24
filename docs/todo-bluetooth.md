@@ -246,8 +246,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `significant` with `auto_shutdown => any_significant`, or a chosen intensity, settles it in the design first.
 * [High] bluetooth, the `ble` facet's side in other domains (docs/design-bluetooth.md "The `ble` facet",
   "Declarations: `abi/gatt`"): `erx_ble_facet` admits a grantee's operations and forwards them to the registry,
-  and the Bluetooth suite's echo domain uses it for `nus`. Missing: `ble_grant`'s refusals (`tools/lib/erx/manifest.rb`, `check_ble_grants`) of a
-  service two rows name, two served services of one UUID, and advertising data that do not fit (while every
+  and the Bluetooth suite's echo domain uses it for `nus`. Missing: `ble_grant`'s refusals (`tools/lib/erx/manifest.rb`, `check_ble_grants`) of
+  two served services of one UUID, and advertising data that do not fit (while every
   declared service is served, `tools/lib/erx/gatt_decl.rb` can refuse `advertise` services whose UUIDs do not
   fit 31 octets, which `erx_bt_adv` otherwise answers with `badarg` at the controller process's start; and a
   declared 128-bit UUID whose value is below 0x10000 is advertised as a 16-bit one, since `erx_bt_hci` hands
@@ -257,9 +257,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   services read from the manifest's rows, where `erx_bt_sup` serves every declared service. Whether the
   registry's monitor of a handler in another domain fires when that handler or its domain ends is unverified.
 * [High] bluetooth and packaging, an installed app's `ble` grant (docs/design-bluetooth.md "The `ble` facet", "Who
-  holds `ble`"; docs/design-packaging.md "The `apps` row", "The declaration", "Admission", PK13): designed, not built.
-  Missing: the `apps` row's `gatt` field and its derived `ble` row for the app template (`tools/lib/erx/manifest.rb`,
-  property 19 clause 1, with `check_ble_grants` taking that one template row and refusing every other); the
+  holds `ble`"; docs/design-packaging.md "The `apps` row", "The declaration", "Admission", PK13): designed, partly built.
+  Built: the `apps` row's `gatt` field and the app template's derived `ble` row (`tools/lib/erx/manifest.rb`,
+  property 19 clause 1), the one template row `check_ble_grants` takes, and step 6's refusal of `ble` as a need
+  (`erx_pkg_manifest` reads no need of it). Missing: the
   declaration's `gatt` field in `abi/formats/package.txt`, the SDK packer and the generated reader, its bound taken
   from `abi/services/ble.txt`; admission's `Held` input and steps 7 and 8 (`erx_app_admit:admit/4`), kept by
   `erx_pkg` from its committed admissions and run in the recovery's and the build's order; the record's GATT

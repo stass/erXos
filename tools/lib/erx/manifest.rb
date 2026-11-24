@@ -393,13 +393,15 @@ module Erx
       NODE_PATH = %r{\A/[A-Za-z0-9,._+@/-]*\z}
       # The apps row (docs/design-packaging.md, "The apps row"), its defaults applied:
       # the budget all apps share, the names of the services an app may take, and max,
-      # how many apps a boot holds. Every sum that counts a principal counts max apps,
+      # how many apps a boot holds, and gatt, the GATT services apps may handle, which the
+      # app template's derived ble row names (docs/design-bluetooth.md, "Who holds
+      # `ble`"). Every sum that counts a principal counts max apps,
       # each a principal with a domains quota of one holding every service of services,
       # and adds memory once (property 19's second clause). A manifest without the row
       # has NO_APPS, which takes no packages and adds nothing to any sum, so each sum
       # counts the row the same way whether or not the manifest has one.
-      AppsRow = Data.define(:memory, :services, :max)
-      NO_APPS = AppsRow.new(memory: 0, services: [].freeze, max: 0)
+      AppsRow = Data.define(:memory, :services, :max, :gatt)
+      NO_APPS = AppsRow.new(memory: 0, services: [].freeze, max: 0, gatt: [].freeze)
       # A package row of the image, bound to its package artifact (check_packages): its
       # app's name, its header's SHA-256 in hexadecimal, whether its row is enabled and
       # the memory its declaration asks.
@@ -763,7 +765,8 @@ module Erx
 
       # The manifest's apps row, or NO_APPS. Its memory is a whole number of pages, as
       # root_memory is; its max is 1 to apps_max_limit; its services are distinct
-      # identifiers, which Check#check_apps resolves against the services.
+      # identifiers, which Check#check_apps resolves against the services, as are its
+      # gatt, which check_apps holds to the ble row's bound.
       def apps_row
         record = records('apps').first
         return NO_APPS unless record
@@ -774,12 +777,15 @@ module Erx
         max = record.properties.key?('max') ? number(record, 'max') : @codec.constant('apps_max_default')
         limit = @codec.constant('apps_max_limit')
         invalid("max is outside 1 to #{limit}", 'apps.max') unless max.between?(1, limit)
-        services = record.properties.fetch('services', []).map do |token|
-          record.line.fail!('services requires service names') if token.quoted || !token.value.match?(Frontend::IDENTIFIER)
-          token.value
+        services, gatt = %w[services gatt].map do |key|
+          names = record.properties.fetch(key, []).map do |token|
+            record.line.fail!("#{key} requires service names") if token.quoted || !token.value.match?(Frontend::IDENTIFIER)
+            token.value
+          end
+          invalid("#{key} names a service twice", "apps.#{key}") unless names.uniq.size == names.size
+          names.freeze
         end
-        invalid('services names a service twice', 'apps.services') unless services.uniq.size == services.size
-        AppsRow.new(memory: memory, services: services.freeze, max: max)
+        AppsRow.new(memory: memory, services: services, max: max, gatt: gatt)
       end
 
       def one(record, key)
@@ -1866,8 +1872,31 @@ module Erx
           derived_quantities(interface, name)
           matching.first
         end
+        check_apps_gatt(indices.any? { |index| ble_service?(service_rows.fetch(index)) })
         indices.freeze
       end
+
+      # Property 19's first clause on gatt (docs/design-packaging.md, "The build's
+      # check"): stated exactly when services names the ble service, offered, so no row
+      # offers apps a ble grant that names nothing and no gatt is written that no row
+      # carries; and within the ble interface's services count, which the app template's
+      # derived row takes from it (app_service_facets) without resolve_parameters, which
+      # holds a source row's set to it. apps_row holds each name to an identifier, within
+      # the parameter's 63 bytes, and ble_grant judges the names as any ble row's.
+      def check_apps_gatt(offered)
+        invalid('services names ble, so the row states gatt, the services apps may handle', 'apps.gatt') if
+          offered && @apps.gatt.empty?
+        invalid('gatt is stated, so services names ble, whose grant carries it', 'apps.gatt') if !offered && @apps.gatt.any?
+        return unless offered
+
+        parameter = declared_parameters(fetch_interface('ble')).fetch('services')
+        invalid("gatt names over #{parameter.fetch(:maximum_count)} services", 'apps.gatt') if
+          @apps.gatt.size > parameter.fetch(:maximum_count)
+      end
+
+      # Whether a service row is of the ble interface, which ble_grant holds to the one
+      # service named ble.
+      def ble_service?(service_row) = service_row.fetch('interface') == fetch_interface('ble')
 
       # The quantities of a facet row the build derives for a service of interface: those
       # its ABI file's quantity lines give (docs/design-abi.md, "Services, facets and their
@@ -1898,13 +1927,19 @@ module Erx
       end
 
       # The rows an apps row asks for (docs/design-packaging.md, "The apps row"): the app
-      # template's grant of each service of app_services, which states no parameter, none
-      # without an apps row. Answers each row as well_known_facets does.
+      # template's grant of each service of app_services, which states no parameter but
+      # the ble service's, whose services are the apps row's gatt, sorted as a set's
+      # values are (pack_parameters); none without an apps row. Answers each row as
+      # well_known_facets does.
       def app_service_facets(tables, app_services)
         return [] if @apps == NO_APPS
 
+        service_rows = tables.fetch('services')
         template = [grantee_kind('session'), app_template_index(tables)]
-        app_services.map { |service| derived_facet(tables.fetch('services'), template, service, {}) }
+        app_services.map do |service|
+          values = ble_service?(service_rows.fetch(service)) ? { 'services' => @apps.gatt.map(&:b).sort.freeze } : {}
+          derived_facet(service_rows, template, service, values)
+        end
       end
 
       # Whether the build derives the rows of the well-known service known, and the
@@ -2552,10 +2587,17 @@ module Erx
       # domain, and no grant of one goes to the system domain, whose handler would take a
       # phone's bytes into the trusted base (B8), or to a session template, which every
       # session made from it would hold, so two sessions would contend for one service's
-      # handler, as line_grant refuses one. facets and values are parallel arrays, each
-      # facet row beside its resolved parameters, and each grant's services are services
+      # handler, as line_grant refuses one. The one template row it takes is the app
+      # template's, which the build derives from the apps row's gatt and no source row
+      # can name (the template names no principal), and which a session of an app keeps
+      # only when admission kept its package's gatt, narrowed to those services, an app
+      # running one session at a time
+      # ("Who holds `ble`"). facets and values are parallel arrays, each
+      # facet row beside its resolved parameters; each grant's services are services
       # abi/gatt declares (Context#gatt_services), so every served set is a subset of the
-      # declarations.
+      # declarations, and no service is named by two grants, so each has at most one
+      # grantee that can handle it, and the apps row's gatt never offers apps a service a
+      # configured domain handles (docs/design-packaging.md, PK13).
       def check_ble_grants(facets, values, tables)
         checked = ->(service) { grant_checker(service.fetch('interface')) == 'ble_grant' }
         system = @codec.constant('mf_none')
@@ -2567,19 +2609,26 @@ module Erx
         unserved = tables.fetch('services').find { |row| checked.call(row) && row.fetch('server') == system }
         invalid("service #{unserved.fetch('name')} is served by no configured domain", 'service.server') if unserved
         declared = @context.gatt_services
-        facets.zip(values).each do |row, given|
-          next unless checked.call(tables.fetch('services').fetch(row.fetch('service')))
-
-          named = "ble grant #{row.fetch('name')}"
+        grants = facets.zip(values).select { |row, _given| checked.call(tables.fetch('services').fetch(row.fetch('service'))) }
+        grants.each do |row, given|
+          named = ble_grant_named(row, tables)
           invalid("#{named} is granted to the system domain, which takes no phone's bytes", 'facet.grantee') if
             row.fetch('grantee_kind') == grantee_kind('system')
           invalid("#{named} is granted to a session template, whose every session would hold it", 'facet.grantee') if
-            row.fetch('grantee_kind') == grantee_kind('session')
+            row.fetch('grantee_kind') == grantee_kind('session') && !app_template?(row, tables)
           undeclared = given.fetch('services', []).reject { |name| declared.include?(name) }
           invalid("#{named} names #{undeclared.map(&:inspect).join(', ')}, which abi/gatt does not declare", 'facet.parameter') unless
             undeclared.empty?
         end
+        holders = grants.flat_map { |row, given| given.fetch('services', []).map { |name| [name, row] } }.group_by(&:first)
+        name, shared = holders.find { |_name, held| held.size > 1 }
+        invalid("#{shared.map { |_name, row| ble_grant_named(row, tables) }.join(' and ')} both name #{name.inspect}",
+                'facet.parameter') if shared
       end
+
+      # A ble grant as a refusal names it: the app template's row by the apps row's gatt,
+      # which its services come from, since no source line states the row.
+      def ble_grant_named(row, tables) = app_template?(row, tables) ? "the apps row's gatt" : "ble grant #{row.fetch('name')}"
 
       # A line grant's device by its role: a UART's grant states rate, which its
       # declaration holds to 115200, and flow, none or rts_cts; a virtio console's states

@@ -1109,8 +1109,9 @@ class ManifestDomainsTest < Minitest::Test
   # grants the system domain and the app template; packages false leaves it out, for a
   # second row.
   PACKAGES = "service packages\n  server @domain.beta\n  interface files\n"
-  def self.apps(memory: 65_536, services: nil, max: nil, packages: true)
-    "#{PACKAGES if packages}apps\n  memory #{memory}\n#{"  services #{services}\n" if services}#{"  max #{max}\n" if max}"
+  def self.apps(memory: 65_536, services: nil, max: nil, packages: true, gatt: nil)
+    "#{PACKAGES if packages}apps\n  memory #{memory}\n#{"  services #{services}\n" if services}#{"  max #{max}\n" if max}" \
+      "#{"  gatt #{gatt}\n" if gatt}"
   end
 
   # source ready for an apps row: max_domains raised by count, the domains max apps take
@@ -1640,6 +1641,43 @@ class ManifestDomainsTest < Minitest::Test
     end
     assert_equal 'facet.parameter', error.field, error.message
     assert_match(/names "nus", which abi\/gatt does not declare/, error.message)
+  end
+
+  # The app template's ble row (docs/design-bluetooth.md, "Who holds `ble`";
+  # docs/design-packaging.md, "The apps row", property 19's first clause, PK13): an apps
+  # row naming ble with gatt nus derives the template's row of the ble service, whose
+  # services are nus and whose quantities are the ble interface's, and ble_grant takes
+  # it, the one template row it takes. Each seeded row differs from it in one thing and
+  # is refused: ble with no gatt, gatt with no ble, a gatt name abi/gatt does not
+  # declare, nine names, and a name a configured domain's ble row names, which no app may
+  # then be offered.
+  def test_the_apps_rows_gatt_is_the_app_templates_ble_grant
+    ble = "service ble\n  server @domain.beta\n  interface ble\n"
+    offered = ->(gatt, services: 'ble') { for_apps(@source + ble + self.class.apps(services: services, gatt: gatt), 8) }
+    view = @codec.open('manifest', admit(offered.call('nus')).bytes)
+    service = rows(view, 'services').index { |row| view.string(row.fetch('name')) == 'ble' }
+    first = view.header.fetch('facet_parameters').fetch('offset')
+    parameters = rows(view, 'facet_parameters')
+    granted = rows(view, 'facets').select { |row| row.fetch('service') == service }.map do |row|
+      span = row.fetch('parameters')
+      named = parameters[(span.fetch('offset') - first) / 32, span.fetch('count')].map { |item| view.string(item.fetch('bytes')) }
+      [row.fetch('grantee_kind'), named, row.fetch('max_request'), row.fetch('in_flight')]
+    end
+    assert_equal [[@codec.member('mf_grantee', 'session'), ['nus'], 1024, 16]], granted
+    {
+      ['apps.gatt', offered.call(nil)] => /services names ble, so the row states gatt/,
+      ['apps.gatt', offered.call('nus', services: nil)] => /gatt is stated, so services names ble/,
+      ['facet.parameter', offered.call('nusb')] => %r{the apps row's gatt names "nusb", which abi/gatt does not declare},
+      ['facet.parameter', for_apps(@source + ble_grant(%w[nus]) + self.class.apps(services: 'ble', gatt: 'nus'), 8)] =>
+        /(ble grant nm and the apps row's gatt|the apps row's gatt and ble grant nm) both name "nus"/
+    }.each do |(field, source), message|
+      refused(Erx::Manifest::Invalid, field, source, message: message)
+    end
+    error = assert_raises(Erx::Manifest::Invalid) do
+      admit(offered.call(ManifestContextFixture::GATT_NAMES.join(' ')), context: gatt_context)
+    end
+    assert_equal 'apps.gatt', error.field, error.message
+    assert_match(/gatt names over 8 services/, error.message)
   end
 
   # Seed: a service of another interface whose parameters name line_grant. Its facet is

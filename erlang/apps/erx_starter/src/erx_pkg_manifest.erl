@@ -81,7 +81,10 @@ config(Manifest) ->
       development => development(rows(View, development_key))}.
 
 %% The reader bounds the apps table to one row, whose services partition
-%% app_services, so the row's services are that table's rows.
+%% app_services, so the services a need may name are that table's rows less the
+%% ble service's: an app takes that grant only through its declaration's gatt,
+%% never as a need (docs/design-packaging.md, "Admission", step 6), so a need of
+%% ble finds no service here and admission refuses it.
 apps(_View, []) ->
     none;
 apps(View, [#{memory := Memory, max := Max, packages_facet := Packages, system_facet := System}]) ->
@@ -91,7 +94,10 @@ apps(View, [#{memory := Memory, max := Max, packages_facet := Packages, system_f
       packages_row => Packages,
       system_row => System,
       services => [service(View, element(Index + 1, Services), Facet)
-                   || #{service := Index, facet := Facet} <- rows(View, app_services)]}.
+                   || #{service := Index, facet := Facet} <- rows(View, app_services),
+                      need(element(Index + 1, Services))]}.
+
+need(#{interface := Interface}) -> Interface =/= ?ERX_SERVICE_BLE.
 
 service(View, #{interface := Interface} = Row, Facet) ->
     #{name => name(View, Row),
