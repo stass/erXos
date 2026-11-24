@@ -4,7 +4,7 @@
  */
 
 /*
- * The services and facet rows of the domain library's view as the terms
+ * The services, facet rows and drives of the domain library's view as the terms
  * the domain service reads (erx_domain_terms.h).
  */
 
@@ -188,4 +188,29 @@ erx_domain_served_terms(ErlNifEnv *env, const erx_dom_view_t *view, ERL_NIF_TERM
 		    limits), *grants);
 	}
 	return (true);
+}
+
+/*
+ * The drive numbers of the drive windows on the devices placed on
+ * configured row row, [N], in catalogue order: the drives that row serves
+ * (docs/design-drives.md, "How the grant reaches the media domain"). Each
+ * is the manifest's, below ERX_MF_NONE (erx_dom_device_entry_t's drives),
+ * never a report's.
+ */
+ERL_NIF_TERM
+erx_domain_drives_term(ErlNifEnv *env, const erx_dom_view_t *view, uint32_t row)
+{
+	const erx_dom_device_entry_t *entry;
+	ERL_NIF_TERM drives;
+
+	/* Built from the last entry back, so the list's head is the first drive. */
+	drives = enif_make_list(env, 0);
+	for (uint32_t index = view->ndevices; index-- > 0;) {
+		entry = &view->devices[index];
+		if (entry->row != row)
+			continue;
+		for (uint32_t at = entry->ndrives; at-- > 0;)
+			drives = enif_make_list_cell(env, enif_make_uint(env, entry->drives[at]), drives);
+	}
+	return (drives);
 }

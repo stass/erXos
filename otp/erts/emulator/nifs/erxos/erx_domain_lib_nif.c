@@ -411,8 +411,10 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
  * What the domain service reads of the manifest's configured domains:
  * {ok, #{host => Host, domains => Rows, services => Services, grants =>
  * Grants, boot_timeout_s => Seconds}}, Rows in row order, each #{row, place,
- * name, principal, kind, restarts, restart_period_s}, place its place in the
- * boot order, Services and Grants as erx_domain_served_terms makes them, and
+ * name, principal, kind, restarts, restart_period_s, drives}, place its place
+ * in the boot order, drives the drive numbers its placed devices carry
+ * (erx_domain_drives_term), Services and Grants as erx_domain_served_terms
+ * makes them, and
  * Seconds the machine's boot timeout. The view is
  * fixed at boot, so this reads it without the lock.
  */
@@ -445,7 +447,8 @@ configured_nif(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 		keys[4] = atom(env, "restarts"), values[4] = enif_make_uint(env, configured->restarts);
 		keys[5] = atom(env, "restart_period_s"), values[5] = enif_make_uint(env, configured->restart_period_s);
 		keys[6] = atom(env, "place"), values[6] = enif_make_uint(env, configured->place);
-		if (!enif_make_map_from_arrays(env, keys, values, 7, &row))
+		keys[7] = atom(env, "drives"), values[7] = erx_domain_drives_term(env, &lib->view, index);
+		if (!enif_make_map_from_arrays(env, keys, values, 8, &row))
 			return (enif_make_badarg(env));
 		rows = enif_make_list_cell(env, row, rows);
 	}

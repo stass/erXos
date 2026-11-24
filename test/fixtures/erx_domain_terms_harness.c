@@ -5,12 +5,15 @@
 
 /*
  * The host harness of test/host/facet_parameters_test.rb: a NIF of
- * erx_facet_parameters_tests whose served/1 builds the domain library's
- * boot view from a packed manifest's bytes, as the root does
- * (liberx/system/dom_boot_view.c), and answers the view's services and
- * grants as erx_domain_lib:configured/0 does, through the NIF's own
- * erx_domain_served_terms: {ok, {Services, Grants}}, or {refused, Reason}
- * for a manifest the view refuses.
+ * erx_facet_parameters_tests whose served/1 and drives/1 build the domain
+ * library's boot view from a packed manifest's bytes, as the root does
+ * (liberx/system/dom_boot_view.c), and answer what of the view
+ * erx_domain_lib:configured/0 does, through the NIF's own terms: served/1
+ * the services and grants, {ok, {Services, Grants}}, through
+ * erx_domain_served_terms, and drives/1 each configured row's name and
+ * drives, {ok, [{Name, Drives}]} in row order, through
+ * erx_domain_drives_term; each {refused, Reason} for a manifest the view
+ * refuses.
  */
 
 #include <stdbool.h>
@@ -25,8 +28,39 @@
 #include "erx/dom_lib.h"
 #include "erx_domain_terms.h"
 
+/* What a call answers of a view it built: true with its answer, or false. */
+typedef bool answer_fn(ErlNifEnv *, const erx_dom_view_t *, ERL_NIF_TERM *);
+
+static bool
+served_answer(ErlNifEnv *env, const erx_dom_view_t *view, ERL_NIF_TERM *answer)
+{
+	ERL_NIF_TERM services, grants;
+
+	if (!erx_domain_served_terms(env, view, &services, &grants))
+		return (false);
+	*answer = enif_make_tuple2(env, services, grants);
+	return (true);
+}
+
+static bool
+drives_answer(ErlNifEnv *env, const erx_dom_view_t *view, ERL_NIF_TERM *answer)
+{
+	ERL_NIF_TERM name;
+	unsigned char *bytes;
+
+	*answer = enif_make_list(env, 0);
+	for (uint32_t row = view->nconfigured; row-- > 0;) {
+		if ((bytes = enif_make_new_binary(env, view->configured[row].name_len, &name)) == NULL)
+			return (false);
+		memcpy(bytes, view->configured[row].name, view->configured[row].name_len);
+		*answer = enif_make_list_cell(env, enif_make_tuple2(env, name, erx_domain_drives_term(env, view, row)), *answer);
+	}
+	return (true);
+}
+
+/* The view of the manifest bytes argv[0], and answer's answer of it. */
 static ERL_NIF_TERM
-served(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+view_answer(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[], answer_fn *answer)
 {
 	ErlNifBinary binary;
 	erx_manifest_view_t manifest;
@@ -34,7 +68,7 @@ served(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	erx_dom_boot_sizes_t sizes;
 	erx_dom_boot_tables_t tables;
 	erx_dom_lib_t *lib;
-	ERL_NIF_TERM services, grants, result = 0;
+	ERL_NIF_TERM terms, result = 0;
 	bool answered = false;
 	const char *reason;
 	uint8_t *bytes, *region;
@@ -64,8 +98,8 @@ served(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
 	if ((reason = erx_dom_view_build(lib, &manifest, 0, &tables)) != NULL) {
 		result = enif_make_tuple2(env, enif_make_atom(env, "refused"), enif_make_string(env, reason, ERL_NIF_LATIN1));
 		answered = true;
-	} else if (erx_domain_served_terms(env, &lib->view, &services, &grants)) {
-		result = enif_make_tuple2(env, enif_make_atom(env, "ok"), enif_make_tuple2(env, services, grants));
+	} else if (answer(env, &lib->view, &terms)) {
+		result = enif_make_tuple2(env, enif_make_atom(env, "ok"), terms);
 		answered = true;
 	}
 out:
@@ -76,8 +110,21 @@ out:
 	return (answered ? result : enif_make_badarg(env));
 }
 
+static ERL_NIF_TERM
+served(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	return (view_answer(env, argc, argv, served_answer));
+}
+
+static ERL_NIF_TERM
+drives(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
+{
+	return (view_answer(env, argc, argv, drives_answer));
+}
+
 static ErlNifFunc functions[] = {
 	{ "served", 1, served, 0 },
+	{ "drives", 1, drives, 0 },
 };
 
 ERL_NIF_INIT(erx_facet_parameters_tests, functions, NULL, NULL, NULL, NULL)

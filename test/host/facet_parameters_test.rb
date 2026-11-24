@@ -27,7 +27,8 @@ require_relative '../../tools/lib/erx/host_os'
 # the view reads through, refuses a device one past the device table. The net-grant seed
 # (Erx::ManifestSeeds.net_grant) carries sets: its grant's ports, a full set of 16, and
 # listen reach the terms as lists in ascending order, and the view refuses each forgery of
-# NET_FORGED. The operations seed (Erx::ManifestSeeds.operations_grant), root's template granted two
+# NET_FORGED; it is the development manifest, whose usb row alone carries a drive, disk0,
+# in erx_domain_drives_term's per-row drives. The operations seed (Erx::ManifestSeeds.operations_grant), root's template granted two
 # of inspect's operations, takes the same road: the grant's limits carry their names in
 # number order, and the view refuses each forgery of operation_forgeries, one naming
 # operations on a service a configured domain serves. Seeded faults that drop a parameter
@@ -85,7 +86,7 @@ class FacetParametersTest < Minitest::Test
   ROW_LAYOUTS = { 'parameters' => 'erx_mf_parameter', 'operations' => 'erx_mf_operation' }.freeze
 
   def test_a_packed_row_reaches_the_mint
-    assert_match(/^  All 7 tests passed\.$/, run_cases)
+    assert_match(/^  All 8 tests passed\.$/, run_cases)
   end
 
   # A seeded fault: the file it edits, the anchor found once there, its replacement and

@@ -407,9 +407,16 @@ booted(#{lib := Lib} = State) ->
             Inputs = [Name || {_Server, Name, ?ERX_SERVICE_INPUT} <- maps:get(services, Boot, [])],
             Trees = [Name || {_Server, Name, Interface} <- maps:get(services, Boot, []),
                              lists:member(Interface, ?ERX_TREE_SERVICES)],
+            %% Each drive window is a grant from the row whose placed devices carry it
+            %% to the media domain, the configured domain that serves media, which the
+            %% manifest check holds every drive window to (docs/design-drives.md,
+            %% "Manifest rows"): {ServingRow, MediaRow, N}, N the manifest's.
+            Drives = [{Serving, Media, N} || {Media, media, _Interface} <- maps:get(services, Boot, []),
+                                            is_integer(Media),
+                                            #{row := Serving, drives := Ns} <- Rows, N <- Ns],
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
                                            grants => Minted, files => Files, windows => Windows,
-                                           inputs => Inputs}),
+                                           inputs => Inputs, drives => Drives}),
             %% Only configured rows, each its index, read Served: a {template, T}
             %% grant reaches each session through the session's own facet rows, and
             %% a grant to the system domain is planned by no ready answer.
@@ -1952,8 +1959,9 @@ mint_act({disarm, Tag}, #{mint_timers := Timers} = State) ->
             State
     end;
 mint_act({failed, {Grantee, Name}, {ServerId, GranteeId}, Reason}, State) ->
-    %% One line per operation, so bounded by the restarts of its two domains.
-    logger:warning("erx_domain: facet ~ts of domain ~b for ~0p (domain ~b) failed: ~0p",
+    %% One line per operation, so bounded by the restarts of its two domains. Name is
+    %% the installed name, an atom or a drive's {drive, N}, so it is printed as a term.
+    logger:warning("erx_domain: facet ~0p of domain ~b for ~0p (domain ~b) failed: ~0p",
                    [Name, ServerId, Grantee, GranteeId, Reason]),
     State;
 mint_act({answer, Asker, Reply}, State) ->

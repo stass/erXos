@@ -288,7 +288,7 @@ configured_boot_timeout_test_() ->
              persistent_term:put({erx_domain_fake_lib, boot},
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"silent">>, principal => 1,
-                                                 kind => service, restarts => 0, restart_period_s => 60}]}),
+                                                 kind => service, restarts => 0, restart_period_s => 60, drives => []}]}),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -312,7 +312,7 @@ hung_row_left_down_test_() ->
              persistent_term:put({erx_domain_fake_lib, boot},
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"silent">>, principal => 1,
-                                                 kind => service, restarts => 5, restart_period_s => 1}]}),
+                                                 kind => service, restarts => 5, restart_period_s => 1, drives => []}]}),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -349,7 +349,7 @@ ready_boot_ends_the_timeouts_test_() ->
              persistent_term:put({erx_domain_fake_lib, boot},
                                  #{boot_timeout_s => 1,
                                    domains => [#{row => 0, place => 0, name => <<"slow">>, principal => 1,
-                                                 kind => service, restarts => 1, restart_period_s => 600}]}),
+                                                 kind => service, restarts => 1, restart_period_s => 600, drives => []}]}),
              Log = erx_domain_fake_lib:start_log(),
              {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
                                                           exports => erx_domain_fake_lib,
@@ -479,7 +479,7 @@ nothing_held_starts_every_row_test_() ->
 
 hold_fixture(PcieName, Held, Test) ->
     Row = fun(Index, Name) -> #{row => Index, place => Index, name => Name, principal => 1, kind => service,
-                               restarts => 0, restart_period_s => 60}
+                               restarts => 0, restart_period_s => 60, drives => []}
           end,
     {setup,
      fun() ->

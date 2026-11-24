@@ -157,7 +157,7 @@ setup(Interface, Opts) -> setup(Interface, Opts, fun(Id) -> #{<<"echo">> => pid(
 %% reports providing what Provides answers for the reporting incarnation's id.
 setup(Interface, Opts, Provides) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 3, restart_period_s => 60} end,
+                                     restarts => 3, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, echo, Interface}],
@@ -388,7 +388,7 @@ served_test() ->
 
 served_setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 0, restart_period_s => 60} end,
+                                     restarts => 0, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)], services => [],
                           grants => [{0, log, system, #{max_request => 64, in_flight => 2, queue => 4096}},
@@ -419,6 +419,29 @@ served() ->
     ?assertEqual([log], maps:keys(maps:get(PidB, Answers))),
     ?assertMatch(#{grantee := 6, max_request := 64, in_flight := 2}, erx_facet:info(Facet)),
     ?assertEqual(#{}, grants()).
+
+%% The manifest's drive windows reach the mint core as grants (docs/design-drives.md,
+%% "How the grant reaches the media domain"): a's placed devices carry drives 0 and 2 and
+%% b serves media, so b, the media domain, holds a grant of each from a, keyed
+%% {drive, N}; a, which serves no media, holds none.
+drives_test() ->
+    Row = fun(Row, Place, Name, Drives) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
+                                             restarts => 0, restart_period_s => 60, drives => Drives} end,
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [Row(0, 1, <<"b">>, []), Row(1, 0, <<"a">>, [0, 2])],
+                          services => [{0, media, ?ERX_SERVICE_FILES}], grants => []}),
+    provide_a(fun(_Id) -> #{} end),
+    Log = erx_domain_fake_lib:start_log(),
+    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    unlink(Service),
+    try
+        #{mints := Mints} = sys:get_state(erx_domain_srv),
+        ?assertEqual([{0, {drive, 0}}, {0, {drive, 2}}], lists:sort(maps:keys(erx_domain_mints:grants(Mints))))
+    after
+        cleanup({Log, Service})
+    end.
 
 %% The ready answer names the facets of configured domains the manifest grants the
 %% domain, each with its interface, echo's 1, which come later by installation, so the domain mounts each it is granted:
@@ -489,7 +512,7 @@ system_packages_mount_test_() ->
 %% no call to the service first, as the release's later applications read /data.
 system_mounts(Grants) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 0, restart_period_s => 60} end,
+                                     restarts => 0, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, data, 5}, {1, packages, 5}], grants => Grants}),
@@ -864,7 +887,7 @@ display_setup() -> display_setup([{1, screen, ?ERX_SERVICE_WINDOWS}], []).
 %% The same over late serving Services, and Grants of them.
 display_setup(Services, Grants) ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 3, restart_period_s => 60} end,
+                                     restarts => 3, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"late">>)],
                           services => Services, grants => Grants}),
@@ -954,7 +977,7 @@ app_session_test_() ->
 app_setup() ->
     persistent_term:put({erx_domain_fake_lib, apps}, #{template => 2, first => 6, max => 4, memory => 4 * ?APP_MEMORY}),
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                     restarts => 3, restart_period_s => 60} end,
+                                     restarts => 3, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
                         #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
                           services => [{1, screen, ?ERX_SERVICE_WINDOWS}, {1, clip, ?ERX_SERVICE_FILES}],

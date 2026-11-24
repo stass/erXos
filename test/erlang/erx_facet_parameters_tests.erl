@@ -26,7 +26,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
--export([served/1]).
+-export([served/1, drives/1]).
 -on_load(load/0).
 
 load() ->
@@ -34,6 +34,19 @@ load() ->
 
 served(_Bytes) ->
     erlang:nif_error(not_loaded).
+
+drives(_Bytes) ->
+    erlang:nif_error(not_loaded).
+
+%% Each configured row carries the drive numbers of the drive windows on its placed
+%% devices (docs/design-drives.md, "How the grant reaches the media domain"): the
+%% development manifest's one drive, disk0, lies on the xhci unit the usb domain holds,
+%% and no other row carries one.
+the_usb_row_carries_the_development_manifest_s_drive_test() ->
+    {ok, Bytes} = file:read_file("net.bin"),
+    {ok, Rows} = drives(Bytes),
+    ?assertEqual([{<<"usb">>, [0]}], [Row || {_Name, [_ | _]} = Row <- Rows]),
+    ?assert(lists:keymember(<<"media">>, 1, Rows)).
 
 %% The display service and the client template's grant of it, from the manifest.
 display() ->
