@@ -40,12 +40,11 @@ module Erx
     PARTITION_DIRECTORY = 'apps'
     ARTIFACT_KIND = 'package'
     DEVELOPMENT_SIGNER = 'development'
-    # The kiosk: the app the Raspberry Pi 4's card carries, enabled (ProductionImage#own_apps),
+    # The kiosk: the app the Raspberry Pi 4's card carries, enabled (ProductionImage#published_apps),
     # and the kiosk suite boots on QEMU virt (Kiosk), both as packed_kiosk packs it.
     KIOSK = 'examples/dashboard'
     # The Bluetooth echo, decision 7's second package (docs/design-bluetooth.md,
-    # "Decisions"), which the Pi 4's development card carries beside the kiosk, enabled
-    # (ProductionImage.own_examples), and the Bluetooth suite's app cell boots on QEMU virt (BtDomain).
+    # "Decisions"), which the Bluetooth suite's app cell boots on QEMU virt (BtDomain).
     ECHO = 'examples/echo'
     KEY_BYTES = 32
     # The most bytes of a signer's key file; a PEM Ed25519 public key takes about 115.

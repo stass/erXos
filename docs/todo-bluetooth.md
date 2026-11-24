@@ -31,9 +31,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [High] bluetooth, the serial service on the board (docs/design-bluetooth.md "On the board", Decisions 7): the
   QEMU suite's serial row passes through the echo domain and through the echo package, `examples/echo`, in its
   app cell (`tools/lib/erx/bt_domain.rb`, `test/bt/peer/serial_peer.py`), but no board run has echoed `nus` to a
-  phone. The Pi 4's development card carries the echo beside the kiosk, enabled (`ProductionImage.own_examples`),
-  under an `apps` row of `max 2` offering `ble` and `gatt nus` (decision 7); run the board checklist's `nus` echo
-  from a phone or `blew` on a card of it.
+  phone. Decision 7 gives the Pi's Nordic UART service to a planned `bleuart` service, not to an app: the Pi 4's
+  cards carry the kiosk alone and its `apps` row offers no `ble`, so the board's `blew nus` run waits on `bleuart`'s
+  design and build.
 * [Low] bluetooth suite, the app cell (`BtDomain::Run#app_boot`): a third copy of the medium boot of
   `Kiosk::Run#boot` and `MediumBoot::Run`, without the boot value's checkpoint those insert
   (`MediumBoot.boot_value_checkpoint`); fold the three into one MediumBoot helper. Also: nothing at the landing

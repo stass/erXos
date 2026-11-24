@@ -155,20 +155,19 @@ Raspberry Pi's reads:
 
 ```text
 apps
-  memory 137363456
-  max 2
-  services display net ble
-  gatt nus
+  memory 69206016
+  max 1
+  services display net
 ```
 
-It says that all apps together share 131 MiB, that one boot holds at
-most two apps, and that an app may ask for the display, the network
-and Bluetooth, and handle the serial service `nus` alone, nothing else ([design-packaging.md, The `apps` row](../design-packaging.md#the-apps-row)).
+It says that all apps together share 66 MiB, that one boot holds at
+most one app, and that an app may ask for the display and the network,
+nothing else ([design-packaging.md, The `apps` row](../design-packaging.md#the-apps-row)).
 QEMU `virt`'s development manifest has a row with four apps and the
-display and network services (`config/manifest/qemu-virt-development.txt`).
-A board that lets apps handle Bluetooth services adds `ble` to `services`
-and a `gatt` line naming the services it offers, as the Raspberry Pi's
-does for the terminal echo its development card carries.
+same two services (`config/manifest/qemu-virt-development.txt`). A board
+that lets apps handle Bluetooth services adds `ble` to `services` and a
+`gatt` line naming the services it offers; the Raspberry Pi 4's development
+row is designed to offer `nus` alone.
 
 From the row the build derives the **app template**, one session
 template every app's sessions use. Its release boots the system's

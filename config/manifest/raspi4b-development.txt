@@ -59,19 +59,19 @@
 # being device memory, and 8 MiB for the screen image erx_firmware_fb keeps in the domain's
 # own memory, one 1920x1080 screen of 32 bits (8,294,400 bytes), with 8 MiB of headroom; a
 # larger screen, 4K's 31.6 MiB among them, does not fit, and the driver ignores it. Its
-# outer budget is 1 MiB and two pixel areas of windows_pixels_default, 8 MiB each, with
-# their 4 KiB lanes, for the apps row's two apps, and eight more for the sessions of root's
+# outer budget is 1 MiB and one pixel area of windows_pixels_default, 8 MiB, with its
+# 4 KiB lane, for the apps row's one app, and eight more for the sessions of root's
 # template that the system principal's domains quota lets live at once, which display_root
-# grants the display (development.txt), 64 MiB and 32 KiB; its quota of five connections is those
-# apps', root's session's, its replacement's and the USB domain's input tree's.
+# grants the display (development.txt), 64 MiB and 32 KiB; its quota of four connections is that
+# app's, root's session's, its replacement's and the USB domain's input tree's.
 # Its memory and the display share's 100 mcpu are measured on neither board (TODO.md).
 limits display
   memory 41943040
-  outer 84975616
+  outer 76582912
   grant @share.display
   spaces none
   lane 4096
-  connections 5
+  connections 4
   crash 0
   flags none
   runtime_limits @runtime_limits.display
@@ -81,12 +81,12 @@ limits display
 # The system principal holds root's one session, 36 MiB and outer 1 MiB, and 1 MiB for
 # the outer budget of a domain that has ended while another still holds a connection to
 # it, as QEMU virt's comment explains; the storage domain, 30 MiB and outer 1 MiB; the
-# network domain, 36 MiB and outer 1 MiB; the display domain, 40 MiB and outer 81 MiB
-# and 40 KiB; the PCIe domain, 25 MiB and outer 1 MiB; the USB domain, 32 MiB and outer
-# 1 MiB; and the Bluetooth domain, 32 MiB and outer 1 MiB: 319 MiB and 40 KiB in all.
+# network domain, 36 MiB and outer 1 MiB; the display domain, 40 MiB and outer 73 MiB
+# and 36 KiB; the PCIe domain, 25 MiB and outer 1 MiB; the USB domain, 32 MiB and outer
+# 1 MiB; and the Bluetooth domain, 32 MiB and outer 1 MiB: 311 MiB and 36 KiB in all.
 # The system baseline is QEMU virt's 46 MiB.
-# root_memory, 497 MiB and 36 KiB before ntpd's principal adds its own (its comment),
-# admits the baseline, the principal's 319 MiB and 40 KiB, the apps row's 131 MiB, the SD
+# root_memory, 432 MiB and 36 KiB before ntpd's principal adds its own (its comment),
+# admits the baseline, the principal's 311 MiB and 36 KiB, the apps row's 66 MiB, the SD
 # controller's 1 MiB of DMA memory, GENET's 1 MiB of device memory and the VL805's 1 MiB
 # of contiguous memory with 6 MiB no one is promised, and lies well below what the
 # smallest Pi 4 the record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
@@ -97,36 +97,32 @@ principal system
   names 64
   default_limits @limits.native
   ceiling_limits @limits.native
-# The apps row (docs/design-packaging.md, "The apps row"): 131 MiB, two apps of the
-# default 64 MiB, each with its session's outer 1 MiB, and the outer budget of one that
-# has ended; max 2, the development card's two apps, the dashboard and the Bluetooth echo
-# (docs/design-bluetooth.md, decision 7), so the display domain's outer budget pays for
-# two pixel areas; the display, net and ble, which the build grants the app template; and
-# gatt nus, the one GATT service an app may handle, the echo's. The published card carries
-# the dashboard alone, which names no gatt, so no session holds ble there. Each app is a
-# principal with a domains quota of one, so max_domains is the system principal's eight,
-# ntpd's and the two apps. max_connections, 28 with ntpd's session's, holds the 15 of the
-# network domain's comment, each app's session's five: its system connection, packages,
-# the display, net and ble, and two more for root's session's display connection and its
+# The apps row (docs/design-packaging.md, "The apps row"): 66 MiB, one app of the default
+# 64 MiB with its session's outer 1 MiB and the outer budget of one that has ended; max 1,
+# the card's one app, the dashboard, so the display domain's outer budget pays for one
+# pixel area; and the display and net, which the build grants the app template. The app
+# is a principal with a domains quota of one, so max_domains is the system principal's
+# eight and the one app. max_connections, 22 with ntpd's session's, holds the 15 of the
+# network domain's comment and the app's session's four: its system connection, packages,
+# the display and net, and two more for root's session's display connection and its
 # replacement's.
 apps
-  memory 137363456
-  max 2
-  services display net ble
-  gatt nus
+  memory 69206016
+  max 1
+  services display net
 machine
   flags development
   host "erxos"
   console "/soc/serial@7e215040"
   hostlink "/soc/serial@7e201600"
   platform "raspi4b"
-  root_memory 559976448
+  root_memory 491819008
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 11
-  max_connections 28
+  max_domains 10
+  max_connections 22
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -213,7 +209,7 @@ system_image
 # system connections of root's session and of the storage, network, display, PCIe, USB and
 # Bluetooth domains, the session's data and net, and the display's usb_input; the other five are the
 # three a replacement session makes beside its predecessor's closing rows and the two a
-# restarted configured domain makes, as on QEMU virt. The apps row's two apps take five more each (the apps row's comment).
+# restarted configured domain makes, as on QEMU virt. The apps row's one app takes four more (the apps row's comment).
 domain network
   principal @principal.system
   limits @limits.network
@@ -358,9 +354,8 @@ facet usb_input
 # domain whose release's boot script, bt, starts crypto and erx_bt, so the mint of ble
 # exists before init's ready report, and whose -eval (erx_bt_top:start_stack/0) starts the
 # rest of the stack once init holds the ready answer's facets, the line grant among them.
-# The service ble, which the domain serves, has no grant here: only an app's session holds
-# ble on this board, through the apps row, narrowed to the gatt services its package
-# declares, and its row makes the domain service accept the mint the domain names. They are
+# The service ble, which the domain serves, has no grant here, so no domain holds ble on
+# this board: its row makes the domain service accept the mint the domain names. They are
 # the rows of QEMU virt's Bluetooth suite (tools/lib/erx/bt_domain.rb, whose comment
 # explains the runtime limits, the share and the limits) with four differences:
 #
