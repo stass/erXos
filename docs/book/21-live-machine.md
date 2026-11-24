@@ -815,9 +815,9 @@ never waits in the ring, and the ring's lines go out first, escaped as
 a take would give them. So while the console's driver runs it is the
 UART's only user, and no kernel write can hide a lost keystroke
 ([design-fiasco.md, The kernel's lines](../design-fiasco.md#the-kernels-lines)).
-A development build's debugger is the one exception: an operator who
-resumes it leaves the kernel writing the UART beside the driver until
-the machine ends. The ring is designed and not built.
+A development build's debugger is the one exception: once resumed, or
+when the boot enters it before user mode, it leaves the kernel writing
+the UART beside the driver until the machine ends. The ring is designed and not built.
 
 The service, its pure core and its console consumer are **Built**
 (`erlang/apps/erx/src/erx_syslog.erl`, `erx_syslog_core.erl`). The

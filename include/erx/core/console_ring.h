@@ -130,7 +130,9 @@ void erx_console_ring_take(erx_console_ring_t *ring,
 /*
  * Vlog operation 5, and the head of every stop's report. Moves any route to
  * closed, taking back and counting a line open in the ring, and ends any
- * drop, so the stop's report that follows reaches the UART whole. Returns
+ * drop, so the stop's report that follows reaches the UART whole; the rest
+ * of the counted line, if it arrives after the close, goes to the UART raw.
+ * Returns
  * whether this call closed it: only then does the caller
  * write the ring out, through erx_console_ring_drain, so a stop inside that
  * write finds the route closed and its close does nothing.

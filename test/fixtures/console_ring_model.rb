@@ -111,7 +111,7 @@ class ConsoleRingModel
   def close
     return 'close 0' if @route == :closed
 
-    lose if @route == :ring && !@open.empty?
+    take_back if @route == :ring && !@open.empty?
     @dropping = false
     @route = :closed
     'close 1'
@@ -137,9 +137,13 @@ class ConsoleRingModel
 
   private
 
-  def lose
+  def take_back
     @open = +''.b
     @lost += 1
+  end
+
+  def lose
+    take_back
     @dropping = true
   end
 

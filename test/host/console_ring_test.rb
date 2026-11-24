@@ -202,9 +202,10 @@ class ConsoleRingTest < Minitest::Test
       'the drop does not end at the newline' => ["\t\t\tring->dropping = false;\n", "\t\t\t;\n"],
       'a take keeps the rest of the uart line' => ["\t\tif (ring->uart_line_open)\n\t\t\tconsole_ring_lose(ring);\n", "\n"],
       'a close keeps the open line' => ["\tif (ring->route == ERX_CONSOLE_ROUTE_RING && ring->head != ring->open)\n" \
-                                        "\t\tconsole_ring_lose(ring);\n", "\n"],
+                                        "\t\tconsole_ring_take_back(ring);\n", "\n"],
       'a line may be one byte longer' => ['segment > ERX_CONSOLE_RING_LINE_MAX - ', 'segment > 1 + ERX_CONSOLE_RING_LINE_MAX - '],
       'the ring may overfill by one' => ['segment > ERX_CONSOLE_RING_BYTES - ', 'segment > 1 + ERX_CONSOLE_RING_BYTES - '],
+      # A leftover drop under closed changes no output; the state line shows it.
       'a close leaves the drop armed' => ["\tring->dropping = false;\n\tring->route = ERX_CONSOLE_ROUTE_CLOSED;\n",
                                           "\tring->route = ERX_CONSOLE_ROUTE_CLOSED;\n"],
       'a take after the close hands out lines' => ["\tif (ring->route == ERX_CONSOLE_ROUTE_CLOSED)\n\t\treturn;\n", "\n"],

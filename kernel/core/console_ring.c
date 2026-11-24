@@ -59,6 +59,7 @@ static uint8_t console_ring_byte(const erx_console_ring_t *, uint32_t);
 static size_t console_ring_drop(erx_console_ring_t *, const uint8_t *, size_t);
 static uint32_t console_ring_line_end(const erx_console_ring_t *, uint32_t);
 static void console_ring_lose(erx_console_ring_t *);
+static void console_ring_take_back(erx_console_ring_t *);
 static size_t console_segment(const uint8_t *, size_t);
 static bool console_piece_add(erx_console_drain_t *, size_t *, const void *,
     size_t);
@@ -69,17 +70,24 @@ console_ring_byte(const erx_console_ring_t *ring, uint32_t position)
 	return (ring->bytes[position & CONSOLE_RING_MASK]);
 }
 
-/*
- * The one way a line is lost: the open line's bytes come back off the tail,
- * the loss is counted once, and the rest of the line, through its newline,
- * is dropped if it arrives on the ring route.
- */
+/* The open line's bytes come back off the tail, and the loss is counted once. */
 static void
-console_ring_lose(erx_console_ring_t *ring)
+console_ring_take_back(erx_console_ring_t *ring)
 {
 	ring->head = ring->open;
 	if (ring->lost != UINT64_MAX)
 		ring->lost++;
+}
+
+/*
+ * The ring route's one way a line is lost: the open line is taken back and
+ * the rest of the line, through its newline, is dropped. Only a write and a
+ * take on the ring route call it, so a drop is only ever armed there.
+ */
+static void
+console_ring_lose(erx_console_ring_t *ring)
+{
+	console_ring_take_back(ring);
 	ring->dropping = true;
 }
 
@@ -217,8 +225,8 @@ erx_console_ring_close(erx_console_ring_t *ring)
 	if (ring->route == ERX_CONSOLE_ROUTE_CLOSED)
 		return (false);
 	if (ring->route == ERX_CONSOLE_ROUTE_RING && ring->head != ring->open)
-		console_ring_lose(ring);
-	/* The stop's report that follows reaches the UART whole. */
+		console_ring_take_back(ring);
+	/* A drop an earlier loss armed ends: the report reaches the UART whole. */
 	ring->dropping = false;
 	ring->route = ERX_CONSOLE_ROUTE_CLOSED;
 	return (true);
