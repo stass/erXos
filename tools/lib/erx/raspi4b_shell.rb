@@ -4,11 +4,14 @@
 
 require 'fileutils'
 require_relative 'abi_theme'
+require_relative 'bench_measurement'
+require_relative 'bench_suite'
 require_relative 'bl31'
 require_relative 'boot_partition'
 require_relative 'board_tree'
 require_relative 'generated_abi'
 require_relative 'manifest_frontend'
+require_relative 'native_bench'
 require_relative 'native_root'
 require_relative 'output_directory'
 require_relative 'pi_medium'
@@ -68,6 +71,13 @@ module Erx
   # no partition holds, and reads them back; after QEMU exits the harness finds the same
   # bytes at that sector of the card's file (check_card_write!).
   #
+  # tcg-bench-set: the native nullcall bench's board set (NativeBench::BoardSets,
+  # docs/design-bench.md, "The bench image's boot set"), booted from its own kernel8.img
+  # and bl31.bin with an entry's command line in the tree's /chosen/bootargs
+  # (bench_set_boot). Seeded by hand: the set's kernel8.img made with the main build's
+  # first stage shows no banner before the boot's deadline, and a root built with
+  # ERX_BENCH_SEED_ASKED_OFF ends with erx: end off, which NativeBench.check_end refuses.
+  #
   # Seeded by hand, over a card file: check_card_data! refuses the card as packed, whose
   # data partition holds a fresh volume, so the check reads the bytes from the card and
   # not from anywhere else. A manifest that grants no data facet fails earlier, at
@@ -84,7 +94,11 @@ module Erx
   class Raspi4bShell
     PLATFORM = 'raspi4b'
     CPUS = 4
-    CELLS = %w[tcg-4cpu tcg-cpu-removed tcg-sd-card].freeze
+    CELLS = %w[tcg-4cpu tcg-cpu-removed tcg-sd-card tcg-bench-set].freeze
+    # The board set tcg-bench-set boots (docs/design-bench.md, "Seeded faults", the
+    # board's set), and the name its command line gives the boot.
+    BENCH_SET = 'nullcall'
+    BENCH_NAME = '0123456789abcdef' * 2
     # The CPU node the seeded tree loses, the last of the model's four.
     REMOVED_CPU = '/cpus/cpu@3'
     # Under TCG a four-CPU boot takes minutes to reach the release.
@@ -262,7 +276,25 @@ module Erx
       { 'tcg-4cpu' => screen_boot(inputs),
         'tcg-cpu-removed' => boot(inputs, dtb: removed_cpu_tree(inputs.fetch(:dtb)), points: release_checkpoints(CPUS - 1),
                                           machine_end: false),
-        'tcg-sd-card' => card_boot(inputs) }
+        'tcg-sd-card' => card_boot(inputs),
+        'tcg-bench-set' => bench_set_boot(jobs: jobs) }
+    end
+
+    # The nullcall set as NativeBench::BoardSets lays it out, booted from its own
+    # kernel8.img and bl31.bin with the name on its command line: the banner names the
+    # set's image, every naming line carries the name, every cell the boot asks for
+    # reports between two of them, and the machine ends with a reset. The model's numbers
+    # are not recorded, since the model is no environment.
+    def bench_set_boot(jobs:)
+      laid = NativeBench::BoardSets.new(root: @root, platform: @platform, runner: @runner, compiler: @compiler, linker: @linker)
+                                   .call([BENCH_SET], jobs: jobs).fetch(BENCH_SET)
+      boot_files = laid.set.files
+      inputs = { image: File.join(boot_files, BootPartition::KERNEL), stub: patched_stub(File.join(boot_files, BootPartition::ARMSTUB)) }
+      set_line = File.file?(File.join(boot_files, BootPartition::CMDLINE)) ? File.read(File.join(boot_files, BootPartition::CMDLINE)) : nil
+      dtb = named_tree(located_dtb, NativeBench.entry_command_line(set_line, BENCH_NAME))
+      report = boot(inputs, dtb: dtb, points: bench_checkpoints(laid.image), machine_end: true)
+      check_bench_boot(File.binread(report.fetch(:serial)))
+      report
     end
 
     # From the release to the system's command shell, its kernel log lines for the card,
@@ -461,7 +493,7 @@ module Erx
       partition = File.join(@root, ProductionImage.packed_directory(@platform), BootPartition::PARTITION)
       image = File.join(partition, BootPartition::KERNEL)
       bl31 = File.join(partition, BootPartition::ARMSTUB)
-      dtb = File.join(@root, BoardTree::OUTPUT, PLATFORM, 'model.dtb')
+      dtb = located_dtb
       [image, bl31, dtb].each { |path| raise Error, "raspi4b: #{path} is not built" unless File.file?(path) }
       card = File.join(@root, ProductionImage.packed_directory(@platform), BootPartition::IMAGE)
       raise Error, "raspi4b: #{card} is not built" unless File.file?(card)
@@ -478,6 +510,43 @@ module Erx
 
       File.binwrite(path, Bl31.patch_stub(File.binread(bl31), dtb: loads.dtb, entry: loads.image))
       path
+    end
+
+    # A copy of the model's tree whose /chosen/bootargs is line, as the firmware writes an
+    # entry's cmdline.txt there; QEMU's loader path takes no command line of its own.
+    def named_tree(model, line)
+      path = File.join(OutputDirectory.prepare(root: @root, path: File.join(@root, STUB_DIRECTORY)), 'bench-named.dtb')
+      FileUtils.cp(model, path)
+      @runner.run(['fdtput', '-p', '-t', 's', path, '/chosen', 'bootargs', line], name: 'raspi4b-bench-bootargs', deadline: 30)
+      path
+    end
+
+    def located_dtb = File.join(@root, BoardTree::OUTPUT, PLATFORM, 'model.dtb')
+
+    # The bench boot's transcript: the banner, the set's image identity, the root's first
+    # naming line, its timing and its end, at the guest's landing deadline and the margin.
+    def bench_checkpoints(image)
+      identity = /\Aerx: boot image build #{image.build_id} index #{image.index_hash} flags 0x#{image.flags.to_s(16)} archive /n
+      named = /\Aerx: bench: boot #{BENCH_NAME}\r*\n\z/n
+      deadline = NativeBench::LANDING_DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS
+      [*Qemu.boot_transcript(memory_mib: @machine.memory_mib),
+       point('bench-image-identity', identity),
+       point('bench-named', named, seconds: RELEASE_SECONDS),
+       point('bench-done', NativeBench::END_LINE, seconds: deadline)].freeze
+    end
+
+    # Raises unless the bench boot of serial named no setup failure, ended with a reset,
+    # kept its naming and reported every cell it asks for.
+    def check_bench_boot(serial)
+      NativeBench.judge(serial)
+      NativeBench.check_end(serial)
+      misnamed = NativeBench.misnamed_lines(serial, name: BENCH_NAME)
+      raise Error, "raspi4b: the bench boot's #{misnamed.size} lines break its naming, first #{misnamed.first.dump[0, 200]}" unless misnamed.empty?
+
+      asked = NativeBench.asked(BenchSuite.benchmark(BENCH_SET), cpus: CPUS)
+      lines = NativeBench.guest_lines(serial)
+      unreported = BenchMeasurement.boot(lines, asked, timed_out: false).fetch(:cells).reject { |cell| BenchMeasurement::GUEST_STATUSES.include?(cell.status) }
+      raise Error, "raspi4b: the bench boot did not report #{unreported.map(&:operation).uniq.join(', ')}" unless unreported.empty?
     end
 
     def removed_cpu_tree(model)

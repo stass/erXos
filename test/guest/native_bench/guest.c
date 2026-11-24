@@ -61,6 +61,16 @@ erx_bench_hist_t bench_hist;
 static _Alignas(16) uint8_t thread_stacks[BENCH_THREADS + 1][STACK_BYTES];
 /* The boot's name, NUL-ended, once root_main has read it. */
 static char boot_name[NAME_DIGITS + 1];
+/*
+ * How every end of the boot ends the machine: with a reset, so a board boots again from
+ * its boot server; the end's seed ends it off instead, which halts a board.
+ */
+#ifdef ERX_BENCH_SEED_ASKED_OFF
+#define BENCH_END	ERX_FIASCO_END_ASKED_OFF
+#else
+#define BENCH_END	ERX_FIASCO_END_ASKED_RESET
+#endif
+
 /* Set by the one caller that ends the boot: the done path, the deadline or a failure. */
 static _Atomic uint32_t bench_ending;
 /* When the deadline thread ends the boot, on erx_fiasco_clock_ns's clock. */
@@ -106,7 +116,7 @@ end_with(const char *text, size_t length)
 		erx_fiasco_sleep_forever();
 	erx_fiasco_lock(&console_lock);
 	erx_fiasco_console_write(text, length);
-	erx_fiasco_end(ERX_FIASCO_END_ASKED_RESET, NULL);
+	erx_fiasco_end(BENCH_END, NULL);
 }
 
 _Noreturn void

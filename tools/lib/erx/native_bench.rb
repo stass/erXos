@@ -2,14 +2,20 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
+
 require_relative 'bench_landing'
 require_relative 'bench_measurement'
 require_relative 'bench_record'
 require_relative 'boot_image'
+require_relative 'boot_partition'
+require_relative 'build_kind'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'native_root'
 require_relative 'native_task'
+require_relative 'output_directory'
+require_relative 'platform'
 require_relative 'qemu'
 require_relative 'runner'
 
@@ -105,14 +111,20 @@ module Erx
     # ended by the guest first.
     LANDING_DEADLINE_SECONDS = 540
     DEADLINE_MARGIN_SECONDS = 60
+    # The word the root takes its boot's name from (docs/design-bench.md, "The boot name").
+    NAME_WORD = 'erx.arg='
     # Under QEMU each boot has a console of its own, so every boot takes this one name
     # (docs/design-bench.md, "The boot name"), on its command line.
     QEMU_BOOT_NAME = '0' * 32
-    QEMU_COMMAND_LINE = "erx.arg=#{QEMU_BOOT_NAME}".freeze
+    QEMU_COMMAND_LINE = "#{NAME_WORD}#{QEMU_BOOT_NAME}".freeze
     # The root's naming line at its end, done or deadline, as one line of the serial log,
     # with or without its line end: QEMU's bench-done checkpoint and timed_out's one pattern.
     END_LINE = /\Aerx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
     FAILED_LINE = /^erx: bench: .* FAILED/n
+    # The machine's end, the boot's last line (docs/design-bench.md, "The end").
+    MACHINE_END_LINE = /^erx: end (?<how>[a-z]+)\r*$/n
+    # The root's naming line in any of its forms, with its name.
+    NAMING_LINE = /\Aerx: bench: boot (?<name>\S*)(?: done| deadline)?\r*\z/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
     module_function
@@ -177,6 +189,37 @@ module Erx
       raise Error, "the guest says #{failed[0].inspect}" if failed
     end
 
+    # Raises unless the boot of serial ended the machine with a reset, as every end of the
+    # bench root does: a board's boot that ends off has halted the board.
+    def check_end(serial)
+      how = serial.b.scan(MACHINE_END_LINE).last&.first
+      return if how == 'reset'
+      raise Error, 'the boot did not end the machine' if how.nil?
+
+      raise Error, "the boot ended with erx: end #{how}: the board halts there, and its power needs cycling"
+    end
+
+    # The lines of serial that break its naming (docs/design-bench.md, "The boot name"):
+    # a naming line with another name than name, and a BENCH or CLOCK line without a
+    # naming line before and after it; empty when there are no naming lines to break.
+    def misnamed_lines(serial, name:)
+      lines = serial.b.split(/\r?\n/n)
+      named = lines.each_index.select { |index| NAMING_LINE.match?(lines[index]) }
+      return lines.grep(GUEST_LINE) if named.empty?
+
+      others = named.map { |index| lines[index] }.reject { |line| NAMING_LINE.match(line)[:name] == name }
+      outside = lines.each_index.select { |index| GUEST_LINE.match?(lines[index]) && !(named.first < index && index < named.last) }
+      others + outside.map { |index| lines[index] }
+    end
+
+    # An entry's cmdline.txt: its set's line followed by the name's word, or that word
+    # alone when the set has no line, with no newline (docs/design-bench.md, "The boot name").
+    def entry_command_line(set_line, name)
+      raise Error, "bench: #{name.inspect} is not a boot name" unless name.match?(/\A[0-9a-f]{32}\z/)
+
+      [set_line.to_s.chomp, "#{NAME_WORD}#{name}"].reject(&:empty?).join(' ')
+    end
+
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
@@ -194,20 +237,37 @@ module Erx
       # QEMU's version, and the stored log a replayed boot came from (nil for a fresh one).
       def call(benchmark, accel:, cpus:, seed: nil, build: false, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
-        fiasco.build(jobs: jobs) if build
+        fiasco.build_for(@platform, jobs: jobs) if build
         deadline = seed&.deadline_seconds || LANDING_DEADLINE_SECONDS
         flags = NativeBench.flags(seeded: seed ? seed.root_flags : [], deadline_seconds: deadline)
         built = image(fiasco, benchmark, seed: seed, flags: flags)
         directory = File.join(@root, 'build/qemu', "bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = boot(built, accel: accel, cpus: cpus, directory: directory, deadline_seconds: deadline)
         serial = File.binread(report.fetch('serial_log'))
+        NativeBench.check_end(serial)
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
           lines: NativeBench.guest_lines(serial), image_sha256: report.fetch('image_sha256'), flags: flags,
           compiler: @compiler, qemu_version: report['qemu_version'], reused_from: report['reused_from'],
           timed_out: NativeBench.timed_out(serial) }.freeze
       end
 
+      # benchmark's image for the run's platform, seeded with seed's fault if given, its
+      # root built with flags: the boot image (BootImage::Built).
+      def image(fiasco, benchmark, seed:, flags:)
+        guest = NativeBench.guest(benchmark)
+        build = File.join(@root, 'build', ['native-bench', *board_part, benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-'))
+        native = NativeRoot.new(root: @root, source: @root, runner: @runner, compiler: @compiler, linker: @linker,
+                                platform: @platform, fiasco: fiasco)
+        root_task = native.build(name: 'bench-root', sources: [*ROOT_SOURCES, *guest.root.map { |file| "#{GUEST}/#{file}" }],
+                                 directory: File.join(build, 'root'), flags: flags)
+        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform)
+                 .build(directory: File.join(build, 'image'), stand_in_root: root_task, programs: programs(native, guest, build, seed))
+      end
+
       private
+
+      # A board's builds are apart from QEMU virt's, which take the development platform.
+      def board_part = @platform.name == Platform::DEVELOPMENT_NAME ? [] : [@platform.name]
 
       def boot(built, accel:, cpus:, directory:, deadline_seconds:)
         Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: cpus, image: built.single,
@@ -218,17 +278,6 @@ module Erx
         serial = File.join(directory, 'serial.log')
         NativeBench.judge(File.binread(serial)) if File.file?(serial)
         raise e
-      end
-
-      def image(fiasco, benchmark, seed:, flags:)
-        guest = NativeBench.guest(benchmark)
-        build = File.join(@root, 'build', ['native-bench', benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-'))
-        native = NativeRoot.new(root: @root, source: @root, runner: @runner, compiler: @compiler, linker: @linker,
-                                platform: @platform, fiasco: fiasco)
-        root_task = native.build(name: 'bench-root', sources: [*ROOT_SOURCES, *guest.root.map { |file| "#{GUEST}/#{file}" }],
-                                 directory: File.join(build, 'root'), flags: flags)
-        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
-                 .build(directory: File.join(build, 'image'), stand_in_root: root_task, programs: programs(native, guest, build, seed))
       end
 
       # The test task's program, for a guest whose cells launch one.
@@ -242,6 +291,51 @@ module Erx
 
         { TASK_PATH => native.build_task(name: 'native-bench-task', sources: [*TASK_SOURCES, *guest.task.map { |file| "#{GUEST}/#{file}" }],
                                          directory: File.join(build, 'task'), flags: NativeBench.flags(seeded: seed ? seed.task_flags : [])) }
+      end
+    end
+
+    # The board's sets (docs/design-bench.md, "The bench image's boot set"): each distinct
+    # benchmark's native bench image built for platform, a board whose medium is a boot
+    # partition, and laid out once as that partition's files and their build record in
+    # build/bench-board/<benchmark>/, which every entry of the set is made from.
+    class BoardSets
+      DIRECTORY = 'build/bench-board'
+      # A laid-out set: its files and record (BootPartition::WrittenSet), and its image
+      # (BootImage::Built), whose identity its banner names.
+      Laid = Data.define(:set, :image)
+
+      def initialize(root:, platform:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+        raise Error, "bench: #{platform.name} boots no boot partition" unless BootPartition.boot_partition_medium?(platform)
+
+        @root = File.expand_path(root)
+        @platform = platform
+        @runner = runner
+        @compiler = compiler
+        @linker = linker
+        @run = Run.new(root: @root, runner: runner, compiler: compiler, linker: linker, platform: platform)
+      end
+
+      # Each distinct benchmark name of benchmarks to its Laid set, the kernel built for
+      # the platform first; seed's root flags, if given, are a seeded build's
+      # (docs/design-bench.md, "Seeded faults").
+      def call(benchmarks, seed: nil, jobs: 4)
+        fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
+        fiasco.build_for(@platform, jobs: jobs)
+        flags = NativeBench.flags(seeded: seed ? seed.root_flags : [])
+        benchmarks.uniq.to_h { |benchmark| [benchmark, lay_out(fiasco, benchmark, seed: seed, flags: flags)] }
+      end
+
+      private
+
+      def lay_out(fiasco, benchmark, seed:, flags:)
+        image = @run.image(fiasco, benchmark, seed: seed, flags: flags)
+        directory = File.join(@root, DIRECTORY, [benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-'))
+        FileUtils.remove_entry(directory) if File.exist?(directory)
+        OutputDirectory.prepare(root: @root, path: directory)
+        set = BootPartition.lay_out_set(root: @root, runner: @runner, platform: @platform, build_kind: BuildKind::DEVELOPMENT,
+                                        bootable: image.single, directory: directory, compiler: @compiler, linker: @linker)
+        Laid.new(set: set, image: image)
       end
     end
 

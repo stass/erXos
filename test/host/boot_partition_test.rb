@@ -227,6 +227,24 @@ class BootPartitionTest < Minitest::Test
 
   # A directory that already holds one of the medium's entries, or a link by its name, is
   # refused and left as it was: the medium is written only beside a fresh image.
+  # A bench set is the partition's files and their record alone: no card, volume or
+  # compressed card, and a record with no card for its artifact.
+  def test_a_set_is_the_partition_files_and_their_record_alone
+    Dir.mktmpdir do |root|
+      output = File.join(root, 'set')
+      Dir.mkdir(output)
+      written = Erx::BootPartition.write_set(root: root, directory: output, plan: plan(root), record: { 'inputs' => 'given' })
+      assert_equal %w[boot boot.receipt.json], Dir.children(output).sort
+      assert_equal [File.join(File.realpath(output), 'boot'), File.join(File.realpath(output), 'boot.receipt.json')], [written.files, written.record]
+      assert_equal 'kernel', File.read(File.join(output, 'boot/kernel8.img'))
+      receipt = JSON.parse(File.read(written.record))
+      refute receipt.key?('artifact')
+      assert_equal 'given', receipt.fetch('inputs')
+      assert_equal Digest::SHA256.hexdigest('kernel'), Erx::BootPartition.listed_files(receipt).fetch('kernel8.img')
+      assert_raises(Erx::Error) { Erx::BootPartition.write_set(root: root, directory: output, plan: plan(root), record: {}) }
+    end
+  end
+
   def test_refuses_a_directory_that_holds_one_of_its_entries
     Erx::BootPartition::ENTRIES.each do |entry|
       Dir.mktmpdir do |root|

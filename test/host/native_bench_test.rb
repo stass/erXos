@@ -155,4 +155,44 @@ class NativeBenchTest < Minitest::Test
     refute caught.call([cell('nullcall', 'root-same-space', 'rejected'), cell('nullcall', 'root-cross-space', 'rejected')])
     refute caught.call([cell('nullcall', 'root-same-space', 'failed'), cell('nullcall', 'root-cross-space', 'timed_out')])
   end
+
+  # Every end of the bench root is a reset; one that ends off has halted a board, and a
+  # boot whose serial log holds no end did not end the machine.
+  def test_only_a_boot_that_ends_with_a_reset_passes_its_end
+    assert_nil Erx::NativeBench.check_end("erx: bench: boot #{NAME} done\r\nerx: end reset\r\n")
+    error = assert_raises(Erx::Error) { Erx::NativeBench.check_end("erx: bench: boot #{NAME} done\r\nerx: end off\r\n") }
+    assert_match(/end off.*power needs cycling/, error.message)
+    assert_raises(Erx::Error) { Erx::NativeBench.check_end("erx: bench: boot #{NAME} done\r\n") }
+    assert_raises(Erx::Error) { Erx::NativeBench.check_end("erx: end reset\r\nerx: end off\r\n") }
+  end
+
+  # Each BENCH and CLOCK line falls between two naming lines, and every naming line
+  # carries the boot's name.
+  def test_a_cells_line_outside_the_naming_lines_or_another_name_breaks_the_naming
+    named = "erx: bench: boot #{NAME}\r\n"
+    good = "banner\n#{named}erx: bench: timing\nBENCH {}\n#{named}CLOCK {}\r\nerx: bench: boot #{NAME} done\r\nerx: end reset\n"
+    assert_empty Erx::NativeBench.misnamed_lines(good, name: NAME)
+    assert_equal ['BENCH {}'], Erx::NativeBench.misnamed_lines("BENCH {}\n#{named}#{named}", name: NAME)
+    assert_equal ['CLOCK {}'], Erx::NativeBench.misnamed_lines("#{named}CLOCK {}\n", name: NAME)
+    other = "erx: bench: boot #{'f' * 32} done"
+    assert_equal [other], Erx::NativeBench.misnamed_lines("#{named}BENCH {}\n#{other}\n", name: NAME)
+    assert_equal ['BENCH {}'], Erx::NativeBench.misnamed_lines("BENCH {}\n", name: NAME)
+  end
+
+  # An entry's cmdline.txt is its set's line and the name's word, or the word alone.
+  def test_an_entrys_command_line_follows_its_sets_line_with_the_name
+    assert_equal "erx.hostlink=1 erx.arg=#{NAME}", Erx::NativeBench.entry_command_line('erx.hostlink=1', NAME)
+    assert_equal "erx.arg=#{NAME}", Erx::NativeBench.entry_command_line(nil, NAME)
+    assert_equal "erx.arg=#{NAME}", Erx::NativeBench.entry_command_line('', NAME)
+    assert_raises(Erx::Error) { Erx::NativeBench.entry_command_line(nil, NAME.upcase) }
+    assert_raises(Erx::Error) { Erx::NativeBench.entry_command_line(nil, "#{NAME} erx.hostlink=0") }
+  end
+
+  # Only a board whose medium is a boot partition has a set.
+  def test_qemu_virt_has_no_board_set
+    root = File.expand_path('../..', __dir__)
+    assert_raises(Erx::Error) { Erx::NativeBench::BoardSets.new(root: root, platform: Erx::Platform.development(root)) }
+  end
+
+  NAME = '0123456789abcdef' * 2
 end

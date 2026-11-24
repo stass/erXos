@@ -76,6 +76,9 @@ module Erx
     COMPRESSED = 'sdcard.img.xz'
     RECORD = 'sdcard.img.receipt.json'
     ENTRIES = [PARTITION, IMAGE, COMPRESSED, RECORD].freeze
+    # A set's build record, beside its boot/ (write_set), and what a set's directory holds.
+    SET_RECORD = 'boot.receipt.json'
+    SET_ENTRIES = [PARTITION, SET_RECORD].freeze
     # How the card is compressed. One fixed preset and one thread, so xz writes one stream
     # of one block, and XZ_ENVIRONMENT unsets the variables xz reads options from before its
     # command line, so the bytes depend only on the card and xz's encoder. -9's 64 MiB
@@ -101,6 +104,9 @@ module Erx
     # ReleaseMedium::Written#path is QEMU's); compressed, the image compressed (compress);
     # files, the partition's directory; record, their build record.
     Written = Data.define(:path, :compressed, :files, :record)
+    # What write_set left in a set's directory: files, the partition's directory, and
+    # record, their build record.
+    WrittenSet = Data.define(:files, :record)
 
     module_function
 
@@ -259,11 +265,39 @@ module Erx
     # and record, the inputs' build record, with the SHA-256 of each file, the EROFS image,
     # the volume and the card added.
     def write(root:, directory:, plan:, record:, runner:, fsimg:, erofs:, volume:)
+      directory = staged(root: root, directory: directory, plan: plan, entries: ENTRIES, record_name: RECORD) do |work, files, written|
+        image = PiMedium.write(directory: work, name: IMAGE, files: files, names: plan.keys.map { |name| name.split('/').first }.uniq,
+                               erofs: erofs, volume: volume, runner: runner, fsimg: fsimg)
+        compress(image, to: File.join(work, COMPRESSED), runner: runner)
+        pieces = [erofs, volume.path].compact.to_h { |piece| [File.basename(piece), Digest::SHA256.file(piece).hexdigest] }
+        receipt(record, image: image, files: written, pieces: pieces)
+      end
+      Written.new(path: File.join(directory, IMAGE), compressed: File.join(directory, COMPRESSED),
+                  files: File.join(directory, PARTITION), record: File.join(directory, RECORD))
+    end
+
+    # Writes plan into directory, as write does, as the files under boot/ and their build
+    # record alone, with no card, volume or compression: a bench set
+    # (docs/design-bench.md, "The bench image's boot set").
+    def write_set(root:, directory:, plan:, record:)
+      directory = staged(root: root, directory: directory, plan: plan, entries: SET_ENTRIES, record_name: SET_RECORD) do |_work, _files, written|
+        receipt(record, image: nil, files: written, pieces: {})
+      end
+      WrittenSet.new(files: File.join(directory, PARTITION), record: File.join(directory, SET_RECORD))
+    end
+
+    # The one way write and write_set place their entries: plan's names must be the
+    # layout's and directory an existing one under root holding none of entries; plan's
+    # files go under boot/ of a fresh work directory beside them, each refused if it holds
+    # the build's path, the receipt the block makes from the work directory, boot/ and each
+    # file's SHA-256 is written as record_name, one of entries, and entries move into directory only
+    # once all of them are made. Answers directory as checked, resolved within root.
+    def staged(root:, directory:, plan:, entries:, record_name:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
       directory = OutputDirectory.check(root: root, path: directory)
       raise Error, "boot partition: #{directory} is not a directory" unless File.directory?(directory)
 
-      taken = ENTRIES.select { |name| File.exist?(File.join(directory, name)) || File.symlink?(File.join(directory, name)) }
+      taken = entries.select { |name| File.exist?(File.join(directory, name)) || File.symlink?(File.join(directory, name)) }
       raise Error, "boot partition: #{directory} already holds #{taken.join(', ')}" unless taken.empty?
 
       Dir.mktmpdir('.boot-partition-', directory) do |work|
@@ -277,15 +311,11 @@ module Erx
           File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write(bytes) }
           [name, Digest::SHA256.hexdigest(bytes)]
         end
-        image = PiMedium.write(directory: work, name: IMAGE, files: files, names: plan.keys.map { |name| name.split('/').first }.uniq,
-                               erofs: erofs, volume: volume, runner: runner, fsimg: fsimg)
-        compress(image, to: File.join(work, COMPRESSED), runner: runner)
-        pieces = [erofs, volume.path].compact.to_h { |piece| [File.basename(piece), Digest::SHA256.file(piece).hexdigest] }
-        File.write(File.join(work, RECORD), JSON.pretty_generate(receipt(record, image: image, files: written, pieces: pieces)) + "\n")
-        ENTRIES.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
+        receipt = yield work, files, written
+        File.write(File.join(work, record_name), JSON.pretty_generate(receipt) + "\n")
+        entries.each { |name| File.rename(File.join(work, name), File.join(directory, name)) }
       end
-      Written.new(path: File.join(directory, IMAGE), compressed: File.join(directory, COMPRESSED),
-                  files: File.join(directory, PARTITION), record: File.join(directory, RECORD))
+      directory
     end
 
     # Writes the card at card xz-compressed (XZ_ARGUMENTS) to to, which the runner creates
@@ -295,12 +325,12 @@ module Erx
     end
 
     # The card's receipt, in the shape of the image's own (ProductionImage's assembled
-    # receipts): the card as its artifact, each file of the partition as a component by
+    # receipts): the card as its artifact (none for a set, whose image is nil), each file of the partition as a component by
     # its name and SHA-256, then pieces, the card's other inputs (the EROFS image and the
     # data volume) by their names beside the card, and record's inputs.
     def receipt(record, image:, files:, pieces:)
       { 'version' => 1, 'kind' => 'assembled',
-        'artifact' => { 'path' => IMAGE, 'sha256' => Digest::SHA256.file(image).hexdigest },
+        **(image ? { 'artifact' => { 'path' => IMAGE, 'sha256' => Digest::SHA256.file(image).hexdigest } } : {}),
         'components' => files.sort.map { |name, sha256| { 'path' => "#{PARTITION}/#{name}", 'sha256' => sha256 } } +
                         pieces.sort.map { |name, sha256| { 'path' => name, 'sha256' => sha256 } },
         **record }
@@ -420,6 +450,27 @@ module Erx
     # once so both name one; bootable_record is the bootable file's own (record).
     def lay_out(root:, runner:, platform:, build_kind:, bootable:, erofs:, directory:, compiler:, linker:,
                 revision: SourceRevision.read(root: root, runner: runner), bootable_record: nil)
+      plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
+                            compiler: compiler, linker: linker, revision: revision, bootable_record: bootable_record)
+      volume = DataVolume.format(root: root, runner: runner, compiler: compiler, directory: directory,
+                                 data_sectors: MediumImage::PACKED_DATA_SECTORS)
+      write(root: root, directory: directory, plan: plan, record: record, runner: runner,
+            fsimg: Fsimg.checked(root: root, runner: runner), erofs: erofs, volume: volume)
+    end
+
+    # Lays the partition's files for bootable out into directory with their build record,
+    # as lay_out does, without the card: a bench set (write_set).
+    def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
+                    revision: SourceRevision.read(root: root, runner: runner))
+      plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
+                            compiler: compiler, linker: linker, revision: revision, bootable_record: nil)
+      write_set(root: root, directory: directory, plan: plan, record: record)
+    end
+
+    # The plan and the build record of bootable's partition on platform: BL31 and the
+    # board's tree built, the firmware as deps.lock pins it, verified against its pinned
+    # hashes.
+    def layout(root:, runner:, platform:, build_kind:, bootable:, compiler:, linker:, revision:, bootable_record:)
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
       plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
@@ -428,12 +479,8 @@ module Erx
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
                   tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler,
                                         revision: revision))
-      record = record(root: root, runner: runner, revision: revision, platform: platform,
-                      firmware: pinned.map(&:first), compiler: compiler, linker: linker, bootable_record: bootable_record)
-      volume = DataVolume.format(root: root, runner: runner, compiler: compiler, directory: directory,
-                                 data_sectors: MediumImage::PACKED_DATA_SECTORS)
-      write(root: root, directory: directory, plan: plan, record: record, runner: runner,
-            fsimg: Fsimg.checked(root: root, runner: runner), erofs: erofs, volume: volume)
+      [plan, record(root: root, runner: runner, revision: revision, platform: platform,
+                    firmware: pinned.map(&:first), compiler: compiler, linker: linker, bootable_record: bootable_record)]
     end
   end
 end

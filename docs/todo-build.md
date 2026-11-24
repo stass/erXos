@@ -116,23 +116,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   positional `[wanted, declared]` pairs, which a named value would read better as; a boot that timed out before
   its `CLOCK` line also notes that line's absence as a refusal; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
   `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
-* [Medium] benchmarks, the Raspberry Pi 4's boot set (`tools/lib/erx/boot_image.rb`, `native_bench.rb`,
-  `boot_partition.rb`, `test/guest/native_bench/guest.c`,
-  [design-bench.md](design-bench.md#the-bench-images-boot-set)): `BootImage` takes the platform
-  (`Fiasco#build_for`, `#first_stage_path`, `Machine#check_single_file`); `BootPartition` writes a set's files and
-  record without the volume, the card or its compression, and `NativeBench` lays each distinct board set out once
-  with it; every end of the bench root is `ERX_FIASCO_END_ASKED_RESET`; the root takes its first `erx.arg` word as
-  its boot's name and prints `erx: bench: boot NAME` once up and after each `BENCH` and `CLOCK` line, with `done`
-  and `deadline` forms, and `NativeBench` passes thirty-two zeros under QEMU; the guest's deadline thread, its
-  number per profile form in `NativeBench`, and QEMU's `bench-done` checkpoint taking the two naming forms. Tests:
-  the board set boots in QEMU's `raspi4b` model with its banner, its naming lines, its cells and `erx: end reset`,
-  seeded with the main build's first stage and with `ASKED_OFF`; the hang seed ends by the guest's deadline with
-  its earlier cells `rejected`, seeded with the thread not started. One implementer.
 * [Medium] benchmarks, the cycle counter's probe (`test/guest/native_task/program.c`,
   `liberx/backend/fiasco/arch/aarch64/clock.c`, [design-bench.md](design-bench.md#the-cycle-counter)):
-  `MODE_CYCLES`, the cycle read beside `erx_fiasco_counter`, the root's probe on board sets and the `CLOCK` line's
+  `MODE_CYCLES`, the cycle read beside `erx_fiasco_counter`, the root's probe on board sets, which then pack `native_task`'s program
+  (`NativeBench::BoardSets`), and the `CLOCK` line's
   `cycles_per_tick`. Test on the board: the count times the counter's frequency within 2% of `/proc/sensors`'s
-  `arm_clock`, seeded with the system counter read twice. Needs the boot set's item first. One implementer.
+  `arm_clock`, seeded with the system counter read twice. One implementer.
 * [Medium] benchmarks, the board's log and `tools/erx bench import` for erXos logs (`BoardLog`,
   [design-bench.md](design-bench.md#importing-a-log)): the pure reader that places each line between two naming
   lines of one entry, the queue's and the walk's files, the `pi4` record with the entry's set's firmware hashes,

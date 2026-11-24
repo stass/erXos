@@ -10,13 +10,16 @@ require_relative 'boot_file'
 require_relative 'fiasco'
 require_relative 'output_directory'
 require_relative 'pack_tools'
+require_relative 'platform'
+require_relative 'production_image'
 require_relative 'toolchain_provenance'
 require_relative '../../../test/fixtures/structural_pack'
 
 module Erx
-  # A bootable file for Fiasco from what the build holds: bootstrap as the
-  # first stage and an archive of the kernel, sigma0 and, for a guest test, a
-  # root task that bootstrap places. The archive is the structural recipe's:
+  # A bootable file for Fiasco from what the build holds: platform's first stage
+  # (Fiasco#first_stage_path), bootstrap, and an archive of the kernel, sigma0 and, for a
+  # guest test, a root task that bootstrap places, checked against platform's RAM and
+  # loader as the production image's is. The archive is the structural recipe's:
   # its empty manifest passes the manifest check like any other, but it and
   # the archive's own root entry say nothing about what runs.
   class BootImage
@@ -24,8 +27,9 @@ module Erx
       def fetch(name) = public_send(name)
     end
 
-    # kernel replaces the built kernel, for a suite that boots a test kernel.
-    def initialize(root:, runner:, compiler:, linker:, kernel: nil)
+    # kernel replaces the built kernel, for a suite that boots a test kernel; platform is
+    # the board the file boots on, QEMU virt's development platform unless given.
+    def initialize(root:, runner:, compiler:, linker:, kernel: nil, platform: Platform.development(root))
       @root = File.expand_path(root)
       @runner = runner
       @compiler = compiler
@@ -33,6 +37,7 @@ module Erx
       @codec = ABI::Codec.new(ABI::Generator.plan(root: @root).schema)
       @fiasco = Fiasco.new(root: @root, runner: runner, compiler: compiler)
       @kernel = kernel || @fiasco.kernel_path
+      @platform = platform
     end
 
     # Rebuilds directory from nothing, so a stale archive cannot stand in. programs maps
@@ -45,10 +50,12 @@ module Erx
       recipe = File.join(directory, 'recipe')
       fixture = StructuralPackFixture.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,
                                             compiler: @compiler, linker: @linker, external: external,
-                                            extra_files: extra_files(stand_in_root, programs, images, jit), first_stage: @fiasco.image_path)
+                                            extra_files: extra_files(stand_in_root, programs, images, jit), first_stage: first_stage)
       report = fixture.fetch('report')
+      ProductionImage::Machine.development(@platform)
+                              .check_single_file(File.size(report.fetch('single_path')), load_address: @fiasco.first_stage_address(@platform))
       header = @codec.decode_layout('erx_pack_header', File.binread(report.fetch('path'), @codec.layout_size('erx_pack_header')))
-      Built.new(single: report.fetch('single_path'), archive: report.fetch('path'), first_stage: @fiasco.image_path,
+      Built.new(single: report.fetch('single_path'), archive: report.fetch('path'), first_stage: first_stage,
                 index_hash: header.fetch('index_hash').unpack1('H*'),
                 build_id: header.fetch('build_id').unpack1('H*'), flags: header.fetch('flags'))
     end
@@ -63,6 +70,8 @@ module Erx
     end
 
     private
+
+    def first_stage = @fiasco.first_stage_path(@platform)
 
     def extra_files(stand_in_root, programs, images, jit)
       stray = jit - images.keys

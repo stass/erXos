@@ -934,10 +934,11 @@ out as the production image's boot partition is:
   probe runs ([The cycle counter](#the-cycle-counter)).
 * **The set.** `BootPartition` writes the partition's files and their
   build record into `build/bench-board/<benchmark>/` and nothing more:
-  the part of `write` that places the files and writes the record,
-  without the data volume, `PiMedium.write` or `compress`
-  (`boot_partition.rb:261-289`; `lay_out`, `:421`, formats the volume
-  and makes the card). Each distinct set is laid out once, and every
+  `write_set`, which places the files and writes the record through the
+  one staging step `write` uses, without the data volume, `PiMedium.write`
+  or `compress`, as `boot.receipt.json` beside `boot/`; `lay_out_set`
+  shares the plan and the record (`layout`) with `lay_out`, which formats
+  the volume and makes the card. Each distinct set is laid out once, and every
   entry of it is made from that one layout. The firmware and
   `config.txt` are those the normal image's set has, from the same
   platform record and pins, so the bench runs at the board's own

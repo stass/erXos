@@ -12,7 +12,9 @@ require_relative '../raspi4b_shell'
 # seeded, a tree with one CPU's node removed shows three; and, with the packed card on
 # EMMC2's bus, the SD device process identifies the card, root's session writes a file
 # under /data and the system domain's probe writes two blocks, and the harness finds both
-# in the card's file after QEMU exits. The suite packs the Pi's production image
+# in the card's file after QEMU exits; and the native nullcall bench's board set boots
+# with a name on its command line, reports its cells between the root's naming lines
+# and ends the machine with a reset. The suite packs the Pi's production image
 # and its SD card (tools/erx pack --medium --platform raspi4b), since check_qemu builds
 # only the kernel, and boots the card's own kernel8.img and bl31.bin. Every cell
 # needs the loader's boot stub, which a remote boot does not take (Qemu#run), so it
