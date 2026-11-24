@@ -407,10 +407,10 @@ code. QEMU's release medium, the page's QEMU virt
 download ([design-ssh.md](design-ssh.md#the-ssh-domain)), is the
 published kind: it carries the same kiosk, enabled, takes no app of its
 builder's, and its build refuses the same trust. A published
-medium's build also packs each switched row's `published_enable`, where
+medium's build also packs each `start` row's `published_enable`, where
 it has one, in its `enable`'s place, so a service its builder runs at
 boot, such as `bleuart`, ships off
-([design-apps.md](design-apps.md#switched-services)). A card is the website's
+([design-apps.md](design-apps.md#the-start-table)). A card is the website's
 whatever its kind, so a development card carries the kiosk alone too;
 only the published kind carries the Doom example
 ([Examples](#examples)). Since a package of the image is
@@ -456,9 +456,9 @@ The row's size follows from how the build counts it:
 * `services` is `display net`: the display and the network, which both
   boards serve and the examples need. Neither row offers `ble`: QEMU
   `virt`'s development machine has no Bluetooth, and the Raspberry Pi
-  4's Nordic UART service, `nus`, is `bleuart`'s, the console over the
-  radio, a switched configured domain that runs on a builder's own card
-  and is off on the published one
+  4's Nordic UART service, `nus`, is `bleuart`'s, root's shell over the
+  radio, an app of the board's manifest that runs on a builder's own
+  card and is off on the published one
   ([design-bluetooth.md](design-bluetooth.md#the-console)), and a
   service has one holder (PK13). `data` waits for `tree apps`,
   since a files service is refused until then.

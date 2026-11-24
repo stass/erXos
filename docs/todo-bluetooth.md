@@ -165,12 +165,15 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
-* [Medium] bluetooth, `bleuart`, the console as a driven console line (docs/design-bluetooth.md, "The
-  console"; docs/design-live.md, "The console"; docs/design-apps.md, "Switched services"): build the
-  `console_line` interface and `erx_console_line`, the `bleuart` domain and release with `erx_bleuart` and its
-  core, the Bluetooth domain's `services` derived from the rows that will run, and the start table's switched
-  rows, with their tests and the Bumble cell. The package retires the phone console it replaces. On master: the
-  manifest check's `btconsole` login holder (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`) and its case in
+* [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The
+  console"; docs/design-login.md, build order 7): build the `bleuart` app (its principal, session template,
+  `ble` and `login` rows and `start` row in the Raspberry Pi 4's development manifest, `published_enable` in the
+  packer, the `bleuart` release with `erx_bleuart`), the login facet's `root_line` with its holder row and its
+  release-manifest refusal, `ble_grant`'s admission of a `start` row's template, `erx_gatt_serial`'s
+  `serial_lost` and `subscribed`, the link's end past `bt_write_queue`, the registry's `{advertised, Services}`
+  and the HCI core's `{advertising_data, Data}`, with their tests, the Bumble cell and probe B-P7. The package
+  retires the phone console it replaces. On master: the manifest check's `btconsole` login holder
+  (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), whose row `bleuart`'s takes, and its case in
   `test/host/manifest_domains_test.rb` (`BTCONSOLE_LOGIN`, `btconsole` in `LOGIN_DOMAINS`). On the unlanded
   branch `login-8`: `erx_bt_prompt` with its tests and its fuzz target (`test/erlang/erx_bt_prompt_fuzz.erl`,
   `tools/fuzz/erx_bt_prompt.rb`), the console core `erx_bt_console_core` with its login and session phases and

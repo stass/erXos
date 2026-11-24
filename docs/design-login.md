@@ -13,8 +13,11 @@ what a login returns and when a login ends.
 What a front end does with its line is its own design: the SSH domain's
 channels open ttys ([design-ssh.md](design-ssh.md)), the web domain opens
 views ([design-web.md](design-web.md)). The Bluetooth console,
-`bleuart`, is no front end: it is a line of the system console, as the
-UART is, and holds no login facet
+`bleuart`, an app's session rather than a configured domain, logs no
+one in: in a development build it takes the line of the session the
+console logged `root` in to, through the grant's one operation that
+starts no session, `root_line`, and masters ttys of that session as an
+SSH channel does
 ([design-bluetooth.md](design-bluetooth.md#the-console)).
 Login at a display, with its prompt, lock and overlay, is
 [design-display.md](design-display.md#risks-and-decisions)'s decision
@@ -66,19 +69,28 @@ the principal service directly ([design-live.md](design-live.md#the-console)).
   matched, did not match, `limited` or `unavailable`, and answers a
   stranger as it answers a wrong passphrase, after the same time. The
   vault is [plan.md](plan.md#m11-security-closure)'s.
-* **What is built.** The login facet is built and parked: the login
-  service runs in the system domain, no manifest grants the facet, and
-  no passphrase checker is built, so `login_passphrase` answers
-  `unavailable`. SSH runs stage 1
-  of [design-ssh.md](design-ssh.md#stages), `erx_ssh_dev` in root's own
+* **What is built.** The facet, its service and its core
+  (`erlang/apps/erx_domain/src/erx_login_facet.erl`, `erx_login.erl`,
+  `erx_login_core.erl`) and the manifest check's table of holders
+  (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), with the four
+  operations below and not `root_line`; the development manifest
+  declares the service and no row grants it
+  (`config/manifest/development.txt`). No passphrase checker is built,
+  so `login_passphrase` answers `unavailable`. SSH runs stage 1 of
+  [design-ssh.md](design-ssh.md#stages), `erx_ssh_dev` in root's own
   session with root's authority, and the web front end's login is
   designed but not built.
+* **The console's root session.** In a development build the console
+  logs `root` in at boot and `erx_console:login_session/0` answers that
+  session's domain (`erlang/apps/erx/src/erx_console.erl`); the host
+  link's `web` facet mints that session's `web_line` for the web domain
+  with no login (`erx_hostlink_web:root_line/2`).
 
 ## Requirements
 
 | Requirement | Consumer and what breaks without it |
 | --- | --- |
-| **L1.** One interface for every front end | the SSH domain and the web domain; two copies of one check diverge |
+| **L1.** One interface for every front end | the SSH domain, the web domain and `bleuart`; two copies of one check diverge |
 | **L2.** A login gives its front end the session's line and nothing else | every front end parses hostile input; a facet that granted more would hand a parser defect authority over principals |
 | **L3.** A login ends when the front end's connection ends | SSH and the web; a crashed connection would otherwise leave a session running with nobody at its line |
 | **L4.** A passphrase is checked in one place, under the network limits | every front end; a front end that checked passphrases itself, or under the console's local limits, would let a network peer guess faster or lock a name out at the UART |
@@ -163,8 +175,8 @@ the owner ends.
 ### Who holds it
 
 `login` is declared in `abi/services/login.txt`, served by the system
-domain. A configured domain holds it by a facet row of the manifest
-naming two parameters:
+domain. A configured domain, or `bleuart`'s session template, holds it
+by a facet row of the manifest naming two parameters:
 
 * `line`, the session line the login mints for this front end, one of
   the `served_by session` interfaces (`?ERX_LINES`): `tty_line` for a
@@ -181,14 +193,15 @@ row lists, and any other is refused `eperm` before the callback sees it
 | --- | --- | --- | --- |
 | the SSH domain ([design-ssh.md](design-ssh.md#the-ssh-domain)) | `tty_line` | `cookie`, `key_ok`, `login_key`, `login_passphrase` | 128, twice the daemon's 64 connections |
 | the web domain ([design-web.md](design-web.md#logging-in-and-the-line)) | `web_line` | `login_passphrase` | 16, the front end's live logins |
+| `bleuart`'s session template ([design-bluetooth.md](design-bluetooth.md#the-console)) | `tty_line` | `root_line` | 1, its one process |
 
-The manifest check holds the facet to that table, as an allow-list: it
-refuses a `login` row on any other domain, a row whose `line`, operations or
-`logins` differ from its holder's, a row whose `max_request` or `in_flight`
-differs from the interface's (below), and more than one row per holder.
-The Bluetooth domain is not on it: it parses what anyone in range sends
-and holds only its radio grants; nor is `bleuart`, whose console line
-logs in as the console's lines do.
+The manifest check holds the facet to that table, as an allow-list keyed
+by the grantee's name: it refuses a `login` row on any other grantee, a
+row whose `line`, operations or `logins` differ from its holder's, a row
+whose `max_request` or `in_flight` differs from the interface's (below),
+more than one row per holder, and, in a release manifest, a row listing
+`root_line`. The Bluetooth domain is not on it: it parses what anyone in
+range sends and holds only its radio grants.
 `tty_line` is the session line [design-system.md](design-system.md#a-sessions-lines)
 serves a front end whose connections master the session's ttys,
 `open_tty` and, with design-ssh.md's answer on jobs, `open_job`;
@@ -209,6 +222,17 @@ the row does not list.
 | `key_ok(User, KeyBlob)` | `User` names an enrolled principal whose login keys hold `KeyBlob` | `true` or `false`, the same for an unknown principal and an unknown key |
 | `login_key(User, Exchange, Alg, KeyBlob, Sig, Peer)` | the owner's row holds an outstanding cookie; the exchange, signed data and signature as [design-ssh.md](design-ssh.md#logging-in) gives them, checked by the verifier against `KeyBlob` as the request arrives; then `KeyBlob` among `User`'s login keys, as `key_ok` checks | `{ok, Line}` or `{error, no_match \| unavailable \| badarg}` |
 | `login_passphrase(User, Passphrase, Peer)` | the owner has not logged in and has no login being checked; the passphrase checker of [The passphrase check](#the-passphrase-check), class `network` | `{ok, Line}` or `{error, no_match \| limited \| unavailable \| badarg}` |
+| `root_line()` | the owner has not logged in; the console holds a root session, `erx_console:login_session/0` | `{ok, Line}`, that session's `line` minted for the grantee with the login facet as the opening, as the host link's `web` facet mints root's `web_line` (`erx_hostlink_web:root_line/2`); `{error, unavailable}` when the console holds none or the mint fails, which leaves no row |
+
+`root_line` starts no session and checks no credential: it hands the
+grantee a line of the session the console already logged `root` in to,
+which only a development build has, and which only a development
+manifest can grant (above). The line ends with the login facet, so with
+the grantee's session, and with the console's session; each tty opened
+through it ends with its master, as every session tty does. The owner's
+row is kept for the owner's life, as a login's is, so the grant's
+`logins` of 1 bounds what `bleuart` can make the service keep to one
+row and one line.
 
 On a match the service starts a session of the principal from its
 template (`erx_domain:start_session/2`) with `ends_with` naming the
@@ -468,6 +492,7 @@ ran the code it names.
 | no checker (host) | `login_passphrase` answers `unavailable` | a missing checker read as a match |
 | bounds and fuzz (host) | `admit/3` refuses each argument one past its bound and returns on every input of the fuzz target | one bound removed |
 | manifest check (host) | a `login` row on another domain, the Bluetooth domain included, with another `line`, another operation list, or another `max_request` or `in_flight` is refused | the allow-list rule removed; the quantities' rule removed |
+| `root_line` (host) | with a console root session it answers that session's `tty_line` minted for the grantee with the login facet as the opening; with none it answers `unavailable` and keeps no row, so the owner's next call is answered; a second call after a success answers `badarg`; in a release manifest a row listing `root_line` is refused | the caller named as the opening, so the line outlives the grant; the release rule removed |
 | user name (host) | every system identifier decodes, a digit, a hyphen and 63 bytes included; an uppercase letter, a leading `-` or `_`, a `.`, a space, 64 bytes and a non-binary are `badarg` | the facet checking a name of its own instead of `erx_ident:new/1` |
 | supervision (host) | the domain service's supervisor allows a restart of each permanent child, the login service among them, within one period | the intensity left at OTP's default of 1 |
 
@@ -475,7 +500,7 @@ ran the code it names.
 
 | Interface | Between | Declared in |
 | --- | --- | --- |
-| `login`: `cookie`, `key_ok`, `login_key`, `login_passphrase`; parameters `line` and `logins` | each front end and the system domain | `abi/services/login.txt`, citing this document |
+| `login`: `cookie`, `key_ok`, `login_key`, `login_passphrase`, `root_line`; parameters `line` and `logins` | each front end and the system domain | `abi/services/login.txt`, citing this document |
 | `erx_login.hrl`: the bounds of a login's arguments | `erx_login_facet` and each front end's prompt | the `erx` application |
 | `tty_line`: `open_tty`, later `open_job` | a front end and a session | `abi/services/tty_line.txt` ([design-system.md](design-system.md#a-sessions-lines)) |
 | `web_line` | the web domain and a session | `abi/services/web.txt` |
@@ -514,10 +539,13 @@ names; the full gates run once per batch.
    process holds its line, and `erx_ssh_dev` goes
    ([design-ssh.md](design-ssh.md#stages)). SSH stage 2's other parts
    are its own packages.
+6. **`root_line`**, with `bleuart`'s row of the holder table and the
+   manifest check's refusal of the operation in a release manifest, in
+   `bleuart`'s package ([design-bluetooth.md](design-bluetooth.md#the-console)).
 
-Packages 1 and 3 are independent; 2 needs 1; 4 needs 2; and 5 needs
-both 3 and 4. The web domain's login moves onto the facet with the
-web's network front end.
+Packages 1 and 3 are independent; 2 needs 1; 4 needs 2; 5 needs
+both 3 and 4; and 6 needs 2 and 3. The web domain's login moves onto
+the facet with the web's network front end.
 
 ## Alternatives considered
 
@@ -574,3 +602,26 @@ web's network front end.
    and when the process had ended before the monitor was taken
    (`noproc`), and treats each alike; where one fails, it says so before
    building on it.
+5. **Open: how `bleuart` gets root's line without a login.** `tty_line`
+   reaches a grantee only as the reply of a declared facet's operation
+   ([design-system.md](design-system.md#a-sessions-lines)), and no
+   manifest row grants a line, so `bleuart`, which has no credential,
+   needs one operation that answers a line without one. The ways:
+   * **`root_line` on the login facet** (this document's design): one
+     operation and one row of the holder table, minting the console's
+     root session's line as the host link's `web` facet already mints
+     its `web_line`; refused in a release manifest. Its cost is that the
+     login facet, whose every other answer follows a checked credential,
+     gains one that follows only the manifest's grant, and that the
+     holder table names a session template beside configured domains.
+   * **A facet of its own**, a new interface with that one operation:
+     the same mint and the same release rule, with a second interface
+     and a second callback to keep.
+   * **A daemon in root's console session**, as SSH's first stage runs,
+     holding root's session's `ble` grant: no line and no new operation,
+     but no `start` row, so no `service bleuart`, and a `ble` grant on
+     root's template, which every root session would hold.
+
+   Recommended: `root_line`, the smallest change that keeps `bleuart` an
+   app the start table switches, and the one that puts every handover
+   of a session line to a front end behind one facet and one allow-list.

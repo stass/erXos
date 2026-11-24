@@ -235,9 +235,8 @@ manifest holds:
   none in a release build); the console, `console`, by the device-tree
   path of its UART; and the host-link port, `hostlink`, by the
   device-tree path of its UART, where the machine has one; and the
-  `secure` attribute of each of the two console lines the system domain
-  drives, the UART and the host link (a line another domain drives has
-  none and is never secure), which marks a line at which a system-shell principal's login
+  `secure` attribute of each of the two console lines, the UART and the
+  host link, which marks a line at which a system-shell principal's login
   opens the system shell, as UNIX's `/etc/ttys` marks the terminals where
   root may log in ([design-live.md](design-live.md#the-console)). The
   console has no other line. The manifest grants
@@ -1047,9 +1046,8 @@ and 6 give way to the partial boot below.
    the manifest lists them. Once the slot writer runs, and before the
    network domain or any user domain exists, the update service has it
    read and advance the reset count (below).
-4. **The console** serves its lines: the UART, the host link where
-   the machine has one, and a line another domain drives once that
-   domain starts ([design-live.md](design-live.md#the-console)). Each line starts with a login in release builds;
+4. **The console** serves its lines: the UART, and the host link where
+   the machine has one. Each line starts with a login in release builds;
    in development builds the console logs `root` in at the UART and,
    when the host opens it, at the host link's `console` line, both
    secure lines. The login asks the domain service, which alone reads the
@@ -2837,15 +2835,19 @@ peer's.
 #### A session's lines
 
 A **line** is a facet a session serves to a front-end domain, the web
-domain or the SSH domain, whose grantee the system domain names at run
-time instead of the manifest: the web domain when the host link's `web`
-facet opens or a login through its `login` facet succeeds
-([design-web.md](design-web.md#logging-in-and-the-line)), and the SSH
-domain when a login through its own succeeds
+domain, the SSH domain or `bleuart`'s session, whose grantee the system
+domain names at run time instead of the manifest: the web domain when
+the host link's `web` facet opens or a login through its `login` facet
+succeeds ([design-web.md](design-web.md#logging-in-and-the-line)), the
+SSH domain when a login through its own succeeds
 ([design-login.md](design-login.md))
-([design-ssh.md](design-ssh.md#logging-in)). Through it the front end
-opens what the session offers it: views of the session's paths for the
-web domain, ttys for the SSH domain's channels. The process that serves
+([design-ssh.md](design-ssh.md#logging-in)), and `bleuart`, in a
+development build, when it asks its `login` facet for the line of the
+session the console logged `root` in to
+([design-bluetooth.md](design-bluetooth.md#the-console)). Through it
+the front end opens what the session offers it: views of the session's
+paths for the web domain, ttys for the SSH domain's channels and for
+`bleuart`'s client. The process that serves
 it, the **line process** (`erx_web_line`, `erx_tty_line`), is the
 session's; the facet is the only name of the session a front end gets
 but those its replies hand out, and the system domain hands the facet
@@ -4499,7 +4501,7 @@ manifest lists: the vault.
 | device service, `erx_devices` | the device catalogue, each device given to the domain the manifest names, `/dev` | [Devices](#devices) |
 | watchdog, `erx_watchdog` | pets the kernel's watchdog every period, at priority `max`, once every service it lists has answered a liveness call | [Boot](#boot) |
 | clock service, `erx_clock` | the wall clock's one setter: takes ntpd's samples and root's sets through the `clock` facet, whose rows grant ntpd's template `sample` alone and root's template `set` alone ([design-time.md](design-time.md#who-may-set-it)), decides each step with `erx_clock_core`, sets the time page through `erx_clock_nif`, and reports `/proc/time` | [design-time.md](design-time.md) |
-| console service, `erx_console` | the console lines: the UART over its driver in the system domain, the host-link port's bytes, and a line another domain drives through `console_line`; each line's menu and login prompt, the connection of sessions' ttys, and the system-shell facet, which it grants to a login at a secure line, holds for that login and ends with it | [Devices](#devices), [design-live.md](design-live.md#the-console) |
+| console service, `erx_console` | the two console lines: the UART over its driver in the system domain and the host-link port's bytes; each line's menu and login prompt, the connection of sessions' ttys, and the system-shell facet, which it grants to a login at a secure line, holds for that login and ends with it | [Devices](#devices), [design-live.md](design-live.md#the-console) |
 | inspector, `erx_inspector` | one schema over kernel, service and runtime reports, the previous boot's crash record included; the `inspect` service, whose facets the domain service mints with the scope `erx_domain_core:inspect_scope/4` gives, and the questions to each domain's inspection agent | [design-live.md](design-live.md#inspection), [design-live.md](design-live.md#the-inspect-service) |
 | tracer, `erx_tracer` | trace sessions and the kernel's trace | [design-live.md](design-live.md#tracing) |
 | host link, `erx_hostlink` | sessions with the development host | [design-live.md](design-live.md#the-host-link) |
@@ -4509,7 +4511,7 @@ manifest lists: the vault.
 | update service, `erx_update` | system updates, through the slot writer: writing the spare slot, the trial, the commit and the fallback | [design-storage.md](design-storage.md#system-updates) |
 | start service, `erx_starter` | the start table, the manifest's `start` rows with the machine's `start.conf` over them, and the supervisor and keeper of each row; its tree, `start`; the package process and its `apps` tree ([design-packaging.md](design-packaging.md#apps)) | [design-apps.md](design-apps.md) |
 | file trees, `erx_procfs` and the device service's tree | the system domain's own `/proc`, the system shell's and the host link's, as every domain runs one for itself; `/dev` for administrators | [design-live.md](design-live.md#the-proc-tree), [Devices](#devices) |
-| login service, `erx_login` | the `login` facet every front end holds, the SSH domain and the web domain: cookies for SSH's key exchanges, key and passphrase logins, each starting a session of the principal and minting the front end's line; a login belongs to the front end's process that made it, and its session ends with that process | [design-login.md](design-login.md) |
+| login service, `erx_login` | the `login` facet every front end holds, the SSH domain, the web domain and `bleuart`: cookies for SSH's key exchanges, key and passphrase logins, each starting a session of the principal and minting the front end's line, and `bleuart`'s `root_line`, the line of the console's root session in a development build; a login belongs to the front end's process that made it, and its session ends with that process | [design-login.md](design-login.md) |
 | vault, `erx_vault`, in a domain of its own | principals' keys and secrets; logins; signatures for key facets, by purpose; its sealing backend, and that backend's driver where it has one | [The vault](#the-vault) |
 
 ### The network domain

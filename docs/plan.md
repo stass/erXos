@@ -3152,11 +3152,11 @@ without pairing.
   of stages 1 to 3
   ([design-bluetooth.md](design-bluetooth.md#on-qemu-against-bumble)).
   It needs the domains and facets of
-  [1b-A](#m5-a-wall-around-some-processes). `bleuart`, the console over
-  the serial service, follows on the system console's driven line and
-  the start table's switched rows
+  [1b-A](#m5-a-wall-around-some-processes). `bleuart`, root's shell over
+  the serial service, follows as an app of the start table, on the
+  login facet's `root_line` and the session line `tty_line`
   ([design-bluetooth.md](design-bluetooth.md#the-console),
-  [design-apps.md](design-apps.md#switched-services)).
+  [design-login.md](design-login.md#build-order), package 7).
 * **(c) Stage 4 on QEMU `virt`.** The Security Manager as responder,
   the pairing window with its pairing wait and the control tree, the store with its
   development backend, reconnection with bonds and Service Changed, and
@@ -3175,7 +3175,7 @@ without pairing.
 * **(e) Release.** The store's release backend, the vault's state slot
   ([design-system.md](design-system.md#state-slots)), which waits for
   [M11](#m11-security-closure)'s vault, and the manifest check that
-  refuses `bleuart`'s console line in a release manifest
+  refuses `root_line` in a release manifest
   ([design-bluetooth.md](design-bluetooth.md#decisions), 2),
   and the Pi 4 on erXos's kernel at
   [M12](#m12-storage-networking-boards), where the firmware notification

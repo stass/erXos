@@ -20,7 +20,7 @@
 > read of the serial service's write-only characteristic refused; an echo
 > through an app and pairing have not run on the board. Designed: an installed app's own `ble` grant, the rule that a service's
 > state belongs to its handler beyond its owner's check of sets and
-> notifications, `bleuart`, the console over the serial service,
+> notifications, `bleuart`, root's shell over the serial service,
 > and tests against a Bumble peer that scans, connects, reads, streams
 > and pairs.
 
@@ -175,32 +175,11 @@ own.
 
 The Bluetooth domain mounts its grant of the line at `/line` and
 opens `/line/data` and `/line/ctl` as ordinary files. Its manifest
-row holds that grant and a store for its bonds (19.6). A development
-machine also offers its console over the serial service, as a serial
-cable that needs no plug. A small domain of its own, `bleuart`, handles
-the serial service as a client of the `ble` facet and drives a line of
-the system console through a facet the console serves, `console_line`,
-which carries the console's own driver messages: bytes in, bytes out,
-each answered, and the line's size and end
-([design-bluetooth.md, The console](../design-bluetooth.md#the-console)).
-The console treats that line as it treats its others, with its own
-`Ctrl-G` menu and root logged in, so a phone's terminal app gets what a
-terminal on the UART gets, except the system shell: the line is never
-secure. One client holds the line at a time, as one cable fits a
-serial port, and a disconnect changes nothing on the line, as
-unplugging the cable changes nothing on the UART. No radio byte reaches
-the system domain; it sees console input, as from the UART. There is no
-login and no pairing, so anyone in range gets root's session, a
-limitation published with the development images: `bleuart` is a
-switched service, on by default on a builder's own card and off on the
-published one, where `service bleuart enable` turns it on
-([chapter 23](23-apps.md#2312-what-starts-without-a-person)), and a
-release build refuses the line. The console line and `bleuart` are
-designed and not built. The manifest check is designed to refuse
-anything more, because a stranger in radio range reaches whatever the
-domain holds through a parser defect; that check is designed and not
-built, so the row's contents rest on the manifest text. Figure 19.1
-shows the path.
+row holds that grant and a store for its bonds (19.6). The manifest
+check is designed to refuse anything more, because a stranger in radio
+range reaches whatever the domain holds through a parser defect; that
+check is designed and not built, so the row's contents rest on the
+manifest text. Figure 19.1 shows the path.
 
 ```mermaid
 flowchart LR
@@ -223,6 +202,31 @@ flowchart LR
 *Figure 19.1. The Bluetooth controller process and its line to the
 chip. The system domain moves bytes and parses none; every byte from
 the chip is decoded in the Bluetooth domain, which holds no device.*
+
+A development machine also offers root's shell over the serial
+service. `bleuart`, an app with its own session, handles the serial
+service as a client of the `ble` facet and, for each phone that
+connects, masters a tty of the session the console logged `root` in
+to, as an SSH connection's channel masters a tty of its session
+([design-bluetooth.md, The console](../design-bluetooth.md#the-console)).
+It gets that session's line from the login facet without a login, by
+an operation only a development manifest may grant. A phone's terminal
+app gets the command shell, and never the console's `Ctrl-G` menu or
+the system shell. Its bytes reach root's session as terminal input,
+through the tty's line discipline; the system domain only hands over
+the line and parses none of them. Input the radio stack drops ends the
+phone's link, and input `bleuart` itself has to drop is reported to the
+tty as lost, so a partly lost command line never runs. One phone is
+connected at a time, since the Bluetooth domain's connection limit is
+one, and a disconnect hangs its tty up. There is no login and no
+pairing, so anyone in range gets a root shell, a limitation published
+with the development images: `bleuart` is a service in the start
+table, on by default on a builder's own card and off on the published
+one, where `service bleuart enable` turns it on
+([chapter 23](23-apps.md#2312-what-starts-without-a-person)), and a
+release manifest cannot grant its line. While it is off the machine
+does not advertise the serial service. `bleuart` is designed and not
+built.
 
 The build makes a release of the stack, `erx_bt`, for a domain named
 `bt`. The Raspberry Pi 4's development manifest names that domain and
@@ -420,8 +424,9 @@ appearance (a number that tells a phone what kind of device to
 show), are a pure function, `erx_bt_adv:data/1`. Each is at most 31
 bytes; a name that does not fit is shortened at a character
 boundary. The function can carry service UUIDs, but the controller
-process passes none: advertising the UUID of a served service is
-designed and not built.
+process passes none: advertising the UUID of a served service while
+someone handles it, so that a service nobody runs disappears from a
+phone's scan without a restart of the domain, is designed and not built.
 
 The machine's address on the air is a **static random address**, made
 from the system's random generator, which the root service keeps.
@@ -522,8 +527,9 @@ offered and that no other app already declares it
 of the app then holds the row narrowed to its package's services, so
 the app can handle those services and no others. A service that no
 installed app handles is still in the table; it answers reads from its
-declared values and refuses writes. Installing, updating or removing an
-app therefore never changes the table or the advertising data. On the
+declared values and refuses writes, and is not advertised. Installing,
+updating or removing an app therefore never changes the table; only a
+running handler puts its service in the advertising data. On the
 Raspberry Pi 4 no app handles `nus`: the Nordic UART service there is
 the console's, `bleuart`'s, and both of its cards carry the kiosk alone
 ([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)).

@@ -491,11 +491,9 @@ prompts again.
 
 `erx_console` is the system domain's console service
 ([design-live.md, The console](../design-live.md#the-console)). It
-serves **console lines**: the UART, which is erXos's
-`/dev/console` as on UNIX; the host link's `console` line, which
-reaches the developer's machine; and, on a development build, the line
-the Bluetooth console `bleuart` drives from another domain, which is
-never secure (chapter [19](19-bluetooth.md)). In a development build the console
+serves two **console lines**: the UART, which is erXos's
+`/dev/console` as on UNIX, and the host link's `console` line, which
+reaches the developer's machine. In a development build the console
 logs `root` in at the UART at boot, and root's session takes the line.
 The serial console shows the banner, the line
 `rc: the command shell; erl starts the Erlang shell`, and the `% `
@@ -680,7 +678,9 @@ console line, and an SSH connection is never one, so no SSH login
 reaches the system shell whatever the configuration says. And a
 connection's end is a hangup, which ends its shells and, with them, the
 session, as a UNIX session ends with its terminal. The login facet is
-the one every front end holds, the web's too
+the one every front end holds, the web's too, and on a development
+build it also hands `bleuart`, root's shell over Bluetooth, a line of
+the console's root session with no login (chapter [19](19-bluetooth.md))
 ([design-login.md](../design-login.md)). A login's session is started
 bound to the front end's process that asked for it, here the
 connection's: the domain service, which makes the session, watches

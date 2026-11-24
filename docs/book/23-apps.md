@@ -135,6 +135,12 @@ nothing, the design names the file `/etc/start.conf` rather than
 `/data/etc/rc.conf`, in the data partition's `etc/` directory
 (`erlang/apps/erx_starter/src/erx_starter_rc.erl`).
 
+One manifest packs both a builder's own card and the published one,
+so a row may also carry `published_enable`, the `enable` the published
+card is packed with: `bleuart`, root's shell over Bluetooth, runs at boot
+on a builder's card and ships off on the website's
+([chapter 19](19-bluetooth.md)). This is designed and not built.
+
 Each kept row has an OTP supervisor of its own, `one_for_one` with the
 row's intensity, whose one child is a **session keeper**, a process
 that asks the domain service for a session and links to it

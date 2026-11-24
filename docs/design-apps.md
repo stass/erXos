@@ -280,6 +280,17 @@ start clock
   restart_period_s 600
 ```
 
+A `start` row may also say `published_enable`, `YES` or `NO`, which
+only the packer reads: the published medium's build packs it in
+`enable`'s place, and every other medium's ignores it
+([design-packaging.md](design-packaging.md#the-apps-row)). A builder's
+own card and the website's are packed from one manifest, and this is
+how they ship a row on and off: `bleuart`, a root shell over the radio,
+runs at boot on a builder's card and ships off on the published one
+([design-bluetooth.md](design-bluetooth.md#the-console)). The table
+never sees the field; the row it holds has the `enable` its medium was
+packed with.
+
 `/etc/start.conf` holds this machine's own settings of those rows and
 nothing else, one variable per line, in the assignment syntax of
 FreeBSD's rc.conf(5):
