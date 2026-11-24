@@ -27,7 +27,7 @@ shells") to the job's relay, each tagged both ways with the alias the
 channel made for the job (erx_ssh_job), so no other process of the session
 speaks for the relay. erx_ssh_job_core:channel_step/2 decides the job's
 side of the channel, and this module carries out its actions: the
-client's data goes as `job_input` pieces of at most ssh_line_data_max
+client's data goes as `job_input` pieces of at most tty_line_data_max
 bytes, one unanswered at a time, and the client's window opens by a
 piece's size once the relay answers `job_written`, so what the channel
 holds of the client's input is bounded by the window it gave. The
@@ -46,8 +46,8 @@ as its `ssh_channel_up` gave them; another process of the session that
 names them both can still speak for the client, which stage 1 accepts as
 it runs only trusted code (docs/design-ssh.md, "Stages").
 
-Either way the command is 1 to ssh_line_command_max bytes holding no NUL
-byte (erx_ssh_line_core:valid_run/1), and a command out of those bounds is
+Either way the command is 1 to tty_line_command_max bytes holding no NUL
+byte (erx_tty_line_core:valid_run/1), and a command out of those bounds is
 refused, as is any other request the connection does not answer itself. A
 shell or an exec opens one tty or job; a second on the channel is refused.
 
@@ -138,14 +138,14 @@ terminate(_Reason, _State) ->
     ok.
 
 event({pty, Channel, WantReply, {Term, Columns, Rows, _, _, _}}, #state{connection = Connection} = State)
-  when is_list(Term), length(Term) =< ?ERX_SSH_TERM_MAX,
+  when is_list(Term), length(Term) =< ?ERX_TTY_TERM_MAX,
        is_integer(Rows), Rows >= 0, Rows =< ?ERX_CONSOLE_SIDE_MAX,
        is_integer(Columns), Columns >= 0, Columns =< ?ERX_CONSOLE_SIDE_MAX ->
     ssh_connection:reply_request(Connection, WantReply, success, Channel),
-    {ok, State#state{pty = erx_ssh_line_core:tty(shell, list_to_binary(Term), Rows, Columns)}};
+    {ok, State#state{pty = erx_tty_line_core:tty(shell, list_to_binary(Term), Rows, Columns)}};
 event({shell, _Channel, WantReply}, #state{tty = none, relay = none, pty = Pty} = State) ->
     Tty = case Pty of
-              none -> erx_ssh_line_core:tty(shell, <<>>, 0, 0);
+              none -> erx_tty_line_core:tty(shell, <<>>, 0, 0);
               #{} -> Pty
           end,
     open_tty(Tty, WantReply, State);
@@ -154,7 +154,7 @@ event({shell, _Channel, WantReply}, #state{tty = none, relay = none, pty = Pty} 
 %% bounds is refused.
 event({exec, Channel, WantReply, Command}, #state{connection = Connection, tty = none, relay = none, pty = Pty} = State) ->
     Run = {exec, list_to_binary(Command)},
-    case {erx_ssh_line_core:valid_run(Run), Pty} of
+    case {erx_tty_line_core:valid_run(Run), Pty} of
         {true, #{}} ->
             open_tty(Pty#{run := Run}, WantReply, State);
         {true, none} ->

@@ -22,7 +22,7 @@ its master in the six messages, and is read by its console on demand
   relay holds no name: its console reaches it by pid, and every open names the
   relay that made it;
 * a tty for each SSH channel the session's line to the SSH domain opens with
-  open_channel/3 (erx_ssh_line; docs/design-ssh.md, "Sessions, ttys and
+  open_channel/3 (erx_tty_line; docs/design-ssh.md, "Sessions, ttys and
   shells"), whose master is the channel, a process of that domain. Its shell is
   the command shell, or `rc -c Command` for an exec request, and it is not
   started again: once the shell has ended and the channel has taken its last

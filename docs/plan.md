@@ -2358,7 +2358,7 @@ registered and resolved as the network service's design document defines
 ([design-crypto.md](design-crypto.md)); and SSH's first two stages
 ([design-ssh.md](design-ssh.md#stages)): OTP's daemon with its edits in
 root's development session, then the SSH domain, its login facet with
-its cookies and derived session identifiers, `erx_ssh_line` with its
+its cookies and derived session identifiers, `erx_tty_line` with its
 ttys and jobs, and the channel and algorithm policies and limits, for
 `root` and the development key in development builds. No stopgap stack is ported: the stack is erXos's own from the first,
 written in Erlang by translating the logic of FreeBSD's `netinet` and

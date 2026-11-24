@@ -109,7 +109,7 @@ end before the ended row's successor starts (ended/4).
 
 A session's ready report names its lines among its provides, each under a
 name of the closed set ?ERX_LINES: its line to the web domain, web_line, and to
-the SSH domain, ssh_line. The mint core keeps them with the session's grants,
+the SSH domain, tty_line. The mint core keeps them with the session's grants,
 and erx_domain:line/4 is one line operation of the core, answered by the core
 (docs/design-system.md, "A session's lines"): the session mints the line's
 facet for the peer the system domain names, and no pid of a line process

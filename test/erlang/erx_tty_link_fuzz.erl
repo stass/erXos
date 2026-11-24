@@ -15,7 +15,7 @@
 %% bytes written and not dropped. At the end of a run, with every output taken,
 %% every write has been answered once.
 %%
-%% The SSH line's requests (erx_ssh_line_core:request/4, docs/design-ssh.md,
+%% The SSH line's requests (erx_tty_line_core:request/4, docs/design-ssh.md,
 %% "Sessions, ttys and shells") are fed the same way: open_tty in its shape at
 %% and past every bound among arbitrary terms, from the peer's channel, a third
 %% domain's and a pid of no domain, to a line holding 0 to 11 channels. Every
@@ -238,10 +238,10 @@ pick(Choices) -> lists:nth(rand:uniform(length(Choices)), Choices).
 %% against the request.
 request_round() ->
     Held = rand:uniform(?MAX_CHANNELS + 2) - 1,
-    Core = lists:foldl(fun(N, C) -> erx_ssh_line_core:opened(pid(1000 + N), self(), C) end,
-                       erx_ssh_line_core:new(), lists:seq(1, Held)),
+    Core = lists:foldl(fun(N, C) -> erx_tty_line_core:opened(pid(1000 + N), self(), C) end,
+                       erx_tty_line_core:new(), lists:seq(1, Held)),
     Request = request(),
-    Answer = try erx_ssh_line_core:request(Request, ?PEER, fun owner/1, Core)
+    Answer = try erx_tty_line_core:request(Request, ?PEER, fun owner/1, Core)
              catch Class:Reason -> fail(request_crashed, {Request, Class, Reason})
              end,
     answered(Request, Held, Answer).

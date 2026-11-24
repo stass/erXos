@@ -156,7 +156,7 @@ with any other term to refuse. {error, badarg} for a Name that is no atom or a M
 that is no process of this domain.
 
 A session names its lines this way, its line to the web domain as `web_line`
-(erx_web_line_app) and to the SSH domain as `ssh_line` (erx_ssh_line_app), under
+(erx_web_line_app) and to the SSH domain as `tty_line` (erx_tty_line_app), under
 names of ?ERX_LINES, and the domain service sends a line's mint request only for
 an erx_domain:line/4 of the system domain's, naming its grantee and its opening
 (docs/design-system.md, "A session's lines").

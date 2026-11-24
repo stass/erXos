@@ -827,7 +827,7 @@ one of the signal set tty_master of abi/signals.txt, the signals a tty's master
 hears; with status 0 for a normal end, and 1 for any other, as for a shell
 that crashed or was killed or a signal the set does not list. So every ending
 a tty reports has the shape its master hears, and the session's line passes it
-on unchecked (erx_ssh_line_core:report/2).
+on unchecked (erx_tty_line_core:report/2).
 """.
 -spec shell_ending(term()) -> erx_prog:status().
 shell_ending(normal) -> {exited, 0};

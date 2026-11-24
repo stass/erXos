@@ -1,11 +1,11 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
--module(erx_ssh_line).
+-module(erx_tty_line).
 -moduledoc """
 The session's line to the SSH domain (docs/design-ssh.md, "Sessions, ttys
 and shells"): the process through which the SSH domain's channels open the
-session's ttys. The decisions are erx_ssh_line_core's; this module hears the
+session's ttys. The decisions are erx_tty_line_core's; this module hears the
 messages, carries out what the core decides and answers.
 
 The line is an erx_session_line, which owns who reaches it: the SSH domain
@@ -13,7 +13,7 @@ reaches it only through the facet the line mints when the system domain asks
 for it (erx_domain:line/4) as a login of that domain starts the session, and
 the facet forwards each of its grantee's calls with the grantee's caller and
 the facet itself. The session names the line to the domain service in its
-ready report (erx_ssh_line_app). This module serves the forwarded calls
+ready report (erx_tty_line_app). This module serves the forwarded calls
 (request/4) and the session's own messages to the line (info/2).
 
 An open tty is a tty of the session's (erx_session_tty:open_channel/3) whose
@@ -43,14 +43,14 @@ SSH domain; the tty's relay is to send the ending instead (docs/todo-session.md)
 -doc "Starts the line for Config, linked to the caller.".
 -spec start_link(config()) -> {ok, pid()}.
 start_link(Config) when is_map(Config) ->
-    erx_session_line:start_link(?MODULE, maps:merge(#{name => ssh_line, open => fun erx_session_tty:open_channel/3},
+    erx_session_line:start_link(?MODULE, maps:merge(#{name => tty_line, open => fun erx_session_tty:open_channel/3},
                                                 Config)).
 
 %% The line's state: Owner, the domain of a pid as the export table answers it, the
 %% tty opener and the core.
 -doc false.
 init(#{exports := Exports, open := Open}) ->
-    #{owner => fun Exports:owner/1, open => Open, core => erx_ssh_line_core:new()}.
+    #{owner => fun Exports:owner/1, open => Open, core => erx_tty_line_core:new()}.
 
 %% A request of the grantee Peer's that the facet forwarded, answered as the core
 %% decides. A tty that cannot be started, a session out of room, is answered
@@ -60,13 +60,13 @@ init(#{exports := Exports, open := Open}) ->
 request(From, Request, #{grantee := Peer}, #{owner := Owner, open := Open, core := Core} = State) ->
     Line = self(),
     Notify = fun(Ending) -> Line ! {?MODULE, ended, self(), Ending} end,
-    case erx_ssh_line_core:request(Request, Peer, Owner, Core) of
+    case erx_tty_line_core:request(Request, Peer, Owner, Core) of
         {open_tty, Channel, Spec} ->
             case Open(Channel, Spec, Notify) of
                 {ok, Tty} ->
                     _ = erlang:monitor(process, Tty),
                     gen:reply(From, ok),
-                    State#{core := erx_ssh_line_core:opened(Tty, Channel, Core)};
+                    State#{core := erx_tty_line_core:opened(Tty, Channel, Core)};
                 {error, _Reason} ->
                     gen:reply(From, {error, limited}),
                     State
@@ -80,12 +80,12 @@ request(From, Request, #{grantee := Peer}, #{owner := Owner, open := Open, core 
 %% request/4 gave it, for its channel, and the end of a tty the line monitors.
 -doc false.
 info({?MODULE, ended, Tty, Ending}, #{core := Core} = State) when is_pid(Tty) ->
-    case erx_ssh_line_core:report(Tty, Core) of
+    case erx_tty_line_core:report(Tty, Core) of
         {send, Channel} -> Channel ! Ending;
         drop -> ok
     end,
     State;
 info({'DOWN', _Ref, process, Tty, _Reason}, #{core := Core} = State) ->
-    State#{core := erx_ssh_line_core:ended(Tty, Core)};
+    State#{core := erx_tty_line_core:ended(Tty, Core)};
 info(_Message, State) ->
     State.

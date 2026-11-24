@@ -16,7 +16,7 @@ step/2 answers the relay's next state and the actions to carry out, in
 order:
 
 * input: a `job_input` is checked as the design's table has it, a binary
-  of at most ssh_line_data_max bytes with no other `job_input` unanswered
+  of at most tty_line_data_max bytes with no other `job_input` unanswered
   and no `job_eof` before it, and is written (`{write, Bytes}`); once
   written, the channel hears `job_written`. A `job_input` that fails the
   check ends the job as `job_hangup` does. `job_eof` closes standard
@@ -44,7 +44,7 @@ untrusted; channel_step/2 answers the channel's next state and the actions
 to carry out, in order:
 
 * input: the client's data goes to the job as `{job_input, Piece}`
-  pieces of at most ssh_line_data_max bytes, in order, one unanswered at
+  pieces of at most tty_line_data_max bytes, in order, one unanswered at
   a time; each waits in a queue until the one before it is answered by
   `job_written`, and the client's window then opens by its size
   (`{adjust, Size}`), so what the channel holds of the client's input is
@@ -101,7 +101,7 @@ to carry out, in order:
 %% job_eof, then sent.
 -opaque channel() :: #{job := waiting | started,
                        pieces := queue:queue(binary()),
-                       unanswered := none | 1..?ERX_SSH_LINE_DATA_MAX,
+                       unanswered := none | 1..?ERX_TTY_LINE_DATA_MAX,
                        eof := none | pending | sent}.
 
 -type channel_event() :: {data, binary()} | eof | started | {heard, term()}.
@@ -120,14 +120,14 @@ new() ->
 
 -doc """
 The relay's next state and actions, in order, for Event (see the module
-documentation). A reader's bytes are at most ssh_line_data_max, as the
+documentation). A reader's bytes are at most tty_line_data_max, as the
 relay reads them.
 """.
 -spec step(event(), job()) -> {job(), [action()]}.
 step(_Event, #{phase := over} = Job) ->
     {Job, []};
 step({channel, {job_input, Bytes}}, #{input := idle, eof := none} = Job)
-  when is_binary(Bytes), byte_size(Bytes) =< ?ERX_SSH_LINE_DATA_MAX ->
+  when is_binary(Bytes), byte_size(Bytes) =< ?ERX_TTY_LINE_DATA_MAX ->
     {Job#{input := writing}, [{write, Bytes}]};
 step({channel, {job_input, _}}, Job) ->
     over(Job, [hangup]);
@@ -176,7 +176,7 @@ channel_step({heard, job_written}, #{unanswered := Size} = Channel) when Size =/
     feed(Channel#{unanswered := none}, adjust(Size));
 channel_step({heard, {job_output, Stream, Bytes}}, Channel)
   when (Stream =:= stdout orelse Stream =:= stderr), is_binary(Bytes),
-       byte_size(Bytes) =< ?ERX_SSH_LINE_DATA_MAX ->
+       byte_size(Bytes) =< ?ERX_TTY_LINE_DATA_MAX ->
     {Channel, [{output, Stream, Bytes}, {send, job_sent}]};
 channel_step({heard, {exited, Status}}, Channel)
   when is_integer(Status), Status >= 0, Status =< 255 ->
@@ -199,9 +199,9 @@ feed(#{job := started, unanswered := none, pieces := Pieces, eof := Eof} = Chann
 feed(Channel, Actions) ->
     {Channel, Actions}.
 
-%% Data in pieces of at most ssh_line_data_max bytes, none empty.
-pieces(Data) when byte_size(Data) =< ?ERX_SSH_LINE_DATA_MAX -> [Data || Data =/= <<>>];
-pieces(<<Piece:?ERX_SSH_LINE_DATA_MAX/binary, Rest/binary>>) -> [Piece | pieces(Rest)].
+%% Data in pieces of at most tty_line_data_max bytes, none empty.
+pieces(Data) when byte_size(Data) =< ?ERX_TTY_LINE_DATA_MAX -> [Data || Data =/= <<>>];
+pieces(<<Piece:?ERX_TTY_LINE_DATA_MAX/binary, Rest/binary>>) -> [Piece | pieces(Rest)].
 
 %% The window opens by data that goes nowhere, if there is any.
 adjust(0) -> [];

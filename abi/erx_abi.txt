@@ -12,7 +12,7 @@ include services/inspect.txt
 include services/windows.txt
 include services/line.txt
 include services/log.txt
-include services/ssh.txt
+include services/tty_line.txt
 include services/clock.txt
 include services/code_objects.txt
 include services/code.txt

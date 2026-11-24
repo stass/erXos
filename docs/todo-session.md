@@ -330,13 +330,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   on a terminal's tty it waits on the line's console, and fails once the line has hung up or crashed. Have both call
   sites pass their own encoding to `prompt_width/2` (`prim_tty` holds `unicode`, `group` its `encoding`), extending edit
   44 of design-runtime.md; then no session console needs `user`, and `user => none` (erx_console.erl) can go.
-* [Medium] session lines, a tty's ending from its relay (`erlang/apps/erx_ssh_line/src/erx_ssh_line.erl`,
+* [Medium] session lines, a tty's ending from its relay (`erlang/apps/erx_tty_line/src/erx_tty_line.erl`,
   `erlang/apps/erx_session/src/erx_session_relay.erl`; [design-system.md](design-system.md#a-sessions-lines)):
   each line is minted as a facet, but the SSH line still sends a channel its tty's ending itself, which exports
   the line process to the SSH domain beside its facet. The tty's console hands its ending to the tty's relay
   (`erx_console`'s `on_shell_end`, `erx_session_tty:open_channel/3`), which sends it to the channel as its last
-  message, as `erx_ssh_dev_channel` then takes it, and `erx_ssh_line` sends a front end nothing; its `Notify`
-  and its `{erx_ssh_line, ended, Tty, Ending}` report go. The design's "no door beside the facet" test, row 7
+  message, as `erx_ssh_dev_channel` then takes it, and `erx_tty_line` sends a front end nothing; its `Notify`
+  and its `{erx_tty_line, ended, Tty, Ending}` report go. The design's "no door beside the facet" test, row 7
   of its tests table, lands with it, with its seeded fault, the line process sending a tty's ending itself.
 * [Medium] session lines, a line for the system domain (`erlang/apps/erx_domain/src/erx_domain_mints.erl`,
   `request_line`, `start_line`, `live_peer/2`; [design-system.md](design-system.md#a-sessions-lines), the answers
@@ -360,7 +360,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   settles routing and delivery together, by the open question's two ways: the job's relay handed to the channel
   as the endpoint (recommended), or the channel's alias for the job as its key through the facet, bound to the
   admitted grantee and a live job, with an admission that never drops them. `open_job` and the four messages stay
-  out of `ssh_line`'s interface until then.
+  out of `tty_line`'s interface until then.
 
 ## Security residuals
 
@@ -540,7 +540,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   and `tty_open` from the tty's relay arrive untagged; tag them as the
   job's messages are.
 * [Low] SSH stage 1, `erlang/apps/erx_session/src/erx_session.app.src`
-  does not list `erx_ssh_line`, whose modules `erx_session` calls.
+  does not list `erx_tty_line`, whose modules `erx_session` calls.
 * [Low] SSH stage 1, the channel's names
   (`erlang/apps/erx_session/src/erx_ssh_dev_channel.erl`): rename
   `#state.input`, `job/2` and `erx_ssh_job_core`'s `job` key, and give
@@ -551,12 +551,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   name the real connection with another channel, and another connection
   with the real channel, so that dropping either check fails a case.
 * [Low] SSH, the job relay's sends
-  (`erlang/apps/erx_ssh_line/src/erx_ssh_job.erl`): a relay sending to a
+  (`erlang/apps/erx_tty_line/src/erx_ssh_job.erl`): a relay sending to a
   channel of the SSH domain can be suspended by a busy queue to that
   domain ([design-domains.md](design-domains.md#the-peer)); send with
   `nosuspend` or state the wait in design-ssh.md.
 * [Low] SSH, output requests as bytes
-  (`erlang/apps/erx_ssh_line/src/erx_ssh_job.erl`,
+  (`erlang/apps/erx_tty_line/src/erx_ssh_job.erl`,
   `erlang/apps/erx/src/erx_log_user.erl`): both turn an io output
   request into bytes; one module should do it for both.
 * [Low] ssh edits, the manual window (`otp/lib/ssh/src/ssh_client_channel.erl`,

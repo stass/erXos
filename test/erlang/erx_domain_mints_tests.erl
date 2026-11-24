@@ -904,7 +904,7 @@ trace(Node, Seen) ->
     end.
 
 %% A session's lines (docs/design-system.md, "A session's lines"): session 9 provides
-%% web_line and ssh_line; the web domain, configured row ?G, is incarnation 6; the
+%% web_line and tty_line; the web domain, configured row ?G, is incarnation 6; the
 %% opening is a process of the system domain.
 -define(SESSION, 9).
 -define(PEER, 6).
@@ -913,7 +913,7 @@ trace(Node, Seen) ->
 line_ready(Provides) ->
     {session_ready, [], ?SESSION, node_of(?SESSION), none, Provides}.
 
-line_mints() -> #{web_line => mint(?SESSION), ssh_line => pid(node_of(?SESSION), ?SESSION, 3)}.
+line_mints() -> #{web_line => mint(?SESSION), tty_line => pid(node_of(?SESSION), ?SESSION, 3)}.
 
 line_request(Asker) -> {line, Asker, web_line, ?SESSION, ?PEER, ?OPENING}.
 
@@ -936,14 +936,14 @@ line_mints_and_answers_test() ->
 %% The session providers: a pid of another node refuses its entry alone, a name outside
 %% ?ERX_LINES the map whole, and a refused line answers no_line.
 session_line_providers_test() ->
-    Foreign = (line_mints())#{ssh_line := forged(?SESSION)},
+    Foreign = (line_mints())#{tty_line := forged(?SESSION)},
     {[_, Refused], One} = run([ready(?G, ?PEER, #{}), line_ready(Foreign)], new()),
-    ?assertEqual([{refused, foreign_mint, {session, ?SESSION, ssh_line}}], Refused),
-    {[_, NoPid], _} = run([ready(?G, ?PEER, #{}), line_ready((line_mints())#{ssh_line := not_a_pid})], new()),
-    ?assertEqual([{refused, not_a_pid, {session, ?SESSION, ssh_line}}], NoPid),
+    ?assertEqual([{refused, foreign_mint, {session, ?SESSION, tty_line}}], Refused),
+    {[_, NoPid], _} = run([ready(?G, ?PEER, #{}), line_ready((line_mints())#{tty_line := not_a_pid})], new()),
+    ?assertEqual([{refused, not_a_pid, {session, ?SESSION, tty_line}}], NoPid),
     ?assertMatch({[[{arm, 1, _}, _]], _}, run([line_request(asker)], One)),
     ?assertEqual([{error, no_line}],
-                 answers(element(1, run([{line, asker, ssh_line, ?SESSION, ?PEER, ?OPENING}], One)))),
+                 answers(element(1, run([{line, asker, tty_line, ?SESSION, ?PEER, ?OPENING}], One)))),
     {[_, Whole], None} = run([ready(?G, ?PEER, #{}), line_ready((line_mints())#{data => mint(?SESSION)})], new()),
     ?assertEqual([{refused, undeclared, {session, ?SESSION}}], Whole),
     ?assertEqual([{error, no_line}], answers(element(1, run([line_request(asker)], None)))),

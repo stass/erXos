@@ -186,7 +186,7 @@ provide_a(Provides) ->
     persistent_term:put({erx_domain_fake_lib, provides},
                         #{<<"a">> => Provides,
                           <<"root_1">> => fun(Id) -> #{<<"web_line">> => pid('root_1@erxos', Id, 3),
-                                                       <<"ssh_line">> => pid('b@erxos', Id, 4)} end}).
+                                                       <<"tty_line">> => pid('b@erxos', Id, 4)} end}).
 
 %% The whole path for both grants: b is introduced to a, a's mint is asked, its reply
 %% installs the facet in b's registry through b's domain pid, and b's acknowledgement
@@ -738,7 +738,7 @@ sessions() ->
 
 %% A session's line (docs/design-system.md, "A session's lines"): erx_domain:line/4 is
 %% one call the mint core answers. Session 7's report provides web_line under a pid of
-%% its own and ssh_line under one of another node, which refuses that entry alone. A
+%% its own and tty_line under one of another node, which refuses that entry alone. A
 %% request for web_line with b (6) as peer introduces the two, then sends the mint
 %% request to the line through the session's domain pid, with ?ERX_LINES's quantities,
 %% the opening and b's user name, and the session's reply with the operation's tag
@@ -752,7 +752,7 @@ lines() ->
     Opening = self(),
     Asked = gen_server:send_request(erx_domain_srv, {line, web_line, 7, 6, Opening}),
     ?assertEqual({error, busy}, erx_domain:line(web_line, 7, 6, Opening)),
-    ?assertEqual({error, no_line}, erx_domain:line(ssh_line, 7, 6, Opening)),
+    ?assertEqual({error, no_line}, erx_domain:line(tty_line, 7, 6, Opening)),
     ?assertEqual({error, no_line}, erx_domain:line(web_line, 5, 6, Opening)),
     ?assertMatch({connect, 7, 6, _, _}, connect_of(7, 6)),
     PidB ! {erx_origin, 6, {erx_connection_mapped, 7}},

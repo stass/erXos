@@ -24,7 +24,7 @@ require_relative '../fixtures/erlang_build'
 # without being decoded, a medium file of any length
 # taken as blobs, keys files read by OTP's ssh_file, the default version banner (OTP's
 # id_string, Erlang/<version>, in place of erXos_<release>), exec run by OTP, a job's
-# input sent in pieces past ssh_line_data_max, a second piece or job_eof sent before
+# input sent in pieces past tty_line_data_max, a second piece or job_eof sent before
 # the last piece is answered, an end of input before the exec dropped, an SSH event of
 # another connection or channel taken, a job's relay not watched, OTP's channel opening the
 # window after each data message, a job's ending heard without its alias, any build kind taken for
@@ -32,11 +32,11 @@ require_relative '../fixtures/erlang_build'
 # half, which ssh_file cannot read back as a host key.
 class ErxSshDevTest < Minitest::Test
   SSH = File.join(ErlangBuild::ROOT, 'otp/lib/ssh/src')
-  APPLICATIONS = %w[erx erx_shell erx_ssh_line erx_session].freeze
+  APPLICATIONS = %w[erx erx_shell erx_tty_line erx_session].freeze
   TESTS = %w[test/erlang/erx_ssh_dev_tests.erl].freeze
   DEV = 'erlang/apps/erx_session/src/erx_ssh_dev.erl'
   CHANNEL = 'erlang/apps/erx_session/src/erx_ssh_dev_channel.erl'
-  CORE = 'erlang/apps/erx_ssh_line/src/erx_ssh_job_core.erl'
+  CORE = 'erlang/apps/erx_tty_line/src/erx_ssh_job_core.erl'
   CLIENT_CHANNEL = 'otp/lib/ssh/src/ssh_client_channel.erl'
   Fault = Data.define(:name, :source, :from, :to)
   FAULTS = [
@@ -60,7 +60,7 @@ class ErxSshDevTest < Minitest::Test
               from: '{id_string, ?ID_STRING},', to: ''),
     Fault.new(name: 'exec run by OTP', source: DEV,
               from: '{ssh_cli, {erx_ssh_dev_channel, [Open, Job]}},', to: '{exec, erlang_eval},'),
-    Fault.new(name: "a job's input in pieces past ssh_line_data_max", source: CORE,
+    Fault.new(name: "a job's input in pieces past tty_line_data_max", source: CORE,
               from: 'lists:foldl(fun queue:in/2, Pieces, pieces(Bytes))', to: 'queue:in(Bytes, Pieces)'),
     Fault.new(name: 'a second piece before job_written', source: CORE,
               from: 'feed(#{job := started, unanswered := none, pieces := Pieces, eof := Eof} = Channel, Actions) ->',

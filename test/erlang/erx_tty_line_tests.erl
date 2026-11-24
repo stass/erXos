@@ -1,8 +1,8 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
-%% EUnit cases of the session's line to the SSH domain (erx_ssh_line over
-%% erx_session_line, and its core, erx_ssh_line_core; docs/design-ssh.md, "Sessions,
+%% EUnit cases of the session's line to the SSH domain (erx_tty_line over
+%% erx_session_line, and its core, erx_tty_line_core; docs/design-ssh.md, "Sessions,
 %% ttys and shells"; docs/design-system.md, "A session's lines"): the line's mint, the
 %% shape checks of open_tty through its facet, a channel of a third domain, the channel
 %% limit, the exit report and the bound of a request. The export table, the session's
@@ -10,7 +10,7 @@
 %% and the test is the domain pid a mint replies to (erx_facet:minted/2);
 %% erx_session_tty_tests covers the tty a channel gets and its report of the shell's
 %% status.
--module(erx_ssh_line_tests).
+-module(erx_tty_line_tests).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
@@ -20,7 +20,7 @@
 -define(PEER, 5).
 -define(SYSTEM, 4).
 -define(OTHER, 9).
--define(TESTER, erx_ssh_line_tests_test).
+-define(TESTER, erx_tty_line_tests_test).
 -define(SHELL, {open_tty, self(), shell, <<"vt100">>, 24, 80}).
 
 %% The export table's stand-in: every name is the peer's unless a test has claimed it for
@@ -56,7 +56,7 @@ line() ->
                    end
            end,
     Conn = stand_in(),
-    {ok, Line} = erx_ssh_line:start_link(#{system => ?SYSTEM, exports => ?MODULE, open => Open,
+    {ok, Line} = erx_tty_line:start_link(#{system => ?SYSTEM, exports => ?MODULE, open => Open,
                                            connection => fun(_Grantee) -> {ok, Conn} end}),
     Line.
 
@@ -71,7 +71,7 @@ stand_in_tty(Notify) ->
 mint(Line, Domain, Name, Grantee) ->
     persistent_term:put({erx, domain_pid}, self()),
     Tag = erlang:unique_integer([positive]),
-    Limits = (maps:get(ssh_line, ?ERX_LINES))#{opening => stand_in()},
+    Limits = (maps:get(tty_line, ?ERX_LINES))#{opening => stand_in()},
     Line ! {erx_origin, Domain, {erx_facet_mint, Tag, Name, Grantee, <<"root">>, Limits}},
     receive {erx_facet_minted, Tag, Reply} -> Reply after 500 -> none end.
 
@@ -79,7 +79,7 @@ mint(Line, Domain, Name, Grantee) ->
 %% the session does, and that facet.
 open_line() ->
     Line = line(),
-    {ok, Facet} = mint(Line, ?SYSTEM, ssh_line, ?PEER),
+    {ok, Facet} = mint(Line, ?SYSTEM, tty_line, ?PEER),
     ?assertEqual(ok, receive {exported, Facet, [send], ?PEER} -> ok after 1000 -> none end),
     {Line, Facet}.
 
@@ -103,12 +103,12 @@ opened() ->
 %% Through the facet the line serves its grantee alone.
 mint_test() ->
     Line = line(),
-    ?assertEqual(none, mint(Line, ?PEER, ssh_line, ?PEER)),
-    ?assertEqual(none, mint(Line, ?SYSTEM, ssh_line, ?SYSTEM)),
+    ?assertEqual(none, mint(Line, ?PEER, tty_line, ?PEER)),
+    ?assertEqual(none, mint(Line, ?SYSTEM, tty_line, ?SYSTEM)),
     ?assertEqual(none, mint(Line, ?SYSTEM, web_line, ?PEER)),
     ?assertEqual(none, receive {exported, _, _, _} = Early -> Early after 0 -> none end),
     ?assertEqual(none, call(Line, ?PEER, ?SHELL)),
-    {ok, Facet} = mint(Line, ?SYSTEM, ssh_line, ?PEER),
+    {ok, Facet} = mint(Line, ?SYSTEM, tty_line, ?PEER),
     ?assertEqual(ok, receive {exported, Facet, [send], ?PEER} -> ok after 0 -> none end),
     ?assertEqual(none, call(Line, ?PEER, ?SHELL)),
     ?assertEqual(none, opened()),
@@ -216,7 +216,7 @@ ending_on_the_channel(Ending) ->
     ?assertEqual(ok, call(Facet, ?PEER, {open_tty, self(), {exec, <<"exit 4">>}, <<"vt100">>, 24, 80})),
     {Tty, Channel, _Run, _Size} = opened(),
     ?assertEqual(self(), Channel),
-    Line ! {erx_ssh_line, ended, spawn(fun() -> ok end), {exited, 5}},
+    Line ! {erx_tty_line, ended, spawn(fun() -> ok end), {exited, 5}},
     Tty ! {notify, Ending},
     Reported = receive {exited, _} = Exited -> Exited; {signaled, _} = Signaled -> Signaled
                after 1000 -> none
@@ -249,7 +249,7 @@ term_test() ->
                               {<<"xterm", 27, "]0;owned", 7>>, <<"vt100">>}]].
 
 %% The largest request the line serves, an exec of a 32 KiB command with a 64-byte TERM
-%% from a caller whose pid and alias are of a 255-character node name, fits ssh_line's
+%% from a caller whose pid and alias are of a 255-character node name, fits tty_line's
 %% max_request under both measures, and that bound is the smallest power of two not
 %% below the larger of them; through the facet such a request is served, and an exec
 %% past max_request is dropped unanswered and counted, before the line sees it.
@@ -257,7 +257,7 @@ request_bound_test() ->
     Facet = facet(),
     Me = self(),
     Largest = {open_tty, Me, {exec, binary:copy(<<"a">>, 32768)}, binary:copy(<<"x">>, 64), 65535, 65535},
-    Max = maps:get(max_request, maps:get(ssh_line, ?ERX_LINES)),
+    Max = maps:get(max_request, maps:get(tty_line, ?ERX_LINES)),
     Measure = erx_line_bound:measure(Largest),
     ?assert(Measure =< Max andalso Measure > Max div 2),
     ?assertEqual(ok, call(Facet, ?PEER, Largest)),

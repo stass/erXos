@@ -2494,7 +2494,7 @@ session's line has no manifest row, service or facet: its interface,
 marked `served_by session`, names it, every session serves it, and the
 domain service grants it only on a request that names its grantee
 ([design-system.md](design-system.md#a-sessions-lines)), so `web_line`
-and `ssh_line` are instances of interfaces of those names. The
+and `tty_line` are instances of interfaces of those names. The
 build generates from the manifest the table of service names, and the
 domain service's one funnel for a domain's facets,
 `erx_domain_srv:facets/2`, through which every create spec and every

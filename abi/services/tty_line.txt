@@ -15,7 +15,7 @@
 # {'$gen_call', From, Request}, the envelope left out, and the term's heap words times
 # the word size plus the bytes of the binaries it references, each about 33 KiB.
 # in_flight is 4, since a channel's open_tty is answered at once.
-service ssh_line 12
+service tty_line 12
   served_as message
   served_by session
   operation open_tty 1
@@ -29,14 +29,14 @@ service ssh_line 12
 # (docs/design-programs.md, "A program's end"); the channel sends it as SSH's
 # exit-signal, by the name without sig in capitals.
 # The line's bounds (docs/design-ssh.md, "Sessions, ttys and shells" and "Limits and who
-# pays"): a connection holds at most ssh_line_max_channels channels open, FreeBSD's
+# pays"): a connection holds at most tty_line_max_channels channels open, FreeBSD's
 # MaxSessions, and the line answers limited past them; an exec's command is 1 to
-# ssh_line_command_max bytes, and a job_input or job_output carries at most ssh_line_data_max bytes,
-# the channel's packet size. A pty-req's TERM is at most ssh_term_max bytes, terminfo's
+# tty_line_command_max bytes, and a job_input or job_output carries at most tty_line_data_max bytes,
+# the channel's packet size. A pty-req's TERM is at most tty_term_max bytes, terminfo's
 # names being short, and its rows and columns each at most console_side_max (console.txt),
 # a side of zero taken as the default; the session's own first stage, erx_ssh_dev_channel,
 # takes a pty-req under the same bounds.
-limit ssh_line_max_channels u32 10
-limit ssh_line_command_max u32 32768
-limit ssh_line_data_max u32 32768
-limit ssh_term_max u32 64
+limit tty_line_max_channels u32 10
+limit tty_line_command_max u32 32768
+limit tty_line_data_max u32 32768
+limit tty_term_max u32 64

@@ -138,7 +138,7 @@ module Erx
     # errors only (SSH_EXEC_OPTIONS).
     SshExec = Data.define(:name, :command, :tty, :input, :output, :error_output, :status)
     # Every byte value, 512 times: 128 KiB, past a job's input and output pieces of
-    # ssh_line_data_max bytes (abi/services/ssh.txt) and a message pipe's capacity
+    # tty_line_data_max bytes (abi/services/tty_line.txt) and a message pipe's capacity
     # (erx_shell_pipe).
     SSH_BYTES = ((0..255).to_a.pack('C*') * 512).freeze
     # Without a tty a job's output and error output cross apart and unchanged and its

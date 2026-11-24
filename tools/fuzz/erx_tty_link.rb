@@ -22,12 +22,12 @@ module ErxTtyLinkFuzz
   TTY_SOURCE = File.join(ROOT, 'erlang/apps/erx_session/src/erx_tty.erl')
   # The SSH line core, whose requests the same target feeds (docs/design-ssh.md, "Sessions, ttys
   # and shells").
-  LINE_SOURCE = File.join(ROOT, 'erlang/apps/erx_ssh_line/src/erx_ssh_line_core.erl')
+  LINE_SOURCE = File.join(ROOT, 'erlang/apps/erx_tty_line/src/erx_tty_line_core.erl')
   # The core takes a shell's TERM from erx_text_tables, which the build generates from
   # abi/terminal.txt into build/gen.
   TEXT_TABLES = 'erlang/apps/erx/src/erx_text_tables.erl'
   # The modules take their bounds from the generated ABI header (abi/services/console.txt
-  # and ssh.txt).
+  # and tty_line.txt).
   INCLUDE = 'erlang/apps/erx/include'
   # A broken guarantee: the text that keeps it, what replaces it, and the property that must
   # then fail, as the target names it.
@@ -65,8 +65,8 @@ module ErxTtyLinkFuzz
                                                property: 'foreign_channel'),
     'a command holding no NUL' => Seed.new(text: 'binary:match(Command, <<0>>) =:= nomatch;', broken: 'true;',
                                            property: 'bad_run'),
-    'ten channels at most' => Seed.new(text: 'when map_size(Ttys) >= ?ERX_SSH_LINE_MAX_CHANNELS ->',
-                                       broken: 'when map_size(Ttys) > ?ERX_SSH_LINE_MAX_CHANNELS ->',
+    'ten channels at most' => Seed.new(text: 'when map_size(Ttys) >= ?ERX_TTY_LINE_MAX_CHANNELS ->',
+                                       broken: 'when map_size(Ttys) > ?ERX_TTY_LINE_MAX_CHANNELS ->',
                                        property: 'over_limit'),
     'a zero side taken as the default' => Seed.new(text: 'side(0, Default) -> Default;',
                                                    broken: 'side(0, _Default) -> 0;', property: 'size_out_of_range')
@@ -94,7 +94,7 @@ module ErxTtyLinkFuzz
         end
       end
     end
-    puts 'erx_tty_link and erx_ssh_line_core keep their guarantees, and copies without ' \
+    puts 'erx_tty_link and erx_tty_line_core keep their guarantees, and copies without ' \
          "#{TARGETS.values.flat_map(&:keys).join(', ')} do not"
   end
 

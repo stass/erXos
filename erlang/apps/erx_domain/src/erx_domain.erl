@@ -278,7 +278,7 @@ introduce({erx_domain, A, _, _}, {erx_domain, B, _, _}) ->
 Session's line Name, minted as a facet for the domain Peer (docs/design-system.md,
 "A session's lines"): `web_line`, the erx_web_line the host link's `web` facet
 hands the web domain as it opens (docs/design-web.md, "Logging in and the
-line"), or `ssh_line`, the erx_ssh_line a login hands the SSH domain
+line"), or `tty_line`, the erx_tty_line a login hands the SSH domain
 (docs/design-ssh.md, "Logging in"). Opening, a process of the system domain,
 bounds the grant: the facet ends when it does. One call, answered once by the
 mint core's line operation within its deadline: {ok, Facet}, or {error,

@@ -160,7 +160,7 @@ action(close_input, #relay{stdin = Stdin} = Relay) ->
     ok = erx_shell_pipe:close(Stdin),
     Relay;
 action({read, Stream}, Relay) ->
-    Ref = erx_shell_pipe:get_bytes_async(pipe(Stream, Relay), ?ERX_SSH_LINE_DATA_MAX),
+    Ref = erx_shell_pipe:get_bytes_async(pipe(Stream, Relay), ?ERX_TTY_LINE_DATA_MAX),
     request(Ref, {read, Stream}, Relay);
 action({send, Message}, #relay{alias = Alias} = Relay) ->
     Alias ! {Alias, Message},

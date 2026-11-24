@@ -250,7 +250,7 @@ mint_test() ->
         Opening = stand_in(),
         ?assertEqual(none, mint(Line, ?PEER, ?PEER, Opening)),
         ?assertEqual(none, mint(Line, ?SYSTEM, ?SYSTEM, Opening)),
-        ?assertEqual(none, mint(Line, ?SYSTEM, ssh_line, ?PEER, Opening)),
+        ?assertEqual(none, mint(Line, ?SYSTEM, tty_line, ?PEER, Opening)),
         receive {exported, _, _, _} = Early -> error(Early) after 0 -> ok end,
         ?assertEqual(none, call(Line, {open, {path, []}})),
         {ok, Facet} = mint(Line, ?SYSTEM, ?PEER, Opening),

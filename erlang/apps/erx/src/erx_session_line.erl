@@ -5,7 +5,7 @@
 -moduledoc """
 A session's line to a front-end domain (docs/design-system.md, "A session's
 lines"): the line process, which is the mint of the line's facet and the
-service behind it, erx_web_line's for the web domain and erx_ssh_line's for
+service behind it, erx_web_line's for the web domain and erx_tty_line's for
 the SSH domain. This module owns who reaches the line from another domain;
 the callback module owns what the line does with a request its facet
 forwarded and with its own domain's messages.

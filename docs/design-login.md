@@ -183,8 +183,8 @@ and holds only its radio grants.
 `tty_line` is the session line [design-system.md](design-system.md#a-sessions-lines)
 serves a front end whose connections master the session's ttys,
 `open_tty` and, with design-ssh.md's answer on jobs, `open_job`;
-design-ssh.md and design-system.md name it `ssh_line`, served by
-`erx_ssh_line`, and package 2 of the [Build order](#build-order)
+design-ssh.md and design-system.md name it `tty_line`, served by
+`erx_tty_line`, and package 2 of the [Build order](#build-order)
 renames both, since the phone console masters ttys through it too. Whoever
 masters a tty of a logged-in session can already type any command its
 shell runs, so a front end that never opens a job gains nothing by being
@@ -491,10 +491,10 @@ names; the full gates run once per batch.
    allow-list; the fuzz target over `admit/3`; the secrets test;
    `abi/services/web.txt`'s comments pointed at the facet. A host front
    end stands in for a real one in the tests.
-3. **`tty_line`.** `ssh_line` becomes `tty_line`, `erx_ssh_line`
-   becomes `erx_tty_line`, and `abi/services/ssh.txt`'s line moves to
-   `abi/services/tty_line.txt` with its limits under the new name, in the
-   ABI, the code, the tests and the documents together.
+3. **`tty_line`.** The session's line to a front end is the `tty_line`
+   interface, served by `erx_tty_line`, with its operations and limits in
+   `abi/services/tty_line.txt`, in the ABI, the code, the tests and the
+   documents together.
 4. **SSH's key login.** `cookie`, `key_ok` and `login_key` in the core and
    the service, `erx_ssh_wire` with its fuzz target, and the verifier's
    direct tests ([design-ssh.md](design-ssh.md#verification)).

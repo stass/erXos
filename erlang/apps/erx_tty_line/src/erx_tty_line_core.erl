@@ -1,9 +1,9 @@
 %% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 %% SPDX-License-Identifier: BSD-2-Clause
 
--module(erx_ssh_line_core).
+-module(erx_tty_line_core).
 -moduledoc """
-The decisions of a session's line to the SSH domain (erx_ssh_line;
+The decisions of a session's line to the SSH domain (erx_tty_line;
 docs/design-ssh.md, "Sessions, ttys and shells"), pure: which requests the
 line takes and how many channels it holds open.
 
@@ -13,14 +13,14 @@ peer is untrusted, so request/4 checks its whole shape before anything acts
 on it, and answers
 `{error, badarg}` for any shape but the one below, and for a channel that is
 no process of the peer's: a channel of a third domain would make the session
-send a tty's bytes there. Past ssh_line_max_channels open channels,
+send a tty's bytes there. Past tty_line_max_channels open channels,
 `max_channels`, it answers `{error, limited}`.
 
 * `{open_tty, Channel, Run, Term, Rows, Columns}`: Channel a pid of the
   peer's, Run `shell` or `{exec, Command}` with Command a binary of 1 to
-  ssh_line_command_max bytes holding no NUL, Term a binary of at most
-  ssh_term_max bytes, and Rows and Columns integers from 0, which `pty-req`
-  allows, to console_side_max (abi/services/ssh.txt and console.txt).
+  tty_line_command_max bytes holding no NUL, Term a binary of at most
+  tty_term_max bytes, and Rows and Columns integers from 0, which `pty-req`
+  allows, to console_side_max (abi/services/tty_line.txt and console.txt).
 
 The tty opens at Rows by Columns, a side of zero taken as 24 rows or 80
 columns, and its shell's TERM is Term when abi/terminal.txt lists it and
@@ -54,11 +54,11 @@ of a pid: open a tty on the channel, or answer the error.
 -spec request(term(), pos_integer(), fun((pid()) -> non_neg_integer()), core()) ->
           {open_tty, pid(), erx_session_tty:channel()} | {error, limited | badarg}.
 request({open_tty, Channel, Run, Term, Rows, Columns}, Peer, Owner, #{ttys := Ttys})
-  when is_pid(Channel), is_binary(Term), byte_size(Term) =< ?ERX_SSH_TERM_MAX,
+  when is_pid(Channel), is_binary(Term), byte_size(Term) =< ?ERX_TTY_TERM_MAX,
        is_integer(Rows), Rows >= 0, Rows =< ?ERX_CONSOLE_SIDE_MAX,
        is_integer(Columns), Columns >= 0, Columns =< ?ERX_CONSOLE_SIDE_MAX ->
     case {valid_run(Run), Owner(Channel) =:= Peer} of
-        {true, true} when map_size(Ttys) >= ?ERX_SSH_LINE_MAX_CHANNELS -> {error, limited};
+        {true, true} when map_size(Ttys) >= ?ERX_TTY_LINE_MAX_CHANNELS -> {error, limited};
         {true, true} -> {open_tty, Channel, tty(Run, Term, Rows, Columns)};
         _ -> {error, badarg}
     end;
@@ -93,13 +93,13 @@ side(Side, _Default) -> Side.
 
 -doc """
 Whether Run is what a channel may ask to run: `shell`, or `{exec, Command}` with
-Command a binary of 1 to ssh_line_command_max bytes holding no NUL byte.
+Command a binary of 1 to tty_line_command_max bytes holding no NUL byte.
 erx_ssh_dev_channel, SSH's first stage in the session, checks its exec requests here.
 """.
 -spec valid_run(term()) -> boolean().
 valid_run(shell) -> true;
 valid_run({exec, Command})
-  when is_binary(Command), byte_size(Command) >= 1, byte_size(Command) =< ?ERX_SSH_LINE_COMMAND_MAX ->
+  when is_binary(Command), byte_size(Command) >= 1, byte_size(Command) =< ?ERX_TTY_LINE_COMMAND_MAX ->
     binary:match(Command, <<0>>) =:= nomatch;
 valid_run(_Run) -> false.
 

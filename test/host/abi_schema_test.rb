@@ -572,14 +572,14 @@ class AbiSchemaTest < Minitest::Test
     end
   end
 
-  # The checked-in lines are ssh_line and web_line, each with the grant design-system.md gives it.
-  def test_the_checked_in_lines_are_ssh_line_and_web_line
+  # The checked-in lines are tty_line and web_line, each with the grant design-system.md gives it.
+  def test_the_checked_in_lines_are_tty_line_and_web_line
     root = File.expand_path('../..', __dir__)
     services = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services
     lines = services.select { |service| service.fetch(:served_by) == 'session' }
                     .to_h { |service| [service.fetch(:name), service.fetch(:quantities)] }
     common = { 'reductions' => 100_000, 'period_ns' => 1_000_000_000, 'max_heap_size' => 65_536 }
-    assert_equal({ 'ssh_line' => common.merge('max_request' => 65_536, 'in_flight' => 4),
+    assert_equal({ 'tty_line' => common.merge('max_request' => 65_536, 'in_flight' => 4),
                    'web_line' => common.merge('max_request' => 8192, 'in_flight' => 16) }, lines)
   end
 

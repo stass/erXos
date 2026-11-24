@@ -59,7 +59,7 @@ explore([{Job, M} = State | Rest], Seen, Endings) ->
 %% readers' and job's events only where they can happen.
 events(#{writing := Writing, inputs := Inputs, reading := Reading,
          pieces := Pieces, ended := Ended}) ->
-    Big = binary:copy(<<0>>, ?ERX_SSH_LINE_DATA_MAX + 1),
+    Big = binary:copy(<<0>>, ?ERX_TTY_LINE_DATA_MAX + 1),
     Channel = [{job_input, <<0, 255>>} || Inputs < ?INPUTS]
         ++ [{job_input, Big}, {job_input, nope}, job_eof, job_sent,
             job_hangup, {job_output, stdout, <<"x">>}],
@@ -94,7 +94,7 @@ check(Event, Actions, M0) ->
 %% the event obliges the relay to do.
 before({channel, {job_input, Bytes}}, #{writing := false, eof_sent := false,
                                         inputs := N} = M)
-  when is_binary(Bytes), byte_size(Bytes) =< ?ERX_SSH_LINE_DATA_MAX ->
+  when is_binary(Bytes), byte_size(Bytes) =< ?ERX_TTY_LINE_DATA_MAX ->
     M#{inputs := N + 1, input_due := Bytes};
 before({channel, {job_input, _}}, M) ->
     M#{hangup_due := true};
@@ -167,7 +167,7 @@ nothing_after_the_end_test() ->
 %%% size) and end of input, of the job's start, and of what the line sends,
 %%% well-formed or not. After every step the test checks that the job gets
 %%% exactly the client's data sent after the start and before its end of input,
-%%% in order, in pieces of 1 to ssh_line_data_max bytes, one unanswered at a time,
+%%% in order, in pieces of 1 to tty_line_data_max bytes, one unanswered at a time,
 %%% each sent as soon as none is unanswered; that job_eof goes once, after the
 %%% last piece is answered, and as soon as it is; that the window opens by a
 %%% piece's size only once it is answered and by data that goes nowhere at once,
@@ -198,7 +198,7 @@ channel_explore([{Channel, M} = State | Rest], Seen) ->
     channel_explore([S || {_, #{done := false}} = S <- Next] ++ Rest, Seen#{State => true}).
 
 channel_events(#{started := Started, data := Data}) ->
-    Big = binary:copy(<<7>>, ?ERX_SSH_LINE_DATA_MAX + 1),
+    Big = binary:copy(<<7>>, ?ERX_TTY_LINE_DATA_MAX + 1),
     [{data, Bytes} || Data < ?DATA, Bytes <- [<<Data, 1>>, Big]]
         ++ [eof]
         ++ [started || not Started]
@@ -247,7 +247,7 @@ channel_act(_Action, #{done := true} = M) ->
     ?assert(false, {action_after_the_end, M});
 channel_act({send, {job_input, Piece}}, #{started := true, unanswered := none, sent := Sent,
                                           accepted := Accepted} = M)
-  when byte_size(Piece) >= 1, byte_size(Piece) =< ?ERX_SSH_LINE_DATA_MAX ->
+  when byte_size(Piece) >= 1, byte_size(Piece) =< ?ERX_TTY_LINE_DATA_MAX ->
     Next = <<Sent/binary, Piece/binary>>,
     ?assertEqual(Next, binary:part(Accepted, 0, byte_size(Next))),
     M#{sent := Next, unanswered := byte_size(Piece)};
@@ -269,7 +269,7 @@ channel_act(Action, M) ->
 
 %% The channel's checks of what the line sends for its job.
 channel_heard_test() ->
-    Big = binary:copy(<<1>>, ?ERX_SSH_LINE_DATA_MAX + 1),
+    Big = binary:copy(<<1>>, ?ERX_TTY_LINE_DATA_MAX + 1),
     New = erx_ssh_job_core:new_channel(),
     {Started, []} = erx_ssh_job_core:channel_step(started, New),
     {Writing, [{send, {job_input, <<"x">>}}]} =

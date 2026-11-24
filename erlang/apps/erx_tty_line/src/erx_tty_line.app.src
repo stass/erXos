@@ -2,15 +2,15 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% A session's line to the SSH domain (docs/design-ssh.md, "Sessions, ttys and
-%% shells"): erx_ssh_line, its pure core erx_ssh_line_core, the job relay erx_ssh_job
+%% shells"): erx_tty_line, its pure core erx_tty_line_core, the job relay erx_ssh_job
 %% with its core erx_ssh_job_core, and the application that
 %% names it. The session's boot script starts it, permanent, before init's ready
 %% report, which names the line.
-{application, erx_ssh_line,
+{application, erx_tty_line,
  [{description, "erXos session's line to the SSH domain"},
   {vsn, "1"},
-  {modules, [erx_ssh_job, erx_ssh_job_core, erx_ssh_line, erx_ssh_line_app, erx_ssh_line_core]},
+  {modules, [erx_ssh_job, erx_ssh_job_core, erx_tty_line, erx_tty_line_app, erx_tty_line_core]},
   {registered, []},
   {applications, [kernel, stdlib, erx, erx_shell]},
-  {mod, {erx_ssh_line_app, []}},
+  {mod, {erx_tty_line_app, []}},
   {env, []}]}.

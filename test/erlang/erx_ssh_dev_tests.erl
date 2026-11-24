@@ -19,7 +19,7 @@
 %% on Ctrl-C, as the session's line discipline would. The job relay is a stand-in
 %% too (job/1) that speaks the job messages, tagged with the channel's alias as
 %% erx_ssh_job tags them, and checks the channel keeps to them: pieces of at most
-%% ssh_line_data_max bytes, one unanswered at a time, each output answered before
+%% tty_line_data_max bytes, one unanswered at a time, each output answered before
 %% the next. A job whose input is not answered holds the client to the window it
 %% was given, and a job message without the alias, from another process, changes
 %% nothing. The work directory is ERX_SSH_DEV_WORK, which the host test makes and
@@ -140,12 +140,12 @@ tty_loop(Channel, Ref, Notify, N) ->
 %% job_eof, and ends with status N; `hold` does the same with status 0, but tells
 %% the test (registered as this module) that it holds the first piece and answers
 %% it only once the test says `release`; `crash` ends the relay before any ending;
-%% `forge` sends a job_output one byte past ssh_line_data_max and tells the test
+%% `forge` sends a job_output one byte past tty_line_data_max and tells the test
 %% how the channel ended; `forger` has another process send the channel job
 %% messages without the alias, and then ends with status 7; `inject` sends the
 %% channel SSH data and end of input in messages naming another connection and
 %% channel, tells the test, and then runs as `exit 0`. It crashes, so the
-%% channel ends with status 1, on a piece past ssh_line_data_max or empty, on a
+%% channel ends with status 1, on a piece past tty_line_data_max or empty, on a
 %% job_input or job_eof the channel sent before the last piece was answered, and
 %% when a job_output is not answered.
 job(Command) ->
@@ -167,7 +167,7 @@ job_run(<<"hold">>, #{alias := Alias} = Job) ->
 job_run(<<"crash">>, _Job) ->
     exit(crash);
 job_run(<<"forge">>, #{alias := Alias, ref := Ref}) ->
-    Alias ! {Alias, {job_output, stdout, binary:copy(<<0>>, ?ERX_SSH_LINE_DATA_MAX + 1)}},
+    Alias ! {Alias, {job_output, stdout, binary:copy(<<0>>, ?ERX_TTY_LINE_DATA_MAX + 1)}},
     receive {'DOWN', Ref, process, _, Reason} -> ?MODULE ! {channel_ended, Reason} end;
 job_run(<<"inject">>, #{channel := Channel} = Job) ->
     _ = [Channel ! Forged || Forged <- [{ssh_cm, self(), {data, 99, 0, <<"injected">>}},
@@ -203,7 +203,7 @@ job_loop(#{alias := Alias, ref := Ref} = Job, Status) ->
 %% A piece of input, written back and answered. The channel's job_sent follows
 %% every message the channel sent before it, so a job_input or job_eof waiting
 %% once it is heard was sent while the piece was unanswered.
-job_piece(#{alias := Alias} = Job, Bytes) when byte_size(Bytes) >= 1, byte_size(Bytes) =< ?ERX_SSH_LINE_DATA_MAX ->
+job_piece(#{alias := Alias} = Job, Bytes) when byte_size(Bytes) >= 1, byte_size(Bytes) =< ?ERX_TTY_LINE_DATA_MAX ->
     job_output(Job, stdout, Bytes),
     receive
         {Alias, {job_input, _}} -> exit(two_inputs_unanswered);
@@ -278,7 +278,7 @@ ctrl_c_ends_with_int(#{client := Client} = Context) ->
     ok = ssh:close(Connection).
 
 %% An exec without a pty-req runs as a job: a MiB of every byte value, past the
-%% channel's first window and in packets past ssh_line_data_max, reaches the job and
+%% channel's first window and in packets past tty_line_data_max, reaches the job and
 %% comes back as its standard output, unchanged, its standard error stays apart,
 %% and its status is the channel's.
 exec_runs_as_a_job(#{client := Client} = Context) ->
@@ -398,7 +398,7 @@ exec_runs_on_a_tty(#{client := Client} = Context) ->
     ?assertEqual({<<>>, {status, 4}}, ending(Connection, Channel, <<>>, none)),
     ok = ssh:close(Connection).
 
-%% A command holding a NUL byte, or past ssh_line_command_max bytes, is refused, on
+%% A command holding a NUL byte, or past tty_line_command_max bytes, is refused, on
 %% a tty and as a job.
 an_exec_out_of_bounds_is_refused(#{client := Client} = Context) ->
     {ok, Connection} = connect(Context, "root", Client),
@@ -409,7 +409,7 @@ an_exec_out_of_bounds_is_refused(#{client := Client} = Context) ->
               end,
     ?assertEqual([failure, failure, failure, failure],
                  [Refused(Pty, Command) || Pty <- [true, false],
-                                           Command <- ["exit 1\0", lists:duplicate(?ERX_SSH_LINE_COMMAND_MAX + 1, $x)]]),
+                                           Command <- ["exit 1\0", lists:duplicate(?ERX_TTY_LINE_COMMAND_MAX + 1, $x)]]),
     ok = ssh:close(Connection).
 
 %% A key of root's home copy logs root in, and no other user name.
