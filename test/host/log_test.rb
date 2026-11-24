@@ -423,6 +423,20 @@ class LogTest < Minitest::Test
     refute_match(/[^\t\n -~]/, stderr)
   end
 
+  # A line of the kernel's ring is a warning record, labelled and escaped, and never
+  # reaches standard error, the early console, whose write on Fiasco would put it
+  # back in the ring. Seeded fault: the record logged at level debug.
+  def test_a_kernel_line_is_a_labelled_escaped_warning_kept_off_standard_error
+    assert_equal 'warning', kernel_line_level(build_probe)
+    seeded = File.join(@directory, 'debug_log_debug_level.c')
+    original = 'erx_log_bytes(&erx_debug_log_ring, ERX_LOG_LEVEL_WARNING,'
+    source = File.read(File.join(@root, 'kernel/core/debug_log.c'))
+    assert_equal 1, source.scan(original).size
+    File.write(seeded, source.sub(original) { 'erx_log_bytes(&erx_debug_log_ring, ERX_LOG_LEVEL_DEBUG,' })
+    cores = HOSTED_CORES.map { |core| core == 'kernel/core/debug_log.c' ? seeded : File.join(@root, core) }
+    assert_equal 'debug', kernel_line_level(build_probe(name: 'hosted-debug-level', cores: cores))
+  end
+
   # Standard error shows every record as it is written, so the console's take finds nothing
   # and a read from the start, as dmesg makes, sees the same lines standard error showed.
   def test_hosted_take_finds_nothing_and_a_read_sees_what_standard_error_showed
@@ -478,13 +492,27 @@ class LogTest < Minitest::Test
     output
   end
 
-  def build_probe(name: 'hosted', sanitizers: @sanitizer_flags)
+  # Logs one kernel line and returns its record's level, once the rest of the record checks.
+  def kernel_line_level(probe)
+    stdout, stderr, status = run_probe(probe, "kernel:#{hex("Receiver \e[2J\tgone\n")}", 'read:0')
+    assert status.success?, stderr
+    assert_equal '', stderr
+    lines = stdout.lines(chomp: true)
+    assert_equal ['status 0', 'read 0 lost 0'], lines.first(2)
+    assert_equal 3, lines.size
+    level = lines.fetch(2)[/\Aread #0 \d+\.\d{6} (\w+) fiasco: Receiver \\x1B\[2J\\x09gone\\x0A\z/, 1]
+    refute_nil level, lines.fetch(2)
+    level
+  end
+
+  def build_probe(name: 'hosted', sanitizers: @sanitizer_flags,
+                  cores: HOSTED_CORES.map { |source| File.join(@root, source) })
     output = File.join(@directory, name)
     @runner.run([compiler, '-std=c17', '-D_DARWIN_C_SOURCE', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror', '-pedantic',
                  '-O1', '-g', *sanitizers, '-pthread', *Erx::Generated.include_flags(root: @root),
                  '-I', File.join(@root, 'include'), '-I', @root,
                  '-I', Erx::Generated.path('kernel/generated', root: @root), '-I', File.join(@root, 'kernel/core'),
-                 *HOSTED_CORES.map { |source| File.join(@root, source) },
+                 *cores,
                  File.join(@root, CORE), File.join(@root, HOSTED),
                  Erx::Generated.path('liberx/backend/hosted/generated/calls.c', root: @root),
                  File.join(@root, 'test/fixtures/log_hosted_probe.c'), '-o', output],

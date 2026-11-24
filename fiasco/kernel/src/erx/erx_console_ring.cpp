@@ -14,8 +14,6 @@ INTERFACE:
 #include "initcalls.h"
 #include "types.h"
 
-class Utcb;
-
 // The console the multiplexer holds in the UART console's place, with the
 // UART console's attributes and input.
 class Erx_ring_console : public Console
@@ -26,6 +24,13 @@ private:
 
 class Erx_console_ring
 {
+public:
+  // What a Vlog operation number names: the ring console's take or close,
+  // or another operation, not the ring console's.
+  enum class Op { Other, Take, Close };
+
+  // The words of a take's reply, which Vlog copies into its message words.
+  enum { Reply_words = 63 };
 };
 
 IMPLEMENTATION:
@@ -33,10 +38,13 @@ IMPLEMENTATION:
 #include <libc_backend.h>
 #include "erx/core/console_ring.h"
 #include "global_data.h"
-#include "l4_types.h"
+#include "vlog.h"
 
-static_assert(Utcb::Max_words == ERX_CONSOLE_RING_REPLY_WORDS,
+static_assert(Erx_console_ring::Reply_words == ERX_CONSOLE_RING_REPLY_WORDS,
               "a take's reply is every message word");
+static_assert(ERX_CONSOLE_RING_OP_TAKE > Mword(Vlog::Op::Get_attr)
+              && ERX_CONSOLE_RING_OP_CLOSE > Mword(Vlog::Op::Get_attr),
+              "the ring console's operations follow Fiasco's own");
 static_assert(sizeof(Mword) == sizeof(uint64_t),
               "a reply word is a message word");
 
@@ -109,10 +117,27 @@ Erx_console_ring::wrap(Console *uart)
   return _rcon;
 }
 
-// Vlog operation 4: the reply's words in u, and how many there are.
+// The operation numbers are the core's alone, so Vlog names none.
+PUBLIC static
+Erx_console_ring::Op
+Erx_console_ring::op(Mword number)
+{
+  switch (number)
+    {
+    case ERX_CONSOLE_RING_OP_TAKE:
+      return Op::Take;
+    case ERX_CONSOLE_RING_OP_CLOSE:
+      return Op::Close;
+    default:
+      return Op::Other;
+    }
+}
+
+// The take: the reply's words into words, which the caller owns, and how
+// many there are.
 PUBLIC static
 unsigned
-Erx_console_ring::take(Utcb *u)
+Erx_console_ring::take(Mword (&words)[Reply_words])
 {
   erx_console_reply_words_t reply;
 
@@ -121,11 +146,11 @@ Erx_console_ring::take(Utcb *u)
     erx_console_ring_take(&_ring, &reply);
   }
   for (unsigned at = 0; at < reply.count; at++)
-    u->values[at] = reply.words[at];
+    words[at] = reply.words[at];
   return reply.count;
 }
 
-// Vlog operation 5, and the head of every stop's report: the first close
+// The close, and the head of every stop's report: the first close
 // writes the ring out to the UART, under the lock, before anything else
 // the kernel prints.
 PUBLIC static

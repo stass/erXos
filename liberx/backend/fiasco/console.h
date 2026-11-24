@@ -20,9 +20,9 @@ void erx_fiasco_console_write(const char *, size_t);
 
 /*
  * The kernel's ring console (docs/design-fiasco.md, "The kernel's lines"). The take,
- * Vlog's operation 4, moves the kernel's lines from the UART to the ring and copies the
+ * Vlog's operation ERX_CONSOLE_RING_OP_TAKE, moves the kernel's lines from the UART to the ring and copies the
  * reply's words out of the message registers, which a tag's word count bounds at
- * ERX_CONSOLE_RING_REPLY_WORDS; it returns false when the kernel refuses the call. The close, operation 5,
+ * ERX_CONSOLE_RING_REPLY_WORDS; it returns false when the kernel refuses the call. The close, ERX_CONSOLE_RING_OP_CLOSE,
  * writes the ring out to the UART and sends every later line there.
  */
 bool erx_fiasco_console_take(erx_console_reply_words_t *);

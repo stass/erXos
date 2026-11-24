@@ -1,5 +1,5 @@
-// Modified by erXos: operations 4 and 5 are the ring console's take and close
-// (docs/design-fiasco.md, "The kernel's lines").
+// Modified by erXos: the ring console's take and close, whose operation numbers
+// Erx_console_ring::op decides (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
 
 #include "icu_helper.h"
@@ -36,8 +36,6 @@ public:
     Read     = 1,
     Set_attr = 2,
     Get_attr = 3,
-    Erx_take  = 4, ///< erXos: ERX_CONSOLE_RING_OP_TAKE, the ring console's take
-    Erx_close = 5, ///< erXos: ERX_CONSOLE_RING_OP_CLOSE, the ring console's close
   };
 
 private:
@@ -58,6 +56,9 @@ IMPLEMENTATION:
 #include "irq.h"
 #include "irq_controller.h"
 #include "global_data.h"
+
+static_assert(Erx_console_ring::Reply_words <= Utcb::Max_words,
+              "a take's reply fits the message words");
 
 JDB_DEFINE_TYPENAME(Vlog, "Vlog");
 
@@ -211,7 +212,9 @@ Vlog::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights, Syscall_frame *f,
   if (!Ko::check_basics(&tag, L4_msg_tag::Label_log))
     return tag;
 
-  switch (Op{r_msg->values[0] & 0xFFFF})
+  Mword const op = r_msg->values[0] & 0xFFFF;
+
+  switch (Op{op})
     {
     case Op::Write:
       log_string(r_msg);
@@ -222,21 +225,37 @@ Vlog::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights, Syscall_frame *f,
       return get_attr(rights, f, s_msg);
     case Op::Read:
       return get_input(rights, f, s_msg);
-    // Both need the right Read needs, so a reduced copy can do neither.
-    case Op::Erx_take:
-      if (!have_receive(s_msg))
-        return commit_result(0);
-      if (!(rights & L4_fpage::Rights::CW()))
-        return commit_result(-L4_err::EPerm);
-      return commit_result(0, Erx_console_ring::take(s_msg));
-    case Op::Erx_close:
+    default:
+      break;
+    }
+
+  // erXos: the ring console's take and close, whose numbers the glue
+  // decides. Both need the right Read needs, so a reduced copy can do
+  // neither.
+  switch (Erx_console_ring::op(op))
+    {
+    case Erx_console_ring::Op::Take:
+      {
+        if (!have_receive(s_msg))
+          return commit_result(0);
+        if (!(rights & L4_fpage::Rights::CW()))
+          return commit_result(-L4_err::EPerm);
+        // The glue writes only this kernel copy, never the UTCB.
+        Mword reply[Erx_console_ring::Reply_words];
+        unsigned const count = Erx_console_ring::take(reply);
+        for (unsigned at = 0; at < count; at++)
+          s_msg->values[at] = reply[at];
+        return commit_result(0, count);
+      }
+    case Erx_console_ring::Op::Close:
       if (!(rights & L4_fpage::Rights::CW()))
         return commit_result(-L4_err::EPerm);
       Erx_console_ring::close();
       return commit_result(0);
-    default:
-      return commit_result(-L4_err::ENosys);
+    case Erx_console_ring::Op::Other:
+      break;
     }
+  return commit_result(-L4_err::ENosys);
 }
 
 

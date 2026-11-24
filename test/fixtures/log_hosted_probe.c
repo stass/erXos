@@ -8,6 +8,8 @@
  * calling thread's UTCB, then the generated call. Each argument is one step:
  *
  *   line:HEX        log HEX, printing the status on standard output
+ *   kernel:HEX      log HEX as a kernel line (erx_debug_log_kernel_line),
+ *                   printing the status
  *   length:N        log N bytes of whatever the UTCB holds
  *   flood:THREADS:LINES  LINES full lines on each of THREADS threads, each
  *                   printing its statuses' sum at the end
@@ -27,6 +29,7 @@
 #include <time.h>
 
 #include "erx/abi.h"
+#include "erx/core/debug_log.h"
 #include "erx/log.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/hosted/log.h"
@@ -38,7 +41,9 @@ int main(int, char **);
 
 static void *flood_thread(void *);
 static void flood(const char *);
+static size_t from_hex(const char *, uint8_t *, size_t);
 static void log_bytes(const char *);
+static void log_kernel_line(const char *);
 static erx_status_t put_and_log(const uint8_t *, size_t);
 static void read_log(const char *, const char *);
 
@@ -65,22 +70,43 @@ put_and_log(const uint8_t *bytes, size_t length)
 	return (erx_debug_log(len));
 }
 
-static void
-log_bytes(const char *hex)
+/* The bytes HEX spells, at most capacity of them; how many there are. */
+static size_t
+from_hex(const char *hex, uint8_t *bytes, size_t capacity)
 {
-	uint8_t bytes[ERX_UTCB_BYTES_MAX];
 	size_t length;
 	unsigned int byte;
 
 	length = strlen(hex) / 2;
-	if (length > sizeof(bytes))
+	if (length > capacity)
 		exit(2);
 	for (size_t index = 0; index < length; index++) {
 		if (sscanf(hex + index * 2, "%2x", &byte) != 1)
 			exit(2);
 		bytes[index] = (uint8_t)byte;
 	}
+	return (length);
+}
+
+static void
+log_bytes(const char *hex)
+{
+	uint8_t bytes[ERX_UTCB_BYTES_MAX];
+	size_t length;
+
+	length = from_hex(hex, bytes, sizeof(bytes));
 	printf("status %d\n", (int)put_and_log(bytes, length));
+}
+
+/* What the root logs for each line of the kernel's ring. */
+static void
+log_kernel_line(const char *hex)
+{
+	uint8_t bytes[ERX_UTCB_BYTES_MAX];
+	size_t length;
+
+	length = from_hex(hex, bytes, sizeof(bytes));
+	printf("status %d\n", (int)erx_debug_log_kernel_line(bytes, length));
 }
 
 static void *
@@ -161,6 +187,8 @@ main(int argc, char **argv)
 	for (int index = 1; index < argc; index++) {
 		if (strncmp(argv[index], "line:", 5) == 0) {
 			log_bytes(argv[index] + 5);
+		} else if (strncmp(argv[index], "kernel:", 7) == 0) {
+			log_kernel_line(argv[index] + 7);
 		} else if (strncmp(argv[index], "length:", 7) == 0) {
 			len.raw = (uint32_t)strtoul(argv[index] + 7, NULL, 10);
 			printf("status %d\n", (int)erx_debug_log(len));
