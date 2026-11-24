@@ -50,7 +50,6 @@ module Erx
     MIN_IMAGE = PiMedium::BOOT_PLACE + (65 * MIB)
     # Room beside the files' clusters for directories and long names.
     SLACK = 4 * MIB
-    IMAGE_DEADLINE = 300
     # An entry directory's name in its queue: its number, from 1.
     NUMBER = /\A[1-9][0-9]{0,8}\z/
 
@@ -70,11 +69,11 @@ module Erx
 
       Dir.mkdir(directory, 0o755)
       staged = File.join(directory, 'files')
-      contents = stage(files: files, names: names, name: name, to: staged)
+      listed = stage(files: files, names: names, name: name, to: staged)
       image = File.join(directory, IMAGE)
-      runner.run([fsimg, 'cW', '-f', image, *PiMedium.fat_format(bytes: image_bytes(staged, contents.keys), label: LABEL),
-                  *PiMedium::PLACE, '-C', staged, '.'], name: 'fsimg-netboot-entry', deadline: IMAGE_DEADLINE)
-      check(image, staged: staged, names: contents.keys)
+      runner.run([fsimg, 'cW', '-f', image, *PiMedium.fat_format(bytes: image_bytes(staged, listed), label: LABEL),
+                  *PiMedium::PLACE, '-C', staged, '.'], name: 'fsimg-netboot-entry', deadline: PiMedium::VOLUME_DEADLINE)
+      check(image, staged: staged, names: listed)
       File.write(File.join(directory, SIGNATURE), signature(image, key), perm: 0o644)
       FileUtils.rm_rf(staged)
     end
@@ -95,7 +94,8 @@ module Erx
       end
       raise Error, "netboot: the signing key #{path} is larger than a key" if text.bytesize > MAX_KEY
 
-      key = OpenSSL::PKey::RSA.new(text)
+      # An empty passphrase, so an encrypted key is refused rather than prompted for.
+      key = OpenSSL::PKey::RSA.new(text, '')
       raise Error, "netboot: the signing key #{path} is no RSA-#{KEY_BITS} private key" unless
         key.private? && key.n.num_bits == KEY_BITS
 
@@ -112,15 +112,19 @@ module Erx
     def entries(queue) = Dir.children(queue).grep(NUMBER).map(&:to_i).max || 0
 
     # The pair of entry directory directory, both files opened without following a link
-    # and only when the directory and both are regular, or nil when it lacks either.
+    # and only when the directory and both are regular, or nil when it lacks either or
+    # either cannot be read, which the boot server answers alike.
     def open_pair(directory)
       return nil unless File.lstat(directory).directory?
 
       signature = open_regular(File.join(directory, SIGNATURE))
       return nil unless signature
 
-      bytes = signature.read(MAX_SIGNATURE + 1).to_s
-      signature.close
+      bytes = begin
+        signature.read(MAX_SIGNATURE + 1).to_s
+      ensure
+        signature.close
+      end
       return nil if bytes.bytesize > MAX_SIGNATURE
 
       image = open_regular(File.join(directory, IMAGE))
@@ -140,23 +144,31 @@ module Erx
       nil
     end
 
-    # Links each of names from files into to, but cmdline.txt, which is written afresh as
-    # the set's line and the boot name word (docs/design-bench.md, "The boot name"), so
-    # the set's copy is never changed. Returns each staged name to its bytes' SHA-256.
+    # Links each of names from files into to, but cmdline.txt, which is written afresh
+    # (command_line), so the set's copy is never changed. Returns the staged names.
     def stage(files:, names:, name:, to:)
-      cmdline = File.join(files, BootPartition::CMDLINE)
-      line = names.include?(BootPartition::CMDLINE) ? "#{BoundedFile.read(cmdline, maximum: MAX_CMDLINE)} " : ''
-      (names - [BootPartition::CMDLINE]).to_h do |file|
+      (names - [BootPartition::CMDLINE]).each do |file|
         target = File.join(to, file)
         FileUtils.mkdir_p(File.dirname(target))
         File.link(File.join(files, file), target)
-        [file, Digest::SHA256.file(target).hexdigest]
-      end.merge(BootPartition::CMDLINE => write_line(File.join(to, BootPartition::CMDLINE), "#{line}#{WORD}#{name}"))
+      end
+      FileUtils.mkdir_p(to)
+      File.write(File.join(to, BootPartition::CMDLINE), command_line(files, names, name), perm: 0o644)
+      (names | [BootPartition::CMDLINE])
     end
 
-    def write_line(path, line)
-      File.write(path, line, perm: 0o644)
-      Digest::SHA256.hexdigest(line)
+    # The entry's kernel command line: the set's line followed by the boot name word, or
+    # that word alone when the set has none, with no newline (docs/design-bench.md, "The
+    # boot name"). A set's line that holds a line break is refused, since the word after
+    # it would not be on the line the firmware passes.
+    def command_line(files, names, name)
+      word = "#{WORD}#{name}"
+      return word unless names.include?(BootPartition::CMDLINE)
+
+      line = BoundedFile.read(File.join(files, BootPartition::CMDLINE), maximum: MAX_CMDLINE)
+      raise Error, "netboot: the set's #{BootPartition::CMDLINE} holds a line break" if line.match?(/[\r\n]/)
+
+      "#{line} #{word}"
     end
 
     # The image's size: the slot's boot start, each file in whole 1 KiB clusters and the
@@ -198,6 +210,6 @@ module Erx
       "#{digest.hexdigest}\nts: #{Time.now.to_i}\nrsa2048: #{key.sign_raw('SHA256', digest.digest).unpack1('H*')}\n"
     end
 
-    private_class_method :open_regular, :stage, :write_line, :image_bytes, :check, :signature
+    private_class_method :open_regular, :stage, :command_line, :image_bytes, :check, :signature
   end
 end

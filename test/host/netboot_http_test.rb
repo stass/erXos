@@ -73,6 +73,14 @@ class NetbootHttpTest < Minitest::Test
     assert_equal Digest::SHA256.hexdigest(files('b').fetch('kernel8.img')), second.kernel
   end
 
+  # A set's command line with a line break would put the boot name on a line of its own.
+  def test_a_set_command_line_with_a_line_break_is_refused
+    error = assert_raises(Erx::Error) do
+      Erx::Netboot.prepare(root: @root, sets: [set('n', cmdline: "erx.hostlink=1\n")], names: NAMES.take(1), key: @key, **tools)
+    end
+    assert_match(/cmdline.txt holds a line break/, error.message)
+  end
+
   def test_the_key_is_taken_only_as_the_users_own_private_file
     File.chmod(0o640, @key)
     assert_refused(/grants permission to group or others/)

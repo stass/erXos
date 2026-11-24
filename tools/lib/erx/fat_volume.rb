@@ -115,14 +115,15 @@ module Erx
       end
     end
     # The bytes of entry, a file of volume's root directory (root_entries), read along its
-    # chain in the first FAT. The chain is walked no further than the file's length needs,
-    # and must end there, so a looping, short or overlong chain is refused at its first
-    # wrong link.
+    # chain in the first FAT. A file longer than the volume's clusters is refused before
+    # any is read; the chain is walked no further than the file's length needs and must
+    # end there, so a short, overlong or looping chain is refused within that walk.
     def contents(volume, entry)
       layout = volume.layout
       name = entry.name.dump
       volume.refuse("#{name} is not a file") unless entry.attributes.nobits?(DIRECTORY | VOLUME_ID)
       count = (entry.size + layout.cluster_bytes - 1) / layout.cluster_bytes
+      volume.refuse("#{name} is longer than the volume") if count > layout.cluster_count
       cluster = entry.first_cluster
       bytes = Array.new(count) do |index|
         volume.refuse("#{name}'s chain leaves the volume at its cluster #{index}") unless layout.cluster?(cluster)

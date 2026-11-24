@@ -107,18 +107,20 @@ module Erx
     # The effects around Decision for queue (LinkQueue), answering at /prefix/; log takes
     # one line per request.
     class Server
-      # A request's head must come whole within this many seconds, and each part of an
-      # answer must be taken within STALL_SECONDS, so a stalled client holds the server for
-      # a bounded time.
+      # A request's head must come whole within HEAD_SECONDS, and an answer be taken whole
+      # within ANSWER_SECONDS, a 180 MB image at 0.6 MB/s, so a stalled client holds the
+      # server for a bounded time.
       HEAD_SECONDS = 10
-      STALL_SECONDS = 30
+      ANSWER_SECONDS = 300
+      # Internet Sharing's address on the Mac's side of the cable.
+      BIND = '192.168.2.1'
       READ_MAX = 16_384
       CHUNK = 1 << 20
       # The EEPROM's HTTP_PATH: one path segment.
       PREFIX = /\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z/
       HEADERS = [%w[Content-Type application/octet-stream], %w[Cache-Control no-store]].freeze
 
-      # An answer not taken within STALL_SECONDS.
+      # An answer not taken within ANSWER_SECONDS.
       class Stalled < IOError; end
 
       attr_reader :state
@@ -135,7 +137,11 @@ module Erx
       # Answers listener's connections one at a time until it is closed.
       def listen(listener)
         loop do
-          socket = listener.accept
+          socket = begin
+            listener.accept
+          rescue Errno::ECONNABORTED
+            next
+          end
           begin
             connection(socket)
           ensure
@@ -152,7 +158,7 @@ module Erx
         case read_request(socket)
         in nil then nil
         in Web::Http::Refusal => refusal
-          write_all(socket, Web::Http.encode(Web::Http.refusal(refusal)))
+          Writer.new(socket).write(Web::Http.encode(Web::Http.refusal(refusal)))
           @log.call("#{client} refused: #{refusal.reason}")
         in Web::Http::Request => request then answer(request, client: client, out: Writer.new(socket))
         end
@@ -173,21 +179,27 @@ module Erx
       private
 
       def refuse(out, refuse, request:, client:)
-        out.write(Web::Http.head(refuse.status, [], length: 0))
-        note(request, client, refuse.status)
+        out.write(Web::Http.head(refuse.status, refuse.status == 405 ? [%w[Allow GET,\ HEAD]] : [], length: 0))
+        note(request, client: client, status: refuse.status)
       end
 
       def begin_download(out, start, request:, client:)
         pair = @queue.open(start.target, start.entry)
-        before = @state.download
-        @state = Decision.begun(@state, start, client: client, pair: pair)
-        close(before) unless before.equal?(@state.download)
-        close_pair(pair) unless pair.nil? || @state.download&.pair.equal?(pair)
+        advance(Decision.begun(@state, start, client: client, pair: pair), opened: pair)
         return refuse(out, Decision::Refuse.new(status: 404), request: request, client: client) unless pair
 
         out.write(Web::Http.head(200, HEADERS, length: pair.signature.bytesize))
         out.write(pair.signature) if start.body
-        note(request, client, 200, "entry #{start.entry}")
+        note(request, client: client, status: 200, detail: "entry #{start.entry}")
+      end
+
+      # Moves to state, closing every pair that it does not hold: the previous download's,
+      # once that download ends or is replaced, and opened, an entry just opened, unless
+      # state's download took it. So each opened pair has one owner, the state, or none.
+      def advance(state, opened: nil)
+        held = state.download&.pair
+        [@state.download&.pair, opened].compact.reject { |pair| pair.equal?(held) }.each { |pair| pair.image.close }
+        @state = state
       end
 
       def send_image(out, send, request:, client:)
@@ -199,9 +211,8 @@ module Erx
           copy(image, out, size) if send.body
           whole = true
         ensure
-          @state = Decision.sent(@state, send, whole: whole)
-          close(send.download) unless @state.download.equal?(send.download)
-          note(request, client, 200, "entry #{send.download.entry}#{whole ? '' : ', cut'}")
+          advance(Decision.sent(@state, send, whole: whole))
+          note(request, client: client, status: 200, detail: "entry #{send.download.entry}#{whole ? '' : ', cut'}")
         end
       end
 
@@ -215,10 +226,7 @@ module Erx
         end
       end
 
-      def close(download) = download && close_pair(download.pair)
-      def close_pair(pair) = pair.image.close
-
-      def note(request, client, status, detail = nil)
+      def note(request, client:, status:, detail: nil)
         @log.call([client, LineEscape.escape(request.method), LineEscape.escape(request.path), status, detail].compact.join(' '))
       end
 
@@ -241,14 +249,14 @@ module Erx
         end
       end
 
-      def write_all(socket, bytes) = Writer.new(socket).write(bytes)
     end
 
-    # A connection's writer: each write waits at most Server::STALL_SECONDS for the socket
-    # to take more, then raises Server::Stalled.
+    # A connection's writer: everything written must be taken within
+    # Server::ANSWER_SECONDS of the writer's making, or Server::Stalled is raised.
     class Writer
       def initialize(socket)
         @socket = socket
+        @deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + Server::ANSWER_SECONDS
       end
 
       def write(bytes)
@@ -256,7 +264,8 @@ module Erx
         until rest.empty?
           written = @socket.write_nonblock(rest, exception: false)
           if written == :wait_writable
-            raise Server::Stalled, 'the client took nothing' unless @socket.wait_writable(Server::STALL_SECONDS)
+            left = @deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            raise Server::Stalled, 'the client took too long' unless left.positive? && @socket.wait_writable(left)
           else
             rest = rest.byteslice(written..)
           end

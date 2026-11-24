@@ -129,6 +129,10 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   entries placed, a dropout over one entry's end and the next one's start, a log cut inside an entry, seeded with
   placement by the nearest naming line before and with the cut boot taken as timed out. Needs the boot set's item
   first. One implementer.
+* [Low] tooling, the HTTP form's read-back (`NetbootEntry.check`, `FatVolume`): `FatVolume` reads no long name
+  and no subdirectory, so an entry's `boot.img` is checked by a reader independent of fsimg only for `kernel8.img`'s
+  placement and its root files with short names; the device tree, `overlays/` and other long-named files are checked
+  only by the test's extraction with fsimg itself. A long-name and subdirectory walk in `FatVolume` closes it.
 * [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, [design-bench.md](design-bench.md#the-walk)):
   the pure walk over the queue's names, tested exhaustively, seeded with the end deadline restarted at each naming
   line and with the return taken from any banner; the console reader with its byte and line limits; the ssh

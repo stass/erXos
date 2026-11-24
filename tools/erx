@@ -756,7 +756,7 @@ module Erx
     def self.netboot_serve(arguments)
       require_relative 'lib/erx/netboot_server'
       http = Netboot::DEFAULT_HTTP_ROOT
-      bind = '192.168.2.1'
+      bind = NetbootServer::Server::BIND
       port = 8080
       prefix = 'erxos'
       OptionParser.new do |flags|
@@ -773,7 +773,7 @@ module Erx
         TCPServer.new(bind, port)
       rescue SystemCallError => e
         raise Error, "netboot serve: cannot listen on #{bind}:#{port}: #{e.class.name.split('::').last} " \
-                     '(with Internet Sharing on, the bridge on the cable holds 192.168.2.1)'
+                     "(with Internet Sharing on, the bridge on the cable holds #{NetbootServer::Server::BIND})"
       end
       Terminal.puts("netboot serve: answering http://#{bind}:#{port}/#{prefix}/boot.sig and boot.img from the queue #{link} names")
       trap('INT') { exit(0) }
