@@ -15,7 +15,10 @@ stamped on the client's side, so a cell needs no calibration across CPUs.
 run/1 runs in a domain the echo facet is granted to and answers the boot's lines,
 the CLOCK line first: the host prints them and judges them
 (Erx::BenchMeasurement). A reply that is not its request fails its cell, as does
-a call with no reply or a domain that holds no echo facet.
+a call with no reply, a domain that holds no echo facet, or any exception the
+cell raises, so run/1 always answers and the host always sees how each cell
+ended. A calibration that raises leaves no line at all, so the host reports
+every cell as not run.
 """.
 -export([run/1]).
 
@@ -31,20 +34,26 @@ the CLOCK line, then local-rtt's BENCH line, then xdomain-pingpong's.
 """.
 -spec run(#{warmup := non_neg_integer(), samples := pos_integer(), bytes := non_neg_integer()}) -> [binary()].
 run(#{warmup := Warmup, samples := Samples, bytes := Bytes}) ->
-    Clock = erx_bench_hist:calibrate(),
-    Request = {echo, binary:copy(<<16#a5>>, Bytes)},
-    Local = spawn_link(fun echo/0),
-    Cells = [cell(<<"local-rtt">>, {ok, Local}, Request, Warmup, Samples, Clock),
-             cell(<<"xdomain-pingpong">>, facet(?FACET_POLLS), Request, Warmup, Samples, Clock)],
-    unlink(Local),
+    try erx_bench_hist:calibrate() of
+        Clock -> lines(Warmup, Samples, {echo, binary:copy(<<16#a5>>, Bytes)}, Clock)
+    catch
+        _:_ -> []
+    end.
+
+lines(Warmup, Samples, Request, Clock) ->
+    Local = spawn(fun echo/0),
+    Cells = [cell(<<"local-rtt">>, fun() -> {ok, Local} end, Request, Warmup, Samples, Clock),
+             cell(<<"xdomain-pingpong">>, fun() -> facet(?FACET_POLLS) end, Request, Warmup, Samples,
+                  Clock)],
     exit(Local, kill),
     [erx_bench_hist:clock_line(Clock) | [erx_bench_hist:cell_line(Cell) || Cell <- Cells]].
 
-%% local-rtt's server: it answers {echo, Term} as erx_echo_test's facet does.
+%% local-rtt's server: it answers {echo, Term} with {echo, Term}, as
+%% erx_echo_test's facet does, though without the erx_facet behaviour's loop.
 echo() ->
     receive
         {'$gen_call', From, {echo, Term}} ->
-            gen:reply(From, {echo, Term}),
+            gen_server:reply(From, {echo, Term}),
             echo()
     end.
 
@@ -57,22 +66,34 @@ facet(Polls) ->
         undefined -> timer:sleep(?FACET_POLL_MS), facet(Polls - 1)
     end.
 
-%% One cell's fields: its round trips timed after the warm-up, in the batch the
-%% warm-up's median asks for, or its failure with the samples taken before it.
-cell(Operation, {error, Reason}, Request, _Warmup, _Samples, Clock) ->
+%% One cell's fields: its round trips to the server Find answers, timed after the
+%% warm-up in the batch the warm-up's median asks for, or its failure with the
+%% samples taken before it.
+cell(Operation, Find, Request, Warmup, Samples, Clock) ->
+    try timed(Operation, Find(), Request, Warmup, Samples, Clock)
+    catch
+        _:_ -> summary(Operation, Request, 1, {failed, <<"the cell raised an exception">>}, [], Clock)
+    end.
+
+timed(Operation, {error, Reason}, Request, _Warmup, _Samples, Clock) ->
     summary(Operation, Request, 1, {failed, Reason}, [], Clock);
-cell(Operation, {ok, Server}, Request, Warmup, Samples, Clock) ->
+timed(Operation, {ok, Server}, Request, Warmup, Samples, Clock) ->
     case trips(Server, Request, 1, Warmup, []) of
+        {ok, []} ->
+            measure(Operation, Server, Request, 1, Samples, Clock);
         {ok, Warm} ->
-            Batch = erx_bench_hist:batch(median(Warm)),
-            {Outcome, Taken} = case trips(Server, Request, Batch, Samples, []) of
-                                   {ok, Timed} -> {measured, Timed};
-                                   {failed, Why, Timed} -> {{failed, Why}, Timed}
-                               end,
-            summary(Operation, Request, Batch, Outcome, Taken, Clock);
+            Batch = erx_bench_hist:batch(median(Warm), maps:get(increment, Clock)),
+            measure(Operation, Server, Request, Batch, Samples, Clock);
         {failed, Why, _} ->
             summary(Operation, Request, 1, {failed, Why}, [], Clock)
     end.
+
+measure(Operation, Server, Request, Batch, Samples, Clock) ->
+    {Outcome, Taken} = case trips(Server, Request, Batch, Samples, []) of
+                           {ok, Timed} -> {measured, Timed};
+                           {failed, Why, Timed} -> {{failed, Why}, Timed}
+                       end,
+    summary(Operation, Request, Batch, Outcome, Taken, Clock).
 
 %% Count samples of Batch round trips each, each sample the batch's mean in ticks,
 %% in the order taken; the first wrong or missing reply ends them.
@@ -80,19 +101,20 @@ trips(_Server, _Request, _Batch, 0, Taken) ->
     {ok, lists:reverse(Taken)};
 trips(Server, Request, Batch, Count, Taken) ->
     Start = erlang:monotonic_time(),
-    case batch(Server, Request, Batch) of
+    case round_trips(Server, Request, Batch) of
         ok -> trips(Server, Request, Batch, Count - 1, [(erlang:monotonic_time() - Start) div Batch | Taken]);
         {failed, Why} -> {failed, Why, lists:reverse(Taken)}
     end.
 
-batch(_Server, _Request, 0) ->
+%% Left round trips, each answered by its request.
+round_trips(_Server, _Request, 0) ->
     ok;
-batch(Server, Request, Left) ->
+round_trips(Server, Request, Left) ->
     try gen_server:call(Server, Request, ?CALL_MS) of
-        Request -> batch(Server, Request, Left - 1);
+        Request -> round_trips(Server, Request, Left - 1);
         _ -> {failed, <<"a reply was not its request">>}
     catch
-        exit:{timeout, _} -> {failed, <<"a request had no reply within 5 s">>};
+        exit:{timeout, _} -> {failed, <<"a request had no reply in time">>};
         exit:_ -> {failed, <<"the server ended during a request">>}
     end.
 
@@ -104,9 +126,10 @@ summary(Operation, {echo, Binary} = Request, Batch, Outcome, Taken, Clock) ->
                            measured -> {<<"measured">>, #{}};
                            {failed, Why} -> {<<"failed">>, #{reason => Why}}
                        end,
+    Parameters = #{bytes => byte_size(Binary), encoded => byte_size(term_to_binary(Request))},
     Conditions = #{load => <<"idle">>, placement => <<"runtime">>, clock => maps:get(clock, Clock),
-                   batch => Batch,
-                   parameters => #{bytes => byte_size(Binary), encoded => byte_size(term_to_binary(Request))}},
-    erx_bench_hist:cell(Reason#{benchmark => ?BENCHMARK, operation => Operation, conditions => Conditions,
-                                frequency_hz => maps:get(frequency_hz, Clock), status => Status,
-                                counts => #{lost => 0, early => 0, missed => 0}}, Taken).
+                   batch => Batch, parameters => Parameters},
+    Fields = #{benchmark => ?BENCHMARK, operation => Operation, conditions => Conditions,
+               frequency_hz => maps:get(frequency_hz, Clock), status => Status,
+               counts => #{lost => 0, early => 0, missed => 0}},
+    erx_bench_hist:cell(maps:merge(Fields, Reason), Taken).

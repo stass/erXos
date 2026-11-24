@@ -36,8 +36,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `tools/lib/erx/native_bench.rb` exist: its root times `park-deadline`, the two wake handshakes and
   `trigger-take` on two executors of its group and prints their `BENCH` lines and the `CLOCK` line, and its
   build with `ERX_BENCH_SEED_LOST_WAKE` skips one wake; the `bench` suite boots both, records the first and
-  fails its cell unless the second loses its wake. Still to build: `bench/erx_wake_bench.erl` with
-  `bench/erx_bench_hist.erl` for `erlang-timer` in the `xdomain` bench image; and the load cells, whose
+  fails its cell unless the second loses its wake. Still to build: `bench/erx_wake_bench.erl` for
+  `erlang-timer` in the `xdomain` bench image, which waits on two questions for design-bench.md: how a periodic
+  cell with no phase sweep is reported, since `BenchMeasurement` requires every periodic line to carry sixteen
+  phases and their excess, and how one boot reports cells of two benchmarks, since `BenchMeasurement.boot`
+  judges one benchmark and its one `CLOCK` line per boot; and the load cells, whose
   spinners are `native_task`'s program in new modes, which the landing matrix does not run yet.
 * [Medium] benchmarks, the landing run's record (`tools/lib/erx/native_bench.rb` `Landing`,
   `tools/lib/erx/bench_record.rb`): a `not_run` or `rejected` cell the host makes carries zero counts and batch 1,
@@ -62,6 +65,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   message, which embeds `JsonInput`'s reason and path names from the history destination, has no character-set
   check of its own before it reaches the terminal; give the refusal messages the console line escaper or a test
   that every refusal's text is plain.
+* [Low] benchmarks, the native bench guest's setup failure (`tools/lib/erx/native_bench.rb` `NativeBench.judge`):
+  it raises with a guest serial line quoted through `inspect`, not the console line escaper, and its pattern is not
+  bounded in length; escape the quoted text and bound the match.
 * [Low] benchmarks, the `BENCH` line fuzz target (`tools/fuzz/bench_line.rb`): its seeded fault, the
   validator's check that a histogram holds the line's sample count removed, is run by hand and kept nowhere;
   make it a test that runs a fixed number of inputs from a fixed seed against the faulted validator, so the
@@ -87,9 +93,16 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,
   touch, protect, decommit, release, map and child operations from the root and from a test task.
 * [Medium] benchmarks, `xdomain` ([design-bench.md](design-bench.md#5-xdomain-one-message-one-domain-to-another)):
-  `bench/erx_xdomain_bench.erl`, a test image from the `system_domain` suite's with the echo facet granted to the
-  client's domain, `local-rtt` and `xdomain-pingpong`. `xdomain-throughput` and `xdomain-stall` wait for their own
-  design with G5's runs.
+  `local-rtt` and `xdomain-pingpong` run in the xdomain bench image (`tools/lib/erx/xdomain_bench.rb`). Open: a QEMU
+  failure of that boot (a load or run checkpoint that times out) raises out of `BenchSuite.run` and loses the native
+  boot's verdict, where its unreported cells should be `timed_out` and the record written from the serial log; the
+  measured map both landing runners pass `BenchLanding` is an untyped hash (`measured.slice` drops a misspelled key);
+  `LANDING_PROFILES`, `profiles` and `guest_lines` are shared bench facts still owned by `NativeBench`; the
+  Erlang guest's 1 GHz view of the counter, its batch rule in steps of the calibration's increment and the
+  `runtime` placement are not yet stated in design-bench.md; a missing echo facet reports `failed` though it is a
+  setup failure; the `BENCH` line fuzz target has no Erlang-shaped seeds (1 GHz clock, `unknown` cycles, no pairs, a
+  failed cell with samples); `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
+  `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
 * [Medium] benchmarks, the Raspberry Pi 4 and the other systems
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): a raspi4b build of the native
   bench image; `tools/erx bench import` for console logs and the analyser's captures; `bench/peer/erx_peer_bench.c`;

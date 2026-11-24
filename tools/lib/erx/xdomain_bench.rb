@@ -31,6 +31,7 @@ module Erx
     # How long the shell waits for each module's load and for the cells' lines.
     LOAD_SECONDS = 120
     RUN_SECONDS = 600
+    ERPC_SECONDS = 540
     DONE = 'erx: bench: done'
 
     module_function
@@ -49,16 +50,19 @@ module Erx
                                   profiles: NativeBench.profiles(benchmark), clock: 'counter', pairs: [])
     end
 
-    # The line that runs the cells in peer and prints its answer, a line each, then DONE.
+    # The line that runs the cells in peer and prints its answer, a line each, then DONE:
+    #   [io:put_chars([XbL,$\n])||XbL<-erpc:call(peer@erxos,erx_xdomain_bench,run,
+    #     [#{warmup=>1000,samples=>10000,bytes=>64}],540000)],io:format("erx: bench: done~n").
     # The fast profile's sizes and the request's size are asked's, so the guest's
-    # conditions are the declared ones.
+    # conditions are the declared ones. erpc's deadline ends before the checkpoint's, so
+    # a guest that never answers shows as erpc's timeout in the serial log.
     def run_line(asked)
       profile = asked.profiles.values.uniq.then { |found| found.one? ? found.first : raise(Error, 'xdomain cells mix profiles') }
       bytes = asked.cells.map { |cell| cell.parameters.fetch('bytes') }.uniq.then do |found|
         found.one? ? found.first : raise(Error, 'xdomain cells ask for different request sizes')
       end
       "[io:put_chars([XbL,$\\n])||XbL<-erpc:call(#{NODE},erx_xdomain_bench,run," \
-        "[\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}],#{RUN_SECONDS * 1000})]," \
+        "[\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}],#{ERPC_SECONDS * 1000})]," \
         "io:format(\"#{DONE}~n\").\r"
     end
 
@@ -82,12 +86,8 @@ module Erx
     def checkpoints(points, steps)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
-      answers = steps.each_with_index.map do |step, index|
-        following = steps[index + 1]&.line
-        { name: step.name, pattern: step.answer, seconds: step.seconds, **(following ? { type: following } : {}) }.freeze
-      end
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
-       ProductionImage::Run::ERLANG_SHELL.merge(type: steps.first.line).freeze, *answers].freeze
+       ProductionImage::Run::ERLANG_SHELL.merge(type: steps.first.line).freeze, *BenchGuest.answers(steps)].freeze
     end
 
     # One boot of the xdomain bench image: its serial log, seconds, the guest's lines, the
@@ -118,7 +118,7 @@ module Erx
         report = Qemu.new(root: @root, runner: @runner)
                      .run(platform: @machine.platform, accel: accel, cpus: cpus, image: built.single, memory_mib: memory_mib,
                           checkpoints: XdomainBench.checkpoints(points, XdomainBench.exchanges(beams.transform_values(&:bytes), asked)),
-                          directory: File.join(@root, 'build/qemu', "xdomain-bench-#{accel}-#{cpus}cpu-#{Process.pid}"))
+                          directory: File.join(@root, 'build/qemu', "xdomain-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"))
         serial = File.expand_path(report.fetch('serial_log'), @root)
         { serial: serial, seconds: report.fetch('elapsed_seconds'), lines: NativeBench.guest_lines(File.binread(serial)),
           image_sha256: report.fetch('image_sha256'), workloads: beams.transform_values(&:sha256), compiler: @compiler,

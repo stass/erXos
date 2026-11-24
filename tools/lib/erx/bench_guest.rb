@@ -124,16 +124,20 @@ module Erx
       end
       raise Error, "the boot transcript has no #{FIRST_LINE_AT} point to type at" unless
         boot.any? { |point| point.key?(:type) }
-      answers = steps.each_with_index.map do |step, index|
+      [*boot, ProductionImage::Run::SLOGAN,
+       ProductionImage::Run::RELEASE_SHELL.merge(seconds: BOOT_SECONDS).freeze,
+       ProductionImage::Run::ERLANG_SHELL.merge(seconds: LOAD_SECONDS, type: steps.first.line).freeze,
+       *answers(steps)].freeze
+    end
+
+    # A checkpoint for each exchange's answer, each typing the next exchange's line.
+    def answers(steps)
+      steps.each_with_index.map do |step, index|
         point = { name: step.name, pattern: step.answer, seconds: step.seconds }
         following = steps[index + 1]&.line
         point[:type] = following if following
         point.freeze
       end
-      [*boot, ProductionImage::Run::SLOGAN,
-       ProductionImage::Run::RELEASE_SHELL.merge(seconds: BOOT_SECONDS).freeze,
-       ProductionImage::Run::ERLANG_SHELL.merge(seconds: LOAD_SECONDS, type: steps.first.line).freeze,
-       *answers].freeze
     end
 
     # Boots the development image (built here unless one is given) under the plan's

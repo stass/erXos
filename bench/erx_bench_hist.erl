@@ -18,7 +18,7 @@ one validator; this module only builds them. A cell's samples are the list the
 caller timed, in the order it took them, so the summary is a pure function of
 that list.
 """.
--export([bucket/1, bounds/1, batch/1, cell/2, calibrate/0, clock_line/1, cell_line/1]).
+-export([bucket/1, bounds/1, batch/2, cell/2, calibrate/0, clock_line/1, cell_line/1]).
 
 %% Sub-buckets per octave, and the largest samples a line carries.
 -define(SUB, 64).
@@ -51,15 +51,19 @@ top_bit(0, Bit) -> Bit;
 top_bit(Rest, Bit) -> top_bit(Rest bsr 1, Bit + 1).
 
 -doc """
-The batch an operation is timed in from its warm-up median in ticks
-(docs/design-bench.md, "The one clock", short operations): 1 when the median spans
-100 ticks, and otherwise the smallest power of two of operations that does.
+The batch an operation is timed in from its warm-up median (docs/design-bench.md,
+"The one clock", short operations): 1 when the median spans 100 of the clock's
+steps, and otherwise the smallest power of two of operations that does. An Erlang
+guest's ticks are nanoseconds of a coarser counter, so a step is the calibration's
+increment, not one tick: the rule is the C guests', which count the counter's own
+ticks.
 """.
--spec batch(non_neg_integer()) -> pos_integer().
-batch(Median) when is_integer(Median), Median >= 0 -> batch(max(Median, 1), 1).
+-spec batch(non_neg_integer(), pos_integer()) -> pos_integer().
+batch(Median, Increment) when is_integer(Median), Median >= 0, is_integer(Increment), Increment > 0 ->
+    span(max(Median, 1), ?BATCH_SPAN * Increment, 1).
 
-batch(Median, Batch) when Median * Batch >= ?BATCH_SPAN -> Batch;
-batch(Median, Batch) -> batch(Median, Batch * 2).
+span(Median, Span, Batch) when Median * Batch >= Span -> Batch;
+span(Median, Span, Batch) -> span(Median, Span, Batch * 2).
 
 -doc """
 A cell's summary from the samples it took, in the order taken, as the fields a
@@ -71,8 +75,8 @@ given.
 """.
 -spec cell(map(), [non_neg_integer()]) -> map().
 cell(Conditions, Samples) ->
-    Counted = lists:foldl(fun(Value, Acc) -> maps:update_with(bucket(Value), fun(N) -> N + 1 end, 1, Acc) end,
-                          #{}, Samples),
+    Count = fun(Value, Counts) -> maps:update_with(bucket(Value), fun(N) -> N + 1 end, 1, Counts) end,
+    Counted = lists:foldl(Count, #{}, Samples),
     Histogram = [begin {Low, Last} = bounds(Index), [Low, Last, Count] end
                  || {Index, Count} <- lists:sort(maps:to_list(Counted))],
     Indexed = lists:zip(lists:seq(0, length(Samples) - 1), Samples),
