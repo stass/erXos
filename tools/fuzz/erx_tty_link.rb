@@ -19,7 +19,7 @@ module ErxTtyLinkFuzz
   MODULE_SOURCE = File.join(ROOT, 'erlang/apps/erx_session/src/erx_tty_link.erl')
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_tty_link_fuzz.erl')
   # erx_tty_link takes its room from erx_tty:master_room/0.
-  TTY_SOURCE = File.join(ROOT, 'erlang/apps/erx_session/src/erx_tty.erl')
+  TTY_SOURCE = File.join(ROOT, 'erlang/apps/erx/src/erx_tty.erl')
   # The SSH line core, whose requests the same target feeds (docs/design-ssh.md, "Sessions, ttys
   # and shells").
   LINE_SOURCE = File.join(ROOT, 'erlang/apps/erx_tty_line/src/erx_tty_line_core.erl')

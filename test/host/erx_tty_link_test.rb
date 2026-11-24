@@ -17,7 +17,7 @@ class ErxTtyLinkTest < Minitest::Test
 
   def test_link_core_cases_pass_under_eunit
     Dir.mktmpdir('erx-tty-link-test') do |work|
-      ErlangBuild.compile(work, applications: %w[erx_session], tests: TESTS)
+      ErlangBuild.compile(work, applications: %w[erx erx_session], tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '300', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                                        '-eval', 'halt(case eunit:test(erx_tty_link_tests, [verbose]) of ok -> 0; _ -> 1 end)',
                                        chdir: work, stdin_data: '')

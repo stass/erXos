@@ -14,7 +14,7 @@ require_relative '../fixtures/erlang_build'
 # rule broken, which must fail the property that guards it.
 class ErxTtyTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCE = 'erlang/apps/erx_session/src/erx_tty.erl'
+  SOURCE = 'erlang/apps/erx/src/erx_tty.erl'
   CASES = %w[test/erlang/erx_tty_tests.erl].freeze
   DEADLINE = '600'
   Fault = Data.define(:text, :broken, :property)

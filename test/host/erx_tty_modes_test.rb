@@ -14,7 +14,7 @@ require_relative '../fixtures/erlang_build'
 # broken, which must fail the case that guards it.
 class ErxTtyModesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  SOURCE = 'erlang/apps/erx_session/src/erx_tty_modes.erl'
+  SOURCE = 'erlang/apps/erx/src/erx_tty_modes.erl'
   CASES = %w[test/erlang/erx_tty_modes_tests.erl].freeze
   DEADLINE = '120'
   Fault = Data.define(:text, :broken, :case_name)

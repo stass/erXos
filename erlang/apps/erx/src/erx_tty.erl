@@ -6,8 +6,9 @@
 The line discipline (docs/design-live.md, "The tty"): the decisions of one
 tty as a pure state machine. Each call takes the tty and one event and
 returns the next tty and what to do, as a list of actions in order. The
-process that owns the tty, the terminal relay, carries the actions out and
-owns the timers, so time reaches the machine only as timer/2.
+process that owns the tty, the terminal relay or a console that reads a
+tty of its own (erx_console), carries the actions out and owns the timers,
+so time reaches the machine only as timer/2.
 
 Behaviour follows FreeBSD 15.1's line discipline, sys/kern/tty_ttydisc.c,
 redesigned as a fold over the bytes rather than translated: a received byte
@@ -77,7 +78,7 @@ and takes no flow control.
 """.
 
 -export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3,
-         input_room/1, lost/1,
+         input_room/1, lost/1, event_name/1,
          output/3, read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, read_input/2, status/3,
          hangup/1, waiting/1, dropped/1]).
 -export_type([tty/0, termios/0, open/0, timer/0, room/0, action/0]).
@@ -405,6 +406,23 @@ input_room(#tty{ready = Ready, line = Line} = Tty) ->
                   false -> 0
               end,
     max(0, ?MAX_INPUT - byte_size(Ready#units.bytes) - byte_size(Line#units.bytes) - Reserve).
+
+-doc """
+The event one of the tty's actions makes for its holder, which gets it as
+`{erx_tty_event, Group, Event}`: a signal key's, `lost` for a flush that
+dropped a loss, VSTATUS's `info` and a size change's `winch`. The one
+mapping, which the terminal relay tells its holder by
+(erx_session_relay_core) and a console reading a tty of its own carries
+out by (erx_console).
+""".
+-spec event_name({signal, sigint | sigtstp | sigquit} | flushed_loss | info | winch) ->
+          interrupt | suspend | quit | lost | info | winch.
+event_name({signal, sigint}) -> interrupt;
+event_name({signal, sigtstp}) -> suspend;
+event_name({signal, sigquit}) -> quit;
+event_name(flushed_loss) -> lost;
+event_name(info) -> info;
+event_name(winch) -> winch.
 
 -doc """
 Input was lost here (docs/design-live.md, "Lost input"): a loss goes where

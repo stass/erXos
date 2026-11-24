@@ -2,7 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% erXos's runtime services (docs/design-runtime.md): the carrier between domains and
-%% its connection agent, the console and hosted mode's console driver, the log sink's
+%% its connection agent, the console, its line discipline (erx_tty, erx_tty_modes) and
+%% hosted mode's console driver, the log sink's
 %% handler and the report filter, the kernel log, the namespace, the watchdog's petter, a driver's view
 %% of its device and its device record, the hold on a header pin, chip select or PWM
 %% channel, the decisions of a shared interrupt line's owner, the inspector and its
@@ -115,7 +116,9 @@
              erx_trace,
              erx_trace_ring,
              erx_tracer,
+             erx_tty,
              erx_tty_master,
+             erx_tty_modes,
              erx_virtio,
              erx_watchdog,
              erx_web_proto]},

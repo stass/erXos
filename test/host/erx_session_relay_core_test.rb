@@ -20,6 +20,7 @@ class ErxSessionRelayCoreTest < Minitest::Test
   CASES = %w[test/erlang/erx_session_relay_core_tests.erl].freeze
   DEADLINE = '600'
   LINK = 'erlang/apps/erx_session/src/erx_tty_link.erl'
+  TTY = 'erlang/apps/erx/src/erx_tty.erl'
   # A broken rule: the text that keeps it in source, what replaces it, and the case that
   # must then fail.
   Fault = Data.define(:text, :broken, :case_name, :source) do
@@ -56,7 +57,7 @@ class ErxSessionRelayCoreTest < Minitest::Test
     maker_kept: Fault.new(text: 'Maker =:= Process]),', broken: 'Maker =:= no_one]),', case_name: /opens_test/),
     sigtstp_as_interrupt: Fault.new(text: 'event_name({signal, sigtstp}) -> suspend;',
                                     broken: 'event_name({signal, sigtstp}) -> interrupt;',
-                                    case_name: /events_test/),
+                                    case_name: /events_test/, source: TTY),
     suspension_only_parks: Fault.new(text: READ_GATE, broken: 'case holds(Made, Core) andalso N =:= Signal of',
                                      case_name: /a_signal_suspends_the_jobs_reads_test/),
     number_ignored: Fault.new(text: READ_GATE, broken: 'case may_read(Made, Core) andalso is_integer(N + Signal) of',
@@ -74,7 +75,7 @@ class ErxSessionRelayCoreTest < Minitest::Test
                                  broken: 'counted_for(_Signal, #core{holder = console}) -> none.',
                                  case_name: /signals_the_console_takes_test/),
     console_loss_dropped: Fault.new(text: 'flushed_loss(#core{holder = console} = Core) -> ' \
-                                          'notify(event_name(flushed_loss), Core);',
+                                          'notify(erx_tty:event_name(flushed_loss), Core);',
                                     broken: 'flushed_loss(#core{holder = console}) -> [];',
                                     case_name: /a_flushed_loss_reaches_only_the_console_test/),
     job_told_of_the_loss: Fault.new(text: 'flushed_loss(#core{holder = {job, _, _, _}}) -> [].',

@@ -19,7 +19,7 @@ module ErxTtyFuzz
   ROOT = File.expand_path('../..', __dir__)
   # erx_abi_termios is generated into build/gen from abi/termios.txt.
   Erx::Generated.ensure(root: ROOT)
-  SOURCES = { 'erx_tty.erl' => File.join(ROOT, 'erlang/apps/erx_session/src/erx_tty.erl'),
+  SOURCES = { 'erx_tty.erl' => File.join(ROOT, 'erlang/apps/erx/src/erx_tty.erl'),
               'erx_abi_termios.erl' => File.join(ROOT, 'build/gen/erlang/apps/erx/src/generated/erx_abi_termios.erl') }
             .freeze
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_tty_fuzz.erl')

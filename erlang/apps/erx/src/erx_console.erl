@@ -262,7 +262,10 @@
                 %% The console's reads of its terminal, made only for its groups' asks.
                 reader :: reader(),
                 %% Each group's outstanding ask for input.
-                asks = #{} :: #{pid() => reference()}}).
+                asks = #{} :: #{pid() => reference()},
+                %% The leading bytes of a character read for each group, which its next
+                %% ask's bytes complete (answer/3).
+                held = #{} :: #{pid() => binary()}}).
 
 %% Both consoles read on demand (docs/design-live.md, "Lost input"): a unit at a time,
 %% a byte or a loss, and only for an ask of the current group, keeping for each group
@@ -280,11 +283,9 @@
 %% holds back, or `answered` once all of the message is in and the driver is answered;
 %% and whether the driver's input has ended, which the groups are told once nothing read
 %% before the end waits.
--type reader() :: #{relay := pid(), open := erx_session_relay:open(), held := held(),
-                    watching := boolean()}
-                | #{tty := erx_tty:tty(), pipe := boolean(), unread := binary() | answered,
-                    ending := boolean(), held := held()}.
--type held() :: #{pid() => binary()}.
+-type reader() :: {relay, #{relay := pid(), open := erx_session_relay:open(), watching := boolean()}}
+                | {own, #{tty := erx_tty:tty(), pipe := boolean(), unread := binary() | answered,
+                          ending := boolean()}}.
 
 %% A session: its tty, name, principal and domain pid with the pid's monitor, once
 %% add_session/2 names them; the monitor of its console facet, once the facet has
@@ -505,10 +506,10 @@ relay_foreground(Relay, {Tag, Mode}, Signals) -> erx_session_relay:foreground(Re
 %% console's own, set for a person's terminal or for a pipe as Terminal says.
 reader(none, Terminal) ->
     {ok, _NoWaiter, Tty} = erx_tty:set(own_termios(Terminal), erx_tty:new()),
-    #{tty => Tty, pipe => not Terminal, unread => answered, ending => false, held => #{}};
+    {own, #{tty => Tty, pipe => not Terminal, unread => answered, ending => false}};
 reader(Relay, true) ->
     {ok, Open} = erx_session_relay:open_reader(Relay, console),
-    #{relay => Relay, open => Open, held => #{}, watching => false}.
+    {relay, #{relay => Relay, open => Open, watching => false}}.
 
 %% The settings of the console's own tty (docs/design-live.md, "Lost input"). A person's
 %% terminal gets a session prompt's, less IXON and IMAXBEL, since the console's output
@@ -692,20 +693,20 @@ handle_info(Message, State = #state{log = {asked, Request}}) ->
 handle_info(Message, State) ->
     info(Message, State).
 
-info({erx_console_input, Bytes}, State = #state{reader = #{unread := _}}) when is_binary(Bytes) ->
+info({erx_console_input, Bytes}, State = #state{reader = {own, _}}) when is_binary(Bytes) ->
     %% A driver keeps one input message outstanding until its answer (docs/design-live.md,
     %% "Lost input"), which serve/1 sends once all of the message is in the tty.
     {noreply, serve(typed(Bytes, unanswered(State)))};
-info(erx_console_lost, State = #state{reader = #{unread := _}}) ->
+info(erx_console_lost, State = #state{reader = {own, _}}) ->
     {noreply, serve(driver_lost(unanswered(State)))};
 info(erx_console_eof, State = #state{role = session}) ->
     hang_up(State);
-info(erx_console_eof, State = #state{reader = Reader = #{ending := false}}) ->
+info(erx_console_eof, State = #state{reader = {own, Own = #{ending := false}}}) ->
     %% The groups are told once nothing read before the end waits (serve/1).
-    {noreply, serve(State#state{reader = Reader#{ending := true}})};
-info({ready, Open, [in], N}, State = #state{reader = Reader = #{open := Open}}) ->
-    read_for_ask(N, State#state{reader = Reader#{watching := false}});
-info({erx_tty_event, Group, Event}, State = #state{reader = #{relay := _}}) ->
+    {noreply, serve(State#state{reader = {own, Own#{ending := true}}})};
+info({ready, Open, [in], N}, State = #state{reader = {relay, Relay = #{open := Open}}}) ->
+    read_for_ask(N, State#state{reader = {relay, Relay#{watching := false}}});
+info({erx_tty_event, Group, Event}, State = #state{reader = {relay, _}}) ->
     {noreply, tty_event(Group, Event, State)};
 info({erx_console_size, Rows, Columns}, State = #state{tty = TTY, size = Held})
   when is_integer(Rows), is_integer(Columns),
@@ -1208,9 +1209,9 @@ read([ctrl_g | _Dropped], State = #state{line = Back}) ->
     open_menu(none, Back, State);
 read([Bytes | Rest], State = #state{line = {session, Domain}}) ->
     read(Rest, to_session(Domain, Bytes, State));
-read([Bytes | Rest], State = #state{reader = Reader = #{unread := Unread}}) ->
+read([Bytes | Rest], State = #state{reader = {own, Own = #{unread := Unread}}}) ->
     %% For the console's own tty, which serve/1 fills.
-    read(Rest, State#state{reader = Reader#{unread := <<Unread/binary, Bytes/binary>>}}).
+    read(Rest, State#state{reader = {own, Own#{unread := <<Unread/binary, Bytes/binary>>}}}).
 
 %% The menu takes the line, drawn after Notice if there is one, with Back as the entry
 %% Esc returns to; the session that had the line, if one did, is stopped.
@@ -1478,19 +1479,19 @@ latin1(Bin) -> unicode:characters_to_binary(Bin, latin1).
 %% that has ended, its ask and the bytes held for it, is forgotten; a relay is told
 %% Group, so the events made from now on carry it; and Group's ask, if it has one, is
 %% read for.
-follow_current(Group, State = #state{asks = Asks, reader = Reader = #{held := Held}}) ->
+follow_current(Group, State = #state{asks = Asks, held = Held, reader = Reader}) ->
     Live = groups(State),
-    State1 = State#state{asks = maps:with(Live, Asks), reader = Reader#{held := maps:with(Live, Held)}},
+    State1 = State#state{asks = maps:with(Live, Asks), held = maps:with(Live, Held)},
     case Reader of
-        #{relay := Relay} -> ok = erx_session_relay:console_group(Relay, Group);
-        #{tty := _} -> ok
+        {relay, #{relay := Relay}} -> ok = erx_session_relay:console_group(Relay, Group);
+        {own, _} -> ok
     end,
     next_read(State1).
 
 %% A read for the current group's ask, if it has one, from whichever tty the console
 %% reads.
-next_read(State = #state{reader = #{relay := _}}) -> watch(State);
-next_read(State = #state{reader = #{tty := _}}) -> serve(State).
+next_read(State = #state{reader = {relay, _}}) -> watch(State);
+next_read(State = #state{reader = {own, _}}) -> serve(State).
 
 %% What the relay tells the console of a key or a flush on its tty, made while Group was
 %% the current group, or `none`. Each event the relay core's mapping makes is handled by
@@ -1525,11 +1526,11 @@ tty_event(_Group, Event, State) ->
 %% once a unit waits (a complete line when ICANON is set) whatever VMIN and VTIME
 %% are, so a program that leaves VMIN 0 makes no report of nothing; it is ready at once
 %% only on a hangup, which ends a session's console (erx_console_eof).
-watch(State = #state{asks = Asks, reader = Reader = #{open := Open, watching := false}}) ->
+watch(State = #state{asks = Asks, reader = {relay, Relay = #{open := Open, watching := false}}}) ->
     case is_map_key(current(State), Asks) of
         true ->
             ok = erx_session_relay:watch(Open, in),
-            State#state{reader = Reader#{watching := true}};
+            State#state{reader = {relay, Relay#{watching := true}}};
         false ->
             State
     end;
@@ -1544,7 +1545,7 @@ watch(State) ->
 %% ICANON set, is that read's end and never the hangup, which the relay tells with
 %% erx_console_eof: it is a read that found nothing, so the ask stays outstanding and
 %% the bytes held for the group go.
-read_for_ask(N, State = #state{asks = Asks, reader = #{open := Open}}) ->
+read_for_ask(N, State = #state{asks = Asks, reader = {relay, #{open := Open}}}) ->
     Group = current(State),
     case is_map_key(Group, Asks) andalso erx_session_relay:read_input(Open, N) of
         false -> {noreply, State};
@@ -1572,20 +1573,19 @@ damage(Group, State0 = #state{asks = Asks}) ->
 
 %% The bytes held for Group go: a signal flushed the input typed with them, a loss fell
 %% among them, or a read found the end of file.
-drop_held(Group, State = #state{reader = Reader = #{held := Held}}) ->
-    State#state{reader = Reader#{held := maps:remove(Group, Held)}}.
+drop_held(Group, State = #state{held = Held}) ->
+    State#state{held = maps:remove(Group, Held)}.
 
 %% Byte, read for Group's ask, joins the bytes held for Group: what they complete ends
 %% the ask, and what they leave incomplete stays held for Group's next ask.
-answer(Group, Byte, State = #state{asks = Asks, reader = Reader = #{held := Held}}) ->
+answer(Group, Byte, State = #state{asks = Asks, held = Held}) ->
     {Chars, Left} = chars(maps:get(Group, Held, <<>>), Byte),
-    Reader1 = Reader#{held := Held#{Group => Left}},
     case Chars of
         <<>> ->
-            State#state{reader = Reader1};
+            State#state{held = Held#{Group => Left}};
         Chars ->
             Group ! {self(), {read, map_get(Group, Asks), Chars}},
-            State#state{reader = Reader1, asks = maps:remove(Group, Asks)}
+            State#state{held = Held#{Group => Left}, asks = maps:remove(Group, Asks)}
     end.
 
 %% A signal key typed while Group was the console's current group; `quit` at the prompt
@@ -1624,8 +1624,8 @@ resized(State = #state{shells = Shells}) ->
 
 %% The driver's next input message has come: until all of it is in the tty, the driver
 %% is not answered.
-unanswered(State = #state{reader = Reader = #{unread := answered}}) ->
-    State#state{reader = Reader#{unread := <<>>}};
+unanswered(State = #state{reader = {own, Own = #{unread := answered}}}) ->
+    State#state{reader = {own, Own#{unread := <<>>}}};
 unanswered(State) ->
     State.
 
@@ -1647,39 +1647,39 @@ serve(State0) ->
 
 %% The driver's bytes the tty has room for, into it: all of them for a person's
 %% terminal, as many as fit for a pipe.
-fill(State = #state{reader = #{unread := answered}}) ->
+fill(State = #state{reader = {own, #{unread := answered}}}) ->
     State;
-fill(State = #state{reader = #{tty := Tty, pipe := Pipe, unread := Unread}}) ->
+fill(State = #state{reader = {own, #{tty := Tty, pipe := Pipe, unread := Unread}}}) ->
     Fits = case Pipe of
                true -> min(byte_size(Unread), erx_tty:input_room(Tty));
                false -> byte_size(Unread)
            end,
     <<Taken:Fits/binary, Left/binary>> = Unread,
-    State1 = #state{reader = Reader} = own_input(Taken, State),
-    State1#state{reader = Reader#{unread := Left}}.
+    State1 = #state{reader = {own, Own}} = own_input(Taken, State),
+    State1#state{reader = {own, Own#{unread := Left}}}.
 
 %% Bytes through the tty's input/3 until none is left: it stops after each signal key,
 %% whose event is carried out before the bytes after it go in. The tty makes no output,
 %% so its echo has no room.
 own_input(<<>>, State) ->
     State;
-own_input(Bytes, State = #state{reader = Reader = #{tty := Tty}}) ->
+own_input(Bytes, State = #state{reader = {own, Own = #{tty := Tty}}}) ->
     {Actions, Rest, _Room, Tty1} = erx_tty:input(Bytes, {0, 0, false}, Tty),
-    own_input(Rest, own_actions(Actions, State#state{reader = Reader#{tty := Tty1}})).
+    own_input(Rest, own_actions(Actions, State#state{reader = {own, Own#{tty := Tty1}}})).
 
 %% A loss the driver sent, into the tty after every byte sent before it, which goes in
 %% first whatever the room, since a byte the bound drops is a loss of its own there.
-own_lost(State0 = #state{reader = #{unread := Unread}}) ->
-    State = #state{reader = Reader = #{tty := Tty}} = own_input(Unread, State0),
+own_lost(State0 = #state{reader = {own, #{unread := Unread}}}) ->
+    State = #state{reader = {own, Own = #{tty := Tty}}} = own_input(Unread, State0),
     {Actions, Tty1} = erx_tty:lost(Tty),
-    own_actions(Actions, State#state{reader = Reader#{tty := Tty1, unread := <<>>}}).
+    own_actions(Actions, State#state{reader = {own, Own#{tty := Tty1, unread := <<>>}}}).
 
 own_actions(Actions, State) ->
     lists:foldl(fun own_action/2, State, Actions).
 
 %% What the tty's actions mean to the console: a key's signal, a flush that dropped a
-%% loss and VSTATUS are the events the relay tells its console, through the relay core's
-%% one mapping, for the current group; the tty echoes nothing, holds no output to flush,
+%% loss and VSTATUS are the events the relay tells its console, through erx_tty's one
+%% mapping, for the current group; the tty echoes nothing, holds no output to flush,
 %% stop or start, and has no waiter to ready or time.
 own_action({echo, _Bytes}, State) -> State;
 own_action(flush_output, State) -> State;
@@ -1688,23 +1688,23 @@ own_action(start_output, State) -> State;
 own_action({ready, _Open}, State) -> State;
 own_action({timer_start, _Timer, _Ms}, State) -> State;
 own_action({timer_cancel, _Timer}, State) -> State;
-own_action(Event, State) -> tty_event(current(State), erx_session_relay_core:event_name(Event), State).
+own_action(Event, State) -> tty_event(current(State), erx_tty:event_name(Event), State).
 
 %% One unit read from the tty for the current group's ask, if it has one: a byte joins
 %% the bytes held for the group (answer/3), and a loss damages the read (damage/2). The
 %% tty never hangs up, so a read never finds the end of file.
-read_own(State = #state{asks = Asks, reader = Reader = #{tty := Tty}}) ->
+read_own(State = #state{asks = Asks, reader = {own, Own = #{tty := Tty}}}) ->
     Group = current(State),
     case is_map_key(Group, Asks) andalso erx_tty:read_input(console, Tty) of
         false -> none;
         {eagain, _Tty} -> none;
-        {{ok, <<Byte>>}, Tty1} -> {read, answer(Group, Byte, State#state{reader = Reader#{tty := Tty1}})};
-        {lost, Tty1} -> {read, damage(Group, State#state{reader = Reader#{tty := Tty1}})}
+        {{ok, <<Byte>>}, Tty1} -> {read, answer(Group, Byte, State#state{reader = {own, Own#{tty := Tty1}}})};
+        {lost, Tty1} -> {read, damage(Group, State#state{reader = {own, Own#{tty := Tty1}}})}
     end.
 
-answer_driver(State = #state{driver = Driver, reader = Reader = #{unread := <<>>}}) ->
+answer_driver(State = #state{driver = Driver, reader = {own, Own = #{unread := <<>>}}}) ->
     Driver ! erx_console_taken,
-    State#state{reader = Reader#{unread := answered}};
+    State#state{reader = {own, Own#{unread := answered}}};
 answer_driver(State) ->
     State.
 
@@ -1713,15 +1713,15 @@ answer_driver(State) ->
 %% stock reads a bad byte, as latin-1, and then the group gets the end, as every group
 %% that gets the input from then on does (gets_input/1). The end is told once: `ending`
 %% is cleared before gets_input/1, whose read for the group comes back through serve/1.
-ended(State = #state{reader = Reader = #{ending := true, unread := answered, tty := Tty, held := Held},
-                     asks = Asks}) ->
+ended(State = #state{reader = {own, Own = #{ending := true, unread := answered, tty := Tty}},
+                     asks = Asks, held = Held}) ->
     Group = current(State),
     case {erx_tty:waiting(Tty), maps:get(Group, Held, <<>>), Asks} of
         {0, <<>>, _} ->
-            gets_input(State#state{input_ended = true, reader = Reader#{ending := false}});
+            gets_input(State#state{input_ended = true, reader = {own, Own#{ending := false}}});
         {0, Bytes, #{Group := Ref}} ->
             Group ! {self(), {read, Ref, latin1(Bytes)}},
-            ended(State#state{asks = maps:remove(Group, Asks), reader = Reader#{held := maps:remove(Group, Held)}});
+            ended(State#state{asks = maps:remove(Group, Asks), held = maps:remove(Group, Held)});
         _ ->
             State
     end;
