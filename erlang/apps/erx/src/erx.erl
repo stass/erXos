@@ -192,10 +192,13 @@ domain is ready and replacing an older pid of the name
 domain holds only the latter. A facet whose server ended is a dead pid until
 the server's next incarnation installs another. The registry, erx_facets,
 holds a files facet with its grant's rights (erx_facets:facet/0); this
-answers its pid alone.
+answers its pid alone. The media domain holds each drive's grant under
+`{drive, N}` (erx_facets:name/0; docs/design-drives.md, "The media domain's
+drives are its registry's").
 """.
--spec cap(atom()) -> pid() | undefined.
-cap(Name) when is_atom(Name) ->
+-spec cap(erx_facets:name()) -> pid() | undefined.
+cap(Name) ->
+    true = erx_facets:is_name(Name),
     erx_facets:find(Name).
 
 -doc """
@@ -204,7 +207,7 @@ caller that hands on what
 the domain holds as a whole, as the command shell builds a session's
 facets.
 """.
--spec caps() -> #{atom() => pid()}.
+-spec caps() -> #{erx_facets:name() => pid()}.
 caps() ->
     erx_facets:pids().
 

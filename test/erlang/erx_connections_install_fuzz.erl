@@ -12,8 +12,8 @@
 %% Whatever arrives, the agent stays up, and after every message:
 %% * the registry, the persistent term {erx, facets}, holds the count of the installations
 %%   and exactly the installations a
-%%   model took: those in the system connection's envelope with an integer tag, an atom
-%%   name and a pid, each replacing an older pid of its name;
+%%   model took: those in the system connection's envelope with an integer tag, a name
+%%   (an atom, or a drive's {drive, N}, N a non-negative integer) and a pid, each replacing an older pid of its name;
 %% * each such installation, and nothing else, is acknowledged to the domain pid with
 %%   its tag, in order;
 %% * every other message is dropped and counted.
@@ -74,14 +74,19 @@ message(Agent, {Model, Dropped, Tally}) ->
     end.
 
 %% The model: what the agent may install.
+%% A name is an atom or a drive's {drive, N}, N a non-negative integer.
 accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Facet}})
-  when is_integer(Tag), is_atom(Name), is_pid(Facet) ->
-    {yes, Tag, Name, Facet};
+  when is_integer(Tag), is_pid(Facet) ->
+    named(Tag, Name, Facet);
 accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, {Pid, Rights} = Facet}})
-  when is_integer(Tag), is_atom(Name), is_pid(Pid), (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
-    {yes, Tag, Name, Facet};
+  when is_integer(Tag), is_pid(Pid), (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
+    named(Tag, Name, Facet);
 accepted(_Message) ->
     no.
+
+named(Tag, Name, Facet) when is_atom(Name) -> {yes, Tag, Name, Facet};
+named(Tag, {drive, N} = Name, Facet) when is_integer(N), N >= 0 -> {yes, Tag, Name, Facet};
+named(_Tag, _Name, _Facet) -> no.
 
 nothing_else() ->
     receive
@@ -105,7 +110,8 @@ random_message() ->
     end.
 
 tag() -> pick([1, 2, 7, 1 bsl 70, -3, 0, 1.0, tag, <<1>>, make_ref()]).
-name() -> pick([data, echo, log, data, '', <<"data">>, 1, {data}, "data"]).
+name() -> pick([data, echo, log, data, '', <<"data">>, 1, {data}, "data", {drive, 0}, {drive, 7}, {drive, -1},
+                 {drive, x}, {drive, 1.0}, {disk, 0}, {drive, 0, 1}]).
 facet() -> pick([pid(5), pid(5), pid(99), self(), data, fun() -> ok end, make_ref(), {pid(5)}, [pid(5)],
                   {pid(5), rx}, {pid(5), rw}, {pid(99), ro}, {pid(5), rwx}, {data, rw}, {pid(5), ro, x}]).
 field() -> pick([tag(), name(), facet()]).

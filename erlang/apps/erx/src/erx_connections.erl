@@ -452,8 +452,8 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Next, Held, Dropped);
         {erx_origin, SystemId, {erx_app, App}} when is_map(App), element(1, map_get(app, Env)) =:= waiting ->
             records(app_came(App, Env), Held, Dropped);
-        {erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}} when is_integer(Tag), is_atom(Name) ->
-            case erx_facets:is_facet(Facet) of
+        {erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}} when is_integer(Tag) ->
+            case erx_facets:is_name(Name) andalso erx_facets:is_facet(Facet) of
                 true ->
                     records(minted_install(Env, Tag, Name, Facet), Held, Dropped);
                 false ->

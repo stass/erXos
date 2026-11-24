@@ -31,7 +31,8 @@ agent_test_() ->
      || {Name, Case} <- [{mapped_then_lost, fun mapped_then_lost/1}, {ended_before_up, fun ended_before_up/1},
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
                          {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
-                         {facets, fun facets/1}, {app, fun app/1}, {installs, fun installs/1}, {connection, fun connection/1},
+                         {facets, fun facets/1}, {app, fun app/1}, {installs, fun installs/1},
+                         {drive_installs, fun drive_installs/1}, {connection, fun connection/1},
                          {area_down, fun area_down/1}, {area_lost, fun area_lost/1},
                          {area_lost_then_down, fun area_lost_then_down/1}, {area_refused, fun area_refused/1},
                          {malformed_calls, fun malformed_calls/1}]]
@@ -371,6 +372,27 @@ installs(Agent) ->
     after
         persistent_term:erase({erx, facets}),
         [Pid ! stop || Pid <- [Answer, Old, New]]
+    end.
+
+drive_installs(Agent) ->
+    %% A drive's grant is installed under its installed name, {drive, N}
+    %% (docs/design-drives.md, "How the grant reaches the media domain"), and erx:cap/1
+    %% finds it there; every other name that is no atom, a {drive, N} whose N is no
+    %% drive number among them, is dropped and counted, and installs nothing.
+    Facet = spawn(fun() -> receive stop -> ok end end),
+    try
+        record(Agent, {erx_facets, #{}, []}),
+        [record(Agent, {erx_facets_install, 1, Name, Facet})
+         || Name <- [{drive, -1}, {drive, x}, {drive, 1.0}, {disk, 0}, {drive, 0, 1}, {0, drive}]],
+        record(Agent, {erx_facets_install, 2, {drive, 3}, Facet}),
+        ?assertEqual({erx_facets_installed, 2}, answer()),
+        ?assertEqual(6, erx_connections:dropped()),
+        ?assertEqual({2, #{{drive, 3} => Facet}}, persistent_term:get({erx, facets})),
+        ?assertEqual(Facet, erx:cap({drive, 3})),
+        ?assertEqual(undefined, erx:cap({drive, 4}))
+    after
+        persistent_term:erase({erx, facets}),
+        Facet ! stop
     end.
 
 %% The facets answers init received, in order, from the trace of its receives, waiting

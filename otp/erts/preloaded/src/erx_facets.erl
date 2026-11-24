@@ -39,9 +39,9 @@ It is preloaded beside prim_file and erx_path, since every resolution of a
 path reads it, the code loader's included.
 """.
 
--export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_facet/1, files/2, table/1,
+-export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_facet/1, files/2, table/1,
          file_grant/2, file_grant/3]).
--export_type([facet/0]).
+-export_type([name/0, facet/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -58,11 +58,19 @@ its pid with its grant's rights, as the manifest's facet row states them
 -type facet() :: pid() | {pid(), erx_abi_enums:files_rights()}.
 
 -doc """
+The name a facet is held under: its service's name, or for a drive's grant
+its installed name, `{drive, N}`, N the drive window row's number
+(docs/design-drives.md, "How the grant reaches the media domain"), so the
+several drives of one serving domain are held apart.
+""".
+-type name() :: atom() | {drive, non_neg_integer()}.
+
+-doc """
 The pid of the facet named `Name` that the domain holds, or `undefined` when
 it holds none of that name. A facet whose server ended is a dead pid until
 the server's next incarnation installs another.
 """.
--spec find(atom()) -> pid() | undefined.
+-spec find(name()) -> pid() | undefined.
 find(Name) ->
     case registry() of
         #{Name := Facet} -> pid(Facet);
@@ -70,7 +78,7 @@ find(Name) ->
     end.
 
 -doc "The pid of every facet the domain holds, by name, each as find/1 answers it.".
--spec pids() -> #{atom() => pid()}.
+-spec pids() -> #{name() => pid()}.
 pids() ->
     #{Name => pid(Facet) || Name := Facet <- registry()}.
 
@@ -80,7 +88,7 @@ name and keeping every other. The caller is the registry's writer in its
 domain, the one process whose installations are serialized, so none is lost
 to another write that read the registry before it.
 """.
--spec install(#{atom() => facet()}) -> ok.
+-spec install(#{name() => facet()}) -> ok.
 install(Facets) ->
     {Generation, Held} = value(),
     persistent_term:put(?REGISTRY, {Generation + 1, maps:merge(Held, Facets)}).
@@ -150,6 +158,11 @@ changed(Generation) ->
         undefined -> {error, noproc};
         Agent -> gen:send_request(Agent, '$gen_call', {changed, Generation})
     end.
+
+-doc "Whether `Term` is a name as the system domain sends one, name/0's.".
+-spec is_name(term()) -> boolean().
+is_name({drive, N}) -> is_integer(N) andalso N >= 0;
+is_name(Name) -> is_atom(Name).
 
 -doc """
 Whether `Term` is a facet as the system domain sends it: a pid, or a pid with
