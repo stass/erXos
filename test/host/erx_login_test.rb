@@ -67,7 +67,7 @@ class ErxLoginTest < Minitest::Test
     Seed.new(fault: "the supervisor's intensity left at OTP's default", path: SUPERVISOR,
              anchor: 'intensity => Permanent, period => ?PERIOD_S}', replacement: 'period => ?PERIOD_S}',
              catching_case: 'each_permanent_child_restarts_once_within_the_period_test'),
-    Seed.new(fault: 'a user name checked by an alphabet of its own', path: FACET,
+    Seed.new(fault: 'a user name checked by a rule of its own that admits any name', path: FACET,
              anchor: 'case erx_ident:new(User) of', replacement: 'case erx_ident:new(<<"a">>) of',
              catching_case: 'a_user_name_is_a_system_identifier_test')
   ].freeze

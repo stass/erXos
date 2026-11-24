@@ -71,7 +71,7 @@ init([]) ->
               restart => permanent, shutdown => 5000, type => worker,
               modules => [erx_login]},
     Children = [Coordinator, Machine, Pci, Login, Service, Dev],
-    Permanent = length([Child || #{restart := permanent} = Child <- Children]),
+    Permanent = length([Child || Child <- Children, maps:get(restart, Child, permanent) =:= permanent]),
     {ok, {#{strategy => one_for_one, auto_shutdown => any_significant,
             intensity => Permanent, period => ?PERIOD_S},
           Children}}.

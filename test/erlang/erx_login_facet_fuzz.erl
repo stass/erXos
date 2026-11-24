@@ -21,7 +21,7 @@
 -define(MIN_ACCEPTED, ?ROUNDS div 10).
 %% One byte past a system identifier's bound (docs/design-system.md, "Identifiers"), so
 %% names reach the bound and cross it; erx_ident:new/1 is the oracle that judges them.
--define(IDENT_EDGE, 64).
+-define(IDENT_EDGE, (?ERX_IDENTIFIER_MAX + 1)).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),

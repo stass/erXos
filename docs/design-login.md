@@ -120,8 +120,8 @@ Each requirement that would otherwise be a rule of its own follows:
   ends, and a login service that crashes, stop every session their
   logins started, and the line's facet, whose opening is the login
   facet, ends with them. A front end takes its login facet's end as
-  its own end, so the manifest restarts its domain within the row's
-  intensity, and the restarted domain is granted a new facet in front
+  its own end, so the manifest restarts its domain within its start
+  row's intensity, and the restarted domain is granted a new facet in front
   of the restarted service: the recovery that exists for any domain's
   end, with no reconnection protocol of its own.
 

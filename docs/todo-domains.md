@@ -106,7 +106,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erlang/apps/erx_domain/src/erx_ident.erl` (docs/design-system.md, "Identifiers"): the
   manifest reader and the system domain each write out the rule `[a-z0-9][a-z0-9_-]`, 1 to 63
   bytes, so a change to one admits names the other refuses, a principal the manifest admits
-  that no login can name among them. Generate both from one spec line.
+  that no login can name among them. Generate both from abi/manifest.txt's `identifier_max`
+  and one rule line beside it.
 * [Low] manifest check, `tools/lib/erx/manifest.rb` `parameter_value`: an `identifier` parameter is checked only for its byte bound, not the manifest reader's identifier class (`abi/manifest.txt`, 1 to 63 bytes of `[a-z0-9][a-z0-9_-]*`), so a name like `"Nus"` passes the parameter check and is refused only when `admit` reopens the bytes, with the codec's generic error rather than a `facet.parameter` diagnostic. Apply the identifier class in `parameter_value`, and cap an identifier parameter's bound at 63 in the ABI reader.
 * [Low] handles, `erx_group_configure(ERX_CAP_NULL)` (`liberx/backend/fiasco/group.c` and the hosted
   `group.c`): both backends refuse NULL with `ERX_EINVAL` before the lookup, while the call table's configure

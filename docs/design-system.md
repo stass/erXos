@@ -4444,9 +4444,10 @@ domain service is never restarted, and its records of every domain and
 connection live in its own heap, with no copy kept for a successor and no
 protocol to rebuild them. Its inputs from other domains are hardened as [Ending a domain](#ending-a-domain) says, so no
 domain can crash it. Any other service's crash restarts that service and
-nothing more: the domain service's supervisor allows within 5 s as many
-restarts as it has permanent children, so a crash of each in one period
-restarts it alone, and a restart beyond that is a service that cannot
+nothing more. Under the domain service's supervisor that holds within
+an intensity of as many restarts within 5 s, shared among them, as it
+has permanent children, so a crash of each in one period restarts it
+alone, and a restart beyond that is a service that cannot
 stay up, which ends the supervisor as the domain service's end does. Besides the domain service's end only a fault of the
 runtime itself, or a missed watchdog deadline, ends the machine. One
 service of the table runs outside the system domain, in a domain the
