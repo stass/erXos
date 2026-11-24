@@ -6,6 +6,7 @@ require 'etc'
 require_relative 'bench_measurement'
 require_relative 'bench_record'
 require_relative 'error'
+require_relative 'host_os'
 require_relative 'qemu_gate'
 require_relative 'runner'
 require_relative 'source_revision'
@@ -33,7 +34,7 @@ module Erx
     def call(asked, boot:, memory_mib:, history:)
       accel = boot.kind.delete_prefix('qemu-')
       revision = revision()
-      model = sysctl('hw.model')
+      model = host_model
       date = Time.now.utc
       before = QemuGate.one_minute_load
       measured = yield(accel)
@@ -52,6 +53,9 @@ module Erx
                 end
       { record: record, written: written, refused: answer.fetch(:refused), timed_out: timed_out }
     end
+
+    LINUX_MODELS = %w[/sys/class/dmi/id/product_name /proc/device-tree/model].freeze
+    private_constant :LINUX_MODELS
 
     private
 
@@ -73,9 +77,17 @@ module Erx
                                details: measured.slice(:image_sha256, :flags, :compiler, :workloads).transform_keys(&:to_s))
     end
 
-    def sysctl(name)
-      result = @runner.run(['sysctl', '-n', name], name: "bench-sysctl-#{name.tr('.', '-')}", deadline: 10)
-      File.binread(result.fetch('log'), 4096).strip
+    # The host's hardware model as BenchRecord::MODEL spells it: sysctl hw.model on macOS
+    # and FreeBSD, the firmware's product name on Linux, unknown elsewhere.
+    def host_model
+      named = if HostOs::MACOS || HostOs::FREEBSD
+                result = @runner.run(%w[sysctl -n hw.model], name: 'bench-sysctl-hw-model', deadline: 10)
+                File.binread(result.fetch('log'), 4096)
+              else
+                LINUX_MODELS.find { |path| File.file?(path) }&.then { |path| File.binread(path, 4096) }
+              end
+      model = named.to_s.strip.gsub(/[^A-Za-z0-9.,_-]+/, '-').delete_prefix('-')[0, 64]
+      model.match?(BenchRecord::MODEL) ? model : 'unknown'
     end
   end
 end
