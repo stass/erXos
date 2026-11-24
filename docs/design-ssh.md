@@ -1346,6 +1346,7 @@ change.
 | the host key file is missing (before the vault) | `ssh_file` finds none | a new key is made and logged with its fingerprint |
 | the host key file does not decode (before the vault) | `ssh_file`'s error | the daemon does not listen; one log line names the file; the domain stays up |
 | the vault answers `unavailable` (its partition or backend down) | the host key facet's or login's answer | the daemon waits, retrying every 10 s with one log line, and does not listen until the host key answers; logins answer `unavailable` |
+| the login service crashes | the login facet ends, with an atom | the SSH domain takes the facet's end as its own and ends: every connection closes and every session its logins started has already stopped with the facet; the domain service restarts it under its restart intensity, with a new login facet, and it listens again |
 | the network domain restarts | the grant's sockets close | the listener and every connection end; `erx_ssh` listens again when the grant answers |
 | a session cannot start (quota, budget) | the domain service's refusal | the login answers `unavailable`, logged with the reason; the client sees authentication fail |
 | entropy unavailable in the SSH domain | `crypto` raises in the key exchange | that connection closes ([design-crypto.md](design-crypto.md#seeding)) |

@@ -28,14 +28,13 @@ service login 22
   quantity max_heap_size 65536
 # The bounds of a login's arguments (docs/design-login.md, "Operations"), which
 # erx_login_facet's admit/3 checks before the service sees a request and erx_login.hrl
-# gives every front end's prompt: a user name of 1 to login_user_max bytes of the
-# principal-name alphabet, a passphrase of 1 to login_passphrase_max bytes, a peer of at
+# gives every front end's prompt: a user name that is a system identifier
+# (docs/design-system.md, "Identifiers"), a passphrase of 1 to login_passphrase_max bytes, a peer of at
 # most login_peer_max bytes, kept only for the checker's terminal counter and the log. A
 # key login's blobs are erx_ssh_wire's fixed layouts (docs/design-ssh.md, "Logging in",
 # S3), at most login_blob_max bytes here, and its exchange input at most
 # login_exchange_max bytes. A cookie is login_cookie_bytes bytes of erx_bytes:entropy/1,
 # kept for login_grace_ms.
-limit login_user_max u32 32
 limit login_passphrase_max u32 1024
 limit login_peer_max u32 64
 limit login_blob_max u32 128

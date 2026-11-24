@@ -310,7 +310,11 @@ supervisor with
 (`erlang/apps/erx_domain/src/erx_domain_sup.erl`), and so is
 `erx_machine`, the process that coordinates the machine's end
 (section 24.6.2). The end of either, however it comes, shuts down the
-application, the runtime and the machine. The domain service keeps
+application, the runtime and the machine. The same supervisor allows
+within 5 s one restart for each of its permanent children (the login
+service, `/dev`'s tree, the PCIe process and the machine tree's grants),
+so two of them crashing together each restart, and only one that cannot
+stay up ends it. The domain service keeps
 the record of every domain and connection in its own heap, and a
 clean reset is safer than a successor guessing at them.
 

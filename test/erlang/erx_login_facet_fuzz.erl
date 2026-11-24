@@ -19,6 +19,9 @@
 
 -define(ROUNDS, 30000).
 -define(MIN_ACCEPTED, ?ROUNDS div 10).
+%% One byte past a system identifier's bound (docs/design-system.md, "Identifiers"), so
+%% names reach the bound and cross it; erx_ident:new/1 is the oracle that judges them.
+-define(IDENT_EDGE, 64).
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
@@ -68,11 +71,7 @@ in_bounds(_Request) -> false.
 
 bytes(B, Min, Max) -> is_binary(B) andalso byte_size(B) >= Min andalso byte_size(B) =< Max.
 
-user(<<First, Rest/binary>> = User) when byte_size(User) =< ?ERX_LOGIN_USER_MAX ->
-    First >= $a andalso First =< $z andalso
-        lists:all(fun(C) -> (C >= $a andalso C =< $z) orelse (C >= $0 andalso C =< $9) orelse C =:= $_ end,
-                  binary_to_list(Rest));
-user(_User) -> false.
+user(User) -> erx_ident:new(User) =/= {error, bad_identifier}.
 
 %% A request: a third within the interface, the rest mutated or random.
 request() ->
@@ -104,10 +103,10 @@ mutate(Good, Change) ->
 name() ->
     Size = case rand:uniform(3) of
                1 -> 1;
-               2 -> ?ERX_LOGIN_USER_MAX;
-               3 -> rand:uniform(?ERX_LOGIN_USER_MAX)
+               2 -> ?IDENT_EDGE;
+               3 -> rand:uniform(?IDENT_EDGE)
            end,
-    Alphabet = <<"abcdefghijklmnopqrstuvwxyz0123456789_">>,
+    Alphabet = <<"abcdefghijklmnopqrstuvwxyz0123456789_-">>,
     Rest = << <<(binary:at(Alphabet, rand:uniform(byte_size(Alphabet)) - 1))>> || _ <- lists:seq(2, Size) >>,
     <<($a + rand:uniform(26) - 1), Rest/binary>>.
 

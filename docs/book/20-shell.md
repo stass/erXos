@@ -670,7 +670,9 @@ bound to the front end's process that asked for it, here the
 connection's: the domain service, which makes the session, watches
 that process from the start onwards and stops the session when the
 process ends, on every path, a crash of the login service included, so
-no front end has a log-out to forget. What the facet can tell apart is
+no front end has a log-out to forget. A front end takes the end of its
+login facet, which such a crash brings, as its own end, so its domain
+restarts, as any configured domain does, and is granted a new facet. What the facet can tell apart is
 domains, not processes: it trusts the SSH domain to call from the right
 connection, and guarantees only that no other domain reaches that
 domain's logins. The SSH domain, a

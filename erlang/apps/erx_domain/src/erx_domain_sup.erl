@@ -27,12 +27,22 @@ The login service, erx_login, is a permanent child started before the
 service, so it has named itself the process behind `login` (erx_facet:serve/2)
 before the service mints any front end's facet (docs/design-login.md, "The
 service and its facet"). A restarted one starts with an empty table: the
-facets minted in front of the old one ended with it, with an atom, and
-nothing grants a front end a new one until its domain restarts (TODO.md).
+facets minted in front of the old one ended with it, with an atom, and each
+front end takes its facet's end as its own, so the manifest restarts its
+domain, which the service grants a new facet (docs/design-login.md,
+"Failure handling").
+
+The restart intensity allows as many restarts within ?PERIOD_S seconds as the
+supervisor has permanent children, so a crash of each in one period restarts
+that child alone (docs/design-system.md, "System services"); a restart beyond
+them is a service that cannot stay up, and ends the supervisor, and so the
+system domain, as the service's end does.
 """.
 -behaviour(supervisor).
 
 -export([start_link/0, init/1]).
+
+-define(PERIOD_S, 5).
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
@@ -60,5 +70,8 @@ init([]) ->
     Login = #{id => erx_login, start => {erx_login, start_link, []},
               restart => permanent, shutdown => 5000, type => worker,
               modules => [erx_login]},
-    {ok, {#{strategy => one_for_one, auto_shutdown => any_significant},
-          [Coordinator, Machine, Pci, Login, Service, Dev]}}.
+    Children = [Coordinator, Machine, Pci, Login, Service, Dev],
+    Permanent = length([Child || #{restart := permanent} = Child <- Children]),
+    {ok, {#{strategy => one_for_one, auto_shutdown => any_significant,
+            intensity => Permanent, period => ?PERIOD_S},
+          Children}}.

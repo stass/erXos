@@ -2672,7 +2672,8 @@ module Erx
       # login_grant is served by the system domain, whose login service checks what a front
       # end forwards, so no configured domain serves the login interface and receives a
       # person's passphrase or key as a login. Each grant of one goes to a configured domain LOGIN_HOLDERS names, at most one
-      # row a holder, with exactly its entry's line, operations and logins: no row on the
+      # row a holder, with exactly its entry's line, operations and logins and the
+      # interface's max_request and in_flight: no row on the
       # system domain, a session template, the Bluetooth domain or any other domain. The
       # entries' lines are served_by session interfaces, so no rule checks line against
       # ?ERX_LINES. facets, values and operations are parallel arrays: each facet row, its
@@ -2686,8 +2687,9 @@ module Erx
           next unless checked.call(service)
 
           holder = fetch_login_holder(row, tables)
-          check_login_row("login grant #{row.fetch('name')} to domain #{holder}", holder, given,
-                          login_operation_names(service, numbers))
+          named = "login grant #{row.fetch('name')} to domain #{holder}"
+          check_login_row(named, holder, given, login_operation_names(service, numbers))
+          check_login_quantities(named, row, service)
           holder
         end
         twice = holders.tally.find { |_holder, count| count > 1 }
@@ -2725,6 +2727,18 @@ module Erx
         invalid("#{named} lists #{extra.join(', ')}, which #{holder}'s login row does not", 'facet.operations') unless extra.empty?
         missing = entry.operations - names
         invalid("#{named} omits #{missing.join(', ')}, which #{holder}'s login row lists", 'facet.operations') unless missing.empty?
+      end
+
+      # A login row's max_request and in_flight against the login interface's quantities
+      # (abi/services/login.txt): the largest request, a login_key, fits one request, and a
+      # front end has no more requests outstanding than the interface sizes the service's
+      # queue for.
+      def check_login_quantities(named, row, service)
+        declared = derived_quantities(service.fetch('interface'), service.fetch('name'))
+        %w[max_request in_flight].each do |field|
+          invalid("#{named} has #{field} #{row.fetch(field)}, where the login interface's is #{declared.fetch(field)}",
+                  "facet.#{field}") unless row.fetch(field) == declared.fetch(field)
+        end
       end
 
       # A line grant's device by its role: a UART's grant states rate, which its

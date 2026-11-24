@@ -22,6 +22,7 @@ module ErxLoginFacetFuzz
   # The generated header named here is in build/gen.
   Erx::Generated.ensure(root: ROOT)
   FACET = 'erlang/apps/erx_domain/src/erx_login_facet.erl'
+  IDENT = 'erlang/apps/erx_domain/src/erx_ident.erl'
   HEADER = 'erlang/apps/erx/include'
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   TARGET = 'test/erlang/erx_login_facet_fuzz.erl'
@@ -64,7 +65,7 @@ module ErxLoginFacetFuzz
       decoder_path = File.join(work, 'erx_login_facet.erl')
       File.binwrite(decoder_path, decoder_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-I', File.join(ROOT, HEADER), '-o', work, decoder_path,
-                                       File.join(ROOT, TARGET), stdin_data: '')
+                                       File.join(ROOT, IDENT), File.join(ROOT, TARGET), stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

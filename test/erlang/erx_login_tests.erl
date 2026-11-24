@@ -160,6 +160,16 @@ a_crash_holding_a_passphrase_logs_none_of_it_test_() ->
         [?assertEqual(nomatch, binary:match(Text, ?SENTINEL)) || Text <- Logged]
     end).
 
+%% The login service's crash restarts it alone (docs/design-system.md, "System services"):
+%% its supervisor allows within one period a restart of each of its permanent children, so
+%% a crash of the service and one of the PCIe process, /dev or the machine tree in the same
+%% period end neither the supervisor nor the system domain.
+each_permanent_child_restarts_once_within_the_period_test() ->
+    {ok, {Flags, Children}} = erx_domain_sup:init([]),
+    Permanent = [Id || #{id := Id, restart := permanent} <- Children],
+    ?assert(lists:member(erx_login, Permanent)),
+    ?assert(maps:get(intensity, Flags, 1) >= length(Permanent)).
+
 log(#{msg := Msg} = Event, #{config := Pid}) ->
     Text = case Msg of
                {report, Report} -> io_lib:format("~tp ~tp", [Report, maps:get(meta, Event)]);

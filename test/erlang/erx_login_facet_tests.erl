@@ -121,6 +121,16 @@ connection() -> spawn(fun() -> receive after infinity -> ok end end).
 
 %% The row's line reaches the service as the name of ?ERX_LINES its text is, which a
 %% login mints, and a text that names no line starts no facet.
+%% A user name is a principal's name, a system identifier (docs/design-system.md,
+%% "Identifiers"): every name a principal may have decodes, a digit or a hyphen in it
+%% included, and nothing else does.
+a_user_name_is_a_system_identifier_test() ->
+    Login = fun(User) -> erx_login_facet:decode({login_passphrase, User, <<"pass">>, <<>>}) end,
+    Longest = binary:copy(<<"a">>, 63),
+    [?assertMatch({ok, _}, Login(User)) || User <- [<<"root">>, <<"my-app">>, <<"9lives">>, Longest]],
+    [?assertEqual({error, badarg}, Login(User))
+     || User <- [<<>>, <<"Root">>, <<"-x">>, <<"_x">>, <<"a.b">>, <<"a b">>, <<Longest/binary, "a">>, root]].
+
 the_grant_s_line_is_the_row_s_test_() ->
     with(fun(Login) ->
         Facet = facet(Login, #{line => <<"web_line">>}),

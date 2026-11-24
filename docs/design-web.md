@@ -984,6 +984,7 @@ web's development paths in release builds
 | a connection process or cowboy crashes | the web domain's supervisor | the browser's WebSocket closes; its views go stale | the client reconnects and reopens its views but `trace`; lines and logins live under a separate supervisor and keep their cookies and UIs |
 | the host link is busy, retrying or down | the host tool's calls fail or time out | every WebSocket closes with 1011; views go stale | the tool's session recovers as [the host link](design-live.md#the-host-link) describes; the client reconnects |
 | the web domain ends | the system domain | every view goes stale; the login facet ends and the sessions its logins started end, their UIs with them; `root`'s session runs on and keeps its UIs, which no browser shows until one attaches again | the domain restarts under its manifest policy; browsers log in again; the host tool reopens `web` |
+| the login service crashes | the login facet ends, with an atom | the web domain takes the facet's end as its own and ends, as in the row above: the sessions its logins started have stopped with the facet | the domain restarts under its manifest policy with a new login facet; browsers log in again |
 | a protocol error from the browser | `erx_web_proto` or the core's view rules | `bye protocol`, the connection closes, counted | the client reloads |
 
 Every refusal and every count (protocol errors, dropped events, busy

@@ -1750,9 +1750,9 @@ class ManifestDomainsTest < Minitest::Test
 
   # A login facet row named name to grantee, a manifest token (system, @domain.NAME or
   # @session.PRINCIPAL), listing operations, minting line and allowing logins.
-  def login_grant(name, grantee:, operations:, line:, logins:)
+  def login_grant(name, grantee:, operations:, line:, logins:, max_request: 131_072, in_flight: 8)
     "facet #{name}\n  grantee #{grantee}\n  service @service.login\n  operations #{operations}\n" \
-      "  max_request 131072\n  in_flight 8\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n" \
+      "  max_request #{max_request}\n  in_flight #{in_flight}\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n" \
       "  parameter line \"#{line}\"\n  parameter logins #{logins}\n"
   end
 
@@ -1795,6 +1795,11 @@ class ManifestDomainsTest < Minitest::Test
         /login grant lg to domain web lists cookie, which web's login row does not/,
       ['facet.operations', with_login + ssh.call(operations: 'key_ok,login_key,login_passphrase')] =>
         /login grant lg to domain ssh omits cookie, which ssh's login row lists/,
+      ['facet.max_request', with_login + web.call(max_request: 131_073)] =>
+        /login grant lg to domain web has max_request 131073, where the login interface's is 131072/,
+      ['facet.max_request', with_login + ssh.call(max_request: 65_536)] => /has max_request 65536, where the login interface's is 131072/,
+      ['facet.in_flight', with_login + web.call(in_flight: 9)] => /has in_flight 9, where the login interface's is 8/,
+      ['facet.in_flight', with_login + ssh.call(in_flight: 1)] => /has in_flight 1, where the login interface's is 8/,
       ['facet.grantee', with_login + login_grant('lga', **WEB_LOGIN) + login_grant('lgb', **WEB_LOGIN)] =>
         /domain web holds more than one login grant/
     }.each do |(field, source), message|

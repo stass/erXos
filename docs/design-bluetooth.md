@@ -2287,7 +2287,11 @@ two grants and nothing else, which the manifest check holds it to: the
 `ble` facet with `services` naming `console` alone, and the login facet
 with `line` `tty_line`, `logins` 8 and the one operation
 `login_passphrase` ([Who holds it](design-login.md#who-holds-it)). The
-Bluetooth domain holds no login facet. For each phone:
+Bluetooth domain holds no login facet. `btconsole` takes its login
+facet's end, which a crash of the login service brings, as its own end:
+the domain ends, and with it every phone's console process, and the
+manifest restarts it with a new facet
+([Failure handling](design-login.md#failure-handling)). For each phone:
 
 * **One process per phone.** The first write of a `Conn` starts the
   phone's **console process**, which owns everything of that phone: its
@@ -2305,8 +2309,9 @@ Bluetooth domain holds no login facet. For each phone:
   returns the bytes to send and, at a line's end, the name or the
   passphrase: it sends `login: `, takes bytes up to a CR, an LF or a
   CR LF, echoing them; then `Password:`, taking bytes without echo. The
-  bounds are the login facet's own, from `erx_login.hrl`, a name of the
-  principal-name alphabet up to 32 bytes and a passphrase up to 1,024
+  bounds are the login facet's own: a name that is a system identifier
+  ([design-system.md](design-system.md#identifiers)) and a passphrase up
+  to 1,024 bytes, from `erx_login.hrl`
   ([Operations](design-login.md#operations)). A longer line, a NUL or a
   byte outside the alphabet in the name is a failed attempt, without
   asking the facet: the core discards the rest of the line, keeping

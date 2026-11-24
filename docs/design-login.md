@@ -119,7 +119,11 @@ Each requirement that would otherwise be a rule of its own follows:
   stops every session started through it, so a front end's domain that
   ends, and a login service that crashes, stop every session their
   logins started, and the line's facet, whose opening is the login
-  facet, ends with them.
+  facet, ends with them. A front end takes its login facet's end as
+  its own end, so the manifest restarts its domain within the row's
+  intensity, and the restarted domain is granted a new facet in front
+  of the restarted service: the recovery that exists for any domain's
+  end, with no reconnection protocol of its own.
 
 The login service still keeps a table of logins, keyed by owner, which
 it monitors. The table is bookkeeping for the bounds and the cookie, not
@@ -177,7 +181,8 @@ row lists, and any other is refused `eperm` before the callback sees it
 
 The manifest check holds the facet to that table, as an allow-list: it
 refuses a `login` row on any other domain, a row whose `line`, operations or
-`logins` differ from its holder's, and more than one row per holder.
+`logins` differ from its holder's, a row whose `max_request` or `in_flight`
+differs from the interface's (below), and more than one row per holder.
 The Bluetooth domain is not on it: it parses what anyone in range sends
 and holds only its radio grants.
 `tty_line` is the session line [design-system.md](design-system.md#a-sessions-lines)
@@ -213,7 +218,9 @@ with its reason; a line the session does not mint answers
 `unavailable`, and the service stops the session.
 
 Arguments are bounded where the facet decodes them, before any check:
-`User` is 1 to 32 bytes of the principal-name alphabet, `Passphrase` 1 to
+`User` is a principal's name, a system identifier, which `erx_ident:new/1`
+alone checks ([design-system.md](design-system.md#identifiers)), so every
+principal the manifest admits can be named at a login; `Passphrase` 1 to
 1,024 bytes, `Peer` at most 64 bytes, kept only for the terminal counter
 and the log, through the log's escaping; SSH's blobs and exchange input
 are `erx_ssh_wire`'s ([design-ssh.md](design-ssh.md#logging-in), S3).
@@ -401,7 +408,7 @@ supplies.
 | --- | --- | --- | --- |
 | a front end's connection process ends | the domain service's monitor of the owner; the login service's of the row | its session stops, the line's facet and ttys with it; its row goes | the person connects again |
 | a front end's domain ends | the facet's grantee | the facet ends; every session started through it stops by its `ends_with`; the owners' rows go with the owners | the manifest restarts the domain |
-| the login service crashes | its supervisor in the system domain | every login facet ends with it, with an atom; every session started through them stops; the table is rebuilt empty | front ends reconnect; a lost cookie fails only the login in progress |
+| the login service crashes | its supervisor in the system domain | every login facet ends with it, with an atom; every session started through them stops; the table is rebuilt empty | each front end takes its facet's end as its own and ends; the manifest restarts its domain, which is granted a new facet; the service's supervisor restarts it within an intensity of its own (design-system.md, "System services"); a lost cookie fails only the login in progress |
 | the login service crashes while a start is in flight | the domain service's monitor of the facet | the start is refused or its session stopped | as above |
 | the checker is unavailable | its answer | `unavailable` | the person tries later |
 | a session start or a line mint fails | its answer | `unavailable`, logged with its reason; a started session stopped | none needed |
@@ -457,7 +464,9 @@ ran the code it names.
 | passphrase (QEMU, with a checker) | the right passphrase opens a session; a wrong one and an unknown name answer `no_match`; the sixth failure in 60 s answers `limited` | the checker's answer ignored, so a wrong passphrase opens a session |
 | no checker (host) | `login_passphrase` answers `unavailable` | a missing checker read as a match |
 | bounds and fuzz (host) | `admit/3` refuses each argument one past its bound and returns on every input of the fuzz target | one bound removed |
-| manifest check (host) | a `login` row on another domain, the Bluetooth domain included, with another `line`, or with another operation list is refused | the allow-list rule removed |
+| manifest check (host) | a `login` row on another domain, the Bluetooth domain included, with another `line`, another operation list, or another `max_request` or `in_flight` is refused | the allow-list rule removed; the quantities' rule removed |
+| user name (host) | every system identifier decodes, a digit, a hyphen and 63 bytes included; an uppercase letter, a leading `-` or `_`, a `.`, a space, 64 bytes and a non-binary are `badarg` | the facet checking a name of its own instead of `erx_ident:new/1` |
+| supervision (host) | the domain service's supervisor allows a restart of each permanent child, the login service among them, within one period | the intensity left at OTP's default of 1 |
 
 ## Interfaces
 

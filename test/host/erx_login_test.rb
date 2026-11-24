@@ -25,6 +25,7 @@ class ErxLoginTest < Minitest::Test
   SERVICE = 'erlang/apps/erx_domain/src/erx_login.erl'
   FACET = 'erlang/apps/erx_domain/src/erx_login_facet.erl'
   BEHAVIOUR = 'erlang/apps/erx/src/erx_facet.erl'
+  SUPERVISOR = 'erlang/apps/erx_domain/src/erx_domain_sup.erl'
 
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
@@ -62,7 +63,13 @@ class ErxLoginTest < Minitest::Test
     Seed.new(fault: "erx:call_from/3's domain check removed", path: BEHAVIOUR,
              anchor: 'erx:call_from(Grantee, From, fun Exports:owner/1) of',
              replacement: '(erx:call_from(Grantee, From, fun Exports:owner/1) orelse true) of',
-             catching_case: 'a_forged_caller_reaches_no_row_test_')
+             catching_case: 'a_forged_caller_reaches_no_row_test_'),
+    Seed.new(fault: "the supervisor's intensity left at OTP's default", path: SUPERVISOR,
+             anchor: 'intensity => Permanent, period => ?PERIOD_S}', replacement: 'period => ?PERIOD_S}',
+             catching_case: 'each_permanent_child_restarts_once_within_the_period_test'),
+    Seed.new(fault: 'a user name checked by an alphabet of its own', path: FACET,
+             anchor: 'case erx_ident:new(User) of', replacement: 'case erx_ident:new(<<"a">>) of',
+             catching_case: 'a_user_name_is_a_system_identifier_test')
   ].freeze
 
   def test_the_cases_pass

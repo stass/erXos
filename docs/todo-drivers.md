@@ -475,9 +475,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   (design-files.md, "Narrowing for a program"), and that a program started from the
   system shell does not inherit the control tree; `erx_devfs:start_link/0` unmounts
   whatever is at `/dev` before it mounts.
-* [Medium] devices, `erx_devfs`: it is a permanent child of `erx_domain_sup` (default
-  intensity, 1 restart in 5 s), so a bug that crashes the `/dev` grant twice within 5 s
-  ends the system domain and resets the machine. Move it under a supervisor whose end
+* [Medium] devices, `erx_devfs`: it is a permanent child of `erx_domain_sup`, whose
+  intensity is one restart per permanent child within 5 s, shared by all of them, so a
+  bug that crashes the `/dev` grant in a loop ends the system domain and resets the machine. Move it under a supervisor whose end
   the domain service survives, when the device service gets its own.
 * [Low] devices, `erx_devfs`, `/dev`'s ctl writes: the facet call is the control tree's bounded work, with
   `erx_driver_ctl`'s 30 s deadline as the bound its grant may stop for (design-system.md, "The `/dev`

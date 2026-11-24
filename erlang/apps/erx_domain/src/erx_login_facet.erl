@@ -16,8 +16,8 @@ bounds, before the service sees it:
 * `{login_key, User, Exchange, Alg, KeyBlob, Sig, Peer}`;
 * `{login_passphrase, User, Passphrase, Peer}`.
 
-User is 1 to login_user_max bytes of the principal-name alphabet, a lowercase
-letter, then lowercase letters, digits and underscores; Passphrase 1 to
+User is a principal's name, a system identifier, which erx_ident:new/1 alone
+checks (docs/design-system.md, "Identifiers"); Passphrase 1 to
 login_passphrase_max bytes; Peer at most login_peer_max bytes; Alg, KeyBlob
 and Sig 1 to login_blob_max bytes and Exchange 1 to login_exchange_max, whose
 layouts erx_ssh_wire checks (docs/design-ssh.md, S3). Anything else is
@@ -67,22 +67,11 @@ decode({login_passphrase, User, Passphrase, Peer} = Request)
 decode(_Request) ->
     {error, badarg}.
 
-user(User, Request) when ?IS_LOGIN_USER_SIZE(User) ->
-    case name(User) of
-        true -> {ok, Request};
-        false -> {error, badarg}
-    end;
-user(_User, _Request) ->
-    {error, badarg}.
-
-%% The principal-name alphabet: a lowercase letter, then lowercase letters, digits
-%% and underscores.
-name(<<First, Rest/binary>>) when First >= $a, First =< $z -> name_rest(Rest);
-name(_User) -> false.
-
-name_rest(<<C, Rest/binary>>) when C >= $a, C =< $z; C >= $0, C =< $9; C =:= $_ -> name_rest(Rest);
-name_rest(<<>>) -> true;
-name_rest(_Rest) -> false.
+user(User, Request) ->
+    case erx_ident:new(User) of
+        {error, bad_identifier} -> {error, badarg};
+        _Ident -> {ok, Request}
+    end.
 
 -doc "The operation of a request decode/1 admits; error for any other term.".
 -spec operation(term()) -> {ok, cookie | key_ok | login_key | login_passphrase} | error.
