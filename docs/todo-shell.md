@@ -772,32 +772,28 @@ to the corpus and follow rc
   without end. Build the rest of edit 73 with its tests, beside
   `test/host/edlin_lost_test.rb`.
 * [High] shell and console, the input-loss event ([design-live.md](design-live.md#lost-input), edits 73, 80
-  and 81 of [design-runtime.md](design-runtime.md)): a line that lost input can still run today. A
-  character `edlin`'s bounds drop is lost silently, and a loss reaches a session's tty from the console only
-  as a NUL byte; and the system console pushes input into a group that may not read, with no bound.
-  The console's drivers, and only they, send `erx_console_lost` in order with their bytes and keep one input message
-  outstanding until `erx_console_taken` (`erx_uart_input`), which `erx_console` answers at once, handing the
-  group a loss as NUL, which `edlin` now reads as any NUL, a key bound to nothing, so until step 4 lands a
-  console's loss is dropped unmarked: steps 4 and 5 land together. `erx_tty` holds its input as units
-  of bytes and losses (`lost/1`, `read_input/2`, `flushed_loss`), every master numbers `tty_input` and `tty_lost`,
-  `erx_tty_link` takes a gap as a loss, the relay serves `tty_read_input` and sends `lost` only while the
-  console holds, and a cooked edit that removes no byte keeps the line's loss; `erx_console` does not yet call
-  `erx_tty_master:lost/1` or read with `tty_read_input`, and drops `lost` in its event catch-all, which step 4
-  replaces. Build the rest of the design's event in steps, each with its rows of the design's verification table:
-  4. `erx_console`: both roles read on demand, the system role from its own `erx_tty` with a terminal's or a
-     pipe's settings as `Terminal` says, deleting `input/2` and the push; the console answers a terminal's input
-     at once and a pipe's once there is room; a loss, and the relay's `lost` event, damage the group's read, and a
-     loss drops a cut character and resets `erx_console_keys`; every `erx_tty_event` is handled by name, with no
-     catch-all, and the system console takes its own tty's signals and `flushed_loss` through the same handler,
-     with one action-to-event mapping, the relay core's `event_name/1` and `lost`, exported rather than
-     copied. `group` takes the
-     ask's answer `{read, Ref, lost}`, which the console's one function that damages a group's read sends;
-  5. `edlin`: a character edit 73's bounds refuse damages the read, once those bounds are built (`edlin.erl`
-     has none). The rest of step 5 is built: the damage in each request (`edlin:edit_line/3`, `group`'s
-     `lose/1`, `pop_state/2` and `fail/3`), the kill buffer keeping the damage, the NUL rule, the hold and the NUL scan deleted, dumb mode, and
-     `test/host/edlin_lost_test.rb`. `group`'s history rule is kept, keyed on the damage rather than on a NUL:
-     without it a damaged line left by Up comes back by Down after the recalled line was emptied, which ended
-     the damage, and runs (edit 81 of design-runtime.md).
+  and 81 of [design-runtime.md](design-runtime.md)): a character `edlin`'s bounds drop is lost silently,
+  since `edlin.erl` has none of edit 73's bounds yet. The rest of the design's event is built: the drivers'
+  placement and their one input message outstanding, `erx_tty`'s units, numbered master input,
+  `erx_tty_link`'s gaps, the relay's `lost` event, both consoles reading on demand (a session's its relay's
+  tty, the system console an `erx_tty` of its own with a terminal's or a pipe's settings as `Terminal`
+  says), the damage in each request of `group` and `edlin`, the kill buffer keeping the damage, and
+  `group`'s history rule keyed on the damage. What remains, each with its rows of the design's
+  verification table:
+  * `edlin`: a character edit 73's bounds refuse damages the read, once those bounds are built, beside
+    `test/host/edlin_lost_test.rb`;
+  * the rows not yet written: the hosted-mode cases (a 64 KiB script piped into `erx_stdio`, `Ctrl-C`
+    through 8 KiB typed ahead at an Erlang shell, `erx_stdio` serving 64 KiB of output while it waits for
+    `erx_console_taken`), and in `erx_console_master_tests` the terminal's CR, LF and CR LF and a group
+    that asks nothing while 10 KiB, a loss and more arrive.
+* [Medium] trace, what a frame trace carries ([design-live.md](design-live.md#tracing) "Frames",
+  [design-domains.md](design-domains.md)'s inspection section): the frame record's `Bytes` is not defined,
+  and the two documents give the record different fields (`{frame, Peer, To, Operation, Bytes, Outcome}`
+  and `{frame, From, To, Operation, Bytes}`). If it were the payload, a frame tracer in the system domain
+  would get every cross-domain message's contents, typed text a session's line carries among them.
+  Nothing builds the record yet (`erx_trace` takes only a `frames` flag). Define `Bytes` as the frame's
+  size, as the connection counters count bytes, in one record both documents cite, before the frame trace
+  is built.
 * [Medium] sys, typed text in a group's status (`otp/lib/stdlib/src/sys.erl`, `get_status/5`): with
   `sys:log` on, `sys:get_status` returns the raw sys debug list, which holds the group's events with what
   was typed. Let one function of `gen` decide for the calling process whether it hides its terms, for both
