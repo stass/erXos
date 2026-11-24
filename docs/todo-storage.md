@@ -15,7 +15,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      service and its mount point in `erx_ns`. The two limits are step 3's.
   2. The whole-medium window. `erx_blk_drive`, the drive grant, and USB's block service (the transport
      and its one window over the medium, ended through the engine when a grant is asked again) are
-     built. What remains, as four packages in this order:
+     built. What remains, as three packages in this order:
      1. Drive records ([design-fiasco.md](design-fiasco.md#drive-records)): the domain library writes
         `-erx_record drive ROLE N` for each drive window on a device a configured domain holds
         (`dom_boot_view.c` hangs them on their devices, `dom_args.c` writes them beside the device records,
@@ -23,15 +23,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
         them, joining `tools/fuzz/erx_device_record.rb`; the manifest check refuses a drive on any
         device the system domain holds, not only a block device. The host tests and seeds are that
         section's, and the check's clause gets a seeded manifest.
-     2. USB's drives: `erx_usb_places_sup` reads its `usb` drives at its start and starts one
-        `erx_blk_drive` for each; a ready medium takes the lowest free with an `occupy_drive/2` that
-        works as `occupy_input/2` does, and frees it when its medium ends; `erx_usb_bot` starts each
-        transport with its drive's grant, and a medium finding every drive taken, or the records
-        refused, shows `no drive`. Its property test runs beside `erx_usb_places_prop`'s, seeded with
-        a number not freed at a medium's end. Handing the media domain each grant is the device
-        service's introduction, which lands with step 4's media domain rows. The same package adds
-        the test of `erx_usb_bot`'s own `end_medium` clause, which only the engine's tests cover.
-     3. The medium reference on `erx_blk_virtio`, USB's rule
+     2. The medium reference on `erx_blk_virtio`, USB's rule
         ([design-drives.md](design-drives.md#a-drive-and-its-medium)): the device process takes a fresh
         reference for each block service it starts over a drive; every request of the drive's window
         carries it; the process checks it at the head of its queue, and the step that ends it answers
@@ -48,7 +40,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
         drive holds its end, its old window and the grant's held asks until its driver is restarted,
         each holder's ask giving up at the grant's 60 s. The same bound bounds the held asks: they
         are those of holders that restarted during one end, each answered at the window's end.
-     4. `erx_blk` serving a `block` device's medium as a drive: `erx_blk_service` reads its `block`
+     3. `erx_blk` serving a `block` device's medium as a drive: `erx_blk_service` reads its `block`
         drive; with one it starts the grant and one window of role `drive` over the whole medium and
         reads no table; with none it reads the layout; on a refusal it serves no window and logs why.
         Host tests over a fake device for each of the three, seeded with a service that reads the
