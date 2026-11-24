@@ -393,7 +393,10 @@ packs from the tree as the kiosk suite does (`ImageApps.packed`)
 and the row binds by its header's hash. A development card carries a
 second, the Bluetooth echo, `examples/echo`, enabled, packed the same
 way (`ProductionImage.own_examples`;
-[design-bluetooth.md](design-bluetooth.md#decisions), decision 7).
+[design-bluetooth.md](design-bluetooth.md#decisions), decision 7), and
+the published card's row offers no `ble` and no `gatt`, which its build
+takes out of the board's row since the kiosk handles no GATT service
+(`ProductionImage.medium_manifest`).
 Until a release signer exists a card carries no signer row and no
 development key, so it trusts its packages by their hashes and no key, and no downloaded card ever trusts
 its builder's development key: the build refuses a card whose admitted
@@ -2655,8 +2658,9 @@ Decisions:
 11. **Both development manifests carry an `apps` row**, sized as
     [The shipped manifests](#the-apps-row) says; the website's image
     carries none, and the Raspberry Pi 4's published card carries the
-    kiosk alone and its development card the kiosk and the Bluetooth
-    echo, each trusted by its hash, and trusts no key until a release signer exists.
+    kiosk alone, with an `apps` row that offers no `ble`, and its
+    development card the kiosk and the Bluetooth echo, each trusted by
+    its hash, and trusts no key until a release signer exists.
 12. **A native app starts through `erx_prog_handler`'s `window`
     option**, and the handler's start returns a monitor whose `'DOWN'`
     is the program's one end report, so no second launcher and no second

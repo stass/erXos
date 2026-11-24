@@ -1195,6 +1195,17 @@ class ManifestCheckTest < Minitest::Test
     pi_source.sub(row, pi_unit('framebuffer', 'system'))
   end
 
+  # The published card's manifest (ProductionImage.medium_manifest): the Pi's with an apps
+  # row that offers no ble, so the Bluetooth domain serves ble and no row grants it
+  # (docs/design-bluetooth.md, decision 7).
+  def test_the_pi_manifest_without_ble_is_admitted
+    view = @codec.open('manifest', admit(Erx::Manifest::Edit.without_ble(pi_shipped), pi_context).bytes)
+    rows = ->(table) { view.count(table).times.map { |index| view.fetch(table, index) } }
+    ble = rows.call('services').index { |row| view.string(row.fetch('name')) == 'ble' }
+    refute_nil ble, 'the Bluetooth domain serves ble'
+    assert_empty rows.call('facets').select { |row| row.fetch('service') == ble }
+  end
+
   # The clock rule (docs/design-header-io.md, "Clocks"): BSC1 and SPI0 divide the core
   # clock, which their rows carry as the PL011s carry theirs, so a manifest placing the
   # i2c and spi units is accepted.

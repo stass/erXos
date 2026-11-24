@@ -294,6 +294,25 @@ class ProductionImageTest < Minitest::Test
     end
   end
 
+  # The manifest each medium is built from (medium_manifest): the board's own, except the
+  # published card's, whose apps row offers no ble and no gatt, since the kiosk it carries
+  # alone handles no GATT service (docs/design-bluetooth.md, decision 7); the development
+  # card's keeps both for the echo.
+  def test_the_published_card_offers_no_ble
+    pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
+    offered = lambda do |platform, kind|
+      apps = Erx::Manifest::Frontend.read(Erx::ProductionImage.medium_manifest(kind, platform, root: ROOT)).records.fetch('apps').first
+      [apps.properties.fetch('services').map(&:value).include?('ble'), apps.properties.fetch('gatt', []).map(&:value)]
+    end
+    { [pi, KIND.published] => [false, []], [pi, KIND.development] => [true, %w[nus]],
+      [PLATFORM, KIND.published] => [false, []], [PLATFORM, KIND.development] => [false, []] }.each do |(platform, kind), offer|
+      assert_equal offer, offered.call(platform, kind), "#{platform.name}'s #{kind.name} medium"
+    end
+    [PLATFORM, pi].each do |platform|
+      assert_equal platform.manifest_source(ROOT), Erx::ProductionImage.medium_manifest(KIND.development, platform, root: ROOT)
+    end
+  end
+
   # The development card's own packages: the kiosk, examples/dashboard, and the echo,
   # examples/echo, packed as the kiosk suite and the Bluetooth suite pack them, each
   # enabled, with no signer row and no --local, so the card trusts each package by its

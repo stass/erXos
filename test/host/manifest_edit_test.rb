@@ -220,6 +220,18 @@ class ManifestEditTest < Minitest::Test
     assert_raises(Erx::Error) { Edit.with_unit(gone, 'absent', holder: 'system', units: UNITS) }
   end
 
+  # without_ble undoes offering: ble leaves the row's services, its gatt goes with it, and
+  # max_connections gives back the connection each of the row's max apps made to the
+  # Bluetooth domain; nothing else changes. A row that offers no ble is refused.
+  def test_without_ble_takes_ble_and_its_gatt_out_of_the_apps_row
+    offered = Edit.offering(SOURCE, service: 'ble', gatt: %w[nus])
+    gone = Edit.without_ble(offered)
+    assert_equal records(SOURCE), records(gone)
+    assert_nil Frontend.read(gone).records.fetch('apps').first.properties['gatt']
+    error = assert_raises(Erx::Error) { Edit.without_ble(SOURCE) }
+    assert_equal "the manifest's apps row offers no ble", error.message
+  end
+
   # The apps row taken out gives back its memory in root_memory, its max apps in
   # max_domains and, in max_connections, each app's system connection, its packages
   # connection and one for each service of the row, and nothing else changes; a
