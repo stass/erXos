@@ -56,11 +56,12 @@ typedef struct apply {
 	uint64_t		 release_addr;	/* where it sees its release slice */
 	apply_give_t		 gives[ERX_DOM_GIVES_MAX];	/* plan->gives, give for give */
 	/*
-	 * The boot page's -erx_record given record of each device, -erx_record boot, -erx_record build
-	 * and -erx_record system_image.
+	 * The boot page's -erx_record given record of each device, -erx_record drive of each drive,
+	 * -erx_record boot, -erx_record build and -erx_record system_image.
 	 */
 	char			 given_words[ERX_DOM_DEVICES_MAX][ERX_BOOT_GIVEN_WORDS_MAX > ERX_BOOT_FUNCTION_WORDS_MAX ?
 				     ERX_BOOT_GIVEN_WORDS_MAX : ERX_BOOT_FUNCTION_WORDS_MAX];
+	char			 drive_words[ERX_DOM_DRIVES_MAX][ERX_BOOT_DRIVE_WORDS_MAX];
 	char			 pair_words[ERX_BOOT_PAIR_WORDS_MAX];
 	char			 build_words[ERX_BOOT_BUILD_WORDS_MAX];
 	char			 system_image_words[ERX_BOOT_SYSTEM_IMAGE_WORDS_MAX];
@@ -656,18 +657,21 @@ apply_unrecorded(const erx_dom_device_entry_t *entry)
 }
 
 /*
- * The boot page's arguments into words, which holds 4 + ERX_DOM_DEVICES_MAX
- * runs:
+ * The boot page's arguments into words, which holds 4 + ERX_DOM_DEVICES_MAX +
+ * ERX_DOM_DRIVES_MAX runs:
  * - the specification's own;
  * - -erx_record build with the boot image's build identifier;
  * - a -erx_record given or -erx_record framebuffer record per device of the
  *   gives that has one;
+ * - for a configured domain, a -erx_record drive record per drive on its
+ *   devices, which are its gives' (boot_drives collects them);
  * - for a holder of a block device of a kind, -erx_record boot with the
  *   boot's pair;
  * - for the configured row that holds the system window alone
  *   (boot_system_image), -erx_record system_image from the manifest's
  *   system_image row, which the root's own page never carries.
- * The first four are as the root's own page carries them. A
+ * All but the drive and system_image records are as the root's own page
+ * carries them. A
  * device of no kind, which its give marks not driven
  * (erx_dom_entry_driven), is held with its unit and has no record, so no
  * driver opens it, as the root writes none
@@ -682,6 +686,7 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 	const erx_dom_spec_t *spec = &apply->plan->spec;
 	const erx_dom_unit_plan_t *give;
 	const erx_dom_device_entry_t *entry;
+	const erx_dom_configured_t *row;
 	size_t count = 0, length;
 	uint32_t record = 0;
 	bool block = false;
@@ -704,6 +709,14 @@ apply_args(apply_t *apply, erx_boot_words_t *words)
 			words[count++] = (erx_boot_words_t){ apply->given_words[record++], length };
 			block = block || entry->role == ERX_MF_DEVICE_ROLE_BLOCK;
 		}
+	}
+	row = spec->origin.kind == ERX_DOM_CONFIGURED ? &apply->lib->view.configured[spec->origin.record] : NULL;
+	for (uint32_t at = 0; row != NULL && at < row->ndrives; at++) {
+		length = erx_boot_drive_words(row->drives[at].role, row->drives[at].number, apply->drive_words[at],
+		    sizeof(apply->drive_words[at]));
+		if (length == 0)
+			return (0);
+		words[count++] = (erx_boot_words_t){ apply->drive_words[at], length };
 	}
 	if (block) {
 		length = erx_boot_pair_words(apply->lib->boot.value, apply->lib->boot.slot, apply->pair_words,
@@ -749,7 +762,7 @@ apply_bootinfo(apply_t *apply)
 	const erx_dom_plan_t *plan = apply->plan;
 	const erx_dom_spec_t *spec = &plan->spec;
 	const uint64_t page = apply->handles.made[ERX_DOM_OBJ_BOOTINFO];
-	erx_boot_words_t args[4 + ERX_DOM_DEVICES_MAX];
+	erx_boot_words_t args[4 + ERX_DOM_DEVICES_MAX + ERX_DOM_DRIVES_MAX];
 	const erx_boot_words_t env = { spec->strings + spec->args_len, spec->env_len };
 	char node[ERX_DOM_NODE_MAX], system_node[ERX_DOM_NODE_MAX];
 	erx_boot_inputs_t inputs = { 0 };

@@ -17,6 +17,7 @@ require_relative '../../tools/lib/erx/production_image'
 require_relative '../../tools/lib/erx/runner'
 require_relative '../../tools/lib/erx/system_domain'
 require_relative '../fixtures/abi_manifest_fixture'
+require_relative '../fixtures/dom_view_build'
 require_relative '../fixtures/generated_tree'
 require_relative '../fixtures/manifest_context'
 
@@ -54,16 +55,7 @@ class DomPlannerTest < Minitest::Test
 
     # The view driver with boot_view in dom_boot_view.c's place, for a seeded fault.
     def view_driver_from(boot_view, name:)
-      File.join(build_directory, name).tap do |output|
-        sources = [*%w[liberx/system/dom_core.c liberx/system/dom_life.c].map { |path| File.join(ROOT, path) }, boot_view,
-                   *%w[liberx/erx_lane.c liberx/backend/core/boot_manifest.c tools/host/input.c
-                       test/fixtures/dom_view_driver.c].map { |path| File.join(ROOT, path) }]
-        build_runner.run([ENV.fetch('ERX_CLANG', 'clang'), '-std=c17', '-D_DARWIN_C_SOURCE', '-Wall', '-Wextra', '-Werror',
-                          '-O1', *Erx::Generated.include_flags(root: ROOT), '-I', File.join(ROOT, 'include'),
-                          '-I', ROOT, '-I', File.join(ROOT, 'tools/host'), *sources,
-                          Erx::Generated.path('liberx/generated/abi_reader.c', root: ROOT), '-o', output],
-                         name: "#{name}-build", deadline: 120)
-      end
+      DomViewBuild.build(output: File.join(build_directory, name), runner: build_runner, name: name, boot_view: boot_view)
     end
 
     private

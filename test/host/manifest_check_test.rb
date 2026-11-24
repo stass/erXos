@@ -8,6 +8,8 @@ require_relative '../../tools/lib/erx/manifest'
 require_relative '../../tools/lib/erx/platform'
 require_relative '../../tools/lib/erx/medium_boot'
 require_relative '../../tools/lib/erx/pcie_domain'
+require_relative '../../tools/lib/erx/runner'
+require_relative '../fixtures/dom_view_build'
 require_relative '../fixtures/manifest_context'
 
 # Phase 1's manifest check (docs/design-fiasco.md): each kept property of
@@ -307,7 +309,7 @@ class ManifestCheckTest < Minitest::Test
   end
 
   def stick_row = usb_row('stick', role: 'usb', path: STICK, compatible: 'generic-xhci', base: 0xa004000, size: 0x1000,
-                                   line: 60, flags: hostile)
+                                   line: 90, flags: hostile)
 
   # The real platform with the units of units, each key's list of devices, in place of the
   # platform's own unit of that key (QEMU virt's ECAM bridge and qemu-xhci).
@@ -651,11 +653,12 @@ class ManifestCheckTest < Minitest::Test
   end
 
   # The block device of block_drive_source, a copy of the line unit's device as a block
-  # device with no DMA.
+  # device with no DMA, on a register page and an interrupt line of its own, since the
+  # domain library's boot view refuses devices of two units that share either.
   def extra_block_row
     @platform.fetch('units').find { |unit| unit.fetch('key') == 'line' }.fetch('devices').first
              .merge('path' => '/extra@0', 'placement_key' => 'extra', 'role' => 'block', 'dma' => 'none',
-                    'flags' => 0, 'dma_memory' => 0)
+                    'flags' => 0, 'dma_memory' => 0, 'base' => 0xa005000, 'line' => 91)
   end
 
   # media_source with a block device's drive, disk0, whose device's unit holder holds
@@ -669,7 +672,7 @@ class ManifestCheckTest < Minitest::Test
 
   # A second block device, /spare@0, its unit held by the storage domain, so a seed can
   # place a data window on it without naming the boot medium's partition again.
-  def spare_block_row = extra_block_row.merge('path' => '/spare@0', 'placement_key' => 'spare')
+  def spare_block_row = extra_block_row.merge('path' => '/spare@0', 'placement_key' => 'spare', 'base' => 0xa006000, 'line' => 92)
 
   SPARE_UNIT = "unit spare\n  placement \"spare\"\n  holder @domain.storage\n"
 
@@ -716,6 +719,47 @@ class ManifestCheckTest < Minitest::Test
   def test_a_usb_drive_on_the_system_domain_s_controller_is_refused
     usb_refused('unit.holder', /the device of drive disk0 is held by a configured domain/,
                 media_source(USB_HOLDERS.merge('stick' => 'system')) + drive_window('disk0'))
+  end
+
+  # The drive records of docs/design-fiasco.md, "Drive records", as the domain library's
+  # boot view collects them and each creation writes them (test/fixtures/dom_view_driver.c):
+  # two USB drives on one controller and a block drive give the network domain, which holds
+  # the controller, its two `usb` records and the disk domain
+  # its one `block` record, and the media domain, which holds the windows, and every other
+  # domain none. Seeded with a view keyed on the window's holder, which gives the media
+  # domain the records, and with ERX_BOOT_DRIVE_WORDS_MAX a byte short or long.
+  def test_a_drive_record_goes_to_the_holder_of_the_drive_s_device_alone
+    source, against = block_drive_source
+    view = @codec.open('manifest', admit(source + drive_window('disk3', name: 'first') + drive_window('disk1', name: 'second'), against).bytes)
+    row = ->(name) { packed_rows(view, 'domains').index { |domain| view.string(domain.fetch('name')) == name } }
+    expected = ["drive #{row.call('network')} usb 1", "drive #{row.call('network')} usb 3", "drive #{row.call('disk')} block 0"]
+    Dir.mktmpdir('drive-records-') do |work|
+      runner = Erx::Runner.new(owner_root: work, log_dir: File.join(work, 'logs'))
+      File.binwrite(manifest = File.join(work, 'manifest.bin'), view.bytes)
+      lines = lambda do |driver|
+        File.readlines(runner.run([driver, manifest], name: File.basename(driver), deadline: 30).fetch('log'), chomp: true)
+      end
+      driver = DomViewBuild.build(output: File.join(work, 'view'), runner: runner, name: 'view')
+      found = lines.call(driver)
+      assert_equal expected.sort, found.grep(/\Adrive /).sort, found.join("\n")
+      length, bound = found.grep(/\Adrive_bound /).first.split.drop(1)
+      assert_equal bound, length
+
+      boot_view = File.read(File.join(DomViewBuild::ROOT, 'liberx/system/dom_boot_view.c'))
+      File.write(keyed = File.join(work, 'dom_boot_view.c'), boot_view.sub('if (entry->row != index)', 'if (window.holder != index)'))
+      seeded = lines.call(DomViewBuild.build(output: File.join(work, 'keyed'), runner: runner, name: 'keyed', boot_view: keyed))
+      assert_equal [row.call('media')], seeded.grep(/\Adrive /).map { |line| line.split[1].to_i }.uniq
+
+      words = File.read(File.join(DomViewBuild::ROOT, 'include/erx/boot_words.h'))
+      { 'short' => '- 1u', 'long' => '+ 1u' }.each do |name, change|
+        FileUtils.mkdir_p(File.join(work, name, 'erx'))
+        File.write(File.join(work, name, 'erx/boot_words.h'), words.sub('sizeof("4294967294"))', "sizeof(\"4294967294\") #{change})"))
+        built = DomViewBuild.build(output: File.join(work, "bound-#{name}"), runner: runner, name: "bound-#{name}",
+                                   include: File.join(work, name))
+        length, bound = lines.call(built).grep(/\Adrive_bound /).first.split.drop(1)
+        refute_equal bound, length, "a bound one byte #{name} passed"
+      end
+    end
   end
 
   # The driver-control service a block drive's holder serves the system domain, as every

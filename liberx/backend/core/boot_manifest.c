@@ -912,6 +912,18 @@ erx_boot_system_image_words(const erx_mf_system_image_t *row, bool record_volume
 	return (0);
 }
 
+size_t
+erx_boot_drive_words(uint32_t role, uint32_t number, char *words, size_t capacity)
+{
+	size_t used = 0;
+
+	if ((role == ERX_MF_DEVICE_ROLE_USB || role == ERX_MF_DEVICE_ROLE_BLOCK) && number != ERX_MF_NONE &&
+	    word_put(words, capacity, &used, ERX_BOOT_RECORD_FLAG) && word_put(words, capacity, &used, "drive") &&
+	    word_put(words, capacity, &used, erx_mf_device_role_name(role)) && number_put(words, capacity, &used, number))
+		return (used);
+	return (0);
+}
+
 bool
 erx_boot_manifest_dma_total(const erx_manifest_view_t *view, uint64_t *total)
 {

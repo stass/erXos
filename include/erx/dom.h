@@ -573,6 +573,21 @@ typedef struct erx_dom_display {
 	uint32_t	palette;	/* ERX_MF_DISPLAY_PALETTE_LIGHT or _DARK */
 } erx_dom_display_t;
 
+/*
+ * A drive of a configured row (docs/design-fiasco.md, "Drive records"): a
+ * drive window on one of the row's devices, with that device's role,
+ * ERX_MF_DEVICE_ROLE_USB or _BLOCK, and the window's drive number, below
+ * ERX_MF_NONE. Each creation of the domain writes it as -erx_record drive
+ * ROLE N. A row has at most ERX_DOM_DRIVES_MAX, the manifest check's
+ * bound: usb_drives_max on a USB domain's controllers, and one for a block
+ * drive's holder, which holds that device alone.
+ */
+#define ERX_DOM_DRIVES_MAX	ERX_USB_DRIVES_MAX
+typedef struct erx_dom_drive {
+	uint32_t	role;
+	uint32_t	number;
+} erx_dom_drive_t;
+
 /* A checked configured-domain row of the system manifest. */
 typedef struct erx_dom_configured {
 	uint32_t	principal;
@@ -596,6 +611,9 @@ typedef struct erx_dom_configured {
 	const char	*args, *env;
 	uint32_t	args_len, env_len;
 	erx_dom_display_t display;
+	/* Its drives, in the window table's order (boot_drives). */
+	erx_dom_drive_t	drives[ERX_DOM_DRIVES_MAX];
+	uint32_t	ndrives;
 } erx_dom_configured_t;
 
 /*

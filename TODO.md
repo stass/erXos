@@ -77,7 +77,7 @@ goes to the document of the subsystem its component pointer names.
 * [liberx and the ABI](docs/todo-liberx.md#bugs-by-subsystem): liberx and its program layer, the ABI and its generators, the domain library.
   90 items (39 Medium, 51 Low).
 * [Domains and the system manifest](docs/todo-domains.md#bugs-by-subsystem): the domain service, domains, the code service, facets, the system manifest and its checks, the funnel.
-  60 items (1 High, 34 Medium, 25 Low).
+  61 items (1 High, 35 Medium, 25 Low).
 * [Network](docs/todo-network.md#bugs-by-subsystem): the network stack (`erx_net`), WiFi and HTTPS clients.
   63 items (2 High, 28 Medium, 33 Low).
 * [USB](docs/todo-usb.md#bugs-by-subsystem): the USB stack and its class drivers.

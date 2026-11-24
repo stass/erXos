@@ -88,13 +88,15 @@ static uint32_t	boot_bridges_count(const erx_manifest_view_t *);
 static bool	boot_is_bridge(const erx_mf_device_t *);
 static const char *boot_bridges(erx_dom_view_t *, const erx_manifest_view_t *, erx_dom_pci_bridge_t *);
 static const char *boot_firmware(erx_dom_view_t *, const erx_manifest_view_t *, erx_mf_firmware_request_t *);
-static bool	boot_strings_fit(uint64_t, uint64_t, uint32_t, bool, bool);
+static bool	boot_strings_fit(uint64_t, uint64_t, uint32_t, uint32_t, bool, bool);
 static bool	boot_env_names_display(const char *, uint32_t);
 static bool	boot_env_sets(const char *, uint32_t, const char *);
 static const char *boot_display(const erx_manifest_view_t *, uint32_t, const char *, uint32_t,
 		    erx_dom_display_t *);
 static const char *boot_places(erx_dom_configured_t *, uint32_t, const erx_manifest_view_t *);
 static const char *boot_system_image(erx_dom_lib_t *, const erx_manifest_view_t *);
+static const char *boot_drives(const erx_dom_view_t *, const erx_manifest_view_t *, uint32_t,
+		    erx_dom_configured_t *);
 static const char *boot_configured(erx_dom_view_t *, const erx_manifest_view_t *,
 		    erx_dom_configured_t *, uint32_t);
 static const char *boot_templates(erx_dom_view_t *, const erx_manifest_view_t *,
@@ -723,7 +725,8 @@ _Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a fr
  * Whether a domain's boot page's strings hold its arguments and
  * environment beside what the library writes there (docs/design-fiasco.md,
  * "Boot information"): its own node name and the system node's, -erx_record
- * build, a -erx_record given record per device of a kind it holds, and -erx_record boot when it holds a
+ * build, a -erx_record given record per device of a kind it holds, a -erx_record drive record per drive
+ * on its devices (boot_drives), -erx_record boot when it holds a
  * block device of a kind, and -erx_record system_image when it holds the system
  * window (system_image). The reserve takes each at its longest, so a row the view
  * admits never fails its creation for its strings: a node name at
@@ -733,10 +736,11 @@ _Static_assert(ERX_BOOT_FRAMEBUFFER_WORDS_MAX <= ERX_BOOT_GIVEN_WORDS_MAX, "a fr
  * constant.
  */
 static bool
-boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t records, bool block, bool system_image)
+boot_strings_fit(uint64_t args_len, uint64_t env_len, uint32_t records, uint32_t drives, bool block,
+    bool system_image)
 {
 	const uint64_t reserve = 2u * (uint64_t)ERX_DOM_NODE_MAX + ERX_BOOT_BUILD_WORDS_MAX +
-	    (uint64_t)records * ERX_BOOT_GIVEN_WORDS_MAX +
+	    (uint64_t)records * ERX_BOOT_GIVEN_WORDS_MAX + (uint64_t)drives * ERX_BOOT_DRIVE_WORDS_MAX +
 	    (block ? ERX_BOOT_PAIR_WORDS_MAX : 0) + (system_image ? ERX_BOOT_SYSTEM_IMAGE_WORDS_MAX : 0);
 
 	return (args_len + env_len + reserve <= ERX_BOOT_STRINGS_MAX);
@@ -889,11 +893,51 @@ boot_system_image(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest)
 }
 
 /*
+ * Sets row->drives to the drives of configured row index
+ * (docs/design-fiasco.md, "Drive records"): each drive window whose device
+ * lies on the row, so in one of the gives of the row's every creation, in
+ * the window table's order. It keys on the device's row, not the
+ * window's holder: the holder is the media domain, which learns a drive
+ * through its grant and gets no record. The manifest check holds each
+ * drive to a usb or block device and a number below mf_none, and a row to
+ * ERX_DOM_DRIVES_MAX drives; a manifest past those is refused here, so
+ * every record the row's creations write has its room.
+ */
+static const char *
+boot_drives(const erx_dom_view_t *view, const erx_manifest_view_t *manifest, uint32_t index,
+    erx_dom_configured_t *row)
+{
+	const erx_dom_device_entry_t *entry;
+	erx_mf_window_t window;
+
+	row->ndrives = 0;
+	for (uint32_t at = 0; at < manifest->header.windows.count; at++) {
+		if (!erx_manifest_windows_at(manifest, at, &window))
+			return ("manifest: a window the reader cannot read");
+		if (window.role != ERX_MF_WINDOW_ROLE_DRIVE)
+			continue;
+		if (window.device >= view->ndevices)
+			return ("manifest: a drive window names no device");
+		entry = &view->devices[window.device];
+		if (entry->row != index)
+			continue;
+		if ((entry->role != ERX_MF_DEVICE_ROLE_USB && entry->role != ERX_MF_DEVICE_ROLE_BLOCK) ||
+		    window.drive == ERX_MF_NONE)
+			return ("manifest: a drive window not on a usb or block device, or naming no drive");
+		if (row->ndrives == ERX_DOM_DRIVES_MAX)
+			return ("manifest: a configured domain's devices carry more drives than its boot page records");
+		row->drives[row->ndrives++] = (erx_dom_drive_t){ .role = entry->role, .number = window.drive };
+	}
+	return (NULL);
+}
+
+/*
  * Each configured-domain row, its limits resolved from its limits record and
  * its strings judged against the devices the catalogue places on it, so
  * it reads view->devices, which boot_devices builds first. Every device
  * on the row is given; only a driven one (erx_dom_entry_driven) gets a
- * record, -erx_record given or -erx_record framebuffer. The row
+ * record, -erx_record given or -erx_record framebuffer, and each drive on
+ * the row's devices a -erx_record drive (boot_drives). The row
  * system_image_holder names, the system window's holder, gets -erx_record
  * system_image too.
  */
@@ -941,13 +985,15 @@ boot_configured(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_d
 		}
 		if (held > ERX_DOM_DEVICES_MAX)
 			return ("manifest: a configured domain holds more devices than its creation gives");
+		if ((reason = boot_drives(view, manifest, index, row)) != NULL)
+			return (reason);
 		/* The reader checked every string against the string table; the manifest's bytes outlive the view. */
 		strings = (const char *)manifest->bytes + manifest->header.strings.offset;
 		if ((reason = boot_display(manifest, index, strings + domain.env.offset, domain.env.length,
 		    &row->display)) != NULL)
 			return (reason);
 		if (!boot_strings_fit(domain.args.length, domain.env.length +
-		    (row->display.name_len != 0 ? ERX_DOM_DISPLAY_WORDS_MAX : 0), records, block,
+		    (row->display.name_len != 0 ? ERX_DOM_DISPLAY_WORDS_MAX : 0), records, row->ndrives, block,
 		    index + 1 == system_image_holder))
 			return ("manifest: a configured domain's arguments and environment leave the boot page's strings "
 			    "no reserve for its node names, device records and display");
@@ -1010,7 +1056,7 @@ boot_templates(erx_dom_view_t *view, const erx_manifest_view_t *manifest, erx_do
 		if (boot_env_sets(strings + session.env.offset, session.env.length, ERX_PRINCIPAL_KEY_STRING) ||
 		    boot_env_sets(strings + session.env.offset, session.env.length, ERX_DISPLAY_KEY_STRING))
 			return ("manifest: a session template's environment sets a variable its start gives it");
-		if (!boot_strings_fit(session.args.length, session.env.length + ERX_DOM_SESSION_WORDS_MAX, 0, false, false))
+		if (!boot_strings_fit(session.args.length, session.env.length + ERX_DOM_SESSION_WORDS_MAX, 0, 0, false, false))
 			return ("manifest: a session template's arguments and environment leave the boot page's strings "
 			    "no reserve for its node names, principal and display");
 		templates[index] = (erx_dom_template_t){ .principal = principal,

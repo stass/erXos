@@ -91,4 +91,12 @@
 	3u * ERX_BOOT_NUMBER_WORD_MAX + 2u * sizeof(((erx_mf_system_image_t *)0)->salt) + 1u + \
 	2u * sizeof(((erx_mf_system_image_t *)0)->root_hash) + 1u + sizeof("record_volume"))
 
+/*
+ * -erx_record drive ROLE N, per drive window on a device a configured domain holds
+ * (docs/design-fiasco.md, "Drive records"): ROLE the longer of the two roles a drive lies on,
+ * usb and block, and N a drive number below mf_none, at most ten digits.
+ */
+#define ERX_BOOT_DRIVE_WORDS_MAX	(sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("drive") + sizeof("block") + \
+	sizeof("4294967294"))
+
 #endif /* ERX_BOOT_WORDS_H */

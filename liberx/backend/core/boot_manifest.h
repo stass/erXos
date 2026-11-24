@@ -427,4 +427,14 @@ size_t	erx_boot_build_words(uint64_t build_id, char *words, size_t capacity);
 size_t	erx_boot_system_image_words(const erx_mf_system_image_t *row, bool record_volume, char *words,
 	    size_t capacity);
 
+/*
+ * Writes -erx_record drive ROLE N into words (docs/design-fiasco.md, "Drive records"): ROLE
+ * the name of role, ERX_MF_DEVICE_ROLE_USB or _BLOCK, the only two a drive window lies on,
+ * and N number in decimal, the words erx_device_record:drives/2 reads. Returns their whole
+ * length; 0 for another role, a number of ERX_MF_NONE, or words that do not fit, which
+ * ERX_BOOT_DRIVE_WORDS_MAX bytes always do. The domain library writes one into a configured
+ * domain's boot page per drive window on a device the domain holds.
+ */
+size_t	erx_boot_drive_words(uint32_t role, uint32_t number, char *words, size_t capacity);
+
 #endif /* ERX_BACKEND_BOOT_MANIFEST_H */

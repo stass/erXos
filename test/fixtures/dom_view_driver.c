@@ -14,12 +14,16 @@
  * One line per catalogue entry, then one per service row, then one per
  * configured row that serves a display, with the display its creation puts
  * in its environment, then, for the configured row whose boot page carries
- * -erx_record system_image, that record's words after its form:
+ * -erx_record system_image, that record's words after its form, then each
+ * configured row's -erx_record drive records, as its creation writes them,
+ * and the length of the longest drive record against its bound:
  *
  *   device INDEX unit=NAME compatible=STRING|none ranges=BASE+SIZE,... lines=LINE,... confined=0|1
  *   service INDEX name=NAME server=ROW|none interface=NUMBER
  *   display ROW name=NAME policy=NUMBER idle_dim_s=SECONDS idle_off_s=SECONDS
  *   system_image ROW LEN TREE_OFF TREE_LEN SALT ROOT
+ *   drive ROW ROLE N
+ *   drive_bound LENGTH MAX
  *
  * numbers in hexadecimal for ranges and decimal elsewhere. A view the
  * library refuses prints `refused REASON` alone. A malformed input prints
@@ -184,6 +188,36 @@ print_system_image(const erx_dom_lib_t *lib)
 	for (size_t at = sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("system_image"); at < used; at += strlen(words + at) + 1)
 		printf(" %s", words + at);
 	printf("\n");
+	return (true);
+}
+
+/*
+ * Each configured row's -erx_record drive words, as its creation writes
+ * them, then the longest record's length, a block drive numbered just below
+ * mf_none, against ERX_BOOT_DRIVE_WORDS_MAX: the two are equal when the
+ * bound is exact, and the length is 0 when the record does not fit.
+ */
+static bool
+print_drives(const erx_dom_view_t *view)
+{
+	char words[ERX_BOOT_DRIVE_WORDS_MAX];
+	const erx_dom_drive_t *drive;
+	size_t used;
+
+	for (uint32_t index = 0; index < view->nconfigured; index++) {
+		for (uint32_t at = 0; at < view->configured[index].ndrives; at++) {
+			drive = &view->configured[index].drives[at];
+			if ((used = erx_boot_drive_words(drive->role, drive->number, words, sizeof(words))) == 0)
+				return (false);
+			printf("drive %" PRIu32, index);
+			for (size_t word = sizeof(ERX_BOOT_RECORD_FLAG) + sizeof("drive"); word < used;
+			    word += strlen(words + word) + 1)
+				printf(" %s", words + word);
+			printf("\n");
+		}
+	}
+	printf("drive_bound %zu %zu\n", erx_boot_drive_words(ERX_MF_DEVICE_ROLE_BLOCK, ERX_MF_NONE - 1, words,
+	    sizeof(words)), sizeof(words));
 	return (true);
 }
 
@@ -496,7 +530,7 @@ main(int argc, char **argv)
 			    index, (int)display->name_len, display->name, display->policy, display->idle_dim_s,
 			    display->idle_off_s);
 	}
-	if (!print_system_image(&lib))
+	if (!print_system_image(&lib) || !print_drives(&lib.view))
 		return (2);
 	return (fflush(stdout) == 0 ? 0 : 2);
 }
