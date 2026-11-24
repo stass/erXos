@@ -639,7 +639,8 @@ controllers ([design-fiasco.md](design-fiasco.md#drive-records)): at
 its start its places start one drive grant for each, and a medium that
 becomes ready takes the lowest free of them, as a HID function takes
 the lowest free input number. A domain whose drive records are refused
-serves no drive, and each of its ready media shows `no drive`.
+serves no drive, and its functions show each unit with a ready medium
+as `no drive`.
 
 A drive grant answers one request, `window`: `{ok, Window}`, the pid of
 the window on the medium the drive holds now, or `{error, no_medium}`
@@ -675,8 +676,10 @@ drive number on the machine. What is bounded is how many
 drives there are, not their names: the rows on all of a USB domain's
 controllers name at most `usb_drives_max` drives, the media that domain
 serves at once, under any numbers. A logical unit whose medium becomes
-ready when every drive of its domain is occupied is not served, and the
-bus process shows it as `no drive`.
+ready when every drive of its domain is occupied is not served: its
+function's state shows the unit as `no drive`, and the medium stays
+unserved, though a drive is freed later, until its device is attached
+again, when the new function finds the lowest drive free then.
 
 A drive's number names a place, not a medium: the same stick may come
 back as another number. A script that must find one medium again finds

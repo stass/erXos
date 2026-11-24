@@ -173,13 +173,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   hub at SuperSpeed at its device descriptor (`superspeed_hub`), and no device behind it runs at SuperSpeed. Driving one is a
   design of its own, with the VL805's bulk-out burst quirk for mass storage behind such a hub that the design lists
   beside it.
-* [Medium] USB, drives above a medium (`erx_usb_bot`, `erx_blk`;
-  [design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)): the partition and window processes above
-  a USB medium's transport, the drive grant `erx_blk_drive`, drive numbers within `usb_drives_max` and the FAT
-  server's mount of a drive are not built, so a medium is served only as its transport. The `usb` QEMU suite's
-  sector cases read the transport until then (`tools/lib/erx/usb_boot.rb`); they move to a raw window client
-  through a drive row of the development manifest, which needs the boot reader's `windows[].drive` check
-  ([todo-domains.md](todo-domains.md)), and gain a case that the medium is named `disk0`.
+* [Medium] USB, the `usb` QEMU suite's sector cases (`tools/lib/erx/usb_boot.rb`;
+  [design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)): they read a medium's transport, since
+  nothing holds a drive's window before the media domain asks its grant for it (step 4 of the drives item in
+  [todo-storage.md](todo-storage.md)). Move them to the media domain's walk of the drive once it serves media,
+  and add a case that the medium is named `disk0`.
 * [Medium] USB, `abi/inspection.txt` ([design-usb.md](design-usb.md#failure-handling)): no `usb` kind. Declare
   `[usb, Controller]`, `[usb, Controller, ports, Route]`, `[usb, Controller, devices, Route]` and the other paths
   Failure handling lists, shown under `/proc/usb`, with the controller and bus processes that report them. The
