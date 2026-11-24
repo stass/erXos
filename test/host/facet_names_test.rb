@@ -20,7 +20,7 @@ class FacetNamesTest < Minitest::Test
   DOC = 'docs/design-seeded.md'
   WEB = 'abi/services/web.txt'
   # The tree's lines, which the check takes from the ABI schema.
-  LINES = Erx::FacetNames.session_lines(ROOT).freeze
+  LINES = Erx::FacetNames.unrowed_names(ROOT).freeze
   # Every exempt name used once in each of its listed files, so a seed reports only its
   # own violation.
   EXEMPT = Erx::FacetNames::UNDECLARED.each_with_object({}) do |(name, exemption), files|
@@ -49,13 +49,13 @@ class FacetNamesTest < Minitest::Test
   def found(source, **table_text)
     files, docs = table(**table_text)
     files = files.merge(EXEMPT).merge(MODULE => source)
-    Erx::FacetNames.violations(files, docs: docs, lines: LINES).map { |violation| [violation.path, violation.line] }
+    Erx::FacetNames.violations(files, docs: docs, unrowed: LINES).map { |violation| [violation.path, violation.line] }
   end
 
   def test_the_tree_passes_and_its_table_holds_every_manifest_facet
     files, docs = tree
-    assert_empty Erx::FacetNames.violations(files, docs: docs, lines: LINES).map(&:to_s)
-    facets = Erx::FacetNames.table(files, lines: LINES).first.facets.to_set { |facet| [facet.name, facet.interface] }
+    assert_empty Erx::FacetNames.violations(files, docs: docs, unrowed: LINES).map(&:to_s)
+    facets = Erx::FacetNames.table(files, unrowed: LINES).first.facets.to_set { |facet| [facet.name, facet.interface] }
     assert_operator facets, :superset?, Set[%w[data files], %w[storage_ctl driver_control], %w[net net],
                                             %w[network_ctl driver_control], %w[web web],
                                             %w[inspect inspect]]
@@ -71,14 +71,14 @@ class FacetNamesTest < Minitest::Test
     assert_includes files.fetch(board), row
     without = files.merge(board => files.fetch(board).sub(row, ''))
     assert_equal %w[erlang/apps/erx_starter/src/erx_pkg_medium.erl erlang/apps/erx_storage/src/erx_storage_system.erl],
-                 Erx::FacetNames.violations(without, docs: docs, lines: LINES).map(&:path).sort
+                 Erx::FacetNames.violations(without, docs: docs, unrowed: LINES).map(&:path).sort
   end
 
   # inspect is a manifest service of a declared interface that cites its design section,
   # so its uses need no exemption.
   def test_inspect_resolves_to_its_interface_and_citation
     files, = tree
-    interface = Erx::FacetNames.table(files, lines: LINES).first.interfaces.find { |item| item.name == 'inspect' }
+    interface = Erx::FacetNames.table(files, unrowed: LINES).first.interfaces.find { |item| item.name == 'inspect' }
     assert_equal 'abi/services/inspect.txt', interface.path
     assert_match(/design-live\.md.*The inspect service/, interface.design.to_s)
     refute Erx::FacetNames::UNDECLARED.key?('inspect')
@@ -132,6 +132,13 @@ class FacetNamesTest < Minitest::Test
   # A session's line is provided under its name, which no manifest row names: the check
   # passes a name the ABI declares served_by session in any file, fails one no row and no
   # such interface declares, and refuses a manifest service of a line's name. Without
+
+  # A drive's grant has no row either: its serving domain's mint is provided under the
+  # interface's name, drive, which passes as a line does; a name beside it does not.
+  def test_a_drive_grant_is_no_facet
+    assert_empty found("f() -> erx_facet:provide(drive, self()).\n")
+    assert_equal [[MODULE, 1]], found("f() -> erx_facet:provide(drives, self()).\n")
+  end
   # served_by session web_line is no line of the schema's, so the same provide fails.
   def test_a_line_is_no_facet
     source = "f() -> erx_facet:provide(web_line, self()).\n"
@@ -142,14 +149,14 @@ class FacetNamesTest < Minitest::Test
       write(root, files.merge(MANIFEST => files.fetch(MANIFEST).sub("  interface seeded\n",
                                                                     "  interface seeded\n  name \"web_line\"\n")))
       error = assert_raises(Erx::Error) { Erx::FacetNames.generation(root: root) }
-      assert_match 'both declared and exempt or lines: web_line', error.message
+      assert_match 'both declared and exempt or unrowed: web_line', error.message
     end
     Dir.mktmpdir do |root|
       write(root, WEB => File.read(File.join(ROOT, WEB)).sub("  served_by session\n", ''))
-      lines = Erx::FacetNames.session_lines(root)
+      lines = Erx::FacetNames.unrowed_names(root)
       assert_equal LINES - ['web_line'], lines
       files, docs = table
-      violations = Erx::FacetNames.violations(files.merge(EXEMPT).merge(MODULE => source), docs: docs, lines: lines)
+      violations = Erx::FacetNames.violations(files.merge(EXEMPT).merge(MODULE => source), docs: docs, unrowed: lines)
       assert_equal [[MODULE, 1]], violations.map { |violation| [violation.path, violation.line] }
     end
   end
@@ -175,7 +182,7 @@ class FacetNamesTest < Minitest::Test
 
   def test_an_exemption_no_use_names_fails
     files, docs = table
-    stale = Erx::FacetNames.violations(files, docs: docs, lines: LINES).map { |violation| violation.detail[/facet (\S+)/, 1] }
+    stale = Erx::FacetNames.violations(files, docs: docs, unrowed: LINES).map { |violation| violation.detail[/facet (\S+)/, 1] }
     assert_equal Erx::FacetNames::UNDECLARED.flat_map { |name, exemption| [name] * exemption.sites.size }.sort, stale.sort
   end
 
@@ -238,7 +245,7 @@ class FacetNamesTest < Minitest::Test
     Dir.mktmpdir do |root|
       write(root, files.merge(MANIFEST => files.fetch(MANIFEST).sub("  interface seeded\n", "  interface seeded\n  name \"console\"\n")))
       error = assert_raises(Erx::Error) { Erx::FacetNames.generation(root: root) }
-      assert_match 'both declared and exempt or lines: console', error.message
+      assert_match 'both declared and exempt or unrowed: console', error.message
     end
   end
 

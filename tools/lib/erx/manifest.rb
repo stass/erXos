@@ -3124,16 +3124,18 @@ module Erx
 
       # No service row is of an interface abi/services declares served_by session, a
       # session's line, whose grant the domain service mints only for the grantee the system
-      # domain names (docs/design-system.md, "A session's lines"), so no facet row grants
-      # one either: a facet row names a service row.
+      # domain names (docs/design-system.md, "A session's lines"), or served_by drive, whose
+      # only grants are the drive window rows (docs/design-drives.md, "Manifest rows"); so no
+      # facet row grants one either: a facet row names a service row.
       def check_no_line_services(service_rows)
-        lines = @codec.schema.session_lines.to_h { |service| [service.fetch(:number), service.fetch(:name)] }
+        schema = @codec.schema
+        unrowed = schema.session_lines.to_h { |service| [service.fetch(:number), "#{service.fetch(:name)}, a session's line"] }
+                        .merge(schema.drive_grants.to_h { |service| [service.fetch(:number), "#{service.fetch(:name)}, a drive window's grant"] })
         service_rows.each do |row|
-          line = lines[row.fetch('interface')]
-          next unless line
+          what = unrowed[row.fetch('interface')]
+          next unless what
 
-          invalid("service #{row.fetch('name')} is of #{line}, a session's line, which no manifest row grants",
-                  'service.interface')
+          invalid("service #{row.fetch('name')} is of #{what}, which no manifest row grants", 'service.interface')
         end
       end
 

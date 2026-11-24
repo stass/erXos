@@ -46,7 +46,11 @@ module Erx
   #   name written out. A session's lines, the interfaces abi/services declares served_by
   #   session, are no manifest service's and pass: a session provides each under its
   #   name and passes it to erx_domain:line/4, which mints it for the grantee the system
-  #   domain names (docs/design-system.md, "A session's lines").
+  #   domain names (docs/design-system.md, "A session's lines"). So do the interfaces
+  #   declared served_by drive, whose grants are the manifest's drive window rows: the
+  #   drive's serving domain provides a mint under the interface's name, and the media
+  #   domain holds each facet as {drive, N} (docs/design-system.md, "A drive window as a
+  #   grant"). Together they are the unrowed grants.
   #
   # UNDECLARED lists the facets the code uses that no interface declares, each with
   # its TODO.md item and the files that may use it; a use in another file fails, and so
@@ -121,8 +125,8 @@ module Erx
     # (docs/design-abi.md, "Services, facets and their parameter schemas"); label is the
     # row's own public name, unique per grantee, which no lookup uses.
     Facet = Data.define(:name, :label, :server, :interface, :grantee, :path, :line)
-    # lines is the set of the names of a session's lines (session_lines/1).
-    Table = Data.define(:interfaces, :facets, :services, :lines) do
+    # unrowed is the set of the names of the unrowed grants' interfaces (unrowed_names/1).
+    Table = Data.define(:interfaces, :facets, :services, :unrowed) do
       # Every name a use may give: a manifest service's public name, under which its
       # grantees hold its facets and its server mints them.
       def names = services.keys.to_set
@@ -145,13 +149,13 @@ module Erx
       raise Error, "no system manifest matches #{MANIFESTS}" if globs.fetch(MANIFESTS).empty?
 
       inputs = globs.values.flatten.to_h { |relative| [relative, File.binread(File.join(root, relative))] }
-      found, violations = table(inputs, lines: session_lines(root))
+      found, violations = table(inputs, unrowed: unrowed_names(root))
       raise Error, "the facet table has violations:\n#{violations.join("\n")}" unless violations.empty?
 
       # A declared name keeps no exemption, so no waiver outlives its declaration, and
       # a name is a facet or a line, not both.
-      both = found.names.to_a & (UNDECLARED.keys + found.lines.to_a)
-      raise Error, "facet names both declared and exempt or lines: #{both.sort.join(', ')}" unless both.empty?
+      both = found.names.to_a & (UNDECLARED.keys + found.unrowed.to_a)
+      raise Error, "facet names both declared and exempt or unrowed: #{both.sort.join(', ')}" unless both.empty?
 
       GenerationPlan.new(files: { HEADER => header(found.names).freeze },
                          reads: inputs.transform_values { |bytes| Digest::SHA256.hexdigest(bytes) },
@@ -193,9 +197,9 @@ module Erx
 
     # The violations of the tree: files maps each path the check reads, sources and
     # the table's files, to its text; docs maps a design document's path to its text;
-    # lines names a session's lines (session_lines/1).
-    def violations(files, docs:, lines:)
-      table, table_violations = table(files, lines: lines)
+    # unrowed names the unrowed grants' interfaces (unrowed_names/1).
+    def violations(files, docs:, unrowed:)
+      table, table_violations = table(files, unrowed: unrowed)
       used = files.select { |path, _| covers?(path) }.flat_map { |path, text| uses(path, text) }
       table_violations + design_violations(table, docs) + use_violations(used, table) + stale_exemptions(used) +
         exemption_violations(UNDECLARED)
@@ -217,14 +221,15 @@ module Erx
                      detail: "UNDECLARED holds #{exemptions.size} names, not EXEMPTIONS_MAX (#{EXEMPTIONS_MAX}): #{advice}")]
     end
 
-    # The names of a session's lines: the interfaces the ABI beneath root declares
+    # The names of the unrowed grants' interfaces: those the ABI beneath root declares
     # served_by session, as the generated ?ERX_LINES names them.
-    def session_lines(root)
-      ABI::Model.validate(ABI::Sources.read(root: root)).session_lines.to_set { |line| line.fetch(:name) }
+    def unrowed_names(root)
+      schema = ABI::Model.validate(ABI::Sources.read(root: root))
+      (schema.session_lines + schema.drive_grants).to_set { |service| service.fetch(:name) }
     end
 
     # The table read from files, with lines, and the violations of its manifest's interfaces.
-    def table(files, lines:)
+    def table(files, unrowed:)
       interfaces = files.select { |path, _| File.fnmatch?(SERVICES, path, GLOB_FLAGS) }.sort.flat_map do |path, text|
         interfaces_of(path, text)
       end
@@ -239,7 +244,7 @@ module Erx
       end
       facets = records.select { |record| record.kind == 'facet' }.map { |record| facet_of(record, services, interfaces) }
       public_services = services.values.to_h { |record| [public_name(record), record] }
-      [Table.new(interfaces: interfaces, facets: facets, services: public_services, lines: lines.to_set), unknown]
+      [Table.new(interfaces: interfaces, facets: facets, services: public_services, unrowed: unrowed.to_set), unknown]
     end
 
     # An interface file's services, each with the file's first design citation.
@@ -325,10 +330,10 @@ module Erx
       inner.scan(GRANT).flatten
     end
 
-    # A name outside the table and the lines, or an exempt name used outside its listed
+    # A name outside the table and the unrowed grants, or an exempt name used outside its listed
     # files.
     def use_violations(uses, table)
-      allowed = table.names | table.lines
+      allowed = table.names | table.unrowed
       uses.reject { |path, _, name| allowed.include?(name) || UNDECLARED[name]&.sites&.include?(path) }
           .map do |path, line, name|
         detail = if UNDECLARED.key?(name)

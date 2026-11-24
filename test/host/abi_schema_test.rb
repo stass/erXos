@@ -572,6 +572,32 @@ class AbiSchemaTest < Minitest::Test
     end
   end
 
+  # served_by drive marks a drive window's grant (docs/design-system.md, "A drive window as
+  # a grant"): served as message with all five quantities, as a session's line is, and
+  # ?ERX_DRIVE_GRANTS maps the interface's name to its operations and quantities, the
+  # limits every drive's grant carries; it is no session's line.
+  def test_served_by_drive_states_every_quantity_and_gives_the_drive_grants
+    parsed = schema("#{QUANTITY_ROW}service disk 4\n  served_as message\n  served_by drive\n  operation window 1\n" \
+                    "#{QUANTITIES}")
+    header = Erx::ABI::ErlangEmitter.header(parsed)
+    assert_includes header, "-define(ERX_DRIVE_GRANTS, \#{\n    'disk' =>\n        \#{in_flight => 2, " \
+                            "max_heap_size => 1000, max_request => 64, operations => ['window'], period_ns => 100, " \
+                            "reductions => 10}\n}).\n"
+    assert_includes header, '-define(ERX_LINES, #{}).'
+    without = QUANTITIES.lines.reject { |line| line.include?('reductions') }.join
+    assert_raises(Erx::ABI::SchemaError) { schema("#{QUANTITY_ROW}service disk 4\n  served_as message\n  served_by drive\n#{without}") }
+  end
+
+  # The checked-in drive interface carries design-drives.md's five quantities.
+  def test_the_checked_in_drive_interface
+    root = File.expand_path('../..', __dir__)
+    drive = Erx::ABI::Model.validate(Erx::ABI::Sources.read(root: root)).services.find { |service| service.fetch(:name) == 'drive' }
+    assert_equal 'drive', drive.fetch(:served_by)
+    assert_equal({ 'window' => 1 }, drive.fetch(:operations))
+    assert_equal({ 'max_request' => 65_536, 'in_flight' => 8, 'reductions' => 1_000_000, 'period_ns' => 1_000_000_000,
+                   'max_heap_size' => 131_072 }, drive.fetch(:quantities))
+  end
+
   # The checked-in lines are tty_line and web_line, each with the grant design-system.md gives it.
   def test_the_checked_in_lines_are_tty_line_and_web_line
     root = File.expand_path('../..', __dir__)

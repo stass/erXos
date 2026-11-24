@@ -155,7 +155,7 @@ module Erx
         end
         schema.signals.sets.sort.each { |name, signals| lines << signal_set_members(schema, name, signals) }
         lines << tree_services(schema)
-        lines << session_lines(schema)
+        lines << session_lines(schema) << drive_grants(schema)
         (lines + ['', '-endif.', '']).join("\n")
       end
 
@@ -188,13 +188,31 @@ module Erx
       def session_lines(schema)
         raise SchemaError, 'lines collides with a constant' if schema.constants.key?('lines')
 
-        entries = schema.session_lines.sort_by { |service| service.fetch(:name) }.map do |service|
-          quantities = service.fetch(:quantities).sort.map { |key, value| "#{key} => #{value}" }
-          "#{literal(atom(service.fetch(:name)))} =>\n        \#{#{quantities.join(', ')}}"
-        end
-        return '-define(ERX_LINES, #{}).' if entries.empty?
+        unrowed_grants('ERX_LINES', schema.session_lines) { |service| service.fetch(:quantities) }
+      end
 
-        "-define(ERX_LINES, \#{\n    #{entries.join(",\n    ")}\n})."
+      # ?ERX_DRIVE_GRANTS: each abi/services interface declared served_by drive, by its name,
+      # to the limits every grant of it carries, its operations by name and its quantities
+      # (docs/design-system.md, "A drive window as a grant"), so the domain service mints
+      # each drive window row's grant within the limits its interface states.
+      def drive_grants(schema)
+        raise SchemaError, 'drive_grants collides with a constant' if schema.constants.key?('drive_grants')
+
+        unrowed_grants('ERX_DRIVE_GRANTS', schema.drive_grants) do |service|
+          service.fetch(:quantities).merge('operations' => "[#{service.fetch(:operations).sort_by { |_, id| id }
+                                                                 .map { |name, _| literal(atom(name)) }.join(', ')}]")
+        end
+      end
+
+      # A map macro from each of services' names to the limits the block gives it, sorted.
+      def unrowed_grants(macro, services)
+        entries = services.sort_by { |service| service.fetch(:name) }.map do |service|
+          limits = yield(service).sort.map { |key, value| "#{key} => #{value}" }
+          "#{literal(atom(service.fetch(:name)))} =>\n        \#{#{limits.join(', ')}}"
+        end
+        return "-define(#{macro}, \#{})." if entries.empty?
+
+        "-define(#{macro}, \#{\n    #{entries.join(",\n    ")}\n})."
       end
 
       # ?ERX_<ENUM>_MEMBERS: an enum's members as {Name, Value} in value order,

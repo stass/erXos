@@ -578,9 +578,10 @@ module Erx
       SERVED_AS = %w[message tree].freeze
       # Who serves an interface's grants when not the holder a manifest service row names:
       # session, a session's line to a front end, which the domain service grants only on a
-      # request naming its grantee, so its interface states every quantity a facet row
-      # carries (docs/design-system.md, "A session's lines").
-      SERVED_BY = %w[session].freeze
+      # request naming its grantee, or drive, a drive window row's grant, which no service
+      # or facet row declares; so its interface states every quantity a facet row carries
+      # (docs/design-system.md, "A session's lines" and "A drive window as a grant").
+      SERVED_BY = %w[session drive].freeze
 
       def services(declarations, types:)
         seen_numbers = {}
@@ -661,9 +662,9 @@ module Erx
           # (abi/services/files.txt), so the boot view never checks a tree grant's.
           declaration.fail!('a service served as a tree declares no operation') if served_as == 'tree' && operations.any?
           if served_by
-            declaration.fail!('a service served by a session is served as message') unless served_as == 'message'
+            declaration.fail!("a service served by a #{served_by} is served as message") unless served_as == 'message'
             missing = FACET_QUANTITIES - quantities.keys
-            declaration.fail!("a service served by a session lacks the quantities #{missing.join(', ')}") unless
+            declaration.fail!("a service served by a #{served_by} lacks the quantities #{missing.join(', ')}") unless
               missing.empty?
           end
           checkers = parameters.values.map { |parameter| parameter.fetch(:helper) }.uniq

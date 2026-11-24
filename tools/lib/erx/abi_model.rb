@@ -162,6 +162,10 @@ module Erx
       # The service interfaces declared served_by session, a session's lines
       # (docs/design-system.md, "A session's lines"), in declaration order.
       def session_lines = services.select { |service| service.fetch(:served_by) == 'session' }
+
+      # The service interfaces declared served_by drive, whose grants are the manifest's
+      # drive window rows (docs/design-system.md, "A drive window as a grant").
+      def drive_grants = services.select { |service| service.fetch(:served_by) == 'drive' }
     end
 
     # Resolve types before readers and calls. No emitter receives an unchecked

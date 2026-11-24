@@ -1508,6 +1508,14 @@ class ManifestCheckTest < Minitest::Test
             message: /of web_line, a session's line/)
   end
 
+  # A drive window row is the only grant of the drive interface, so a service row of it
+  # is refused, and with it any facet row, which names a service row
+  # (docs/design-drives.md, "Manifest rows").
+  def test_a_service_of_the_drive_interface_is_refused
+    service = "service rogue_drive\n  server @domain.network\n  interface drive\n"
+    refused(Erx::Manifest::Invalid, 'service.interface', @source + service, message: /of drive, a drive window's grant/)
+  end
+
   # A second service record whose public name is system, under another label, on
   # another server, since property 5 refuses two names alike on one server first.
   def test_a_second_system_service_is_refused
