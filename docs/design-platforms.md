@@ -1788,7 +1788,9 @@ card. The Pi 4's bootloader, in its EEPROM, fetches the boot files over
 TFTP from `boot/` beside the card, the firmware's network boot root
 ([design-fiasco.md](design-fiasco.md#the-raspberry-pi-4)); `tools/erx
 netboot` stages them, and the [guide](guide/raspberry-pi-4.md#netbooting-from-a-mac)
-has the steps.
+has the steps. A benchmark run on the board serves a queue of builds this
+way and lets the board walk it by itself
+([design-bench.md](design-bench.md#running-on-the-raspberry-pi-4)).
 
 **This is a development setup only.** With the network first in the boot
 order, whatever answers DHCP and TFTP on the board's network chooses the

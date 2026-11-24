@@ -3188,7 +3188,8 @@ private to that file, so nothing ends the machine without one; the build check `
 `l4_platform_ctl_system_shutdown` to that file. A root fault, the root's own stop and `erx_machine_end` reach it on
 the service, a missed pet on the watchdog, and a refusal, of the boot or of a kernel or service step the root cannot go on without,
 on whichever root thread met it. A task holds no platform control, so a task's reaper that is refused sleeps instead. A test
-root's own power-off, when its test passes or fails, is a requested one, made on its own thread. It is best effort and takes no lock.
+root's own end, a power-off when its test passes or fails or the bench root's reset, which lets a board boot its next
+image by itself ([design-bench.md](design-bench.md#the-bench-images-boot-set)), is a requested one, made on its own thread. It is best effort and takes no lock.
 The service answers `erx_machine_end` for the root task alone and refuses it from any other task with `ERX_ENOTSUP`, as it refuses
 `erx_log_take`, since on erXos's kernel only the root resource carries the `POWER` the call needs
 ([design-kernel.md](design-kernel.md#kernel-calls), K31).

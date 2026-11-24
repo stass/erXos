@@ -56,6 +56,12 @@ Decisions every reader needs:
   compiled on the board by the system's own compiler. Linux serves as the
   best-case comparison on the board, FreeBSD as the behaviour erXos
   matches; an operation with no counterpart says so.
+* **On the board, the board walks its own boots.** The host serves a
+  queue of boot sets and changes the served set only when a boot's
+  banner names its build; every bench boot ends with a reset, so the
+  board boots the next set by itself, and the queue's last set is the
+  one the board was found with
+  ([Running on the Raspberry Pi 4](#running-on-the-raspberry-pi-4)).
 
 ## Context
 
@@ -347,10 +353,11 @@ in under a second, and records:
 * the rounding of a timed wait (`erx_fiasco_time_wait_us` rounds a
   deadline up to the microsecond, `liberx/backend/fiasco/time_table.c`),
   so lateness under a microsecond is recorded as unresolvable;
-* on the Raspberry Pi 4, the CPU's cycles per counter tick over one second
-  where its cycle counter is readable in user mode (`CONFIG_PERF_CNT_USER`
-  is set; that the board allows the read is unverified), and otherwise
-  `unknown`; the `CLOCK` line carries it as a number or `unknown`.
+* on the Raspberry Pi 4, the CPU's cycles per counter tick over one second,
+  which a disposable test task measures where its cycle counter is
+  readable in user mode ([The cycle counter](#the-cycle-counter)), and
+  otherwise `unknown`; the `CLOCK` line carries it as a number or
+  `unknown`.
 
 The rule applies to a cell whose start and end stamps are read on
 different CPUs; a round trip stamped on one CPU needs no calibration,
@@ -755,6 +762,291 @@ after another, and the record keeps the host's load; another worktree's
 gate running meanwhile shows as load, and makes the comparison
 inconclusive rather than wrong.
 
+## Running on the Raspberry Pi 4
+
+FD32's decision needs twenty boots of `nullcall` on the board, ten of each
+build, and the interrupt measurement twelve, the six load cells for each
+responder; every number of the `pi4-4gb-erxos` environment comes from
+boots like these. The board has no rig: nothing on the desk cuts its
+power, so a board that halts or hangs stays that way until its power is
+cycled by hand. A native bench image has no shell, so nothing but the
+image's own end can make the board boot anything after it. The board
+boots each build over the network, from boot files the development host
+serves ([design-platforms.md, Netbooting from a Mac](design-platforms.md#netbooting-from-a-mac)).
+
+### What the code does today
+
+* **No board build of a bench image.** `NativeBench::Run` takes a
+  `platform:` only to link the root task (`NativeRoot`), and always boots
+  QEMU (`tools/lib/erx/native_bench.rb`, `Run#boot`). `BootImage#build`
+  packs the main Fiasco build's first stage, `Fiasco#image_path`, whatever
+  the platform (`tools/lib/erx/boot_image.rb:48`). Only the production
+  image packs a board's own first stage (`Fiasco#build_for` and
+  `#first_stage_path`, `production_image.rb:507` and `:695`) and checks the
+  single file against the board's RAM and device tree
+  (`Machine#check_single_file`, `:697`). A test root's place is already the
+  development machine's: `NativeRoot.development_place`, 64 MiB into RAM,
+  which `Machine.development` also takes.
+* **The bench root ends powered off.** Its done and every setup failure
+  end with `erx_fiasco_end(ERX_FIASCO_END_ASKED_OFF, NULL)`
+  (`test/guest/native_bench/guest.c:69` and `:231`). On the Pi 4 that is
+  the firmware's power-off, which leaves the board halted
+  ([design-fiasco.md, The Raspberry Pi 4](design-fiasco.md#the-raspberry-pi-4)),
+  and only the system root arms the hardware watchdog that would reset it
+  (`erx_fiasco_watchdog_start`, `liberx/backend/fiasco/root.c:141`).
+* **Every boot already names its image.** Fiasco's banner prints
+  `erx: boot image build B index I flags ... bootargs N` from the handoff
+  page on every boot of every image, before any root runs
+  (`Erx_handoff::banner`, `fiasco/kernel/src/erx/erx_handoff.cpp:52-59`),
+  and `boot_image_check.rb` matches that line against `BootImage::Built`.
+* **The stager serves one build.** `Netboot.stage` copies a boot
+  partition's listed files into a fresh sibling of the TFTP root, checks
+  each copy's SHA-256 against the build record, points the root, a
+  symbolic link, at the sibling in one rename, and removes every other
+  sibling of its naming, the build it replaced included
+  (`tools/lib/erx/netboot.rb:58-82`). The board's EEPROM as configured on
+  the desk boots over HTTP instead, with no TFTP entry in its boot order
+  (`BOOT_ORDER=0xf17`: HTTP, then the card, then a restart):
+  a FAT image `boot.img` and its `boot.sig`, an RSA-2048 signature by a
+  key whose public half the EEPROM holds, made and served by scripts
+  outside the tree (`~/erxos-scratch/tools/pi4_http_stage.rb` and
+  `pi4_http_serve.rb`), which rename `boot.img` and then `boot.sig` into
+  the served directory ([Open decisions](#open-decisions)).
+* **Cycles are never measured.** The guest prints `cycles_per_tick` as
+  `unknown` on every boot (`bench_print_clock`, `guest.c:205`). The Fiasco
+  build sets `CONFIG_PERF_CNT_USER` (`config/fiasco/kernel.defconfig:17`),
+  under which Fiasco turns the cycle counter on and opens the performance
+  monitor to user mode on every CPU it starts (`Perf_cnt::init_cpu`,
+  `fiasco/kernel/src/kern/arm/perf_cnt-arm.cpp:211-228`); whether the
+  firmware's levels above the kernel leave that read untrapped on the
+  board is unverified.
+* **No reader of a board's console.** `tools/erx bench import` does not
+  exist, and nothing on the host reads the board's console while it runs.
+
+### The construction: the board walks a queue of boot sets
+
+A **boot set** is a complete directory of boot files, the files a boot
+partition holds, written by `BootPartition.lay_out` and listed with their
+SHA-256 in its build record. A **board run** prepares a queue of boot sets
+with the stager and lets the board walk the queue by itself. Two facts
+carry the walk:
+
+1. **Every bench boot ends with a reset.** After each boot the board's
+   firmware boots whatever set is served at that moment.
+2. **Every boot names its set before it can end.** Fiasco's banner names
+   the image's build and index hash, and the kernel runs only once the
+   firmware has read the set's files, so between the banner and the
+   boot's end the board reads no boot file. That the firmware reads no
+   file after it starts the kernel is taken from the boot sequence: over
+   HTTP the bootloader fetches `boot.sig` and then `boot.img`, which it
+   loads whole as a RAM disk (`STEPS.txt` and `pi4_http_stage.rb`'s
+   limit, [References](#references)); over TFTP it is unverified.
+
+The host changes the served set only on a banner, and always to the
+queue's next set; the queue's last set is the one the stager served when
+the run began, read before the first change, or no set when it served
+none. Each requirement follows:
+
+* **Runs.** N runs of one image are N copies of its set in the queue, and
+  a change to the set already served changes nothing.
+* **Paired runs.** `A B A B A B`, then the found set: the paired
+  comparison of [Comparison](#comparison) on the board, FD32's twenty
+  boots among them. As for `--paired`, the developer builds the two sets
+  (`--set DIR`), and the tool builds only the default one.
+* **The way back.** The last bench boot's banner points the stager at
+  the found set, and that boot's reset boots it: the build that was
+  served, or, when none was, the card, which the bootloader's boot order
+  falls back to.
+* **A late change is one more run.** A change that lands after a boot has
+  ended leaves the board booting the set before it once more. Its banner
+  names that set, the host counts the boot as one more run of it, and the
+  served set is already the next. A change is one rename prepared in
+  advance and a bench boot lasts at least its calibration, so a late
+  change is rare, and no result depends on it.
+* **A lost banner costs a run, not a result.** A banner the host does not
+  read whole changes nothing: the board boots the same set again, and the
+  next banner moves the walk on. The lost boot's lines are attributed to
+  no set and are kept only in the log.
+
+The host reads the console itself and writes every byte to the run's log
+as it arrives. The walk's decisions depend only on the banners and the
+deadlines below; the record is made afterwards from that log by the one
+reader of board logs, the one `bench import` uses for a log captured by
+hand.
+
+### The bench image's boot set
+
+The board's set is the native bench image built for the board and laid
+out as the production image's boot partition is:
+
+* **The image.** `BootImage` takes the platform: Fiasco is built for it
+  (`Fiasco#build_for`), the single file starts with its first stage
+  (`Fiasco#first_stage_path`), and it is checked against the board's RAM
+  and device tree by `Machine.development(platform).check_single_file`
+  at that stage's address (`Fiasco#first_stage_address`), as the
+  production image's is. For QEMU `virt` the first stage is the main
+  build's, so QEMU's bench images do not change. The root is linked at
+  the development place, as on QEMU, and with the profile form's sizes.
+  Every board set also packs `native_task`'s program, which the cycle
+  probe runs ([The cycle counter](#the-cycle-counter)).
+* **The set.** `BootPartition.lay_out(bootable:, erofs: nil)` writes the
+  firmware, `config.txt`, BL31, the device tree and the image as
+  `kernel8.img` into `build/bench-board/<benchmark>/`, with the build
+  record the stager checks; the card it also writes is not used. The
+  firmware and `config.txt` are those the normal image's set has, from
+  the same platform record and pins, so the bench runs at the board's own
+  settings, and the record's firmware hashes are the set's build record's.
+* **The CPUs.** The count is the platform record's `cpuset`; the pair a
+  two-CPU cell spans is the root's CPU and the last, as on QEMU
+  (`NativeBench.asked`).
+
+**The end.** Every end of the bench root, its done and its setup
+failures, is the machine's end with a reset:
+`erx_fiasco_end(ERX_FIASCO_END_ASKED_RESET, NULL)`, whose last line is
+`erx: end reset` ([design-fiasco.md, The end path](design-fiasco.md#the-end-path)).
+That is the seam: the same end `reboot` asks of the running system
+(`ERX_END_RESET`), which on Fiasco reaches its platform control and, on
+the Pi 4, the firmware's PSCI system reset, which BL31 makes with the
+board's power-management watchdog; the bench root never touches the
+watchdog's registers. Under QEMU's `-no-reboot` every end exits QEMU, so
+a QEMU boot differs only by its last line. Every boot's judge reads that
+line: a board boot that ends `erx: end off` has halted the board, and the
+run says its power needs cycling.
+
+**The guest's deadline.** Before its cells the bench root starts one
+thread of its own, at the root's top priority, that sleeps until the
+boot's deadline. If the cells have not finished by then it prints
+`erx: bench: deadline` and ends the machine with a reset; whichever of it
+and the done path ends first takes the end path's one caller. Every cell
+the boot did not report is `timed_out`, as at a QEMU deadline. The
+deadline is one number per profile form, kept in `NativeBench` beside the
+profile sizes and compiled into the root by flag; QEMU's deadline for the
+boot is that number plus a margin, so on both a hung cell is ended by the
+guest first, and QEMU's `bench-done` checkpoint takes either line. The
+thread sleeps through the cells and never runs while they do.
+
+### The cycle counter
+
+The run tests the read rather than assume it. On a board set, before its
+cells, the root launches `native_task`'s program as a disposable test task
+in a mode of its own, `MODE_CYCLES`, on the root's CPU: the task reads the
+cycle counter and the system counter, spins one second by the system
+counter, reads both again, and exits with the cycles per tick in
+thousandths, as `MODE_TURNS` exits with its median. The read is one
+accessor beside `erx_fiasco_counter` in the backend's architecture layer
+(`liberx/backend/fiasco/arch/aarch64/clock.c`, the file the inline
+assembly chokepoint already lists for the counter).
+
+| What the task does | What the `CLOCK` line carries |
+| --- | --- |
+| exits with a positive count | the count, as `cycles_per_tick` |
+| faults on the read, which ends it with a fault record as `vm`'s disposable task's write does | `unknown`; the root prints `erx: bench: cycle counter: not readable in user mode` |
+| exits with 0: the counter did not advance | `unknown`; the root prints `erx: bench: cycle counter: did not advance` |
+
+The root's line is for a person reading the log; the host reads only the
+`CLOCK` line. QEMU's sets do not run the probe: a cycle counter under an
+emulator or a hypervisor counts what QEMU or the host makes of it, not
+the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
+
+### The walk
+
+`tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST
+[--runs N] [--profile full] [--set DIR ...]` runs it:
+
+1. **Before anything is staged**, every refusal of
+   [Refusals and error results](#refusals-and-error-results) is checked, the
+   default set is built (or each `--set` read), and each set of the queue
+   is prepared as a sibling of the stager's root: copied and checked
+   against its build record, as `Netboot.stage` copies. The run reads
+   what the root names, the found set, and takes the stager's lock, which
+   it holds to the end.
+2. It opens the console device, 115,200 baud, and starts the log. Over
+   ssh it reads `/proc/sensors/status`
+   ([design-board-sensors.md](design-board-sensors.md#procsensors-and-the-inspector)):
+   the SoC temperature, the throttle state and the ARM clock before the
+   run, `unknown` where the path is unsupported.
+3. It points the root at the queue's first set, while the running system
+   reads no boot file, and asks that system to reboot: `ssh -T -- DEST
+   reboot`, which root's session may run, since it holds the `machine`
+   grant (`config/manifest/development.txt`, `facet machine`). The
+   destination is checked as `CodeSsh` checks it. If ssh fails, the run
+   says so, asks for a reset by hand, and waits the boot deadline.
+4. **On each banner** it acts by `BoardWalk`, a pure function of the
+   queue, the walk's state and the banner's build and index hash, which
+   answers what to point the root at, if anything, and which set the
+   boot is a run of:
+
+   | The banner names | The boot is | The root is pointed at |
+   | --- | --- | --- |
+   | the served set | a run of it | the queue's next set, the found set after the last |
+   | the set before the served one | one more run of that set | nothing: it already names the next |
+   | any other build, once the found set is served | the board back on its found set; the walk ends | nothing |
+   | any other build, before then | a boot the queue did not ask for, such as the card the bootloader fell back to; the walk ends, every queued boot not yet run `not_run` | the found set |
+5. **Two deadlines**, each a starting value revised from the first runs'
+   recorded times: the boot deadline, 180 s from the reboot request or a
+   boot's end line to the next banner, and the end deadline, the guest's
+   deadline plus 60 s from a banner to its end line. Past either while a
+   bench set is served, the found set is pointed at, the boot's
+   unreported cells are `timed_out`, the queued boots not yet run are
+   `not_run`, and the walk waits one boot deadline more for the board to
+   come back. Past the end deadline, after an `erx: end off`, or past the
+   boot deadline once the found set is served, the run says the board
+   needs its power cycled; the found set is already served, so it comes
+   back on it.
+6. **At the end** it points the root at the found set if it has not, and
+   removes every sibling it prepared; reads `/proc/sensors/status` again
+   once ssh answers; and writes the record from the log.
+
+**The pieces.** `Netboot` splits its one stage into the two steps it
+already takes: `prepare(medium:, root:)`, the copy and check into a fresh
+sibling, and `point(root:, target:)`, the one rename of the link, where
+`target` is a sibling, the found target or none (the link removed);
+`stage` is `prepare`, `point` and the removal of stale siblings, and a
+board run calls the first two under the lock it holds.
+`BoardWalk` and `BoardLog` are pure and tested on the host;
+`BoardConsole` opens the device, sets its line, and appends what it reads
+to the log, yielding each line, at most a `BENCH` line's 64 KiB and its
+end, to the walk. Nothing else is new: the image is `BootImage`'s, the
+set `BootPartition`'s, the judge `BenchMeasurement`'s and the writer
+`BenchRecord`'s.
+
+### The record of a board run
+
+The record is the one of [The record](#the-record), in
+`bench/pi4-4gb-erxos/<run>/`, one per subject, so a paired walk writes
+one for each set and a comparison:
+
+* **environment**: kind `pi4`, system `erxos`, four CPUs and 4,096 MiB,
+  and the SHA-256 of every firmware file from the set's build record;
+* **subject**: the source revision, the SHA-256 of the set's
+  `kernel8.img` and of its build record, the root's flags and the
+  compiler;
+* **run**: the sensor readings before the run and after the return,
+  each named for when it was read;
+* **boots**: `boot-<n>.serial.log` is the console from the end line of
+  the boot before it, or the run's start, to its own end line, so the
+  bootloader's and the firmware's lines, and a boot attributed to no set,
+  stay in the log of the boot that follows them.
+
+### Importing a log
+
+`tools/erx bench import NAME --env pi4-4gb-erxos --set DIR [--profile P]
+LOG` reads a console log captured by hand of boots of the set `DIR`. The
+reader is `BoardLog`, a pure function of the log's bytes and the sets'
+builds and index hashes, which the host reads from each set's
+`kernel8.img`, its pack header, as `BootImage::Built` holds them. It
+splits the log into boots at banners, each banner's build and index hash
+exactly 16 and 64 hexadecimal digits, the handoff's sizes; a boot whose
+banner names a set is attributed to it, and any other is attributed to
+none. Each boot ends at its end line or at the next banner, and one that
+printed the guest's deadline line timed out. Each attributed boot's
+`BENCH`, `CLOCK` and `WINDOW` lines go to `BenchMeasurement.boot` against
+what `NAME` asks at profile `P`, as a QEMU boot's lines do. The live run's
+record is the same function of the log it captured. Every byte the
+reader takes is the board's, untrusted: nothing it reads reaches the
+terminal but through `LineEscape`, and the reader is fuzzed with the
+bench lines' reader.
+
 ## Other systems on the same Raspberry Pi 4
 
 A comparison across systems is only as fair as its board. Every system
@@ -767,7 +1059,7 @@ not corrected.
 
 | System | Version | How it boots | What it runs |
 | --- | --- | --- | --- |
-| erXos | the subject | netboot (`tools/erx netboot`) | the bench images |
+| erXos | the subject | netboot, walked by the board itself ([Running on the Raspberry Pi 4](#running-on-the-raspberry-pi-4)) | the bench images |
 | L4Re | a pinned L4Re snapshot of the Fiasco revision erXos's fork came from, built by its own build system, without virtualization support as erXos's fork is | netboot, as erXos's Fiasco does | L4Re's own IPC benchmark (`github.com/l4re/ipcbench`), fetched pinned; in the configuration erXos's fork uses, which is the comparison, and in L4Re's published configuration as a diagnostic: a result more than a tenth from the page's 505, 702 and 305 cycles is reported beside the comparison and looked into, and does not by itself void it |
 | FreeBSD | 15.1-RELEASE's image for the Raspberry Pi, the release erXos's commands are compared with in the oracle guest ([design.md](design.md#testing-and-the-oracle)); that it boots this board is unverified | its own SD card | `erx_peer_bench` |
 | Linux | Raspberry Pi OS Lite, 64-bit, pinned, with the vendor's stock kernel; its real-time kernel as a second row for `wake` only, if the image offers one (unverified) | its own SD card | `erx_peer_bench` |
@@ -788,9 +1080,11 @@ and otherwise `CLOCK_MONOTONIC` (recorded as such). It pins threads with
 `cpuset_setaffinity` on FreeBSD and `sched_setaffinity` on Linux, the one
 place it differs by system.
 
-A run on the board writes its console to a file through the host's serial
-adapter, and `tools/erx bench import --env pi4-4gb-SYSTEM LOG [--capture
-FILE]` turns the log, and the analyser's capture, into a record. L4Re's
+A run of another system on the board writes its console to a file
+through the host's serial adapter, and `tools/erx bench import NAME --env
+pi4-4gb-SYSTEM LOG [--capture FILE]` turns the log, and the analyser's
+capture, into a record; an erXos log goes through the same command with
+the boot set it booted ([Importing a log](#importing-a-log)). L4Re's
 benchmark prints its own format; its importer keeps only what it prints,
 so its rows are `partial: mean only` where it gives a mean.
 
@@ -898,9 +1192,8 @@ full matrix's loaded cells, launches `native_task`'s program
 `test/guest/bench/` (calibration, histogram, the `BENCH` line); an
 Erlang module `bench/erx_wake_bench.erl` typed into the image's shell
 as `g3` types its beam; the responders and the analyser's
-importer for `gpio-edge`; and a build of the native bench image for the
-Raspberry Pi 4, since the native guests are built for QEMU `virt`'s
-platform (`Platform.development`).
+importer for `gpio-edge`; and the native bench image's boot set for the
+Raspberry Pi 4 ([The bench image's boot set](#the-bench-images-boot-set)).
 
 ### 2. `sched`: how a CPU is shared
 
@@ -1142,9 +1435,11 @@ File and pipe I/O come with their owning gates.
 
 ## Concurrency and failure
 
-A guest that hangs is ended at its benchmark's deadline, its QEMU killed
-with every child; each cell that reported keeps its status and each that
-did not is `timed_out`. The record is written however the run ended, so a
+A native guest that hangs in a cell ends itself at its own deadline
+([The guest's deadline](#the-bench-images-boot-set)); one that hangs below
+it, and any other guest, is ended at its benchmark's deadline, its QEMU
+killed with every child. Either way each cell that reported keeps its
+status and each that did not is `timed_out`. The record is written however the run ended, so a
 failure leaves evidence. A guest's line that fails validation makes its
 cell `rejected` and the run goes on. A failed boot in a paired run makes
 that pair's verdict `inconclusive`, never a pass.
@@ -1171,6 +1466,38 @@ write, which the root's one service thread writes whole. What else
 writes the console meanwhile (the kernel) can still cut a line, which
 is then refused, and the cell is `rejected`.
 
+**On the board.** A board run holds the stager's lock from its first
+`prepare` to its last `point`, so `tools/erx netboot` and a second run
+wait for it, and holds the console device exclusively, so a second run's
+open is refused. The walk is one thread over one console; its decisions
+are `BoardWalk`'s, and its effects are the stager's renames, two ssh calls
+and the log. The board's own order does the rest: a set changes only
+while a boot runs, and each boot ends itself.
+
+* **A hang in a cell** meets the guest's deadline: the boot ends with a
+  reset, its unreported cells are `timed_out`, and the walk goes on.
+* **A hang below the bench root**, in Fiasco or in a root whose deadline
+  thread cannot run, meets the end deadline: the found set is pointed at,
+  the record is written, and the run says the board needs its power
+  cycled, after which it boots the found set. So does a boot that ends
+  `erx: end off`.
+* **A board that boots no set**, because ssh could not ask it to reboot
+  and nobody reset it, or because the bootloader refused the set, meets
+  the boot deadline: the found set is pointed at and the queued boots not
+  yet run are `not_run`. A refused set over HTTP falls back to the card,
+  whose banner ends the walk at once.
+* **An interrupted run** (a signal, a failure of the tool) points the root
+  at the found set before it exits, at whatever moment that is. A boot
+  that is reading its set then may, over TFTP, take its early files from
+  one set and its later ones from the other, as netboot's own note says;
+  two sets of one tree differ only in `kernel8.img`, which is read whole,
+  so the board boots one image or the other. A host that dies without
+  that step leaves the bench set served, and the board boots it at every
+  reset, each boot ending itself, until a stage serves another set.
+* **Lost console bytes** cost a run, never a result: a lost banner leaves
+  the set as it was, a lost end line only makes that boot end at the next
+  banner, and a cut `BENCH` line is refused, so its cell is `rejected`.
+
 ## Refusals and error results
 
 | Case | Result |
@@ -1188,6 +1515,18 @@ is then refused, and the cell is `rejected`.
 | a sustained cell whose `WINDOW` lines are not exactly one for each of its windows and threads, in order | the cell is `rejected`, naming the first missing or misplaced line |
 | `WINDOW` lines followed by a `BENCH` line of another profile, or by none | the lines are refused |
 | a `measured` sustained cell with a thread that made no pass in a window | the cell is `failed`, naming the thread and the window |
+| `--env pi4-4gb-erxos` without `--console DEVICE` or `--ssh DEST` | refused before anything is built, naming what is missing |
+| a console device that cannot be opened, or that another run holds | refused before anything is staged |
+| a stager root that is not a symbolic link | refused, as `tools/erx netboot` refuses it |
+| an ssh destination that begins with `-` | refused, as `CodeSsh` refuses it |
+| a set whose single file the board's RAM and device tree leave no room for | refused when the set is built (`Machine#check_single_file`) |
+| a found set whose `kernel8.img` is a queued set's | refused: `the board is already served a set of this run` |
+| `--runs` below 1, or `--set` with a directory whose build record does not list `kernel8.img` | refused |
+| an ssh `reboot` that fails | not a refusal: the run says so, asks for a reset by hand and waits the boot deadline |
+| a banner naming a build of no queued set before the found set is served | the walk ends with the found set served; the queued boots not yet run are `not_run` |
+| no banner within the boot deadline | the same, the waiting boot's cells `timed_out` |
+| no end line within the end deadline, or a boot that ends `erx: end off` | the found set is served, the boot's unreported cells are `timed_out`, and the run says the board needs its power cycled |
+| `bench import` of an erXos log without `--set` | refused: the set names the banners the log's boots must carry |
 
 ## Verification
 
@@ -1222,6 +1561,12 @@ fault that must fail it:
 | a sustained cell | twelve `WINDOW` lines, three windows of four threads, then `share-equal`'s `BENCH` line give a `measured` cell with each thread's share and the longest gap; with one `WINDOW` line dropped the cell is `rejected`, and with a thread making no pass in window 1 it is `failed` | the line count check removed: the cell missing a line is `measured`; the idle-window check removed: the starved cell is `measured` |
 | a sustained comparison | three baseline runs whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
 | the interrupt-entry pairing (with the patch) | given receipts and `irq_entry` records, one entry between two receipts makes a sample, and none, two, or a window with a record counted as overwritten makes the receipt `partial` | the window's lower end dropped, pairing each receipt with the latest entry before it: the two-entry case yields a sample |
+| the board's set | the `nullcall` set's `kernel8.img` starts with the board's own first stage and boots in QEMU's `raspi4b` model under TCG, as the `raspi4b` suite boots the card: the banner names the set's build and index hash, every declared cell reports, and the last line is `erx: end reset`; the model's numbers are not recorded, since the model is no environment | the main build's first stage packed instead: no banner appears before the boot's deadline; the root built to end with `ASKED_OFF`: the judge refuses the boot's end as `erx: end off` |
+| the guest's deadline | a build seeded so that `wake-same-cpu`'s thread A never wakes B and B parks with no deadline, at a 10 s guest deadline, prints `erx: bench: deadline` and `erx: end reset` by itself; the cells before it are `measured`, it and every later one `timed_out` | the deadline thread not started: QEMU's own deadline ends the boot, no deadline line appears, and the test fails |
+| the walk (`BoardWalk`, exhaustive over its closed set of events: a banner of each queued set, of the set before, of a foreign build; an end line; each deadline) | against a fake board that boots at each reset the set served then and flags any change while it reads one: `[A, A, A, found]` and `[A, B, A, B, A, B, found]` give their boots in order and end on the found set's banner with no change during a read; a board that ends a boot before the change gives one more run of the set before, and the walk still ends on the found set; a foreign banner, or no banner within the boot deadline, ends the walk with the found set served and the rest `not_run`; and over every sequence of up to eight events no change but a deadline's falls between an end line and the next banner, and every walk that ends leaves the found set served | the change made on the end line instead of the banner: the fake board flags a change during a read; the banner's index hash left unchecked: a foreign boot of the same build number is counted as a run of A |
+| the board log (`BoardLog`) | a log of three boots, with the bootloader's and the firmware's lines between them, splits into three boots, each named by its banner and ended by its end line; a boot whose banner is cut is attributed to no set and its lines to no cell; the fuzz target of the bench lines' reader takes board logs as seeds and runs its budget clean | the split made at end lines alone: the cut banner's boot is attributed to the boot before, its cells repeat that boot's, and that boot's cells are `rejected` |
+| the stager's two steps | `prepare` two sets, then `point` at the first, the second and back at the found target, an empty directory outside netboot's naming: the target is untouched, the link names it at the end, and the run's cleanup leaves neither prepared sibling | the stale siblings removed at each `point`, as `stage` removes them: the second set's sibling is gone when the walk points at it, and the point fails |
+| the cycle counter (on the board) | `cycles_per_tick` times the counter's frequency lies within 2% of the `arm_clock` that `/proc/sensors/status` reported just before the run | the probe built to read the system counter twice instead: the count is 1,000 thousandths and the board check fails |
 
 **Sensitivity runs** check, on a real environment, that a benchmark
 moves when the cost it watches moves. They are experiments, not proofs:
@@ -1284,6 +1629,29 @@ benchmark back to its design rather than letting it land.
 * **Pooling the patched runs' samples for FD32.** The accepted predicate
   compares medians of runs with the spread of medians of runs; the same
   kind of number on both sides is the one that is comparable.
+* **A power-off at the bench's end, and the hardware watchdog to reset
+  the board.** The stand-in root would arm the watchdog, and the host
+  would have to put the found set back within its timeout, at most about
+  16 s by its 20-bit count of 1/65536 s (`include/erx/core/pm_wdt.h`,
+  `kernel/core/pm_wdt.c`);
+  the end path's reset reaches the same reset with neither.
+* **Restoring the found set at the boot's first console line.** The
+  bootloader and the firmware print on the console before and while the
+  set is read (`BOOT_UART`, `uart_2ndstage`), so only a line of the image
+  itself, Fiasco's banner, says the set has been read.
+* **Restoring only after the bench's last line.** The board resets right
+  after that line and reads its next set at once, so a change then races
+  the read; on the banner the board reads nothing for the whole boot.
+* **Following the log a terminal program writes.** Its writes are
+  buffered for an interval of its own (unverified for `screen`), and a
+  file another program owns has a start, truncation and rotation the run
+  would have to handle; a device the run holds has none.
+* **A console reader in the bench image, to take `reboot`.** It would add
+  a reader beside the measured cells, and a reboot typed after the cells
+  does nothing the image's own reset does not.
+* **Arming the hardware watchdog in the bench root,** so that a hang below
+  it resets the board by itself: an open decision
+  ([Open decisions](#open-decisions)).
 
 ## Decisions
 
@@ -1399,6 +1767,61 @@ runs' medians. The patched runs combine as the median of their medians,
 each run's reported beside it, as [FD32's decision](#fd32s-decision)
 computes it. A different reading changes only that one function.
 
+## Open decisions
+
+### The board's way back to its found set
+
+[The walk](#the-walk) brings the board back without anyone at the desk:
+every bench boot ends with the machine's reset, the host serves the found
+set from the last bench boot's banner on, and that boot's reset boots it.
+What it leaves to a person is a power cycle after a hang below the bench
+root, a halted board, or a board that could not be asked to reboot; in
+each case the found set is already served, so the board comes back on it.
+**Recommendation: accept it.** The construction adds nothing to the
+image but its reset and its deadline, and a power cycle is the board's
+recovery for every other hang below the root
+([design-fiasco.md, The Raspberry Pi 4](design-fiasco.md#the-raspberry-pi-4)).
+
+### Which network boot the stager drives
+
+The tree's stager serves TFTP; the board on the desk boots over HTTP, from
+a `boot.img` and `boot.sig` that scripts outside the tree make and serve,
+and its boot order as configured has no TFTP entry, so the walk cannot
+reach the board through the tree's stager as it stands.
+**Recommendation: bring the HTTP boot into `Netboot` as its second form,
+behind the same `prepare` and `point`.** `prepare` builds `boot.img` from
+the set's listed files and signs it, beside the served directory; `point`
+renames the image and then its signature into it, as the scripts do. The
+two renames leave a moment in which the pair disagrees, which the
+bootloader refuses, falling back to the card; the walk changes the set
+only while the board reads none, so only an interrupted run's last
+`point` can meet that moment. The served directory cannot be a link to a
+sibling, as the TFTP root is, while the server resolves its directory
+once at its start and serves no symbolic link (`pi4_http_serve.rb`,
+`File.realpath` of its argument). The key is given by path to each
+`prepare` and read only then: it is never copied into the tree, `build/`,
+a record or a log, never passed on a command line, and a key file inside
+any erXos worktree, reached through a symbolic link, or readable by anyone
+but its owner is refused. The board's check is unchanged: a bench set is
+signed and checked as every staged build is, and a development build runs
+only trusted code, which a bench image is. The server stays outside the
+tree; bringing it in would add a reader of the board's requests, with
+its fuzz target. The form's design is a change to
+[design-platforms.md, Netbooting from a Mac](design-platforms.md#netbooting-from-a-mac).
+The alternative, putting TFTP back in the board's boot order, keeps the
+tree as it is and checks nothing the board boots.
+
+### A hardware watchdog in the bench root
+
+Arming the board's watchdog in the bench root would reset the board by
+itself after a hang below the root too. It costs a reload at the root's
+top priority every second through every cell, which the system root
+pays as well, and the watchdog's window in a stand-in root that reads no
+manifest. **Recommendation: not now.** A hang below the bench root has no
+known cause, and the walk already leaves the board to come back on its
+found set after a power cycle; the cost is a periodic wake inside every
+cell the board measures.
+
 ## References
 
 Fetched on 2026-11-23 into `~/erxos-scratch/src-osbench/` and read as
@@ -1418,5 +1841,20 @@ trace ring, Measurements, Verification), [design-build.md](design-build.md)
 (What the gates run, Reusing passing boots),
 [design-domains.md](design-domains.md#performance),
 [design-scheduler.md](design-scheduler.md#performance),
-[design-header-io.md](design-header-io.md), and
+[design-header-io.md](design-header-io.md),
+[design-platforms.md](design-platforms.md#netbooting-from-a-mac) (Netbooting
+from a Mac), [design-board-sensors.md](design-board-sensors.md), and
 [research-baselines.md](research-baselines.md).
+
+Outside the tree, the board's HTTP boot as set up on the development host,
+read on 2026-11-24 and not run:
+
+| File | SHA-256 |
+| --- | --- |
+| `~/erxos-scratch/tools/pi4_http_stage.rb` | `bba85ff71ef683096fb886586050ad67737c884166898edd978eb5626ee6d4ff` |
+| `~/erxos-scratch/tools/pi4_http_serve.rb` | `7244ca73bdc5f54935ea0788c2538db7a819083e2454cb8085efed925a3225a1` |
+| `~/erxos-scratch/netboot/http/boot.conf`, the EEPROM configuration | `0f25bd6b986f835f120511209bcac1bb9210649f826d7dff8c90dae68222c19f` |
+| `~/erxos-scratch/netboot/http/STEPS.txt` | `e2ac61fc908bf2caf1b7e6163a795185cc8e5e64004b9123a3e092fd36ebbc8e` |
+
+That this configuration is the one flashed into the board's EEPROM is
+taken from `STEPS.txt` and unverified.
