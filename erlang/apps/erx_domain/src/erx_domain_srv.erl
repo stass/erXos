@@ -408,12 +408,10 @@ booted(#{lib := Lib} = State) ->
             Trees = [Name || {_Server, Name, Interface} <- maps:get(services, Boot, []),
                              lists:member(Interface, ?ERX_TREE_SERVICES)],
             %% Each drive window is a grant from the row whose placed devices carry it
-            %% to the media domain, the configured domain that serves media, which the
-            %% manifest check holds every drive window to (docs/design-drives.md,
-            %% "Manifest rows"): {ServingRow, MediaRow, N}, N the manifest's.
-            Drives = [{Serving, Media, N} || {Media, media, _Interface} <- maps:get(services, Boot, []),
-                                            is_integer(Media),
-                                            #{row := Serving, drives := Ns} <- Rows, N <- Ns],
+            %% to the window row's holder (docs/design-drives.md, "How the grant
+            %% reaches the media domain"): {ServingRow, Holder, N}, both of the
+            %% window the manifest's.
+            Drives = [{Serving, Holder, N} || #{row := Serving, drives := Ds} <- Rows, {N, Holder} <- Ds],
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
                                            grants => Minted, files => Files, windows => Windows,
                                            inputs => Inputs, drives => Drives}),

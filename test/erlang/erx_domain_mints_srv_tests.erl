@@ -421,15 +421,29 @@ served() ->
     ?assertEqual(#{}, grants()).
 
 %% The manifest's drive windows reach the mint core as grants (docs/design-drives.md,
-%% "How the grant reaches the media domain"): a's placed devices carry drives 0 and 2 and
-%% b serves media, so b, the media domain, holds a grant of each from a, keyed
-%% {drive, N}; a, which serves no media, holds none.
+%% "How the grant reaches the media domain"), each held by its window row's holder: a's
+%% placed devices carry drives 0 and 2, both held by b, so b holds a grant of each from a,
+%% keyed {drive, N}; a holds none, though it serves them.
 drives_test() ->
-    Row = fun(Row, Place, Name, Drives) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
-                                             restarts => 0, restart_period_s => 60, drives => Drives} end,
-    persistent_term:put({erx_domain_fake_lib, boot},
-                        #{domains => [Row(0, 1, <<"b">>, []), Row(1, 0, <<"a">>, [0, 2])],
-                          services => [{0, media, ?ERX_SERVICE_FILES}], grants => []}),
+    Grants = drive_grants([row(0, 1, <<"b">>, []), row(1, 0, <<"a">>, [{0, 0}, {2, 0}])],
+                          [{0, media, ?ERX_SERVICE_FILES}]),
+    ?assertEqual([{0, {drive, 0}}, {0, {drive, 2}}], lists:sort(maps:keys(Grants))).
+
+%% Each drive's grantee is its own row's holder, not the server of media, of which there
+%% is none here: a's drive 0 is held by b and c's drive 1 by d, so two serving rows and
+%% two holders make two grants, each record from its own server.
+drives_of_two_rows_held_by_two_domains_test() ->
+    Grants = drive_grants([row(0, 0, <<"a">>, [{0, 1}]), row(1, 1, <<"b">>, []),
+                           row(2, 2, <<"c">>, [{1, 3}]), row(3, 3, <<"d">>, [])], []),
+    ?assertEqual([{1, {drive, 0}}, {3, {drive, 1}}], lists:sort(maps:keys(Grants))).
+
+row(Row, Place, Name, Drives) ->
+    #{row => Row, place => Place, name => Name, principal => 1, kind => service,
+      restarts => 0, restart_period_s => 60, drives => Drives}.
+
+%% The mint core's grant records once the service has booted Domains and Services.
+drive_grants(Domains, Services) ->
+    persistent_term:put({erx_domain_fake_lib, boot}, #{domains => Domains, services => Services, grants => []}),
     provide_a(fun(_Id) -> #{} end),
     Log = erx_domain_fake_lib:start_log(),
     {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
@@ -438,7 +452,7 @@ drives_test() ->
     unlink(Service),
     try
         #{mints := Mints} = sys:get_state(erx_domain_srv),
-        ?assertEqual([{0, {drive, 0}}, {0, {drive, 2}}], lists:sort(maps:keys(erx_domain_mints:grants(Mints))))
+        erx_domain_mints:grants(Mints)
     after
         cleanup({Log, Service})
     end.

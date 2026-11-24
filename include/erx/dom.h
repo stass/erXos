@@ -262,6 +262,17 @@ typedef struct erx_dom_range {
 } erx_dom_range_t;
 
 /*
+ * A drive window on a device (docs/design-drives.md, "How the grant reaches
+ * the media domain"): its drive number, below ERX_MF_NONE, and the
+ * configured row that holds the window, the drive grant's grantee. Both
+ * are the manifest's, never a report's.
+ */
+typedef struct erx_dom_drive {
+	uint32_t	number;
+	uint32_t	holder;
+} erx_dom_drive_t;
+
+/*
  * One entry of the device service's catalogue: what a give makes for the
  * device in the creation of the configured row its unit is placed on, and
  * where the manifest places it. The boot view builds one per row of the
@@ -356,13 +367,13 @@ typedef struct erx_dom_device_entry {
 	erx_dt_framebuffer_t framebuffer;
 	const char	*format;
 	/*
-	 * The drive number of each drive window on it (docs/design-fiasco.md,
-	 * "Drive records"), each below ERX_MF_NONE, in the window table's
-	 * order; only a usb or block row has any (boot_drives). Each give of
-	 * the entry writes one -erx_record drive ROLE N per drive, ROLE its
-	 * role's name, into its holder's arguments (erx_dom_args).
+	 * Each drive window on it (docs/design-fiasco.md, "Drive records"), in
+	 * the window table's order; only a usb or block row has any
+	 * (boot_drives). Each give of the entry writes one -erx_record drive
+	 * ROLE N per drive, ROLE its role's name, into its holder's arguments
+	 * (erx_dom_args).
 	 */
-	uint32_t	drives[ERX_DOM_DRIVES_MAX];
+	erx_dom_drive_t	drives[ERX_DOM_DRIVES_MAX];
 	uint32_t	ndrives;
 } erx_dom_device_entry_t;
 

@@ -115,12 +115,16 @@ decides; Erlang code reads it here and never recomputes it.
 -doc """
 A configured domain of the system manifest: its row in the manifest's domain
 table, its place in the boot order (from 0), its name, an identifier the
-manifest check accepted, its principal, its kind, and its restart intensity:
-at most restarts restarts within restart_period_s seconds.
+manifest check accepted, its principal, its kind, its restart intensity:
+at most restarts restarts within restart_period_s seconds, and the drive
+windows on its placed devices, the drives it serves, each its drive number
+and the configured row that holds the window, the drive grant's grantee
+(docs/design-drives.md, "How the grant reaches the media domain").
 """.
 -type configured() :: #{row := non_neg_integer(), place := non_neg_integer(), name := binary(),
                         principal := pos_integer(), kind := service | secret,
-                        restarts := non_neg_integer(), restart_period_s := non_neg_integer()}.
+                        restarts := non_neg_integer(), restart_period_s := non_neg_integer(),
+                        drives := [{Drive :: non_neg_integer(), Holder :: non_neg_integer()}]}.
 
 -doc """
 A session template of the system manifest, from which each session of its

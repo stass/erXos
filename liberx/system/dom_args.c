@@ -204,7 +204,7 @@ erx_dom_args(const erx_dom_lib_t *lib, const erx_dom_plan_t *plan, const erx_dom
 			entry = &lib->view.devices[give->devices[d].index];
 			for (uint32_t n = 0; n < entry->ndrives; n++) {
 				if (drive == ERX_DOM_DRIVES_MAX ||
-				    (length = erx_boot_drive_words(entry->role, entry->drives[n], out->drive_words[drive],
+				    (length = erx_boot_drive_words(entry->role, entry->drives[n].number, out->drive_words[drive],
 				    sizeof(out->drive_words[drive]))) == 0)
 					return (0);
 				runs[count++] = (erx_boot_words_t){ out->drive_words[drive++], length };

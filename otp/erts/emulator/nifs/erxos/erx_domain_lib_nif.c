@@ -412,8 +412,8 @@ created_term(ErlNifEnv *env, const erx_dom_created_t *created)
  * {ok, #{host => Host, domains => Rows, services => Services, grants =>
  * Grants, boot_timeout_s => Seconds}}, Rows in row order, each #{row, place,
  * name, principal, kind, restarts, restart_period_s, drives}, place its place
- * in the boot order, drives the drive numbers its placed devices carry
- * (erx_domain_drives_term), Services and Grants as erx_domain_served_terms
+ * in the boot order, drives the drive windows its placed devices carry,
+ * each {N, Holder} (erx_domain_drives_term), Services and Grants as erx_domain_served_terms
  * makes them, and
  * Seconds the machine's boot timeout. The view is
  * fixed at boot, so this reads it without the lock.

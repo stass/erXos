@@ -735,8 +735,9 @@ number in its `drive` field, on the row of a `usb` device or of a
 carries `mf_none` in its `partition` field, since the window covers
 whatever medium the drive holds, whole, and every window of another role
 carries `mf_none` in its `drive` field. The media domain is the
-configured domain that serves the service named `media`; the manifest
-names it no other way.
+configured domain that serves the service named `media`. The drive's
+grant goes to the row's holder, which the manifest check holds to the
+media domain.
 
 A drive window, as every window, states no rights: the `drive` role is
 writable, so the media domain may write every drive. Which sessions may

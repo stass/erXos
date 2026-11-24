@@ -895,12 +895,14 @@ boot_system_image(erx_dom_lib_t *lib, const erx_manifest_view_t *manifest)
  * Hangs each drive window on its device's entry, the first count of
  * entries (docs/design-fiasco.md, "Drive records"), in the window table's
  * order, so every give of the device writes its records and a domain
- * learns only the drives on what it holds. The window's holder is the
- * media domain, which learns a drive through its grant and gets no
- * record. The manifest check holds each drive to a usb or block device
- * and a number below mf_none, and a domain's devices to
+ * learns only the drives on what it holds. The window's holder, a
+ * configured row, is the drive grant's grantee, the media domain, which
+ * learns a drive through its grant and gets no record. The manifest check
+ * holds each drive to a usb or block device, a number below mf_none and
+ * the media domain as its holder, and a domain's devices to
  * ERX_DOM_DRIVES_MAX drives (boot_configured); a manifest past those is
- * refused, so every record a creation writes has its room.
+ * refused, so every record a creation writes has its room and every grant
+ * a grantee.
  */
 static const char *
 boot_drives(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries, uint32_t count)
@@ -919,9 +921,11 @@ boot_drives(const erx_manifest_view_t *manifest, erx_dom_device_entry_t *entries
 		if ((entry->role != ERX_MF_DEVICE_ROLE_USB && entry->role != ERX_MF_DEVICE_ROLE_BLOCK) ||
 		    window.drive == ERX_MF_NONE)
 			return ("manifest: a drive window not on a usb or block device, or naming no drive");
+		if (window.holder >= manifest->header.domains.count)
+			return ("manifest: a drive window held by no configured domain");
 		if (entry->ndrives == ERX_DOM_DRIVES_MAX)
 			return ("manifest: a device carries more drives than its holder's boot page records");
-		entry->drives[entry->ndrives++] = window.drive;
+		entry->drives[entry->ndrives++] = (erx_dom_drive_t){ .number = window.drive, .holder = window.holder };
 	}
 	return (NULL);
 }
