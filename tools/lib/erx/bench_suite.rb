@@ -21,13 +21,15 @@ module Erx
     # sampled by, and what a correct result of the act is. A handshake (one thread acts,
     # another answers before the first acts again) cannot be batched, so it is exempt
     # from the short operations' batches and reports batch 1 (docs/design-bench.md, "The
-    # one clock").
-    Operation = Data.define(:name, :profile, :result, :handshake) do
-      def initialize(name:, profile:, result:, handshake: false)
+    # one clock"). A periodic operation whose timer rounds its own deadlines is declared
+    # sweep: false, and its lines carry no sweep phases (docs/design-bench.md, "A benchmark").
+    Operation = Data.define(:name, :profile, :result, :handshake, :sweep) do
+      def initialize(name:, profile:, result:, handshake: false, sweep: true)
         BenchRecord.check(name.is_a?(String) && BenchRecord::NAME.match?(name), 'operation is not a plain name')
         BenchRecord.check(BenchRecord::PROFILES.include?(profile), 'profile is not one of the profiles')
         BenchRecord.check(result.is_a?(String) && !result.empty?, "#{name} does not say what a correct result is")
         BenchRecord.check([true, false].include?(handshake), "#{name}'s handshake is neither true nor false")
+        BenchRecord.check([true, false].include?(sweep), "#{name}'s sweep is neither true nor false")
         super
       end
     end
@@ -100,11 +102,7 @@ module Erx
 
     # The suite's cells: each boot's benchmarks, named as a QEMU cell that carries its
     # case (Erx::QemuCells::CELL_CASE_NAME): "hvf-4cpu-native-wake".
-    def suite_cells
-      BOOTS.flat_map do |boot, _|
-        benchmarks.values.select { |declared| declared.landing.key?(boot) }.map { |declared| suite_cell_name(boot, declared.name) }
-      end
-    end
+    def suite_cells = BOOTS.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
 
     def suite_cell_name(boot, benchmark)
       entry = BOOTS.fetch(boot)
@@ -128,67 +126,84 @@ module Erx
       !cpus.nil? && cpus < PLACEMENTS.fetch(placed.placement)
     end
 
-    # The suite cell of one boot's benchmark from its record: the worst of its cells,
-    # each judged in the record's environment, at best partial when a line of the boot
-    # was refused, since what it said is unknown, and failed when the boot's seeded run
-    # did not show its fault. A boot with no seeded run passes nothing for seed_caught.
-    def boot_cell(record, refused:, seed_caught: true)
+    # The suite cell of one boot's benchmark from its record: the worst of that
+    # benchmark's cells, each judged in the record's environment, at best partial when a
+    # line of the boot was refused, since what it said is unknown, and failed when the
+    # boot's seeded run did not show its fault. A boot with no seeded run passes nothing
+    # for seed_caught.
+    def boot_cell(record, benchmark:, refused:, seed_caught: true)
       return 'failed' unless seed_caught
 
-      judged = record.cells.map { |cell| [cell.status, expected_unsupported?(cell.conditions, record.environment)] }
+      judged = record.cells.select { |cell| cell.benchmark == benchmark }
+                     .map { |cell| [cell.status, expected_unsupported?(cell.conditions, record.environment)] }
       suite_cell(judged + (refused.empty? ? [] : [['rejected', false]]))
     end
 
-    # The suite's run, each landing recorded in history: every benchmark's native boot
-    # and its seeded runs (native, a NativeBench::Landing), then the xdomain boot's
-    # xdomain cells (xdomain, an XdomainBench::Landing). A landing that fails is a failed
-    # cell, so the others' cells stand. wake's erlang-timer, which the xdomain boot also
-    # declares, has no guest yet, so its cell is pending, the gate's status for a cell
-    # whose call does not exist.
+    # One landing of the suite's run: the boot, the label its notes carry, the benchmarks
+    # whose cells its record holds, and its outcome (Landing#call's answer, or { error: }).
+    Landed = Data.define(:boot, :label, :benchmarks, :outcome)
+
+    # The suite's run, one landing after another, each recorded in history: every
+    # benchmark's native boot and its seeded runs (native, a NativeBench::Landing), then
+    # the xdomain boot's cells of every benchmark it runs (xdomain, an
+    # XdomainBench::Landing). Each landing is given, for a test, or made for context's
+    # tree. A landing that fails is a failed cell for each of its benchmarks, so the
+    # others' cells stand; a boot that ends at a QEMU deadline is recorded with its
+    # unreported cells timed_out.
     def run(context, history: BenchRecord.history, native: NativeBench::Landing.new(root: context.root),
             xdomain: XdomainBench::Landing.new(root: context.root))
-      outcomes = benchmarks.values.select { |declared| declared.landing.key?('native') }.to_h do |declared|
-        [['native', declared.name], outcome(native, declared, boot: 'native', history: history)]
+      landed = booted('native').map do |declared|
+        Landed.new(boot: 'native', label: "native: #{declared.name}", benchmarks: [declared],
+                   outcome: outcome(native, declared, boot: 'native', history: history))
       end
-      outcomes[%w[xdomain xdomain]] = outcome(xdomain, benchmark('xdomain'), boot: 'xdomain', history: history)
-      cells = outcomes.to_h { |(boot, name), outcome| [suite_cell_name(boot, name), outcome_cell(outcome)] }
-      { cells: suite_cells.to_h { |cell| [cell, 'pending'] }.merge(cells),
-        notes: outcomes.flat_map { |(boot, name), outcome| landing_notes(boot, name, outcome) } +
-               ["bench: xdomain: wake's erlang-timer has no guest to run it"] }
+      landed << Landed.new(boot: 'xdomain', label: 'xdomain', benchmarks: booted('xdomain'),
+                           outcome: outcome(xdomain, booted('xdomain'), boot: 'xdomain', history: history))
+      cells = landed.flat_map do |landing|
+        landing.benchmarks.map do |declared|
+          [suite_cell_name(landing.boot, declared.name), outcome_cell(landing.outcome, benchmark: declared.name)]
+        end
+      end
+      { cells: cells.to_h, notes: landed.flat_map { |landing| landing_notes(landing.label, landing.outcome) } }
     end
 
-    # A landing's outcome for declared in boot, or { error: } with the message of the
-    # failure that ended it.
-    def outcome(landing, declared, boot:, history:)
-      landing.call(declared, boot: BOOTS.fetch(boot), history: history)
+    # The benchmarks with landing cells in boot, in the suite's order.
+    def booted(boot) = benchmarks.values.select { |declared| declared.landing.key?(boot) }
+
+    # A landing's outcome for what (a benchmark, or the boot's benchmarks) in boot, or
+    # { error: } with the message of the failure that ended it.
+    def outcome(landing, what, boot:, history:)
+      landing.call(what, boot: BOOTS.fetch(boot), history: history)
     rescue Error => e
       { error: e.message }
     end
     private_class_method :outcome
 
-    # A boot without seeded runs has no seeds_missed.
-    def outcome_cell(outcome)
+    # benchmark's suite cell from its landing's outcome. A landing without seeded runs
+    # has no seeds_missed.
+    def outcome_cell(outcome, benchmark:)
       case outcome
       in { error: String } then 'failed'
-      in { record:, refused: } then boot_cell(record, seed_caught: outcome.fetch(:seeds_missed, []).empty?, refused: refused)
+      in { record:, refused: }
+        boot_cell(record, benchmark: benchmark, refused: refused, seed_caught: outcome.fetch(:seeds_missed, []).empty?)
       end
     end
     private_class_method :outcome_cell
 
-    # What the report says of a benchmark's landing in boot, each note escaped for the
-    # terminal: a refusal never quotes a guest's line but may carry JsonInput's words
-    # about it, and a failure's message may quote the guest's FAILED line.
-    def landing_notes(boot, name, outcome)
+    # What the report says of one landing, each note escaped for the terminal: a refusal
+    # never quotes a guest's line but may carry JsonInput's words about it, and a
+    # failure's message may quote the guest's FAILED line. A boot that ran to its end has
+    # no timed_out.
+    def landing_notes(label, outcome)
       notes = case outcome
               in { error: String => error } then ["failed: #{error}"]
               in { record:, written:, refused: }
                 kept = written ? "recorded #{written}" : "replayed the stored log #{record.run.reused_from}, no record added"
                 cells = record.cells.reject { |cell| cell.status == 'measured' }
                               .map { |cell| "#{cell.operation} #{cell.conditions.placement}: #{cell.status} (#{cell.reason})" }
-                [kept, *outcome.fetch(:seeds_missed, []).map { |missed| "the seeded #{missed} was not caught" }, *cells,
-                 *refused.map { |reason| "refused: #{reason}" }]
+                [kept, *outcome.fetch(:seeds_missed, []).map { |missed| "the seeded #{missed} was not caught" },
+                 *[outcome[:timed_out]].compact, *cells, *refused.map { |reason| "refused: #{reason}" }]
               end
-      notes.map { |note| "bench: #{boot}: #{name}: #{LineEscape.escape(note)}" }
+      notes.map { |note| "bench: #{label}: #{LineEscape.escape(note)}" }
     end
     private_class_method :landing_notes
   end

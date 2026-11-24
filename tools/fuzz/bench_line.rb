@@ -7,6 +7,7 @@
 require 'json'
 require 'optparse'
 require_relative '../lib/erx/bench_measurement'
+require_relative '../lib/erx/bench_suite'
 
 # The BENCH, CLOCK and WINDOW line validators (Erx::BenchMeasurement.cell, .clock and
 # .window) over mutated lines, as a guest could print them.
@@ -20,8 +21,15 @@ module Erx
     PROFILES = {
       'park-deadline' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 32, runs: 1),
       'wake-same-cpu' => BenchRecord::Profile.new(name: 'fast', warmup: 10, samples: 40, runs: 1),
-      'trigger-take' => BenchRecord::Profile.new(name: 'expensive', warmup: 10, samples: 20, runs: 1)
+      'trigger-take' => BenchRecord::Profile.new(name: 'expensive', warmup: 10, samples: 20, runs: 1),
+      'erlang-timer' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 24, runs: 1)
     }.freeze
+    WAKE = BenchSuite.benchmark('wake')
+    # The one benchmark the lines report, at PROFILES' sizes; cell checks no declared cell.
+    ASKED = BenchMeasurement::Asked.new(
+      benchmarks: [BenchMeasurement::Wanted.new(benchmark: WAKE, cells: [], profiles: PROFILES)],
+      clock: 'counter', pairs: [[0, 1]]
+    )
     # JSON's own tokens and a float, inserted where they turn one value into another.
     TOKENS = ['0', '9', '-', ',', ']', '[', '{', '}', '"', '1e3', '5.0', 'null', '\udc00', '/*'].freeze
 
@@ -43,7 +51,7 @@ module Erx
         'counts' => { 'lost' => 0, 'early' => 0, 'missed' => 0 }
       }
       fields['raw'] = samples if profile.name == 'expensive'
-      if profile.name == 'periodic'
+      if profile.name == 'periodic' && WAKE.operations.fetch(operation).sweep
         fields['phases'] = (0...16).map { |phase| [5, samples.size / 16 + (phase < samples.size % 16 ? 1 : 0)] }
         fields['excess'] = buckets
       end
@@ -68,7 +76,16 @@ module Erx
     # The longest WINDOW line a spinner writes: its last window and thread, every count at its most.
     def longest_window_line = window_line(window: 9, thread: 7, **MEASUREMENT::WINDOW_COUNTS.to_h { |name| [name, (1 << 64) - 1] })
 
-    def seeds = PROFILES.keys.map { |operation| line(operation) } + [clock_line, window_line, longest_window_line]
+    # Each operation's line, the two-CPU calibration, an Erlang guest's: 1 GHz, its wait
+    # rounding 1 ms, cycles unknown, no pair, and a failed cell with samples; and WINDOW
+    # lines, a typical one and the longest.
+    def seeds
+      PROFILES.keys.map { |operation| line(operation) } +
+        [clock_line, clock_line(frequency_hz: 1_000_000_000, increment: 41, wait_rounding: 1_000_000, pairs: []),
+         line('erlang-timer', frequency_hz: 1_000_000_000, status: 'failed', reason: 'a timer message did not come',
+                              counts: { 'lost' => 1, 'early' => 0, 'missed' => 3 }),
+         window_line, longest_window_line]
+    end
 
     # A seed's text mutated: bytes changed, cut or inserted, and the histogram's first
     # bucket repeated.
@@ -101,7 +118,7 @@ module Erx
         return
       end
 
-      cell = MEASUREMENT.cell(text, benchmark: 'wake', profiles: PROFILES)
+      cell = MEASUREMENT.cell(text, ASKED)
       samples = cell.summary.fetch('samples', 0)
       raise 'an accepted histogram past its profile' if samples > PROFILES.fetch(cell.operation).samples
     rescue Erx::Error

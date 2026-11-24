@@ -12,15 +12,14 @@ differs. local-rtt's server is a process of this domain that answers the call as
 the facet does. One request is outstanding at a time, and each round trip is
 stamped on the client's side, so a cell needs no calibration across CPUs.
 
-run/1 runs in a domain the echo facet is granted to and answers the boot's lines,
-the CLOCK line first: the host prints them and judges them
-(Erx::BenchMeasurement). A reply that is not its request fails its cell, as does
-a call with no reply, a domain that holds no echo facet, or any exception the
-cell raises, so run/1 always answers and the host always sees how each cell
-ended. A calibration that raises leaves no line at all, so the host reports
-every cell as not run.
+cells/2 runs in a domain the echo facet is granted to, under erx_bench_hist:run/1,
+which prints the boot's CLOCK line before these cells' BENCH lines: the host
+judges them (Erx::BenchMeasurement). A reply that is not its request fails its
+cell, as does a call with no reply, a domain that holds no echo facet, or any
+exception the cell raises, so cells/2 always answers both cells and the host
+always sees how each ended.
 """.
--export([run/1]).
+-export([cells/2]).
 
 -define(BENCHMARK, <<"xdomain">>).
 -define(CALL_MS, 5000).
@@ -29,24 +28,19 @@ every cell as not run.
 -define(FACET_POLL_MS, 100).
 
 -doc """
-The boot's lines for a fast profile's Warmup and Samples and a request of Bytes:
-the CLOCK line, then local-rtt's BENCH line, then xdomain-pingpong's.
+The cells' fields for a fast profile's Warmup and Samples and a request of Bytes,
+timed on Clock, the boot's calibration: local-rtt's, then xdomain-pingpong's.
 """.
--spec run(#{warmup := non_neg_integer(), samples := pos_integer(), bytes := non_neg_integer()}) -> [binary()].
-run(#{warmup := Warmup, samples := Samples, bytes := Bytes}) ->
-    try erx_bench_hist:calibrate() of
-        Clock -> lines(Warmup, Samples, {echo, binary:copy(<<16#a5>>, Bytes)}, Clock)
-    catch
-        _:_ -> []
-    end.
-
-lines(Warmup, Samples, Request, Clock) ->
+-spec cells(#{warmup := non_neg_integer(), samples := pos_integer(), bytes := non_neg_integer()}, map()) -> [map()].
+cells(#{warmup := Warmup, samples := Samples, bytes := Bytes}, Clock) ->
+    Request = {echo, binary:copy(<<16#a5>>, Bytes)},
     Local = spawn(fun echo/0),
-    Cells = [cell(<<"local-rtt">>, fun() -> {ok, Local} end, Request, Warmup, Samples, Clock),
-             cell(<<"xdomain-pingpong">>, fun() -> facet(?FACET_POLLS) end, Request, Warmup, Samples,
-                  Clock)],
-    exit(Local, kill),
-    [erx_bench_hist:clock_line(Clock) | [erx_bench_hist:cell_line(Cell) || Cell <- Cells]].
+    try
+        [cell(<<"local-rtt">>, fun() -> {ok, Local} end, Request, Warmup, Samples, Clock),
+         cell(<<"xdomain-pingpong">>, fun() -> facet(?FACET_POLLS) end, Request, Warmup, Samples, Clock)]
+    after
+        exit(Local, kill)
+    end.
 
 %% local-rtt's server: it answers {echo, Term} with {echo, Term}, as
 %% erx_echo_test's facet does, though without the erx_facet behaviour's loop.

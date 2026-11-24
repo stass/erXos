@@ -26,9 +26,10 @@ module Erx
     # Boots boot (a BenchSuite::Boot) through the block, which takes the accelerator and
     # answers the boot's measured map (its serial log, guest lines, image SHA-256,
     # flags, compiler, workloads' SHA-256, QEMU version and the stored log a replayed
-    # boot came from), and judges its lines against asked. Answers the record, the run
-    # directory written (nil for a replayed boot) and the refused lines' reasons.
-    # memory_mib is the machine's.
+    # boot came from, and the checkpoint timeout that ended a boot early), and judges its
+    # lines against asked: a cell a timed-out boot did not report is timed_out. Answers
+    # the record, the run directory written (nil for a replayed boot), the refused lines'
+    # reasons and the timeout. memory_mib is the machine's.
     def call(asked, boot:, memory_mib:, history:)
       accel = boot.kind.delete_prefix('qemu-')
       revision = revision()
@@ -37,7 +38,8 @@ module Erx
       before = QemuGate.one_minute_load
       measured = yield(accel)
       after = QemuGate.one_minute_load
-      answer = BenchMeasurement.boot(measured.fetch(:lines), asked)
+      timed_out = measured.fetch(:timed_out, nil)
+      answer = BenchMeasurement.boot(measured.fetch(:lines), asked, timed_out: !timed_out.nil?)
       record = BenchRecord::Record.new(
         environment: environment(boot, accel: accel, model: model, memory_mib: memory_mib, measured: measured),
         subject: subject(revision, measured),
@@ -48,7 +50,7 @@ module Erx
       written = unless record.run.replayed?
                   BenchRecord.write(record, history: history, erxos_root: @root, boots: [{ serial: measured.fetch(:serial) }])
                 end
-      { record: record, written: written, refused: answer.fetch(:refused) }
+      { record: record, written: written, refused: answer.fetch(:refused), timed_out: timed_out }
     end
 
     private

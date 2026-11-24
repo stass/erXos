@@ -106,12 +106,16 @@ module Erx
       benchmark.operations.transform_values { |operation| LANDING_PROFILES.fetch(operation.profile, nil) }.compact
     end
 
+    # What a landing boot asks of benchmark: its cells in boot at their landing profiles.
+    def wanted(benchmark, boot:)
+      BenchMeasurement::Wanted.new(benchmark: benchmark, cells: benchmark.landing.fetch(boot), profiles: profiles(benchmark))
+    end
+
     # What a boot of the image at cpus CPUs asks of its guest: the benchmark's native
     # landing cells at their profiles, on the counter, and the one pair the root (on CPU
     # 0) times wake-cross-cpu across, with the last CPU; none on one CPU.
     def asked(benchmark, cpus:)
-      BenchMeasurement::Asked.new(benchmark: benchmark, cells: benchmark.landing.fetch('native'),
-                                  profiles: profiles(benchmark), clock: 'counter',
+      BenchMeasurement::Asked.new(benchmarks: [wanted(benchmark, boot: 'native')], clock: 'counter',
                                   pairs: cpus > 1 ? [[0, cpus - 1]] : [])
     end
 

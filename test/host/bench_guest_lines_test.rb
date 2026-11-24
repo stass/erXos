@@ -18,7 +18,6 @@ class BenchGuestLinesTest < Minitest::Test
   SOURCES = %w[test/guest/bench/bench_hist.c test/guest/bench/bench_periodic.c test/guest/bench/bench_clock.c
                test/guest/bench/bench_line.c test/guest/bench/bench_window.c
                test/fixtures/bench_cores_driver.c].freeze
-  PROFILES = Erx::BenchLineFuzz::PROFILES
 
   def guest_lines
     Dir.mktmpdir('erx-bench-lines-') do |directory|
@@ -37,12 +36,12 @@ class BenchGuestLinesTest < Minitest::Test
 
   def test_the_guests_lines_pass_the_hosts_validator
     fast, periodic, costly, clock, boundary, window = guest_lines
-    cell = Erx::BenchMeasurement.cell(fast, benchmark: 'wake', profiles: PROFILES)
+    cell = Erx::BenchMeasurement.cell(fast, Erx::BenchLineFuzz::ASKED)
     assert_equal [40, 1000, 1199], cell.summary.values_at('samples', 'min', 'max')
     assert_equal({ 'threads' => 2, 'mode' => 'spin' }, cell.conditions.parameters)
-    late = Erx::BenchMeasurement.cell(periodic, benchmark: 'wake', profiles: PROFILES)
+    late = Erx::BenchMeasurement.cell(periodic, Erx::BenchLineFuzz::ASKED)
     assert_equal ['partial', 'cut short', 32], [late.status, late.reason, late.summary.fetch('samples')]
-    expensive = Erx::BenchMeasurement.cell(costly, benchmark: 'wake', profiles: PROFILES)
+    expensive = Erx::BenchMeasurement.cell(costly, Erx::BenchLineFuzz::ASKED)
     assert_equal [20, 20], [expensive.summary.fetch('samples'), expensive.detail.fetch('raw').size]
     calibration = Erx::BenchMeasurement.clock(clock)
     assert_in_delta 27.778, calibration.fetch('cycles_per_tick'), 1e-9

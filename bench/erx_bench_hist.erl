@@ -17,8 +17,12 @@ reported as [low, last, count]. The host's Erx::BenchMeasurement is the lines'
 one validator; this module only builds them. A cell's samples are the list the
 caller timed, in the order it took them, so the summary is a pure function of
 that list.
+
+run/1 is a boot's entry: one calibration, whose CLOCK line serves every
+benchmark the boot runs, then each guest module's cells (erx_xdomain_bench,
+erx_wake_bench), each module exporting cells(Arguments, Clock).
 """.
--export([bucket/1, bounds/1, batch/2, cell/2, calibrate/0, clock_line/1, cell_line/1]).
+-export([run/1, bucket/1, bounds/1, batch/2, cell/2, calibrate/0, clock_line/1, cell_line/1]).
 
 %% Sub-buckets per octave, and the largest samples a line carries.
 -define(SUB, 64).
@@ -26,6 +30,27 @@ that list.
 %% Back-to-back reads that calibrate the clock, and the ticks a batch must span.
 -define(CALIBRATION_PAIRS, 10000).
 -define(BATCH_SPAN, 100).
+
+-doc """
+A boot's lines from the guests it runs, each {Module, Arguments}: the CLOCK line,
+then each guest's BENCH lines, Module:cells(Arguments, Clock), in order. A guest
+that raises leaves no line, so the host reports its cells as not run; a
+calibration that raises leaves no line at all.
+""".
+-spec run([{module(), map()}]) -> [binary()].
+run(Guests) ->
+    try calibrate() of
+        Clock -> [clock_line(Clock) | lists:append([guest_lines(Guest, Clock) || Guest <- Guests])]
+    catch
+        _:_ -> []
+    end.
+
+guest_lines({Module, Arguments}, Clock) ->
+    try
+        [cell_line(Cell) || Cell <- Module:cells(Arguments, Clock)]
+    catch
+        _:_ -> []
+    end.
 
 -doc "The index of the bucket holding a non-negative Value.".
 -spec bucket(non_neg_integer()) -> non_neg_integer().

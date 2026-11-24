@@ -36,11 +36,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `tools/lib/erx/native_bench.rb` exist: its root times `park-deadline`, the two wake handshakes and
   `trigger-take` on two executors of its group and prints their `BENCH` lines and the `CLOCK` line, and its
   build with `ERX_BENCH_SEED_LOST_WAKE` skips one wake; the `bench` suite boots both, records the first and
-  fails its cell unless the second loses its wake. Still to build: `bench/erx_wake_bench.erl` for
-  `erlang-timer` in the `xdomain` bench image, which waits on two questions for design-bench.md: how a periodic
-  cell with no phase sweep is reported, since `BenchMeasurement` requires every periodic line to carry sixteen
-  phases and their excess, and how one boot reports cells of two benchmarks, since `BenchMeasurement.boot`
-  judges one benchmark and its one `CLOCK` line per boot; and the load cells, whose
+  fails its cell unless the second loses its wake; `bench/erx_wake_bench.erl` times `erlang-timer` in the
+  `xdomain` bench image. Still to build: the load cells, whose
   spinners are `native_task`'s program in new modes, which the landing matrix does not run yet.
 * [Medium] benchmarks, the landing run's record (`tools/lib/erx/native_bench.rb` `Landing`,
   `tools/lib/erx/bench_record.rb`): a `not_run` or `rejected` cell the host makes carries zero counts and batch 1,
@@ -93,15 +90,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,
   touch, protect, decommit, release, map and child operations from the root and from a test task.
 * [Medium] benchmarks, `xdomain` ([design-bench.md](design-bench.md#5-xdomain-one-message-one-domain-to-another)):
-  `local-rtt` and `xdomain-pingpong` run in the xdomain bench image (`tools/lib/erx/xdomain_bench.rb`). Open: a QEMU
-  failure of that boot (a load or run checkpoint that times out) raises out of `BenchSuite.run` and loses the native
-  boot's verdict, where its unreported cells should be `timed_out` and the record written from the serial log; the
+  `local-rtt` and `xdomain-pingpong` run in the xdomain bench image (`tools/lib/erx/xdomain_bench.rb`). Open: the
   measured map both landing runners pass `BenchLanding` is an untyped hash (`measured.slice` drops a misspelled key);
-  `LANDING_PROFILES`, `profiles` and `guest_lines` are shared bench facts still owned by `NativeBench`; the
-  Erlang guest's 1 GHz view of the counter, its batch rule in steps of the calibration's increment and the
-  `runtime` placement are not yet stated in design-bench.md; a missing echo facet reports `failed` though it is a
-  setup failure; the `BENCH` line fuzz target has no Erlang-shaped seeds (1 GHz clock, `unknown` cycles, no pairs, a
-  failed cell with samples); `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
+  `LANDING_PROFILES`, `profiles`, `wanted` and `guest_lines` are shared bench facts still owned by `NativeBench`; a
+  timed-out native boot still raises out of `BenchSuite.run`, as the xdomain boot no longer does; a missing echo
+  facet reports `failed` though it is a setup failure; `XdomainBench.arguments` knows each guest module's argument
+  map by benchmark name; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
   `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
 * [Medium] benchmarks, the Raspberry Pi 4 and the other systems
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): a raspi4b build of the native

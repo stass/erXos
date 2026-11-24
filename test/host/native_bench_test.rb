@@ -28,7 +28,7 @@ class NativeBenchTest < Minitest::Test
   def test_the_boot_asks_for_the_native_cells_on_the_counter_and_the_last_cpus_pair
     wake = Erx::BenchSuite.benchmark('wake')
     asked = Erx::NativeBench.asked(wake, cpus: 4)
-    assert_equal wake.landing.fetch('native'), asked.cells
+    assert_equal wake.landing.fetch('native'), asked.cells.map(&:last)
     assert_equal ['counter', [[0, 3]]], [asked.clock, asked.pairs]
     assert_equal [], Erx::NativeBench.asked(wake, cpus: 1).pairs
   end

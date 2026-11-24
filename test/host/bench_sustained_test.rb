@@ -42,8 +42,9 @@ class BenchSustainedTest < Minitest::Test
   def boot(lines)
     declared = Erx::BenchSuite::LandingCell.new(operation: 'share-equal', load: 'idle', placement: 'other-cpu',
                                                 parameters: PARAMETERS)
-    asked = Measurement::Asked.new(benchmark: Erx::BenchSuite.benchmark('sched'), cells: [declared],
-                                   profiles: { 'share-equal' => PROFILE }, clock: 'counter', pairs: [[0, 1]])
+    wanted = Measurement::Wanted.new(benchmark: Erx::BenchSuite.benchmark('sched'), cells: [declared],
+                                     profiles: { 'share-equal' => PROFILE })
+    asked = Measurement::Asked.new(benchmarks: [wanted], clock: 'counter', pairs: [[0, 1]])
     Measurement.boot([*lines, Fuzz.clock_line], asked)
   end
 
@@ -90,8 +91,7 @@ class BenchSustainedTest < Minitest::Test
     assert_equal 'WINDOW lines are followed by no BENCH line',
                  boot(window_lines(iterations: every_pass)).fetch(:refused).last
     error = assert_raises(Erx::Error) do
-      Measurement.cell(Fuzz.line('wake-same-cpu'), benchmark: 'wake', profiles: Fuzz::PROFILES,
-                                                   windows: [Fuzz.window_line])
+      Measurement.cell(Fuzz.line('wake-same-cpu'), Fuzz::ASKED, windows: [Fuzz.window_line])
     end
     assert_equal 'BENCH line follows WINDOW lines but is not a sustained cell', error.message
   end

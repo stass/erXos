@@ -14,20 +14,22 @@ require_relative '../../tools/lib/erx/xdomain_bench'
 class XdomainBenchTest < Minitest::Test
   Bench = Erx::XdomainBench
 
-  def asked = Bench.asked(Erx::BenchSuite.benchmark('xdomain'))
+  def asked = Bench.asked(%w[xdomain wake].map { |name| Erx::BenchSuite.benchmark(name) })
 
-  def test_the_boot_asks_for_the_declared_cells_on_the_counter_and_no_pair
-    assert_equal %w[local-rtt xdomain-pingpong], asked.cells.map(&:operation)
-    assert_equal({ 'bytes' => 64, 'encoded' => 78 }, asked.cells.first.parameters)
+  def test_the_boot_asks_for_both_benchmarks_cells_on_the_counter_and_no_pair
+    assert_equal [%w[xdomain local-rtt], %w[xdomain xdomain-pingpong], %w[wake erlang-timer]],
+                 asked.cells.map { |wanted, declared| [wanted.benchmark.name, declared.operation] }
+    assert_equal({ 'bytes' => 64, 'encoded' => 78 }, asked.cells.first.last.parameters)
     assert_equal 'counter', asked.clock
     assert_empty asked.pairs
-    assert_equal [Erx::NativeBench::LANDING_PROFILES.fetch('fast')], asked.profiles.values.uniq
   end
 
-  def test_the_run_line_passes_the_profiles_sizes_and_the_request_size
-    fast = Erx::NativeBench::LANDING_PROFILES.fetch('fast')
+  def test_the_run_line_passes_each_guest_its_profiles_sizes_and_parameters
+    fast, periodic = Erx::NativeBench::LANDING_PROFILES.values_at('fast', 'periodic')
     line = Bench.run_line(asked)
-    assert_includes line, "erpc:call(peer@erxos,erx_xdomain_bench,run,[\#{warmup=>#{fast.warmup},samples=>#{fast.samples},bytes=>64}]"
+    assert_includes line, 'erpc:call(peer@erxos,erx_bench_hist,run,' \
+                          "[[{erx_xdomain_bench,\#{warmup=>#{fast.warmup},samples=>#{fast.samples},bytes=>64}}," \
+                          "{erx_wake_bench,\#{samples=>#{periodic.samples},priorities=>[normal]}}]],"
     assert line.end_with?("io:format(\"#{Bench::DONE}~n\").\r")
   end
 

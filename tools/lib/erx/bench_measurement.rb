@@ -81,14 +81,11 @@ module Erx
     THREADS = (1..8)
     WINDOW_MS = (1..60_000)
 
-    # The cell one BENCH line reports for benchmark, whose operations profiles maps to
-    # the BenchRecord::Profile each ran at. Raises Erx::Error naming the first field that
-    # is wrong; the line's text is never quoted.
-    # A sustained cell's windows are its WINDOW lines, the lines between the boot's
-    # previous BENCH line and this one.
-    def cell(text, benchmark:, profiles:, windows: [])
-      refusing('BENCH') { bench_cell(text, benchmark: benchmark, profiles: profiles, windows: windows) }
-    end
+    # The cell one BENCH line reports for one of asked's benchmarks, which the line's
+    # benchmark field names. Raises Erx::Error naming the first field that is wrong; the
+    # line's text is never quoted. A sustained cell's windows are its WINDOW lines, the
+    # lines between the boot's previous BENCH line and this one.
+    def cell(text, asked, windows: []) = refusing('BENCH') { bench_cell(text, asked, windows: windows) }
 
     # One thread's window from a WINDOW line: its window and thread, and its passes,
     # longest gap, lost turns and the ticks they took. Raises Erx::Error naming the first
@@ -129,41 +126,53 @@ module Erx
     # the first wrong field.
     def clock(text) = refusing('CLOCK') { clock_group(text) }
 
-    # What a boot asked of its guest (docs/design-bench.md, "The gates"): the declared
-    # benchmark (a BenchSuite::Benchmark), its landing cells in that boot, the
-    # BenchRecord::Profile each operation ran at, the clock the environment reads, and the
-    # CPU pairs, lower first, that its two-CPU cells span.
-    Asked = Data.define(:benchmark, :cells, :profiles, :clock, :pairs)
+    # One benchmark a boot runs (docs/design-bench.md, "The gates"): the declared
+    # benchmark (a BenchSuite::Benchmark), its landing cells in that boot, and the
+    # BenchRecord::Profile each of its operations ran at.
+    Wanted = Data.define(:benchmark, :cells, :profiles)
+
+    # What a boot asked of its guest: the benchmarks it runs (Wanted), in the order their
+    # cells are recorded, the clock the environment reads, and the CPU pairs, lower
+    # first, that its two-CPU cells span. One CLOCK line serves every benchmark.
+    Asked = Data.define(:benchmarks, :clock, :pairs) do
+      # The benchmark a line names, or nil.
+      def find(name) = benchmarks.find { |wanted| wanted.benchmark.name == name }
+
+      # Every asked cell as [wanted, declared], in order.
+      def cells = benchmarks.flat_map { |wanted| wanted.cells.map { |declared| [wanted, declared] } }
+    end
 
     # A boot's clock group and cells from the guest lines it printed, each a BENCH or a
     # CLOCK line (docs/design-bench.md, "A benchmark"), held to what the boot asked. A
-    # BENCH line reports one of asked's cells, once, on its clock; a handshake's in batch
+    # BENCH line reports one cell of the asked benchmark it names, once, on its clock; a
+    # handshake's in batch
     # 1. The CLOCK line reads asked's clock and calibrates exactly its pairs. Without
     # exactly one such CLOCK line the boot has no calibration and its cells are rejected,
     # and so is a cell whose frequency is not the CLOCK line's. A failed cell stays failed
     # in both only when its failure does not depend on the clock (a lost wake, a wrong
     # status), and keeps only its status, reason and counts. A calibrated handshake carries
     # the clock's read cost and increment. An asked cell no accepted line reported is
-    # not_run, or rejected when a BENCH line was refused; one reported more than once is
-    # rejected, whatever its lines said. The cells come in asked's order, and each refused
-    # line's reason is returned in refused, never its text.
-    def boot(lines, asked)
+    # not_run, timed_out when the boot timed_out before the guest reported it, or rejected
+    # when a BENCH line was refused; one reported more than once is rejected, whatever its
+    # lines said. The cells come in asked's order, and each refused line's reason is
+    # returned in refused, never its text.
+    def boot(lines, asked, timed_out: false)
       clocks, others = lines.partition { |text| line_of?(text, 'CLOCK') }
       benches, trailing = with_windows(others)
-      answers = benches.map do |text, windows|
-        judged { asked_cell(cell(text, benchmark: asked.benchmark.name, profiles: asked.profiles, windows: windows), asked) }
-      end
+      answers = benches.map { |text, windows| judged { asked_cell(cell(text, asked, windows: windows), asked) } }
       answers << 'WINDOW lines are followed by no BENCH line' unless trailing.empty?
       accepted, refused = answers.partition { |answer| answer.is_a?(Array) }
       reported = accepted.group_by(&:first).transform_values { |pairs| pairs.map(&:last) }
       calibration = clocks.size == 1 ? judged { calibrated(clocks.first, asked) } : 'the boot has not exactly one CLOCK line'
       group = calibration unless calibration.is_a?(String)
-      cells = asked.cells.map do |declared|
-        case reported.fetch(declared, [])
-        in [found] then verdict(found, group, asked)
-        in [] if refused.empty? then unreported(declared, asked, status: 'not_run', reason: 'the guest printed no line for it')
-        in [] then unreported(declared, asked, status: 'rejected', reason: 'a line of the boot was refused')
-        else unreported(declared, asked, status: 'rejected', reason: 'the guest reported it more than once')
+      cells = asked.cells.map do |entry|
+        case reported.fetch(entry, [])
+        in [found] then verdict(found, group, entry.first)
+        in [] unless refused.empty?
+          unreported(entry, asked, status: 'rejected', reason: 'a line of the boot was refused')
+        in [] if timed_out then unreported(entry, asked, status: 'timed_out', reason: 'the boot timed out before its line')
+        in [] then unreported(entry, asked, status: 'not_run', reason: 'the guest printed no line for it')
+        else unreported(entry, asked, status: 'rejected', reason: 'the guest reported it more than once')
         end
       end
       { clock: group, cells: cells, refused: refused + [calibration].grep(String) }
@@ -186,21 +195,22 @@ module Erx
       e.message
     end
 
-    # The asked cell a line's cell reports, and the cell: [declared, cell].
+    # The asked cell a line's cell reports, and the cell: [[wanted, declared], cell].
     def asked_cell(cell, asked)
       conditions = cell.conditions
-      declared = asked.cells.find do |wanted|
-        [wanted.operation, wanted.load, wanted.placement, wanted.parameters] ==
-          [cell.operation, conditions.load, conditions.placement, conditions.parameters]
+      entry = asked.cells.find do |wanted, declared|
+        [wanted.benchmark.name, declared.operation, declared.load, declared.placement, declared.parameters] ==
+          [cell.benchmark, cell.operation, conditions.load, conditions.placement, conditions.parameters]
       end
       refusing('BENCH') do
-        need(declared, 'reports a cell the boot did not ask for')
+        need(entry, 'reports a cell the boot did not ask for')
+        wanted, declared = entry
         need(conditions.clock == asked.clock, 'reads a clock that is not the one the boot reads')
-        need(!handshake?(cell, asked) || conditions.batch == 1, 'times a handshake in batches, not in batch 1')
+        need(!handshake?(cell, wanted) || conditions.batch == 1, 'times a handshake in batches, not in batch 1')
         need(declared.cpus == 1 || cell.status == 'unsupported' || !asked.pairs.empty?,
              'times across two CPUs the boot did not calibrate')
       end
-      [declared, cell]
+      [entry, cell]
     end
 
     # The clock group of the boot's CLOCK line, on the clock asked and over its pairs.
@@ -214,24 +224,24 @@ module Erx
       group
     end
 
-    # An asked cell no single accepted line reported, with no samples.
-    def unreported(declared, asked, status:, reason:)
-      BenchRecord::Cell.new(benchmark: asked.benchmark.name, operation: declared.operation,
+    # An asked cell, [wanted, declared], no single accepted line reported, with no samples.
+    def unreported((wanted, declared), asked, status:, reason:)
+      BenchRecord::Cell.new(benchmark: wanted.benchmark.name, operation: declared.operation,
                             conditions: BenchRecord::Conditions.new(load: declared.load, placement: declared.placement,
                                                                     parameters: declared.parameters, clock: asked.clock,
                                                                     batch: 1),
-                            profile: asked.profiles.fetch(declared.operation), status: status, reason: reason,
+                            profile: wanted.profiles.fetch(declared.operation), status: status, reason: reason,
                             counts: COUNTS.to_h { |name| [name, 0] }, detail: {})
     end
 
-    def handshake?(cell, asked) = asked.benchmark.operations.fetch(cell.operation).handshake
+    def handshake?(cell, wanted) = wanted.benchmark.operations.fetch(cell.operation).handshake
 
-    def verdict(cell, group, asked)
+    def verdict(cell, group, wanted)
       unjudged = if group.nil? then 'no valid CLOCK line in the boot'
                  elsif cell.detail['frequency_hz'] != group.fetch('frequency_hz')
                    'frequency differs from the CLOCK line'
                  end
-      return quantized(cell, group, asked) if unjudged.nil?
+      return quantized(cell, group, wanted) if unjudged.nil?
       return stripped(cell, status: 'failed', reason: cell.reason) if clock_free_failure?(cell)
 
       stripped(cell, status: 'rejected', reason: unjudged)
@@ -239,8 +249,8 @@ module Erx
 
     # A handshake's cell is timed one operation per sample, however short (docs/design-bench.md,
     # "The one clock"), so it carries the clock's read cost and increment beside its samples.
-    def quantized(cell, group, asked)
-      return cell unless handshake?(cell, asked)
+    def quantized(cell, group, wanted)
+      return cell unless handshake?(cell, wanted)
 
       BenchRecord::Cell.new(**cell.to_h, detail: cell.detail.merge(group.slice('read_cost', 'increment')))
     end
@@ -263,27 +273,32 @@ module Erx
       raise Error, "#{kind} line #{e.reason}"
     end
 
-    def bench_cell(text, benchmark:, profiles:, windows:)
+    def bench_cell(text, asked, windows:)
       fields = decode(text, kind: 'BENCH', required: REQUIRED, known: REQUIRED + TICKED + OPTIONAL.keys,
                       max_bytes: LINE_BYTES)
-      need(fields['benchmark'] == benchmark, 'field benchmark is not the benchmark run')
-      operation = profiles.keys.find { |name| name == fields['operation'] }
+      wanted = asked.find(fields['benchmark'])
+      need(wanted, 'field benchmark is not a benchmark the boot runs')
+      operation = wanted.profiles.keys.find { |name| name == fields['operation'] }
       need(operation, 'field operation is not one the benchmark declares')
-      profile = profiles.fetch(operation)
+      profile = wanted.profiles.fetch(operation)
+      swept = profile.name == 'periodic' && wanted.benchmark.operations.fetch(operation).sweep
       samples = fields['samples']
       need(count?(samples) && samples <= profile.samples, 'field samples is not a count the profile allows')
       status = fields['status']
       need(GUEST_STATUSES.include?(status), 'field status is not one a guest reports')
       need(frequency?(fields['frequency_hz']), 'field frequency_hz is not a frequency')
-      return sustained_cell(fields, benchmark: benchmark, operation: operation, profile: profile, lines: windows) if profile.name == 'sustained'
+      if profile.name == 'sustained'
+        return sustained_cell(fields, benchmark: wanted.benchmark.name, operation: operation, profile: profile, lines: windows)
+      end
 
       need(windows.empty?, 'follows WINDOW lines but is not a sustained cell')
       need((TICKED - fields.keys).empty?, 'lacks a required field')
       # The cell itself holds a measured cell to every sample, the reason to its
       # character set and the extremes to their buckets, whether read from a line or a file.
-      BenchRecord::Cell.new(benchmark: benchmark, operation: operation, conditions: conditions(fields['conditions']),
-                            profile: profile, status: status, reason: fields['reason'], counts: counts(fields['counts']),
-                            detail: detail(fields, profile: profile.name, samples: samples))
+      BenchRecord::Cell.new(benchmark: wanted.benchmark.name, operation: operation,
+                            conditions: conditions(fields['conditions']), profile: profile, status: status,
+                            reason: fields['reason'], counts: counts(fields['counts']),
+                            detail: detail(fields, profile: profile.name, samples: samples, swept: swept))
     end
 
     # A sustained cell (docs/design-bench.md, "A sustained cell"): its samples are its
@@ -396,8 +411,9 @@ module Erx
     end
 
     # The operation file's detail: the histogram, the extremes, the largest samples and
-    # whatever the profile adds, each checked against the others.
-    def detail(fields, profile:, samples:)
+    # whatever the profile adds, each checked against the others. Only a swept periodic
+    # cell carries phases and excess.
+    def detail(fields, profile:, samples:, swept:)
       wrong = OPTIONAL.find { |name, owner| fields.key?(name) && owner && owner != profile }
       need(wrong.nil?, 'holds a field of another profile')
       histogram = histogram(fields['histogram'], 'histogram')
@@ -406,7 +422,11 @@ module Erx
       largest(fields['largest'], range: range, samples: samples)
       need(profile != 'expensive' || fields.key?('raw'), 'field raw is absent from an expensive cell')
       raw(fields['raw'], range: range, samples: samples) if fields.key?('raw')
-      phases(fields, samples: samples) if profile == 'periodic'
+      if swept
+        phases(fields, samples: samples)
+      else
+        need(!fields.key?('phases') && !fields.key?('excess'), 'holds phases or excess of an operation with no sweep')
+      end
       need(!fields.key?('uncertainty') || tick?(fields['uncertainty']), 'field uncertainty is not a tick count')
       fields.slice('frequency_hz', 'histogram', 'min', 'max', 'largest', 'raw', 'phases', 'excess', 'uncertainty')
     end

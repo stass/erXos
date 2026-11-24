@@ -203,7 +203,9 @@ It declares:
   clock, and what a correct result of the act is (a status, a reply, a
   count);
 * its **profile** per operation (below), with only the parameters that
-  differ from the profile's defaults;
+  differ from the profile's defaults; a periodic operation whose timer
+  takes only deadlines it rounds itself is declared `sweep: false` and
+  takes no phase sweep;
 * the **environments** it runs in, and for each the image and the guest
   program that run it;
 * the **load cells** it runs under, each a named background (idle, a
@@ -218,13 +220,18 @@ declarations. A name a design document gives and no file declares is
 refused as unknown, as it is today.
 
 A **cell** is one operation under one set of conditions: its load cell,
-CPU placement, workload parameters (a size, a thread count, a priority),
+CPU placement (`same-cpu`, `cross-cpu`, `service-cpu`, `other-cpu`, or
+`runtime` where a runtime's own scheduler places the work on a CPU the
+cell does not choose), workload parameters (a size, a thread count, a priority),
 clock and batch size. A guest reports each cell as one line on its
 console, `BENCH` followed by one JSON object of at most 64 KiB, in clock
 ticks: the benchmark, the operation, the cell's conditions, the clock and
 its frequency, the status, the sample count, the batch size, the
 histogram, the exact maximum and minimum, the sixteen largest samples with
-their sequence numbers, and the counts of lost, early and missed events. A
+their sequence numbers, and the counts of lost, early and missed events.
+A swept periodic cell adds its sixteen phases and its excess histogram;
+an unswept one carries neither, and a line that carries them for an
+unswept operation, or lacks them for a swept one, is refused. A
 sustained cell's samples are windows, not ticks, and reach the host in
 lines of their own ([A sustained cell](#a-sustained-cell)).
 `BenchMeasurement` grows into the one validator of these lines; it checks
@@ -265,15 +272,20 @@ statistics; a failure judged with the clock, an early return, is
 `rejected` like the cells that did not fail.
 
 The runner holds a boot's lines to what it asked the guest for: the
-declared cells of that boot, the clock its environment reads, and the
+declared cells of every benchmark the boot runs, the line's `benchmark`
+field selecting among them, the clock its environment reads, and the
 pairs of CPUs its two-CPU cells span. A `BENCH` line is refused when its
 operation, load cell, placement and workload parameters are not one
 declared cell, when its clock is not the environment's, when it repeats
 a cell, or when it times across two CPUs in a boot that calibrated no
 pair; a `CLOCK` line is refused when its clock is not the environment's
 or its pairs are not exactly the boot's. A declared cell no accepted
-line reports is `not_run`, or `rejected` when one of the boot's `BENCH`
-lines was refused, since that line may have been its own.
+line reports is `not_run`, `timed_out` when the boot ended at a QEMU
+deadline before reporting it, or `rejected` when one of the boot's
+`BENCH` lines was refused, since that line may have been its own. One
+`CLOCK` line serves every benchmark of a boot. A boot that ends at a
+deadline is still recorded, from the lines its serial log holds, and
+ends no other boot of the run.
 
 ### The histogram
 
@@ -866,7 +878,7 @@ it.
 | `park-deadline` | an executor of the root's group parks with deadline k of the phase sweep ([Profiles](#profiles)) and stamps its return | `ERX_ETIMEDOUT`, not before its deadline | periodic, on the root service's CPU and on another |
 | `wake-same-cpu`, `wake-cross-cpu` | thread B parks with a deadline 1 s away; thread A, on B's CPU or another, sees B parked (`native_irq`'s handshake), stamps, calls `erx_executor_wake` for B's slot, and blocks; B stamps its return | B's park returns `ERX_OK`; a return of `ERX_ETIMEDOUT` is a lost wake | fast |
 | `trigger-take` | a thread stamps and fires a doorbell bound to the root's group with `erx_irq_trigger`; the parked executor's take returns its label and it stamps | the label the bind gave, once per fire | fast, same CPU and across CPUs |
-| `erlang-timer` | in an image with ERTS (the `xdomain` bench image at the landing gate), a process at `normal` and one at `high` each take a timer with an absolute deadline every millisecond (`erlang:start_timer/4` with `{abs, true}`) and stamp its message's receipt; ERTS's absolute deadlines are whole milliseconds, so this cell takes no phase sweep and its lateness includes ERTS's own rounding | one message per deadline, none before it | periodic |
+| `erlang-timer` | in an image with ERTS (the `xdomain` bench image at the landing gate), a process at `normal` and one at `high` each take a timer with an absolute deadline every millisecond (`erlang:start_timer/4` with `{abs, true}`) and stamp its message's receipt; ERTS's absolute deadlines are whole milliseconds, so this cell takes no phase sweep (`sweep: false`) and its lateness includes ERTS's own rounding; a message more than 1 s past its deadline is a lost wake | one message per deadline, none before it | periodic, placement `runtime` |
 | `gpio-edge` | the analyser's stimulus edge to the responder's response edge | a response for every stimulus | periodic, the Raspberry Pi 4 only |
 
 Load cells: idle; a spinner of a test task in the app band on the waiting
@@ -1057,8 +1069,8 @@ This is the round-trip half of E-D1 of
 
 | Operation | Exact act | Correct result | Profile |
 | --- | --- | --- | --- |
-| `local-rtt` | two processes of one domain: the client stamps, sends `{echo, B}`, B a 64-byte binary, and stamps the reply `{echo, B}` | the reply equals the request | fast |
-| `xdomain-pingpong` | the same, across a connection, as a request on `erx_echo_test`'s facet in another domain, whose `admit/3` answers `{echo, Term}` with `{echo, Term}`; one request outstanding at a time | the reply equals the request | fast |
+| `local-rtt` | two processes of one domain: the client stamps, sends `{echo, B}`, B a 64-byte binary, and stamps the reply `{echo, B}` | the reply equals the request | fast, placement `runtime` |
+| `xdomain-pingpong` | the same, across a connection, as a request on `erx_echo_test`'s facet in another domain, whose `admit/3` answers `{echo, Term}` with `{echo, Term}`; one request outstanding at a time | the reply equals the request | fast, placement `runtime` |
 
 The fixture sets the limits: the `system_domain` suite's facet rows allow
 requests of at most 512 bytes and four in flight
@@ -1081,7 +1093,19 @@ in one domain and grants its facet to a peer and to the system
 principal's session (`tools/lib/erx/system_domain_regrant.rb`); the
 client runs in a domain the facet is granted to, which this image must
 give it. No new facet: the echo service is the test-only one that
-exists.
+exists. The same boot runs `wake`'s `erlang-timer`
+(`bench/erx_wake_bench.erl`), under the one `CLOCK` line.
+
+The Erlang guests share `bench/erx_bench_hist.erl`, the twin of the C
+guest library. Their clock is `counter`: ERTS's monotonic time in its
+native unit, which on erXos is `erx_clock_ns`, the system counter scaled
+to nanoseconds (`otp/erts/emulator/sys/erxos/sys_time.c`), so the line's
+frequency is 1 GHz while the counter steps at its own rate. A batch
+therefore spans 100 steps of the calibration's smallest increment, not
+100 ticks, which is the C guests' rule in the counter's own steps. The
+`CLOCK` line's rounding of a timed wait is 1 ms, the resolution of
+ERTS's timers. No Erlang cell stamps across CPUs, so the line
+calibrates no pair and its cycles per tick are `unknown`.
 
 ### Next
 

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require_relative 'bench'
 require_relative 'bench_guest'
 require_relative 'bench_landing'
@@ -21,13 +22,15 @@ module Erx
   # which erts serves echo through the test-only erx_echo_test and grants it to peer,
   # the client's domain (Regrant::PEER_FACET). At the system's Erlang shell the harness
   # loads the bench modules into peer by erpc, as g3 types its beam (BenchGuest.load_lines),
-  # and prints the lines erx_xdomain_bench:run/1 answers there; BenchMeasurement.boot is
-  # their one judge.
+  # and prints the lines erx_bench_hist:run/1 answers there: one CLOCK line, then each
+  # benchmark's cells from its guest module; BenchMeasurement.boot is their one judge.
   module XdomainBench
     BOOT = 'xdomain'
     NODE = 'peer@erxos'
-    # The bench modules in the order they load: erx_xdomain_bench calls erx_bench_hist.
-    MODULES = %w[erx_bench_hist erx_xdomain_bench].freeze
+    # The bench modules in the order they load: the guest modules call erx_bench_hist.
+    MODULES = %w[erx_bench_hist erx_xdomain_bench erx_wake_bench].freeze
+    # The guest module that times each benchmark's cells in this boot.
+    GUESTS = { 'xdomain' => 'erx_xdomain_bench', 'wake' => 'erx_wake_bench' }.freeze
     # How long the shell waits for each module's load and for the cells' lines.
     LOAD_SECONDS = 120
     RUN_SECONDS = 600
@@ -42,29 +45,46 @@ module Erx
                                        SystemDomain::Regrant::PEER_FACET)
     end
 
-    # What the boot asks of its guest: benchmark's xdomain landing cells at their
-    # landing profiles, on the counter, which ERTS's monotonic time reads; every cell is
-    # stamped on one CPU, so no pair is calibrated.
-    def asked(benchmark)
-      BenchMeasurement::Asked.new(benchmark: benchmark, cells: benchmark.landing.fetch(BOOT),
-                                  profiles: NativeBench.profiles(benchmark), clock: 'counter', pairs: [])
+    # What the boot asks of its guest: each of benchmarks' landing cells in this boot at
+    # their landing profiles, on the counter, which ERTS's monotonic time reads; every
+    # cell is stamped on one CPU, so no pair is calibrated.
+    def asked(benchmarks)
+      BenchMeasurement::Asked.new(benchmarks: benchmarks.map { |benchmark| NativeBench.wanted(benchmark, boot: BOOT) },
+                                  clock: 'counter', pairs: [])
     end
 
     # The line that runs the cells in peer and prints its answer, a line each, then DONE:
-    #   [io:put_chars([XbL,$\n])||XbL<-erpc:call(peer@erxos,erx_xdomain_bench,run,
-    #     [#{warmup=>1000,samples=>10000,bytes=>64}],540000)],io:format("erx: bench: done~n").
-    # The fast profile's sizes and the request's size are asked's, so the guest's
+    #   [io:put_chars([XbL,$\n])||XbL<-erpc:call(peer@erxos,erx_bench_hist,run,
+    #     [[{erx_xdomain_bench,#{warmup=>1000,samples=>10000,bytes=>64}},
+    #       {erx_wake_bench,#{samples=>2000,priorities=>[normal]}}]],540000)],
+    #   io:format("erx: bench: done~n").
+    # Each guest's arguments are its cells' profile sizes and parameters, so the guest's
     # conditions are the declared ones. erpc's deadline ends before the checkpoint's, so
     # a guest that never answers shows as erpc's timeout in the serial log.
     def run_line(asked)
-      profile = asked.profiles.values.uniq.then { |found| found.one? ? found.first : raise(Error, 'xdomain cells mix profiles') }
-      bytes = asked.cells.map { |cell| cell.parameters.fetch('bytes') }.uniq.then do |found|
-        found.one? ? found.first : raise(Error, 'xdomain cells ask for different request sizes')
+      guests = asked.benchmarks.map do |wanted|
+        name = wanted.benchmark.name
+        profile = only(wanted.cells.map { |cell| wanted.profiles.fetch(cell.operation) }, "#{name} cells mix profiles")
+        "{#{GUESTS.fetch(name)},#{arguments(name, profile, wanted.cells)}}"
       end
-      "[io:put_chars([XbL,$\\n])||XbL<-erpc:call(#{NODE},erx_xdomain_bench,run," \
-        "[\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}],#{ERPC_SECONDS * 1000})]," \
-        "io:format(\"#{DONE}~n\").\r"
+      "[io:put_chars([XbL,$\\n])||XbL<-erpc:call(#{NODE},erx_bench_hist,run,[[#{guests.join(',')}]]," \
+        "#{ERPC_SECONDS * 1000})],io:format(\"#{DONE}~n\").\r"
     end
+
+    # The map a benchmark's guest module takes for its cells, which share profile:
+    # xdomain's one request size, and wake's erlang-timer priorities, one cell each.
+    def arguments(name, profile, cells)
+      case name
+      in 'xdomain'
+        bytes = only(cells.map { |cell| cell.parameters.fetch('bytes') }, 'xdomain cells ask for different request sizes')
+        "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}"
+      in 'wake'
+        "\#{samples=>#{profile.samples},priorities=>[#{cells.map { |cell| cell.parameters.fetch('priority') }.join(',')}]}"
+      end
+    end
+
+    def only(values, mixed) = values.uniq.then { |found| found.one? ? found.first : raise(Error, mixed) }
+    private_class_method :arguments, :only
 
     # Everything typed at the system's Erlang shell after its banner, each with the answer
     # that says it was handled: each module's load lines, from beams, its name to its
@@ -92,7 +112,9 @@ module Erx
 
     # One boot of the xdomain bench image: its serial log, seconds, the guest's lines, the
     # image's SHA-256, each bench module's beam's SHA-256 as its workloads, QEMU's version,
-    # and the stored log a replayed boot came from (nil for a fresh one).
+    # the stored log a replayed boot came from (nil for a fresh one), and the checkpoint
+    # timeout that ended the boot early (nil when it ran to the end). A timed-out boot
+    # answers the lines its serial log holds, so the cells it reported keep their verdict.
     class Run
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
@@ -115,14 +137,19 @@ module Erx
         beams = MODULES.to_h { |name| [name, bench.compile_beam(name: name)] }
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: cpus,
                                                          manifest_source: @manifest, memory_mib: memory_mib, test_image: true)
-        report = Qemu.new(root: @root, runner: @runner)
-                     .run(platform: @machine.platform, accel: accel, cpus: cpus, image: built.single, memory_mib: memory_mib,
-                          checkpoints: XdomainBench.checkpoints(points, XdomainBench.exchanges(beams.transform_values(&:bytes), asked)),
-                          directory: File.join(@root, 'build/qemu', "xdomain-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}"))
+        directory = File.join(@root, 'build/qemu', "xdomain-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
+        checkpoints = XdomainBench.checkpoints(points, XdomainBench.exchanges(beams.transform_values(&:bytes), asked))
+        report, timed_out = begin
+          [Qemu.new(root: @root, runner: @runner)
+               .run(platform: @machine.platform, accel: accel, cpus: cpus, image: built.single, memory_mib: memory_mib,
+                    checkpoints: checkpoints, directory: directory), nil]
+        rescue TranscriptTimeout => e
+          [{ 'serial_log' => Qemu.serial_log(directory), 'image_sha256' => Digest::SHA256.file(built.single).hexdigest }, e.message]
+        end
         serial = File.expand_path(report.fetch('serial_log'), @root)
-        { serial: serial, seconds: report.fetch('elapsed_seconds'), lines: NativeBench.guest_lines(File.binread(serial)),
+        { serial: serial, seconds: report['elapsed_seconds'], lines: NativeBench.guest_lines(File.file?(serial) ? File.binread(serial) : ''),
           image_sha256: report.fetch('image_sha256'), workloads: beams.transform_values(&:sha256), compiler: @compiler,
-          qemu_version: report['qemu_version'], reused_from: report['reused_from'] }.freeze
+          qemu_version: report['qemu_version'], reused_from: report['reused_from'], timed_out: timed_out }.freeze
       end
     end
 
@@ -135,10 +162,11 @@ module Erx
         @run = run
       end
 
-      # benchmark's xdomain cells booted as boot (a BenchSuite::Boot): the record, the run
-      # directory written (nil for a replayed boot) and the refused lines' reasons.
-      def call(benchmark, boot:, history:)
-        asked = XdomainBench.asked(benchmark)
+      # benchmarks' xdomain cells booted as boot (a BenchSuite::Boot): the record, the run
+      # directory written (nil for a replayed boot), the refused lines' reasons and the
+      # timeout that ended the boot early, if one did.
+      def call(benchmarks, boot:, history:)
+        asked = XdomainBench.asked(benchmarks)
         @landing.call(asked, boot: boot, memory_mib: @run.memory_mib, history: history) do |accel|
           @run.call(asked, accel: accel, cpus: boot.cpus)
         end

@@ -20,7 +20,7 @@ Erx::BenchSuite.declare_benchmark(
                   result: "B's park returns ERX_OK; ERX_ETIMEDOUT is a lost wake"),
     operation.new(name: 'trigger-take', profile: 'fast', handshake: true,
                   result: 'the label the bind gave, once per fire'),
-    operation.new(name: 'erlang-timer', profile: 'periodic',
+    operation.new(name: 'erlang-timer', profile: 'periodic', sweep: false,
                   result: 'one message per deadline, none before it')
   ],
   landing: {

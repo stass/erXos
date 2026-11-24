@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'minitest/autorun'
+require 'open3'
+require 'tmpdir'
+require_relative '../../tools/fuzz/bench_line'
 require_relative '../../tools/lib/erx/bench_suite'
 require_relative '../../tools/lib/erx/qemu_gate'
 
@@ -67,13 +71,14 @@ class BenchSuiteTest < Minitest::Test
   # A boot's suite cell is its cells' worst, each judged in the record's environment,
   # and failed when its seeded run's fault went uncaught.
   def test_a_boots_suite_cell_comes_from_its_record_and_its_seeded_run
-    assert_equal 'passed', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), seed_caught: true, refused: [])
+    assert_equal 'passed', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), benchmark: 'wake', seed_caught: true, refused: [])
     # A refused line may have been a failure, so the boot is at best partial.
-    assert_equal 'partial', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), seed_caught: true,
+    assert_equal 'partial', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), benchmark: 'wake', seed_caught: true,
                                                                                      refused: ['BENCH line is long'])
-    assert_equal 'partial', Suite.boot_cell(wake_record(4, 'cross-cpu', 'unsupported'), seed_caught: true, refused: [])
-    assert_equal 'not_run', Suite.boot_cell(wake_record(4, 'cross-cpu', 'not_run'), seed_caught: true, refused: [])
-    assert_equal 'failed', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), seed_caught: false, refused: [])
+    assert_equal 'partial', Suite.boot_cell(wake_record(4, 'cross-cpu', 'unsupported'), benchmark: 'wake', seed_caught: true, refused: [])
+    assert_equal 'not_run', Suite.boot_cell(wake_record(4, 'cross-cpu', 'not_run'), benchmark: 'wake', seed_caught: true, refused: [])
+    assert_equal 'failed', Suite.boot_cell(wake_record(1, 'cross-cpu', 'unsupported'), benchmark: 'wake', seed_caught: false, refused: [])
+    assert_equal 'not_run', Suite.boot_cell(wake_record(4, 'cross-cpu', 'failed'), benchmark: 'xdomain', refused: [])
   end
 
   # A benchmark whose landing raises is a failed cell with its message as a note, and the
@@ -89,10 +94,76 @@ class BenchSuiteTest < Minitest::Test
     answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: landing, xdomain: xdomain)
     assert_equal 'failed', answer.fetch(:cells).fetch('hvf-4cpu-native-nullcall')
     assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-native-wake')
-    assert_equal 'pending', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
+    assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
     failure = answer.fetch(:notes).grep(/nullcall: failed: /).first
     assert_match(/no task FAILED/, failure)
     refute_includes failure, "\e"
+  end
+
+  # The xdomain boot's run (XdomainBench::Run), stubbed: what a boot that QEMU's
+  # checkpoint ended after local-rtt's line answers.
+  class TimedOutRun
+    def initialize(serial) = @serial = serial
+    def memory_mib = 512
+
+    def call(_asked, accel:, cpus:)
+      raise 'the suite boots xdomain under HVF at four CPUs' unless [accel, cpus] == ['hvf', 4]
+
+      rtt = Erx::BenchLineFuzz.line('wake-same-cpu', benchmark: 'xdomain', operation: 'local-rtt', status: 'partial',
+                                                     reason: 'cut short',
+                                                     conditions: { 'load' => 'idle', 'placement' => 'runtime',
+                                                                   'parameters' => { 'bytes' => 64, 'encoded' => 78 },
+                                                                   'clock' => 'counter', 'batch' => 1 })
+      { serial: @serial, seconds: nil, lines: [Erx::BenchLineFuzz.clock_line(pairs: []), rtt], image_sha256: 'a' * 64,
+        workloads: {}, compiler: '', qemu_version: nil, reused_from: nil,
+        timed_out: "QEMU checkpoint timed out: cells\e]8;;x" }
+    end
+  end
+
+  # The native boot's landing, stubbed: a record of one measured wake cell.
+  class NativeLanding
+    def call(_benchmark, boot:, history:)
+      conditions = Erx::BenchRecord::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'counter',
+                                                    batch: 1)
+      cell = Erx::BenchRecord::Cell.new(benchmark: 'wake', operation: 'wake-same-cpu', conditions: conditions,
+                                        profile: Erx::BenchRecord::Profile.new(name: 'fast', warmup: 1, samples: 1, runs: 1),
+                                        status: 'not_run', reason: 'the guest printed no line for it',
+                                        counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 }, detail: {})
+      record = Erx::BenchRecord::Record.new(
+        environment: Erx::BenchRecord::Environment.new(kind: boot.kind, model: 'Mac16,10', cpus: boot.cpus, system: nil, details: {}),
+        subject: Erx::BenchRecord::Subject.new(revision: '0' * 40, dirty: false, details: {}),
+        run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
+        clock: {}, cells: [cell]
+      )
+      { record: record, written: File.join(history, 'native'), refused: [], seed_caught: true, timed_out: nil }
+    end
+  end
+
+  # A QEMU timeout of the xdomain boot ends only that boot: its unreported cells are
+  # timed_out in a record written from what it printed, its notes carry the timeout
+  # escaped, and the native boot's verdict stands.
+  def test_a_timed_out_xdomain_boot_is_recorded_and_leaves_the_native_verdict
+    Dir.mktmpdir('erx-bench-suite-') do |scratch|
+      scratch = File.realpath(scratch)
+      erxos = File.join(scratch, 'erxos')
+      history = File.join(scratch, 'history')
+      [erxos, history].each { |path| git(path, 'init', '-q') }
+      git(erxos, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'x')
+      serial = File.join(scratch, 'serial.log').tap { |path| File.write(path, "booted\n") }
+      xdomain = Erx::XdomainBench::Landing.new(root: erxos, run: TimedOutRun.new(serial))
+      ran = Suite.run(Struct.new(:root).new(erxos), history: history, native: NativeLanding.new, xdomain: xdomain)
+      assert_equal({ 'hvf-4cpu-native-nullcall' => 'not_run', 'hvf-4cpu-native-sched' => 'not_run',
+                     'hvf-4cpu-native-wake' => 'not_run', 'hvf-4cpu-xdomain-wake' => 'timed_out',
+                     'hvf-4cpu-xdomain-xdomain' => 'timed_out' }, ran.fetch(:cells))
+      notes = ran.fetch(:notes).grep(/\Abench: xdomain: /)
+      assert_includes notes, 'bench: xdomain: QEMU checkpoint timed out: cells<U+001B>]8;;x'
+      assert_includes notes, 'bench: xdomain: erlang-timer runtime: timed_out (the boot timed out before its line)'
+      assert(notes.none? { |note| note.include?("\e") })
+      written = Dir.glob(File.join(history, '**', 'run.json'))
+      assert_equal 1, written.size
+      statuses = JSON.parse(File.read(written.first)).fetch('cells').to_h { |cell| [cell.fetch('operation'), cell.fetch('status')] }
+      assert_equal({ 'local-rtt' => 'partial', 'xdomain-pingpong' => 'timed_out', 'erlang-timer' => 'timed_out' }, statuses)
+    end
   end
 
   private
@@ -111,5 +182,11 @@ class BenchSuiteTest < Minitest::Test
       run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
       clock: {}, cells: [cell]
     )
+  end
+
+  def git(path, *arguments)
+    FileUtils.mkdir_p(path)
+    _, error, status = Open3.capture3('git', '-C', path, *arguments, stdin_data: '')
+    raise "git #{arguments.first} failed: #{error}" unless status.success?
   end
 end

@@ -12,19 +12,20 @@ require_relative '../../tools/lib/erx/bench_suite'
 class BenchLineTest < Minitest::Test
   Fuzz = Erx::BenchLineFuzz
 
-  def cell(text) = Erx::BenchMeasurement.cell(text, benchmark: 'wake', profiles: Fuzz::PROFILES)
+  def cell(text) = Erx::BenchMeasurement.cell(text, Fuzz::ASKED)
 
   # A landing cell of the wake benchmark the boot asked for.
   def declared(operation, load: 'idle', placement: 'same-cpu', parameters: {})
     Erx::BenchSuite::LandingCell.new(operation: operation, load: load, placement: placement, parameters: parameters)
   end
 
-  # The guest's lines judged as one boot that asked for cells, read on clock, whose
-  # two-CPU cells span pairs.
-  def boot(lines, cells: [declared('wake-same-cpu')], clock: 'counter', pairs: [[0, 1]])
-    asked = Erx::BenchMeasurement::Asked.new(benchmark: Erx::BenchSuite.benchmark('wake'), cells: cells,
-                                             profiles: Fuzz::PROFILES, clock: clock, pairs: pairs)
-    Erx::BenchMeasurement.boot(lines, asked)
+  # The guest's lines judged as one boot that asked for wake's cells and also's
+  # benchmarks (Wanted), read on clock, whose two-CPU cells span pairs, and which timed
+  # out where it says so.
+  def boot(lines, cells: [declared('wake-same-cpu')], clock: 'counter', pairs: [[0, 1]], also: [], timed_out: false)
+    wake = Erx::BenchMeasurement::Wanted.new(benchmark: Fuzz::WAKE, cells: cells, profiles: Fuzz::PROFILES)
+    asked = Erx::BenchMeasurement::Asked.new(benchmarks: [wake, *also], clock: clock, pairs: pairs)
+    Erx::BenchMeasurement.boot(lines, asked, timed_out: timed_out)
   end
 
   # Conditions of a line under load at placement.
@@ -47,8 +48,8 @@ class BenchLineTest < Minitest::Test
 
   def test_the_lines_names_never_reach_a_file_name
     assert_match(/operation is not one the benchmark declares/, refusal(Fuzz.line('wake-same-cpu',
-                                                                                  operation: 'erlang-timer')))
-    assert_match(/benchmark is not the benchmark run/, refusal(Fuzz.line('wake-same-cpu', benchmark: 'sched')))
+                                                                                  operation: 'nonesuch')))
+    assert_match(/benchmark is not a benchmark the boot runs/, refusal(Fuzz.line('wake-same-cpu', benchmark: 'sched')))
   end
 
   def test_a_refusal_never_quotes_the_line
@@ -99,6 +100,44 @@ class BenchLineTest < Minitest::Test
     largest = JSON.parse(Fuzz.line('wake-same-cpu').delete_prefix('BENCH ')).fetch('largest')
     assert_match(/largest is not the sixteen largest/, refusal(Fuzz.line('wake-same-cpu', largest: largest.first(15))))
     assert_match(/raw/, refusal(without(Fuzz.line('trigger-take'), 'raw')))
+  end
+
+  # Only a swept periodic operation's line carries the sweep's phases and excess:
+  # park-deadline's must, and erlang-timer's, declared sweep: false, must not.
+  def test_phases_belong_to_a_swept_periodic_operation_alone
+    assert_equal 'measured', cell(Fuzz.line('erlang-timer')).status
+    swept = JSON.parse(Fuzz.line('park-deadline').delete_prefix('BENCH '))
+    %w[phases excess].each do |field|
+      assert_match(/phases or excess of an operation with no sweep/,
+                   refusal(Fuzz.line('erlang-timer', field.to_sym => swept.fetch(field))))
+      assert_match(/field #{field} /, refusal(without(Fuzz.line('park-deadline'), field)))
+    end
+  end
+
+  # One CLOCK line serves a boot's two benchmarks, each line's benchmark field selecting
+  # its own cells; a line of a benchmark the boot does not run is refused.
+  def test_a_boot_of_two_benchmarks_shares_one_clock_line
+    xdomain = Erx::BenchSuite.benchmark('xdomain')
+    fast = Fuzz::PROFILES.fetch('wake-same-cpu')
+    other = Erx::BenchMeasurement::Wanted.new(benchmark: xdomain, cells: xdomain.landing.fetch('xdomain'),
+                                              profiles: { 'local-rtt' => fast, 'xdomain-pingpong' => fast })
+    parameters = xdomain.landing.fetch('xdomain').first.parameters
+    rtt = Fuzz.line('wake-same-cpu', benchmark: 'xdomain', operation: 'local-rtt',
+                                     conditions: on('idle', placement: 'runtime', parameters: parameters))
+    answer = boot([Fuzz.line('wake-same-cpu'), rtt, Fuzz.clock_line], also: [other])
+    assert_empty answer.fetch(:refused)
+    assert_equal [%w[wake wake-same-cpu measured], %w[xdomain local-rtt measured], %w[xdomain xdomain-pingpong not_run]],
+                 answer.fetch(:cells).map { |found| [found.benchmark, found.operation, found.status] }
+    assert_equal ['BENCH line field benchmark is not a benchmark the boot runs'],
+                 boot([Fuzz.line('wake-same-cpu'), rtt, Fuzz.clock_line]).fetch(:refused)
+  end
+
+  # A boot that ended at a QEMU deadline keeps the cells it reported; the rest timed out.
+  def test_a_timed_out_boots_unreported_cells_are_timed_out
+    answer = boot([Fuzz.line('wake-same-cpu'), Fuzz.clock_line], cells: [declared('wake-same-cpu'), declared('trigger-take')],
+                                                                 timed_out: true)
+    assert_equal [%w[measured], %w[timed_out the\ boot\ timed\ out\ before\ its\ line]],
+                 answer.fetch(:cells).map { |found| [found.status, found.reason].compact }
   end
 
   # Every refusal of a BENCH line says so, the cell's own checks included.
@@ -176,7 +215,7 @@ class BenchLineTest < Minitest::Test
     lost = Fuzz.line('wake-same-cpu', status: 'failed', reason: 'lost wake', counts: { 'lost' => 1, 'early' => 0, 'missed' => 0 })
     [[Fuzz.line('wake-same-cpu'), lost],
      [Fuzz.line('park-deadline'), Fuzz.line('park-deadline', conditions: on('idle', batch: 2))]].each do |pair|
-      twice = boot(pair + [Fuzz.clock_line], cells: [declared(Fuzz::MEASUREMENT.cell(pair.first, benchmark: 'wake', profiles: Fuzz::PROFILES).operation)])
+      twice = boot(pair + [Fuzz.clock_line], cells: [declared(Fuzz::MEASUREMENT.cell(pair.first, Fuzz::ASKED).operation)])
       assert_equal [['rejected', 'the guest reported it more than once']],
                    twice.fetch(:cells).map { |cell| [cell.status, cell.reason] }
       assert_empty twice.fetch(:refused)
