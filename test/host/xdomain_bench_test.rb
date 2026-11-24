@@ -33,6 +33,23 @@ class XdomainBenchTest < Minitest::Test
     assert line.end_with?("io:format(\"#{Bench::DONE}~n\").\r")
   end
 
+  # A boot cut short at a checkpoint may end inside a line, which is dropped; the rest
+  # of the log's guest lines are kept, as they are for a boot that ran to its end.
+  def test_a_timed_out_boot_drops_its_unclosed_last_line
+    serial = "x\r\nCLOCK {}\r\nBENCH {\"a\":1}\r\nBENCH {\"a\""
+    assert_equal ['CLOCK {}', 'BENCH {"a":1}'], Bench.lines(serial, timed_out: 'QEMU checkpoint timed out: cells')
+    assert_equal ['CLOCK {}', 'BENCH {"a":1}', 'BENCH {"a"'], Bench.lines(serial, timed_out: nil)
+  end
+
+  def test_a_guest_argument_outside_the_declarations_is_refused
+    wake = Erx::BenchSuite.benchmark('wake')
+    timer = Erx::BenchSuite::LandingCell.new(operation: 'erlang-timer', load: 'idle', placement: 'runtime',
+                                             parameters: { 'priority' => 'Normal' })
+    odd = Erx::BenchMeasurement::Wanted.new(benchmark: wake, cells: [timer], profiles: Erx::NativeBench.profiles(wake))
+    error = assert_raises(Erx::Error) { Bench.run_line(Erx::BenchMeasurement::Asked.new(benchmarks: [odd], clock: 'counter', pairs: [])) }
+    assert_match(/priority is not one of/, error.message)
+  end
+
   def test_the_manifest_grants_echo_to_peer
     source = Erx::Platform.development(File.expand_path('../..', __dir__)).site_manifest_source(File.expand_path('../..', __dir__))
     manifest = Bench.manifest(source)

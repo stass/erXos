@@ -95,7 +95,10 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   `LANDING_PROFILES`, `profiles`, `wanted` and `guest_lines` are shared bench facts still owned by `NativeBench`; a
   timed-out native boot still raises out of `BenchSuite.run`, as the xdomain boot no longer does; a missing echo
   facet reports `failed` though it is a setup failure; `XdomainBench.arguments` knows each guest module's argument
-  map by benchmark name; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
+  map by benchmark name; `XdomainBench::Run#call`'s rescue of a checkpoint timeout, which reads `Qemu#run`'s
+  `report.json`, has no test (the suite's test stubs the whole run); `BenchMeasurement.boot` passes asked cells as
+  positional `[wanted, declared]` pairs, which a named value would read better as; a boot that timed out before
+  its `CLOCK` line also notes that line's absence as a refusal; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
   `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
 * [Medium] benchmarks, the Raspberry Pi 4 and the other systems
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): a raspi4b build of the native

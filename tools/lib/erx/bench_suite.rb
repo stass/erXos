@@ -30,6 +30,7 @@ module Erx
         BenchRecord.check(result.is_a?(String) && !result.empty?, "#{name} does not say what a correct result is")
         BenchRecord.check([true, false].include?(handshake), "#{name}'s handshake is neither true nor false")
         BenchRecord.check([true, false].include?(sweep), "#{name}'s sweep is neither true nor false")
+        BenchRecord.check(sweep || profile == 'periodic', "#{name} is not periodic, so it has no sweep to decline")
         super
       end
     end
@@ -163,7 +164,8 @@ module Erx
           [suite_cell_name(landing.boot, declared.name), outcome_cell(landing.outcome, benchmark: declared.name)]
         end
       end
-      { cells: cells.to_h, notes: landed.flat_map { |landing| landing_notes(landing.label, landing.outcome) } }
+      { cells: suite_cells.to_h { |cell| [cell, 'pending'] }.merge(cells.to_h),
+        notes: landed.flat_map { |landing| landing_notes(landing.label, landing.outcome) } }
     end
 
     # The benchmarks with landing cells in boot, in the suite's order.

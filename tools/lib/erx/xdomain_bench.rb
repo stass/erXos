@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'digest'
+require 'json'
 require_relative 'bench'
 require_relative 'bench_guest'
 require_relative 'bench_landing'
@@ -27,10 +27,12 @@ module Erx
   module XdomainBench
     BOOT = 'xdomain'
     NODE = 'peer@erxos'
-    # The bench modules in the order they load: the guest modules call erx_bench_hist.
-    MODULES = %w[erx_bench_hist erx_xdomain_bench erx_wake_bench].freeze
     # The guest module that times each benchmark's cells in this boot.
     GUESTS = { 'xdomain' => 'erx_xdomain_bench', 'wake' => 'erx_wake_bench' }.freeze
+    # The bench modules in the order they load: the guest modules call erx_bench_hist.
+    MODULES = ['erx_bench_hist', *GUESTS.values].freeze
+    # The priorities an erlang-timer cell may ask for, ERTS's process priorities.
+    PRIORITIES = %w[low normal high max].freeze
     # How long the shell waits for each module's load and for the cells' lines.
     LOAD_SECONDS = 120
     RUN_SECONDS = 600
@@ -71,6 +73,13 @@ module Erx
         "#{ERPC_SECONDS * 1000})],io:format(\"#{DONE}~n\").\r"
     end
 
+    # The guest's lines in a serial log; a boot that timed out may have been cut inside
+    # its last line, which a line end has not closed, so that one is dropped.
+    def lines(serial, timed_out:)
+      closed = timed_out ? serial.b.sub(/[^\n]*\z/n, '') : serial
+      NativeBench.guest_lines(closed)
+    end
+
     # The map a benchmark's guest module takes for its cells, which share profile:
     # xdomain's one request size, and wake's erlang-timer priorities, one cell each.
     def arguments(name, profile, cells)
@@ -79,7 +88,13 @@ module Erx
         bytes = only(cells.map { |cell| cell.parameters.fetch('bytes') }, 'xdomain cells ask for different request sizes')
         "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}"
       in 'wake'
-        "\#{samples=>#{profile.samples},priorities=>[#{cells.map { |cell| cell.parameters.fetch('priority') }.join(',')}]}"
+        raise Error, 'the xdomain boot times only wake\'s erlang-timer' unless cells.all? { |cell| cell.operation == 'erlang-timer' }
+
+        priorities = cells.map { |cell| cell.parameters.fetch('priority') }
+        raise Error, "erlang-timer's priority is not one of #{PRIORITIES.join(', ')}" unless (priorities - PRIORITIES).empty?
+
+        "\#{samples=>#{profile.samples},priorities=>[#{priorities.join(',')}]}"
+      else raise Error, "the xdomain boot has no guest for #{name}"
       end
     end
 
@@ -144,10 +159,11 @@ module Erx
                .run(platform: @machine.platform, accel: accel, cpus: cpus, image: built.single, memory_mib: memory_mib,
                     checkpoints: checkpoints, directory: directory), nil]
         rescue TranscriptTimeout => e
-          [{ 'serial_log' => Qemu.serial_log(directory), 'image_sha256' => Digest::SHA256.file(built.single).hexdigest }, e.message]
+          # Qemu#run's report of the boot, which it writes however the boot ended.
+          [JSON.parse(File.read(File.join(directory, 'report.json'))), e.message]
         end
         serial = File.expand_path(report.fetch('serial_log'), @root)
-        { serial: serial, seconds: report['elapsed_seconds'], lines: NativeBench.guest_lines(File.file?(serial) ? File.binread(serial) : ''),
+        { serial: serial, seconds: report['elapsed_seconds'], lines: XdomainBench.lines(File.binread(serial), timed_out: timed_out),
           image_sha256: report.fetch('image_sha256'), workloads: beams.transform_values(&:sha256), compiler: @compiler,
           qemu_version: report['qemu_version'], reused_from: report['reused_from'], timed_out: timed_out }.freeze
       end
