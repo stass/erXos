@@ -855,7 +855,9 @@ waiting input, the sys log and `edlin`'s kill buffer, which the group keeps in i
 `gen_statem` and `group` failures are upstream bugs. Hiding is for reports, which leave the domain:
 `process_info/2`, `sys:get_state/1`, `sys:trace/2`, `sys:log/2` and tracing are not reports and show a
 process's terms whole, to its own domain's code only, since the domain is the trust boundary and a `sys`
-call from another domain arrives in the `erx_origin` envelope and is never answered.
+call from another domain arrives in the `erx_origin` envelope and is never answered; the trace facet that
+leaves the domain carries only its fixed flags ([design-live.md](design-live.md#tracing)), none of which
+shows a term.
 
 Nothing changes in `erl_ptab.c`: processes take their pids as stock ERTS
 allocates them. Nothing changes in the node table's keys, the decoder's test

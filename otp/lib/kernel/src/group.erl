@@ -137,9 +137,9 @@
 
           %% erXos: the line editor's kill buffer, the text the user last killed
           %% with its damage, which every edit takes and returns (edlin:read/0). It
-          %% lives here, which format_status/1 hides from reports, and not in the
-          %% process dictionary (edit 75 of docs/design-runtime.md says what a
-          %% report hides and what the group's own domain sees).
+          %% lives here, which format_status/1 hides from reports, as a value each
+          %% edit passes on with its damage (edit 75 of docs/design-runtime.md says
+          %% what a report hides and what the group's own domain sees).
           kill = edlin:empty_kill() :: edlin:kill()
         }).
 

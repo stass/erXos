@@ -117,22 +117,25 @@ a_tty_left_with_vmin_zero_waits_for_input_test() ->
                          Console = persistent_term:get({erx_console, line}),
                          leave_raw_with_vmin_zero(),
                          Shell ! {get_line, self()},
+                         watching(Console),
+                         %% Idle, the console spends next to nothing; a spin calls the relay
+                         %% thousands of times in the window.
                          {reductions, Before} = process_info(Console, reductions),
                          timer:sleep(200),
                          {reductions, After} = process_info(Console, reductions),
-                         ?assert(After - Before < 10000),
+                         ?assertMatch(Spent when Spent < 10000, After - Before),
                          type(Relay, <<"x\r">>),
                          ?assertEqual("x\n", line())
                  end).
 
 %% A read the watch reported can still find nothing: Ctrl-C typed after the reported
 %% byte flushes it before the console reads, and the read, carrying the signal number
-%% of its report, answers eagain. The console waits again, the interrupt ends the line,
-%% and the next line is read.
+%% of its report, answers eagain (erx_session_relay_core_tests pins the relay's side).
+%% The console waits again, the interrupt ends the line, and the next line is read.
 a_read_that_finds_nothing_waits_again_test() ->
     with_console(fun(Relay, Shell) ->
                          Console = persistent_term:get({erx_console, line}),
-                         Open = leave_raw_with_vmin_zero(),
+                         {ok, Open} = erx_session_relay:open_writer(relay(), background),
                          Shell ! {get_line, self()},
                          watching(Console),
                          ok = sys:suspend(Console),
@@ -142,7 +145,9 @@ a_read_that_finds_nothing_waits_again_test() ->
                          {ok, _} = erx_session_relay:tty(Open, tcgetattr),
                          ok = sys:resume(Console),
                          ?assertEqual({error, interrupted}, line()),
-                         ?assertEqual("x\n", begin Shell ! {get_line, self()}, type(Relay, <<"x\r">>), line() end)
+                         Shell ! {get_line, self()},
+                         type(Relay, <<"x\r">>),
+                         ?assertEqual("x\n", line())
                  end).
 
 %% A loss the master reports among its input reaches the group as a loss at its place, so
@@ -211,26 +216,24 @@ lose(Relay) ->
 
 relay() -> whereis(erx_tty_owner).
 
-%% A background program, SIGTTOU ignored, leaves the tty raw with VMIN and VTIME 0,
-%% through the open it returns.
+%% A background program, SIGTTOU ignored, leaves the tty raw with VMIN and VTIME 0.
 leave_raw_with_vmin_zero() ->
     {ok, Open} = erx_session_relay:open_writer(relay(), background),
     {ok, #{lflag := L, cc := CC} = Termios} = erx_session_relay:tty(Open, tcgetattr),
     Raw = Termios#{lflag := L -- [icanon], cc := CC#{vmin := 0, vtime := 0}},
-    ok = erx_session_relay:tty(Open, {tcsetattr, Raw, sigttou_ignored}),
-    Open.
+    ok = erx_session_relay:tty(Open, {tcsetattr, Raw, sigttou_ignored}).
 
-%% Waits until the console watches its open for the group's ask: its state holds the
-%% reader, a map, with `watching` true.
+%% Waits until the console watches its open for the group's ask. No message tells a
+%% case that, so it reads the console's state, whose one map with a `watching` key is
+%% the reader's.
 watching(Console) -> watching(Console, 50).
 
-watching(_Console, 0) ->
-    error(no_watch);
 watching(Console, Tries) ->
-    Watching = [true || #{watching := true} <- tuple_to_list(sys:get_state(Console))],
-    case Watching of
+    State = sys:get_state(Console),
+    case [W || #{watching := W} <- tuple_to_list(State)] of
         [true] -> ok;
-        [] -> timer:sleep(20), watching(Console, Tries - 1)
+        [false] when Tries > 0 -> timer:sleep(20), watching(Console, Tries - 1);
+        _ -> error({no_watch, State})
     end.
 
 %% Waits for the console's output to the master to carry Byte, taking each output as

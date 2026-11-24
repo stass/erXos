@@ -1577,8 +1577,9 @@ nothing. Each of the group's modes then does one thing:
   keeps the damage, since the line it shows replaces what the user sees,
   not what the read lost. Text keeps the damage of the read it came from
   wherever `edlin` stores it: the kill buffer, which the caller keeps beside
-  the read and a group in its state, which the group's reports hide, never
-  in the process dictionary ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos), edit 75,
+  the read and a group in its state, a value each edit passes on with its
+  damage, which the group's reports hide
+  ([design-runtime.md](design-runtime.md#the-edits-outside-syserxos), edit 75,
   says what a report hides and what its own domain sees); a kill in a damaged read stores its text
   damaged, and a yank of damaged text damages the read it lands in, the
   same read or a later one,

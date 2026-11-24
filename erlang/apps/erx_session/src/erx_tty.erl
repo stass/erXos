@@ -976,12 +976,15 @@ read(Open, Max, Tty) when is_integer(Max), Max > 0 ->
 -doc """
 Open reads one unit, as read/3 reads one byte, but a loss is `lost`
 rather than a NUL: the read of a line editor, which refuses a line that
-lost input (docs/design-live.md, "Lost input").
+lost input (docs/design-live.md, "Lost input"). A read that finds nothing
+is `eagain` whatever VMIN is, since a line editor has no use for an empty
+read.
 """.
--spec read_input(open(), tty()) -> {{ok, binary()} | lost | eof | eagain, tty()}.
+-spec read_input(open(), tty()) -> {{ok, <<_:8>>} | lost | eof | eagain, tty()}.
 read_input(Open, Tty) ->
     case consume(Open, 1, Tty) of
         {{ok, #units{losses = [_]}}, Tty1} -> {lost, Tty1};
+        {{ok, #units{bytes = <<>>}}, Tty1} -> {eagain, Tty1};
         {{ok, #units{bytes = Bytes}}, Tty1} -> {{ok, Bytes}, Tty1};
         Other -> Other
     end.

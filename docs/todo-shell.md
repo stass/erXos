@@ -822,17 +822,20 @@ to the corpus and follow rc
   bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the
   receiver answers, so RTS/CTS holds the sender off on a line that has it, and on a line without flow control the
   FIFO overruns and the overrun placement of [design-live.md](design-live.md#lost-input) marks the loss.
-* [Medium] group and console, typed text in a domain's crash dump (`otp/lib/kernel/src/group.erl`,
-  `erlang/apps/erx/src/erx_console.erl`): what `process_info/2`, `sys:get_state/1` and tracing show of the
-  line being typed, the kill buffer, the history and the bytes the console holds stays in the domain, as edit 75 of
-  [design-runtime.md](design-runtime.md#the-edits-outside-syserxos) states, and a report that leaves it hides
-  them (`format_status/1`, `erx_report`); but ERTS's crash dump writes every process's heap, stack and messages
+* [Medium] group, console and relay, typed text in a domain's crash dump (`otp/lib/kernel/src/group.erl`,
+  `erlang/apps/erx/src/erx_console.erl`, `erlang/apps/erx_session/src/erx_session_relay.erl`): what `process_info/2`, `sys:get_state/1` and tracing show of the
+  line being typed, the kill buffer, the history and the bytes the console holds, and the input `erx_tty` keeps in the relay unread (a passphrase a
+  program reads with ECHO off among it), stays in the domain, as edit 75 of
+  [design-runtime.md](design-runtime.md#the-edits-outside-syserxos) states, and a session domain's reports leave it with names only
+  (`erx_report`, for OTP's events: a `group_history` error logs outside OTP's domain, so a custom
+  history provider that crashes on a line logs it whole); but ERTS's crash dump writes every process's heap, stack and messages
   that is not `sensitive`, and the dump leaves the domain: the domain service reads it from the crash area and
   serves it at `[domains, Id, crash]`, and in a development build the system domain's goes to the kernel log
   ([Crash handling](design-runtime.md#crash-handling)). A crash of the runtime thus carries a passphrase typed at
   a prompt to the inspector. The storage domain's item for file data has the same shape
   ([todo-storage.md](todo-storage.md)). Fix both by one rule: the dump writes no heap, stack or messages of a
-  process that hides its terms by `format_status/1`, as edit 75 hides them from reports, with a case that
+  process that hides its terms by `format_status/1`, as edit 75 hides them from reports, once the console
+  and the relay export one (the console's crash-report item below), with a case that
   types a line, crashes the runtime and finds none of it in the dump.
 * [Medium] console, crash reports (`erlang/apps/erx/src/erx_console.erl`): the console exports no
   `format_status/1`, so a crash while it handles `{erx_console_input, Bytes}` reports the message and the state,

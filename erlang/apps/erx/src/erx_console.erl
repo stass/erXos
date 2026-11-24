@@ -1506,7 +1506,8 @@ follow_current(Group, State = #state{asks = Asks}) ->
 %% A watch for one unit of input, made only when none waits for its report and the
 %% current group has an ask outstanding. It is an `in` watch, which erx_tty reports
 %% once a unit waits (a complete line when ICANON is set) whatever VMIN and VTIME
-%% are, so a program that leaves VMIN 0 makes no report of nothing.
+%% are, so a program that leaves VMIN 0 makes no report of nothing; it is ready at once
+%% only on a hangup, which ends a session's console (erx_console_eof).
 watch(State = #state{asks = Asks, reader = Reader = #{open := Open, watching := false}}) ->
     case is_map_key(current(State), Asks) of
         true ->
@@ -1520,10 +1521,9 @@ watch(State) ->
 
 %% The watch's report, numbered N: one unit of input, a byte or a loss, is read for the
 %% current group's ask, if it has one; otherwise it stays in the tty until a group asks.
-%% A loss damages the read (damage/2). A read that finds nothing waits again: the relay
-%% answers eagain once a signal has flushed the reported unit, since the read carries the
-%% signal number of its report, and a read of an empty raw tty with VMIN 0 is erx_tty's
-%% no bytes. An end of file, VEOF at a line's start while a background program left
+%% A loss damages the read (damage/2). A read that finds nothing, eagain, waits again:
+%% the relay answers it whenever the report is stale, a signal since it or another
+%% holder, since the read carries the signal number of its report. An end of file, VEOF at a line's start while a background program left
 %% ICANON set, is that read's end and never the hangup, which the relay tells with
 %% erx_console_eof: it is a read that found nothing, so the ask stays outstanding and
 %% the bytes held for the group go.
@@ -1533,7 +1533,6 @@ read_for_ask(N, State = #state{asks = Asks, reader = #{open := Open}}) ->
         false -> {noreply, State};
         {ok, <<Byte>>} -> {noreply, watch(answer(Group, Byte, State))};
         lost -> {noreply, watch(damage(Group, State))};
-        {ok, <<>>} -> {noreply, watch(State)};
         eagain -> {noreply, watch(State)};
         eof -> {noreply, watch(drop_held(Group, State))}
     end.

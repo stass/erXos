@@ -1900,8 +1900,10 @@ holds the session's authority anyway (SH1).
   second and appears in the next line. The key is drawn there, so it is
   seen before anything runs, and both groups keep stock's behaviour
   here.
-* **The read.** On an ask, the console watches `{read, 1}`, and at the
-  report `{ready, Open, [{read, 1}], N}` calls `{tty_read_input, Open, N}`,
+* **The read.** On an ask, the console watches `in`, which is ready once a
+  unit waits whatever `VMIN` and `VTIME` are, so the termios a program leaves
+  cannot make it ready at once, and at the
+  report `{ready, Open, [in], N}` calls `{tty_read_input, Open, N}`,
   as it makes its other requests,
   noting the group it reads for, and watches again only after the
   answer, so it has one watch or one read outstanding, never both. The

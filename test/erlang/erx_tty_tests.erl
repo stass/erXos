@@ -319,6 +319,8 @@ hangup_drops_the_input_test() ->
 
 %% A loss is one unit among the bytes: a read gives it as one NUL at its
 %% place, read_input/2 as `lost`, and a short read leaves the rest in order.
+%% read_input/2 that finds nothing is `eagain` even where read/3 would
+%% answer no bytes, raw with VMIN 0.
 a_raw_loss_is_one_unit_at_its_place_test() ->
     {[], W0} = erx_tty:read_wait(r, 4096, raw(5, 0)),
     {[], W1} = input(<<"ab">>, W0),
@@ -330,7 +332,8 @@ a_raw_loss_is_one_unit_at_its_place_test() ->
     {{ok, <<"ab">>}, Short} = erx_tty:read(r, 2, W4),
     ?assertMatch({{ok, <<0, "cd">>}, _}, erx_tty:read(r, 5, Short)),
     {Units, _} = lists:mapfoldl(fun(_, T) -> erx_tty:read_input(r, T) end, W4, lists:seq(1, 6)),
-    ?assertEqual([{ok, <<"a">>}, {ok, <<"b">>}, lost, {ok, <<"c">>}, {ok, <<"d">>}, eagain], Units).
+    ?assertEqual([{ok, <<"a">>}, {ok, <<"b">>}, lost, {ok, <<"c">>}, {ok, <<"d">>}, eagain], Units),
+    ?assertMatch({eagain, _}, erx_tty:read_input(r, raw(0, 0))).
 
 %% A loss alone readies what one byte readies, and starts the timer one
 %% byte starts: lost/1 returns what input/3 returns for a byte that ends no
