@@ -87,6 +87,13 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
 
 ## Bugs by subsystem
 
+* [Low] shell, rc's lines through the Erlang shell's formatter (`otp/lib/kernel/src/group.erl`,
+  `format_expression/2`): the group redraws every ended line in the output of the node-wide
+  `stdlib` `format_shell_func`, so with an Erlang formatter set by `shell:format_shell_func/1`
+  the command shell's lines are redrawn as that formatter prints them, and one that fails on rc
+  syntax prints `* Bad format function` and resets the setting for the whole node. Inferred from
+  the source, not run. Settled by setting a formatter and typing `x=(a b c)` at rc; fix: format
+  only a group whose shell is the Erlang shell.
 * [Low] programs, a narrowing to `/dev` (`erlang/apps/erx/src/erx_prog_handler_core.erl`,
   `narrowed_at/4`): where no entry of the starter's table stands at `/dev`, `within [/dev]` makes
   an entry at `/dev` on the provider above it, such as the release slice's root, so the program
