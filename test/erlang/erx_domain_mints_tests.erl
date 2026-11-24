@@ -1003,3 +1003,43 @@ ending_answer({deadline, _}) -> {error, unavailable}.
 
 permutations([]) -> [[]];
 permutations(List) -> [[X | Rest] || X <- List, Rest <- permutations(List -- [X])].
+
+%% A drive window row's grant (docs/design-system.md, "A drive window as a grant"): its
+%% record's service is drive, which its serving row's ready report provides a mint for
+%% and the mint request names, and its installed name {drive, N}, which keys it and names
+%% the facet in the grantee's registry, so one mint serves the serving row's every drive,
+%% each minted with drive => N and the interface's limits.
+drive_config() ->
+    #{services => [{?S, data}], grants => [], drives => [{?S, ?G, 0}, {?S, ?G, 1}],
+      owner => fun ?MODULE:owner/1, deadline => 10000}.
+
+a_drive_grant_mints_under_its_service_and_installs_under_its_number_test() ->
+    {Actions, State} = run([ready(?S, 5, #{drive => mint(5)}), ready(?G, 6, #{}),
+                            {introduced, 1, ok}, {introduced, 2, ok}],
+                           erx_domain_mints:new(drive_config())),
+    Mints = [Mint || Step <- Actions, {mint, _, _, _, _, _} = Mint <- Step],
+    Window = maps:get(drive, ?ERX_DRIVE_GRANTS),
+    ?assertEqual([{mint, 1, mint(5), drive, 6, Window#{drive => 0}},
+                  {mint, 2, mint(5), drive, 6, Window#{drive => 1}}], Mints),
+    ?assertEqual([window], maps:get(operations, Window)),
+    ?assertEqual(8, maps:get(in_flight, Window)),
+    {Installs, _} = run([{minted, 5, 2, {ok, facet(5)}}], State),
+    ?assertEqual([[{install, 2, 6, {drive, 1}, facet(5)}]], Installs).
+
+%% Only a row with drives declares drive: a ready report of any other row that names it
+%% is refused as a name no row declares, and no drive grant follows that row.
+a_drive_mint_from_a_row_without_drives_is_refused_test() ->
+    {[Actions | _], State} = run([ready(?T, 7, #{drive => mint(7)}), ready(?G, 6, #{})],
+                                 erx_domain_mints:new((drive_config())#{services := [{?S, data}, {?T, other}]})),
+    ?assertMatch([{refused, undeclared, _}], [A || {refused, _, _} = A <- Actions]),
+    ?assertEqual([idle, idle], [G || _ := G <- maps:with([{?G, {drive, 0}}, {?G, {drive, 1}}],
+                                                                       erx_domain_mints:grants(State))]).
+
+%% A drive's grant follows its pair as a facet row's does: the grantee's restart mints it
+%% again under the same service and number.
+a_drive_grant_is_minted_again_for_a_new_grantee_test() ->
+    Config = (drive_config())#{drives := [{?S, ?G, 3}]},
+    {_, State} = run([ready(?S, 5, #{drive => mint(5)}), ready(?G, 6, #{}), {introduced, 1, ok},
+                      {minted, 5, 1, {ok, facet(5)}}, {installed, 6, 1}], erx_domain_mints:new(Config)),
+    {Actions, _} = run([{ended, ?G, 6}, ready(?G, 8, #{}), {introduced, 2, ok}], State),
+    ?assertMatch([{mint, 2, _, drive, 8, #{drive := 3}}], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]).

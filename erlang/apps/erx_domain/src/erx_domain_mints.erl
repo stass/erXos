@@ -174,7 +174,10 @@ from one counter, so a tag names one of them at most.
 -type tag() :: pos_integer().
 -type template() :: non_neg_integer().
 -type grantee() :: row() | system | {session, id()}.
--type key() :: {grantee(), name()}.
+%% The name a grant is installed under in its grantee's registry: its service's name, or
+%% for a drive window row's grant {drive, N}, N the row's drive number.
+-type installed() :: name() | {drive, non_neg_integer()}.
+-type key() :: {grantee(), installed()}.
 -type pair() :: {ServerId :: id(), GranteeId :: id()}.
 -type pending() :: introducing | minting | installing.
 -type reason() :: {introduce, term()} | bad_reply | {deadline, pending()}.
@@ -195,6 +198,7 @@ from one counter, so a tag names one of them at most.
                     files => [name()],
                     windows => [name()],
                     inputs => [name()],
+                    drives => [{Server :: row(), Grantee :: row(), Drive :: non_neg_integer()}],
                     deadline => pos_integer()}.
 %% ready carries the incarnation's node, which the service knows; the rest of the
 %% untrusted events' fields are any term a domain sent.
@@ -209,7 +213,7 @@ from one counter, so a tag names one of them at most.
                | {deadline, tag()}.
 -type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id()}
                 | {mint, tag(), Mint :: pid(), name(), GranteeId :: id(), Limits :: map()}
-                | {install, tag(), GranteeId :: id(), name(), Facet :: erx_facets:facet()}
+                | {install, tag(), GranteeId :: id(), installed(), Facet :: erx_facets:facet()}
                 | {arm, tag(), Milliseconds :: pos_integer()}
                 | {disarm, tag()}
                 | {refused, atom(), Detail :: tuple()}
@@ -222,7 +226,7 @@ from one counter, so a tag names one of them at most.
 -type line_op() :: #{state := {introducing | minting, pair(), tag()}, asker := term(), opening := pid()}.
 -type incarnation() :: {id(), ready, node(), Providers :: #{name() => pid()}} | {id(), ended}.
 -opaque state() :: #{declared := #{row() => [name()]},
-                     grants := #{key() => #{server := row(), limits := map(), mark := boolean(),
+                     grants := #{key() => #{server := row(), service := name(), limits := map(), mark := boolean(),
                                             state := grant()}},
                      rows := #{row() => incarnation()},
                      sessions := sets:set(id()),
@@ -252,7 +256,13 @@ rows its plan gave it, in its ready report and as a party. Files names the
 services of the files interface, whose grants a namespace mounts, and
 Windows those of the windows interface, whose grants size their pairs'
 pixel areas (pair_area/3), and Inputs those of the input interface, whose
-grants are read-only (grant_limits/2); none of any by default. A grant of a
+grants are read-only (grant_limits/2); none of any by default. Drives are
+the manifest's drive window rows, each its serving row, the configured row
+whose units hold the drive's device, the media domain's row and the drive's
+number: each is a grant of the drive interface under {drive, N}, whose
+limits are the interface's (?ERX_DRIVE_GRANTS) and drive => N, and makes the
+serving row declare drive, as if a service row named it (docs/design-system.md,
+"A drive window as a grant"); none by default. A grant of a
 service its server does not declare, a grant to its own server, two
 grants of one name to one grantee, or a service whose server is no row (the
 system domain's, which the ready answers serve) is a bug of the caller,
@@ -261,18 +271,29 @@ badarg.
 """.
 -spec new(config()) -> state().
 new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_function(Owner, 1) ->
-    Declared = maps:groups_from_list(fun({Row, _}) -> Row end, fun({_, Name}) -> Name end, Services),
+    Drives = maps:get(drives, Config, []),
+    DriveLimits = maps:get(drive, ?ERX_DRIVE_GRANTS),
+    Declared = maps:groups_from_list(fun({Row, _}) -> Row end, fun({_, Name}) -> Name end,
+                                     lists:usort(Services ++ [{Server, drive} || {Server, _, _} <- Drives])),
     Keys = [{Grantee, Name} || {Grantee, Name, _, _} <- Grants],
     Valid = lists:all(fun({Row, _Name}) -> is_integer(Row) andalso Row >= 0 end, Services)
         andalso length(lists:usort(Keys)) =:= length(Grants)
+        andalso length(lists:usort([N || {_, _, N} <- Drives])) =:= length(Drives)
+        andalso lists:all(fun({Server, Grantee, N}) ->
+                                  is_integer(Server) andalso Server >= 0 andalso is_integer(Grantee)
+                                      andalso Grantee >= 0 andalso Server =/= Grantee
+                                      andalso is_integer(N) andalso N >= 0
+                          end, Drives)
         andalso lists:all(fun({Grantee, Name, Server, Limits}) ->
                                   Grantee =/= Server andalso is_map(Limits)
                                       andalso lists:member(Name, maps:get(Server, Declared, []))
                           end, Grants),
     Valid orelse error(badarg),
     %% A template's grants are held by its sessions, each from its own ready report.
-    Entries = maps:from_list([{{Grantee, Name}, entry(Server, Limits, false)}
-                              || {Grantee, Name, Server, Limits} <- Grants, not is_template(Grantee)]),
+    Entries = maps:from_list([{{Grantee, Name}, entry(Server, Name, Limits, false)}
+                              || {Grantee, Name, Server, Limits} <- Grants, not is_template(Grantee)]
+                             ++ [{{Grantee, {drive, N}}, entry(Server, drive, DriveLimits#{drive => N}, false)}
+                                 || {Server, Grantee, N} <- Drives]),
     Windows = maps:get(windows, Config, []),
     #{declared => Declared, grants => Entries, rows => #{}, sessions => sets:new([{version, 2}]),
           lines => #{}, line_ops => #{},
@@ -280,7 +301,9 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
           inputs => maps:get(inputs, Config, []),
           areas => areas(Windows, Grants), deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
-entry(Server, Limits, Mark) -> #{server => Server, limits => Limits, mark => Mark, state => idle}.
+%% A grant's record, its service fixed beside the installed name that keys it.
+entry(Server, Service, Limits, Mark) ->
+    #{server => Server, service => Service, limits => Limits, mark => Mark, state => idle}.
 
 is_template({template, _}) -> true;
 is_template(_Grantee) -> false.
@@ -446,7 +469,7 @@ on_event({session_ready, Rows, Id, Node, Marked, Provides},
         true ->
             {[{refused, stale_report, {session, Id}}], State};
         false ->
-            Added = maps:from_list([{{{session, Id}, Name}, entry(Server, Limits, {display, Name} =:= Marked)}
+            Added = maps:from_list([{{{session, Id}, Name}, entry(Server, Name, Limits, {display, Name} =:= Marked)}
                                     || {Name, Server, Limits} <- Rows]),
             {Refusals, Accepted} = session_lines(Id, Node, Provides, State),
             {Actions, Next} = reconcile(State#{sessions := sets:add_element(Id, Sessions),
@@ -489,8 +512,8 @@ on_event({minted, Origin, Tag, Reply}, State) ->
             case is_owned_reply(Reply, Origin, State) of
                 true ->
                     {ok, Facet} = Reply,
-                    {_, Name} = Key,
-                    {[{install, Tag, GranteeId, Name, installed_facet(Facet, Key, State)}],
+                    {_, Installed} = Key,
+                    {[{install, Tag, GranteeId, Installed, installed_facet(Facet, Key, State)}],
                      set_grant(Key, {installing, Pair, Tag, Facet}, State)};
                 false ->
                     fail_pending(Key, Pair, Tag, bad_reply, State)
@@ -779,10 +802,10 @@ party_areas(request, _State) -> [].
 
 %% The request to the server's mint for the grant Key and its operation Tag, with the
 %% grant's limits as its mark has them (session_limits/2).
-mint_request({_, Name} = Key, {ServerId, GranteeId}, Tag, #{rows := Rows} = State) ->
-    #{mark := Mark, server := Server} = grant_entry(Key, State),
-    #{Server := {ServerId, ready, _Node, #{Name := Mint}}} = Rows,
-    {mint, Tag, Mint, Name, GranteeId, session_limits(grant_limits(Key, State), Mark)}.
+mint_request(Key, {ServerId, GranteeId}, Tag, #{rows := Rows} = State) ->
+    #{mark := Mark, server := Server, service := Service} = grant_entry(Key, State),
+    #{Server := {ServerId, ready, _Node, #{Service := Mint}}} = Rows,
+    {mint, Tag, Mint, Service, GranteeId, session_limits(grant_limits(Key, State), Mark)}.
 
 %% The limits of the grant Key as its server mints it and its grantee holds it: its facet
 %% row's, and for a grant of an input service, which states no rights
@@ -826,11 +849,11 @@ fail_at_deadline(Key, Pair, Reason, State) ->
     {[{failed, Key, Pair, Reason}], set_grant(Key, {failed, Pair, Reason}, State)}.
 
 %% The pair the grant Key should have: its server's ready incarnation, if that provides
-%% the name, and its grantee's.
-current_pair({Grantee, Name} = Key, #{rows := Rows} = State) ->
-    #{server := Server} = grant_entry(Key, State),
+%% the grant's service, and its grantee's.
+current_pair({Grantee, _Installed} = Key, #{rows := Rows} = State) ->
+    #{server := Server, service := Service} = grant_entry(Key, State),
     case {Rows, ready_id(Grantee, State)} of
-        {#{Server := {ServerId, ready, _, #{Name := _}}}, GranteeId} when GranteeId =/= none ->
+        {#{Server := {ServerId, ready, _, #{Service := _}}}, GranteeId} when GranteeId =/= none ->
             {ServerId, GranteeId};
         _ ->
             none
