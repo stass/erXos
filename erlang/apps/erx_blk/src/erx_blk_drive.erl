@@ -57,7 +57,8 @@ a drive in its eyes.
 
 -behaviour(gen_server).
 
--export([start_link/0, window/1, serve/3, occupy/2]).
+-export([start_link/0, window/1, serve/3, occupy/2, start_mint/1, mint_request/3]).
+-export([mint_init/2]).
 -export([new/0, step/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -130,6 +131,66 @@ device's, and an unoccupied grant takes a serve from any issuer.
 -spec occupy(pid(), pid()) -> ok | taken.
 occupy(Grant, Pid) when is_pid(Pid) ->
     gen_server:call(Grant, {occupy, Pid}).
+
+-doc """
+Starts the mint of the service `drive` (docs/design-drives.md, "How the grant reaches
+the media domain", item 2), linked to the caller, which starts it before init's ready
+report: the USB places after their drive grants. Find answers, for a drive number,
+that drive's grant as it is at the call, `{ok, Grant}`, `none` while the drive has
+none, or `unknown` for a number this domain's drive records do not name. For each mint
+request in the system domain's envelope (mint_request/3) the mint starts a facet of
+erx_blk_drive_facet bound to the grantee and ending with this domain's connection to
+it and with the mint, and refuses a number Find does not know, which leaves the grant
+failed.
+""".
+-spec start_mint(fun((non_neg_integer()) -> {ok, pid()} | none | unknown)) -> {ok, pid()}.
+start_mint(Find) when is_function(Find, 1) ->
+    proc_lib:start_link(?MODULE, mint_init, [self(), Find]).
+
+-doc false.
+mint_init(Parent, Find) ->
+    ok = erx_facet:provide(drive, self()),
+    proc_lib:init_ack(Parent, {ok, self()}),
+    mint(erx_kernel_records:system_domain(), Find).
+
+mint(System, Find) ->
+    receive
+        Message ->
+            _ = case mint_request(System, Find, Message) of
+                    {grant, Tag, Grant} -> erx_facet:minted(Tag, facet(Grant));
+                    {refuse, Tag} -> erx_facet:minted(Tag, {error, unknown_drive});
+                    unknown -> ok
+                end,
+            mint(System, Find)
+    end.
+
+facet(#{grantee := Grantee} = Grant) ->
+    case erx_connections:connection(Grantee) of
+        {ok, Connection} ->
+            erx_facet:start(erx_blk_drive_facet, Grant#{ends_with => [Connection, self()], exports => erx_dist}, #{});
+        {error, _} = Refused ->
+            Refused
+    end.
+
+-doc """
+What the mint of a domain whose system domain's id is System does with Message: a mint
+request of `drive` in the system domain's envelope, for another domain, whose limits
+name a drive number Find knows, is granted, the grant's limits joined by the grantee
+and the drive's Find; one naming a number Find does not know is refused; anything else
+is unknown and dropped.
+""".
+-spec mint_request(pos_integer(), fun((non_neg_integer()) -> {ok, pid()} | none | unknown), term()) ->
+          {grant, pos_integer(), map()} | {refuse, pos_integer()} | unknown.
+mint_request(System, Find, {erx_origin, System, {erx_facet_mint, Tag, drive, Grantee, Principal,
+                                                 #{drive := N} = Limits}})
+  when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, Grantee =/= System, is_binary(Principal),
+       is_integer(N), N >= 0 ->
+    case Find(N) of
+        unknown -> {refuse, Tag};
+        _Known -> {grant, Tag, Limits#{grantee => Grantee, find => fun() -> Find(N) end}}
+    end;
+mint_request(_System, _Find, _Message) ->
+    unknown.
 
 %% ---------------------------------------------------------------------------
 %% The pure core

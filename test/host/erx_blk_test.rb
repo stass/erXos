@@ -20,13 +20,14 @@ class ErxBlkTest < Minitest::Test
   # The applications the cases exercise, compiled whole (ErlangBuild), and the cases.
   APPLICATIONS = %w[erx erx_blk erx_usb].freeze
   TESTS = %w[test/erlang/erx_blk_tests.erl test/erlang/erx_blk_window_tests.erl
-              test/erlang/erx_blk_drive_tests.erl test/erlang/erx_blk_usb_tests.erl].freeze
+              test/erlang/erx_blk_drive_tests.erl test/erlang/erx_blk_usb_tests.erl
+              test/erlang/erx_blk_drive_facet_tests.erl].freeze
 
   def test_transport_choice_and_window_cases_pass_under_eunit
     Dir.mktmpdir('erx-blk-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS)
       output, status = Open3.capture2e('gtimeout', '-k', '10', '60', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
-                                       '-eval', 'halt(case eunit:test([erx_blk_tests, erx_blk_window_tests, erx_blk_drive_tests, erx_blk_usb_tests], [verbose]) of ok -> 0; _ -> 1 end)',
+                                       '-eval', 'halt(case eunit:test([erx_blk_tests, erx_blk_window_tests, erx_blk_drive_tests, erx_blk_usb_tests, erx_blk_drive_facet_tests], [verbose]) of ok -> 0; _ -> 1 end)',
                                        chdir: work, stdin_data: '')
       assert status.success?, output
       assert_match(/All \d+ tests passed/, output)

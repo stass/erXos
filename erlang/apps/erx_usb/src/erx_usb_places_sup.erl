@@ -48,7 +48,7 @@ only with the places, and so with every grant.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/0, start_link/1, occupy_input/2, streams/1, occupy_drive/2, drives/1]).
--export([init/1, start_mint/1]).
+-export([init/1, start_mint/1, start_drive_mint/1]).
 
 -doc "Starts the USB domain's places over the domain's drive records, linked to the caller.".
 -spec start_link() -> {ok, pid()}.
@@ -102,9 +102,13 @@ init(Drives) ->
     Streams = [#{id => {input, N}, start => {erx_usb_input_stream, start_link, []}}
                || N <- lists:seq(0, ?ERX_USB_INPUT_MAX - 1)],
     Grants = [#{id => {drive, N}, start => {erx_blk_drive, start_link, []}} || N <- numbers(Drives)],
+    %% The drives' mint, after their grants, and only with a drive: a ready report of a
+    %% domain no drive window lies on may not provide drive (erx_domain_mints).
+    DriveMint = [#{id => drive_mint, start => {?MODULE, start_drive_mint, [self()]}, shutdown => brutal_kill,
+                   modules => [erx_blk_drive]} || Grants =/= []],
     Mint = #{id => mint, start => {?MODULE, start_mint, [self()]}, shutdown => brutal_kill,
              modules => [erx_fs_mint]},
-    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Streams ++ Grants ++ [Mint]}}.
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Streams ++ Grants ++ DriveMint ++ [Mint]}}.
 
 %% The input tree's mint, whose mount answers the streams of Places, number 0 first.
 -doc false.
@@ -112,6 +116,18 @@ init(Drives) ->
 start_mint(Places) ->
     erx_fs_mint:start_link(usb_input, erx_usb_input_tree,
                            fun() -> list_to_tuple(streams(Places)) end).
+
+%% The drives' mint (erx_blk_drive:start_mint/1), which finds a drive's grant among the
+%% places' children at each ask.
+-doc false.
+-spec start_drive_mint(pid()) -> {ok, pid()}.
+start_drive_mint(Places) ->
+    erx_blk_drive:start_mint(fun(N) ->
+                                     case lists:keyfind(N, 1, drives(Places)) of
+                                         {N, Grant} -> {ok, Grant};
+                                         false -> unknown
+                                     end
+                             end).
 
 %% ---------------------------------------------------------------------------
 %% Internal

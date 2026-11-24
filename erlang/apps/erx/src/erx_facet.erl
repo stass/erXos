@@ -95,7 +95,7 @@ the grantee's share of reductions; the funnel's check of max_request
 before a message is queued, and the facet's queue quota and heap limit.
 """.
 
--export([start/3, info/1, provide/2, minted/2, serve/2, served/0]).
+-export([start/3, info/1, provide/2, minted/2, serve/2, served/0, admitted/2]).
 
 -callback init(Grant :: grant()) -> {ok, State :: term()}.
 -callback admit(Request :: term(), From :: pid(), State :: term()) ->
@@ -282,6 +282,31 @@ start(Callback, Grant, Operations, Exports) ->
             {error, timeout}
     end.
 
+-doc """
+The admission path of a facet, which every process a facet starts runs on what reaches
+it too (docs/design-domains.md, "Processes a facet starts"), Limits its grant's:
+{call, From, Request} for a gen_server call of the grantee's, in its envelope, within
+max_request encoded bytes, whose caller's pid and alias are names of the grantee's
+(erx:call_from/3), so a reply to From goes to the grantee alone; {message, Message} for
+a message of the grantee's in no call's shape, whose size its taker checks; and drop for
+anything else, which no answer may name.
+""".
+-spec admitted(term(), #{grantee := pos_integer(), max_request := pos_integer(), exports := module(),
+                         atom() => term()}) ->
+          {call, {pid(), [alias | reference()]}, term()} | {message, term()} | drop.
+admitted({erx_origin, Grantee, {'$gen_call', From, Request} = Message},
+         #{grantee := Grantee, max_request := MaxRequest, exports := Exports}) ->
+    case erlang:external_size(Message) =< MaxRequest andalso
+         erx:call_from(Grantee, From, fun Exports:owner/1) of
+        true -> {call, From, Request};
+        false -> drop
+    end;
+admitted({erx_origin, Grantee, Message}, #{grantee := Grantee})
+  when not is_tuple(Message); element(1, Message) =/= '$gen_call' ->
+    {message, Message};
+admitted(_Message, _Limits) ->
+    drop.
+
 -doc "The facet's grantee, limits and counts, asked from the facet's own domain.".
 -spec info(pid()) -> #{grantee := pos_integer(), max_request := pos_integer(), in_flight := pos_integer(),
                        dropped := non_neg_integer(), refused := non_neg_integer(),
@@ -386,18 +411,12 @@ replied(Alias, Reply, #{forwards := Forwards} = State) ->
 %% the grantee's; a message of the grantee's if it is in no call's shape; dropped and
 %% counted otherwise. erx:call_from/3 admits only a From of {Pid, [alias | Alias]},
 %% the shape admit/3 and a forward rely on.
-request({erx_origin, Grantee, {'$gen_call', From, Request} = Message},
-        #{grantee := Grantee, max_request := MaxRequest, exports := Exports} = State) ->
-    case erlang:external_size(Message) =< MaxRequest andalso
-         erx:call_from(Grantee, From, fun Exports:owner/1) of
-        true -> admit(Request, From, State);
-        false -> dropped(State)
-    end;
-request({erx_origin, Grantee, Message}, #{grantee := Grantee} = State)
-  when not is_tuple(Message); element(1, Message) =/= '$gen_call' ->
-    message(Message, State);
-request(_Message, State) ->
-    dropped(State).
+request(Message, State) ->
+    case admitted(Message, State) of
+        {call, From, Request} -> admit(Request, From, State);
+        {message, Plain} -> message(Plain, State);
+        drop -> dropped(State)
+    end.
 
 message(Message, #{max_request := MaxRequest, forwards := Forwards, in_flight := InFlight,
                    callback := Callback, cb_state := CbState, grantee := Grantee} = State) ->

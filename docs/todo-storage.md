@@ -64,10 +64,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      window as a grant"), with each record's service apart from its installed name
      (design-system.md's "One operation per grant"): `key()`'s name becomes the installed name, and
      `current_pair/2` and `mint_request/4` look the mint up and name it by the service, where today
-     one `Name` serves all three; `erx_blk_drive:start_mint/1` and `erx_blk_drive_facet` with the
-     USB places' mint child, and `erx_blk_drive_proxy`, the window proxy, under the facet's
-     admission path and account (design-domains.md's "Processes a facet starts", whose account
-     `erx_facet` has yet to build: its residuals in TODO.md); the facet table check passing
+     one `Name` serves all three; for a block drive, its grant in the
+     device process, which occupies it for its whole life, and the drive's mint started in
+     `erx_blk_sup` before the device process (`erx_blk_drive:start_mint/1`, the USB places' mint
+     child, `erx_blk_drive_facet` and `erx_blk_drive_proxy` are built); the window proxy's charge
+     of the facet's account and its pause while the share is spent (design-domains.md's
+     "Processes a facet starts"), which wait for `erx_facet`'s account: its residuals in TODO.md; the facet table check passing
      `served_by drive` as it passes a session's lines; the manifest check's refusal of a service or
      facet row of `drive`; and in each board
      manifest one more of the media domain's and the serving domain's `connections` and of
