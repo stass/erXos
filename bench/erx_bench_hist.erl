@@ -75,8 +75,8 @@ given.
 """.
 -spec cell(map(), [non_neg_integer()]) -> map().
 cell(Conditions, Samples) ->
-    Count = fun(Value, Counts) -> maps:update_with(bucket(Value), fun(N) -> N + 1 end, 1, Counts) end,
-    Counted = lists:foldl(Count, #{}, Samples),
+    Tally = fun(Value, Counts) -> maps:update_with(bucket(Value), fun(N) -> N + 1 end, 1, Counts) end,
+    Counted = lists:foldl(Tally, #{}, Samples),
     Histogram = [begin {Low, Last} = bounds(Index), [Low, Last, Count] end
                  || {Index, Count} <- lists:sort(maps:to_list(Counted))],
     Indexed = lists:zip(lists:seq(0, length(Samples) - 1), Samples),

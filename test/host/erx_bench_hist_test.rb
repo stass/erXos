@@ -86,7 +86,7 @@ class ErxBenchHistTest < Minitest::Test
     end
     sources << File.join(directory, 'erx.erl').tap { |path| File.write(path, STAND_IN) } if stand_in
     runtime do |erl, erlc|
-      _, status = Open3.capture2e(erlc, '-o', directory, *sources, stdin_data: '')
+      _, status = Open3.capture2e(erlc, '+warnings_as_errors', '-o', directory, *sources, stdin_data: '')
       assert status.success?, 'the bench modules do not compile'
       @erl = erl
     end
