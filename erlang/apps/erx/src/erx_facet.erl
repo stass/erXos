@@ -70,6 +70,13 @@ What arrives is sorted by its shape before the callback sees a request:
 Every other message, a local one without an envelope included, is dropped
 and counted: a facet acts for its grantee alone.
 
+The behaviour catches nothing its callback raises. A crash inside the
+callback, in operation/1, admit/3 or message/2, ends the facet with the
+crash's reason, the one end that is no atom, and that reason, which can
+hold the grantee's request, reaches the grantee's callers and monitors. So
+a callback keeps operation/1, admit/3 and message/2 total: each answers
+every term, refusing what it does not take, and never raises on a request.
+
 A grant's operations, the names its manifest row lists (erx_domain_lib:configured/0),
 are checked through the callback's operation/1, which maps a request or a message of
 the grantee's to the interface operation it invokes (docs/design-time.md, "On Fiasco").
