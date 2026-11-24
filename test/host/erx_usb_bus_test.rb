@@ -110,13 +110,13 @@ class ErxUsbBusTest < Minitest::Test
              module_path: BLK_USB,
              anchor: '    gen_server:start_monitor(?MODULE, Medium, []).',
              replacement: "    {ok, Pid} = gen_server:start_link(?MODULE, Medium, []),\n    {ok, {Pid, monitor(process, Pid)}}.",
-           catching_case: 'a_transport_crash_ends_only_its_medium_test'),
-  Seed.new(fault: "the function's end_medium clause dropped, so a grant asked again ends no medium",
-           module_path: BOT,
-           anchor: 'handle_info({erx_blk_drive, end_medium, {Lun, Ref}}, B = #bot{units = Units}) ->',
-           replacement: 'handle_info({erx_blk_drive, end_medium_dropped, {Lun, Ref}}, B = #bot{units = Units}) ->',
-           catching_case: 'a_grant_asked_again_ends_its_medium_through_the_function_test')
-].freeze
+             catching_case: 'a_transport_crash_ends_only_its_medium_test'),
+    Seed.new(fault: "the function's end_medium clause dropped, so a grant asked again ends no medium",
+             module_path: BOT,
+             anchor: 'handle_info({erx_blk_drive, end_medium, {Lun, Ref}}, B = #bot{units = Units}) ->',
+             replacement: 'handle_info({erx_blk_drive, end_medium_dropped, {Lun, Ref}}, B = #bot{units = Units}) ->',
+             catching_case: 'a_grant_asked_again_ends_its_medium_through_the_function_test')
+  ].freeze
 
   def test_the_cases_pass
     output, status = run_cases({})

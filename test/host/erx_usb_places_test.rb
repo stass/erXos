@@ -27,9 +27,9 @@ class ErxUsbPlacesTest < Minitest::Test
   ].freeze
   DEADLINE_SECONDS = '300'
   STREAM = 'erlang/apps/erx_usb/src/erx_usb_input_stream.erl'
-PROPERTY = 'places_hold_under_random_sequences_test_'
-DRIVE = 'erlang/apps/erx_blk/src/erx_blk_drive.erl'
-DRIVES = 'drives_hold_under_random_sequences_test_'
+  PROPERTY = 'places_hold_under_random_sequences_test_'
+  DRIVE = 'erlang/apps/erx_blk/src/erx_blk_drive.erl'
+  DRIVES = 'drives_hold_under_random_sequences_test_'
 
   Seed = Data.define(:fault, :module_path, :anchor, :replacement, :catching_case)
 
@@ -58,23 +58,23 @@ DRIVES = 'drives_hold_under_random_sequences_test_'
              module_path: STREAM,
              anchor: '            Size = min(Count - Count rem erx_input_codec:size(), byte_size(Buffer)),',
              replacement: '            Size = min(Count, byte_size(Buffer)),',
-           catching_case: 'reads_take_whole_records_test'),
-  Seed.new(fault: 'a drive given twice',
-           module_path: DRIVE,
-           anchor: '    {State, [{answer, From, taken}, {forget, Occupant}]};',
-           replacement: '    {State#{occupant := Occupant}, [{answer, From, ok}]};',
-           catching_case: DRIVES),
-  Seed.new(fault: "a drive its occupant's end never frees",
-           module_path: DRIVE,
-           anchor: "step({ended, Occupant}, State = \#{occupant := Occupant}) ->\n    {State\#{occupant := none}, []};",
-           replacement: "step({ended, Occupant}, State = \#{occupant := Occupant}) ->\n    {State, []};",
-           catching_case: DRIVES),
-  Seed.new(fault: "a drive not freed at its medium's end",
-           module_path: DRIVE,
-           anchor: '#{monitor := Monitor} -> free(State#{medium := none});',
-           replacement: '#{monitor := Monitor} -> {State#{medium := none}, []};',
-           catching_case: DRIVES)
-].freeze
+             catching_case: 'reads_take_whole_records_test'),
+    Seed.new(fault: 'a drive given twice',
+             module_path: DRIVE,
+             anchor: '    {State, [{answer, From, taken}, {forget, Occupant}]};',
+             replacement: '    {State#{occupant := Occupant}, [{answer, From, ok}]};',
+             catching_case: DRIVES),
+    Seed.new(fault: "a drive its occupant's end never frees",
+             module_path: DRIVE,
+             anchor: "step({ended, Occupant}, State = \#{occupant := Occupant}) ->\n    {State\#{occupant := none}, []};",
+             replacement: "step({ended, Occupant}, State = \#{occupant := Occupant}) ->\n    {State, []};",
+             catching_case: DRIVES),
+    Seed.new(fault: "a drive not freed at its medium's end",
+             module_path: DRIVE,
+             anchor: '#{monitor := Monitor} -> free(State#{medium := none});',
+             replacement: '#{monitor := Monitor} -> {State#{medium := none}, []};',
+             catching_case: DRIVES)
+  ].freeze
 
   def test_the_cases_pass
     output, status = run_cases({})

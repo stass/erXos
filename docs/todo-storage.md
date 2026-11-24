@@ -52,7 +52,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   4. The `erx_media` application: the drive process, the medium supervisor and reader, the volume
      process with its probe and memory bound, the media tree with `status`, `ctl` and the two-volume
      `exdev` rule, the writable rule over the formats the build writes, the finish shared by `eject` and the freezing
-     checkpoint; the release check that `erx_media` lies only in the media domain's release, which names
+     checkpoint; the device service's introduction of the media domain, which hands it each drive's
+     grant, and the rule that a holder's envelope reaches only the grant's `window` (a holder can call
+     `occupy/2` and `serve/3` on a bare pid today, which would let it keep media off its own drives);
+     the release check that `erx_media` lies only in the media domain's release, which names
      no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the resolver's no-follow rule
      as a `nofollow` mark a provider carries, the provider `{facet, media}` marked by `erx_ns` by the
      facet's name (design-drives.md, "Links and rights"); the ordered end's step 2 freezing the media

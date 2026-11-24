@@ -76,7 +76,7 @@ run(Seed) ->
         Grants = maps:from_list(erx_usb_places_sup:drives(Places)),
         ?assertEqual(Numbers, lists:sort(maps:keys(Grants))),
         M = lists:foldl(fun(_, M0) -> step(Places, M0) end, #model{grants = Grants}, lists:seq(1, ?STEPS)),
-        [exit(O, kill) || O <- M#model.occupants]
+        [exit(Pid, kill) || Pid <- M#model.occupants ++ [W || #{window := W} <- maps:values(M#model.held), W =/= none]]
     after
         stop(Places)
     end.
@@ -90,13 +90,15 @@ step(Places, M = #model{held = Held, occupants = Occupants}) ->
     Idle = [O || O <- Occupants, not holds(O, Held)],
     Waiting = [N || N := #{occupant := O, window := none} <- Held, O =/= none],
     Serving = [N || N := #{window := W} <- Held, W =/= none],
-    Choices = [{take, occupant()}]
+    Choices = [{take, new}]
               ++ [{take, O} || O <- Idle]
               ++ [{finish, O} || O <- Occupants]
               ++ [{serve, N} || N <- Waiting]
               ++ [{eject, N} || N <- Serving],
     act(Places, pick(Choices), M).
 
+act(Places, {take, new}, M) ->
+    act(Places, {take, occupant()}, M);
 act(Places, {take, O}, M = #model{grants = Grants, held = Held, occupants = Occupants}) ->
     Expected = case lists:sort([N || N <- maps:keys(Grants), not is_map_key(N, Held)]) of
                    [Lowest | _] -> {ok, Lowest, maps:get(Lowest, Grants)};
@@ -137,8 +139,7 @@ act(_Places, {eject, N}, M = #model{held = Held}) ->
 holds(O, Held) -> lists:any(fun(#{occupant := Holder}) -> Holder =:= O end, maps:values(Held)).
 
 %% Waits until each of Numbers' grants holds neither occupant nor medium, the ends' signals
-%% taken; a grant that keeps one past the deadline is left as it is, for the next take to
-%% find.
+%% taken, and fails at the step whose end a grant has not seen by the deadline.
 settle(#model{grants = Grants}, Numbers) ->
     Deadline = erlang:monotonic_time(millisecond) + ?SETTLE_MS,
     [settle_one(maps:get(N, Grants), Deadline) || N <- Numbers],
@@ -150,7 +151,7 @@ settle_one(Grant, Deadline) ->
         #{} ->
             case erlang:monotonic_time(millisecond) < Deadline of
                 true -> timer:sleep(5), settle_one(Grant, Deadline);
-                false -> ok
+                false -> error({drive_not_freed, Grant})
             end
     end.
 
