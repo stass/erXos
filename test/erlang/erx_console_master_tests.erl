@@ -79,6 +79,7 @@ master() ->
     the_system_shell_has_the_menu_too(),
     a_loss_runs_no_system_line(),
     a_loss_drops_a_cut_character(),
+    a_loss_ends_a_terminal_reply(),
     Domain = spawn(fun() -> receive after infinity -> ok end end),
     Facet = facet(7, Domain, Console),
     ok = erx_console:add_session(7, session(<<"root_1">>, 1, Domain)),
@@ -192,20 +193,19 @@ the_system_shell_has_the_menu_too() ->
     {ok, _} = await(<<"sys:e">>).
 
 %% A loss on the system line reaches the system shell's group, the tree's group and
-%% edlin, before the bytes typed after it: the line it falls in rings the bell at Enter
-%% and does not run, and once Ctrl-U has emptied it the next line runs
-%% (docs/design-live.md, "Lost input").
+%% edlin, before the bytes typed after it: the bell rings at the loss and at Enter, the
+%% line it falls in does not run, and once Ctrl-U has emptied it the next line runs
+%% (docs/design-live.md, "Lost input"). Everything the line shows up to the next line's
+%% run is checked, so a damaged line that runs late is seen too.
 a_loss_runs_no_system_line() ->
     type(<<"ab">>),
     {ok, _} = await(<<"ab">>),
     erx_console ! erx_console_lost,
-    ?assertEqual(<<$\^G>>, quiet_line()),
     type(<<"c\r">>),
-    Enter = quiet_line(),
-    ?assertEqual({Enter, nomatch}, {Enter, binary:match(Enter, <<"sys:">>)}),
-    ?assertMatch({_, _}, binary:match(Enter, <<$\^G>>)),
     type(<<$\^U, "d\r">>),
-    {ok, _} = await(<<"sys:d">>).
+    {ok, Seen} = await(<<"sys:d">>),
+    ?assertEqual({Seen, 1}, {Seen, length(binary:matches(Seen, <<"sys:">>))}),
+    ?assert(length(binary:matches(Seen, <<$\^G>>)) >= 2).
 
 %% A loss after the first byte of a two-byte UTF-8 character drops that byte: the byte
 %% after the loss is read alone, as latin-1, and never completes the character.
@@ -213,11 +213,21 @@ a_loss_drops_a_cut_character() ->
     type(<<16#C3>>),
     erx_console ! erx_console_lost,
     type(<<16#A9>>),
-    Echo = quiet_line(),
-    ?assertMatch({_, _}, binary:match(Echo, <<16#C2, 16#A9>>)),
-    ?assertEqual(nomatch, binary:match(Echo, <<16#C3, 16#A9>>)),
     type(<<$\^U, "e\r">>),
-    {ok, _} = await(<<"sys:e">>).
+    {ok, Seen} = await(<<"sys:e">>),
+    ?assertMatch({_, _}, binary:match(Seen, <<16#C2, 16#A9>>)),
+    ?assertEqual({Seen, nomatch}, {Seen, binary:match(Seen, <<16#C3, 16#A9>>)}).
+
+%% A loss inside a terminal's OSC reply returns the line's escape state to the ground
+%% state, so the Ctrl-G after it opens the menu rather than ending the reply.
+a_loss_ends_a_terminal_reply() ->
+    type(<<?ESC, "]11;rgb:00">>),
+    erx_console ! erx_console_lost,
+    type(<<$\^G>>),
+    {ok, _} = await(<<"Esc returns. ">>),
+    type(<<?ESC>>),
+    type(<<$\^U, "f\r">>),
+    {ok, _} = await(<<"sys:f">>).
 
 %% Ctrl-G never reaches the session: the bytes before it do, the menu takes the line, and
 %% the rest of the read that carried it is dropped. The session is stopped while the menu
@@ -472,15 +482,6 @@ nothing_from_the_console() ->
 %% No bytes reach the line; the shell's empty prompt is no bytes.
 nothing_on_the_line() ->
     ?assertEqual(none, receive {line, Bytes} when Bytes =/= <<>> -> Bytes after ?QUIET_MS -> none end).
-
-%% Every byte the line gets until it has been quiet for QUIET_MS.
-quiet_line() ->
-    quiet_line(<<>>).
-
-quiet_line(Seen) ->
-    receive {line, Bytes} -> quiet_line(<<Seen/binary, Bytes/binary>>)
-    after ?QUIET_MS -> Seen
-    end.
 
 %% The line's bytes up to and including Pattern.
 await(Pattern) ->
