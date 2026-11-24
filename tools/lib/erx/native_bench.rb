@@ -200,9 +200,11 @@ module Erx
         @landing = BenchLanding.new(root: root, runner: runner)
         @run = run
       end
+
       # benchmark's native cells booted as boot (a BenchSuite::Boot) says: the record, the
-      # run directory written (nil for a replayed boot), the refused lines' reasons, and
-      # the names of the seeds whose boots did not show their fault.
+      # run directory written (nil for a replayed boot), the refused lines' reasons, the
+      # boot's timed_out (nil: a native boot that misses its deadline raises), and the
+      # names of the seeds whose boots did not show their fault.
       def call(benchmark, boot:, history:)
         asked = NativeBench.asked(benchmark, cpus: boot.cpus)
         recorded = @landing.call(asked, boot: boot, memory_mib: MEMORY_MIB, history: history) do |accel|

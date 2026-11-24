@@ -12,9 +12,9 @@ require_relative '../lib/erx/bench_suite'
 # The BENCH, CLOCK and WINDOW line validators (Erx::BenchMeasurement.cell, .clock and
 # .window) over mutated lines, as a guest could print them.
 # Each input either raises Erx::Error and nothing else, or answers a clock group, a
-# window of a line within its bound, or a cell whose histogram holds no more samples than
-# its profile asked for. Whether its
-# answers are right is test/host/bench_line_test.rb's.
+# window of a line within its bound, or a cell whose histogram holds no more samples
+# than its profile asked for. Whether its answers are right is
+# test/host/bench_line_test.rb's.
 module Erx
   module BenchLineFuzz
     MEASUREMENT = BenchMeasurement

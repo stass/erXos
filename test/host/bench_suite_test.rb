@@ -81,6 +81,21 @@ class BenchSuiteTest < Minitest::Test
     assert_equal 'not_run', Suite.boot_cell(wake_record(4, 'cross-cpu', 'failed'), benchmark: 'xdomain', refused: [])
   end
 
+  # A benchmark whose seeded run missed its fault fails its own cell, with a note naming
+  # the seed, and the others' cells stand.
+  def test_a_missed_seed_fails_only_its_benchmarks_cell_and_says_so
+    record = wake_record(1, 'cross-cpu', 'unsupported')
+    native = lambda do |declared, **|
+      { record: record, written: nil, refused: [], seeds_missed: declared.name == 'wake' ? ['lost wake'] : [] }
+    end
+    xdomain = ->(*, **) { { record: record, written: nil, refused: [] } }
+    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: native, xdomain: xdomain)
+    assert_equal 'failed', answer.fetch(:cells).fetch('hvf-4cpu-native-wake')
+    assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-native-nullcall')
+    assert_equal 'passed', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
+    assert_includes answer.fetch(:notes), 'bench: native: wake: the seeded lost wake was not caught'
+  end
+
   # A benchmark whose landing raises is a failed cell with its message as a note, and the
   # others' cells stand.
   def test_a_failing_benchmark_fails_only_its_own_cell
@@ -135,7 +150,7 @@ class BenchSuiteTest < Minitest::Test
         run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
         clock: {}, cells: [cell]
       )
-      { record: record, written: File.join(history, 'native'), refused: [], seed_caught: true, timed_out: nil }
+      { record: record, written: File.join(history, 'native'), refused: [], seeds_missed: [], timed_out: nil }
     end
   end
 
