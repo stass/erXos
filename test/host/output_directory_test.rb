@@ -60,4 +60,22 @@ class OutputDirectoryTest < Minitest::Test
       assert_raises(Erx::Error) { Erx::OutputDirectory.prepare(root: root, path: 'file/logs') }
     end
   end
+
+  # A fresh directory is emptied only once its path is checked: a link on the path is
+  # refused with what lies beyond it untouched, and the owner root is never removed.
+  def test_fresh_empties_only_a_checked_directory_below_the_root
+    Dir.mktmpdir do |base|
+      root = File.join(base, 'root')
+      outside = File.join(base, 'outside')
+      FileUtils.mkdir_p([File.join(root, 'out/old'), File.join(outside, 'set')])
+      File.write(File.join(outside, 'set/keep'), 'keep')
+      File.symlink(outside, File.join(root, 'linked'))
+      fresh = Erx::OutputDirectory.fresh(root: root, path: File.join(root, 'out'))
+      assert_empty Dir.children(fresh)
+      assert_raises(Erx::Error) { Erx::OutputDirectory.fresh(root: root, path: File.join(root, 'linked/set')) }
+      assert_equal 'keep', File.read(File.join(outside, 'set/keep'))
+      assert_raises(Erx::Error) { Erx::OutputDirectory.fresh(root: root, path: root) }
+      assert File.directory?(root)
+    end
+  end
 end

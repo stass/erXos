@@ -292,7 +292,7 @@ module Erx
       inputs = { image: File.join(boot_files, BootPartition::KERNEL), stub: patched_stub(File.join(boot_files, BootPartition::ARMSTUB)) }
       set_line = File.file?(File.join(boot_files, BootPartition::CMDLINE)) ? File.read(File.join(boot_files, BootPartition::CMDLINE)) : nil
       dtb = named_tree(located_dtb, NativeBench.entry_command_line(set_line, BENCH_NAME))
-      report = boot(inputs, dtb: dtb, points: bench_checkpoints(laid.image), machine_end: true)
+      report = boot(inputs, dtb: dtb, points: bench_checkpoints(laid), machine_end: true)
       check_bench_boot(File.binread(report.fetch(:serial)))
       report
     end
@@ -524,22 +524,27 @@ module Erx
     def located_dtb = File.join(@root, BoardTree::OUTPUT, PLATFORM, 'model.dtb')
 
     # The bench boot's transcript: the banner, the set's image identity, the root's first
-    # naming line, its timing and its end, at the guest's landing deadline and the margin.
-    def bench_checkpoints(image)
+    # naming line, its timing and its end, at the guest's deadline the set's root is built
+    # with and the margin.
+    def bench_checkpoints(laid)
+      image = laid.image
       identity = /\Aerx: boot image build #{image.build_id} index #{image.index_hash} flags 0x#{image.flags.to_s(16)} archive /n
       named = /\Aerx: bench: boot #{BENCH_NAME}\r*\n\z/n
-      deadline = NativeBench::LANDING_DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS
+      deadline = laid.deadline_seconds + NativeBench::DEADLINE_MARGIN_SECONDS
       [*Qemu.boot_transcript(memory_mib: @machine.memory_mib),
        point('bench-image-identity', identity),
        point('bench-named', named, seconds: RELEASE_SECONDS),
        point('bench-done', NativeBench::END_LINE, seconds: deadline)].freeze
     end
 
-    # Raises unless the bench boot of serial named no setup failure, ended with a reset,
-    # kept its naming and reported every cell it asks for.
+    # Raises unless the bench boot of serial named no setup failure, ended with a reset
+    # at its done, kept its naming and reported every cell it asks for.
     def check_bench_boot(serial)
       NativeBench.judge(serial)
       NativeBench.check_end(serial)
+      deadline = NativeBench.timed_out(serial)
+      raise Error, "raspi4b: the bench boot did not finish: #{deadline}" if deadline
+
       misnamed = NativeBench.misnamed_lines(serial, name: BENCH_NAME)
       raise Error, "raspi4b: the bench boot's #{misnamed.size} lines break its naming, first #{misnamed.first.dump[0, 200]}" unless misnamed.empty?
 

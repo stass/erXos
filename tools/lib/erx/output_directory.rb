@@ -47,6 +47,17 @@ module Erx
       raise Error, "cannot prepare output directory: #{error.message}"
     end
 
+    # An empty directory at path under root, made afresh: the path is checked before
+    # anything there is removed, so a link on it cannot send the removal elsewhere, and
+    # root itself is never removed.
+    def fresh(root:, path:, mode: 0o755)
+      destination = check(root: root, path: path)
+      raise Error, 'a fresh output directory must lie below its owner root' if destination == File.realpath(root)
+
+      FileUtils.remove_entry(destination) if File.exist?(destination)
+      prepare(root: root, path: destination, mode: mode)
+    end
+
     # Why path cannot be on an output path, naming what holds its place. A link is named
     # as itself: File.realpath would name its target, or fail for a dangling one. Anything
     # else is named as the file system spells it, since one that ignores case takes a

@@ -123,8 +123,10 @@ module Erx
     FAILED_LINE = /^erx: bench: .* FAILED/n
     # The machine's end, the boot's last line (docs/design-bench.md, "The end").
     MACHINE_END_LINE = /^erx: end (?<how>[a-z]+)\r*$/n
-    # The root's naming line in any of its forms, with its name.
-    NAMING_LINE = /\Aerx: bench: boot (?<name>\S*)(?: done| deadline)?\r*\z/n
+    # The root's naming line in any of its forms, with its name; a line with its head
+    # and anything else after it is a broken one.
+    NAMING_HEAD = /\Aerx: bench: boot /n
+    NAMING_LINE = /\Aerx: bench: boot (?<name>[0-9a-f]{32})(?: done| deadline)?\r*\z/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
     module_function
@@ -183,6 +185,10 @@ module Erx
                                   pairs: cpus > 1 ? [[0, cpus - 1]] : [])
     end
 
+    # The guest's deadline a root is built with: seed's own, if it has one, or the landing
+    # form's; QEMU's deadline for the boot's end is DEADLINE_MARGIN_SECONDS more.
+    def deadline_seconds(seed) = seed&.deadline_seconds || LANDING_DEADLINE_SECONDS
+
     # Raises on a setup failure the guest named, which a transcript's timeout would only imply.
     def judge(serial)
       failed = FAILED_LINE.match(serial)
@@ -200,14 +206,15 @@ module Erx
     end
 
     # The lines of serial that break its naming (docs/design-bench.md, "The boot name"):
-    # a naming line with another name than name, and a BENCH or CLOCK line without a
-    # naming line before and after it; empty when there are no naming lines to break.
+    # a naming line that is broken or carries another name than name, and a BENCH or
+    # CLOCK line without a naming line before and after it, which is every one of them
+    # when there is no naming line.
     def misnamed_lines(serial, name:)
       lines = serial.b.split(/\r?\n/n)
-      named = lines.each_index.select { |index| NAMING_LINE.match?(lines[index]) }
+      named = lines.each_index.select { |index| NAMING_HEAD.match?(lines[index]) }
       return lines.grep(GUEST_LINE) if named.empty?
 
-      others = named.map { |index| lines[index] }.reject { |line| NAMING_LINE.match(line)[:name] == name }
+      others = named.map { |index| lines[index] }.reject { |line| NAMING_LINE.match(line)&.[](:name) == name }
       outside = lines.each_index.select { |index| GUEST_LINE.match?(lines[index]) && !(named.first < index && index < named.last) }
       others + outside.map { |index| lines[index] }
     end
@@ -238,7 +245,7 @@ module Erx
       def call(benchmark, accel:, cpus:, seed: nil, build: false, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build_for(@platform, jobs: jobs) if build
-        deadline = seed&.deadline_seconds || LANDING_DEADLINE_SECONDS
+        deadline = NativeBench.deadline_seconds(seed)
         flags = NativeBench.flags(seeded: seed ? seed.root_flags : [], deadline_seconds: deadline)
         built = image(fiasco, benchmark, seed: seed, flags: flags)
         directory = File.join(@root, 'build/qemu', "bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
@@ -252,7 +259,8 @@ module Erx
       end
 
       # benchmark's image for the run's platform, seeded with seed's fault if given, its
-      # root built with flags: the boot image (BootImage::Built).
+      # root built with flags: the boot image (BootImage::Built). BoardSets builds its sets'
+      # images through it.
       def image(fiasco, benchmark, seed:, flags:)
         guest = NativeBench.guest(benchmark)
         build = File.join(@root, 'build', ['native-bench', *board_part, benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-'))
@@ -300,9 +308,10 @@ module Erx
     # build/bench-board/<benchmark>/, which every entry of the set is made from.
     class BoardSets
       DIRECTORY = 'build/bench-board'
-      # A laid-out set: its files and record (BootPartition::WrittenSet), and its image
-      # (BootImage::Built), whose identity its banner names.
-      Laid = Data.define(:set, :image)
+      # A laid-out set: its files and record (BootPartition::WrittenSet), its image
+      # (BootImage::Built), whose identity its banner names, and the guest's deadline its
+      # root is built with.
+      Laid = Data.define(:set, :image, :deadline_seconds)
 
       def initialize(root:, platform:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
@@ -322,20 +331,20 @@ module Erx
       def call(benchmarks, seed: nil, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build_for(@platform, jobs: jobs)
-        flags = NativeBench.flags(seeded: seed ? seed.root_flags : [])
-        benchmarks.uniq.to_h { |benchmark| [benchmark, lay_out(fiasco, benchmark, seed: seed, flags: flags)] }
+        deadline = NativeBench.deadline_seconds(seed)
+        flags = NativeBench.flags(seeded: seed ? seed.root_flags : [], deadline_seconds: deadline)
+        benchmarks.uniq.to_h { |benchmark| [benchmark, lay_out(fiasco, benchmark, seed: seed, flags: flags, deadline: deadline)] }
       end
 
       private
 
-      def lay_out(fiasco, benchmark, seed:, flags:)
+      def lay_out(fiasco, benchmark, seed:, flags:, deadline:)
         image = @run.image(fiasco, benchmark, seed: seed, flags: flags)
-        directory = File.join(@root, DIRECTORY, [benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-'))
-        FileUtils.remove_entry(directory) if File.exist?(directory)
-        OutputDirectory.prepare(root: @root, path: directory)
+        directory = OutputDirectory.fresh(root: @root, path: File.join(@root, DIRECTORY,
+                                                                      [benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-')))
         set = BootPartition.lay_out_set(root: @root, runner: @runner, platform: @platform, build_kind: BuildKind::DEVELOPMENT,
                                         bootable: image.single, directory: directory, compiler: @compiler, linker: @linker)
-        Laid.new(set: set, image: image)
+        Laid.new(set: set, image: image, deadline_seconds: deadline)
       end
     end
 
@@ -352,7 +361,8 @@ module Erx
 
       # benchmark's native cells booted as boot (a BenchSuite::Boot) says: the record, the
       # run directory written (nil for a replayed boot), the refused lines' reasons, the
-      # boot's timed_out (nil: a native boot that misses its deadline raises), and the
+      # boot's timed_out (the guest's deadline's reason, or nil for a boot that ended
+      # done; one past QEMU's deadline raises), and the
       # names of the seeds whose boots did not show their fault.
       def call(benchmark, boot:, history:)
         asked = NativeBench.asked(benchmark, cpus: boot.cpus)

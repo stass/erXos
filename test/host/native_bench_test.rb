@@ -177,6 +177,8 @@ class NativeBenchTest < Minitest::Test
     other = "erx: bench: boot #{'f' * 32} done"
     assert_equal [other], Erx::NativeBench.misnamed_lines("#{named}BENCH {}\n#{other}\n", name: NAME)
     assert_equal ['BENCH {}'], Erx::NativeBench.misnamed_lines("BENCH {}\n", name: NAME)
+    broken = "erx: bench: boot #{NAME} donefoo"
+    assert_equal [broken], Erx::NativeBench.misnamed_lines("#{named}BENCH {}\n#{named}#{broken}\n", name: NAME)
   end
 
   # An entry's cmdline.txt is its set's line and the name's word, or the word alone.

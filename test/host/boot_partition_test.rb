@@ -225,8 +225,6 @@ class BootPartitionTest < Minitest::Test
     end
   end
 
-  # A directory that already holds one of the medium's entries, or a link by its name, is
-  # refused and left as it was: the medium is written only beside a fresh image.
   # A bench set is the partition's files and their record alone: no card, volume or
   # compressed card, and a record with no card for its artifact.
   def test_a_set_is_the_partition_files_and_their_record_alone
@@ -245,6 +243,8 @@ class BootPartitionTest < Minitest::Test
     end
   end
 
+  # A directory that already holds one of the medium's entries, or a link by its name, is
+  # refused and left as it was: the medium is written only beside a fresh image.
   def test_refuses_a_directory_that_holds_one_of_its_entries
     Erx::BootPartition::ENTRIES.each do |entry|
       Dir.mktmpdir do |root|

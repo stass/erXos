@@ -789,13 +789,12 @@ host serves over HTTP
   (`Machine#check_single_file`, `:697`). A test root's place is already the
   development machine's: `NativeRoot.development_place`, 64 MiB into RAM,
   which `Machine.development` also takes.
-* **The bench root ends powered off.** Its done and every setup failure
-  end with `erx_fiasco_end(ERX_FIASCO_END_ASKED_OFF, NULL)`
-  (`test/guest/native_bench/guest.c:69` and `:231`). On the Pi 4 that is
-  the firmware's power-off, which leaves the board halted
-  ([design-fiasco.md, The Raspberry Pi 4](design-fiasco.md#the-raspberry-pi-4)),
-  and only the system root arms the hardware watchdog that would reset it
-  (`erx_fiasco_watchdog_start`, `liberx/backend/fiasco/root.c:141`).
+* **The bench root ends with a reset.** Its done, its deadline and every
+  setup failure end through one funnel with
+  `erx_fiasco_end(ERX_FIASCO_END_ASKED_RESET, NULL)` (`end_with`,
+  `test/guest/native_bench/guest.c`), the board's PSCI reset, never with
+  the power-off that leaves the board halted
+  ([design-fiasco.md, The Raspberry Pi 4](design-fiasco.md#the-raspberry-pi-4)).
 * **Every boot names its archive, and only that.** Fiasco's banner prints
   `erx: boot image build B index I flags ... bootargs N` from the handoff
   page on every boot of every image, before any root runs
@@ -806,12 +805,11 @@ host serves over HTTP
   archive (`boot_file.rb:78`), and the firmware, BL31 and `config.txt`
   beside the image, are not in what it names, and two boots of one image
   print the same line.
-* **The bench root's lines name no boot.** The handoff carries
-  `/chosen/bootargs`, and `erx_boot_args_parse` already takes
-  `erx.arg=WORD` (`liberx/backend/fiasco/boot_args.h`), but the bench root
-  reads none of it (`erx_fiasco_root_main`, `guest.c:212-232`). On one
-  console, two boots' lines are told apart only by the banners and end
-  lines between them.
+* **The bench root's lines name their boot.** The handoff carries
+  `/chosen/bootargs`, `erx_boot_args_parse` takes `erx.arg=WORD`
+  (`liberx/backend/fiasco/boot_args.h`), and the bench root takes its first
+  such word as its boot's name (`read_name`, `guest.c`), as
+  [the boot name](#the-boot-name) says.
 * **The stagers serve one build each.** `Netboot.stage` copies a boot
   partition's listed files into a fresh sibling of the TFTP root, checks
   each copy's SHA-256 against the build record, points the root, a
@@ -953,7 +951,7 @@ boot's name, thirty-two lowercase hexadecimal digits, and prints
 cells, and after each `BENCH` and `CLOCK` line; it prints
 `erx: bench: boot NAME done` at its done and
 `erx: bench: boot NAME deadline` at its deadline, and QEMU's `bench-done`
-checkpoint (`native_bench.rb:95`) takes those last two. Every line the
+checkpoint (`NativeBench.checkpoints`) takes those last two. Every line the
 root prints for a person, the cycle probe's among them, so falls between
 two naming lines. A boot with no such word prints
 `erx: bench: no boot name` and ends before any cell. An
@@ -1714,7 +1712,7 @@ fault that must fail it:
 | a sustained comparison | three baseline runs whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
 | the interrupt-entry pairing (with the patch) | given receipts and `irq_entry` records, one entry between two receipts makes a sample, and none, two, or a window with a record counted as overwritten makes the receipt `partial` | the window's lower end dropped, pairing each receipt with the latest entry before it: the two-entry case yields a sample |
 | the board's set | the `nullcall` set's `kernel8.img` starts with the board's own first stage and boots in QEMU's `raspi4b` model under TCG, as the `raspi4b` suite boots the card, with `erx.arg=` and a name on its command line: the banner names the set's build and index hash, the root's naming lines carry the name, every declared cell reports between two of them, and the last line is `erx: end reset`; the model's numbers are not recorded, since the model is no environment | the main build's first stage packed instead: no banner appears before the boot's deadline; the root built to end with `ASKED_OFF`: the judge refuses the boot's end as `erx: end off` |
-| the guest's deadline | a build seeded so that `wake-same-cpu`'s thread A never wakes B and B parks with no deadline, at a 10 s guest deadline, prints `erx: bench: boot NAME deadline` and `erx: end reset` by itself; the cells it reported before are `rejected`, as the boot has no `CLOCK` line, and it and every later one `timed_out` | the deadline thread not started: QEMU's own deadline ends the boot, no deadline line appears, and the test fails |
+| the guest's deadline | a `nullcall` build seeded to spin forever once it has reported its first cell, at a 20 s guest deadline, prints `erx: bench: boot NAME deadline` and `erx: end reset` by itself; the cell it reported is `rejected`, as the boot has no `CLOCK` line, and every later one `timed_out` | the deadline thread not started: QEMU's own deadline ends the boot, no deadline line appears, and the test fails |
 | the boot server (its decision, exhaustive over a fake bootloader's requests and the link's changes) | against a queue of three entries, four downloads take entries 1, 2, 3 and 3; a `boot.sig` request repeated before its image takes the same entry; a change of the link between a download's two requests leaves its image that of its signature's entry; a request for any other name, a `private.pem` placed in an entry among them, and a `boot.img` request with no download begun, are 404; and over every sequence of up to eight requests and changes, every image sent whole is that of the signature sent before it | the image opened at its own request: the change between the requests sends entry 2's image after entry 1's signature; the cursor moved at the signature's request: the repeated request skips entry 2; the name check widened to any file name: `private.pem` is served |
 | the walk (`BoardWalk`, exhaustive over its closed set of events: a naming line of each entry, a `done` and a `deadline` line, a repeated name, a banner of the found pair and of another build, `erx: end off`, each deadline, the byte limit, the console closing) | `[A, A, A, found]` and `[A, B, A, B, A, B, found]` run each entry in order and end `booted` on the found pair's banner; an entry skipped is `not_run` and the walk goes on; a repeated name ends the walk; and over every sequence of up to eight events the walk ends within the queue's deadlines and points the link back exactly once | the end deadline restarted at every naming line of the entry: a board that prints its name each minute keeps the walk past its bound; the return taken from any banner: another build's banner after the last entry is `booted` |
 | the board log (`BoardLog`) | a log of three entries, with the bootloader's and the firmware's lines between them, gives three boots with their cells; a dropout over entry 1's `done` line and entry 2's first naming line leaves entry 2's first cell to no boot, its other cells to entry 2 and entry 1's as they were; a `WINDOW` line between one entry's names is that entry's; a log cut inside entry 3 gives its unreported cells `not_run`, `the log ends before its boot did`, without the walk's outcomes and `timed_out` with its end deadline; the fuzz target of the bench lines' reader takes board logs as seeds and runs its budget clean | lines placed by the nearest naming line before them: entry 2's first cell is judged in entry 1's boot; the cut boot taken as timed out without the walk's outcome: its cells are `timed_out` |

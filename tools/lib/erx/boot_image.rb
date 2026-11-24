@@ -45,8 +45,7 @@ module Erx
     # executables packed as image entries, as a domain runtime is, and jit names those of
     # them whose manifest marks ERX_IMAGE_JIT, as the BeamAsm runtime's does.
     def build(directory:, stand_in_root: nil, programs: {}, images: {}, jit: [])
-      FileUtils.remove_entry(directory) if File.exist?(directory)
-      OutputDirectory.prepare(root: @root, path: directory)
+      OutputDirectory.fresh(root: @root, path: directory)
       recipe = File.join(directory, 'recipe')
       fixture = StructuralPackFixture.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,
                                             compiler: @compiler, linker: @linker, external: external,

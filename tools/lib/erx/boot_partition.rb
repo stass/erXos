@@ -286,12 +286,13 @@ module Erx
       WrittenSet.new(files: File.join(directory, PARTITION), record: File.join(directory, SET_RECORD))
     end
 
-    # The one way write and write_set place their entries: plan's names must be the
-    # layout's and directory an existing one under root holding none of entries; plan's
-    # files go under boot/ of a fresh work directory beside them, each refused if it holds
-    # the build's path, the receipt the block makes from the work directory, boot/ and each
-    # file's SHA-256 is written as record_name, one of entries, and entries move into directory only
-    # once all of them are made. Answers directory as checked, resolved within root.
+    # The one way write and write_set place their entries. plan's names must be the
+    # layout's, and directory an existing one under root that holds none of entries.
+    # plan's files go under boot/ of a fresh work directory beside them, each refused if
+    # it holds the build's path. The block gets the work directory, boot/ and each file's
+    # SHA-256, makes what else the entries hold and answers the receipt, which is written
+    # as record_name. Only then do entries move into directory. Answers directory as
+    # checked, resolved within root.
     def staged(root:, directory:, plan:, entries:, record_name:)
       plan.each_key { |name| raise Error, "boot partition: #{name.inspect} is not a file name of the layout" unless NAME.match?(name) }
       directory = OutputDirectory.check(root: root, path: directory)
@@ -464,7 +465,8 @@ module Erx
                     revision: SourceRevision.read(root: root, runner: runner))
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
                             compiler: compiler, linker: linker, revision: revision, bootable_record: nil)
-      write_set(root: root, directory: directory, plan: plan, record: record)
+      # A set has no card, so its record names no card's tool.
+      write_set(root: root, directory: directory, plan: plan, record: record.merge('inputs' => record.fetch('inputs').except('card')))
     end
 
     # The plan and the build record of bootable's partition on platform: BL31 and the
