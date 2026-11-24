@@ -29,8 +29,8 @@ No passphrase checker exists yet (docs/design-login.md, "The passphrase
 check", and its open decision 1): with none, a check answers `unavailable`,
 so no front end logs anyone in by passphrase. `checker` in start_link/1's
 options names one, a module whose check_request/4 sends the check and returns
-its request id. The key login's verifier and the principal's login keys are
-package 4's: key_ok and login_key answer `unavailable` until then.
+its request id. The service has no key login's verifier and reads no
+principal's login keys, so key_ok and login_key answer `unavailable`.
 `domain`, the module that starts, mints and stops sessions, is erx_domain
 unless a test names a stand-in.
 """.
