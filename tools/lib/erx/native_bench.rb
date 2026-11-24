@@ -36,10 +36,15 @@ module Erx
     # its read-only page did not fault, which the root is built with (ERX_BENCH_UNFAULTED).
     SEED_PROTECT_IGNORED = '-DERX_BENCH_SEED_PROTECT_IGNORED'
     VM_UNFAULTED = 'the read-only page took the write'
+    # The hang seed's flag: the root spins forever once it has reported its first cell.
+    SEED_HANG = '-DERX_BENCH_SEED_HANG'
 
-    # A seeded fault of a benchmark's guest: the flags its root and its task add for it, and
-    # whether a boot's cells show it.
-    Seed = Data.define(:name, :root_flags, :task_flags, :caught)
+    # A seeded fault of a benchmark's guest: the flags its root and its task add for it,
+    # whether a boot's cells show it, and the guest's deadline its root is built with when
+    # not the landing form's (nil).
+    Seed = Data.define(:name, :root_flags, :task_flags, :caught, :deadline_seconds) do
+      def initialize(name:, root_flags:, task_flags:, caught:, deadline_seconds: nil) = super
+    end
     # A benchmark's guest: the files of GUEST its root and its task add, its seeds, and
     # whether its image packs test/guest/native_task's program, which its cells launch.
     Guest = Data.define(:root, :task, :seeds, :native_task) do
@@ -51,6 +56,13 @@ module Erx
 
     # Whether a cell of operation failed by its count of refusals.
     def self.uncounted?(cells, operation) = failed(cells, operation).any? { |cell| cell.reason == NULLCALL_UNCOUNTED }
+
+    # Whether a boot's first cell was reported and then the guest's deadline ended it: that
+    # cell rejected, since no CLOCK line followed it, and every later one timed_out.
+    def self.hung_after_first?(cells)
+      first, *rest = cells
+      first&.status == 'rejected' && !rest.empty? && rest.all? { |cell| cell.status == 'timed_out' }
+    end
 
     GUESTS = {
       # share-equal's spinners are native_task's MODE_SHARE.
@@ -67,7 +79,10 @@ module Erx
         Seed.new(name: 'root refusal to the empty slot', root_flags: [SEED_EMPTY_SLOT], task_flags: [],
                  caught: ->(cells) { uncounted?(cells, 'root-same-space') }),
         Seed.new(name: 'task refusal to the empty slot', root_flags: [], task_flags: [SEED_EMPTY_SLOT],
-                 caught: ->(cells) { uncounted?(cells, 'root-cross-space') })
+                 caught: ->(cells) { uncounted?(cells, 'root-cross-space') }),
+        # The guest's deadline ends the hung boot, so short that the seed costs little.
+        Seed.new(name: 'hang after the first cell', root_flags: [SEED_HANG], task_flags: [],
+                 caught: ->(cells) { hung_after_first?(cells) }, deadline_seconds: 20)
       ].freeze),
       # The task's protects answer ERX_OK without calling the service: no read sees it, but
       # the disposable task's write to its read-only page goes through, and protect fails.
@@ -84,15 +99,37 @@ module Erx
       # Three 1 s windows after a 2 s warm-up, in milliseconds (docs/design-bench.md, "Profiles").
       'sustained' => BenchRecord::Profile.new(name: 'sustained', warmup: 2000, samples: 3, runs: 1)
     }.freeze
+    # The guest's deadline in the landing form, from the start of its cells
+    # (docs/design-bench.md, "The guest's deadline"), which the root is built with (flags);
+    # QEMU's deadline for the boot's end is DEADLINE_MARGIN_SECONDS more, so a hung cell is
+    # ended by the guest first.
+    LANDING_DEADLINE_SECONDS = 540
+    DEADLINE_MARGIN_SECONDS = 60
+    # Under QEMU each boot has a console of its own, so every boot takes this one name
+    # (docs/design-bench.md, "The boot name"), on its command line.
+    QEMU_BOOT_NAME = '0' * 32
+    QEMU_COMMAND_LINE = "erx.arg=#{QEMU_BOOT_NAME}".freeze
+    # The root's naming line at its end, done or deadline.
+    END_LINE = /^erx: bench: boot [0-9a-f]{32} (?<form>done|deadline)\r*$/n
     FAILED_LINE = /^erx: bench: .* FAILED/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
     module_function
 
-    def checkpoints
+    # The boot's checkpoints, its end the root's naming line in either end form, due within
+    # the guest's deadline (deadline_seconds) and the margin.
+    def checkpoints(deadline_seconds:)
       [*Qemu.boot_transcript(memory_mib: MEMORY_MIB),
        { name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
-       { name: 'bench-done', pattern: /\Aerx: bench: done/n, seconds: 600 }].freeze
+       { name: 'bench-done', pattern: /\Aerx: bench: boot [0-9a-f]{32} (?:done|deadline)\r*\z/n,
+         seconds: deadline_seconds + DEADLINE_MARGIN_SECONDS }].freeze
+    end
+
+    # Why the boot of serial timed out: the guest ended it at its deadline; nil when it
+    # ended done.
+    def timed_out(serial)
+      ended = END_LINE.match(serial.b)
+      "the guest's deadline ended the boot" if ended && ended[:form] == 'deadline'
     end
 
     # The BENCH and CLOCK lines of a serial log, each without its line end. They are the
@@ -102,14 +139,14 @@ module Erx
     def guest(name) = GUESTS.fetch(name) { raise Error, "bench: #{name} has no native bench guest" }
 
     # The build flags of the root, or of the task: the test hooks, the landing profiles'
-    # sizes, which test/guest/native_bench takes from them alone, and a seed's flags for
-    # that side.
-    def flags(seeded: [])
+    # sizes and the guest's deadline, which test/guest/native_bench takes from them alone,
+    # and a seed's flags for that side.
+    def flags(seeded: [], deadline_seconds: LANDING_DEADLINE_SECONDS)
       fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
       ['-DERX_FIASCO_TEST_HOOKS', "-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
        "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u",
        "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u", "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"",
-       "-DERX_BENCH_UNFAULTED=\"#{VM_UNFAULTED}\"", *seeded].freeze
+       "-DERX_BENCH_UNFAULTED=\"#{VM_UNFAULTED}\"", "-DERX_BENCH_DEADLINE_S=#{deadline_seconds}u", *seeded].freeze
     end
 
     # The profile each operation of benchmark ran at, in its landing form.
@@ -154,21 +191,24 @@ module Erx
       def call(benchmark, accel:, cpus:, seed: nil, build: false, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        flags = NativeBench.flags(seeded: seed ? seed.root_flags : [])
+        deadline = seed&.deadline_seconds || LANDING_DEADLINE_SECONDS
+        flags = NativeBench.flags(seeded: seed ? seed.root_flags : [], deadline_seconds: deadline)
         built = image(fiasco, benchmark, seed: seed, flags: flags)
         directory = File.join(@root, 'build/qemu', "bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
-        report = boot(built, accel: accel, cpus: cpus, directory: directory)
+        report = boot(built, accel: accel, cpus: cpus, directory: directory, deadline_seconds: deadline)
         serial = File.binread(report.fetch('serial_log'))
         { serial: report.fetch('serial_log'), seconds: report.fetch('elapsed_seconds'),
           lines: NativeBench.guest_lines(serial), image_sha256: report.fetch('image_sha256'), flags: flags,
-          compiler: @compiler, qemu_version: report['qemu_version'], reused_from: report['reused_from'] }.freeze
+          compiler: @compiler, qemu_version: report['qemu_version'], reused_from: report['reused_from'],
+          timed_out: NativeBench.timed_out(serial) }.freeze
       end
 
       private
 
-      def boot(built, accel:, cpus:, directory:)
+      def boot(built, accel:, cpus:, directory:, deadline_seconds:)
         Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: cpus, image: built.single,
-                                                   memory_mib: MEMORY_MIB, checkpoints: NativeBench.checkpoints,
+                                                   memory_mib: MEMORY_MIB, command_line: QEMU_COMMAND_LINE,
+                                                   checkpoints: NativeBench.checkpoints(deadline_seconds: deadline_seconds),
                                                    machine_end: true, directory: directory)
       rescue Error => e
         serial = File.join(directory, 'serial.log')

@@ -100,4 +100,49 @@ class NativeBenchTest < Minitest::Test
     assert_equal sizes, plain.grep(/SAMPLES|WARMUP/)
     assert_equal plain + ['-DERX_BENCH_SEED_LOST_WAKE'], Erx::NativeBench.flags(seeded: seed('wake', 'lost wake').root_flags)
   end
+  # The guest ends its own boot at the landing form's deadline, and QEMU's deadline for the
+  # boot is that number and a margin more, so a hung cell is ended by the guest first
+  # (docs/design-bench.md, "The bench image's boot set"). A seed may build its root with a
+  # deadline of its own, which its QEMU deadline then follows.
+  def test_the_guests_deadline_is_compiled_in_and_qemus_follows_it
+    deadline = Erx::NativeBench::LANDING_DEADLINE_SECONDS
+    assert_equal ["-DERX_BENCH_DEADLINE_S=#{deadline}u"], Erx::NativeBench.flags.grep(/DEADLINE/)
+    assert_equal ['-DERX_BENCH_DEADLINE_S=7u'], Erx::NativeBench.flags(deadline_seconds: 7).grep(/DEADLINE/)
+    done = Erx::NativeBench.checkpoints(deadline_seconds: deadline).find { |point| point.fetch(:name) == 'bench-done' }
+    assert_equal deadline + Erx::NativeBench::DEADLINE_MARGIN_SECONDS, done.fetch(:seconds)
+    hang = seed('nullcall', 'hang after the first cell')
+    assert_operator hang.deadline_seconds, :<, deadline
+    assert_nil seed('wake', 'lost wake').deadline_seconds
+  end
+
+  # bench-done takes the root's two end forms of its naming line, done and deadline, and no
+  # other line (docs/design-bench.md, "The boot name").
+  def test_bench_done_takes_the_two_naming_end_forms
+    done = Erx::NativeBench.checkpoints(deadline_seconds: 1).find { |point| point.fetch(:name) == 'bench-done' }.fetch(:pattern)
+    name = Erx::NativeBench::QEMU_BOOT_NAME
+    assert_match done, "erx: bench: boot #{name} done"
+    assert_match done, "erx: bench: boot #{name} deadline\r"
+    ["erx: bench: boot #{name}", 'erx: bench: done', "erx: bench: boot #{name[1..]} done", "erx: bench: boot #{name} donee"]
+      .each { |line| refute_match done, line }
+  end
+
+  # Under QEMU every boot is named with thirty-two zeros on its command line, and a boot
+  # the guest ended at its deadline is timed out, so its unreported cells are timed_out.
+  def test_a_boot_ended_at_the_guests_deadline_is_timed_out
+    name = Erx::NativeBench::QEMU_BOOT_NAME
+    assert_equal "erx.arg=#{'0' * 32}", Erx::NativeBench::QEMU_COMMAND_LINE
+    assert_match(/deadline/, Erx::NativeBench.timed_out("erx: bench: boot #{name}\nerx: bench: boot #{name} deadline\r\n"))
+    assert_nil Erx::NativeBench.timed_out("erx: bench: boot #{name}\nerx: bench: boot #{name} done\r\n")
+  end
+
+  # The hang seed spins after the root reports nullcall's first cell: the boot ends at the
+  # guest's deadline with that cell rejected, since no CLOCK line followed it, and every
+  # later cell timed_out.
+  def test_the_hang_seed_is_caught_only_by_the_first_cell_rejected_and_the_rest_timed_out
+    caught = seed('nullcall', 'hang after the first cell').caught
+    assert caught.call([cell('nullcall', 'root-same-space', 'rejected'), cell('nullcall', 'root-cross-space', 'timed_out')])
+    refute caught.call([cell('nullcall', 'root-same-space', 'timed_out'), cell('nullcall', 'root-cross-space', 'timed_out')])
+    refute caught.call([cell('nullcall', 'root-same-space', 'rejected'), cell('nullcall', 'root-cross-space', 'rejected')])
+    refute caught.call([cell('nullcall', 'root-same-space', 'failed'), cell('nullcall', 'root-cross-space', 'timed_out')])
+  end
 end
