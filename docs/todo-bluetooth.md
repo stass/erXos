@@ -201,8 +201,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   board part runs the domain on UART0, where it has brought the controller up and advertised to a phone's scan.
   On the board a Mac connects and reconnects, and its log shows an MTU of 185 and GAP and GATT; blew
   (`tools/ble_board_check.rb`) discovers NUS and has a read of NUS RX refused (erxos-history, pi4/2026-11-23-ble-gatt, commit 6de9bf7). Still open on the board: the echo
-  through an app, which waits for the card to carry decision 7's second package (the serial item above); a NUS write
-  and its notification answered by that app; and pairing, which needs a characteristic that asks for encryption or a
+  through decision 7's planned `bleuart` service (the serial item above); a NUS write
+  and its notification answered by it; and pairing, which needs a characteristic that asks for encryption or a
   peer that starts pairing itself (whether macOS starts pairing only at an Insufficient Authentication answer is unverified, and blew has no
   pairing command).
 * [Medium] bluetooth, the line device's record (`liberx/backend/core/boot_manifest.c`, `tools/lib/erx/manifest.rb`

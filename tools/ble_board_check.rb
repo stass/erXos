@@ -12,7 +12,7 @@
 # reconnection. CoreBluetooth keeps GAP's and GATT's services to itself, so the
 # steps work on Nordic's UART service (abi/gatt/nus.txt). Each step prints passed, failed, or unknown: unknown when
 # blew timed out, could not use Bluetooth, was missing or was given bad arguments,
-# or when what the step needs (the echo package of decision 7, a blew command) is
+# or when what the step needs (decision 7's bleuart service, a blew command) is
 # missing, never a guess; Erx::BleBoardCheck holds the verdicts. Logs of every blew
 # run go in --logs. Exits 0 when a step passed and none failed, 1 when a step
 # failed, 3 when none passed, 2 on bad usage or when it cannot run blew or keep its logs.

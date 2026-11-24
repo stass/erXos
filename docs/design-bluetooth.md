@@ -3268,7 +3268,7 @@ an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT
 browsers show the declared table; a terminal app for Nordic's UART
-service echoes through an app, once the board has a home for one
+service reaches the board's planned `bleuart` service, once it is built
 ([Decisions](#decisions), 7); the phone pairs by typing the passkey the
 `pair` file shows, reboots the machine, and reads an `authenticated`
 value again; the console logs in from the phone; a `reset` written
@@ -3524,24 +3524,21 @@ list ([todo-performance.md](todo-performance.md)):
    considered](#alternatives-considered)). The QEMU suite's echo stays a
    test-only configured domain, which its release, carried only by a
    test image, runs.
-7. **Decided: the Pi 4's development card carries the echo as a second
-   package, enabled, with `max 2`, and its `apps` row offers `gatt nus`
-   alone.** The Bluetooth
-   track's demo ([plan.md](plan.md#track-b-bluetooth)) and the board's
-   checklist have a terminal app on the phone echo through an app on
-   the Pi 4. Under decision 6 the echo is a package declaring `gatt
-   nus`, and the Pi 4's development manifest's `apps` row offers it with
-   `services display net ble` and `gatt nus`. But that row has `max 1`,
-   and its card trusts no key and carries the kiosk alone, whatever its
-   kind ([design-packaging.md](design-packaging.md#the-apps-row)), so no
-   second package can reach the board. The choices: the board's
-   development card carries the echo as a second package of the image,
-   enabled, with `max 2`, which the display pays for with one more
-   pixel area of 8 MiB; or a configured domain in the Pi 4's development
-   manifest runs the echo with a `ble` row of its own naming `nus`, as
-   the QEMU suite does. The second package is chosen, since it is the
-   path an app takes on every other machine and exercises the install
-   check on the board; the published card keeps the kiosk alone.
+7. **Decided: no app handles the Pi 4's Nordic UART service, and its
+   cards carry the kiosk alone.** The Bluetooth track's demo
+   ([plan.md](plan.md#track-b-bluetooth)) and the board's checklist
+   have a terminal app on the phone reach Nordic's UART service on the
+   Pi 4. On the board that service belongs to a planned `bleuart`
+   service, not to an installed app, so the Pi 4's development
+   manifest's `apps` row offers no `ble` and no `gatt`, and both of its
+   cards carry the kiosk alone, whatever their kind
+   ([design-packaging.md](design-packaging.md#the-apps-row)). Until
+   `bleuart` is built, the board serves `nus` as it serves any service
+   no app handles. The echo package, `examples/echo`, declaring `gatt
+   nus` under decision 6, is the path an installed app takes to a GATT
+   service, and runs on QEMU, in the Bluetooth suite's app cell, under
+   an `apps` row that offers `ble` and `gatt nus`
+   ([Verification](#verification)).
 
 8. **Decided: the phone console runs in a configured domain of its own,
    `btconsole`, holding a `ble` grant whose `services` names `console`,

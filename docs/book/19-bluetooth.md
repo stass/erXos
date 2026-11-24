@@ -508,8 +508,8 @@ its holder handles
 A configured domain holds one by a row of the manifest; the facet and
 its request check are built, and no shipped manifest grants it to a
 domain. An installed app holds its own, without anyone editing the manifest: the board's
-`apps` row says which GATT services apps may handle (the Raspberry Pi 4's
-development row offers `nus` alone), the package names the ones it
+`apps` row says which GATT services apps may handle (the row of the
+Bluetooth suite's app cell on QEMU `virt` offers `nus`), the package names the ones it
 handles in its own `gatt` field, and install checks that every name is
 offered and that no other app already declares it
 ([chapter 23](23-apps.md#2313-one-row-bounds-every-app)). Each session
@@ -517,11 +517,11 @@ of the app then holds the row narrowed to its package's services, so
 the app can handle those services and no others. A service that no
 installed app handles is still in the table; it answers reads from its
 declared values and refuses writes. Installing, updating or removing an
-app therefore never changes the table or the advertising data. The Pi 4's
-development card carries the terminal echo as a second package, so the
-board's checklist exercises this path
-([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)); the
-published card carries the kiosk alone. The `apps` row's `gatt` field,
+app therefore never changes the table or the advertising data. On the
+Raspberry Pi 4 no app handles `nus`: the Nordic UART service there
+belongs to a planned `bleuart` service, and both of its cards carry the
+kiosk alone ([design-bluetooth.md, Decisions](../design-bluetooth.md#decisions)).
+The `apps` row's `gatt` field,
 the package's own field, the checks of the packages an image carries
 and the narrowing of each session are built; the checks of an install
 at run time are designed and not built. The serial service's library,
