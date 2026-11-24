@@ -131,7 +131,6 @@ static void
 command_write(char *cursor)
 {
 	static uint8_t text[DRIVER_TEXT_MAX];
-	erx_console_write_t result;
 	unsigned long count;
 	size_t length, unit;
 
@@ -141,10 +140,8 @@ command_write(char *cursor)
 		fail("write longer than the driver holds");
 	for (length = unit; length < unit * count; length += unit)
 		memcpy(text + length, text, unit);
-	result = erx_console_ring_write(&driver_ring, text, length);
-	if (result.uart_from + result.uart_length != length)
-		fail("the UART part is not the write's end");
-	printf("write %zu\n", result.uart_from);
+	printf("write %s\n", erx_console_ring_write(&driver_ring, text, length) ?
+	    "uart" : "ring");
 }
 
 /*

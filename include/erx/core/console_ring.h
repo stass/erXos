@@ -75,12 +75,6 @@ typedef struct erx_console_ring {
 	uint8_t			bytes[ERX_CONSOLE_RING_BYTES];
 } erx_console_ring_t;
 
-/* What of one write goes to the UART: the write's last uart_length bytes. */
-typedef struct erx_console_write {
-	size_t	uart_from;
-	size_t	uart_length;
-} erx_console_write_t;
-
 /*
  * A take's reply as it lies in the caller's message words. count is how
  * many of the words the reply uses, the message tag's word count.
@@ -115,27 +109,29 @@ typedef struct erx_console_loss_text {
 } erx_console_loss_text_t;
 
 /*
- * The ring console's write, every byte the kernel prints. Under ring the
- * bytes join the ring and nothing goes to the UART; under uart and closed
- * the caller writes the part the result names to the UART. On any route the
- * rest of a dropped line, through its newline, goes nowhere.
+ * The ring console's write, every byte the kernel prints. Returns true
+ * under uart and closed, where the caller writes the whole text to the
+ * UART, and false under ring, where the bytes join the ring, all but the
+ * rest of a dropped line through its newline, and nothing goes to the UART.
  */
-erx_console_write_t erx_console_ring_write(erx_console_ring_t *ring,
-    const void *text, size_t length);
+bool erx_console_ring_write(erx_console_ring_t *ring, const void *text,
+    size_t length);
 
 /*
- * Vlog operation 4. Moves uart to ring, dropping the rest of a line the
- * UART had started, and leaves ring and closed as they are. Then fills the
- * reply with the lines lost since the last take and as many of the ring's
- * whole lines as fit, which leave the ring; the open line stays.
+ * Vlog operation 4. Under closed fills an empty reply and changes nothing,
+ * so the close's drain alone hands out what the ring holds. Otherwise moves
+ * uart to ring, dropping the rest of a line the UART had started, then
+ * fills the reply with the lines lost since the last take and as many of
+ * the ring's whole lines as fit, which leave the ring; the open line stays.
  */
 void erx_console_ring_take(erx_console_ring_t *ring,
     erx_console_reply_words_t *reply);
 
 /*
  * Vlog operation 5, and the head of every stop's report. Moves any route to
- * closed, taking back and counting a line open in the ring and dropping its
- * rest. Returns whether this call closed it: only then does the caller
+ * closed, taking back and counting a line open in the ring, and ends any
+ * drop, so the stop's report that follows reaches the UART whole. Returns
+ * whether this call closed it: only then does the caller
  * write the ring out, through erx_console_ring_drain, so a stop inside that
  * write finds the route closed and its close does nothing.
  */

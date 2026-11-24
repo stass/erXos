@@ -768,8 +768,10 @@ Follow a domain's thread that reads through a bad pointer.
 
 The space's other threads run on until the stop, and nothing outside
 the space is touched. Because the record names the space only, a
-faulted thread is never resumed; its space is stopped. A space with no
-fault gate, as a test task has, ends at once with a crash record.
+faulted thread is never resumed; its space is stopped. Every space names
+a fault gate except a test task's, which only the root's test-task
+launcher can create; a test task's fault ends it at once with a crash
+record.
 
 A thread may point its own fault handler elsewhere: Fiasco lets every
 thread act on itself. But it can point only at slots of its own task,

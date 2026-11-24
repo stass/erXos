@@ -79,11 +79,11 @@ class ConsoleRingTest < Minitest::Test
     assert_equal expected, run_driver(commands)
   end
 
-# Positions only grow, modulo 2^32: the same scripts from just before the wrap.
-def test_random_scripts_agree_across_the_position_wrap
-  commands, expected = random_scripts(start: (2**32) - 600)
-  assert_equal expected, run_driver(commands)
-end
+  # Positions only grow, modulo 2^32: the same scripts from just before the wrap.
+  def test_random_scripts_agree_across_the_position_wrap
+    commands, expected = random_scripts(start: (2**32) - 600)
+    assert_equal expected, run_driver(commands)
+  end
 
   def test_a_take_hands_out_only_whole_lines_and_leaves_the_open_line
     line = "#{'a' * 300}\r\n"
@@ -115,14 +115,25 @@ end
 
   def test_a_take_drops_the_rest_of_a_line_the_uart_started
     out = run_driver(['verbose 1', 'reset', 'write 6869', 'take', 'write 74686572650d0a', 'write 6e6578740a', 'take'])
-    assert_equal ['write 0', 'take 1 -', 'write 7', 'write 5', "take 0 #{hex("next\n")}"], out.drop(1)
+    assert_equal ['write uart', 'take 1 -', 'write ring', 'write ring', "take 0 #{hex("next\n")}"], out.drop(1)
   end
 
-  def test_a_close_drops_a_line_open_in_the_ring_and_counts_it
-    out = run_driver(['verbose 1', 'reset', 'take', "write #{hex("whole\r\nhal")}", 'close', 'write 660d0a', 'write 5a0a',
-                      'drain'])
+  # A panic prints with no newline ahead of it, so a line open in the ring
+  # at the close must not swallow the stop's report.
+  def test_a_close_counts_the_open_line_and_the_report_reaches_the_uart_whole
+    out = run_driver(['verbose 1', 'reset', 'take', "write #{hex("whole\r\nhal")}", 'close',
+                      "write #{hex("Panic: x\r\n")}", 'state', 'drain'])
     rendered = "fiasco: 1 kernel lines lost\r\nfiasco: whole\r\n"
-    assert_equal ['close 1', 'write 3', 'write 0', "drain #{hex(rendered)}"], out.last(4)
+    assert_equal ['close 1', 'write uart', "state closed 0 0 0 1 #{hex("whole\r\n")}", "drain #{hex(rendered)}"],
+                 out.last(4)
+  end
+
+  # After the close only its drain hands out what the ring holds.
+  def test_a_take_after_the_close_hands_out_nothing
+    out = run_driver(['verbose 1', 'reset', 'take', "write #{hex('L' * 500)}", "write #{hex("\nkept\r\n")}", 'close',
+                      'take', 'state', 'drain'])
+    rendered = "fiasco: 1 kernel lines lost\r\nfiasco: kept\r\n"
+    assert_equal ['take 0 -', "state closed 0 0 0 1 #{hex("kept\r\n")}", "drain #{hex(rendered)}"], out.last(3)
   end
 
   def test_the_close_renders_escape_and_nul_escaped_and_skips_empty_lines
@@ -194,6 +205,9 @@ end
                                         "\t\tconsole_ring_lose(ring);\n", "\n"],
       'a line may be one byte longer' => ['segment > ERX_CONSOLE_RING_LINE_MAX - ', 'segment > 1 + ERX_CONSOLE_RING_LINE_MAX - '],
       'the ring may overfill by one' => ['segment > ERX_CONSOLE_RING_BYTES - ', 'segment > 1 + ERX_CONSOLE_RING_BYTES - '],
+      'a close leaves the drop armed' => ["\tring->dropping = false;\n\tring->route = ERX_CONSOLE_ROUTE_CLOSED;\n",
+                                          "\tring->route = ERX_CONSOLE_ROUTE_CLOSED;\n"],
+      'a take after the close hands out lines' => ["\tif (ring->route == ERX_CONSOLE_ROUTE_CLOSED)\n\t\treturn;\n", "\n"],
       'closed is not final' => ["\tif (ring->route == ERX_CONSOLE_ROUTE_CLOSED)\n\t\treturn (false);\n", "\n"],
       'the reader keeps the carriage return' => ["\t\t\tbody--;\n", "\t\t\t;\n"],
       'the reader takes one byte past its words' => ['> (words->count - ERX_CONSOLE_RING_REPLY_HEADER) * 8)',

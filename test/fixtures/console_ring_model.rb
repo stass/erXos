@@ -15,15 +15,16 @@ require_relative 'log_model'
 # From the design:
 # * The route starts at uart. A take moves uart to ring; a close moves any
 #   route to closed, which is final.
-# * Under uart and closed a write goes to the UART; under ring it joins the
-#   ring.
+# * Under uart and closed a write goes to the UART whole; under ring it joins
+#   the ring.
 # * A write that would overfill the ring, or make the open line longer than
 #   LINE_MAX, takes the open line back, counts one lost line and drops what
-#   follows through the next newline, on whichever route it arrives. A take
-#   that finds a line open on the UART, and a close that finds one open in
-#   the ring, do the same.
+#   follows in the ring through the next newline. A take that finds a line
+#   open on the UART does the same. A close that finds a line open in the
+#   ring takes it back and counts it, and ends any drop.
 # * A take hands out the lines lost since the last one and as many whole
-#   lines as fit REPLY_BYTES; the close writes the loss line and then every
+#   lines as fit REPLY_BYTES, and nothing after the close, which leaves the
+#   loss count for the drain; the close writes the loss line and then every
 #   line as LABEL, the line without its carriage return and newline escaped,
 #   and a carriage return and newline. The close and the root's reader skip
 #   empty lines.
@@ -65,12 +66,12 @@ class ConsoleRingModel
   def self.loss_text(lost) = "#{lost} kernel lines lost"
 
   def write(text)
-    at = drop(text, 0)
     if @route != :ring
-      @uart_open = !text.end_with?("\n") if at < text.bytesize
-      return "write #{at}"
+      @uart_open = !text.end_with?("\n") unless text.empty?
+      return 'write uart'
     end
 
+    at = drop(text, 0)
     while at < text.bytesize
       segment = text.byteslice(at..)[/\A[^\n]*\n?/]
       if @whole.bytesize + @open.bytesize + segment.bytesize > BYTES || @open.bytesize + segment.bytesize > LINE_MAX
@@ -85,10 +86,12 @@ class ConsoleRingModel
         @open = +''.b
       end
     end
-    "write #{text.bytesize}"
+    'write ring'
   end
 
   def take(verbose:)
+    return "take 0 #{self.class.bytes(''.b, verbose: verbose)}" if @route == :closed
+
     if @route == :uart
       @route = :ring
       lose if @uart_open
@@ -109,6 +112,7 @@ class ConsoleRingModel
     return 'close 0' if @route == :closed
 
     lose if @route == :ring && !@open.empty?
+    @dropping = false
     @route = :closed
     'close 1'
   end

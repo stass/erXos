@@ -11,7 +11,9 @@
  * ERX_CONSOLE_RING_LINE_MAX; anything else goes through console_ring_lose,
  * the one place a line is taken back and counted. So tail..open is always
  * whole lines of at most ERX_CONSOLE_RING_LINE_MAX bytes each, which is what
- * the take and the drain rely on when they walk it.
+ * the take and the drain rely on when they walk it. A drop is armed only
+ * on the ring route and the close disarms it, so a write on any other route
+ * goes to the UART whole.
  */
 
 #include <stdbool.h>
@@ -70,7 +72,7 @@ console_ring_byte(const erx_console_ring_t *ring, uint32_t position)
 /*
  * The one way a line is lost: the open line's bytes come back off the tail,
  * the loss is counted once, and the rest of the line, through its newline,
- * is dropped on whichever route it arrives.
+ * is dropped if it arrives on the ring route.
  */
 static void
 console_ring_lose(erx_console_ring_t *ring)
@@ -127,7 +129,7 @@ console_segment(const uint8_t *text, size_t length)
 	return (length);
 }
 
-erx_console_write_t
+bool
 erx_console_ring_write(erx_console_ring_t *ring, const void *text,
     size_t length)
 {
@@ -135,16 +137,13 @@ erx_console_ring_write(erx_console_ring_t *ring, const void *text,
 	size_t at, segment;
 
 	in = text;
-	at = console_ring_drop(ring, in, length);
 	if (ring->route != ERX_CONSOLE_ROUTE_RING) {
-		if (at < length)
+		if (length > 0)
 			ring->uart_line_open = in[length - 1] != '\n';
-		return ((erx_console_write_t){
-			.uart_from = at,
-			.uart_length = length - at,
-		});
+		return (true);
 	}
 
+	at = console_ring_drop(ring, in, length);
 	while (at < length) {
 		segment = console_segment(in + at, length - at);
 		/* Both sides stay within the ring, so neither sum can wrap. */
@@ -157,7 +156,7 @@ erx_console_ring_write(erx_console_ring_t *ring, const void *text,
 		console_ring_append(ring, in + at, (uint32_t)segment);
 		at += segment;
 	}
-	return ((erx_console_write_t){ .uart_from = length });
+	return (false);
 }
 
 /*
@@ -181,6 +180,13 @@ erx_console_ring_take(erx_console_ring_t *ring,
 	uint8_t *out;
 	uint32_t at, end, length, next;
 
+	/* Every word, so no word the reply leaves unused holds stale bytes. */
+	for (at = 0; at < ERX_CONSOLE_RING_REPLY_WORDS; at++)
+		reply->words[at] = 0;
+	reply->count = ERX_CONSOLE_RING_REPLY_HEADER;
+	/* After the close its drain alone hands out what the ring holds. */
+	if (ring->route == ERX_CONSOLE_ROUTE_CLOSED)
+		return;
 	if (ring->route == ERX_CONSOLE_ROUTE_UART) {
 		ring->route = ERX_CONSOLE_ROUTE_RING;
 		if (ring->uart_line_open)
@@ -195,13 +201,10 @@ erx_console_ring_take(erx_console_ring_t *ring,
 	}
 	length = end - ring->tail;
 
-	/* Every word, so no word the reply leaves unused holds stale bytes. */
-	for (at = 0; at < ERX_CONSOLE_RING_REPLY_WORDS; at++)
-		reply->words[at] = 0;
 	out = (uint8_t *)&reply->words[ERX_CONSOLE_RING_REPLY_HEADER];
 	reply->words[0] = ring->lost;
 	reply->words[1] = length;
-	reply->count = ERX_CONSOLE_RING_REPLY_HEADER + (length + 7) / 8;
+	reply->count += (length + 7) / 8;
 	for (at = 0; at < length; at++)
 		out[at] = console_ring_byte(ring, ring->tail + at);
 	ring->tail = end;
@@ -215,6 +218,8 @@ erx_console_ring_close(erx_console_ring_t *ring)
 		return (false);
 	if (ring->route == ERX_CONSOLE_ROUTE_RING && ring->head != ring->open)
 		console_ring_lose(ring);
+	/* The stop's report that follows reaches the UART whole. */
+	ring->dropping = false;
 	ring->route = ERX_CONSOLE_ROUTE_CLOSED;
 	return (true);
 }
