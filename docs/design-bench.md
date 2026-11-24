@@ -809,7 +809,7 @@ host serves over HTTP
   `/chosen/bootargs`, `erx_boot_args_parse` takes `erx.arg=WORD`
   (`liberx/backend/fiasco/boot_args.h`), and the bench root takes its first
   such word as its boot's name (`read_name`, `guest.c`), as
-  [the boot name](#the-boot-name) says.
+  the boot name ([The bench image's boot set](#the-bench-images-boot-set)) says.
 * **The stagers serve one build each.** `Netboot.stage` copies a boot
   partition's listed files into a fresh sibling of the TFTP root, checks
   each copy's SHA-256 against the build record, points the root, a

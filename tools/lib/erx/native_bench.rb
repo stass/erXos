@@ -327,7 +327,7 @@ module Erx
 
       # Each distinct benchmark name of benchmarks to its Laid set, the kernel built for
       # the platform first; seed's root flags, if given, are a seeded build's
-      # (docs/design-bench.md, "Seeded faults").
+      # (docs/design-bench.md, "Verification").
       def call(benchmarks, seed: nil, jobs: 4)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build_for(@platform, jobs: jobs)

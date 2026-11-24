@@ -95,7 +95,7 @@ module Erx
     PLATFORM = 'raspi4b'
     CPUS = 4
     CELLS = %w[tcg-4cpu tcg-cpu-removed tcg-sd-card tcg-bench-set].freeze
-    # The board set tcg-bench-set boots (docs/design-bench.md, "Seeded faults", the
+    # The board set tcg-bench-set boots (docs/design-bench.md, "Verification", the
     # board's set), and the name its command line gives the boot.
     BENCH_SET = 'nullcall'
     BENCH_NAME = '0123456789abcdef' * 2
