@@ -45,8 +45,12 @@ kill(Registry) ->
 
 %% A facet granted Services, as the mint starts one; ends it after Test(Facet).
 with_facet(Services, Test) ->
+    with_facet(Services, #{}, Test).
+
+%% The same for a grant that also states Extra, such as `identity`.
+with_facet(Services, Extra, Test) ->
     Mint = spawn(fun() -> receive after infinity -> ok end end),
-    Grant = #{grantee => ?GRANTEE, ends_with => [Mint], operations => [], services => Services},
+    Grant = Extra#{grantee => ?GRANTEE, ends_with => [Mint], operations => [], services => Services},
     {ok, Facet} = erx_facet:start(erx_ble_facet, Grant, #{exports => ?MODULE}),
     try
         Test(Facet)
@@ -56,9 +60,12 @@ with_facet(Services, Test) ->
 
 %% The same over a registry; ends both.
 with_registry(Services, Test) ->
+    with_registry(Services, #{}, Test).
+
+with_registry(Services, Extra, Test) ->
     Registry = start_registry(),
     try
-        with_facet(Services, Test)
+        with_facet(Services, Extra, Test)
     after
         kill(Registry)
     end.
@@ -83,6 +90,7 @@ stand_in_link(Test) ->
 link_loop(Test) ->
     receive
         {write, Ref, Key, Value} -> erx_gatt_srv ! {erx_bt_link, self(), {write, Ref, Key, Value}};
+        {security, Security} -> erx_gatt_srv ! {erx_bt_link, self(), {security, Security}};
         Message -> Test ! {link_got, Message}
     end,
     link_loop(Test).
@@ -168,6 +176,34 @@ the_caller_hears_the_events_and_alone_answers_its_writes_test() ->
         exit(Other, kill),
         exit(Link, kill)
     end).
+
+%% A bonded link's identity reaches the handler whose grant states `identity` true, and
+%% no other: the facet forwards each attach with its grant's statement, so the registry
+%% tells the one handler the identity and the other the link as bonded without it. A phone
+%% that connects from its identity address still shows it in `address`.
+bonded_identity_reaches_only_a_grant_that_states_it_test() ->
+    Bonded = #{level => encrypted, bonded => true, identity => {random, <<16#C1, 2, 3, 4, 5, 6>>}},
+    Heard = fun(Extra) ->
+        with_registry([<<"nus">>], Extra, fun(Facet) ->
+            Test = self(),
+            ?assertMatch({ok, _}, call(Facet, {attach, nus})),
+            Link = stand_in_link(Test),
+            receive {joined, Link, _} -> ok after ?WAIT_MS -> error(no_join) end,
+            ?assertMatch({connected, _, #{level := open, bonded := false}},
+                         receive {connected, _, _} = Open -> Open after ?WAIT_MS -> none end),
+            Link ! {security, Bonded},
+            Event = receive {connected, _, _} = Connected -> Connected after ?WAIT_MS -> none end,
+            exit(Link, kill),
+            Event
+        end)
+    end,
+    ?assertMatch({connected, _, #{bonded := true, identity := {random, <<16#C1, 2, 3, 4, 5, 6>>}, address := ?ADDRESS}},
+                 Heard(#{identity => true})),
+    {connected, _, Silent} = Heard(#{}),
+    ?assertMatch(#{bonded := true, address := ?ADDRESS}, Silent),
+    ?assertNot(maps:is_key(identity, Silent)),
+    {connected, _, False} = Heard(#{identity => false}),
+    ?assertNot(maps:is_key(identity, False)).
 
 %% ---- the mint ----
 

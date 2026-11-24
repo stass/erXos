@@ -163,13 +163,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
-* [Medium] bluetooth, tests of the `bonded` level and the `identity` grant beyond their cores
-  (`erx_bt_link_core:server/1`, `erx_ble_facet:init/1` and `as_granted/2`): the gate's `bonded` rows and the
-  registry's identity rule are tested and seeded, but no link test declares a characteristic at `bonded`, so a
-  `server/1` that showed the gate `bonded => true` on a pairing link passes every test, and no facet test mints a
-  grant stating `identity`, so a facet that forwarded `true` for every grant passes too. Add a link test (passkey
-  pairing, a write at `bonded` refused Insufficient Authentication, then `kept`, the same write handed out) and a
-  facet test of the attach each grant forwards, each with a seed.
 * [Medium] bluetooth, the phone console's declaration and manifest rules (docs/design-bluetooth.md, "The
   console"; docs/design-login.md, build order 8): `abi/gatt/console.txt`, the UART service's UUIDs with `rx` and
   `tx` at `bonded`, lands with `btconsole`, and the manifest check refuses a `console` service whose `rx` or `tx`

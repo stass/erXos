@@ -38,6 +38,10 @@ class ErxBleFacetTest < Minitest::Test
              path: SRV, anchor: "handle_call({facet, Caller, Op}, From, Srv) ->\n    step({facet, Caller, Op, From}, Srv).",
              replacement: "handle_call({facet, _Caller, Op}, {Facet, _} = From, Srv) ->\n    step({facet, Facet, Op, From}, Srv).",
              catching_case: 'the_caller_hears_the_events_and_alone_answers_its_writes_test'),
+    Seed.new(fault: 'every attach forwarded as asking for the identity, whatever the grant states',
+             path: FACET, anchor: '{attach, Service, Identity};',
+             replacement: '{attach, Service, true};',
+             catching_case: 'bonded_identity_reaches_only_a_grant_that_states_it_test'),
     Seed.new(fault: 'a reply of any shape forwarded, so the facet bounds no answer',
              path: FACET, anchor: 'answer(_Answer) -> false.', replacement: 'answer(_Answer) -> true.',
              catching_case: 'a_request_of_no_operation_s_shape_is_refused_badarg_test')

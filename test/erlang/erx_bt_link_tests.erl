@@ -36,7 +36,8 @@ services() ->
                              access => #{write => open, write_without_response => open}},
                            #{name => enc_w, uuid => <<16#02, 16#FF>>, max => 20, access => #{write => encrypted}},
                            #{name => enc_n, uuid => <<16#03, 16#FF>>, max => 20, access => #{notify => encrypted}},
-                           #{name => ind, uuid => <<16#04, 16#FF>>, max => 20, access => #{indicate => open}}]}].
+                           #{name => ind, uuid => <<16#04, 16#FF>>, max => 20, access => #{indicate => open}},
+                           #{name => bond_w, uuid => <<16#05, 16#FF>>, max => 20, access => #{write => bonded}}]}].
 
 table() -> erx_gatt_db:build(?GAP, services()).
 
@@ -386,6 +387,46 @@ first_pairing_reaches_level_before_store_test() ->
     ?assertEqual([{registry, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}}], Kept),
     {Failed, _} = core_step({kept, {error, unavailable}}, 0, Core),
     ?assertEqual([{close, {store, unavailable}}], Failed).
+
+%% The honest phone's Passkey Entry pairing (Part H, 2.3.5.6.3 and 2.3.5.6.5, 3.5 and 3.6):
+%% a keyboard phone and the fresh passkey erXos displays, one commit and one nonce a round
+%% for twenty rounds, round i's bit being bit i of the passkey, least significant first
+%% (as erx_bt_smp_tests takes it), and the DHKey check over the passkey. Returns its PDUs
+%% in order and the LTK it agrees.
+passkey_pairing() ->
+    {PhonePrivate, {X, Y} = PhonePublic} = key(2),
+    {_, {OwnX, _} = Own} = key(1),
+    Passkey = maps:get(passkey, fresh()),
+    Na = nonces(2),
+    Rounds = [[<<16#03, (rev(erx_smp_crypto:f4(element(1, PhonePublic), OwnX, Nonce, 16#80 bor ((Passkey bsr Round) band 1))))/binary>>,
+               <<16#04, (rev(Nonce))/binary>>]
+              || {Round, Nonce} <- lists:zip(lists:seq(0, 19), Na)],
+    {MacKey, Ltk} = erx_smp_crypto:f5(erx_smp_crypto:dhkey(PhonePrivate, Own), lists:last(Na), lists:last(nonces(1)),
+                                      ?CENTRAL, ?PERIPHERAL),
+    Ea = erx_smp_crypto:f6(MacKey, lists:last(Na), lists:last(nonces(1)), <<Passkey:128>>, <<16#2D, 0, 16#04>>,
+                           ?CENTRAL, ?PERIPHERAL),
+    {[<<16#0C, (rev(X))/binary, (rev(Y))/binary>> | lists:append(Rounds)] ++ [<<16#0D, (rev(Ea))/binary>>], Ltk}.
+
+%% A write to a `bonded` characteristic on a pairing link whose key is authenticated, by a
+%% Passkey Entry pairing, but not yet a kept bond's, is Insufficient Authentication and
+%% reaches no handler; once the store has kept the bond, the same write is handed out.
+bonded_write_waits_for_the_kept_bond_test() ->
+    {Pdus, Ltk} = passkey_pairing(),
+    Write = att(write(handle(bond_w), <<"b">>)),
+    {Paired, Ended} = run([smp(<<16#01, 16#04, 0, 16#2D, 16, 16#0B, 16#0B>>), {admission, 1, {open, display, fresh()}}]
+                          ++ [smp(Pdu) || Pdu <- Pdus]
+                          ++ [ltk_request(), encryption_on(), smp(<<16#08, 7:128>>),
+                              smp(<<16#09, 1, 16#C6, 16#C5, 16#C4, 16#C3, 16#C2, 16#C1>>)],
+                          core(#{share => 64})),
+    ?assertEqual([], [Code || <<16#05, Code>> <- on(6, Paired)]),
+    ?assertEqual([{ltk_reply, Ltk}], [A || {ltk_reply, _} = A <- Paired]),
+    ?assertMatch([{store, {keep, 1, #{level := authenticated}, #{}}}], [A || {store, _} = A <- Paired]),
+    {Pairing, _} = core_step(Write, 0, Ended),
+    ?assertEqual([error_rsp(16#12, handle(bond_w), 16#05)], on(4, Pairing)),
+    ?assertEqual([], registry(Pairing)),
+    {_, Kept} = core_step({kept, ok}, 0, Ended),
+    {Handed, _} = core_step(Write, 0, Kept),
+    ?assertEqual([{write, 1, {svc, bond_w}, <<"b">>}], registry(Handed)).
 
 %% Every message is keyed by its role: a controller message's step answers `taken` first,
 %% packets and the Long Term Key answer go to the controller as `hci`, the store's
