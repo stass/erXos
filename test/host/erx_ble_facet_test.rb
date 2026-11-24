@@ -26,8 +26,8 @@ class ErxBleFacetTest < Minitest::Test
 
   SEEDS = [
     Seed.new(fault: "the service check dropped from admit/3, so another app's service is attached",
-             path: FACET, anchor: 'forward(lists:member(Service, Services), Request, Caller, Services)',
-             replacement: 'forward(true, Request, Caller, Services)',
+             path: FACET, anchor: 'forward(lists:member(Service, Services), Request, Caller, Grant)',
+             replacement: 'forward(true, Request, Caller, Grant)',
              catching_case: 'a_request_naming_another_service_is_refused_test'),
     Seed.new(fault: "the registry's pid kept from the facet's first request, so the request after a restart fails",
              path: FACET, anchor: "    case whereis(erx_gatt_srv) of\n",

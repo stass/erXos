@@ -11,9 +11,9 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(OPEN, #{key => none, encrypted => false}).
--define(JUST_WORKS, #{key => encrypted, encrypted => true}).
--define(PASSKEY, #{key => authenticated, encrypted => true}).
+-define(OPEN, #{key => none, encrypted => false, bonded => false}).
+-define(JUST_WORKS, #{key => encrypted, encrypted => true, bonded => false}).
+-define(PASSKEY, #{key => authenticated, encrypted => true, bonded => false}).
 -define(WRITES, 4).
 %% GAP's values, which the table's Device Name and Appearance read with no handler.
 -define(GAP, #{name => <<"erxos">>, appearance => 16#03C1}).
@@ -175,9 +175,24 @@ gate_follows_gap_table_10_2_test() ->
             {authenticated, authenticated, false, {error, insufficient_encryption}},
             {authenticated, encrypted, true, {error, insufficient_authentication}},
             {authenticated, authenticated, true, ok}],
-    [?assertEqual({Level, Key, Encrypted, Result},
-                  {Level, Key, Encrypted, erx_gatt_gate:check(Level, #{key => Key, encrypted => Encrypted})})
-     || {Level, Key, Encrypted, Result} <- Rows].
+    [?assertEqual({Level, Key, Encrypted, Bonded, Result},
+                  {Level, Key, Encrypted, Bonded,
+                   erx_gatt_gate:check(Level, #{key => Key, encrypted => Encrypted, bonded => Bonded})})
+     || {Level, Key, Encrypted, Result} <- Rows, Bonded <- [false, true]].
+
+%% `bonded` is `authenticated` on a link whose key is a kept bond's: a pairing link that
+%% has its key, before the store has kept its bond, is refused as one with no key is.
+gate_bonded_requires_the_kept_bond_test() ->
+    Rows = [{none, false, false, {error, insufficient_authentication}},
+            {encrypted, false, true, {error, insufficient_encryption}},
+            {encrypted, true, true, {error, insufficient_authentication}},
+            {authenticated, false, true, {error, insufficient_encryption}},
+            {authenticated, true, false, {error, insufficient_authentication}},
+            {authenticated, true, true, ok}],
+    [?assertEqual({Key, Encrypted, Bonded, Result},
+                  {Key, Encrypted, Bonded,
+                   erx_gatt_gate:check(bonded, #{key => Key, encrypted => Encrypted, bonded => Bonded})})
+     || {Key, Encrypted, Bonded, Result} <- Rows].
 
 %% ---- erx_gatt_db ----
 
@@ -367,7 +382,7 @@ reads_answer_their_errors_test() ->
     ?assertEqual(error_rsp(16#0A, 22, 16#01), answer(read(22), server(?OPEN), B)),
     ?assertEqual(error_rsp(16#0A, 8, 16#02), answer(read(8), server(?OPEN), B)),
     ?assertEqual(error_rsp(16#0A, 18, 16#05), answer(read(18), server(?OPEN), B)),
-    ?assertEqual(error_rsp(16#0A, 18, 16#0F), answer(read(18), server(#{key => encrypted, encrypted => false}), B)),
+    ?assertEqual(error_rsp(16#0A, 18, 16#0F), answer(read(18), server(#{key => encrypted, encrypted => false, bonded => false}), B)),
     ?assertEqual(error_rsp(16#0C, 18, 16#07), answer(read_blob(18, 8), server(?JUST_WORKS), B)),
     ?assertEqual(<<16#0D>>, answer(read_blob(18, 7), server(?JUST_WORKS), B)).
 

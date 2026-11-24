@@ -26,6 +26,11 @@ class ErxBtGattTest < Minitest::Test
   Seed = Data.define(:fault, :module_path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
+    Seed.new(fault: 'the bond check dropped from the gate, so a pairing link passes bonded',
+             module_path: GATE,
+             anchor: 'check(bonded, _Security) -> {error, insufficient_authentication}.',
+             replacement: 'check(bonded, _Security) -> ok.',
+             catching_case: 'gate_bonded_requires_the_kept_bond_test'),
     Seed.new(fault: 'services laid out in manifest order',
              module_path: DB,
              anchor: 'Sorted = lists:sort(fun(#{name := A}, #{name := B}) -> A =< B end, Services),',

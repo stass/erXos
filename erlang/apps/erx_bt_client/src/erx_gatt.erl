@@ -45,9 +45,10 @@ and answer/2 are total over any term and make no atom.
 
 -doc """
 An event the registry sends a handler, its envelope off. `connected` carries `identity`,
-the bond's identity address, exactly when `bonded` is true.
+the bond's identity address, only when `bonded` is true and the handler's grant asks for it.
 """.
 -type event() :: {connected, Conn :: reference(), #{address := address(), level := atom(), bonded := false}
+                                                | #{address := address(), level := atom(), bonded := true}
                                                 | #{address := address(), level := atom(), bonded := true,
                                                     identity := address()}}
                | {mtu, Conn :: reference(), Mtu :: pos_integer()}
@@ -163,6 +164,9 @@ is_characteristic(_Characteristic) ->
     false.
 
 is_event({connected, Conn, #{address := Address, bonded := false, level := Level} = Info})
+  when map_size(Info) =:= 3 ->
+    is_reference(Conn) andalso is_address(Address) andalso is_atom(Level);
+is_event({connected, Conn, #{address := Address, bonded := true, level := Level} = Info})
   when map_size(Info) =:= 3 ->
     is_reference(Conn) andalso is_address(Address) andalso is_atom(Level);
 is_event({connected, Conn, #{address := Address, bonded := true, level := Level, identity := Identity} = Info})

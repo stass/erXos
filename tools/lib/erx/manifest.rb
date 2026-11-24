@@ -2420,8 +2420,9 @@ module Erx
       # check_display_grants, which reads pixels, session and front, and range-checks windows and
       # clipboard as their declarations bound them. line_grant is property 8's line clause,
       # check_line_grants, which reads device, rate and flow and range-checks rate. ble_grant is
-      # check_ble_grants, which reads services. login_grant is check_login_grants, which
-      # holds line and logins to the holder's entry of LOGIN_HOLDERS. net_grant is
+      # check_ble_grants, which reads services; identity its declaration alone bounds, and the
+      # facet applies it at run time. login_grant is check_login_grants, which holds line and
+      # logins to the holder's entry of LOGIN_HOLDERS. net_grant is
       # property 15's parameter clause, check_net_ports, which reads a net facet's ports and
       # listen; its sockets and buffers their declarations alone bound, and the grant
       # enforces all four at run time (abi/services/net.txt). files_grant takes a files
@@ -2433,7 +2434,7 @@ module Erx
       # interface.
       GRANT_CHECKERS = { 'windows_grant' => %w[windows pixels clipboard session front].freeze,
                          'line_grant' => %w[device rate flow].freeze,
-                         'ble_grant' => %w[services].freeze,
+                         'ble_grant' => %w[services identity].freeze,
                          'login_grant' => %w[line logins].freeze,
                          'net_grant' => %w[sockets buffers ports listen].freeze,
                          'files_grant' => %w[rights tree].freeze }.freeze

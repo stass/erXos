@@ -6,15 +6,18 @@
 # reads; notify and indicate send a value on a link; reply answers a write handed to the
 # handler. A facet row says operations none and the facet's admit/3 decides what passes.
 # services names the GATT services the grantee handles, at most 8 names of abi/gatt, which
-# the packer sorts into strict byte order. ble_grant is its grant checker: the service of
-# this interface is named ble and served by a configured domain, no grant goes to the
-# system domain, and every name is a service abi/gatt declares. Its quantities are those
-# of the app template's row the build derives when the apps row names ble
-# (docs/design-packaging.md, "The apps row"): a request of at most 1,024 octets, above
-# the largest a handler makes, a set or notify of the largest value abi/gatt declares,
-# 244 octets, with its term's framing; 16 in flight, a handler's notifies to its links
-# and its answers to their writes; the reductions and period every interface takes; and a
-# heap of 65,536 words, room for 16 requests of 1,024 octets many times over.
+# the packer sorts into strict byte order. identity, true, asks that the grantee's handler
+# hear a bonded link's identity address in its connected events, which no other handler
+# hears; a grant that does not state it hears none. ble_grant is the grant checker of
+# both: the service of this interface is named ble and served by a configured domain, no
+# grant goes to the system domain, and every name is a service abi/gatt declares. Its
+# quantities are those of the app template's row the build derives when the apps row
+# names ble (docs/design-packaging.md, "The apps row"): a request of at most 1,024
+# octets, above the largest a handler makes, a set or notify of the largest value
+# abi/gatt declares, 244 octets, with its term's framing; 16 in flight, a handler's
+# notifies to its links and its answers to their writes; the reductions and period
+# every interface takes; and a heap of 65,536 words, room for 16 requests of 1,024
+# octets many times over.
 service ble 20
   served_as message
   operation attach 1
@@ -23,6 +26,7 @@ service ble 20
   operation indicate 4
   operation reply 5
   parameter services 1 identifier set 8 bytes 63 checked_by ble_grant
+  parameter identity 2 boolean optional boolean checked_by ble_grant
   quantity max_request 1024
   quantity in_flight 16
   quantity reductions 100000

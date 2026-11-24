@@ -184,8 +184,14 @@ new session, as an SSH channel does. A small domain of its own,
 `btconsole`, runs that console as a client of the `ble` facet and holds
 the login facet, so the Bluetooth domain keeps to its radio; the radio
 stack decrypts the link all the same, so the separation contains a
-console defect and buys no secrecy. The console and its
-login are designed and not built. The manifest check is designed to refuse
+console defect and buys no secrecy. The console's characteristics
+require `bonded`, so no write of a phone that is not yet a bond reaches
+it, and its `ble` grant alone asks to hear a bonded phone's identity
+address, the one name of a phone that stays across its connections,
+which the console gives the login as the terminal's peer; no other
+handler hears it from the bond, though a phone that does not use a
+private address shows it as its connection address to every handler. The `bonded` level and the grant's `identity` are
+built; the console and its login are designed and not built. The manifest check is designed to refuse
 anything more, because a stranger in radio range reaches whatever the
 domain holds through a parser defect; that check is designed and not
 built, so the row's contents rest on the manifest text. Figure 19.1
@@ -475,7 +481,9 @@ characteristic tx 6e400003-b5a3-f393-e0a9-e50e24dcca9e 244 notify open
 ```
 
 Each characteristic names its accesses and the level each requires:
-`open`, `encrypted` or `authenticated`. The design has the domain serve
+`open`, `encrypted`, `authenticated` or `bonded`, the last an
+authenticated link whose key is a kept bond's, which a pairing link
+reaches only once the bond is stored. The design has the domain serve
 every service that some `ble` grant of the machine names, a configured
 domain's or the one every installed app's grant is cut from (below);
 the domain serves every declared service, and reading the

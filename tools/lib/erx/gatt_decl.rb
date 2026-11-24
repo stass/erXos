@@ -49,7 +49,7 @@ module Erx
     # The names erx_gatt_db gives GAP's and GATT's own services (gap/0, gatt/0).
     RESERVED_NAMES = %w[gap gatt].freeze
     ACCESSES = %w[read write write_without_response notify indicate].freeze
-    LEVELS = %w[open encrypted authenticated].freeze
+    LEVELS = %w[open encrypted authenticated bonded].freeze
     NAME = /\A[a-z][a-z0-9_]{0,62}\z/
     UUID16 = /\A[0-9a-f]{4}\z/
     UUID128 = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/

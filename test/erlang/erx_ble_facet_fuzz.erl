@@ -32,26 +32,36 @@ run([Seed]) ->
     true = register(erx_gatt_srv, Registry),
     Caller = self(),
     %% Loading the facet makes atoms; a round must not.
-    {forward, Registry, _, ?GRANTED} = erx_ble_facet:admit({attach, console}, Caller, ?GRANTED),
+    Grant = grant(),
+    {forward, Registry, _, Grant} = erx_ble_facet:admit({attach, console}, Caller, Grant),
     Forwarded = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(request(), Registry, Caller) =:= forward]),
     case Forwarded >= ?MIN_FORWARDED of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Forwarded]);
         false -> error({too_few_forwarded, Forwarded})
     end.
 
+% The request the facet forwards: an attach with the grant's identity, every other as made.
+as_granted({attach, Service}) -> {attach, Service, false};
+as_granted(Request) -> Request.
+
+%% The grant the rounds are admitted under: the services of GRANTED, no identity.
+grant() -> #{services => ?GRANTED, identity => false}.
+
 idle() ->
     receive stop -> ok end.
 
 round_of(Request, Registry, Caller) ->
     Atoms = erlang:system_info(atom_count),
-    Said = try erx_ble_facet:admit(Request, Caller, ?GRANTED)
+    Said = try erx_ble_facet:admit(Request, Caller, grant())
            catch Class:Reason -> error({admit_raised, Request, Class, Reason})
            end,
     erlang:system_info(atom_count) =:= Atoms orelse error({atoms_made, Request}),
     Expected = verdict(Request, ?GRANTED),
+    Forwarded = as_granted(Request),
+    Grant = grant(),
     case {Expected, Said} of
-        {forward, {forward, Registry, {facet, Caller, Request}, ?GRANTED}} -> forward;
-        {Refusal, {refuse, Refusal, ?GRANTED}} -> Refusal;
+        {forward, {forward, Registry, {facet, Caller, Forwarded}, Grant}} -> forward;
+        {Refusal, {refuse, Refusal, Grant}} -> Refusal;
         {forward, _} -> error({should_forward, Request, Said});
         {badarg, _} -> error({should_refuse_badarg, Request, Said});
         {not_granted, _} -> error({should_refuse_not_granted, Request, Said})

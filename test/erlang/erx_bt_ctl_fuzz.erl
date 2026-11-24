@@ -19,7 +19,7 @@
 -define(GRAMMAR, "\\Aforget (?:all|" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX ":" ?HEX
                   " (public|random))\\n?\\z").
 -define(COMMANDS, [<<"forget all">>, <<"forget ALL">>, <<"forget">>, <<"reset">>, <<>>,
-                   <<"forget +0:1B:DC:0A:0B:0C">>, <<"forget -1:1B:DC:0A:0B:0C">>,
+                   <<"forget +0:1B:DC:0A:0B:0C public">>, <<"forget -1:1B:DC:0A:0B:0C public">>,
                    <<"forget 00:1B:DC:0A:0B public">>, <<"forget 00-1B-DC-0A-0B-0C public">>,
                    <<"forget 00:1B:DC:0A:0B:0C">>, <<"forget 00:1B:DC:0A:0B:0C PUBLIC">>,
                    <<"forget 00:1B:DC:0A:0B:0C  random">>, <<"forget 00:1B:DC:0A:0B:0C static">>]).

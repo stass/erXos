@@ -15,7 +15,8 @@ and no other, into a byte stream for each phone.
   the write is answered the Application Error `?OWNER_BUSY` and its bytes are dropped,
   so a phone that writes faster than the owner reads cannot grow the owner's queue
   without bound. The owner also hears `{connected, Conn, Info}`, `Info` as erx_gatt's
-  `connected` event gives it, `identity` included, and `{disconnected, Conn}`.
+  `connected` event gives it, `identity` included when the grant asks for it, and
+  `{disconnected, Conn}`.
 * send/2 cuts its bytes into notifications of `tx` of at most `Mtu - 3` octets each,
   `Mtu` the link's bearer MTU as its last `mtu` event gave it, 23 until one comes, and
   returns once all are queued for the link, in order. A notification refused `busy`, the
@@ -34,7 +35,7 @@ byte uses and repeats. The handler ends with its owner.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, send/2]).
--export([init/1, handle_write/4, handle_event/2, handle_call/3, handle_info/2]).
+-export([init/2, handle_write/4, handle_event/2, handle_call/3, handle_info/2]).
 
 %% How often a notification the link's full queue refused is asked again.
 -define(BUSY_RETRY_MS, 5).
@@ -45,7 +46,9 @@ byte uses and repeats. The handler ends with its owner.
 
 -doc """
 Starts the handler of `Service`, linked to the caller, for `Owner`, which hears the
-stream. The facet refuses a service its grant does not name.
+stream. The facet refuses a service its grant does not name, and the start refuses
+`{not_serial, Service}` a service without the serial shape: an `rx` a phone writes, with or
+without a response, and a `tx` the machine notifies.
 """.
 -spec start_link(atom(), pid()) -> gen_server:start_ret().
 start_link(Service, Owner) when is_atom(Service), is_pid(Owner) ->
@@ -57,9 +60,23 @@ send(Conn, Bytes) when is_reference(Conn), is_binary(Bytes) ->
     erx_gatt_service:call(?MODULE, {send, Conn, Bytes}).
 
 -doc false.
-init({Service, Owner}) ->
-    erlang:monitor(process, Owner),
-    {ok, #{}, #serial{service = Service, owner = Owner}}.
+init({Service, Owner}, Table) ->
+    case serial_shape(Table) of
+        true ->
+            erlang:monitor(process, Owner),
+            {ok, #{}, #serial{service = Service, owner = Owner}};
+        false ->
+            {error, {not_serial, Service}}
+    end.
+
+%% Whether the attached characteristics are a serial line's: rx and tx alone, rx taking a
+%% write of either kind and tx a notification and no write, so every write a phone can
+%% make is one of rx.
+serial_shape(#{rx := #{access := Rx}, tx := #{access := Tx}} = Table) when map_size(Table) =:= 2 ->
+    (is_map_key(write, Rx) orelse is_map_key(write_without_response, Rx)) andalso is_map_key(notify, Tx)
+        andalso not (is_map_key(write, Tx) orelse is_map_key(write_without_response, Tx));
+serial_shape(_Table) ->
+    false.
 
 -doc false.
 handle_write(Conn, rx, Bytes, #serial{owner = Owner} = Serial) ->

@@ -94,11 +94,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   peer before it reports the connection. Question for the design: rely on Part E 5.3 and check the board's
   controller's handle reuse with a probe, or add such a fence. A cheap narrowing for host-initiated disconnects
   alone: refuse a link's packets once its handle's disconnect is asked.
-* [Low] bluetooth, `forget ADDRESS` and the address type (`erx_bt_store`'s `{forget, Address}`, `erx_bt_fs_tree:parse/1`;
-  docs/design-bluetooth.md "Bonds and the store"): `ctl` names a bond by its six octets alone, as the `pair` lines
-  print it, and the store forgets every bond with them, so a phone that distributed `{random, X}` beside a bond of
-  `{public, X}` is forgotten with it, and the operator cannot tell the two apart. Either state that `forget ADDRESS`
-  forgets every bond with those octets, or add the type to the `pair` lines and to `ctl`'s grammar.
 * [Low] bluetooth, the window's copy of the store's refusal (`erx_bt_window`'s `refusing`, `erx_bt_fs:start_link/0`): when
   `erx_bt_fs` alone restarts, a grant of the old instance that the grants' supervisor has not yet killed can confirm a
   `forget all` after the new instance read `known()`, so `pair` answers `eio` until another `forget` or a store restart
@@ -168,6 +163,19 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Medium] bluetooth, tests of the `bonded` level and the `identity` grant beyond their cores
+  (`erx_bt_link_core:server/1`, `erx_ble_facet:init/1` and `as_granted/2`): the gate's `bonded` rows and the
+  registry's identity rule are tested and seeded, but no link test declares a characteristic at `bonded`, so a
+  `server/1` that showed the gate `bonded => true` on a pairing link passes every test, and no facet test mints a
+  grant stating `identity`, so a facet that forwarded `true` for every grant passes too. Add a link test (passkey
+  pairing, a write at `bonded` refused Insufficient Authentication, then `kept`, the same write handed out) and a
+  facet test of the attach each grant forwards, each with a seed.
+* [Medium] bluetooth, the phone console's declaration and manifest rules (docs/design-bluetooth.md, "The
+  console"; docs/design-login.md, build order 8): `abi/gatt/console.txt`, the UART service's UUIDs with `rx` and
+  `tx` at `bonded`, lands with `btconsole`, and the manifest check refuses a `console` service whose `rx` or `tx`
+  is below `bonded`, a console row whose `ble` grant does not state `identity` true, and `nus` and `console`
+  together, each with a test that differs from a passing manifest in that rule alone. Until then `ble_grant`
+  consumes `identity` with no rule of its own beyond its declared kind.
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each
   connection, each bond with no key, and the counters) is not declared in `abi/inspection.txt`, and the domain
   serves none of it; declare the path and serve it from the domain's agent, with `unknown` for a value the

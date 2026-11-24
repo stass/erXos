@@ -33,11 +33,13 @@ event_from_the_facet_owner_alone_test() ->
     Connected = #{address => ?ADDRESS, bonded => false, level => open},
     ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected}})),
     ?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{extra => 1}}})),
-    %% `identity` comes exactly with `bonded` true, and is an address.
+    %% `identity` comes only with `bonded` true, and is an address.
     Bonded = Connected#{bonded => true, identity => ?IDENTITY},
     ?assertEqual({ok, {connected, C, Bonded}}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Bonded}})),
+    %% A bonded link's event without `identity` is that of a handler whose grant did not ask.
+    ?assertMatch({ok, _}, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Connected#{bonded => true}}})),
     [?assertEqual(unknown, erx_gatt:event(?BT, {erx_origin, ?BT, {connected, C, Info}}))
-     || Info <- [Connected#{identity => ?IDENTITY}, Connected#{bonded => true},
+     || Info <- [Connected#{identity => ?IDENTITY}, Connected#{bonded => true, identity => <<1:48>>},
                  Bonded#{identity => {random, <<1, 2, 3>>}}, Bonded#{extra => 1}]].
 
 %% ---- attach and the owner's answers, over a facet that answers a script ----
@@ -85,7 +87,16 @@ serial_test_() ->
       fun(_) -> {"send asks again while the link is busy", fun send_waits_while_busy/0} end,
       fun(_) -> {"an event from another domain reaches no owner", fun forged_event_dropped/0} end,
       fun(_) -> {"a serial handler of console answers console alone", fun console_serial_answers_its_service_alone/0}
-      end]}.
+      end,
+      fun(_) -> {"a service without the serial shape gets no serial handler", fun misshaped_refused/0} end]}.
+
+%% A service whose rx the phone cannot write, or whose tx the machine cannot notify, is no
+%% serial line: the start is refused, its caller, linked, lives on, and no serial handler
+%% runs. (The stand-in facet's relay stays attached for the ended handler, so the case
+%% does not start a second one.)
+misshaped_refused() ->
+    ?assertEqual({error, {not_serial, misshaped}}, erx_gatt_serial:start_link(misshaped, self())),
+    ?assertEqual(undefined, whereis(erx_gatt_serial)).
 
 write_reaches_the_owner() ->
     {Link, Conn} = joined_link(),
@@ -162,7 +173,7 @@ console_serial_answers_its_service_alone() ->
 %% installed as ble.
 start_registry() ->
     persistent_term:put(erx_dist_owner, ?BT),
-    Served = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()] ++ [console()],
+    Served = [erx_gatt_decl:service(Name) || Name <- erx_gatt_decl:names()] ++ [console(), misshaped()],
     {ok, Registry} = erx_gatt_srv:start_link(?GAP, Served),
     unlink(Registry),
     Facet = spawn(fun() -> relaying_facet(#{}) end),
@@ -188,9 +199,13 @@ relaying_facet(Relays) ->
                         #{Caller := Known} -> Known;
                         #{} -> spawn(fun() -> link(Caller), relay(Caller) end)
                     end,
-            gen_server:reply(From, erx_gatt_srv:facet(Relay, Op, ?WAIT_MS)),
+            gen_server:reply(From, erx_gatt_srv:facet(Relay, as_granted(Op), ?WAIT_MS)),
             relaying_facet(Relays#{Caller => Relay})
     end.
+
+%% The stand-in grant asks for the identity, as the ble facet forwards an attach.
+as_granted({attach, Service}) -> {attach, Service, true};
+as_granted(Op) -> Op.
 
 relay(Handler) ->
     receive Event -> Handler ! {erx_origin, ?BT, Event}, relay(Handler) end.
@@ -234,6 +249,16 @@ console() ->
          characteristics => [C#{uuid => other_uuid(U)} || #{uuid := U} = C <- Chars]}.
 
 other_uuid(<<First, Rest/binary>>) -> <<(First bxor 16#FF), Rest/binary>>.
+
+%% A stand-in service of nus's names with its accesses swapped: rx only notified and tx
+%% only written.
+misshaped() ->
+    #{uuid := Uuid, characteristics := [Rx, Tx]} = Nus = erx_gatt_decl:service(nus),
+    Nus#{name => misshaped, uuid => other_uuid(second_flipped(Uuid)),
+         characteristics => [Rx#{uuid => second_flipped(maps:get(uuid, Rx)), access => maps:get(access, Tx)},
+                             Tx#{uuid => second_flipped(maps:get(uuid, Tx)), access => maps:get(access, Rx)}]}.
+
+second_flipped(<<First, Second, Rest/binary>>) -> <<First, (Second bxor 16#FF), Rest/binary>>.
 
 %% The next notification of nus's tx the registry asks Link for, answered Answer.
 notification(Link, Answer) -> notification(Link, {nus, tx}, Answer).

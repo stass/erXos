@@ -569,8 +569,9 @@ names; the full gates run once per batch.
    are its own packages.
 6. **The development passphrase checker** (decision 1).
 7. **Bluetooth's parts for the console**: `erx_gatt_serial` started for
-   a declared service, and the bond's identity address in the
-   `connected` event
+   a declared service of the serial shape, the bond's identity address
+   in the `connected` event of a handler whose `ble` grant states
+   `identity`, and the gate's `bonded` level
    ([design-bluetooth.md](design-bluetooth.md#the-console)).
 8. **`btconsole`**, its prompt core with its fuzz target, and its
    manifest checks

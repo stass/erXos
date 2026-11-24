@@ -55,7 +55,7 @@ server() ->
              access => #{read => open, write => open, write_without_response => open, notify => open}},
     Gated = #{name => gated, uuid => <<16#F2, 16#FF>>, max => 20, access => #{read => encrypted, indicate => open}},
     Table = erx_gatt_db:build(?GAP, [#{name => fuzz, uuid => <<16#F0, 16#FF>>, characteristics => [Long, Gated]}]),
-    #{table => Table, values => #{}, security => #{key => none, encrypted => false}}.
+    #{table => Table, values => #{}, security => #{key => none, encrypted => false, bonded => false}}.
 
 %% ---- frames ----
 

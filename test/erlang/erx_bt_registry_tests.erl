@@ -41,20 +41,20 @@ steps(Inputs) ->
     lists:foldl(fun(Input, {_, Core}) -> step(Input, Core) end, {[], erx_gatt_registry:new(?GAP, services())}, Inputs).
 
 attach_answers_the_limits_and_refuses_test() ->
-    {Actions, _} = steps([{facet, ?H1, {attach, a}, from}]),
+    {Actions, _} = steps([{facet, ?H1, {attach, a, true}, from}]),
     ?assertEqual([{monitor, ?H1}, {reply, from, {ok, #{x => #{max => 4, access => #{write => open, notify => open}}}}}],
                  Actions),
     ?assertMatch({[{reply, f2, {error, attached}}], _},
-                 steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H2, {attach, a}, f2}])),
+                 steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H2, {attach, a, true}, f2}])),
     %% A handler of two services is monitored once.
     ?assertMatch({[{reply, f2, {ok, _}}], _},
-                 steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H1, {attach, b}, f2}])).
+                 steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H1, {attach, b, true}, f2}])).
 
 attach_hears_the_live_links_test() ->
     C = make_ref(),
     {Actions, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j},
                           {link, ?L1, {security, #{level => encrypted, bonded => true, identity => ?IDENTITY}}},
-                          {facet, ?H1, {attach, a}, f}]),
+                          {facet, ?H1, {attach, a, true}, f}]),
     ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => true,
                                               identity => ?IDENTITY}}},
                  lists:last(Actions)).
@@ -63,7 +63,7 @@ attach_hears_the_live_links_test() ->
 %% and the address the phone connected from in `address` either way.
 connected_carries_the_identity_of_a_bonded_link_alone_test() ->
     C = make_ref(),
-    {Unbonded, Core} = steps([{facet, ?H1, {attach, a}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
+    {Unbonded, Core} = steps([{facet, ?H1, {attach, a, true}, f}, {join, ?L1, C, #{address => ?ADDRESS}, j},
                               {link, ?L1, {security, #{level => encrypted, bonded => false}}}]),
     ?assertEqual([{event, ?H1, {connected, C, #{address => ?ADDRESS, level => encrypted, bonded => false}}}],
                  Unbonded),
@@ -73,8 +73,23 @@ connected_carries_the_identity_of_a_bonded_link_alone_test() ->
                                                identity => ?IDENTITY}}}],
                  Bonded).
 
+%% A handler whose attach did not ask for the identity hears a bonded link as bonded, and
+%% never its identity, while one that asked hears it on the same link.
+identity_reaches_only_the_handler_that_asked_test() ->
+    C = make_ref(),
+    Bonded = #{level => authenticated, bonded => true, identity => ?IDENTITY},
+    {Actions, _} = steps([{facet, ?H1, {attach, a, false}, f1}, {facet, ?H2, {attach, b, true}, f2},
+                          {join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {security, Bonded}}]),
+    Told = fun(H) -> lists:last([Info || {event, To, {connected, _, Info}} <- Actions, To =:= H]) end,
+    ?assertEqual(#{address => ?ADDRESS, level => authenticated, bonded => true}, Told(?H1)),
+    ?assertEqual(Bonded#{address => ?ADDRESS}, Told(?H2)),
+    {Late, _} = steps([{join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {security, Bonded}},
+                       {facet, ?H1, {attach, a, false}, f1}]),
+    ?assertEqual({event, ?H1, {connected, C, #{address => ?ADDRESS, level => authenticated, bonded => true}}},
+                 lists:last(Late)).
+
 set_refusals_test() ->
-    Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a}, f0}, {facet, ?H1, Op, f}]), A end,
+    Set = fun(Op) -> {[A], _} = steps([{facet, ?H1, {attach, a, true}, f0}, {facet, ?H1, Op, f}]), A end,
     ?assertEqual({reply, f, ok}, Set({set, a, x, <<1, 2, 3, 4>>})),
     ?assertEqual({reply, f, {error, too_long}}, Set({set, a, x, <<1, 2, 3, 4, 5>>})),
     ?assertEqual({reply, f, {error, no_such_characteristic}}, Set({set, a, y, <<>>})),
@@ -83,7 +98,7 @@ set_refusals_test() ->
 
 notify_refusals_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}],
+    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a, true}, f0}],
     ?assertMatch({[{request, _, {notify, notify, {a, x}, <<1>>}, f}], _},
                  steps(Joined ++ [{facet, ?H1, {notify, C, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, {error, gone}}], _}, steps(Joined ++ [{facet, ?H1, {notify, make_ref(), a, x, <<1>>}, f}])),
@@ -94,7 +109,7 @@ notify_refusals_test() ->
 %% of none, is refused not_attached, and nothing reaches a link.
 set_notify_and_indicate_only_from_the_handler_test() ->
     C = make_ref(),
-    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a}, f0}, {facet, ?H2, {attach, b}, f1}],
+    Joined = [{join, ?L1, C, #{address => ?ADDRESS}, j}, {facet, ?H1, {attach, a, true}, f0}, {facet, ?H2, {attach, b, true}, f1}],
     Refused = {error, not_attached},
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {set, a, x, <<1>>}, f}])),
     ?assertMatch({[{reply, f, Refused}], _}, steps(Joined ++ [{facet, ?H2, {notify, C, a, x, <<1>>}, f}])),
@@ -109,7 +124,7 @@ write_without_a_handler_is_unlikely_error_test() ->
 
 subscription_goes_to_its_service_alone_test() ->
     C = make_ref(),
-    {Actions, _} = steps([{facet, ?H1, {attach, a}, f1}, {facet, ?H2, {attach, b}, f2},
+    {Actions, _} = steps([{facet, ?H1, {attach, a, true}, f1}, {facet, ?H2, {attach, b, true}, f2},
                           {join, ?L1, C, #{address => ?ADDRESS}, j}, {link, ?L1, {subscribed, {b, y}, indicate}}]),
     ?assertEqual([{event, ?H2, {subscribed, C, y, indicate}}], Actions).
 
@@ -163,7 +178,7 @@ input({join, L}, #model{joined = J, ended = E}) ->
         false -> {join, L, conn(L), #{address => ?ADDRESS}, from}
     end;
 input({write, L, Key}, #model{writes = N}) -> {write, L, 1, Key, <<1>>, {req, N}};
-input({attach, H, S}, _M) -> {facet, H, {attach, S}, from};
+input({attach, H, S}, _M) -> {facet, H, {attach, S, true}, from};
 input({set, H, V}, _M) -> {facet, H, {set, a, x, V}, from};
 input({notify, L}, _M) -> {facet, ?H1, {notify, conn(L), a, x, <<1>>}, from};
 input({reply, H}, #model{writes = N}) -> {facet, H, {reply, {req, N - 1}, ok}, from};
@@ -199,7 +214,7 @@ check({facet, Caller, {reply, Req, _}, From}, Actions, #model{delivered = D} = M
             ?assertEqual([{reply, From, ok}], Actions),
             M
     end;
-check({facet, Caller, {attach, S}, From}, Actions, #model{handlers = H} = M) ->
+check({facet, Caller, {attach, S, true}, From}, Actions, #model{handlers = H} = M) ->
     case H of
         #{S := _} -> ?assertEqual([{reply, From, {error, attached}}], Actions), M;
         #{} ->
@@ -268,7 +283,7 @@ join_races_sets() ->
     Test = self(),
     Set = fun(Ns) -> [ok = erx_gatt_srv:facet(self(), {set, a, x, <<N:16>>}, ?WAIT_MS) || N <- Ns] end,
     Setter = spawn_link(fun() ->
-                                {ok, _} = erx_gatt_srv:facet(self(), {attach, a}, ?WAIT_MS),
+                                {ok, _} = erx_gatt_srv:facet(self(), {attach, a, true}, ?WAIT_MS),
                                 Set(lists:seq(1, 100)),
                                 Test ! first_sets,
                                 receive go -> ok end,
@@ -390,7 +405,7 @@ joined_link_conn() ->
 %% `{do, Op}`, answering it to the test.
 handler_stand_in(Test, Service) ->
     Pid = spawn(fun() ->
-                        {ok, _} = erx_gatt_srv:facet(self(), {attach, Service}, ?WAIT_MS),
+                        {ok, _} = erx_gatt_srv:facet(self(), {attach, Service, true}, ?WAIT_MS),
                         Test ! {attached, self()},
                         handler_loop(Test)
                 end),

@@ -20,7 +20,8 @@ service's handler, the live links with their `Conn`, and the writes handed to ha
   `attach` makes the caller a service's handler; the core asks for a monitor of a handler
   it does not yet watch, and a handler's `down` detaches it from every service. A handler
   that attaches hears `connected` for each live link, so it knows every `Conn` it may
-  notify.
+  notify. A bonded link's `connected` carries the bond's identity only to a handler whose
+  attach said its grant asks for it, which the facet alone states.
 - **Writes.** A link's write goes to its service's handler under `Req`, a reference the
   process made for it, which the core maps back to the handler, the link and the link's
   own `Ref`; an answer is taken only from that handler, once, and goes to the link. A
@@ -57,13 +58,14 @@ the bond's identity address exactly when it is.
     limits :: #{atom() => #{atom() => limits()}},
     values = #{} :: #{key() => binary()},
     handlers = #{} :: #{atom() => pid()},
+    hearing = [] :: [pid()],  % the handlers whose grant asks for a bonded link's identity
     links = #{} :: #{pid() => link()},
     conns = #{} :: #{reference() => pid()},
     writes = #{} :: #{reference() => {Handler :: pid(), Link :: pid(), Ref :: pos_integer()}}
 }).
 -opaque core() :: #core{}.
 
--type op() :: {attach, atom()} | {set, atom(), atom(), binary()}
+-type op() :: {attach, atom(), Identity :: boolean()} | {set, atom(), atom(), binary()}
             | {notify | indicate, reference(), atom(), atom(), binary()} | {reply, reference(), term()}.
 -doc """
 What the process steps: a link's `join` call and its messages, a write with the fresh
@@ -104,7 +106,7 @@ step({join, Link, Conn, #{address := Address}, From}, #core{links = Links, conns
                        conns = Conns#{Conn => Link}},
     {[{monitor, Link},
       {reply, From, #{table => Core#core.table, values => Core#core.values}}
-      | to_handlers({connected, Conn, connected(Address, Security)}, Core)],
+      | connected_events(Conn, Address, Security, Core)],
      Joined};
 %% A link sends its next write only once it has the last one's answer or gave up waiting,
 %% so a new write drops the link's earlier one: the core holds at most one write a link.
@@ -138,20 +140,20 @@ link(_Link, #{conn := Conn}, {subscribed, {Service, Char}, Kind}, Core) ->
 link(_Link, #{conn := Conn}, {mtu, Mtu}, Core) ->
     {to_handlers({mtu, Conn, Mtu}, Core), Core};
 link(Link, #{conn := Conn, address := Address} = Joined, {security, Security}, Core) ->
-    Event = {connected, Conn, connected(Address, Security)},
-    {to_handlers(Event, Core), Core#core{links = (Core#core.links)#{Link := Joined#{security := Security}}}}.
+    {connected_events(Conn, Address, Security, Core),
+     Core#core{links = (Core#core.links)#{Link := Joined#{security := Security}}}}.
 
 %% ---- a facet's operations ----
 
 %% A refusal is thrown as {refused, Reason} and answered once, in step/2.
-facet({attach, Service}, Caller, From, #core{handlers = Handlers} = Core) ->
+facet({attach, Service, Identity}, Caller, From, #core{handlers = Handlers} = Core) when is_boolean(Identity) ->
     is_map_key(Service, Handlers) andalso throw({refused, attached}),
     New = not lists:member(Caller, maps:values(Handlers)),
-    Connected = [{event, Caller, {connected, Conn, connected(Address, Security)}}
+    Next = Core#core{handlers = Handlers#{Service => Caller}, hearing = hearing(Identity, Caller, Core#core.hearing)},
+    Connected = [{event, Caller, {connected, Conn, connected(Caller, Address, Security, Next)}}
                  || New, _Link := #{conn := Conn, address := Address, security := Security}
                                  <- maps:iterator(Core#core.links, ordered)],
-    {[{monitor, Caller} || New] ++ [{reply, From, {ok, maps:get(Service, Core#core.limits)}} | Connected],
-     Core#core{handlers = Handlers#{Service => Caller}}};
+    {[{monitor, Caller} || New] ++ [{reply, From, {ok, maps:get(Service, Core#core.limits)}} | Connected], Next};
 facet({set, Service, Char, Value}, Caller, From, Core) when is_binary(Value) ->
     owned(Service, Caller, Core),
     within(Service, Char, Value, Core),
@@ -207,6 +209,7 @@ down(Pid, #core{links = Links, conns = Conns, writes = Writes} = Core) ->
                        writes = without_link(Pid, Writes)}};
         #{} ->
             {[], Core#core{handlers = #{S => H || S := H <- Core#core.handlers, H =/= Pid},
+                           hearing = lists:delete(Pid, Core#core.hearing),
                            writes = #{Req => W || Req := {Handler, _, _} = W <- Writes, Handler =/= Pid}}}
     end.
 
@@ -216,13 +219,28 @@ without_link(Link, Writes) ->
 
 %% ---- events ----
 
-%% A `connected` event's facts: the address the phone connected from and the link's
-%% security as it last reported it, a security() whose shape this match checks whole: its
-%% level and whether it is bonded, with the bond's identity exactly when it is.
-connected(Address, #{level := _, bonded := false} = Security) when map_size(Security) =:= 2 ->
+%% Every attached handler's `connected` event of link Conn, once each.
+connected_events(Conn, Address, Security, #core{handlers = Handlers} = Core) ->
+    [{event, Handler, {connected, Conn, connected(Handler, Address, Security, Core)}}
+     || Handler <- lists:usort(maps:values(Handlers))].
+
+%% A `connected` event's facts for Handler: the address the phone connected from and the
+%% link's security as it last reported it, a security() whose shape this match checks
+%% whole: its level and whether it is bonded, with the bond's identity when it is and
+%% Handler's grant asks for it.
+connected(_Handler, Address, #{level := _, bonded := false} = Security, _Core) when map_size(Security) =:= 2 ->
     Security#{address => Address};
-connected(Address, #{level := _, bonded := true, identity := _} = Security) when map_size(Security) =:= 3 ->
-    Security#{address => Address}.
+connected(Handler, Address, #{level := _, bonded := true, identity := _} = Security, #core{hearing = Hearing})
+  when map_size(Security) =:= 3 ->
+    case lists:member(Handler, Hearing) of
+        true -> Security#{address => Address};
+        false -> (maps:remove(identity, Security))#{address => Address}
+    end.
+
+%% The handlers that hear a bonded link's identity, with Caller among them when its
+%% attach asks for it.
+hearing(true, Caller, Hearing) -> lists:usort([Caller | Hearing]);
+hearing(false, _Caller, Hearing) -> Hearing.
 
 to_handler(Service, Event, #core{handlers = Handlers}) ->
     case Handlers of

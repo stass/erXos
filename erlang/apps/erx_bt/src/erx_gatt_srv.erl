@@ -63,7 +63,8 @@ join(Conn, Info) ->
 -doc """
 A `ble` facet's operation `Op` for `Caller`, the process that becomes a service's
 handler, hears its events and alone answers the writes handed to it:
-`{attach, Service}`, `{set, Service, Char, Value}`, `{notify | indicate, Conn, Service,
+`{attach, Service, Identity}`, Identity whether the grant asks for a bonded link's
+identity, `{set, Service, Char, Value}`, `{notify | indicate, Conn, Service,
 Char, Value}` or `{reply, Req, Answer}`. The answers and refusals are the facet's
 (docs/design-bluetooth.md, "Refusals and error results"). An indication answers once the
 phone confirms it or the link's 30 s transaction timeout fails it, so `Timeout` must

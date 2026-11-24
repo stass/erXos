@@ -300,8 +300,9 @@ Every access passes one pure function, the **gate**:
 
 ```erlang
 -spec erx_gatt_gate:check(level(), link_security()) -> ok | {error, att_error()}.
--type level() :: open | encrypted | authenticated. % GAP 10.2.1 levels 1, 2 and 4
--type link_security() :: #{key := none | encrypted | authenticated, encrypted := boolean()}.
+-type level() :: open | encrypted | authenticated | bonded. % GAP 10.2.1 levels 1, 2 and 4, and bonded
+-type link_security() :: #{key := none | encrypted | authenticated, encrypted := boolean(),
+                           bonded := boolean()}.
 ```
 
 It is GAP's Table 10.2 (10.3.1) for the three levels erXos uses, whose
@@ -310,7 +311,13 @@ stored: an `open` access is allowed; an `encrypted` or `authenticated`
 access on a link with no key answers Insufficient Authentication
 (`0x05`); on a link with a key but not yet encrypted, Insufficient
 Encryption (`0x0F`); an `authenticated` access on a link encrypted with
-an unauthenticated key, Insufficient Authentication. Since every key is 16 octets and only
+an unauthenticated key, Insufficient Authentication. `bonded` is erXos's
+own level, level 4 on a link whose key is a kept bond's, the fact
+`bonded` of the link's security: it is refused as `authenticated` is,
+and on a link with an authenticated key that is no kept bond's, a
+pairing link before the store has kept its bond, Insufficient
+Authentication, so no access at `bonded` reaches a handler on a link
+whose phone is not yet a bond. Since every key is 16 octets and only
 Secure Connections pairs, level 3 and Encryption Key Size Too Short
 never arise. The ATT server calls the gate for every read and write of a
 characteristic value or a descriptor; the link calls it before every
@@ -502,7 +509,7 @@ gate refuses every `encrypted` and `authenticated` access with
 Insufficient Authentication, which is the right answer for a server with
 no key for the peer (GAP 10.3.1). The phone console is part of stage 3's service but
 is offered only once stage 4 exists, since its characteristics are
-`authenticated` ([The console](#the-console)).
+`bonded` ([The console](#the-console)).
 
 ## Domains and authority
 
@@ -1604,7 +1611,8 @@ or 128-bit, and optionally `advertise`. Each `characteristic` line gives
 its name, an identifier unique in the service, its UUID, the maximum
 length of its value, at most 512, and the accesses it allows, each with
 the level it requires: `read`, `write`, `write_without_response`,
-`notify` and `indicate`, each `open`, `encrypted` or `authenticated`. A
+`notify` and `indicate`, each `open`, `encrypted`, `authenticated` or
+`bonded` ([One table, one gate](#one-table-one-gate)). A
 readable characteristic may end with `value` and its initial value in
 hexadecimal, so a constant needs no handler.
 
@@ -1744,14 +1752,27 @@ it (GATT 5.2.1).
 ### The `ble` facet
 
 An app reaches the Bluetooth domain only through its `ble` facet, an
-instance of the interface `abi/services/ble.txt` declares. Its one
-parameter names the services the grantee handles, at most 8 names of
-`abi/gatt`, an identifier set in strict byte order
-([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)):
+instance of the interface `abi/services/ble.txt` declares. Its
+parameter `services` names the services the grantee handles, at most 8
+names of `abi/gatt`, an identifier set in strict byte order
+([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)),
+and `identity`, true, asks that the grantee's handler hear a bonded
+link's identity address in its `connected` events (below):
 
 ```text
 parameter services 1 identifier set 8 bytes 63 checked_by ble_grant
+parameter identity 2 boolean optional boolean checked_by ble_grant
 ```
+
+A phone's identity address is the one name of it that stays across its
+connections, so it lets a handler follow one phone over time; only a
+handler that needs that asks for it, the phone console among them, and
+the facet tells the registry so at each attach it forwards, so the
+registry gives the `identity` field to that grant's handlers and to no
+other. A phone that connects from its identity address rather than a
+resolvable private address shows it in `address` all the same, to
+every handler: it is the privacy of a phone that uses private addresses
+that the field keeps.
 
 The bound is written there once; [Declarations](#declarations-abigatt)
 gives what `ble_grant` refuses. The interface declares the five
@@ -1916,7 +1937,7 @@ handler receives, through the envelope rule, which the client module
 
 | Event | Meaning |
 | --- | --- |
-| `{connected, Conn, #{address := A, bonded := boolean(), level := L, identity => I}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bonded` is true once the link is encrypted with a kept bond's key, a resolved bond's or its own pairing's once kept; `A` is the address the phone connected from, a resolvable private address included, and `identity`, present exactly when `bonded` is true, is the bond's identity address, which the link takes from the bond the store resolved or kept and the same phone keeps across connections |
+| `{connected, Conn, #{address := A, bonded := boolean(), level := L, identity => I}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bonded` is true once the link is encrypted with a kept bond's key, a resolved bond's or its own pairing's once kept; `A` is the address the phone connected from, a resolvable private address included, and `identity`, present only when `bonded` is true and the handler's grant states `identity` true ([The `ble` facet](#the-ble-facet)), is the bond's identity address, which the link takes from the bond the store resolved or kept and the same phone keeps across connections |
 | `{mtu, Conn, Mtu}` | the bearer's MTU changed; a notification carries at most `Mtu - 3` octets |
 | `{subscribed, Conn, Char, none \| notify \| indicate}` | the phone wrote the characteristic's configuration |
 | `{write, Req, Conn, Char, Value}` | a write the gate allowed; the handler answers `erx_gatt:reply(Req, ok \| {error, Code})`, where `Req` is a reference the registry made for this write, which names it to no other handler, link or write |
@@ -2276,7 +2297,7 @@ commands; an app that needs every byte uses `write` with response.
 The phone console is the serial service made a **login line**, as an SSH
 connection is ([design-ssh.md](design-ssh.md#an-ssh-connection-is-a-line)):
 `erx_bt_console` handles the `console` service, a declaration with the
-UART service's UUIDs whose `rx` and `tx` require `authenticated`, and
+UART service's UUIDs whose `rx` and `tx` require `bonded`, and
 each phone's stream is a line that logs a person in through the system
 domain's `login` facet ([design-login.md](design-login.md)) and then
 masters a tty of the new session. `erx_bt_console` runs in a configured
@@ -2284,7 +2305,8 @@ domain of its own, `btconsole` ([Decisions](#decisions), 8), a client of
 the stream `erx_gatt_serial:start_link(console, Owner)` gives ([For
 apps](#for-apps)), as the QEMU suite's echo is of `nus`'s. Its row holds
 two grants and nothing else, which the manifest check holds it to: the
-`ble` facet with `services` naming `console` alone, and the login facet
+`ble` facet with `services` naming `console` alone and `identity` true,
+and the login facet
 with `line` `tty_line`, `logins` 8 and the one operation
 `login_passphrase` ([Who holds it](design-login.md#who-holds-it)). The
 Bluetooth domain holds no login facet. `btconsole` takes its login
@@ -2320,9 +2342,12 @@ manifest restarts it with a new facet
 * **The login.** It calls `login_passphrase(Name, Passphrase, Peer)`,
   `Peer` being the `identity` of the link's `connected` event in text,
   the bond's identity address, which a phone keeps across connections
-  while its connection address changes; the console takes no write of a
-  link that is not bonded, which the `authenticated` requirement below
-  already gives. `no_match`,
+  while its connection address changes. No write of a link that is not
+  bonded reaches the console, by construction: `rx` requires `bonded`,
+  so the gate refuses such a write, a pairing link's before the store
+  has kept its bond among them, before the registry hands it out, and
+  every write the console takes comes with a `connected` event that
+  carries `identity`. `no_match`,
   `limited` and `unavailable` are shown as `Login incorrect`,
   `Too many attempts; try later` and `Login unavailable`. After 3 failed
   attempts the process sends nothing more and drops the phone's writes
@@ -2343,7 +2368,8 @@ never offers the system shell, which only the console's secure lines
 carry ([design.md](design.md#decisions)). Since a passphrase must not
 cross the air in clear and a login prompt must not be reachable by
 anyone nearby, the manifest check refuses a `console` service whose
-`rx` or `tx` is below `authenticated`, which in turn needs stage 4. The
+`rx` or `tx` is below `bonded`, which in turn needs stage 4, and a
+console row whose `ble` grant does not state `identity` true. The
 UART service and the console share UUIDs, so a machine serves one of
 them: a manifest that offers both `nus` and `console` is refused, as a
 second holder of one service is. A release build offers the console
@@ -2361,7 +2387,10 @@ vault's, or before it the open choice of
 | prompt (host) | a 33-byte name, a NUL and a 1,025-byte passphrase each count as a failed attempt without a facet call; the fourth attempt gets no prompt | the length bound removed |
 | prompt fuzz (host) | `erx_bt_prompt` fed arbitrary bytes cut at arbitrary points never raises, never yields a name or passphrase past its bound, and its output never holds a byte of a passphrase | the echo left on for the passphrase |
 | identity (host) | the `connected` event of a bonded link from a resolvable private address carries the bond's identity address, and two connections of one bond carry the same | the connection address passed as `identity` |
-| manifest (host) | a `console` service at `encrypted` is refused; `nus` and `console` together are refused | either rule removed |
+| identity by grant (host) | a handler attached through a grant without `identity` hears a bonded link as bonded and never its identity; one whose grant asks hears it on the same link | the identity left in every handler's event |
+| bonded (host) | the gate refuses a `bonded` access on a link with an authenticated key that is no kept bond's, and passes it once the bond is kept | the bond check dropped from the gate |
+| serial shape (host) | `erx_gatt_serial` started for a service whose `rx` is not writable or whose `tx` is not notifiable is refused `{not_serial, Service}` | the shape check skipped |
+| manifest (host) | a `console` service at `authenticated` is refused; a console row whose grant does not state `identity` is refused; `nus` and `console` together are refused | any rule removed |
 | release manifests (build) | the shipped release manifests name no console; a sample that names one fails the check | the check's scan skipped |
 | Bumble (QEMU) | the stage 4 peer pairs by passkey, read from the `pair` file, writes `root`, the passphrase and `echo hello`, and reads `hello` in a notification; closing the link ends the session within 5 s | a wrong passphrase gets no shell, and a Just Works bond's write to `rx` is refused for insufficient authentication |
 
@@ -2459,7 +2488,7 @@ each ASCII the window composes from numbers and addresses alone:
 | `wait N` | the window is open, and the pairing wait has `N` seconds to run |
 | `waiting` | the window is open, the wait has passed, and the machine is bondable (GAP 9.4.3) |
 | `passkey NNNNNN AA:BB:CC:DD:EE:FF` | type this passkey on the phone with this address |
-| `bonded AA:BB:CC:DD:EE:FF authenticated` or `unauthenticated` | a bond is kept |
+| `bonded AA:BB:CC:DD:EE:FF TYPE LEVEL` | a bond is kept: its identity, the address with its type `public` or `random`, and its level `authenticated` or `unauthenticated` |
 | `failed AA:BB:CC:DD:EE:FF REASON` | the pairing failed, with its reason ([Refusals](#refusals-and-error-results)) |
 | `closed timeout` | the time ran out |
 
@@ -2719,8 +2748,10 @@ fails `unavailable` there, pairing fails, and bonds already kept work.
 **Pairing never replaces a bond.** A pairing whose phone turns out, at
 its key distribution, to have the identity of a bond already kept fails
 with `already_bonded`, its keys discarded; the operator ends a bond with
-`forget AA:BB:CC:DD:EE:FF` written to the control tree's `ctl`, or
-`forget all`, and pairs again. A ninth bond fails with `bonds_full`.
+`forget AA:BB:CC:DD:EE:FF TYPE` written to the control tree's `ctl`,
+the identity as its `bonded` line showed it, `public` or `random`, or
+`forget all`, and pairs again; a bond is its whole identity, so a
+public and a random address of the same octets are two bonds. A ninth bond fails with `bonds_full`.
 Forgetting a bond ends its connected link: the store sends `forgotten`
 to each link it monitors for that bond
 ([The link's messages](#the-links-messages)). SMP 2.4.3.2 holds a
@@ -3067,8 +3098,8 @@ and stops in the reverse order, the controller process first.
 | the control tree's `pair` | `ebusy` | another window is open |
 | | `einval` | a first write other than `display` or `nodisplay` |
 | | `eio` | the store is `unknown` since its start |
-| the control tree's `ctl` | `einval` | any write but `forget ADDRESS` or `forget all` |
-| | `eio` | `forget ADDRESS` while the store stays `unknown`, or any `forget` whose `put` is unconfirmed |
+| the control tree's `ctl` | `einval` | any write but `forget ADDRESS TYPE` or `forget all` |
+| | `eio` | `forget ADDRESS TYPE` while the store stays `unknown`, or any `forget` whose `put` is unconfirmed |
 | | `enoent` | no bond has that identity |
 | `ble` facet | `{error, not_granted}` | a service the grant does not name, refused by the facet before the registry sees it |
 | | `{error, attached}` | the service already has a handler: one whose end has not yet reached the registry, the same app's previous session's or, after a removal, the previous owner app's, which `erx_gatt:attach/1` waits out for up to `bt_attach_wait_ms` before it answers this; or another process of the same session that holds the service, which it answers at that deadline |
@@ -3126,7 +3157,7 @@ Each core's test is paired with the seeded faults it must catch.
 | `erx_pl011:program/1` | `fresh` writes `CR` 0 first, clears `FEN` before the divisors, drains the receive side within 33 reads, writes the divisors before `LCR_H` and `CR` whole last with the flow enables; under flow `none` no step sets `RTSEN` or `RTS`, and under `rts_cts` only the last sets `RTSEN`; `keep` clears no FIFO and programs the divisors only of an unprogrammed UART | `LCR_H` before the divisors, so the rate never latches; `fresh` keeping the boot's divisors; `RTS` set under flow `none` |
 | `erx_smp_crypto` | SMP Appendix D's sample data for `f4`, `f5`, `f6` and `ah` | the AES-CMAC key byte order reversed |
 | `erx_bt_state` | a state round-trips; another version, a truncation and an oversized count are refused; the largest state the declared table allows encodes in at most 4 KiB | the bond count read without its bound |
-| the store's table, against a scripted fake store and a development file over a fake data tree that fails a chosen step | a start reading `unavailable` or an undecodable blob runs with no bonds and refuses pairing, configuration writes and `forget ADDRESS`, and `forget all` replaces the bad blob; a start reading `none` makes the identity address; a `put` that reached the medium but answered `unavailable` fails the pairing, and the next pairing reads first and keeps its bond; after every confirmed change and read the domain's bonds are the store's; over the development file, a pairing's `put` that the storage completes after its deadline and after a confirmed `forget` of a bond it holds does not bring the bond back at the next start; a lower generation landing late, a `.new` name and names not the store's leave `get`'s blob the highest generation's | `unavailable` read as `none` (a pairing overwrites the stored bonds); the pre-put state kept after an unconfirmed `put` (the failed pairing's bond lost); the development file read at its lowest generation, and an unconfirmed `put` not counted in the next generation (each brings the forgotten bond back); a `.new` name not counted; `forget all` put without reading the generation |
+| the store's table, against a scripted fake store and a development file over a fake data tree that fails a chosen step | a start reading `unavailable` or an undecodable blob runs with no bonds and refuses pairing, configuration writes and `forget ADDRESS TYPE`, and `forget all` replaces the bad blob; a start reading `none` makes the identity address; a `put` that reached the medium but answered `unavailable` fails the pairing, and the next pairing reads first and keeps its bond; after every confirmed change and read the domain's bonds are the store's; over the development file, a pairing's `put` that the storage completes after its deadline and after a confirmed `forget` of a bond it holds does not bring the bond back at the next start; a lower generation landing late, a `.new` name and names not the store's leave `get`'s blob the highest generation's | `unavailable` read as `none` (a pairing overwrites the stored bonds); the pre-put state kept after an unconfirmed `put` (the failed pairing's bond lost); the development file read at its lowest generation, and an unconfirmed `put` not counted in the next generation (each brings the forgotten bond back); a `.new` name not counted; `forget all` put without reading the generation |
 | the line's `ctl` grammar | `reset`, with or without newline; everything else `einval` | a prefix match accepting `resetx` |
 | the line service's reset, over a model driver and device service | the five steps in order: the driver started with flow `none` before the off notification, the off and on notifications with their times between, and the driver started with the grant's flow only after the on time; input during the power cycle never reaches a reader; a power `{error, _}` at the off or the on notification ends the holding driver before the next step and, once it has ended, answers `eio`, leaves the line broken with no driver and answers `eio` to a write that arrived during the reset; with no power line, steps 1 and 5 alone | the grant's flow passed to the holding start, so RTS is asserted as the controller powers up; the second start made before the on time has passed; the holding start dropped, so the old driver's settings meet the power-up; the failure path that skips ending the holding driver, so a write queued during the reset reaches the controller under flow `none` |
 | the line keeper's core (`erx_line_core`), explored | from a fresh line, with and without a power line, every event in every reachable state up to three requests and two power-cycling resets, each start both answering and refusing: no driver of flow `none` outside a reset, the one live driver of the grant's flow the core's and the only one sent bytes, a reset always waiting on an event still to come, `ok` only at the fresh start and `eio` only with the line broken | a failed reset answered while its holding driver still runs; a failing reset that never takes its holding driver's end |
@@ -3143,6 +3174,7 @@ Each core's test is paired with the seeded faults it must catch.
 | a notification to a link that ends before answering it | the registry's caller gets `{error, gone}` | the caller's `From` handed to the link in a plain message (the caller waits until its own timeout) |
 | the `ble` facet, over a registry the test registers, kills and registers again | a request naming a service its grant names reaches the registry with the grantee's caller in it, and the answer reaches the caller; one naming another service is refused `{error, not_granted}`, and the registry sees nothing; with no registry registered, `{error, unavailable}`; after the registry is killed and started again, the next request reaches the new one; an attaching caller, not the facet, hears the events, and only it answers its writes | the service check dropped from `admit/3` (another app's service attached); the registry's pid kept from the facet's start (the request after the restart is answered `{error, failed}`); the handler taken from the forwarded call's `From` (events go to the facet, which drops them) |
 | `forget` with bonded links connected | the link whose address resolved to the forgotten bond at its start ends; a link of another bond stays | the store taking a link's pid only at `keep` |
+| `forget` by the whole identity | a public and a random bond of the same octets are two bonds: forgetting one leaves the other, and forgetting it again is `enoent` | `forget` matching the octets alone |
 | `erx_bt_hci_core`'s backlog, case by case | a link that acknowledges nothing is sent exactly `bt_link_backlog` messages, events and ACL packets alike; the next is dropped, the handle's disconnect is asked with `0x14`, and nothing more reaches the link; a link that acknowledges every message is never disconnected; a `taken` naming a gone link changes nothing, even on a reused handle | the bound compared one too late (33 sent); `completed` not counted; `taken` taken without its name (a gone link's acknowledgement lowers the next link's backlog) |
 | the link's backlog through the controller group, a link held at its start by a store that does not answer while the model line delivers 40 ACL packets for its handle | `HCI_Disconnect` with `0x14` is written after the 32nd; the link's mailbox never holds more than 32 of the controller's messages | the bound removed (all 40 delivered) |
 | a pairing's outcome, with the link, the window process and the store running | a window closed after the link's `keeping` leaves the bond kept, the window process logging `bonded` and counting no failure; a window closed before it fails the pairing `withdrawn`, and the store gets no `keep`; a link killed after `keeping` leaves the store's outcome as the pairing's; a window opened before that outcome answers `ebusy` | the window's monitor kept past `keeping` (the killed link counted `disconnected` while its bond is kept); the store's outcome sent to the link alone (the window waits) |
@@ -3426,7 +3458,7 @@ list ([todo-performance.md](todo-performance.md)):
    authenticated pairing in a window. A release build serves it only
    when the Bluetooth row's console argument names the service, and
    the manifests erXos ships do not; its characteristics are
-   `authenticated`, which the manifest check requires; the normal login
+   `bonded`, which the manifest check requires; the normal login
    limits of the login facet apply, as at every other line; and it
    never offers the system shell, which only the console's secure lines
    carry.

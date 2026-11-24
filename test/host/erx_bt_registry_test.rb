@@ -22,6 +22,10 @@ class ErxBtRegistryTest < Minitest::Test
   Seed = Data.define(:fault, :path, :anchor, :replacement, :catching_case)
 
   SEEDS = [
+    Seed.new(fault: "a bonded link's identity told to every handler, whatever its grant asked",
+             path: CORE, anchor: '        false -> (maps:remove(identity, Security))#{address => Address}',
+             replacement: '        false -> Security#{address => Address}',
+             catching_case: 'identity_reaches_only_the_handler_that_asked'),
     Seed.new(fault: "a service's values set and sent by any process, not only its handler",
              path: CORE, anchor: '        #{Service := Caller} -> ok;',
              replacement: '        #{Service := _} -> ok;',

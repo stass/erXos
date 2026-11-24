@@ -443,8 +443,9 @@ channel(_Cid, _Payload, _Now, #core{dropped = Dropped} = Core) ->
 %% ---- the ATT bearer ----
 
 %% What the ATT server is shown: the table, the handlers' values and the link's security.
-server(#core{table = Table, values = Values, key = Key, encrypted = Encrypted}) ->
-    #{table => Table, values => Values, security => #{key => gate_key(Key), encrypted => Encrypted}}.
+server(#core{table = Table, values = Values, key = Key, encrypted = Encrypted} = Core) ->
+    #{table => Table, values => Values,
+      security => #{key => gate_key(Key), encrypted => Encrypted, bonded => bonded(Core)}}.
 
 att({Actions, Bearer}, Now, Core) ->
     each(fun att_action/3, Actions, Now, Core#core{bearer = Bearer}).
