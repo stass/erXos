@@ -309,7 +309,8 @@ checked indices, spans and string references, never a native pointer.
 Two readers are generated from it: a C reader in `liberx`, which the
 root-task entry uses before ERTS starts, and the Erlang module
 `erx_manifest`, which the system services use and which gives the
-records a span names (`erx_manifest:span/3`). The packer writes every
+records a span names (`erx_manifest:span/4`, from the span's owner row
+and field, in the table the span's rule names). The packer writes every
 descriptor array the boot reads (configured domains, devices, facets,
 boot order, liveness), so no compiled configuration table repeats them;
 domain records refer to complete named limit records, so no runtime

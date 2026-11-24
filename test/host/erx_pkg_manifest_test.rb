@@ -56,8 +56,8 @@ class ErxPkgManifestTest < Minitest::Test
     'service and row swapped' => Fault.new(file: MODULE, from: '#{service := Index, facet := Facet}',
                                            to: '#{service := Facet, facet := Index}'),
     'ble offered as a need' => Fault.new(file: MODULE, from: 'Interface =/= ?ERX_SERVICE_BLE', to: 'Interface =/= -1'),
-    'span off by one' => Fault.new(file: READER, from: '{Relative div Stride, Counted};',
-                                   to: '{Relative div Stride + 1, Counted};'),
+    'span off by one' => Fault.new(file: READER, from: '{Relative div Stride, Count}.',
+                                   to: '{Relative div Stride + 1, Count}.'),
     'development key in a release' =>
       Fault.new(file: READER, from: RELEASE_END,
                 to: RELEASE_END.sub("\n#{' ' * 24}}", "},\n#{DEVELOPMENT_KEY}"))

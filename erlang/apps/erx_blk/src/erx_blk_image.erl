@@ -51,8 +51,7 @@ windows(Manifest, Slot) ->
     maybe
         {ok, View} ?= erx_manifest:open(Manifest),
         {ok, Indices} ?= erx_manifest:fold(View, windows, fun image_window/2, []),
-        {ok, #{extents := #{offset := Table}}} ?= erx_manifest:header(View),
-        {ok, Images} ?= images(View, Table, lists:usort(Indices), []),
+        {ok, Images} ?= images(View, lists:usort(Indices), []),
         Placed = [place(Image, Slot) || Image <- Images],
         {ok, [Window || {ok, Window} <- Placed], [Reason || {error, Reason} <- Placed]}
     else
@@ -85,28 +84,16 @@ image_window(#{holder := ?ERX_MF_NONE, role := ?ERX_MF_WINDOW_ROLE_VERIFIED_IMAG
 image_window(_Window, Indices) ->
     Indices.
 
-%% The images at Indices of the images table, as place/2 takes them. An image's extents
-%% are a slice of the extents table, which starts at the file offset Table: the slice's
-%% offset is a file offset too, on a record boundary of that table, as the reader checked.
-images(_View, _Table, [], Images) ->
+%% The images at Indices of the images table, as place/2 takes them, each with the
+%% extents table's rows its extents span names, which the reader gives.
+images(_View, [], Images) ->
     {ok, lists:reverse(Images)};
-images(View, Table, [Index | Rest], Images) ->
+images(View, [Index | Rest], Images) ->
     maybe
-        {ok, #{name := NameRef, format := Format, data_bytes := Bytes,
-               extents := #{offset := First, count := Count}}} ?= erx_manifest:fetch(View, images, Index),
+        {ok, #{name := NameRef, format := Format, data_bytes := Bytes}} ?= erx_manifest:fetch(View, images, Index),
         {ok, Name} ?= erx_manifest:string(View, NameRef),
-        {ok, Extents} ?= extents(View, (First - Table) div ?ERX_MF_EXTENT_SIZE, Count, []),
+        {ok, Rows} ?= erx_manifest:span(View, images, Index, extents),
+        Extents = [{Offset, Length} || #{slot_offset := Offset, length := Length} <- Rows],
         Image = #{name => Name, format => Format, data_bytes => Bytes, extents => Extents},
-        images(View, Table, Rest, [Image | Images])
-    end.
-
-%% Count extents from the extents table's row Index, as {SlotOffset, Length}.
-extents(_View, _Index, 0, Extents) ->
-    {ok, lists:reverse(Extents)};
-extents(View, Index, Count, Extents) ->
-    case erx_manifest:fetch(View, extents, Index) of
-        {ok, #{slot_offset := Offset, length := Length}} ->
-            extents(View, Index + 1, Count - 1, [{Offset, Length} | Extents]);
-        {error, _} = Error ->
-            Error
+        images(View, Rest, [Image | Images])
     end.

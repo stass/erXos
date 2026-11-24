@@ -631,9 +631,12 @@ module Erx
         end
         module_name = Names.c(specification.name)
         prefix_export = specification.extent ? ['-export([open_prefix/1]).'] : []
+        readable = spans(specification)
+        accessors = %w[read/1 open/1 header/1 count/2 fetch/3] + (readable.empty? ? [] : ['span/4']) +
+                    %w[string/2 fold/4 fuzz/1]
         lines = [NOTICE, "-module(#{module_name}).",
                  '-moduledoc "Bounded structural reader over immutable ABI bytes; policy admission is separate.".',
-                 '-export([read/1, open/1, header/1, count/2, fetch/3, span/3, string/2, fold/4, fuzz/1]).',
+                 "-export([#{accessors.join(', ')}]).",
                  *prefix_export,
                  '-export_type([view/0, error/0]).', '',
                  '-record(view, {schema = ?MODULE :: module(), bytes :: binary()}).',
@@ -647,6 +650,7 @@ module Erx
           named_types.each { |type| lines.concat(type_specification(type)) }
         end
         lines << RUNTIME
+        lines << span_accessor(readable, specification) unless readable.empty?
         lines << PREFIX_RUNTIME if specification.extent
         lines << 'reader_spec() ->'
         lines << indent(literal(reader_data(specification), depth: 1), 4) + '.'
@@ -662,6 +666,48 @@ module Erx
         output = lines.join("\n")
         raise SchemaError, 'generated Erlang source is not ASCII' unless output.ascii_only?
         output
+      end
+
+      # A span: the field `field` of table `owner`'s records, the pair `field.offset` and
+      # `field.count` that a slice or partition rule bounds to the records of table `table`.
+      Span = Data.define(:owner, :field, :table)
+
+      # The spans the reader's slice and partition rules give, each once. span/4 takes a span's
+      # owner row and field, never a span value, so the table it reads is always the rule's.
+      def spans(reader)
+        found = reader.rules.filter_map do |rule|
+          next unless %w[slice partition].include?(rule.fetch(:kind))
+
+          Span.new(owner: rule.fetch(:offset).scope, field: span_field(rule), table: rule.fetch(:table))
+        end.uniq
+        found.group_by { |span| [span.owner, span.field] }.each do |key, group|
+          raise SchemaError, "Erlang reader span #{key.join('[].')} names two tables" if group.size > 1
+        end
+        found.sort_by { |span| [span.owner, span.field] }
+      end
+
+      # The field a slice or partition rule bounds: its offset and count paths are
+      # OWNER[].FIELD.offset and OWNER[].FIELD.count, the shape span/4 names a span by.
+      def span_field(rule)
+        offset = rule.fetch(:offset)
+        count = rule.fetch(:count)
+        field = offset.fields.first
+        unless offset.scope != 'root' && offset.fields == [field, 'offset'] &&
+               count.scope == offset.scope && count.fields == [field, 'count']
+          raise SchemaError, "Erlang reader span #{offset.name} is not a record's FIELD.offset and FIELD.count"
+        end
+        field
+      end
+
+      # span/4, typed per span: each clause of its spec names an owner and field pair and the
+      # records of the table that pair's rule gives, so Dialyzer refuses any other pair too.
+      def span_accessor(spans, reader)
+        clauses = spans.map do |span|
+          record = type_name(reader.tables.fetch(span.table).fetch(:type))
+          "(view(), #{literal(atom(span.owner))}, non_neg_integer(), #{literal(atom(span.field))}) ->\n" \
+            "          {ok, [#{record}()]} | {error, error()}"
+        end
+        [SPAN_DOC, "-spec span#{clauses.join(";\n          ")}.", SPAN_CODE].join("\n")
       end
 
       def reachable_types(reader)
@@ -796,6 +842,7 @@ module Erx
           result[:offset] = path_data(rule.fetch(:offset))
           result[:count] = path_data(rule.fetch(:count))
           result[:table] = atom(rule.fetch(:table))
+          result[:field] = atom(span_field(rule)) unless rule.fetch(:kind) == 'string'
           if rule.fetch(:kind) == 'string'
             result[:class] = atom(rule.fetch(:class))
             result[:maximum] = rule.fetch(:maximum)
@@ -933,48 +980,26 @@ module Erx
         fetch(View, Name, Index) ->
             attempt(fun() ->
                 {Bytes, Reader, Header} = view_data(View),
-                Table = record_table(Name, Reader),
-                Count = path_value(maps:get(count, Table), Header, Header),
-                ensure(is_integer(Index) andalso Index >= 0 andalso Index < Count,
-                       index, <<"table">>, 0),
-                record_at(Name, Table, Index, Bytes, Header, Reader)
+                {_Base, Record} = indexed_record(Name, Index, Bytes, Header, Reader),
+                Record
             end).
 
-        -doc """
-        The checked records of table `Name` that `Span`, a span field of
-        another record, names: its `offset`, the byte offset of its first
-        record, and its `count`. A span that does not fall on the table's
-        records, whole, is an error, as the open check's slice rule says.
-        """.
-        -spec span(view(), atom(), #{offset := non_neg_integer(), count := non_neg_integer()}) ->
-            {ok, [map()]} | {error, error()}.
-        span(View, Name, Span) ->
-            attempt(fun() ->
-                {Bytes, Reader, Header} = view_data(View),
-                Table = record_table(Name, Reader),
-                Total = path_value(maps:get(count, Table), Header, Header),
-                Stride = maps:get(size, Table),
-                {First, Count} =
-                    case Span of
-                        #{offset := Offset, count := Counted}
-                          when is_integer(Offset), is_integer(Counted), Counted >= 0 ->
-                            Relative = Offset - path_value(maps:get(offset, Table), Header, Header),
-                            ensure(Relative >= 0 andalso Relative rem Stride =:= 0 andalso
-                                   Relative div Stride =< Total andalso
-                                   Counted =< Total - Relative div Stride,
-                                   slice, <<"span">>, 0),
-                            {Relative div Stride, Counted};
-                        _ ->
-                            fail(slice, <<"span">>, 0)
-                    end,
-                [record_at(Name, Table, Index, Bytes, Header, Reader)
-                 || Index <- lists:seq(First, First + Count - 1)]
-            end).
+        %% The byte offset of the record at Index of table Name, and the record;
+        %% an index outside the table is an error.
+        indexed_record(Name, Index, Bytes, Header, Reader) ->
+            Table = record_table(Name, Reader),
+            Count = path_value(maps:get(count, Table), Header, Header),
+            ensure(is_integer(Index) andalso Index >= 0 andalso Index < Count,
+                   index, <<"table">>, 0),
+            {record_base(Table, Index, Header), record_at(Name, Table, Index, Bytes, Header, Reader)}.
+
+        %% The byte offset of the record at Index of Table.
+        record_base(Table, Index, Header) ->
+            path_value(maps:get(offset, Table), Header, Header) + Index * maps:get(size, Table).
 
         %% The record at Index of Table, which the caller bounded.
         record_at(Name, Table, Index, Bytes, Header, Reader) ->
-            Offset = path_value(maps:get(offset, Table), Header, Header) +
-                     Index * maps:get(size, Table),
+            Offset = record_base(Table, Index, Header),
             Type = maps:get(type, Table),
             Record = decode(Type, Bytes, Offset, <<"table">>),
             check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
@@ -1114,8 +1139,7 @@ module Erx
             case Index < Count of
                 false -> ok;
                 true ->
-                    Offset = path_value(maps:get(offset, Table), Header, Header) +
-                             Index * maps:get(size, Table),
+                    Offset = record_base(Table, Index, Header),
                     Type = maps:get(type, Table),
                     Record = decode(Type, Bytes, Offset, atom_to_binary(Name, utf8)),
                     check_scope(Name, Type, Record, Bytes, Offset, Header, Reader),
@@ -1147,8 +1171,7 @@ module Erx
                     ensure(Covered =:= TargetCount, partition,
                            maps:get(label, Path), TargetOffset + Covered * Stride);
                 true ->
-                    OwnerBase = path_value(maps:get(offset, Owner), Header, Header) +
-                                Index * maps:get(size, Owner),
+                    OwnerBase = record_base(Owner, Index, Header),
                     Record = decode(maps:get(type, Owner), Bytes, OwnerBase,
                                     maps:get(label, Path)),
                     Offset = path_value(Path, Record, Header),
@@ -1161,6 +1184,23 @@ module Erx
                     partition_rows(Rule, Owner, Target, Header, Bytes,
                                    Index + 1, Covered + Count)
             end.
+
+        %% The first row and the count of the rows of a slice or partition
+        %% rule's table that the rule's span in Record, the record at byte Base,
+        %% names. The span's offset is the byte offset of its first row; a span
+        %% that does not fall whole on the table's rows is an error at that
+        %% offset field. The open check and span/4 both locate a span here.
+        span_rows(#{offset := Path, count := CountPath, table := Name}, Record, Header, Base, Reader) ->
+            Table = record_table(Name, Reader),
+            Total = path_value(maps:get(count, Table), Header, Header),
+            Stride = maps:get(size, Table),
+            Relative = path_value(Path, Record, Header) - path_value(maps:get(offset, Table), Header, Header),
+            Count = path_value(CountPath, Record, Header),
+            ensure(Relative >= 0 andalso Relative rem Stride =:= 0 andalso
+                   Relative div Stride =< Total andalso
+                   Count =< Total - Relative div Stride,
+                   slice, maps:get(label, Path), Base + maps:get(offset, Path)),
+            {Relative div Stride, Count}.
 
         fold_records(Name, Table, Bytes, Header, Reader, Function, Accumulator, Index) ->
             Count = path_value(maps:get(count, Table), Header, Header),
@@ -1400,19 +1440,10 @@ module Erx
             Count = path_value(maps:get(count, Table), Header, Header),
             ensure(Value < Count orelse Value =:= Absent,
                    index, maps:get(label, Path), Base + maps:get(offset, Path));
-        check_rule(#{kind := Kind, offset := Path, count := CountPath, table := Name},
-                   Record, Header, _Bytes, Base, Reader)
+        check_rule(#{kind := Kind} = Rule, Record, Header, _Bytes, Base, Reader)
           when Kind =:= slice; Kind =:= partition ->
-            Table = record_table(Name, Reader),
-            First = path_value(maps:get(offset, Table), Header, Header),
-            Total = path_value(maps:get(count, Table), Header, Header),
-            Stride = maps:get(size, Table),
-            Relative = path_value(Path, Record, Header) - First,
-            Count = path_value(CountPath, Record, Header),
-            ensure(Relative >= 0 andalso Relative rem Stride =:= 0 andalso
-                   Relative div Stride =< Total andalso
-                   Count =< Total - Relative div Stride,
-                   slice, maps:get(label, Path), Base + maps:get(offset, Path));
+            {_First, _Count} = span_rows(Rule, Record, Header, Base, Reader),
+            ok;
         check_rule(#{kind := string} = Rule, Record, Header, Bytes, Base, Reader) ->
             check_string(Rule, Record, Header, Bytes, Base, Reader);
         check_rule(#{kind := optional, path := Path, flags := Flags, mask := Mask},
@@ -1520,6 +1551,41 @@ module Erx
                                             maps:put(Key, true, Seen));
                         _ -> false
                     end
+            end.
+      ERLANG
+
+      # span/4 reads a span from its owner row itself and takes its table from the span's
+      # rule, so no caller hands it a span value or pairs a span with another table.
+      SPAN_DOC = <<~'ERLANG'.chomp.freeze
+        -doc """
+        The checked rows that span field `Field` of row `Index` of table
+        `Owner` names, in the table that span's slice or partition rule
+        gives. An `Owner` and `Field` pair that no such rule names is an
+        unknown_span error; an `Index` outside `Owner` is an index error.
+        """.
+      ERLANG
+
+      SPAN_CODE = <<~'ERLANG'.freeze
+        span(View, Owner, Index, Field) ->
+            attempt(fun() ->
+                {Bytes, Reader, Header} = view_data(View),
+                Rule = span_rule(Owner, Field, Reader),
+                {Base, Record} = indexed_record(Owner, Index, Bytes, Header, Reader),
+                {First, Count} = span_rows(Rule, Record, Header, Base, Reader),
+                TargetName = maps:get(table, Rule),
+                Target = record_table(TargetName, Reader),
+                [record_at(TargetName, Target, Row, Bytes, Header, Reader)
+                 || Row <- lists:seq(First, First + Count - 1)]
+            end).
+
+        %% The slice or partition rule of span field Field of table Owner's rows.
+        span_rule(Owner, Field, Reader) ->
+            Rules = [Rule || #{field := RuleField, offset := #{scope := RuleOwner}} = Rule
+                                 <- maps:get(rules, Reader),
+                             RuleOwner =:= Owner, RuleField =:= Field],
+            case Rules of
+                [Rule | _] -> Rule;
+                [] -> fail(unknown_span, <<"span">>, 0)
             end.
       ERLANG
     end

@@ -114,13 +114,12 @@ ble(View, [{_Service, Facet}]) ->
     #{row => Facet, gatt => gatt(View, Facet)}.
 
 %% The values of the facet row's services parameter: of the parameter rows its
-%% span names, which the reader gives, those under the ble interface's key for
-%% it, each an identifier's string.
+%% parameters span names, which the reader gives, those under the ble
+%% interface's key for it, each an identifier's string.
 gatt(View, Facet) ->
-    #{parameters := Span} = checked(erx_manifest:fetch(View, facets, Facet)),
     [checked(erx_manifest:string(View, Bytes))
      || #{key := ?ERX_SERVICE_BLE_SERVICES_KEY, bytes := Bytes}
-            <- checked(erx_manifest:span(View, facet_parameters, Span))].
+            <- checked(erx_manifest:span(View, facets, Facet, parameters))].
 
 service(View, #{interface := Interface} = Row, Facet) ->
     #{name => name(View, Row),

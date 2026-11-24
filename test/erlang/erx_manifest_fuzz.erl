@@ -37,7 +37,8 @@ verdict(Record) ->
         {ok, View} ->
             {ok, _} = ?M:header(View),
             lists:foreach(fun(Table) -> rows(View, Table) end, ?TABLES),
-            {ok, ok} = ?M:fold(View, facets, fun(Facet, ok) -> span(View, Facet) end, ok),
+            {ok, Facets} = ?M:count(View, facets),
+            lists:foreach(fun(Facet) -> span(View, Facet) end, lists:seq(0, Facets - 1)),
             %% The package process's reader answers every manifest the generated reader
             %% accepts, refusing only an apps row without its app template's rows.
             case erx_pkg_manifest:system_config(Record) of
@@ -51,8 +52,9 @@ verdict(Record) ->
     end.
 
 %% A facet row's parameter span gives its count of parameter rows.
-span(View, #{parameters := #{count := Count} = Span}) ->
-    {ok, Rows} = ?M:span(View, facet_parameters, Span),
+span(View, Facet) ->
+    {ok, #{parameters := #{count := Count}}} = ?M:fetch(View, facets, Facet),
+    {ok, Rows} = ?M:span(View, facets, Facet, parameters),
     Count = length(Rows),
     ok.
 

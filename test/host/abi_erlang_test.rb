@@ -56,7 +56,7 @@ class AbiErlangTest < Minitest::Test
 
   def test_generated_reader_passes_stock_otp_eunit
     output = run_oracle('run', @directory)
-    assert_includes output, 'All 9 tests passed.'
+    assert_includes output, 'All 10 tests passed.'
   end
 
   def test_generated_erlang_values_match_independent_bytes_and_ruby_reader
@@ -225,8 +225,12 @@ class AbiErlangTest < Minitest::Test
     # The one unit claims the second device row, leaving the first unclaimed.
     gap = AbiErlangFixture.devices(owners: 1, devices: 2)
     AbiManifestFixture.integer(gap, AbiManifestFixture::STRINGS_AT + 12, AbiManifestFixture::STRINGS_AT + 24 + AbiManifestFixture::DEVICE_ROW)
+    # The one unit's span starts a byte into the device table, on no row.
+    misaligned = AbiErlangFixture.devices(owners: 1, devices: 1)
+    AbiManifestFixture.integer(misaligned, AbiManifestFixture::STRINGS_AT + 12, AbiManifestFixture::STRINGS_AT + 25)
     fixtures = {
       'partition_valid' => valid,
+      'span_misaligned' => misaligned,
       'partition_overlap' => overlapping,
       'partition_gap' => gap,
       'partition_orphan' => AbiErlangFixture.devices(owners: 1, devices: 2),

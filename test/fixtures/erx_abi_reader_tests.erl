@@ -166,6 +166,28 @@ ordered_partition_test() ->
     ?assertMatch({error, #{reason := partition}},
                  erx_manifest:read(fixture("partition_orphan.bin"))).
 
+%% Each unit's devices span gives its count of device rows, and the spans, in unit
+%% order, give every device row once. A pair that no rule names and a unit past the
+%% table are refused, and a span on no row of its table is refused at open.
+span_test() ->
+    {ok, View} = erx_manifest:open(fixture("partition_valid.bin")),
+    {ok, Units} = erx_manifest:count(View, units),
+    {ok, Devices} = erx_manifest:count(View, devices),
+    Spans = [begin
+                 {ok, #{devices := #{count := Count}}} = erx_manifest:fetch(View, units, Unit),
+                 {ok, Rows} = erx_manifest:span(View, units, Unit, devices),
+                 ?assertEqual(Count, length(Rows)),
+                 Rows
+             end || Unit <- lists:seq(0, Units - 1)],
+    ?assertEqual([Row || Index <- lists:seq(0, Devices - 1),
+                         {ok, Row} <- [erx_manifest:fetch(View, devices, Index)]],
+                 lists:append(Spans)),
+    ?assertMatch({error, #{reason := unknown_span}}, erx_manifest:span(View, units, 0, places)),
+    ?assertMatch({error, #{reason := unknown_span}}, erx_manifest:span(View, devices, 0, devices)),
+    ?assertMatch({error, #{reason := index}}, erx_manifest:span(View, units, Units, devices)),
+    ?assertMatch({error, #{reason := slice, field := <<"units[].devices.offset">>}},
+                 erx_manifest:read(fixture("span_misaligned.bin"))).
+
 tagged_parameter_checks_test() ->
     {ok, _} = erx_manifest:read(fixture("bool_valid.bin")),
     ?assertMatch({error, #{reason := range,
