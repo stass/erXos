@@ -452,7 +452,11 @@ the store, the registry of GATT services, the file service with the
 pairing window, and the controller group. A restart of the group
 leaves the store, its address, the handlers' attachments and a
 pairing wait alone; a restart of the store or the registry restarts
-everything after it. The group, `erx_bt_host_sup`, is
+everything after it. The design ends the whole domain at the store's
+or the registry's end instead, so that every handler in an app's
+session stops with its facet and attaches again, rather than staying
+attached to a registry that has forgotten it; that is not built. The
+group, `erx_bt_host_sup`, is
 `one_for_all`, at most five restarts in 60 seconds, over the link
 supervisor, the line's reader and writer, and the controller process,
 so all four always belong to one run of the core. Links are temporary

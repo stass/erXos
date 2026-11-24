@@ -521,14 +521,16 @@ only for a row of the boot's table that the boot had not yet recorded
 
 **A read that cannot read the file.** A read that fails, or finds a
 file over the bound, gives no settings, and the failure is in the log
-and at `/proc/apps`. The boot, its package set's rows included, reads
-it as a file that holds no settings: the rows it is for take their declared
-defaults, which the build proved, since no administrator's command
-waits on a boot to be refused, and a machine whose storage domain is
-down still starts what its manifest enables, as a session does not
-wait for a restart either
-([design-system.md](design-system.md#a-session-takes-the-console)). A
-command does not: one that needs the file to know what to start,
+and at `/proc/apps`. The boot, its package set's rows included, starts
+no row the read was for: each shows `stopped`, since the file it could
+not read may disable any row, and a declared default that enables
+`bleuart` or an app would otherwise start what the administrator turned
+off. Each row starts at its own command, whose read succeeds once the
+storage domain serves, or at the next boot. An absent file is not a
+failed read: it is a machine with no settings of its own, and so is a
+machine whose manifest grants the system domain no `data` facet, where
+the build proved that no file can exist and the boot reads none. A
+command likewise: one that needs the file to know what to start,
 `start`, `restart`, `onestart` or `onerestart`, answers `eio` and
 changes nothing, since the declared defaults could start a row the
 administrator disabled or put it on a display the file moved it from,
@@ -1106,12 +1108,12 @@ and starts a row of an install or an update only by its own command.
 
 | Failure | Detected by | What happens |
 | --- | --- | --- |
-| the storage domain is down at boot, ends before it reports ready, or does not make the system domain's grant within the mint core's deadline | the first read of `start.conf`, which follows the system domain's namespace being in place ([design-system.md](design-system.md#a-session-takes-the-console)), fails, since the system domain's `data` grant is absent | the read counts as a file with no settings: the merge applies the declared defaults, the rows they enable start, and `/proc/apps` shows `start_conf` as `failed` with its reason; nothing reads the file again for those rows, and each row takes its local settings at its own command, whose read succeeds once the storage domain serves, or at the next boot |
+| the storage domain is down at boot, ends before it reports ready, or does not make the system domain's grant within the mint core's deadline | the first read of `start.conf`, which follows the system domain's namespace being in place ([design-system.md](design-system.md#a-session-takes-the-console)), fails, since the system domain's `data` grant is absent | no row the read was for starts, each shows `stopped`, and `/proc/apps` shows `start_conf` as `failed` with its reason; nothing reads the file again for those rows, and each starts at its own command, whose read succeeds once the storage domain serves, or at the next boot |
 | the principal has no room | the domain library's plan | the start is refused with `quota` or `no_memory`; a kept row counts it as an end |
 | a session ends more often than its row allows | the row's supervisor | the row is down, with the last reason at `/proc/apps`, until `service NAME start` or the next boot |
 | a local setting names a display the template is not granted, or one a kept row holds | the admission | at boot the row is `refused` with `{no_grant, D}` or `{display_held, Name}` at `/proc/apps` and starts nothing; at a `start` or `restart` the command answers `eperm` or `ebusy`, with the reason in the log, and changes nothing |
 | `start.conf` is damaged, holds `sh` the reader does not take, or names a row the table does not hold | the settings judgement, at every read | each problem line is skipped and shown at `/proc/apps` with its line, and the rest stands; `service -c` prints them |
-| `start.conf` is longer than 64 KiB | the table's reader | reported at `/proc/apps` as `too_long` and handled as a read that fails: as a file with no settings at boot, for the boot's package set's rows too, as in the first row, and as in the next row at a command |
+| `start.conf` is longer than 64 KiB | the table's reader | reported at `/proc/apps` as `too_long` and handled as a read that fails: at boot no row it was for starts, the boot's package set's rows included, as in the first row, and as in the next row at a command |
 | an `enable` or `disable` whose new text would be longer than `start_conf_max` | the start service, before it writes | `efbig`; the file is left as it was, so no edit of the start service ever makes a file every later read takes as `too_long` |
 | a read of `start.conf` fails at a command | `erx_starter_rc`'s answer | `start`, `restart`, `onestart` and `onerestart` answer `eio` and change nothing; `stop` and `onestop` are judged on the row as it was last applied and end the session that runs ([How a command is judged](#how-a-command-is-judged)); no other row changes, and the failure is logged and shown at `/proc/apps` |
 | a purge arrives while the package process carries out an install, update or removal | nothing: it is the order the package process takes them in | the `ctl` write's callback waits in the writer's grant for the purge's answer while the table takes the operation's publication; the purge is carried out after it, and a later `ctl` write of the same client waits for the purge |
@@ -1323,9 +1325,13 @@ variable left out of the reserve, which admits the third.
   keeper that does not clear the count;
 * the states the inspector shows, each with a test: `refused` with its
   reason, `down`, `disabled`, `stopped`, `installed`, and `start_conf`
-  `failed` on a machine with no data partition, where the manifest's
-  enabled rows still run; seeded: a boot that refuses as a command does,
-  which starts no row.
+  `failed` after a seeded read failure, under a row the file disables
+  and a row whose declared default enables, where neither starts;
+  seeded: a boot that reads the failure as a file with no settings,
+  which starts the second; and `read` on a manifest that grants the
+  system domain no `data` facet, where the manifest's enabled rows run;
+  seeded: a boot that counts that machine's missing file as a failed
+  read, which starts none.
 
 **Fuzz targets**, each landing with its parser: the `ctl` line grammar,
 and `start.conf`'s reader with the settings judgement over it, checking
@@ -1429,9 +1435,11 @@ Decisions:
     `start`, `restart`, `onestart` and `onerestart` answer `eio`, while
     `enable` and `disable` answer `eio` and write nothing, and `stop` and
     `onestop` are judged on the row as it was last applied, so an
-    administrator can always stop a running row; the boot reads
-    the failure as a file with no settings, so a machine whose storage
-    domain is down starts what its build proved
+    administrator can always stop a running row; a boot whose read
+    fails starts no row the read was for, so a row the administrator
+    disabled never starts on a failed read, while a machine whose
+    manifest grants the system domain no `data` facet has no file and
+    starts what its build proved
     ([A read that cannot read the file](#the-start-table)).
 11. **The table never waits for the package process**, which waits for
     the table at each publication: a `ctl` write's callback awaits a purge,

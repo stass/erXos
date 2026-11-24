@@ -462,13 +462,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the rooting rests on `erx_fs_grant` building nodes only from the callbacks' answers (`erx_lfs` should check
   each path against its grant's root, as `tree apps` will need); and a file at `/packages`, or a directory a
   full volume cannot make, leaves the tree failing its requests without a diagnostic at attach.
-* [High] apps, the boot's fallback when `/etc/start.conf` cannot be read
-  ([design-apps.md](design-apps.md#the-start-table), "A read that cannot read the file", and decision 10):
-  a boot whose read fails, or whose storage domain misses the mint core's deadline, starts every row its
-  declared default enables, so a row an administrator disabled starts on such a boot. For an app that is a
-  wrong start; for `bleuart` ([design-bluetooth.md](design-bluetooth.md#the-console)) it offers root's shell
-  to anyone in radio range on a development card whose administrator turned it off. Have the boot leave a row
-  off when the file is unreadable, unless the file is known absent, and test both with a seeded read failure.
+* [High] apps, the built boot's fallback at a failed read of the start table's file
+  (`erlang/apps/erx_starter/src/erx_start_table.erl`, `read_answered/3`): the first failed read makes the table
+  from the manifest's rows alone and starts every row their defaults enable, so a row an administrator
+  disabled, `bleuart`'s among them, starts on such a boot. [design-apps.md](design-apps.md#the-start-table)
+  ("A read that cannot read the file", decision 10) starts no row; fix it with the seeded tests that section names.
 
 ## Planned features
 

@@ -1604,7 +1604,10 @@ with a handler changes; the controller process turns it into one input
 of `erx_bt_hci_core`, `{advertising_data, Data}`, `Data` from
 `erx_bt_adv:data/1`, and the core writes LE Set Advertising Data with
 it at its next free command slot, a later input replacing one not yet
-written. Nothing restarts, no link ends and the scan response is
+written. A controller process that starts takes the set in its
+configuration, from `erx_gatt_srv:advertised/0`, and the bring-up
+advertises that, so a change while the group restarts is not missed.
+Nothing restarts, no link ends and the scan response is
 unchanged. That a controller takes LE Set Advertising Data while
 legacy advertising is enabled, and uses the new data from its next
 advertising event, is unverified: no source read for this design
@@ -1686,16 +1689,11 @@ the line service's is named `line`
 name the mint provides and the interface the check reasons from pick one
 service; a service of the `ble` interface served by no configured
 domain; a `ble` grant to the system domain, whose handler would take a
-phone's bytes (B8); a `ble` grant to a session template other than the
-app template and the template of a principal with a `start` row, since
-every session made from any other template would hold it, so that two
-sessions would contend for one service's handler, as `line_grant`
-refuses one (the app template's one `ble` row is the build's, from the
-`apps` row's `gatt`, and each app's session holds it narrowed to its
-own services, [Who holds `ble`](#the-ble-facet); a `start` row runs at
-most one session at a time,
-[design-apps.md](design-apps.md#how-a-command-is-judged), as `bleuart`'s
-does); a service no file
+phone's bytes (B8); a `ble` grant to a session template that is neither
+the app template nor a start row's template, since every session made
+from any other template would hold it, so that two sessions would
+contend for one service's handler, as `line_grant` refuses one
+([Who holds `ble`](#the-ble-facet)); a service no file
 declares, a service two rows name,
 two served services of one UUID, and advertising data that do not fit.
 Every served set is thus a subset of `abi/gatt`'s services with none
@@ -1791,24 +1789,16 @@ An app reaches the Bluetooth domain only through its `ble` facet, an
 instance of the interface `abi/services/ble.txt` declares. Its
 parameter `services` names the services the grantee handles, at most 8
 names of `abi/gatt`, an identifier set in strict byte order
-([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)),
-and `identity`, true, asks that the grantee's handler hear a bonded
-link's identity address in its `connected` events (below):
+([design-abi.md](design-abi.md#services-facets-and-their-parameter-schemas)):
 
 ```text
 parameter services 1 identifier set 8 bytes 63 checked_by ble_grant
-parameter identity 2 boolean optional boolean checked_by ble_grant
 ```
 
-A phone's identity address is the one name of it that stays across its
-connections, so it lets a handler follow one phone over time; only a
-handler that needs that asks for it, and
-the facet tells the registry so at each attach it forwards, so the
-registry gives the `identity` field to that grant's handlers and to no
-other. A phone that connects from its identity address rather than a
-resolvable private address shows it in `address` all the same, to
-every handler: it is the privacy of a phone that uses private addresses
-that the field keeps.
+No handler hears a bonded phone's identity address, the one name of it
+that stays across its connections: a phone that connects from a
+resolvable private address shows that address alone. One that connects
+from its identity address shows it in `address`, to every handler.
 
 The bound is written there once; [Declarations](#declarations-abigatt)
 gives what `ble_grant` refuses. The interface declares the five
@@ -1861,9 +1851,17 @@ and the rules below follow from that:
   "Parameters the domain service computes at the mint"). An app's
   principal has a `domains` quota of 1, so an app runs one session at a
   time, and its services have one grantee too.
-* **No other grantee** holds it: not the system domain (B8), and not a
-  session template a principal names, every session of which would hold
-  the same services and contend for their handlers.
+* **A start row's template**, the session template of a principal that
+  has a `start` row and a `domains` quota of 1, holds `ble` by a facet
+  row of its own, as `bleuart`'s does ([The console](#the-console)):
+  the quota, not the start table alone, lets one session of it live at
+  a time, so the row's services have one grantee. The check compares
+  the grantee row itself, a session template and the principal it
+  belongs to, never a name, so a configured domain named as a start row
+  is another grantee.
+* **No other grantee** holds it: not the system domain (B8), and not
+  any other session template, every session of which would hold the
+  same services and contend for their handlers.
 
 So the scope of an app's grant is fixed at its install, in its record,
 and its facet is minted for each session of the app, as every template
@@ -1962,7 +1960,7 @@ answers the writes handed to it.
 
 | Operation | Answer |
 | --- | --- |
-| `attach(Service)` | `{ok, #{Char => #{max := Max, access := Accesses}}}`, each characteristic's maximum and its accesses with their levels: the caller becomes the service's handler, and hears `connected` for each live link once, when it handles no other service yet; the registry monitors it, and its end detaches it |
+| `attach(Service)` | `{ok, #{Char => #{max := Max, access := Accesses}}}`, each characteristic's maximum and its accesses with their levels: the caller becomes the service's handler, and hears `connected` for each live link once, when it handles no other service yet, then that link's `mtu` when it changed and a `subscribed` for each of the service's characteristics the phone configured, which the registry keeps from the links' messages until each link's end, so a handler that attaches while a phone stays connected hears what one attached before it connected heard; the registry monitors it, and its end detaches it |
 | `set(Service, Char, Value)` | `ok`: reads return `Value` from now on, until the caller's end; `{error, not_attached}` when the caller is not the service's handler |
 | `notify(Conn, Service, Char, Value)` | `ok` once queued for the link, or `{error, busy}` when its queue holds `bt_notify_queue`; `{error, not_attached}` as for `set` |
 | `indicate(Conn, Service, Char, Value)` | `ok` once the phone confirms; `{error, not_attached}` as for `set` |
@@ -1974,7 +1972,7 @@ handler receives, through the envelope rule, which the client module
 
 | Event | Meaning |
 | --- | --- |
-| `{connected, Conn, #{address := A, bonded := boolean(), level := L, identity => I}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bonded` is true once the link is encrypted with a kept bond's key, a resolved bond's or its own pairing's once kept; `A` is the address the phone connected from, a resolvable private address included, and `identity`, present only when `bonded` is true and the handler's grant states `identity` true ([The `ble` facet](#the-ble-facet)), is the bond's identity address, which the link takes from the bond the store resolved or kept and the same phone keeps across connections |
+| `{connected, Conn, #{address := A, bonded := boolean(), level := L}}` | a phone connected, or its link's security changed: `level` is what the link reaches now, `open` until it is encrypted and then its key's, and `bonded` is true once the link is encrypted with a kept bond's key, a resolved bond's or its own pairing's once kept; `A` is the address the phone connected from, a resolvable private address included |
 | `{mtu, Conn, Mtu}` | the bearer's MTU changed; a notification carries at most `Mtu - 3` octets |
 | `{subscribed, Conn, Char, none \| notify \| indicate}` | the phone wrote the characteristic's configuration |
 | `{write, Req, Conn, Char, Value}` | a write the gate allowed; the handler answers `erx_gatt:reply(Req, ok \| {error, Code})`, where `Req` is a reference the registry made for this write, which names it to no other handler, link or write |
@@ -1993,18 +1991,11 @@ handler serves reads from its values and answers writes Unlikely Error.
 `connected` and `disconnected` come from the registry, which monitors
 every link: so every handler of a link's services hears of its end,
 however the link ended, while the registry lives. A registry that ends,
-by its own crash or the store's restart before it, takes every
-attachment, every write handed to a handler and the values the
-handlers set with it, and its
-restart ends every link ([Concurrency](#concurrency)); the facets live
-on and reach the new registry at their next request, but a handler is
-not told: it hears no `disconnected` for those links and no event
-after, its `reply` to a write handed out before is dropped, and its
-services serve reads from their declared initial values and answer
-writes Unlikely Error until it attaches and sets them again. Its next
-`set`, `notify` or `indicate` is refused `{error, not_attached}`, since
-the new registry holds no handler, and that answer is how the client
-learns of it ([The client](#the-client)).
+by its own crash or the store's before it, ends the domain
+([Concurrency](#concurrency)), so every facet ends with the mint and
+every handler stops at its facet's end ([The client](#the-client)): no
+handler outlives the registry that knew it, and its supervisor's
+restart attaches through the facet the next incarnation mints.
 
 #### The client
 
@@ -2031,16 +2022,19 @@ own session, whose public functions the SDK lists
   make the facet's operations and answer theirs, except `{error,
   not_attached}`, at which they exit the calling process with
   `{not_attached, Service}`: the caller is no longer the service's
-  owner, after the registry's restart, and only a new attach makes it
-  one again, which its supervisor's restart does.
+  owner, and only an attach makes it one.
 * **`erx_gatt_service`**, a behaviour whose process is one service's
-  handler. `erx_gatt_service:start_link(Service, Module, Args)` attaches
-  through `erx_gatt:attach/1`, then calls `Module:init(Args)`, which
-  answers `{ok, Values, State}`, and sets each characteristic of
-  `Values`, a map from characteristic to value, before it answers `{ok,
-  Pid}`; an attach that fails is `{error, Reason}`, `{error, attached}`
-  past the deadline among them, so the app's supervisor sees a start
-  that failed and restarts it within its intensity. A write is
+  handler. `erx_gatt_service:start_link(Service, Module, Args)` answers
+  `{ok, Pid}` at once, since a session's grants are installed only
+  after its start has finished and it has reported ready
+  ([design-system.md](design-system.md#waiting-for-a-grant)). The
+  handler then waits for its grant, `erx_facets:await(ble, none,
+  infinity)`, attaches through `erx_gatt:attach/1`, calls
+  `Module:init(Args)`, which answers `{ok, Values, State}`, and sets
+  each characteristic of `Values`, a map from characteristic to value,
+  before it takes any event; an attach that fails ends it with the
+  answer, `{error, attached}` past the deadline among them, so the
+  app's supervisor restarts it within its intensity. A write is
   `Module:handle_write(Conn, Char, Value, State)`, whose `{Answer,
   State}` is the write's reply, `ok` or `{error, Code}`; every other
   event of the table above is `Module:handle_event(Event, State)`,
@@ -2433,7 +2427,8 @@ operation of its login grant, `root_line`
     `erx_gatt_serial:send(Conn, Bytes)` and answered `{tty_taken, N}`
     once `send/2` returns, `ok` or `{error, busy}`, so a phone that
     stalls past `bt_handler_timeout_ms` loses that output and stops
-    nothing. Until the client subscribes to `tx`, the tty's one output
+    nothing. Until the client subscribes to `tx`, which an attach
+    replays for a client already subscribed, the tty's one output
     is held unanswered, so the shell waits and its first prompt reaches
     the client; the tty's resend each second changes nothing meanwhile.
   * **Size.** A client of the UART service has no way to report its
@@ -2469,8 +2464,10 @@ the operator's own terminal. Its one line of its own is constant ASCII.
 **Off means not advertised.** `bleuart`'s handler is attached while its
 session runs, and the Bluetooth domain advertises `nus` only while it
 has a handler ([Advertising](#advertising)). `service bleuart stop` ends
-the session and its handler with it, and the next advertising event
-leaves the UART service out; `service bleuart start` attaches it again
+the session and its handler with it, and the Bluetooth domain
+writes advertising data without the UART service at the controller's
+next free command slot; from which advertising event the controller
+uses it is unverified until probe B-P7 ([Advertising](#advertising)); `service bleuart start` attaches it again
 and puts it back. Nothing restarts the Bluetooth domain, and no other
 service or link changes. With `bleuart` off the machine still
 advertises its name, so a scanner lists the machine but a terminal app's
@@ -2494,17 +2491,17 @@ set `bleuart_enable` in `/etc/start.conf`, which the next boot applies
   and erXos's release manifests carry no `bleuart` rows.
 
 **Failure.** A crash of `erx_bleuart` hangs its ttys up and ends the
-session, which its row starts again. A restart of the Bluetooth domain
-ends the client's link, a disconnect, and `erx_gatt_serial` attaches
-again through the facet the new incarnation mints
-([The client](#the-client)). The end of the console's root session ends
+session, which its row starts again. `erx_bleuart` starts
+`erx_gatt_serial` with `start_link`, so the end of either ends the
+other: a restart of the Bluetooth domain, its registry's end included,
+ends the facet, so the handler stops ([The client](#the-client)), and
+`erx_bleuart` with it, which hangs every tty up, and the session's
+restart attaches through the facet the new incarnation mints; no shell
+outlives its client's link. The end of the console's root session ends
 the line and so `erx_bleuart`. A boot whose read of `/etc/start.conf`
-fails, or whose storage domain misses the boot's deadline, applies the
-row's declared default, as it does for every row
+fails starts no row, `bleuart`'s included
 ([design-apps.md](design-apps.md#the-start-table), "A read that cannot
-read the file"), so a development card whose administrator disabled
-`bleuart` runs it on such a boot; that is
-[todo-apps.md](todo-apps.md)'s item on the boot's fallback.
+read the file").
 
 **Security: a development-build limitation, published with the
 development images.** On a development build with `bleuart` on, anyone
@@ -2522,8 +2519,7 @@ line opens the system shell (L7 of
 published beside SSH's development keys
 ([design-ssh.md](design-ssh.md#the-ssh-domain)), not a residual:
 `service bleuart stop` and `disable` turn it off, the published card
-ships it off, and a release build has none. While the boot's fallback
-above stands, a storage failure at boot can turn it back on.
+ships it off, and a release build has none.
 
 **Tests.** Each with the seeded fault that proves it ran:
 
@@ -2533,9 +2529,9 @@ above stands, a storage failure at boot can turn it back on.
 | lost input end to end (host) | a `serial_lost` between `cd /tmp` and a CR reaches the shell's group as a loss: the line is damaged and runs nothing | the loss turned into no message, which runs `cd` |
 | `serial_lost` (host) | `erx_gatt_serial` with an owner whose queue holds `bt_write_queue` messages answers the next write `0x80` and sends one `serial_lost` for a run of three such writes | the bytes dropped with no message |
 | the link's queue (host) | `erx_bt_link_core` holding `bt_write_queue` write commands for a handler ends the link at the next and the registry sends `disconnected` | the command discarded and the link kept |
-| advertising (host) | the registry sends `{advertised, [nus]}` at `nus`'s attach and `{advertised, []}` at its handler's end, and nothing for a service that does not say `advertise`; `erx_bt_hci_core`, in its exhaustive exploration, writes LE Set Advertising Data with `{advertising_data, D}`'s bytes at its next free command slot while advertising, and two inputs before the slot frees write only the later | the registry's message sent at attach only, which keeps the UUID after the handler's end |
+| advertising (host) | the registry sends `{advertised, [nus]}` at `nus`'s attach and `{advertised, []}` at its handler's end, and nothing for a service that does not say `advertise`; `erx_bt_hci_core`, in its exhaustive exploration, writes LE Set Advertising Data with `{advertising_data, D}`'s bytes at its next free command slot while advertising, and two inputs before the slot frees write only the later; a controller process started after `nus`'s attach writes data with `nus` before it enables advertising | the registry's message sent at attach only, which keeps the UUID after the handler's end; the controller's ask at its start dropped (the restarted controller advertises without `nus`) |
 | `root_line` (host) | the login service answers the console's root session's `tty_line` minted for the grantee with the login facet as opening; with no console session it answers `unavailable` and keeps no row, so a second call is answered | the caller named as the opening, so the line outlives the grant |
-| manifest (host) | the Raspberry Pi 4's development manifest packs; a `login` row listing `root_line` in a release manifest is refused; a `ble` grant to a template with no `start` row is refused; `nus` named by `bleuart` and by the `apps` row's `gatt` is refused | the release rule removed |
+| manifest (host) | the Raspberry Pi 4's development manifest packs; a `login` row listing `root_line` in a release manifest is refused; a `ble` grant to a template with no `start` row, or whose principal's `domains` quota is not 1, is refused; `nus` named by `bleuart` and by the `apps` row's `gatt` is refused | the release rule removed |
 | Bumble (QEMU) | a cell whose manifest runs `bleuart` in the echo's place, since both handle `nus`: a Bumble central's scan shows the UART service; it connects with no pairing, subscribes to `tx`, reads the `% ` prompt, writes `echo hello` and a CR and reads `hello`; `Ctrl-C` interrupts a `sleep 100`; it disconnects, and the shell it had is gone from root's session; it reconnects and gets a new prompt; after `service bleuart stop` a scan shows no UART service and after `service bleuart start` it shows it again | `tty_hangup` left unsent at the disconnect, so the old shell is still in root's session |
 
 The Raspberry Pi 4's checklist repeats the Bumble case with a phone's
@@ -3115,11 +3111,14 @@ its line at the system domain's `/proc`: bytes each way, breaks, resets.
   controller group in the domain's `rest_for_one` supervisor, so a
   controller restart ends every link, every handler hears `disconnected`
   for each, and handlers stay attached.
-* **The mint and the facets outlive the registry.** The mint sits beside
-  `erx_bt_sup`, not below it, and each facet finds the registry by name
-  at each request, so a registry restart ends no facet and a facet never
-  holds a registry of an earlier start; a request between the registry's
-  end and its restart is refused `{error, unavailable}`. A facet never
+* **No facet outlives the registry.** The store and the registry are
+  temporary, `significant` children of `erx_bt_sup`, whose
+  `auto_shutdown` is `any_significant`, so the end of either ends
+  `erx_bt_sup` and so the domain, and every facet ends with the mint: no
+  handler stays attached to a registry that has forgotten it, and none
+  needs telling. Each facet finds the registry by name at each request,
+  and one made while the domain stops is refused `{error,
+  unavailable}`. A facet never
   blocks on the registry, since `erx_facet` sends a forward with an
   alias and passes the reply on when it comes, and the registry waits on
   no facet.
@@ -3220,7 +3219,7 @@ and stops in the reverse order, the controller process first.
 | a link whose backlog of the controller's messages reaches `bt_link_backlog` | the controller process | the link: its handle is disconnected with `0x14` and it ends at `link_down` | the phone reconnects |
 | a malformed ATT request | the ATT server | nothing: Invalid PDU | none needed |
 | a handler that does not answer in 5 s | the link's deadline | nothing: Unlikely Error | none |
-| the registry's crash, or the store's restart before it | `erx_bt_sup` | the registry, with every attachment, every write handed to a handler and the values handlers set; what follows it in `erx_bt_sup`, every link included | `erx_bt_sup` restarts them; the facets and the mint stay, a request meanwhile is refused `{error, unavailable}`, and each app must attach and set its values again: its next `set`, `notify` or `indicate` is refused `{error, not_attached}`, which ends its handler for its supervisor to restart, and a handler that makes none of these is not told ([The client](#the-client)) |
+| the registry's end, or the store's | `erx_bt_sup`, which shuts down at either | the domain, as the mint's end does: every facet, attachment and link | the domain service restarts the domain within its intensity; every handler stops at its facet's end, and its supervisor's restart attaches through the facet the new incarnation mints ([The client](#the-client)) |
 | the mint's end | `erx_bt_top` | the domain: every facet ends with its mint | the domain service restarts the domain within its intensity, and its mint mints every grant anew |
 | a handler that ends | the registry's monitor | the handler's attachment: its services' values return to the declared ones, the writes handed to it are left to the links' deadlines, and what phones sent under it reaches no one | the app's supervisor restarts the handler, which attaches again through `erx_gatt`'s retry and sets its values ([The client](#the-client)) |
 | the store answers `unavailable`, returns a blob that does not decode, or leaves a `put` unconfirmed, a backend call past `bt_store_timeout_ms` included | the store | the pairing; at start, the bonds: the domain runs without them and refuses pairing; the configuration write; `forget` | `/proc/bt` and the log say `store_unavailable` or `store_unreadable`; the store is `unknown`; after an unconfirmed `put` a change reads first and fails unless the read succeeds; after the start's read the next start reads again; `forget all` alone replaces a blob that does not decode ([Bonds and the store](#bonds-and-the-store)) |
@@ -3247,7 +3246,7 @@ and stops in the reverse order, the controller process first.
 | | `enoent` | no bond has that identity |
 | `ble` facet | `{error, not_granted}` | a service the grant does not name, refused by the facet before the registry sees it |
 | | `{error, attached}` | the service already has a handler: one whose end has not yet reached the registry, the same app's previous session's or, after a removal, the previous owner app's, which `erx_gatt:attach/1` waits out for up to `bt_attach_wait_ms` before it answers this; or another process of the same session that holds the service, which it answers at that deadline |
-| | `{error, not_attached}` | a `set`, `notify` or `indicate` whose caller is not the service's handler: another process of the grantee, or a handler whose end, or the registry's restart, has detached it; `erx_gatt` exits the caller with `{not_attached, Service}` |
+| | `{error, not_attached}` | a `set`, `notify` or `indicate` whose caller is not the service's handler: another process of the grantee, or a handler whose end has detached it; `erx_gatt` exits the caller with `{not_attached, Service}` |
 | | `{error, badarg}` | an operation of another shape, or a `reply` whose answer is not `ok`, `{error, value_not_allowed}` or `{error, Code}` with `Code` in `16#80..16#9F`, refused by the facet |
 | | `{error, unavailable}` | no registry is registered: before the row's `-eval` has started it, or while it restarts |
 | | `{error, no_such_characteristic}`, `{error, not_allowed}` | an unknown name; an access the declaration does not allow |
@@ -3311,7 +3310,7 @@ Each core's test is paired with the seeded faults it must catch.
 | the line keeper's core (`erx_line_core`), explored | from a fresh line, with and without a power line, every event in every reachable state up to three requests and two power-cycling resets, each start both answering and refusing: no driver of flow `none` outside a reset, the one live driver of the grant's flow the core's and the only one sent bytes, a reset always waiting on an event still to come, `ok` only at the fresh start and `eio` only with the line broken | a failed reset answered while its holding driver still runs; a failing reset that never takes its holding driver's end |
 | the mailbox core's answer check, `erx_vc_answer`, over buffers the test writes | `set_gpio_state` with response word 0, and with bit 31 set, and pin word 0 is `ERX_OK` with no bytes; with either word and the pin word left at 128, as an untouched buffer has it, `ERX_ENOTSUP`; `notify_xhci_reset` with word 0 is `ERX_ENOTSUP`; a nonzero word without bit 31 is `ERX_ENOTSUP` for both; a wrong code or first tag is `ERX_EPROTO`; both request words of a `set_gpio_state` row reach the buffer, and one of a `notify_xhci_reset` row | `result_word` ignored, so the power line's answer is refused as the probe saw; `result_word` taken as true for every tag, so an ignored VL805 notification reads as performed; the pin word's check dropped, so an untouched buffer reads as performed; the request built from the row's first word alone |
 | the manifest generator's firmware request rows | the Pi 4's record packs UART0's power row as `bt_off`, words 128 and 0, at index 0 and `bt_on`, words 128 and 1, at index 1, and the VL805's row with its one word; a row that names `set_gpio_state` itself, a power row naming a power line `fw_power_line` does not declare, a device other than a placed UART, or a device another row names, and `arguments` longer or shorter than a tag's request are refused | the refusal of a row that names `set_gpio_state` itself removed, so a record row with pin 131, `GLOBAL_RESET`, packs |
-| the manifest check's `ble` rows (`ble_grant`) and the identifier sets of the packer and the boot view | a `ble` grant to a suite domain packs, and the boot view reads it; each refusal of [Declarations](#declarations-abigatt) fires on a manifest that differs from a passing one in it alone: a service of the `ble` interface named otherwise, a `ble` grant to the system domain, one to a session template a principal names, an undeclared name, a name two rows give, an `apps` row whose `gatt` names a service a configured domain's row names, `gatt` without `ble` in the `apps` row's `services` and `ble` there without `gatt`, two served services of one UUID, a ninth name, advertising data one octet too long; the packer packs `nus`, `nusb`, `nv` in that order from every order of its lines and refuses a name twice; the boot view takes that packed set and refuses a name twice and every other packed order | the system domain's refusal removed (a manifest granting `ble` to the system domain packs); identifiers compared length first (`nv` before `nusb`); a prefix ordered after its extension; the duplicate check dropped from the boot view (a forged packed set with a name twice reaches the mint); the template refusal widened to the app template (the development manifest with `ble` and `gatt nus` in its `apps` row fails to pack); the app template's exception widened to every template (a source row granting `ble` to `@session.system` packs) |
+| the manifest check's `ble` rows (`ble_grant`) and the identifier sets of the packer and the boot view | a `ble` grant to a suite domain packs, and the boot view reads it; each refusal of [Declarations](#declarations-abigatt) fires on a manifest that differs from a passing one in it alone: a service of the `ble` interface named otherwise, a `ble` grant to the system domain, one to a session template that is neither the app template nor a start row's, one to a start row's template whose principal's `domains` quota is 2, one to a configured domain that shares a start row's name, an undeclared name, a name two rows give, an `apps` row whose `gatt` names a service a configured domain's row names, `gatt` without `ble` in the `apps` row's `services` and `ble` there without `gatt`, two served services of one UUID, a ninth name, advertising data one octet too long; the packer packs `nus`, `nusb`, `nv` in that order from every order of its lines and refuses a name twice; the boot view takes that packed set and refuses a name twice and every other packed order | the system domain's refusal removed (a manifest granting `ble` to the system domain packs); identifiers compared length first (`nv` before `nusb`); a prefix ordered after its extension; the duplicate check dropped from the boot view (a forged packed set with a name twice reaches the mint); the template refusal widened to the app template (the development manifest with `ble` and `gatt nus` in its `apps` row fails to pack); the app template's exception widened to every template (a source row granting `ble` to `@session.system` packs) |
 | the line service through a real `erx_fs` grant, reader and writer on one `data` file | a write is answered within 1 s while a read waits, and the driver's answer reaches the read once; a `reset` answers a waiting read `eio`; a clunk during a waiting read is answered within 1 s and the next reader gets the next bytes whole | a `read` that waits inside its callback; a dropped flush of a waiting read |
 | flushes of begun and buffered requests, with power notifications held by the test | a `reset` flushed at any step is answered once its last step is done, then the flush; a write flushed after the driver took its bytes answers its count; a read flushed with bytes buffered answers with them, and before bytes arrive `eintr`, the next read getting them whole | a flushed `reset` answered `eintr` while its steps run; a read held while bytes are buffered |
 | the identity address | 10,000 addresses have the static form and parse in Bumble's `Address` as static | the top bits cleared |
@@ -3320,7 +3319,7 @@ Each core's test is paired with the seeded faults it must catch.
 | the link's start, against a store and a registry that hold its calls until the test releases them | `start_child` returns while both calls wait; what the controller process sends meanwhile is stepped in order once the core is built; a phone whose address resolves gets its bond's key | the store's `resolve` called from `init/1`, so `start_child` does not return within the test's deadline |
 | a link's end, with the window process and the registry running | a link killed by `exit(Link, kill)` after an `open` verdict writes `failed ADDR disconnected` and doubles the wait; a link that reports its outcome and then ends counts once; the handlers hear `disconnected` once | the window's monitor not taken (nothing written, the wait unchanged); the monitor kept after the outcome (counted twice) |
 | a notification to a link that ends before answering it | the registry's caller gets `{error, gone}` | the caller's `From` handed to the link in a plain message (the caller waits until its own timeout) |
-| the `ble` facet, over a registry the test registers, kills and registers again | a request naming a service its grant names reaches the registry with the grantee's caller in it, and the answer reaches the caller; one naming another service is refused `{error, not_granted}`, and the registry sees nothing; with no registry registered, `{error, unavailable}`; after the registry is killed and started again, the next request reaches the new one; an attaching caller, not the facet, hears the events, and only it answers its writes | the service check dropped from `admit/3` (another app's service attached); the registry's pid kept from the facet's start (the request after the restart is answered `{error, failed}`); the handler taken from the forwarded call's `From` (events go to the facet, which drops them) |
+| the `ble` facet, over a registry the test registers | a request naming a service its grant names reaches the registry with the grantee's caller in it, and the answer reaches the caller; one naming another service is refused `{error, not_granted}`, and the registry sees nothing; with no registry registered, `{error, unavailable}`; an attaching caller, not the facet, hears the events, and only it answers its writes | the service check dropped from `admit/3` (another app's service attached); the handler taken from the forwarded call's `From` (events go to the facet, which drops them) |
 | `forget` with bonded links connected | the link whose address resolved to the forgotten bond at its start ends; a link of another bond stays | the store taking a link's pid only at `keep` |
 | `forget` by the whole identity | a public and a random bond of the same octets are two bonds: forgetting one leaves the other, and forgetting it again is `enoent` | `forget` matching the octets alone |
 | `erx_bt_hci_core`'s backlog, case by case | a link that acknowledges nothing is sent exactly `bt_link_backlog` messages, events and ACL packets alike; the next is dropped, the handle's disconnect is asked with `0x14`, and nothing more reaches the link; a link that acknowledges every message is never disconnected; a `taken` naming a gone link changes nothing, even on a reused handle | the bound compared one too late (33 sent); `completed` not counted; `taken` taken without its name (a gone link's acknowledgement lowers the next link's backlog) |
@@ -3330,6 +3329,9 @@ Each core's test is paired with the seeded faults it must catch.
 | an app's `ble` grant, through the session plan (`erx_domain_core:app_session/4`) over a template `ble` row whose `services` is `nus` and `nusb` | an app whose record holds `gatt nus` gets a `ble` row whose `services` is `[nus]`, and one whose record holds no `gatt` gets no `ble` row; the install refusals are admission's ([design-packaging.md](design-packaging.md#verification-and-testing)) | the row's `services` passed whole (the session's facet admits `nusb`, which the app did not declare) |
 | the registry's core (`erx_gatt_registry`), a service's owner, over a core serving `nus` and `nusb` with two joined links, handler `A` attached to `nus` and `nusb` | a `set` of `nus` from another caller is `{error, not_attached}` and changes no value; at `A`'s `down` every link gets `{handler, nus, none}` and `{handler, nusb, none}`, a later join answers `nus`'s declared values, and `A`'s `set` and `notify` stepped after that `down`, as a facet's late forwards, are `{error, not_attached}`; `B` then attaches `nus` and every link gets `{handler, nus, B}` before `B`'s first `set` reaches it; a write carrying `A` stepped after `B`'s attach is answered Unlikely Error and `B` hears nothing, and one carrying `B` reaches `B` | the caller check dropped from `set` (`A`'s late `set` reaches the value `B` owns); the write's handler compared with nothing (the write carrying `A` is handed to `B`); the values kept at a handler's `down` (the later join answers `A`'s value); `{handler, ...}` sent after the attach's own answer rather than in the same step (a `set` of `B` stepped at once reaches a link before the change) |
 | the link's core (`erx_bt_link_core`), a change of owner, with `nus` handled by `A` | a Prepare Write of `rx` under `A`, then `{handler, nus, none}` and `{handler, nus, B}`, then a second part and Execute Write: the write sent carries `A`; a Write Request after the change carries `B`; after `{handler, nus, none}` a Read of a readable characteristic of `nus` that `A` set, in the test's own declaration of `nus`, answers its declared value, and of two notifications queued for credits, one of `nus` and one of `nusb`, only `nusb`'s is sent | the handler taken at Execute Write rather than at the first Prepare Write (the prepared bytes carry `B`); the values kept at the change (the read answers `A`'s value); every queued notification dropped, or none (`nusb`'s lost, or `nus`'s sent) |
+| the registry's core, an attach while a phone stays connected | with a link joined, its MTU 247 and `nus`'s `tx` configured `notify`, an attach of `nus` hears `connected`, then `{mtu, Conn, 247}` and `{subscribed, Conn, tx, notify}`, in that order; after the link's end an attach hears none of them | the replay dropped (the handler hears `connected` alone, so `erx_bleuart` holds its prompt for good); the kept configuration not dropped at the link's end (the later attach hears a dead link's `subscribed`) |
+| `erx_bt_top`'s tree, with a stub controller line | killing `erx_gatt_srv`, and killing `erx_bt_store`, ends `erx_bt_top` and so the application | the registry made permanent (`erx_bt_sup` restarts it and every facet lives on, with no handler attached) |
+| `erx_gatt_service` against a stub facet registry | `start_link` answers `{ok, Pid}` with no `ble` grant installed; once the stub installs it the handler attaches and sets its values; an attach answered `{error, not_granted}` ends the handler with it | the attach made before the answer (the start fails `not_granted` before the session can report ready) |
 | `erx_gatt:attach/1` against a stub facet, on a clock the test moves | a stub that answers `{error, attached}` twice and then `{ok, ...}` gives `{ok, ...}` after two waits of `bt_attach_retry_ms`; one that answers `{error, attached}` throughout gives `{error, attached}` once `bt_attach_wait_ms` has passed, and not before; `{error, not_granted}` and `{error, unavailable}` come back at the first ask; `set/3` answered `{error, not_attached}` exits the caller with `{not_attached, nus}` | the retry removed (the first case answers `{error, attached}`); the deadline removed (the second case asks without end, past the test's own deadline); `not_attached` returned rather than exiting (the caller lives on, detached) |
 
 ### Fuzz targets

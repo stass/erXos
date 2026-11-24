@@ -28,12 +28,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Low] bluetooth suite, the controllers' log has no size bound (`BtDomain::Controllers`): the DEBUG log records every HCI
   packet until the deadline.
 
-* [High] bluetooth, the serial service on the board (docs/design-bluetooth.md "On the board", Decisions 7): the
-  QEMU suite's serial row passes through the echo domain and through the echo package, `examples/echo`, in its
-  app cell (`tools/lib/erx/bt_domain.rb`, `test/bt/peer/serial_peer.py`), but no board run has echoed `nus` to a
-  phone. Decision 7 gives the Pi's Nordic UART service to a planned `bleuart` service, not to an app: the Pi 4's
-  cards carry the kiosk alone and its `apps` row offers no `ble`, so the board's `blew nus` run waits on `bleuart`'s
-  design and build.
 * [Low] bluetooth suite, the app cell (`BtDomain::Run#app_boot`): a third copy of the medium boot of
   `Kiosk::Run#boot` and `MediumBoot::Run`, without the boot value's checkpoint those insert
   (`MediumBoot.boot_value_checkpoint`); fold the three into one MediumBoot helper. Also: nothing at the landing
@@ -41,9 +35,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   SDK does not make public fails only in this suite; the design's two-package rows (`echo_a`, `echo_b`, the `cp`
   install) wait for the run-time install; `Manifest::Edit.offering` writes `gatt` for any service, though only
   `ble` takes one; design-packaging.md "Examples" does not list the echo.
-* [Medium] bluetooth, a handler attached mid-connection sends at the default MTU (`erx_gatt_serial`; the item
-  "what a handler hears" below): the registry does not replay a link's MTU at `attach`, so after a restart of the
-  serial handler `send/2` cuts at 20 octets until the phone's next Exchange MTU, which most phones send once.
 * [Medium] bluetooth, the serial service's send path (`erlang/apps/erx_bt_client/src/erx_gatt_serial.erl`; review
   of bt-nus): `send/2` runs in the handler, so a write waits behind a send's busy retries (every 5 ms, up to
   `bt_handler_timeout_ms`, against design-system.md's rule that no waiter looks again on a timer), and a write
@@ -52,11 +43,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   by coincidence of `bt_acl_rx_max`), since `erx_gatt_service` drops the attach table. Settle in the design: the
   link holding a notification until its queue has room, a deferred write answer in `erx_gatt_service`, and
   `send/2` answering what it left unsent.
-* [Medium] bluetooth, a handler that only listens and a registry restart (`erx_gatt_service`): the design has a
-  handler learn of a registry restart from its next `set` or `notify`, but `erx_gatt_serial` makes neither until
-  the app sends, so after a registry crash alone `nus` answers Unlikely Error until the domain restarts. The
-  facet could end when the registry it forwards to changes, which the handler's facet monitor already covers.
-  Also: a handler started while the domain holds a dead facet fails its start with `noproc`.
+* [Medium] bluetooth, a handler started while its session holds a dead `ble` facet (`erx_gatt_service`):
+  `erx_facets:await(ble, none, infinity)` answers the dead facet at once, and the attach fails `noproc`.
 
 
 ## Security residuals
@@ -165,23 +153,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
-* [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The
-  console"; docs/design-login.md, build order 7): build the `bleuart` app (its principal, session template,
-  `ble` and `login` rows and `start` row in the Raspberry Pi 4's development manifest, `published_enable` in the
-  packer, the `bleuart` release with `erx_bleuart`), the login facet's `root_line` with its holder row and its
-  release-manifest refusal, `ble_grant`'s admission of a `start` row's template, `erx_gatt_serial`'s
-  `serial_lost` and `subscribed`, the link's end past `bt_write_queue`, the registry's `{advertised, Services}`
-  and the HCI core's `{advertising_data, Data}`, with their tests, the Bumble cell and probe B-P7. The package
-  retires the phone console it replaces. On master: the manifest check's `btconsole` login holder
-  (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), whose row `bleuart`'s takes, and its case in
-  `test/host/manifest_domains_test.rb` (`BTCONSOLE_LOGIN`, `btconsole` in `LOGIN_DOMAINS`). On the unlanded
-  branch `login-8`: `erx_bt_prompt` with its tests and its fuzz target (`test/erlang/erx_bt_prompt_fuzz.erl`,
-  `tools/fuzz/erx_bt_prompt.rb`), the console core `erx_bt_console_core` with its login and session phases and
-  `erx_bt_console`, the `erx_bt_console` application and the `btconsole` release, the `console` GATT
-  declaration and its manifest rules, and the Raspberry Pi 4 manifest's phone-console rows (the `btconsole`
-  domain, its login grant and its phone-session budget). The `ble` grant's `identity` parameter loses its one
-  consumer with the phone console; delete it unless another handler needs a phone's identity address.
-  CLAUDE.md's fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
+* [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The console";
+  docs/design-login.md, build order 7): build the `bleuart` app (its principal, session template, `ble` and `login`
+  rows and `start` row in the Raspberry Pi 4's development manifest, `published_enable` in the packer, the
+  `bleuart` release with `erx_bleuart`), the login facet's `root_line` with its holder row and its release-manifest
+  refusal, `ble_grant`'s admission of a `start` row's template whose principal's `domains` quota is 1, by kind and
+  identity, `erx_gatt_serial`'s `serial_lost` and `subscribed`, the registry's replay of `mtu` and `subscribed` at
+  an attach, `erx_gatt_service` answering its start before it awaits its grant, the store's and the registry's end
+  ending the domain, the link's end past
+  `bt_write_queue`, the registry's `{advertised, Services}` and the HCI core's `{advertising_data, Data}`, with
+  their tests, the Bumble cell and probe B-P7. The package retires the phone console it replaces. On master: the
+  manifest check's `btconsole` login holder (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), whose row `bleuart`'s
+  takes, and its case in `test/host/manifest_domains_test.rb` (`BTCONSOLE_LOGIN`, `btconsole` in `LOGIN_DOMAINS`).
+  The unlanded branch `login-8`, the phone console, is superseded and does not land. Delete the `ble` grant's
+  `identity` parameter (`abi/services/ble.txt`, the registry), which the design no longer has. CLAUDE.md's
+  fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each
   connection, each bond with no key, and the counters) is not declared in `abi/inspection.txt`, and the domain
   serves none of it; declare the path and serve it from the domain's agent, with `unknown` for a value the
@@ -292,11 +278,5 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   suite's removal and restart cases settle it.
 * [Medium] bluetooth, what a handler hears (`erx_gatt_registry`; docs/design-bluetooth.md "The `ble` facet"):
   `write` and `subscribed` name the characteristic without its service, though a handler may handle several
-  services whose characteristics share a name; and a handler that attaches while a phone is connected hears
-  `connected` but not the link's MTU or its subscriptions, which the registry does not keep, so an app
-  restarted mid-connection answers `not_subscribed` until the phone reconnects. Settle both in the design:
-  the key in the events, or one service a handler; and what `attach` replays.
-* [Medium] bluetooth, a store restart detaches every handler (`erx_bt_sup`; docs/design-bluetooth.md
-  "Concurrency"): the tree's order is store, registry, group under `rest_for_one`, so a store crash restarts
-  the registry, which loses every attachment, and no handler hears of it. The registry depends on the store
-  for nothing; put it first, or tell handlers of a registry restart, in the design's tree.
+  services whose characteristics share a name.
+  Settle it in the design: the key in the events, or one service a handler.

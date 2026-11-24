@@ -196,7 +196,10 @@ row lists, and any other is refused `eperm` before the callback sees it
 | `bleuart`'s session template ([design-bluetooth.md](design-bluetooth.md#the-console)) | `tty_line` | `root_line` | 1, its one process |
 
 The manifest check holds the facet to that table, as an allow-list keyed
-by the grantee's name: it refuses a `login` row on any other grantee, a
+by the grantee's kind and name, a configured domain for the SSH and web
+domains and the session template of the principal `bleuart` for
+`bleuart`, so a domain or a template that only shares a holder's name
+is another grantee: it refuses a `login` row on any other grantee, a
 row whose `line`, operations or `logins` differ from its holder's, a row
 whose `max_request` or `in_flight` differs from the interface's (below),
 more than one row per holder, and, in a release manifest, a row listing
@@ -289,8 +292,9 @@ The login service keeps one row per owner that has something
 outstanding, in one of three states: **cookie**, an outstanding cookie
 and its grace timer; **pending**, a login whose check, session start or
 line mint is outstanding, holding the request id of that one step, the
-facet's reply address and the state to return to on a failed check;
-and **logged in**, which holds the session and is final. No owner has
+facet's reply address, the state to return to on a failed check and
+the session the row started, none for `root_line`, which borrows
+the console's; and **logged in**, which holds the session and is final. No owner has
 more than one row, and a row in pending or logged in refuses every
 operation `badarg`, so an owner has at most one login in progress, and a
 second request from it while one is checked takes no row and starts
@@ -304,13 +308,15 @@ nothing.
 | cookie | `login_key`, its signature verified | pending | the principal service asked whether `KeyBlob` is among `User`'s login keys |
 | cookie | `login_key`, its signature not verified | cookie | `no_match` |
 | none | `login_key` | none | `no_match` |
+| none | `root_line()`, the console holding a root session | pending | a row taken, or `unavailable`; that session's line minted |
+| none | `root_line()`, the console holding none | none | `unavailable` |
 | pending, logged in | any operation | unchanged | `badarg` |
 | pending | the checker's match, or the key found | pending | a cookie the row returns to retired; the session started |
 | pending | the checker's other answer, or the key not found | the state returned to | that answer, `no_match` for a key not found; returning to none frees the row |
 | pending | the session started | pending | the line minted |
 | pending | the start refused | none | `unavailable`, logged; the row freed |
 | pending | the line minted | logged in | `{ok, Line}` |
-| pending | the mint refused | none | the session stopped; `unavailable`; the row freed |
+| pending | the mint refused | none | the session the row started stopped, and none for a `root_line` row, so the console's session is never stopped; `unavailable`; the row freed |
 | cookie | the grace's end | none | the row freed |
 | pending | the grace's end | pending | the state to return to becomes none |
 | any | the owner's end | none | the row freed; its request id forgotten; a pending row answers `unavailable` to the ended caller, so the facet frees the forward's slot in flight |
@@ -492,7 +498,7 @@ ran the code it names.
 | no checker (host) | `login_passphrase` answers `unavailable` | a missing checker read as a match |
 | bounds and fuzz (host) | `admit/3` refuses each argument one past its bound and returns on every input of the fuzz target | one bound removed |
 | manifest check (host) | a `login` row on another domain, the Bluetooth domain included, with another `line`, another operation list, or another `max_request` or `in_flight` is refused | the allow-list rule removed; the quantities' rule removed |
-| `root_line` (host) | with a console root session it answers that session's `tty_line` minted for the grantee with the login facet as the opening; with none it answers `unavailable` and keeps no row, so the owner's next call is answered; a second call after a success answers `badarg`; in a release manifest a row listing `root_line` is refused | the caller named as the opening, so the line outlives the grant; the release rule removed |
+| `root_line` (host) | with a console root session it answers that session's `tty_line` minted for the grantee with the login facet as the opening; with none it answers `unavailable` and keeps no row, so the owner's next call is answered; a second call after a success answers `badarg`; a mint that fails answers `unavailable`, frees the row and leaves the console's session running; in a release manifest a row listing `root_line` is refused, and so is a `login` row granted to a configured domain named `bleuart` | the caller named as the opening, so the line outlives the grant; the failed mint taken as a login's, which stops the console's session; the release rule removed; the holder table keyed by name alone, so the domain named `bleuart` packs |
 | user name (host) | every system identifier decodes, a digit, a hyphen and 63 bytes included; an uppercase letter, a leading `-` or `_`, a `.`, a space, 64 bytes and a non-binary are `badarg` | the facet checking a name of its own instead of `erx_ident:new/1` |
 | supervision (host) | the domain service's supervisor allows a restart of each permanent child, the login service among them, within one period | the intensity left at OTP's default of 1 |
 
