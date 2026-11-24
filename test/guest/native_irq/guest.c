@@ -953,7 +953,6 @@ erx_fiasco_root_main(void)
 		say(reason);
 		erx_fiasco_end(ERX_FIASCO_END_ASKED_OFF, NULL);
 	}
-	erx_fiasco_task_set_archive(&pack);
 	if (erx_fiasco_launcher_find(&pack, HOLDER_PROGRAM, &holder_entry) != ERX_OK)
 		fail("erx: irq: the archive holds no holder program FAILED\n");
 	check_time();

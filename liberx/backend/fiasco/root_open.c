@@ -16,6 +16,7 @@
 #include "liberx/backend/fiasco/launcher.h"
 #include "liberx/backend/fiasco/root_handoff.h"
 #include "liberx/backend/fiasco/root_open.h"
+#include "liberx/backend/fiasco/service_task.h"
 #include "liberx/backend/fiasco/vm.h"
 
 /* No stack holds these: the archive's checks want them large and long-lived. */
@@ -77,6 +78,7 @@ erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack)
 		last--;
 	if (!erx_pack_file_check(pack, last, &root_hasher, &pack_error))
 		return (pack_error.reason);
+	erx_fiasco_task_set_archive(pack);
 	return (NULL);
 }
 

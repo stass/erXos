@@ -104,7 +104,6 @@ root_boot(erx_boot_handoff_view_t *handoff, erx_manifest_view_t *manifest, erx_b
 	reason = erx_fiasco_root_open(handoff, &root_pack);
 	if (reason != NULL)
 		return (reason);
-	erx_fiasco_task_set_archive(&root_pack);
 	erx_fiasco_service_boot(handoff);
 	reason = erx_fiasco_root_read_manifest(&root_pack, manifest);
 	if (reason != NULL)

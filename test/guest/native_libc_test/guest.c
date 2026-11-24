@@ -158,7 +158,6 @@ erx_fiasco_root_main(void)
 		say(reason);
 		erx_fiasco_end(ERX_FIASCO_END_ASKED_OFF, NULL);
 	}
-	erx_fiasco_task_set_archive(&pack);
 	before = erx_fiasco_vm_free_pages();
 	for (uint32_t index = 0; index < pack.header.nentries; index++) {
 		const uint8_t *path;

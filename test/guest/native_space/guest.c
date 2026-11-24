@@ -1399,7 +1399,6 @@ erx_fiasco_root_main(void)
 		say(reason);
 		erx_fiasco_end(ERX_FIASCO_END_ASKED_OFF, NULL);
 	}
-	erx_fiasco_task_set_archive(&pack);
 	say_case("program_found", erx_fiasco_launcher_find(&pack, PROGRAM, &program_entry) == ERX_OK);
 	warm_up();
 	case_between_tasks();

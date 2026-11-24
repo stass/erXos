@@ -12,8 +12,10 @@
 
 /*
  * The root's steps before its memory: finds bootstrap's handoff record through the
- * kernel information page, accepts it, opens the archive the record names and checks
- * its last entry. Returns NULL, or why the boot cannot go on.
+ * kernel information page, accepts it, opens the archive the record names, checks its
+ * last entry, and names it as the archive tasks' programs are read from
+ * (erx_fiasco_task_set_archive), so pack outlives the root. Returns NULL, or why the boot
+ * cannot go on.
  */
 const char	*erx_fiasco_root_open(erx_boot_handoff_view_t *handoff, erx_pack_view_t *pack);
 

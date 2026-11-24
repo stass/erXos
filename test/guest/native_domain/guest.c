@@ -2799,7 +2799,6 @@ erx_fiasco_root_main(void)
 	    erx_fiasco_launcher_find(&pack, JIT, &jit) != ERX_OK || !erts_release_find(&pack)))
 		reason = "erx: domain: no program or release\n";
 	if (reason == NULL) {
-		erx_fiasco_task_set_archive(&pack);
 		files_from(&pack, program);
 		/* Each domain's page names the image's build, as the root's library gives it. */
 		lib.build_id = erx_boot_handoff_build_id(&handoff);

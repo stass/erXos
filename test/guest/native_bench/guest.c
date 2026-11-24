@@ -209,7 +209,6 @@ erx_fiasco_root_main(void)
 		bench_fail("\n");
 	}
 	/* The archive a benchmark's test task loads from (erx_image_map). */
-	erx_fiasco_task_set_archive(&pack);
 	erx_bench_read_pairs(erx_fiasco_counter, pairs, READ_PAIRS);
 	bench_say("erx: bench: timing\n");
 	bench_cells(erx_fiasco_test_cpu_count(), &pack);
