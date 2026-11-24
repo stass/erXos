@@ -395,7 +395,8 @@ input(Bytes, {Free, Kept, Stopped}, #tty{received = Before} = Tty0)
 -doc """
 How many more bytes input/3 takes before its bound drops one, under a termios
 without PARMRK, which doubles a received 0xff: what an owner that must lose
-nothing, the console of a pipe, gives it at most.
+nothing, the console of a pipe, gives it at most. Under ICANON it keeps the one
+byte a line's end needs, so it is exact only in raw mode, the pipe's.
 """.
 -spec input_room(tty()) -> non_neg_integer().
 input_room(#tty{ready = Ready, line = Line} = Tty) ->

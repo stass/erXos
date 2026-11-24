@@ -6,9 +6,10 @@
 %% editor on a raw terminal, as on Unix. It sits between its groups and the console's
 %% driver, as user_drv does: the current group, which gets the input and is shown, and
 %% the `user` group, which the shell's own group can ask for options and which is always
-%% shown. Input bytes go to the current group as `{self(), {data, Chars}}`, and each
-%% request of a shown group goes through prim_tty's terminal-less state to become bytes
-%% for the driver. It runs no line discipline and reads no program's bytes.
+%% shown. The current group's asks for input are answered from a tty the console reads
+%% (reader()), its relay's or its own, and each request of a shown group goes through
+%% prim_tty's terminal-less state to become bytes for the driver. It reads no program's
+%% bytes.
 %%
 %% The console's first group runs the command shell (erx_shell:console/0), the shell a
 %% person meets at boot, as a UNIX console's login shell is. When it ends, by `exit` or a
@@ -276,7 +277,7 @@
 %% erx_tty in its process that holds what the driver sent and makes no output, with a
 %% person's terminal's settings or a pipe's (own_termios/1). It keeps whether the line
 %% is a pipe; the bytes of the driver's input message not yet in the tty, which a pipe's
-%% hold back, or `answered` once all of the message is in and the driver is answered;
+%% holds back, or `answered` once all of the message is in and the driver is answered;
 %% and whether the driver's input has ended, which the groups are told once nothing read
 %% before the end waits.
 -type reader() :: #{relay := pid(), open := erx_session_relay:open(), held := held(),
@@ -441,8 +442,6 @@ first_group() ->
 -spec init(config()) -> {ok, #state{}}.
 init(Config = #{role := Role, driver := Start, first_shell := First}) ->
     process_flag(trap_exit, true),
-    %% A domain has one line, which terminal/0 names.
-    [persistent_term:put({?MODULE, line}, self()) || maps:get(domain_line, Config, false)],
     Console = self(),
     {ok, LineOwners} = (maps:get(line_owners, Config, fun() -> {ok, []} end))(),
     {ok, DriverPid, Kind} = Start(self()),
@@ -456,6 +455,8 @@ init(Config = #{role := Role, driver := Start, first_shell := First}) ->
                             relay -> exit({bad_driver, "a system console's driver is never a terminal relay"});
                             _ when is_boolean(Kind) -> {Kind, none}
                         end,
+    %% A domain has one line, which terminal/0 names.
+    [persistent_term:put({?MODULE, line}, self()) || maps:get(domain_line, Config, false)],
     FirstShell = case First of
                      Make when is_function(Make, 1) -> Make(shell_terminal(Relay));
                      Given -> Given
@@ -1480,7 +1481,10 @@ latin1(Bin) -> unicode:characters_to_binary(Bin, latin1).
 follow_current(Group, State = #state{asks = Asks, reader = Reader = #{held := Held}}) ->
     Live = groups(State),
     State1 = State#state{asks = maps:with(Live, Asks), reader = Reader#{held := maps:with(Live, Held)}},
-    [ok = erx_session_relay:console_group(Relay, Group) || #{relay := Relay} <- [Reader]],
+    case Reader of
+        #{relay := Relay} -> ok = erx_session_relay:console_group(Relay, Group);
+        #{tty := _} -> ok
+    end,
     next_read(State1).
 
 %% A read for the current group's ask, if it has one, from whichever tty the console
@@ -1489,8 +1493,9 @@ next_read(State = #state{reader = #{relay := _}}) -> watch(State);
 next_read(State = #state{reader = #{tty := _}}) -> serve(State).
 
 %% What the relay tells the console of a key or a flush on its tty, made while Group was
-%% the current group, or `none`. Each event is handled by name, and the console's own tty
-%% makes the same events through the relay core's mapping (own_action/2).
+%% the current group, or `none`. Each event the relay core's mapping makes is handled by
+%% name, and the console's own tty makes the same events through it (own_action/2); an
+%% event of a relay that knows more is logged.
 tty_event(Group, Event, State) when Event =:= interrupt; Event =:= suspend; Event =:= quit ->
     %% A signal flushed the tty's input typed with it, so the bytes held for Group go,
     %% and Group's ask stays outstanding. Only a group of this console's is acted on.
@@ -1551,7 +1556,7 @@ read_for_ask(N, State = #state{asks = Asks, reader = #{open := Open}}) ->
 
 %% The one way a loss reaches a group, so no loss is silent and none reaches a process
 %% that is not one of the console's groups: the loss is sent at once, in order with the
-%% input pushed or answered before it, as the answer to Group's outstanding ask or, while
+%% input answered before it, as the answer to Group's outstanding ask or, while
 %% it has none, as an answer to no ask, which group takes as a loss all the same
 %% (otp/lib/kernel/src/group.erl, handle_info/3). The leading bytes of a character held
 %% for Group go, since the loss fell among them (docs/design-live.md, "Lost input").
@@ -1624,13 +1629,15 @@ unanswered(State = #state{reader = Reader = #{unread := answered}}) ->
 unanswered(State) ->
     State.
 
-%% The one step the console's own tty moves on by, after anything that may let it: the
-%% bytes the driver sent go into the tty as it has room, the current group's ask is read
-%% for, and the driver is answered once all of its message is in, at once for a person's
-%% terminal, whose input must keep reaching ISIG however much is typed ahead, so that the
-%% tty's bound drops the rest as a loss; and once its tty has room for a pipe, which is
-%% held back and never cut. Once the driver's input has ended and nothing read before
-%% the end waits, the groups are told.
+%% The one step the console's own tty moves on by, after anything that may let it. The
+%% bytes the driver sent go into the tty as it has room, and the current group's ask is
+%% read for, a unit at each turn, so the step ends. The driver is answered once all of its
+%% message is in the tty: at once for a person's terminal, whose input must keep reaching
+%% ISIG however much is typed ahead, so the tty's bound drops the rest as a loss; for a
+%% pipe, once the group has read enough for the rest to fit, so the pipe is held back and
+%% never cut, and waits with at most one message beyond the tty's bound. Once the
+%% driver's input has ended and nothing read before the end waits, the groups are told
+%% (ended/1).
 serve(State0) ->
     State = fill(State0),
     case read_own(State) of
@@ -1704,7 +1711,8 @@ answer_driver(State) ->
 %% The driver's end, once every byte read before it is taken: the leading bytes of a
 %% character held for the current group, which nothing will finish, answer its ask as
 %% stock reads a bad byte, as latin-1, and then the group gets the end, as every group
-%% that gets the input from then on does (gets_input/1).
+%% that gets the input from then on does (gets_input/1). The end is told once: `ending`
+%% is cleared before gets_input/1, whose read for the group comes back through serve/1.
 ended(State = #state{reader = Reader = #{ending := true, unread := answered, tty := Tty, held := Held},
                      asks = Asks}) ->
     Group = current(State),

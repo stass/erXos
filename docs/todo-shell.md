@@ -835,7 +835,8 @@ to the corpus and follow rc
   types a line, crashes the runtime and finds none of it in the dump.
 * [Medium] console, crash reports (`erlang/apps/erx/src/erx_console.erl`): the console exports no
   `format_status/1`, so a crash while it handles `{erx_console_input, Bytes}` reports the message and the state,
-  which can hold a typed passphrase. Hide its terms as `erx_pl011` and `erx_mini_uart` do, with a case like
+  whose reader holds what was typed and not yet read, up to one tty's bound and a driver's message beside it
+  (a passphrase typed ahead during an evaluation among it). Hide its terms as `erx_pl011` and `erx_mini_uart` do, with a case like
   `erx_pl011_tests`' `format_status_shows_only_the_reasons_name_test`.
 * [Low] console, the answer to a driver's input (`erx_uart_input`, `erx_stdio`): a driver takes
   `erx_console_taken` from any process of its domain, so a stray answer lets it send one more message, bounded by
