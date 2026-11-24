@@ -24,8 +24,12 @@ owner(_Name) -> ?GRANTEE.
 
 %% A call of the grantee's to Pid, in its envelope; the answer, or none.
 call(Pid, Request) ->
+    call(?GRANTEE, Pid, Request).
+
+%% A call to Pid in the envelope of the domain Origin.
+call(Origin, Pid, Request) ->
     Alias = monitor(process, Pid, [{alias, demonitor}]),
-    Pid ! {erx_origin, ?GRANTEE, {'$gen_call', {self(), [alias | Alias]}, Request}},
+    Pid ! {erx_origin, Origin, {'$gen_call', {self(), [alias | Alias]}, Request}},
     receive
         {[alias | Alias], Reply} -> demonitor(Alias, [flush]), Reply;
         {'DOWN', Alias, process, Pid, _} -> down
@@ -194,6 +198,42 @@ a_grant_without_a_heap_bound_starts_no_facet_test() ->
                                    max_request => 65536, in_flight => 8,
                                    find => fun() -> none end, exports => ?MODULE},
                                  #{exports => ?MODULE})).
+
+%% A domain other than the grantee reaches neither the facet nor its proxy, and a request
+%% of the grantee's past max_request is dropped at the proxy: neither is answered, and
+%% neither reaches the window.
+another_domain_s_and_an_oversized_request_are_dropped_test() ->
+    S = #{facet := Facet} = setup(8),
+    try
+        {ok, Proxy} = call(Facet, window),
+        ?assertEqual(none, call(?GRANTEE + 1, Facet, window)),
+        ?assertEqual(none, call(?GRANTEE + 1, Proxy, {read, 0, 1})),
+        ?assertEqual(none, call(Proxy, {write, 0, binary:copy(<<0>>, 65536)})),
+        ?assertEqual(none, receive {got, _From, Request} -> Request after 100 -> none end),
+        %% The proxy still serves the grantee within its limits.
+        Caller = spawn_call(Proxy, {write, 0, binary:copy(<<0>>, 512)}),
+        ?assertMatch(ok, receive {got, From, {write, 0, _}} -> gen:reply(From, ok) after 500 -> none end),
+        ?assertEqual(ok, receive {answer, Caller, Answer} -> Answer after 500 -> none end)
+    after
+        cleanup(S)
+    end.
+
+%% A grant that ends while it holds a proxy's ask ends that proxy unexported, and the
+%% facet answers the ask {error, failed}.
+the_grant_s_end_before_its_answer_fails_the_ask_test() ->
+    S = #{facet := Facet, grant := Grant} = setup(8),
+    try
+        {ok, _First} = call(Facet, window),
+        Second = spawn_call(Facet, window),
+        ?assertMatch(ok, receive {erx_blk_drive, end_medium, medium} -> ok after 500 -> none end),
+        [Waiting] = monitors_of(Grant),
+        exit(Grant, kill),
+        ?assertEqual({error, failed}, receive {answer, Second, Answer} -> Answer after 500 -> none end),
+        ?assertNot(is_process_alive(Waiting)),
+        ?assertNot(lists:member(Waiting, exported()))
+    after
+        cleanup(S)
+    end.
 
 %% The mint grants a request of drive in the system domain's envelope for a number its
 %% records name, refuses one they do not, and drops every other shape.

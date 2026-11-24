@@ -107,6 +107,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      FAT32 and EROFS; a host tool that writes a littlefs volume's files with `erx_lfs_config`; an MBR and
      a GPT writer; signature-only images of the refused formats), and the QEMU cases of design-drives.md
      in the `usb` suite, over its stick plumbing.
+  * [Low] `erx_blk_drive_facet` and `erx_blk_drive_proxy`: design-drives.md's verification cases
+    not yet tested, beyond a second domain's request, one past `max_request` and the grant ending
+    before it answers (`erx_blk_drive_facet_tests`): the facet finding the grant afresh at each ask
+    across a grant's restart, the facet's own `{error, no_medium}` while Find answers `none`, the
+    proxy's end past `max_heap_size`, and the mint process itself (`start_mint/1` providing `drive`
+    and starting one facet per request). The facet process runs without the grant's
+    `max_heap_size`, which `erx_facet:start/3` does not apply to the facets it starts, though
+    design-drives.md says the facet and its proxy each run with it.
   Open findings of step 3's reviews:
   * [Medium] `erx_lfs` lies in `erx_storage`, which the media domain's release may not name, so
     step 4's littlefs volumes need it moved to an application of its own, as `erx_fat_read` moved to
