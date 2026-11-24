@@ -64,6 +64,24 @@ class ErxConsoleReadsTest < Minitest::Test
                       'a_flushed_loss_damages_the_read_test')
   end
 
+  # A watch whose readiness follows VMIN is ready at once with VMIN 0, so the console
+  # spins reading nothing.
+  def test_a_console_that_watches_with_a_read_spins_fails
+    source = File.binread(File.join(ErlangBuild::ROOT, CONSOLE))
+    seeded = [['erx_session_relay:watch(Open, in)', 'erx_session_relay:watch(Open, {read, 1})'],
+              ['{ready, Open, [in], N}', '{ready, Open, [{read, 1}], N}']].reduce(source) do |text, (from, to)|
+      flunk "#{CONSOLE} no longer holds #{from.inspect} once" unless text.scan(from).size == 1
+      text.sub(from) { to }
+    end
+    output, status = eunit(LOAD_GROUP, replaced: { CONSOLE => seeded })
+    refute status.success?, output
+    assert_match(/a_tty_left_with_vmin_zero_waits_for_input_test\S*\.\.\.\*failed\*/, output)
+  end
+
+  def test_a_console_that_ends_at_a_read_of_nothing_fails
+    assert_seed_fails("        eagain -> {noreply, watch(State)};\n", '', 'a_read_that_finds_nothing_waits_again_test')
+  end
+
   private
 
   # The cases, with the console's Anchor replaced, must fail Case.

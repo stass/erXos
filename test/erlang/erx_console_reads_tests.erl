@@ -109,6 +109,42 @@ an_end_of_file_on_a_read_ends_no_shell_test() ->
                          ?assert(is_process_alive(Console))
                  end).
 
+%% A program that leaves the tty raw with VMIN 0 makes a read of nothing complete at
+%% once. The console waits for a unit of input whatever VMIN is, so it neither ends nor
+%% spins while nothing is typed, and the line typed then reaches the shell.
+a_tty_left_with_vmin_zero_waits_for_input_test() ->
+    with_console(fun(Relay, Shell) ->
+                         Console = persistent_term:get({erx_console, line}),
+                         leave_raw_with_vmin_zero(),
+                         Shell ! {get_line, self()},
+                         {reductions, Before} = process_info(Console, reductions),
+                         timer:sleep(200),
+                         {reductions, After} = process_info(Console, reductions),
+                         ?assert(After - Before < 10000),
+                         type(Relay, <<"x\r">>),
+                         ?assertEqual("x\n", line())
+                 end).
+
+%% A read the watch reported can still find nothing: Ctrl-C typed after the reported
+%% byte flushes it before the console reads, and the read, carrying the signal number
+%% of its report, answers eagain. The console waits again, the interrupt ends the line,
+%% and the next line is read.
+a_read_that_finds_nothing_waits_again_test() ->
+    with_console(fun(Relay, Shell) ->
+                         Console = persistent_term:get({erx_console, line}),
+                         Open = leave_raw_with_vmin_zero(),
+                         Shell ! {get_line, self()},
+                         watching(Console),
+                         ok = sys:suspend(Console),
+                         type(Relay, <<"a">>),
+                         type(Relay, <<3>>),
+                         %% The relay has taken both inputs once it answers a later call.
+                         {ok, _} = erx_session_relay:tty(Open, tcgetattr),
+                         ok = sys:resume(Console),
+                         ?assertEqual({error, interrupted}, line()),
+                         ?assertEqual("x\n", begin Shell ! {get_line, self()}, type(Relay, <<"x\r">>), line() end)
+                 end).
+
 %% A loss the master reports among its input reaches the group as a loss at its place, so
 %% the line it falls in finishes only once the user has emptied it (docs/design-live.md,
 %% "Lost input").
@@ -171,6 +207,28 @@ lose(Relay) ->
     Relay ! {tty_lost, N}.
 
 relay() -> whereis(erx_tty_owner).
+
+%% A background program, SIGTTOU ignored, leaves the tty raw with VMIN and VTIME 0,
+%% through the open it returns.
+leave_raw_with_vmin_zero() ->
+    {ok, Open} = erx_session_relay:open_writer(relay(), background),
+    {ok, #{lflag := L, cc := CC} = Termios} = erx_session_relay:tty(Open, tcgetattr),
+    Raw = Termios#{lflag := L -- [icanon], cc := CC#{vmin := 0, vtime := 0}},
+    ok = erx_session_relay:tty(Open, {tcsetattr, Raw, sigttou_ignored}),
+    Open.
+
+%% Waits until the console watches its open for the group's ask: its state holds the
+%% reader, a map, with `watching` true.
+watching(Console) -> watching(Console, 50).
+
+watching(_Console, 0) ->
+    error(no_watch);
+watching(Console, Tries) ->
+    Watching = [true || #{watching := true} <- tuple_to_list(sys:get_state(Console))],
+    case Watching of
+        [true] -> ok;
+        [] -> timer:sleep(20), watching(Console, Tries - 1)
+    end.
 
 %% Waits for the console's output to the master to carry Byte, taking each output as
 %% the console's master does, so the next is sent.

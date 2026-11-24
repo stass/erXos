@@ -830,14 +830,6 @@ to the corpus and follow rc
   closes all but `sys:get_state/1` at once and takes the group out of tracing; `sys` could refuse
   `get_state` for a process for which `gen:hides_terms/1` is true. Add a `backtrace` check to
   `group_status_hides_the_kill_buffer_test`.
-* [Medium] console, a session tty left raw with `VMIN` 0 (`erlang/apps/erx/src/erx_console.erl`,
-  `watch/1` and `read_for_ask/2`): the console watches its open with `{read, 1}`, whose readiness follows
-  `VMIN` (`erx_tty:wanted/2`), and `erx_tty:read_input/2` answers a raw read with `VMIN` 0 and nothing typed, at
-  once or when `VTIME` runs out, `{ok, <<>>}`, which `read_for_ask/2` has no clause for, so a program that leaves those
-  settings ends the console with a `case_clause` when its group next asks; a clause that only watches again
-  would spin, since such a watch is ready at once. Watch with `in` (`erx_tty:poll_wait/2`, at least one
-  unit regardless of `VMIN`) and take `{ok, <<>>}` as `eagain`, with a case in `erx_console_reads_tests`
-  that leaves those settings and types a line.
 * [Medium] console, crash reports (`erlang/apps/erx/src/erx_console.erl`): the console exports no
   `format_status/1`, so a crash while it handles `{erx_console_input, Bytes}` reports the message and the state,
   which can hold a typed passphrase. Hide its terms as `erx_pl011` and `erx_mini_uart` do, with a case like

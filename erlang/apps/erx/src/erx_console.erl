@@ -673,7 +673,7 @@ info(erx_console_lost, State = #state{driver = Driver}) ->
     {noreply, driver_lost(State)};
 info(erx_console_eof, State = #state{role = session}) ->
     hang_up(State);
-info({ready, Open, [{read, 1}], N}, State = #state{reader = Reader = #{open := Open}}) ->
+info({ready, Open, [in], N}, State = #state{reader = Reader = #{open := Open}}) ->
     read_for_ask(N, State#state{reader = Reader#{watching := false}});
 info({erx_tty_event, Group, Event}, State = #state{reader = #{held := _}})
   when Event =:= interrupt; Event =:= suspend; Event =:= quit ->
@@ -1503,12 +1503,14 @@ follow_current(Group, State = #state{asks = Asks}) ->
             watch(State1#state{reader = Reader#{held := maps:with(Live, Held)}})
     end.
 
-%% A watch of one byte, made only when none waits for its report and the current group
-%% has an ask outstanding.
+%% A watch for one unit of input, made only when none waits for its report and the
+%% current group has an ask outstanding. It is an `in` watch, which erx_tty reports
+%% once a unit waits (a complete line when ICANON is set) whatever VMIN and VTIME
+%% are, so a program that leaves VMIN 0 makes no report of nothing.
 watch(State = #state{asks = Asks, reader = Reader = #{open := Open, watching := false}}) ->
     case is_map_key(current(State), Asks) of
         true ->
-            ok = erx_session_relay:watch(Open, {read, 1}),
+            ok = erx_session_relay:watch(Open, in),
             State#state{reader = Reader#{watching := true}};
         false ->
             State
@@ -1518,16 +1520,20 @@ watch(State) ->
 
 %% The watch's report, numbered N: one unit of input, a byte or a loss, is read for the
 %% current group's ask, if it has one; otherwise it stays in the tty until a group asks.
-%% A loss damages the read (damage/2). An end of file, VEOF
-%% at a line's start while a background program left ICANON set, is that read's end and
-%% never the hangup, which the relay tells with erx_console_eof: it is a read that found
-%% nothing, so the ask stays outstanding and the bytes held for the group go.
+%% A loss damages the read (damage/2). A read that finds nothing waits again: the relay
+%% answers eagain once a signal has flushed the reported unit, since the read carries the
+%% signal number of its report, and a read of an empty raw tty with VMIN 0 is erx_tty's
+%% no bytes. An end of file, VEOF at a line's start while a background program left
+%% ICANON set, is that read's end and never the hangup, which the relay tells with
+%% erx_console_eof: it is a read that found nothing, so the ask stays outstanding and
+%% the bytes held for the group go.
 read_for_ask(N, State = #state{asks = Asks, reader = #{open := Open}}) ->
     Group = current(State),
     case is_map_key(Group, Asks) andalso erx_session_relay:read_input(Open, N) of
         false -> {noreply, State};
         {ok, <<Byte>>} -> {noreply, watch(answer(Group, Byte, State))};
         lost -> {noreply, watch(damage(Group, State))};
+        {ok, <<>>} -> {noreply, watch(State)};
         eagain -> {noreply, watch(State)};
         eof -> {noreply, watch(drop_held(Group, State))}
     end.
