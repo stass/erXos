@@ -6,11 +6,11 @@ require 'minitest/autorun'
 require_relative '../../tools/lib/erx/bench_suite'
 require_relative '../../tools/lib/erx/xdomain_bench'
 
-# The xdomain bench image's pure parts (docs/design-bench.md, "5. `xdomain`"): its
-# manifest grants echo to peer, the client's domain; the boot asks for the declared cells
-# on the counter with no pair; the run line passes the landing profile's sizes and the
-# declared request size, so the guest's conditions are the declared ones; and the
-# transcript loads every bench module into peer before the run line.
+# The xdomain bench image's pure parts (docs/design-bench.md, "5. `xdomain`: one message,
+# one domain to another"): its manifest grants echo to peer, the client's domain; the boot
+# asks for the declared cells on the counter with no pair; the run line passes the landing
+# profile's sizes and the declared request size, so the guest's conditions are the declared
+# ones; and the transcript loads every bench module into peer before the run line.
 class XdomainBenchTest < Minitest::Test
   Bench = Erx::XdomainBench
 
