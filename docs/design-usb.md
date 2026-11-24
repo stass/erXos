@@ -633,7 +633,13 @@ serves media on all of them. The device service introduces the media
 domain to the USB domain as it introduces any window's holder, and the
 grant it hands over is a **drive grant**: a process of the USB domain,
 `erx_blk_drive`, made for that one row and living as long as the USB
-domain.
+domain. The USB domain knows its rows from its records, one
+`-erx_record drive usb N` for each drive the manifest names on its
+controllers ([design-fiasco.md](design-fiasco.md#drive-records)): at
+its start its places start one drive grant for each, and a medium that
+becomes ready takes the lowest free of them, as a HID function takes
+the lowest free input number. A domain whose drive records are refused
+serves no drive, and each of its ready media shows `no drive`.
 
 A drive grant answers one request, `window`: `{ok, Window}`, the pid of
 the window on the medium the drive holds now, or `{error, no_medium}`
@@ -641,7 +647,11 @@ while the drive holds none. Asked again for a window it already
 answered, which only a restarted holder does, the grant first ends the
 medium as a UNIT ATTENTION does, so the engine refuses every request of
 the old reference before the medium is ready again under a fresh one,
-and answers the new window; so no medium is mounted twice at once
+and holds the ask until it sees the old window end. The medium becomes
+ready again only after the engine's next poll of the unit, so the grant
+then answers `{error, no_medium}`, and the holder's next walk asks again
+and finds the medium, perhaps under another drive; so no medium is
+mounted twice at once
 ([design-drives.md](design-drives.md#a-drive-and-its-medium)). The window is an ordinary window of the
 block service, whose sectors are the medium's, answering `{read, Sector,
 Count}`, `{write, Sector, Bytes}` and `flush` with the block service's

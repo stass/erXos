@@ -378,6 +378,15 @@ that drives its medium's transport:
   of [design-system.md](design-system.md#the-manifest) holds for an
   unconfined one.
 
+The serving domain learns its drives when it is created, as it learns
+its devices: the domain library writes it one `-erx_record drive ROLE N`
+for each drive window on a device it holds, ROLE that device's role,
+`usb` or `block`, and N the drive's number
+([design-fiasco.md](design-fiasco.md#drive-records)). The USB domain's
+`usb` records are its drives; a block device's driver that finds a
+`block` record serves its medium as that drive, and one that finds none
+reads the medium's layout.
+
 For each medium, the serving domain runs the transport the storage
 design defines and one window process whose sectors are the medium's
 whole capacity ([design-storage.md](design-storage.md#data-model)),
@@ -393,9 +402,10 @@ holding whatever medium the drive holds, whole.
 The first ask for a medium's window answers the window its block
 service started. A later ask comes only from a drive process or a media
 domain that restarted and lost the window, whose earlier mount may still
-have requests on their way. The grant therefore first **ends and
-restarts the medium's block service**, and answers the new window only
-once the earlier one can have no effect. Both transports end a medium
+have requests on their way. The grant therefore first **ends the
+medium's block service**, holds the ask until the old window has ended,
+so the earlier mount can have no further effect, and only then answers.
+Both transports end a medium
 the same way, through the **medium reference** every request of the
 medium carries, which the one process that issues the medium's commands
 checks at the head of its queue:
@@ -414,14 +424,19 @@ checks at the head of its queue:
    failure does.
 3. **The old block service ends**, its windows with it, and the grant
    waits for their end.
-4. **The new block service starts** under a fresh reference, and the
-   grant answers its window.
+4. **The grant answers the held ask** when it sees the old window end:
+   with the window of the medium's next block service, under a fresh
+   reference, if one has started by then, and `{error, no_medium}`
+   otherwise. The holder's next walk asks again and finds the medium
+   once its new window has started.
 
 On USB this is the end a UNIT ATTENTION already makes: the engine is
 the issuing process, the reference is the BOT function's own, and the
 medium becomes ready again only through commands queued behind the
-step ([design-usb.md](design-usb.md#media-and-drives)); it may come back
-as another free drive, as a stick put back may. On a block device the
+step ([design-usb.md](design-usb.md#media-and-drives)), which wait for
+the engine's next poll of the unit, so a held ask on USB is answered
+`{error, no_medium}` and the next walk finds the medium; it may come
+back as another free drive, as a stick put back may. On a block device the
 issuing process is `erx_blk`'s device process, and the medium reference
 is the one thing a drive adds to it: USB's rule, so that both transports
 share one handoff.
@@ -430,7 +445,8 @@ So an earlier mount's requests are answered, or refused unissued, before
 a new mount sends its first, and no medium is mounted twice at once, by
 the order of the one issuing process rather than by a record of what was
 mounted; a fixed drive, such as a second virtio disk, mounts again after
-any restart with nothing taken out. An eject a restart cuts short never
+any restart with nothing taken out, at the walk that asked or the next.
+An eject a restart cuts short never
 answers `ok`: its answer comes only from the drive process after every
 finish, and that drive process has ended, so the writer of `eject` gets
 `eio`; a finish whose flush was refused `gone` leaves its FAT volume
@@ -489,8 +505,9 @@ The manifest check refuses:
   domains holding drive windows;
 * a `media` service served by the system domain, and a row naming the
   media domain that its list does not admit;
-* a block drive's device held by the system domain, and a row naming
-  its holder that the holder's list does not admit;
+* a drive's device held by the system domain, whose boot carries no
+  drive record, and a row naming a block drive's holder that the
+  holder's list does not admit;
 * more drives on one USB domain's controllers than `usb_drives_max`;
 * a `media` facet row with rights `rx`.
 
@@ -1172,10 +1189,11 @@ it whose failure the domain's restart intensity counts.
   medium, or the next one.
 * **A restarted drive process**, after a defect of its own, has ended
   its medium's supervisor with it, since the two are linked; its next
-  walk asks the grant again, which restarts the medium's block service
-  first, so the medium mounts afresh with no earlier request
-  outstanding. A restarted media domain mounts every medium present the
-  same way.
+  walk asks the grant again, which ends the medium's block service
+  first and answers `{error, no_medium}` unless the next block service
+  has started by the old window's end, so the medium mounts afresh, at
+  that walk or the next, with no earlier request outstanding. A
+  restarted media domain mounts every medium present the same way.
 
 ## Failure handling
 
@@ -1336,7 +1354,7 @@ when the names and hashes equal the harness's.
 | `device_del` mid-write, then `device_add`: the stick mounts again, FAT read-only `dirty` | the dirty flag ignored at mount |
 | a session's `mount /media/disk0/s1 /mnt`, the stick's files read through `/mnt` and their hashes equal, then `umount /mnt`, after which `/mnt` is gone and `/media/disk0/s1` still reads | `mount` binding the drive's directory instead of the volume, so `/mnt` lists `status` and `ctl` |
 | a second virtio disk of the `drive` role, served by a block driver domain of its own, listed and read | the block service reading the boot layout on a `drive` device |
-| the same virtio disk read again after the media domain is restarted, with nothing detached | the grant answering a second ask `no_medium`, so the disk is not mounted again |
+| the same virtio disk read again after the media domain is restarted, with nothing detached | the grant answering every ask after the first `no_medium`, so the disk is not mounted again |
 
 At the milestone gate, images that the FreeBSD oracle guest's
 `newfs_msdos` and `gpart`, and the Linux oracle guest's `mkfs.fat`,

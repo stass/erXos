@@ -3558,6 +3558,73 @@ window row, which would reach no holder. The reader's host test covers each word
 a missing, extra or other sixth word, and a second record or none, seeded with a reader that takes
 ROOT of any length and one that takes any sixth word as the window's name.
 
+### Drive records
+
+The device service names a device's windows to its holder when it gives
+the device ([design-storage.md](design-storage.md#data-model), "Partitions
+are windows"), and the holder reads no manifest, which only the system
+domain slices ([design-system.md](design-system.md), A10). A partition
+window needs nothing beyond its role, since the medium layout of the ABI
+file places it; a drive window names a drive number that no layout
+holds ([design-drives.md](design-drives.md#manifest-rows)). The domain
+library therefore adds to a configured domain's arguments, beside its
+device records, one record for each drive window whose device lies in
+one of the domain's gives: `-erx_record drive ROLE N`, ROLE the name of
+that device row's `mf_device_role`, `usb` or `block`, the only two a
+drive window may lie on, and N the row's `drive` field in decimal. The
+records follow the window table's order. The window's holder, the media
+domain, gets none: what it needs of a drive comes through the drive's
+grant. The system domain gets none either, since the manifest check
+refuses a drive on a device it holds, and the hosted entry writes none.
+`ERX_BOOT_DRIVE_WORDS_MAX` in `include/erx/boot_words.h` bounds one
+record's words, the flag, `drive`, the longer role word `block` and one
+number word; how many a domain gets is the manifest check's bound, at
+most `usb_drives_max` on a USB domain's controllers and exactly one for
+a block drive's holder, which holds that device alone.
+
+The one reader is `erx_device_record:drives/2`, a pure function over the
+record words `erx_device_record:records/0` holds, with a fuzz target as
+`find/3` has (it joins `tools/fuzz/erx_device_record.rb`).
+`drives(Role, Arguments)`, Role `usb` or `block`, answers
+`{ok, Numbers}`, the sorted drive numbers of that role's records, `[]`
+for none, a normal state, or `{error, {bad_device_record, Reason}}`. It
+reads every record of the word `drive` whichever role is asked, and
+refuses them all with a stated reason when any has other than two words,
+a role word other than `usb` or `block`, which it compares as a string
+and never makes into an atom, or a number that is not a decimal of at
+most ten digits below `mf_none`; when two name one number; when more
+than `usb_drives_max` are `usb`; or when more than one is `block`. So a
+domain gets its whole set of drives or none, never a part.
+
+* **The USB domain** reads its `usb` drives when its places start and
+  starts one drive grant, `erx_blk_drive`, for each; a ready medium takes
+  the lowest free number among them, and the device service's
+  introduction of the media domain hands over the grant of each row's
+  number ([design-usb.md](design-usb.md#mass-storage-reaches-the-file-servers)).
+  On a refusal its places log the reason and start no grant, so every
+  ready medium shows `no drive`.
+* **A block device's driver**, `erx_blk`, reads its `block` drive. With
+  one, it serves its device's medium as that drive: one grant, one
+  window of role `drive` over the whole medium under a medium
+  reference, and no partition table read
+  ([design-drives.md](design-drives.md#a-drive-and-its-medium)). With
+  none it reads the medium's layout as it does for the boot medium. On
+  a refusal it serves no window at all and logs the reason: it cannot
+  tell whether its medium is a drive, and reading the layout of a
+  medium meant to be served whole would parse a stranger's table in a
+  domain that holds a device.
+
+The writer's host test builds a manifest with two USB drives on one
+controller and a block drive, and finds each holder's records and no
+record in the media domain's or any other domain's arguments, seeded
+with a writer that keys on the window's holder instead of the device's,
+so the media domain gets the records. The reader's host test covers
+each word malformed in turn, a third word, a number twice, five `usb`
+records and two `block`, and a `block` record beside a domain's `usb`
+ones, which each role's answer keeps apart, seeded with a reader that
+takes any role word and one that keeps the first of two records naming
+one number.
+
 ### The console
 
 The console's record is `-erx_record console PERIPHERAL BASE SIZE LINE MARK CLOCK`, which the root writes from the device entry `machine.console` names (`erx_boot_console_words`). PERIPHERAL is the CMSIS-SVD peripheral of the entry's compatible string, from the one table of UART kinds, `erx_uart_kinds` in `include/erx/device_kinds.h`, beside the kinds a give drives and apart from them, so a console UART is never given: `arm,pl011` is `pl011`, which is also the host link's UART, and `brcm,bcm2835-aux-uart` is `mini_uart`. The record's first word, `console`, is the row's too. The manifest check refuses a console of any other compatible string, naming it, and the root writes no record for one. The console starts the driver of the peripheral its record names, `erx_pl011` for `pl011` and `erx_mini_uart` for `mini_uart` (`erx_console:console_driver/1`), and stops with a stated reason at any other word, at no record, or at more than one, so the console makes no atom of a record word. The hosted entry writes `-erx_record console stdio`, the same record with no UART after it, which names `erx_stdio`. The driver opens the record's window and line through `erx_device`. It takes exactly one such entry, each number in decimal within its field of the boot manifest's console (64, 64, 32 and 32 bits), MARK `direct` or `shared` as a device record's, and the clock not 0, and stops with a stated reason otherwise (`erx_pl011:console_uart/1`, which has a fuzz target). The clock, the UART's in hertz from the platform record, times a character while the driver reprograms the UART and gives the divisors for 115200 baud when the boot left the UART unprogrammed; a clock with no integer divisor of 1 to 65535 for that rate stops the driver before it touches the UART. A plain `erx.arg` word that joins any of these lists of arguments, the console's or a device record's, is ignored.
