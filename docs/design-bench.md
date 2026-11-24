@@ -716,10 +716,6 @@ minute. If its recorded time passes that, the deterministic boot moves
 to the milestone gate. Every other cell, load and placement is in the
 full matrix only.
 
-That the native guests boot in deterministic mode as the production image
-does is unverified; until the native bench image does, the deterministic
-boot is not part of the matrix, rather than a cell expected and not run.
-
 **Cells and suite cells.** The `bench` suite is an ordinary QEMU suite
 (`tools/lib/erx/qemu_suites/bench.rb`). Its suite cells, in the sense of
 [design-build.md, What the gates run](design-build.md#what-the-gates-run),
@@ -1028,10 +1024,11 @@ CPU the page the root maps into it names.
 
 ### 4. `vm`: what memory costs
 
-Each operation is timed from the root and from a test task, on Fiasco
-both requests to the root service. A status of `ERX_OK` alone could pass
-a call that did nothing, so after each cell's timed loop the guest makes,
-once and untimed, the check `native_memory`'s suite makes for that call
+Each operation is timed from the benchmark's own test task
+(`test/guest/native_bench/vm_task.c`); on Fiasco every call is a request
+to the root service, and a touch is a plain write. A status of `ERX_OK`
+alone could pass a call that did nothing, so after the cells' timed loops
+the task makes, once and untimed, for each call the check `native_memory`'s suite makes for that call
 (`test/guest/native_memory/guest.c`): a committed page reads zero, a
 written page reads back after a protect to read-only and back, a
 decommitted and recommitted page reads zero, and the free page count is
@@ -1047,7 +1044,7 @@ check, or a task that exits without the fault, makes the cell `failed`.
 | --- | --- | --- | --- |
 | `reserve`, `release` | `erx_vm_reserve` of 1 page and of 512 pages; then `erx_vm_release` of it | `ERX_OK`; the free page count unchanged after the release | fast for 1 page, expensive for 512 |
 | `commit`, `decommit` | `erx_vm_commit` of 1, 64 and 512 reserved pages; then `erx_vm_decommit` | `ERX_OK`, and the checks above | the same |
-| `touch` | the first write to each page of a 64-page commit, one sample per page | the write completes; the record says whether the commit had mapped the pages already | fast |
+| `touch` | the first write to each page of a 64-page commit, one sample per page | the write completes and reads back; the operation's result text states that on Fiasco the commit has mapped the pages already (FD7) | fast |
 | `protect` | `erx_space_protect` of 1 and 64 committed pages to read-only and back | `ERX_OK`, and the checks above | fast |
 | `map` | `erx_mem_create` of 64 pages, `erx_vm_map` of it at reserved addresses of the caller's own space, then `erx_vm_release` of the range and `erx_cap_close` of the object, each timed | `ERX_OK` throughout | expensive |
 | `mem-child` | `erx_mem_child` of a 64-page object | `ERX_OK`; the record says it is an eager copy on Fiasco | expensive |
@@ -1058,8 +1055,9 @@ page charged or zeroed twice, and the cost the root as pager adds over a
 kernel's map. Its counterparts on FreeBSD and Linux are anonymous
 `mmap`, first touch, `mprotect` and freeing.
 
-**What it needs.** A `native_task` program mode for the calls; a test
-task budget large enough for 512 pages; the native bench guest.
+**What it needs.** The benchmark's test task in the native bench image,
+which the root loads with a budget large enough for 512 pages; the
+native bench guest.
 
 ### 5. `xdomain`: one message, one domain to another
 

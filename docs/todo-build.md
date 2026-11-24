@@ -64,9 +64,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   notes say `failed` without the record's directory, which was written. A native boot at its deadline should
   record `timed_out` as the xdomain boot does, and a failed seeded boot should keep the written record in its
   outcome beside the failure.
-* [Medium] benchmarks, the `vm` guest (`test/guest/native_bench/vm_task.c`, `vm.c`): the task waits for the root's
-  answer at each step of its page check by spinning, which works only while the root's band is above the task's
-  (docs/design-fiasco.md, "A wait blocks"); it should block between looks. A failed prepare or act skips every undo,
+* [Medium] benchmarks, the `vm` guest (`test/guest/native_bench/vm_task.c`, `vm.c`): a failed prepare or act skips every undo,
   so a later cell can fail on pages an earlier one left committed; `ERX_ENOTSUP` from a prepare or undo step marks
   the timed operation unsupported; the root's 100 us polls fall inside the timed loops on CPU 0; `record_wait` is a
   copy of `native_space`'s, and the histogram reset is written three times.
@@ -101,7 +99,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Medium] benchmarks, `nullcall` ([design-bench.md](design-bench.md#3-nullcall-the-decoder-refusal-round-trip)):
   FD32's ten runs of a build on the Raspberry Pi 4, judged by its own predicate.
 * [Medium] benchmarks, `vm` ([design-bench.md](design-bench.md#4-vm-what-memory-costs)): the reserve, commit,
-  touch, protect, decommit, release, map and child operations from the root and from a test task.
+  touch, protect, decommit, release, map and child operations: the native landing cells time one page of the first
+  six from the benchmark's test task; the 64- and 512-page sizes, `map` and `mem-child` are not built.
+* [Medium] benchmarks, the landing matrix's deterministic boot ([design-bench.md](design-bench.md#the-gates)): not
+  built. That the native guests boot in deterministic mode as the production image does is unverified; until the
+  native bench image does, `tools/erx check-qemu --suite bench` runs no deterministic cell, rather than expecting one
+  and not running it.
 * [Medium] benchmarks, `xdomain` ([design-bench.md](design-bench.md#5-xdomain-one-message-one-domain-to-another)):
   `local-rtt` and `xdomain-pingpong` run in the xdomain bench image (`tools/lib/erx/xdomain_bench.rb`). Open: the
   measured map both landing runners pass `BenchLanding` is an untyped hash (`measured.slice` drops a misspelled key);

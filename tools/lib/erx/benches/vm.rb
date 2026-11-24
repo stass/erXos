@@ -7,8 +7,8 @@ require_relative '../bench_suite'
 # What memory costs (docs/design-bench.md, "4. `vm`: what memory costs"): a commit or a
 # protect whose plan walks more than it should, a page charged or zeroed twice, and the
 # cost the root as pager adds over a kernel's map. Each cell is one page, timed from a test
-# task; a status of ERX_OK alone could pass a call that did nothing, so each timed loop is
-# followed by native_memory's check for that call, and protect also by a write to the
+# task; a status of ERX_OK alone could pass a call that did nothing, so the timed loops are
+# followed by native_memory's check for each call, and protect's also by a write to the
 # read-only page that must fault.
 operation = Erx::BenchSuite::Operation
 cell = Erx::BenchSuite::LandingCell

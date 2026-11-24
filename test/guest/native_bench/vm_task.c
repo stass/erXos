@@ -31,6 +31,8 @@
 #include "test/guest/native_bench/vm.h"
 
 #define PAGE	((uint64_t)ERX_PAGE_SIZE)
+/* How long the task blocks between looks at the root's answer. */
+#define LOOK_US	UINT64_C(100)
 
 /* One step of a batch on the page at index at of the area; ERX_OK, or the call's answer. */
 typedef int (*vm_act_t)(uint64_t at);
@@ -207,13 +209,17 @@ page_is_zero(uint64_t addr)
 	return (true);
 }
 
-/* Raises step and waits until the root has read the free page count for it. */
+/*
+ * Raises step and waits until the root has read the free page count for it, blocked
+ * between looks: on a CPU it shares with the root, a spin would keep a root whose band is
+ * below the task's off that CPU for ever (docs/design-fiasco.md, "A wait blocks").
+ */
 static void
 step_say(vm_page_t *page, vm_step_t step)
 {
 	atomic_store_explicit(&page->step, step, memory_order_release);
 	while (atomic_load_explicit(&page->answered, memory_order_acquire) != step)
-		;
+		erx_fiasco_test_ipc_sleep_us(LOOK_US);
 }
 
 /*
