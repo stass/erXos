@@ -707,7 +707,8 @@ switch_loop(internal, init, State) ->
                             State#state.tty),
 	    %% init edlin used by switch command
 	    %% erXos: the menu starts with an empty kill buffer of its own: a group's lives
-	    %% in the group's state, which no other process reads (edlin:init/0).
+	    %% in the group's state, not in a dictionary another process can read
+	    %% (edlin:kill/0).
 	    edlin:init(),
             {keep_state, State#state{ tty = NewTTYState },
              {next_event, internal, line}}

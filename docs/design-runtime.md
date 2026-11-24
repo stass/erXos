@@ -851,7 +851,7 @@ reports it, except when its `format_status/2` crashes: then `gen_statem`'s
 terminate report shows `gen`'s text for its state, data and reason, and
 `gen_server`'s an empty sys log, where stock shows them raw. `group`'s
 `format_status/1` hides the shell history, the line being typed, the driver's
-waiting input and the sys log, and the empty dictionary hides `edlin`'s kill buffer; stock's crashes on every call. The
+waiting input, the sys log and `edlin`'s kill buffer, which the group keeps in its state; stock's crashes on every call. The
 `gen_statem` and `group` failures are upstream bugs.
 
 Nothing changes in `erl_ptab.c`: processes take their pids as stock ERTS

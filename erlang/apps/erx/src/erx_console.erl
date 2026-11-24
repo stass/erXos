@@ -823,6 +823,11 @@ info(Message, State = #state{user = User, line = Line})
         false ->
             {noreply, State}
     end;
+info({erx_tty_event, _Group, Event}, State) ->
+    %% An event of the tty this console has no clause for is logged, so a new event
+    %% name is seen rather than dropped unnoticed.
+    logger:notice("erx_console: an erx_tty event it has no clause for: ~0P", [Event, 8]),
+    {noreply, State};
 info(_Message, State) ->
     {noreply, State}.
 
@@ -858,10 +863,14 @@ shell_ending(_Reason) -> {exited, 1}.
 ended_by(Reason) ->
     erlang:display_string(stderr, lists:flatten(io_lib:format("erx_console: ended by ~p\r\n", [Reason]))).
 
-%% Whether Pid is one of the console's groups: `user`, the one it started with, or one
-%% run_shell/1 started.
-is_group(Pid, #state{user = User, base = Base, shells = Shells}) ->
-    Pid =:= User orelse Pid =:= Base orelse lists:keymember(Pid, 1, Shells).
+%% The console's groups: `user`, the one it started with, and each one run_shell/1
+%% started.
+groups(#state{user = User, base = Base, shells = Shells}) ->
+    [User, Base | [Group || {Group, _Caller, _Shell} <- Shells]].
+
+%% Whether Pid is one of the console's groups.
+is_group(Pid, State) ->
+    lists:member(Pid, groups(State)).
 
 %% The group that gets the input: the innermost shell run_shell/1 started, or the one
 %% the console started with.
@@ -877,7 +886,7 @@ gets_input(State = #state{input_ended = Ended}) ->
     %% Not always Group: only the Erlang shell's group answers shell:get_state/0.
     put(current_group, erlang_shell_group(State#state.shells)),
     [Group ! {self(), eof} || Ended],
-    reader_follows(Group, State).
+    follow_current(Group, State).
 
 %% How a shell run_shell/1 started ended, as its caller is told.
 shell_ended(normal) -> ok;
@@ -1479,11 +1488,12 @@ control($\^Z) -> suspend.
 
 %% The relay's reads, for the console of a session's tty (reader()).
 
-%% The current group changed, or may have: the relay is told, so the events made from
-%% now on carry it; what the console kept for a group that has ended is forgotten; and
-%% the open is watched if the current group has an ask outstanding.
-reader_follows(Group, State = #state{user = User, base = Base, shells = Shells, asks = Asks}) ->
-    Live = [User, Base | [G || {G, _Caller, _Shell} <- Shells]],
+%% The current group changed to Group, or may have, in either role: what the console
+%% kept for a group that has ended, its ask and the bytes held for it, is forgotten;
+%% and for a session's tty the relay is told Group, so the events made from now on
+%% carry it, and the open is watched if Group has an ask outstanding.
+follow_current(Group, State = #state{asks = Asks}) ->
+    Live = groups(State),
     State1 = State#state{asks = maps:with(Live, Asks)},
     case State1#state.reader of
         none ->

@@ -138,7 +138,8 @@
           %% erXos: the line editor's kill buffer, the text the user last killed
           %% with its damage, which every edit takes and returns (edlin:read/0). It
           %% lives here, which format_status/1 hides, and not in the process
-          %% dictionary, which process_info/2 shows any process of the runtime.
+          %% dictionary, which process_info/2 shows any process of the runtime
+          %% (docs/todo-shell.md lists the ways the data is still shown).
           kill = edlin:empty_kill() :: edlin:kill()
         }).
 

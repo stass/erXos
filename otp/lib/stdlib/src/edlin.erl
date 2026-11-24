@@ -17,8 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: every editing call takes the read, its damage and the kill buffer,
-%% and returns it (edit_line/3), so no typed text lives in the process dictionary
+%% Modified by erXos: every editing call takes the read, its damage and the kill buffer
+%% together, and returns it (edit_line/3), so no typed text lives in the process dictionary
 %% (init/0); a loss of input, the input lost, damages the read; no line of a
 %% damaged read is finished (finish/5), the end of input drops it, and an edit that
 %% empties the buffer ends the damage (damage_after/4). Text keeps the damage of the
@@ -229,7 +229,7 @@ init() ->
 -type kill() :: {Damage :: boolean(), Text :: string()}.
 
 %% erXos: the read an editing call takes and returns: whether it lost input, and the
-%% kill buffer.
+%% kill buffer, which outlives the read: a group keeps it across its requests.
 -type read() :: {Damage :: boolean(), kill()}.
 
 %% erXos: the kill buffer that holds nothing.
@@ -644,10 +644,10 @@ do_op(kill_line, {LB, {Bef, Aft}, LA}, Rs, Read) ->
     {{redraw,{LB, {Bef,[]}, LA},[{delete_chars,cp_len(Aft)}|Rs]}, killed(Aft, Read)};
 do_op(backward_kill_line, {LB,{Bef, Aft},LA}, Rs, Read) ->
     {{{LB, {[], Aft}, LA}, [{delete_chars, -cp_len(Bef)} | Rs]}, killed(reverse(Bef), Read)};
-do_op(yank, {LB,{Bef, []},LA}, Rs, {_D, {_, Kill}} = Read) ->
-    {{{LB, {reverse(Kill, Bef),[]}, LA},[{insert_chars, unicode,Kill}|Rs]}, yanked(Read)};
-do_op(yank, {LB,{Bef, Aft},LA}, Rs, {_D, {_, Kill}} = Read) ->
-    {{redraw,{LB, {reverse(Kill, Bef),Aft}, LA},[{insert_chars, unicode,Kill}|Rs]},
+do_op(yank, {LB,{Bef, []},LA}, Rs, {_D, {_, Text}} = Read) ->
+    {{{LB, {reverse(Text, Bef),[]}, LA},[{insert_chars, unicode,Text}|Rs]}, yanked(Read)};
+do_op(yank, {LB,{Bef, Aft},LA}, Rs, {_D, {_, Text}} = Read) ->
+    {{redraw,{LB, {reverse(Text, Bef),Aft}, LA},[{insert_chars, unicode,Text}|Rs]},
      yanked(Read)};
 do_op(Op, MultiLine, Rs, Read) ->
     {do_op(Op, MultiLine, Rs), Read}.
