@@ -521,7 +521,7 @@ module Erx
     # row names the release and runtime image the image then carries. kind (MediumKind,
     # development unless its caller states another) decides the rest, after check_medium
     # refuses what it does not take: a medium that carries its own apps (own_apps?), the
-    # published one and any card, carries own_apps of own_examples and trusts no key
+    # published one and any card, carries own_apps and trusts no key
     # (check_published_trust); only the published kind carries the Doom example, /bin/doom
     # of the domain release (example_parts), so no harness build needs the example
     # fetched; and a test kind's roots and programs go to the one build, marked as test
@@ -602,7 +602,7 @@ module Erx
     end
 
     # The app examples a medium of kind (MediumKind) for platform carries as its own
-    # apps (own_apps), the one rule of what a medium carries as its own apps: none on
+    # apps (own_apps), the one rule of what a medium the website offers holds: none on
     # a builder's medium for a board without a card, which carries its builder's apps; the
     # kiosk, ImageApps::KIOSK, on QEMU's published medium and the published card; and the
     # kiosk with the Bluetooth echo, ImageApps::ECHO, on a development card
@@ -770,7 +770,7 @@ module Erx
     # both builds as at that comparison, so the builds read the tree it compared. Each
     # build packs the development medium (MediumKind), so the check needs no example
     # fetched, with packages: a card carries its own, the development card's two, and
-    # QEMU's medium takes its published medium's as its builder's app, so both compare packages'
+    # QEMU's medium takes the kiosk as its builder's app, so both compare packages'
     # bytes. The published media, with Doom, are not compared (TODO.md, "the published
     # media and the Doom example").
     def check_reproducible(directory:)
@@ -783,7 +783,7 @@ module Erx
         @runtime.clean
         Bl31.clean(root: @root) if BootPartition.boot_partition_medium?(@machine.platform)
         card = BootPartition.boot_partition_medium?(@machine.platform)
-        build_medium(directory: File.join(directory, name), apps: card ? ImageApps.none : own_apps(self.class.own_examples(MediumKind.published, @machine.platform)))
+        build_medium(directory: File.join(directory, name), apps: card ? ImageApps.none : own_apps([ImageApps::KIOSK]))
       end
       raise Error, 'build/gen was regenerated during the reproducibility check; run it again' unless generated_stamp == compared
 
