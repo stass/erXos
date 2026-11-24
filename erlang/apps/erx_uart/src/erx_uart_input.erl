@@ -2,8 +2,8 @@
 %% SPDX-License-Identifier: BSD-2-Clause
 
 %% A UART driver's input on its way to the one process it serves (docs/design-live.md,
-%% "Lost input", "One input message outstanding per driver"): the units its drains read, each
-%% a byte or the loss `lost`, and whether the message last sent still waits for its
+%% "Lost input", "One input message outstanding per console driver"): the units its drains read,
+%% each a byte or the loss `lost`, and whether the message last sent still waits for its
 %% erx_console_taken. A driver has at most one input message its owner has not taken: next/1
 %% gives the next message only once taken/1 has recorded the answer to the last, so the
 %% owner's mailbox holds at most one input message from the driver however late it is. A

@@ -111,14 +111,13 @@ goes to the document of the subsystem its component pointer names.
   (`fiasco/kernel/src/lib/uart/uart_16550.cc`, `write`) reads `LSR`, clearing the overrun bit
   before `erx_mini_uart` sees it, and saves and restores `IER` around the write. Since the
   driver pauses a full store by writing `IER` 0 and resumes by enabling it
-  (docs/design-live.md, "One input message outstanding per driver"), a write on another CPU
+  (docs/design-live.md, "One input message outstanding per console driver"), a write on another CPU
   can hide a FIFO overrun during a pause (a damaged line then runs whole), undo a resume (the
   console stops reading until output polls `LSR`) or undo a pause (a delivery storm on the
   shared auxiliary line until the answer). Fix by ownership: Fiasco stops writing the console
   UART once its driver attaches, or its 16550 write leaves `IER` and `LSR` alone on this board.
   The PL011's write touches neither `IMSC` nor its overrun (`uart_pl011.cc`, `write`), but
   that a PL011 marks an overrun with `OE` on silicon is unverified.
-
 
 Every other risk the design accepts is stated in its
 [threat model](docs/design.md#threat-model) and in each subsystem

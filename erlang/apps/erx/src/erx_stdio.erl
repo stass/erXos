@@ -8,7 +8,7 @@
 %% Natively this module is present and never started.
 %%
 %% The driver keeps one input message outstanding (docs/design-live.md, "One input message
-%% outstanding per driver"): standard input can wait, so after sending bytes it reads no
+%% outstanding per console driver"): standard input can wait, so after sending bytes it reads no
 %% more until the console's erx_console_taken, holding a readiness that came meanwhile, and
 %% it serves output while it waits.
 
