@@ -749,7 +749,10 @@ is the processor's system counter, which the kernel interface's clock,
 ERTS's time and the trace ring all read; at the board's pins it is a
 logic analyser's. A guest sends a histogram of its samples rather than
 the samples themselves, since the board's console carries about 11 KiB
-a second.
+a second. A cell that measures how a processor is shared sends
+instead, for each of a few fixed windows, each spinning thread's count
+of passes, its longest gap between them and the turns it lost, from
+which its share of the processor follows.
 
 Two records are compared only when their environments are equal, so a
 number taken under TCG can never be set against a native one. The

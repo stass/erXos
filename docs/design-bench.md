@@ -224,7 +224,9 @@ console, `BENCH` followed by one JSON object of at most 64 KiB, in clock
 ticks: the benchmark, the operation, the cell's conditions, the clock and
 its frequency, the status, the sample count, the batch size, the
 histogram, the exact maximum and minimum, the sixteen largest samples with
-their sequence numbers, and the counts of lost, early and missed events.
+their sequence numbers, and the counts of lost, early and missed events. A
+sustained cell's samples are windows, not ticks, and reach the host in
+lines of their own ([A sustained cell](#a-sustained-cell)).
 `BenchMeasurement` grows into the one validator of these lines; it checks
 every field's type and bound, refuses a line whole with a reason that
 never quotes it, and is fuzzed
@@ -375,7 +377,7 @@ starting values, to be revised by the first calibration runs.
 | **fast** | warm-up, then each operation timed alone | 1,000 warm-up, 10,000 samples, one run | 1,000 warm-up, 100,000 samples, three runs | histogram, percentiles the count allows, minimum, maximum |
 | **expensive** | 10 warm-up operations, or none for a cold start, then each timed | 10 and 100, one run | 10 and 1,000, three runs | median and maximum, the raw samples, percentiles the count allows |
 | **periodic** | absolute deadlines on a fixed schedule of period P and a phase sweep (below); each period's lateness is its return less its deadline | P = 1 ms for 2 s | P = 1 ms for 60 s, three runs; 300 s at the gates that name it | the lateness histogram per phase; early returns, missed periods and lost wakes counted |
-| **sustained** | after a 2 s warm-up, windows of fixed length, each counting work done | three 1 s windows | five 10 s windows, three runs | each window's rate, and their minimum, median and maximum |
+| **sustained** | after a 2 s warm-up, windows of fixed length, in each of which every thread of the cell counts its passes and its gaps ([A sustained cell](#a-sustained-cell)) | three 1 s windows | five 10 s windows, three runs | per window and thread its share of the CPU, longest gap and lost turns; the longest gap over all windows |
 
 Two rules hold in every profile, so no benchmark declares them:
 
@@ -406,6 +408,82 @@ Two rules hold in every profile, so no benchmark declares them:
   distribution over all phases. Whether Fiasco's timed waits end only at
   ticks is unverified; a minimum that varies across the phases by about a
   tick is the sign of it.
+
+### A sustained cell
+
+A sustained cell shows how a CPU is shared, which no single timed act
+does. Its threads are **recording spinners**: each reads the counter in a
+loop on the one CPU it shares with the cell's other threads and its
+load. A **gap** is the ticks between two of a thread's reads; its first
+gap counts from the plan's start, before any thread started, so a thread
+that starts late shows the wait as a gap.
+
+* **The windows.** The plan is fixed before any thread starts: a 2 s
+  warm-up, then the profile's windows, each of fixed length, so every
+  thread's window k is the same span of the counter. The read that passes
+  a window's end is that window's last, and a window no read fell in is
+  one gap of the window's whole length, with no pass.
+* **A lost turn** is a gap longer than half the slice the root
+  configures (`ERX_FIASCO_ROOT_SLICE_US`), converted to ticks with the
+  counter's frequency: for that long the CPU ran something else, another
+  thread's turn, or the host held the guest's CPU. The threshold is a
+  time, not a count of loop passes, because a pass of the loop takes less
+  than one counter tick under HVF, so a pass-counted threshold would take
+  in a tick's worth of interrupt handling. It is half the configured
+  slice, not the slice a thread was given, so a thread given a longer
+  slice still has its turns counted.
+* **What a thread keeps per window**: its passes (`iterations`), its
+  longest gap (`longest`, ticks), its lost turns (`lost`) and the ticks
+  they took (`waited`). Its **share** of the CPU in the window is
+  `1 - waited / window`, the part of the window it was not kept off the
+  CPU for half a slice or more. This accounting is a pure function of the
+  thread's reads and the plan, in the guest bench library, built and
+  tested on the host as the periodic classifier is.
+
+**How a sustained cell is reported.** A test task runs the spinners, and
+a task reaches the console only through its write, not through the root.
+So the task writes the cell's samples, and the root, which knows the
+cell, names it:
+
+1. The task's first thread, on CPU 0, writes nothing while a window
+   runs, where a write perturbed it. Once every spinner has published its
+   last window, it writes one `WINDOW` line per window and thread, window
+   by window and thread by thread, each `WINDOW` followed by one JSON
+   object:
+   `WINDOW {"window":0,"thread":2,"iterations":81234567,"longest":98765,"lost":250,"waited":18000000}`.
+   A line is at most 160 bytes, well inside one task write
+   (`utcb_bytes_max`, 504 bytes), which the root's one service thread
+   writes to the console whole, so no other task's write lands inside it.
+   The task ends with 0 once every line is written.
+2. The root, having joined the task, prints the cell's `BENCH` line: the
+   fields every cell carries, with `samples` the cell's window count and
+   no `histogram` or `largest`, since a window is not a tick sample. Its
+   status is `measured` when the task ended with 0 and `failed`
+   otherwise, the reason naming the task's status (a spinner that
+   publishes no window in time is one such end).
+3. The cell's windows are the `WINDOW` lines between the boot's previous
+   `BENCH` line and this one. `BenchMeasurement` reads `WINDOW` lines as
+   it reads `BENCH` and `CLOCK` lines, with the same decoder and
+   refusals, and the one fuzz target takes the guests' `WINDOW` lines as
+   seeds beside the others. It holds them to the cell: exactly one line
+   for each of the cell's windows and threads (the `threads` parameter),
+   in the order written; otherwise the cell is `rejected`, naming the
+   first missing or misplaced line. `WINDOW` lines followed by a `BENCH`
+   line of another profile, or by none, are refused.
+4. A `measured` cell in which a thread made no pass in some window is
+   `failed`: its correct result is that every thread runs in each
+   window, and the reason names the thread and the window.
+
+The record keeps a sustained cell's windows as its detail, and its
+summary is derived from them: per window and thread the share, the
+longest gap and the lost turns; per window the smallest share over the
+largest; and the longest gap over all windows, the statistic a
+comparison judges ([Comparison](#comparison)). Its windows are few, three
+or five, so it reports no percentile: the percentile rule gives none
+under 20 samples. The window's length is a workload parameter of the
+cell (`window_ms`), the warm-up is the profile's, in milliseconds, and
+both become ticks at the cell's frequency, which is the boot's `CLOCK`
+line's, since every thread reads the same counter.
 
 ### Environments
 
@@ -463,8 +541,8 @@ A cell's status is one of:
 | `partial` | fewer samples than asked, with the reason (a deadline, a load that ended) | from the samples taken, labelled partial |
 | `timed_out` | the guest's deadline passed before the operation reported | none |
 | `unsupported` | the call answered `ERX_ENOTSUP`, the environment lacks what the operation needs (a second CPU, a readable cycle counter), or calibration could not bound its counters; the reporter is named | none |
-| `failed` | a result was wrong: a lost wake, an early return, a reply with the wrong status | the samples before the failure, and the failure |
-| `rejected` | the guest's line failed validation, or a cell came from a boot without exactly one valid `CLOCK` line or with a frequency not its `CLOCK` line's and did not fail on a result the clock did not judge (a lost wake, a wrong status), which stays `failed` with its counts and no summary | none, and the reason |
+| `failed` | a result was wrong: a lost wake, an early return, a reply with the wrong status, a thread of a sustained cell that did not run in a window | the samples before the failure, and the failure |
+| `rejected` | the guest's line failed validation, a sustained cell's `WINDOW` lines were not exactly its windows and threads, or a cell came from a boot without exactly one valid `CLOCK` line or with a frequency not its `CLOCK` line's and did not fail on a result the clock did not judge (a lost wake, a wrong status), which stays `failed` with its counts and no summary | none, and the reason |
 | `not_run` | expected and never reported | none |
 
 A file is at most 1 MiB, a log at most 64 MiB, and a run directory is
@@ -501,7 +579,7 @@ committing it there by hand, and an uncommitted run is scratch.
 
 `BenchCompare` is a pure function of records. It compares one statistic
 (the median, 99th and 99.9th percentiles, the maximum, or a sustained
-rate) of one cell between a **baseline**, at least three runs, and a
+cell's longest gap) of one cell between a **baseline**, at least three runs, and a
 **candidate**.
 
 * **Comparable.** The two sides must have equal environments and equal
@@ -516,7 +594,9 @@ rate) of one cell between a **baseline**, at least three runs, and a
   `slower` when at least two of three candidate runs lie above it and the
   candidates' median exceeds the baseline's by more than the advisory
   threshold; `faster` the mirror; `inconclusive` otherwise. A sustained
-  rate's direction is reversed. Deterministic mode's band has no width,
+  cell is judged on its longest gap over all windows, an exact number
+  whose band is not widened, against the 99th percentile's threshold,
+  since it is the cell's tail. Deterministic mode's band has no width,
   so any difference there is a real change of the measured virtual time,
   though not necessarily of instructions executed.
 * **Inconclusive is not a pass.** A comparison is inconclusive when the
@@ -613,7 +693,7 @@ background:
 
 | Boot | Cells |
 | --- | --- |
-| the native bench image, QEMU `virt` under HVF, four CPUs | `nullcall`: `root-same-space` and `root-cross-space` on the service's CPU, and `kernel`; `vm`: `reserve`, `commit`, `touch`, `protect`, `decommit` and `release` of one page, from a test task; `wake`: `wake-same-cpu`, `wake-cross-cpu` and `trigger-take` on one CPU, and `park-deadline` on one CPU, idle, for 2 s; `sched`: `share-equal` with four spinners, three 1 s windows |
+| the native bench image, QEMU `virt` under HVF, four CPUs | `nullcall`: `root-same-space` and `root-cross-space` on the service's CPU, and `kernel`; `vm`: `reserve`, `commit`, `touch`, `protect`, `decommit` and `release` of one page, from a test task; `wake`: `wake-same-cpu`, `wake-cross-cpu` and `trigger-take` on one CPU, and `park-deadline` on one CPU, idle, for 2 s; `sched`: `share-equal` with four spinners on the last CPU, three 1 s windows |
 | the same image in deterministic mode | `nullcall`'s two root cells and `vm`'s one-page `commit` and `protect`, 1,000 samples each |
 | the `xdomain` bench image, under HVF | `xdomain`: `local-rtt` and `xdomain-pingpong`; `wake`: `erlang-timer` at `normal`, idle, for 2 s |
 
@@ -791,7 +871,9 @@ it.
 
 Load cells: idle; a spinner of a test task in the app band on the waiting
 thread's CPU; on the board, the six cells of
-[design-fiasco.md, Verification](design-fiasco.md#verification).
+[design-fiasco.md, Verification](design-fiasco.md#verification). The
+landing matrix runs `wake` idle only; its loaded cells are in the full
+matrix ([The gates](#the-gates)).
 
 **What it catches.** A lost wake, the one limit that holds everywhere; a
 wake that waits behind other work at its level, the late interrupt;
@@ -802,9 +884,9 @@ round trip. `trigger-take` under HVF, on one CPU and across CPUs, settles
 the watch list's item on a doorbell from ring to wake.
 
 **What it needs.** A native bench guest, `test/guest/native_bench/`,
-whose root reuses `native_irq`'s park handshake and holder, and launches
-`native_task`'s program (`test/guest/native_task/program.c`) in new modes
-for its spinners and callers; the guest C library of
+whose root reuses `native_irq`'s park handshake and holder, and, for the
+full matrix's loaded cells, launches `native_task`'s program
+(`test/guest/native_task/program.c`) for their spinners; the guest C library of
 `test/guest/bench/` (calibration, histogram, the `BENCH` line); an
 Erlang module `bench/erx_wake_bench.erl` typed into the image's shell
 as `g3` types its beam; the responders and the analyser's
@@ -816,25 +898,76 @@ platform (`Platform.development`).
 
 | Operation | Exact act | Correct result | Profile |
 | --- | --- | --- | --- |
-| `share-equal` | N spinners (N = 2 and 4) of one test task in the app band, pinned to one CPU that is not the root service's; each reads the counter in a loop and keeps its own count of iterations and its longest gap between two reads, and writes them at each window's end through the test task's console write | every spinner reports each window | sustained |
-| `share-tasks` | one spinner in task A and four in task B, both in the app band, on one CPU | the same | sustained |
+| `share-equal` | N recording spinners ([A sustained cell](#a-sustained-cell)), N = 2 and 4, of one test task in the app band, pinned to the last CPU, which is not the root service's | every thread runs in each window | sustained |
+| `share-tasks` | one recording spinner of test task A, beside the four spinners of test task B, which record nothing, both in the app band, on the last CPU | the same | sustained |
 | `band-work` | the root's thread, at its band's base, does a fixed piece of work alone and beside app-band spinners on its CPU, as `native_task`'s band case does; the operation is the work's time | the work finishes | expensive |
 
-A window's summary is each thread's share of the iterations, the ratio of
-the smallest share to the largest, each thread's longest gap, and the
-number of gaps longer than twenty loop periods, which are the turns it
-lost. With N threads at one level and a 1 ms slice, the longest gap is
-about N - 1 slices. `share-tasks` shows that Fiasco shares among threads,
-not domains: task A gets about a fifth, the limitation
+Load cells: idle; and `task-spinners`, the four spinners of a second
+test task in the app band on the cell's CPU, running before the cell's
+own threads start and stopped only after they end, so they are the
+background of every window. `share-tasks` runs under `task-spinners`,
+`band-work` at both.
+
+**What a window shows.** With N threads at one level, each has a share
+of about 1/N, and its longest gap is about N - 1 turns. A turn is the
+slice, 1 ms, ended at the first tick after it runs out
+([design-fiasco.md, Scheduling](design-fiasco.md#scheduling)), so on a
+1 ms tick it lasts up to two ticks. Task A's one thread in `share-tasks`
+gets about a fifth, and its longest gap is about four turns: Fiasco
+shares a level among threads, whichever task holds them, the limitation
 [design-fiasco.md, Bands](design-fiasco.md#bands) records, measured and
 not judged.
 
-**What it catches.** A slice that reverts to Fiasco's 10 ms default (the
-gap grows tenfold), a thread starved at its level, and a band that no
-longer protects the work above it.
+**What it catches.** A slice that reverts to Fiasco's 10 ms default, a
+thread starved at its level, and a band that no longer protects the work
+above it. Fiasco gives a thread whose quantum is 0 its default slice
+(`Sched_context::set`, `src/kern/sched_context-fixed_prio.cpp:198-200`
+and `:212-214`), which is `CONFIG_SCHED_DEF_TIME_SLICE` ticks of
+`CONFIG_SCHED_GRANULARITY` microseconds (`src/kern/config.cpp:153-154`),
+by default 10 ticks of 1,000 us (`src/Kconfig:353-367`) under the
+fixed-priority scheduler, Kconfig's default (`src/Kconfig:327-329`);
+`config/fiasco/kernel.defconfig` sets none of the three, so the default
+is 10 ms. A thread given its task row's slice, which is 0, takes it, and
+the longest gap grows to at least N - 1 such turns.
 
-**What it needs.** `native_task` program modes for the recording spinner;
-the native bench guest of `wake`.
+**How the bench root runs them.** The native bench image packs
+`native_task`'s program at `boot/native-task`, as the second-task suite
+does. After the wake cells, the root runs the sched cells its build asks
+for, one after another; a sustained cell reads its counter on one CPU
+and needs no calibration.
+
+* `share-equal`: the root launches the program with
+  `SHARE_ARGUMENT(N, cpus - 1, W, window_ms)`, at the landing form
+  `SHARE_ARGUMENT(4, cpus - 1, 3, 1000)`, joins it as the second-task
+  suite's `case_ends` does, and prints the cell's `BENCH` line.
+* `share-tasks`: the root launches task B in `MODE_SPIN`, which takes
+  its CPU above the mode byte as `MODE_SHARE` takes its parameters,
+  waits until B's four threads are live, as the band case does, launches
+  task A with `SHARE_ARGUMENT(1, cpus - 1, W, window_ms)`, joins A,
+  stops and joins B, and prints A's `BENCH` line. A task B that does not
+  come up, stop or join fails the cell.
+* `band-work`: the root times its work alone and then beside task B's
+  spinners on its own CPU, as `case_band` does, and prints one `BENCH`
+  line for each load.
+* On a machine with one CPU the last CPU is the root service's, and the
+  two sustained cells are `unsupported: the machine has one CPU`, as
+  `wake-cross-cpu` is.
+
+`tools/lib/erx/benches/sched.rb` declares the three operations with their
+profiles and correct results; the landing cell, `share-equal` at load
+`idle`, placement `other-cpu`, parameters `threads` 4 and `window_ms`
+1,000; the full matrix's cells, `share-equal` with `threads` 2 and 4,
+`share-tasks` with `threads` 1 at load `task-spinners`, each at
+`window_ms` 10,000, and `band-work` at `idle` and `task-spinners`,
+placement `service-cpu`; and the counterpart of
+[Other systems](#other-systems-on-the-same-raspberry-pi-4).
+
+**What it needs.** `native_task`'s `MODE_SHARE`, writing `WINDOW` lines,
+and `MODE_SPIN` taking its CPU; the window accounting in the guest bench
+library; `boot/native-task` in the native bench image; and the native
+bench guest of `wake`. The second-task suite's share case reads its
+task's `WINDOW` lines through the same reader, held to the sizes that
+case asks for.
 
 ### 3. `nullcall`: the decoder-refusal round trip
 
@@ -1007,6 +1140,15 @@ whose two stamps are read on one CPU needs no calibration, wherever its
 work ran. In deterministic mode every operation runs on one CPU, so the
 cells that place work on two CPUs are expected `unsupported` there.
 
+A sustained cell's task bounds its own wait: its first thread gives up on
+a spinner that has not published its last window a fixed patience after
+that window's end and ends with its status, which the root reports as
+the cell's failure; a task that never ends meets the boot's deadline.
+Its `WINDOW` lines need no lock between writers: each fits one task
+write, which the root's one service thread writes whole. What else
+writes the console meanwhile (the kernel) can still cut a line, which
+is then refused, and the cell is `rejected`.
+
 ## Refusals and error results
 
 | Case | Result |
@@ -1021,6 +1163,9 @@ cells that place work on two CPUs are expected `unsupported` there.
 | a baseline with fewer than three runs, or none | the comparison is `inconclusive`, not an error |
 | `--paired` without two images | refused |
 | a call that answers `ERX_ENOTSUP` | the cell is `unsupported`, reported by the backend |
+| a sustained cell whose `WINDOW` lines are not exactly one for each of its windows and threads, in order | the cell is `rejected`, naming the first missing or misplaced line |
+| `WINDOW` lines followed by a `BENCH` line of another profile, or by none | the lines are refused |
+| a `measured` sustained cell with a thread that made no pass in a window | the cell is `failed`, naming the thread and the window |
 
 ## Verification
 
@@ -1051,6 +1196,9 @@ fault that must fail it:
 | `nullcall` | every root and task cell's run answers `ERX_EINVAL` and raises its caller's count of refusals by exactly the calls it made | the requests sent to the `kernel` cell's empty slot instead of the service, from the root and in a second seeded build from the task: the stub still answers `ERX_EINVAL`, the count does not move, and that caller's cells are `failed` for it |
 | `vm` | each cell's untimed check passes, and the disposable task's write to its read-only page faults at that address | `erx_space_protect` made to answer `ERX_OK` without calling the service: the task's write succeeds, it exits with no fault, and the cell is `failed` |
 | the GPIO probe's matching | the importer, given a capture whose third stimulus has no response before the fourth, ends the cell after the second sample, `partial`, and matches no later edge of that capture | the next response matched to the third stimulus: the cell holds a sample for it |
+| the window accounting (C, on the host) | at a 24 MHz counter and a 1,000 us slice, a gap of 0.6 ms is one lost turn whose ticks are added to `waited`, a gap of 0.4 ms is a pass, and a window no read fell in is one gap of its whole length with no pass | the slice taken as ticks without the frequency: the 0.4 ms gap counts as a lost turn |
+| a sustained cell | twelve `WINDOW` lines, three windows of four threads, then `share-equal`'s `BENCH` line give a `measured` cell with each thread's share and the longest gap; with one `WINDOW` line dropped the cell is `rejected`, and with a thread making no pass in window 1 it is `failed` | the line count check removed: the cell missing a line is `measured`; the idle-window check removed: the starved cell is `measured` |
+| a sustained comparison | three baseline runs whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
 | the interrupt-entry pairing (with the patch) | given receipts and `irq_entry` records, one entry between two receipts makes a sample, and none, two, or a window with a record counted as overwritten makes the receipt `partial` | the window's lower end dropped, pairing each receipt with the latest entry before it: the two-entry case yields a sample |
 
 **Sensitivity runs** check, on a real environment, that a benchmark
@@ -1064,7 +1212,7 @@ benchmark back to its design rather than letting it land.
 | --- | --- | --- |
 | `wake` | the doorbell trigger stub made to send a root request, the Fiasco design's own seed for its direct doorbell case | `trigger-take`'s median rises by about one `nullcall` round trip |
 | `wake` | the deadline handed to `erx_park` made 1 ms later than the one the cell records | `park-deadline`'s lateness rises by about 1 ms at every phase |
-| `sched` | the root giving a thread its task row's slice, the quantum case's seed | `share-equal`'s longest gap grows about tenfold |
+| `sched` | the root giving a thread its task row's slice, the quantum case's seed | the run checks that `share-equal`'s longest gap is, in every window, at least N - 1 times Fiasco's 10 ms default, 30 ms with four spinners, against about N - 1 turns of up to two 1 ms ticks unseeded. The growth is not tenfold: an unseeded turn is rounded up to the tick and a seeded one barely, so under HVF on one CPU, with four spinners, the seeded gaps were 33 to 36 ms against 6 to 12 ms unseeded, about 5.5 times (QEMU `virt`, 24 MHz counter, the second-task suite's share case; host load average 5 to 15; QEMU version and compiler unrecorded). On four CPUs the seeded gap is unmeasured |
 | `nullcall` | a 1 us busy wait in the decoder's refusal | the median rises by about 1 us |
 | `vm` | the commit body zeroing each page twice | `commit` of 512 pages slower |
 | `xdomain` | a 10 us busy wait in the echo facet's `admit/3` | `xdomain-pingpong`'s median rises by about 10 us and `local-rtt`'s does not |
@@ -1182,6 +1330,21 @@ GPIO 20 is the stimulus and GPIO 21 the response, header pins 38 and 40,
 both plain GPIO in the header map and next to each other. Each is held by
 one responder alone during a run and recorded with its final
 configuration.
+
+### A sustained cell's lines
+
+The root cannot summarize a sustained cell: its spinners are a test
+task's, and a test task reaches only the console, through its write,
+never the root, while its exit status is one number. So the task writes
+the samples and the root, which chose the cell, names it in the `BENCH`
+line that follows them. Each window and thread is a small line of its
+own, rather than the whole cell in one, so every line is written whole
+in one request. The lines take the form of the `BENCH` and `CLOCK`
+lines, a word and one JSON object, so the one validator and its fuzz
+target read them. `share-tasks` records only task A: task B's spinners
+are its load, which keeps one writer per cell and keeps B running
+through every window of A's by the order in which the root starts and
+stops the two, rather than by two tasks' plans agreeing.
 
 ### The first five benchmarks
 
