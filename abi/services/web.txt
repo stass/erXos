@@ -12,7 +12,8 @@ service web 6
   operation close 3
 # A session's line to the web domain (docs/design-system.md, "A session's lines";
 # docs/design-web.md, "Views on the line"): a facet the session mints for the web domain
-# when the host link's web facet opens or a login through erx_web_login succeeds, which
+# when the host link's web facet opens or a login through the login facet succeeds
+# (abi/services/login.txt; docs/design-login.md), which
 # no manifest row grants. A connection of the web domain calls open through it, and the
 # line answers with a view, which sends its own updates. The grant's quantities:
 # max_request is the smallest power of two not below both measures of the largest

@@ -21,6 +21,7 @@ include services/pci_bus.txt
 include services/pci.txt
 include services/pcie.txt
 include services/ble.txt
+include services/login.txt
 include manifest.txt
 include formats/elf64.txt
 include formats/virtio.txt

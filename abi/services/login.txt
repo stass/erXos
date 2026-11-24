@@ -1,0 +1,48 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# The login interface (docs/design-login.md): the one facet every front end logs a person
+# in through, served by the system domain's login service, erx_login, behind the facet
+# callback erx_login_facet. cookie draws a key login's cookie; key_ok asks whether a
+# principal's login keys hold a public key; login_key and login_passphrase log in and,
+# on a match, answer the line of a new session of the principal, which ends with the
+# calling process and with the facet (docs/design-login.md, "A session ends with what it
+# was started for"). A facet row names two parameters: line, the session line the
+# grant's logins mint, one of the served_by session interfaces (?ERX_LINES), and logins,
+# the grant's bound on rows of the login service's table. login_grant holds every row to
+# docs/design-login.md's table of front ends ("Who holds it"), an allow-list: the SSH
+# domain with the ssh_line (tty_line once package 3 renames it), all four operations
+# and 128 logins; the web domain with web_line, login_passphrase and 16; btconsole with
+# the ssh_line, login_passphrase and 8; no row on any other domain and one row per
+# holder. The grant's quantities: max_request is 131072, the smallest power of two not
+# below a login_key with its 64 KiB exchange input, its caller's pid and alias, derived
+# as a line's is; in_flight is 8, each passphrase login waiting on the checker's network
+# queue.
+service login 22
+  served_as message
+  operation cookie 1
+  operation key_ok 2
+  operation login_key 3
+  operation login_passphrase 4
+  parameter line 1 identifier one bytes 31 checked_by login_grant
+  parameter logins 2 u64 one range 1 128 checked_by login_grant
+  quantity max_request 131072
+  quantity in_flight 8
+  quantity reductions 100000
+  quantity period_ns 1000000000
+  quantity max_heap_size 65536
+# The bounds of a login's arguments (docs/design-login.md, "Operations"), which
+# erx_login_facet's admit/3 checks before the service sees a request and erx_login.hrl
+# gives every front end's prompt: a user name of 1 to login_user_max bytes of the
+# principal-name alphabet, a passphrase of 1 to login_passphrase_max bytes, a peer of at
+# most login_peer_max bytes, kept only for the checker's terminal counter and the log. A
+# key login's blobs are erx_ssh_wire's fixed layouts (docs/design-ssh.md, "Logging in",
+# S3), at most login_blob_max bytes here, and its exchange input at most
+# login_exchange_max bytes. A cookie is login_cookie_bytes bytes of erx_bytes:entropy/1,
+# kept for login_grace_ms.
+limit login_user_max u32 32
+limit login_passphrase_max u32 1024
+limit login_peer_max u32 64
+limit login_blob_max u32 128
+limit login_exchange_max u32 65536
+limit login_cookie_bytes u32 16
+limit login_grace_ms u32 120000
