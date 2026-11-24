@@ -918,6 +918,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   mark makes one decision of it. Also tighten `{system_side_ended, Id,
   Reason}`, which any local process can send to the service: carry the side's monitor
   reference, or check the sender is the agent.
+* [Medium] Runtime, test/erlang/erx_dist_tests.erl (erx_dist's owner at the runtime's
+  ordered end): every case stops in owner_up/4's first receive, since the stand-in for
+  net_kernel never hands the owner the controller, so none reaches owner_loop/3, where the
+  system connection's owner is at a domain's real init:stop. Reverting owner_loop/3's
+  'EXIT' clause to ended/2 passes them all. Add a QEMU case in which a domain ends by
+  init:stop() and must halt with its own status, not 69.
 * [Medium] runtime, `erts_internal_dist_spawn_request_4` in `otp/erts/emulator/beam/dist.c`:
   design-domains.md ("The funnel", step 4) has the sender's peer check a spawn request's
   control term with the funnel's grammar before writing it, answering an option of another

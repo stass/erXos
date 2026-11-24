@@ -1521,7 +1521,8 @@ process sends in its name ends the connection like any other end. A
 later start of `net_kernel` halts at its first accept, since the
 carrier starts one agent per runtime. This rests on that supervision
 tree: only a local `supervisor:terminate_child` with no restart would
-leave a runtime running without its agent.
+leave a runtime running without its agent and without its system
+connection.
 Neither can be ended or steered from another domain, whoever hands its
 pid out. Edit 8 gives a peer only `send` on a pid it encodes, so no peer
 can link to either or send it an exit, and edit 16 wraps every message
@@ -1839,9 +1840,9 @@ The system connection is never closed from this side while the domain
 runs: a malformed frame or a failed check on it, or any other end of its
 port or its owner, halts the domain instead, with status 69
 (`EX_UNAVAILABLE`), since the domain has no services without that
-connection and could tell no one. The one exception is `net_kernel`'s
-`shutdown` in the runtime's ordered end, which the owner follows, as
-the agent does (above). When the system domain ends the connection, the
+connection and could tell no one. The one exception is a `shutdown`
+of `net_kernel`, which only its supervisor gives it, as in the
+runtime's ordered end: the owner follows it, as the agent does (above). When the system domain ends the connection, the
 domain service stops the domain
 ([design-system.md](design-system.md#ending-a-domain)). The
 system domain's side closes the same way: at a domain's end the domain
