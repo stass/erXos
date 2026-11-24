@@ -4,11 +4,14 @@
 %% erXos's drives (docs/design-drives.md): every medium's volumes, served at
 %% /media. Its modules are the pure readers of a medium's bytes: the partition
 %% table, erx_media_table, and the probe of a volume's format, erx_media_probe,
-%% which reads FAT's boot sector with the FAT server's erx_fat_read. It starts no process.
+%% which reads FAT's boot sector with the FAT server's erx_fat_read; and the
+%% drive processes, erx_media_drive, one for each drive of the registry, under
+%% erx_media_sup, which erx_media_app starts.
 {application, erx_media,
  [{description, "erXos drives"},
   {vsn, "1"},
-  {modules, [erx_media_probe, erx_media_table]},
-  {registered, []},
+  {modules, [erx_media_app, erx_media_drive, erx_media_probe, erx_media_sup, erx_media_table]},
+  {registered, [erx_media_sup]},
+  {mod, {erx_media_app, []}},
   {applications, [kernel, stdlib, erx, erx_fat]},
   {env, []}]}.

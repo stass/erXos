@@ -53,7 +53,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `place/3`) and `erx_media_probe` with `abi/formats/probe.txt`, pure, with their fuzz targets and
      seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name;
      `media_volumes_max` and `media_volume_bytes` as limits beside `erx_media_table`.
-  4. The `erx_media` application: the drive process, the medium supervisor and reader, the volume
+  4. The `erx_media` application (`erx_media_app` and `erx_media_sup` are built, and of the drive
+     process, `erx_media_drive`, its ask through the registry's facet and its proxy's end): the
+     drive process's medium supervisor, eject and finish, the medium supervisor and reader, the volume
      process with its probe and memory bound, the media tree with `status`, `ctl` and the two-volume
      `exdev` rule, the writable rule over the formats the build writes, the finish shared by `eject` and the freezing
      checkpoint; the drive grants of design-drives.md's "How the grant reaches the media domain":
