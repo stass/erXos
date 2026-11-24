@@ -46,7 +46,7 @@ module Erx
   # stops, the harness checks HOST_STAGES itself: the image holds the written pattern, and
   # the console shows the medium's served line and then its ended one.
   #
-  # The restart cell is a second boot of each cell (BOOTS), whose manifest alone allows the
+  # The restart cell is a second boot at each CPU count (BOOTS), whose manifest alone allows the
   # USB domain one restart (docs/design-system.md, "Waiting for a grant", "Verification").
   # It runs the first two lines, typing the key between them, then the restart line
   # (restart_line) kills the domain's first incarnation, waits for another to be ready and
@@ -200,10 +200,17 @@ module Erx
     # UbTr keeps the first 64 records routed from the input tree's files until asked, then
     # waits up to 5 s at a time for more until it holds KEY_A's up. UbFollow() is whether
     # the follower's readers run on the tree usb_input, and the tree, polled every 200 ms at
-    # most 100 times until they do. Given past, an Erlang expression of the shell's, they
-    # count only when past is a grant, a 3-tuple, and theirs is another, so a failed read
-    # of past never passes. It returns whether they do, and the tree, as text.
-    def self.follow_body(past: nil) = [
+    # most 100 times until they do; a tree read with no reader does not count. Given past,
+    # an Erlang expression of the shell's, they count only when past is a grant, a 3-tuple,
+    # and theirs is another, so a failed read of past never passes. It returns whether they
+    # do, and the tree, as text.
+    def self.follow_body(past: nil)
+      another = past ? " when tuple_size(#{past})=:=3,UbG=/=#{past}" : ''
+      follow_body_with(another)
+    end
+
+    # follow_body's expressions, given the guard another of its pass.
+    private_class_method def self.follow_body_with(another) = [
       'UbTr=spawn(fun()->(fun UbTl(UbA)->receive ' \
       "{trace,_,call,{_,_,[<<\"usb_input/\",_/binary>>,UbR]}} when length(UbA)<64->UbTl([UbR|UbA]);" \
       "{ub_get,UbP}->(fun UbGe(UbB)->case lists:member({key,up,#{KEY_A}},UbB) of true->UbP!{ub_records,lists:reverse(UbB)};" \
@@ -214,7 +221,7 @@ module Erx
       'erlang:trace_pattern({erx_winfs,input,2},true,[global])',
       'erlang:trace(all,true,[call,{tracer,UbTr}])',
       FOLLOWER_TREE,
-      "UbFollow=fun()->try UbTree() of \#{grant:=UbG,phase:={reading,_}}=UbT#{past && " when tuple_size(#{past})=:=3,UbG=/=#{past}"}->{true,UbT};" \
+      "UbFollow=fun()->try UbTree() of \#{grant:=UbG,phase:={reading,[_|_]}}=UbT#{another}->{true,UbT};" \
       'UbT->{false,UbT} catch UbC3:UbR3->{false,{UbC3,UbR3}} end end',
       'UbFpoll=fun UbFp(0)->UbFollow();UbFp(UbK)->case UbFollow() of {true,_}=UbF->UbF;' \
       '_->timer:sleep(200),UbFp(UbK-1) end end',
@@ -317,23 +324,24 @@ module Erx
 
     # The restart boot's line once the first key's records are read, each expression bound
     # in turn: UbPast, the grant the follower reads usb_input on; the first incarnation,
-    # UbDomain's pid, killed; UbAgain, another incarnation once one is ready; at it, the
-    # enumeration; and at the display, the tracer and the wait for a grant other than
-    # UbPast. Its answer holds three texts: the restarted stage's, the enumeration's and
-    # the follower's.
+    # UbDomain's pid, killed, or none when the first line found no domain; UbAgain, another
+    # incarnation once one is ready; at it, the enumeration; and at the display, the tracer
+    # and the wait for a grant other than UbPast. Its answer holds three texts: the
+    # restarted stage's, the follower's and the enumeration's, the longest, last.
     def self.restart_line = [
-      'UbFirst=maps:get(pid,UbDomain)',
+      'UbFirst=case UbDomain of #{pid:=UbP0} when is_pid(UbP0)->UbP0;_->none end',
       "UbPast=UbAt(#{DISPLAY_NODE},fun()->#{FOLLOWER_TREE},maps:get(grant,UbTree(),none) end)",
-      'exit(UbFirst,kill)',
+      'is_pid(UbFirst) andalso exit(UbFirst,kill)',
       # UbNext(K): polls every 100 ms at most K times until the domain has one ready
       # incarnation other than the first.
       "UbNext=fun UbNx(0)->timeout;UbNx(UbK)->case [UbD||\#{pid:=UbPd}=UbD<-PcFind(#{NODE}),UbPd=/=UbFirst] of " \
       '[UbD]->UbD;_->timer:sleep(100),UbNx(UbK-1) end end',
-      'UbAgain=UbNext(1200)',
-      'UbRestarted=iolist_to_binary(io_lib:format("~0kP",[{[{restarted,is_map(UbAgain)}],UbAgain},40]))',
+      'UbAgain=case UbFirst of none->none;_->UbNext(1200) end',
+      'UbRestartedAll=iolist_to_binary(io_lib:format("~0kP",[{[{restarted,is_map(UbAgain)}],UbAgain},40]))',
+      'UbRestarted=binary:part(UbRestartedAll,0,min(byte_size(UbRestartedAll),600))',
       "UbEnumAgain=UbAt(#{NODE},fun()->#{ENUM_BODY} end)",
       "UbFollowedAgain=UbAt(#{DISPLAY_NODE},fun()->#{follow_body(past: 'UbPast')} end)",
-      'io:format("~0kp~n",[{usb_restart,UbRestarted,UbEnumAgain,UbFollowedAgain}])'
+      'io:format("~0kp~n",[{usb_restart,UbRestarted,UbFollowedAgain,UbEnumAgain}])'
     ].join(',').concat(".\r").freeze
 
     # The restart boot's last line, typed once the key has been sent again.
@@ -382,9 +390,9 @@ module Erx
 
     # The production checkpoints to the command shell, then the Erlang shell, the first
     # line and its answer, after which the key is typed through socket, and the second line
-    # and its answer, after which after is typed. Each answer's text goes through note, and
+    # and its answer, after which next_line is typed. Each answer's text goes through note, and
     # each stage of it that sides names through side as its cell.
-    def self.first_key(points, socket:, sides:, side:, note:, after:)
+    def self.first_key(points, socket:, sides:, side:, note:, next_line:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
       [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
@@ -395,7 +403,7 @@ module Erx
            type_key(socket)
          end, type: typed_line }.freeze,
        { name: 'usb-typed', pattern: /\A#{PcieDomain::PROMPT}\{usb_typed,/n, seconds: TYPED_SECONDS,
-         verify: answer('usb_typed', sides: sides, side: side, note: note), type: after }.freeze]
+         verify: answer('usb_typed', sides: sides, side: side, note: note), type: next_line }.freeze]
     end
 
     # The verify of the answer tagged tag: its text through note, and through side the cell
@@ -414,7 +422,7 @@ module Erx
     # its text through note.
     def self.checkpoints(points, socket:, side:, note:)
       stick_answer = ->(tag) { answer(tag, sides: STAGE_SIDES, side: side, note: note) }
-      [*first_key(points, socket: socket, sides: STAGE_SIDES, side: side, note: note, after: stick_line),
+      [*first_key(points, socket: socket, sides: STAGE_SIDES, side: side, note: note, next_line: stick_line),
        { name: 'usb-stick', pattern: /\A#{PcieDomain::PROMPT}\{usb_stick,/n, seconds: STICK_SECONDS,
          verify: lambda do |text|
            stick_answer.call('usb_stick').call(text)
@@ -435,7 +443,7 @@ module Erx
     # note.
     def self.restart_checkpoints(points, socket:, side:, note:)
       [*first_key(points, socket: socket, sides: RESTART_SIDES.fetch(:first), side: side, note: note,
-                          after: restart_line),
+                          next_line: restart_line),
        { name: 'usb-restart', pattern: /\A#{PcieDomain::PROMPT}\{usb_restart,/n, seconds: RESTART_SECONDS,
          verify: lambda do |text|
            answer('usb_restart', sides: RESTART_SIDES.fetch(:restart), side: side, note: note).call(text)

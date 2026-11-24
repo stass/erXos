@@ -9,8 +9,10 @@ require_relative '../qemu_gate'
 # and a usb-storage stick behind the PCIe domain, held by the development manifest's USB
 # domain. Its cases are cells of the boot: one per enumeration stage, one for the key typed
 # through QMP, and the stick's, from its medium served to its sectors read, written, read
-# back and flushed, its unplugging and its log lines. Its boot carries a QMP socket and a
-# disk, which no remote host serves, so it does not declare offload. check_qemu builds the
+# back and flushed, its unplugging and its log lines. A second boot is the restart cell's: its
+# USB domain may restart once, and a key typed after the domain's first incarnation is
+# killed must reach the display through the new input facet. Its boots carry a QMP socket
+# and a disk, which no remote host serves, so it does not declare offload. check_qemu builds the
 # kernel before any suite runs, so this suite does not.
 cpus = [1]
 Erx::QemuGate.declare_suite(

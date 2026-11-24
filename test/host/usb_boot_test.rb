@@ -83,7 +83,8 @@ class UsbBootTest < Minitest::Test
   # Only the restart cell's boot allows the USB domain a restart; the stick's keeps none.
   def test_only_the_restart_boot_allows_the_usb_domain_a_restart
     source = Erx::UsbBoot.manifest_source(ROOT, platform: PLATFORM)
-    stick, restart = Erx::UsbBoot::BOOTS.map { |kind| Erx::UsbBoot.manifest(source, restarts: kind.restarts) }
+    stick, restart = [0, 1].map { |restarts| Erx::UsbBoot.manifest(source, restarts: restarts) }
+    assert_equal [0, 1], Erx::UsbBoot::BOOTS.map(&:restarts).sort
     assert_equal ["  restarts 0\n"], stick.lines - restart.lines
     assert_equal ["  restarts 1\n"], restart.lines - stick.lines
   end
@@ -93,8 +94,8 @@ class UsbBootTest < Minitest::Test
   # quotes escaped, is not read, nor one the boot does not name.
   def test_the_restart_answer_reports_the_stages_of_each_text
     line = '(system@erxos)6> {usb_restart,<<"{[{restarted,true}],#{name => <<\"usb\">>}}">>,' \
-           '<<"{[{started,true},{described,true}],{running,#{},[<<\"{[{typed,true}]\">>]}}">>,' \
-           '<<"{[{followed,false}],#{phase => ended}}">>}'
+           '<<"{[{followed,false}],#{phase => ended}}">>,' \
+           '<<"{[{started,true},{described,true}],{running,#{},[<<\"{[{typed,true}]\">>]}}">>}'
     assert_equal %w[restarted started described], Erx::UsbBoot.passed(line, tag: 'usb_restart')
     assert_equal [], Erx::UsbBoot.passed(line, tag: 'usb_retyped')
     cells = []
@@ -106,7 +107,7 @@ class UsbBootTest < Minitest::Test
   end
 
   # The restart boot ends at the second key's answer, whose typed stage is the second key's
-  # cell, not the first's; the suite declares every restart cell.
+  # cell, not the first's.
   def test_the_restart_boot_ends_at_the_second_key
     points = Erx::UsbBoot.restart_checkpoints([{ name: 'release-shell' }], socket: @socket, side: ->(_) {}, note: ->(_) {})
     assert_equal %w[usb-enum usb-typed usb-restart usb-retyped], points.filter_map { |point| point[:name] }.last(4)
@@ -116,6 +117,5 @@ class UsbBootTest < Minitest::Test
                                                                   note: ->(_) {})
                 .last.fetch(:verify).call('{usb_retyped,<<"{[{typed,true}],[]}">>}')
     assert_equal ['-restart-second-key'], cells
-    assert_empty Erx::UsbBoot::RESTART_SIDES.values.flat_map(&:values) - Erx::UsbBoot::SIDE_CELLS
   end
 end

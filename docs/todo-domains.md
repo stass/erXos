@@ -609,13 +609,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   design's test of a paused view ending at its facet's end, its table entry freed, and its seeded fault, a
   paused receive that takes only the resume message.
 
-* [Medium] grants, the USB restart cell of the waits ([design-system.md](design-system.md#waiting-for-a-grant),
-  "Verification"; `tools/lib/erx/usb_boot.rb`): the three waits are built (`erx_ssh_dev`,
-  `erx_input_follower`, the settlement list and the rows held at boot); what remains is the QEMU cell
-  the design names for the input follower. `tools/lib/erx/usb_boot.rb` gains a cell whose manifest
-  allows the USB domain one restart (:43 sets 0 for the others): after the first key it kills the
-  domain's first incarnation, waits for the display to follow the new input facet and types a second
-  key that must arrive. Its landing runs `make check` and the `usb` and `net_device` suites.
 * [Low] grants, the rows held at boot, three verification rows unbuilt
   ([design-system.md](design-system.md#waiting-for-a-grant), "Verification";
   `test/erlang/erx_domain_tests.erl`, `erx_devices_pci_tests.erl`): the hold fixture checks a display a
