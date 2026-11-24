@@ -6,13 +6,15 @@
 The USB domain's places (docs/design-usb.md, "Hotplug ends at the
 controller's domain", "The process tree"): what a reader outside the USB
 domain holds, which lasts as long as the domain does. It supervises one
-stream, erx_usb_input_stream, for each input number, `hid0` to `hid7`, and
-last the mint of the input tree, erx_usb_input_tree, that serves them, the
-files service `usb_input` (erx_fs_mint), whose grants the domain service
-hands to the display domain the manifest names. The domain's top
-supervisor, erx_usb, starts the places once, from the USB domain's boot
-script, before init's ready report, so a domain serves one input tree,
-under one service name, and only the USB domain serves it.
+stream, erx_usb_input_stream, for each input number, `hid0` to `hid7`; one
+drive grant, erx_blk_drive, for each drive the domain's records name
+(erx_device_record:drives/2, docs/design-fiasco.md, "Drive records"); and
+last the mint of the input tree, erx_usb_input_tree, that serves the
+streams, the files service `usb_input` (erx_fs_mint), whose grants the
+domain service hands to the display domain the manifest names. The
+domain's top supervisor, erx_usb, starts the places once, from the USB
+domain's boot script, before init's ready report, so a domain serves one
+input tree, under one service name, and only the USB domain serves it.
 
 The places hold no device state, so nothing beside them, a function's crash
 or a controller's reset, ends them. Nothing restarts them either: every
@@ -28,6 +30,13 @@ when it asks, and holds it until its process ends, when the number's stream
 writes `release`. A number is free when it has no occupant and its stream
 has room for one read's worth (erx_usb_input_stream).
 
+A ready medium takes its drive with occupy_drive/2, the lowest drive free
+when its function asks, and holds it until the medium's window ends
+(erx_blk_drive:occupy/2); a medium that finds every drive taken is not
+served, and its unit shows `no drive` (erx_usb_bot). Drive records the
+reader refuses start no grant: the places log the reason, and every ready
+medium finds no drive, as on a domain whose manifest names none.
+
 The mint names itself the service's mint and acknowledges its start before
 it mounts the tree; its mount, in the mint's own process, reads the streams
 from the places, which by then have started every child and serve the call
@@ -38,13 +47,18 @@ only with the places, and so with every grant.
 
 -include("generated/erx_abi.hrl").
 
--export([start_link/0, occupy_input/2, streams/1]).
+-export([start_link/0, start_link/1, occupy_input/2, streams/1, occupy_drive/2, drives/1]).
 -export([init/1, start_mint/1]).
 
--doc "Starts the USB domain's places, linked to the caller.".
+-doc "Starts the USB domain's places over the domain's drive records, linked to the caller.".
 -spec start_link() -> {ok, pid()}.
 start_link() ->
-    supervisor:start_link(?MODULE, []).
+    start_link(erx_device_record:drives(usb)).
+
+-doc "Starts the places over Drives, erx_device_record:drives/1's answer for `usb`, linked to the caller.".
+-spec start_link({ok, [non_neg_integer()]} | {error, {bad_device_record, string()}}) -> {ok, pid()}.
+start_link(Drives) ->
+    supervisor:start_link(?MODULE, Drives).
 
 -doc """
 Makes Pid the occupant of the lowest input number of Places that is free,
@@ -61,17 +75,36 @@ occupy_input(Places, Pid) when is_pid(Pid) ->
 streams(Places) ->
     [Stream || {_, Stream} <- lists:sort([{N, Stream} || {{input, N}, Stream, _, _} <- supervisor:which_children(Places)])].
 
+-doc """
+Makes Pid, a mass-storage function, the occupant of the lowest drive of
+Places that is free, for the medium it is about to serve, and answers the
+drive's number and its grant, which the medium's block service is started
+with; or `{error, no_drive}` when every drive is taken or there is none.
+""".
+-spec occupy_drive(pid(), pid()) -> {ok, non_neg_integer(), pid()} | {error, no_drive}.
+occupy_drive(Places, Pid) when is_pid(Pid) ->
+    case lists:search(fun({_N, Grant}) -> erx_blk_drive:occupy(Grant, Pid) =:= ok end, drives(Places)) of
+        {value, {N, Grant}} -> {ok, N, Grant};
+        false -> {error, no_drive}
+    end.
+
+-doc "The drives of Places and their grants, lowest number first.".
+-spec drives(pid()) -> [{non_neg_integer(), pid()}].
+drives(Places) ->
+    lists:sort([{N, Grant} || {{drive, N}, Grant, _, _} <- supervisor:which_children(Places)]).
+
 %% ---------------------------------------------------------------------------
 %% The supervisor's callback
 %% ---------------------------------------------------------------------------
 
 -doc false.
-init([]) ->
+init(Drives) ->
     Streams = [#{id => {input, N}, start => {erx_usb_input_stream, start_link, []}}
                || N <- lists:seq(0, ?ERX_USB_INPUT_MAX - 1)],
+    Grants = [#{id => {drive, N}, start => {erx_blk_drive, start_link, []}} || N <- numbers(Drives)],
     Mint = #{id => mint, start => {?MODULE, start_mint, [self()]}, shutdown => brutal_kill,
              modules => [erx_fs_mint]},
-    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Streams ++ [Mint]}}.
+    {ok, {#{strategy => one_for_one, intensity => 0, period => 1}, Streams ++ Grants ++ [Mint]}}.
 
 %% The input tree's mint, whose mount answers the streams of Places, number 0 first.
 -doc false.
@@ -83,6 +116,14 @@ start_mint(Places) ->
 %% ---------------------------------------------------------------------------
 %% Internal
 %% ---------------------------------------------------------------------------
+
+%% The drive numbers the records name, or none, logged, when the reader refused them. The
+%% reason is the reader's own text, about words the domain library wrote.
+numbers({ok, Numbers}) ->
+    Numbers;
+numbers({error, {bad_device_record, Reason}}) ->
+    logger:warning("erx_usb_places_sup: drive records refused, no drive served: ~ts", [Reason]),
+    [].
 
 lowest([], _N, _Pid) ->
     {error, no_input_number};

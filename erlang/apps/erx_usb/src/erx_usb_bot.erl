@@ -51,9 +51,17 @@ function `{erx_blk_drive, end_medium, {Lun, Ref}}`, and the function ends
 the medium as a UNIT ATTENTION does: the transport and window stop, the
 engine answers every request of the old reference `gone` unsent, and the
 unit becomes ready again only through commands queued behind any already
-issued (erx_blk_drive). A medium's transport is started with no drive
-grant: the drives the manifest names do not reach the USB domain, so no
-medium takes one (docs/todo-storage.md, the drives item).
+issued (erx_blk_drive).
+
+**Drives.** A medium that becomes ready takes the lowest free drive of
+the domain's places (erx_usb_places_sup:occupy_drive/2), the function
+its occupant, and its transport starts with that drive's grant alone, so
+a medium reaches no other drive's grant. The drive is free again when the
+medium's window ends, or when the function ends first
+(erx_blk_drive:occupy/2). A medium that finds every drive taken, or none
+at all, is not served: the engine ends its reference unused, and the unit
+stays `{unserved, no_drive}`, logged as `no drive`, until its device is
+attached again.
 
 Everything the device sends reaches only the engine's decoders, which
 bound what they take; the INQUIRY's text is kept as bytes in the
@@ -80,6 +88,7 @@ transport's `detail`, escaped wherever it is shown.
               control :: erx_usb_pipe:pipe(),
               in :: erx_usb_pipe:pipe(),
               out :: erx_usb_pipe:pipe(),
+              places :: pid(),
               engine :: erx_usb_bot_core:state(),
               units = #{} :: #{erx_usb_bot_core:lun() => unit()},
               tick = none :: none | reference()}).
@@ -99,8 +108,9 @@ request(Function, Ref, Request) ->
 %% ---------------------------------------------------------------------------
 
 -doc false.
-init(#{function := #{interface := Interface}, control := Control, pipes := [In, Out]}) ->
-    {ok, #bot{interface = Interface, control = Control, in = In, out = Out, engine = erx_usb_bot_core:new()}}.
+init(#{function := #{interface := Interface}, control := Control, pipes := [In, Out], places := Places}) ->
+    {ok, #bot{interface = Interface, control = Control, in = In, out = Out, places = Places,
+              engine = erx_usb_bot_core:new()}}.
 
 -doc false.
 handle_call({request, Ref, Request}, From, B) ->
@@ -290,13 +300,24 @@ effect(Lun, {ask, ready}, B = #bot{units = Units}) ->
     {[{request, {unit, Lun}, none, {ready, Lun, Ref}}], B};
 effect(Lun, {ask, Command}, B) ->
     {[{request, {unit, Lun}, none, {Command, Lun}}], B};
-effect(Lun, serve, B = #bot{units = Units}) ->
-    Unit = #{ref := Ref, capacity := Capacity, flush := Flush, detail := Detail, removable := Removable} =
-        maps:get(Lun, Units),
+effect(Lun, serve, B = #bot{units = Units, places = Places}) ->
+    Unit = #{ref := Ref} = maps:get(Lun, Units),
+    case erx_usb_places_sup:occupy_drive(Places, self()) of
+        {ok, Drive, Grant} ->
+            serve(Lun, Unit, Drive, Grant, B);
+        {error, no_drive} ->
+            logger:notice("erx_usb_bot: medium LUN ~b ready: no drive", [Lun]),
+            {[{end_medium, Lun, Ref}], B#bot{units = Units#{Lun := {unserved, no_drive}}}}
+    end.
+
+%% The medium's block service, started with the grant of the drive it took.
+serve(Lun, Unit, Drive, Grant, B = #bot{units = Units}) ->
+    #{ref := Ref, capacity := Capacity, flush := Flush, detail := Detail, removable := Removable} = Unit,
     {ok, Transport} = erx_blk_usb:start_monitor(#{function => self(), lun => Lun, ref => Ref, capacity => Capacity,
-                                                  flush => Flush, detail => Detail, drive => none}),
+                                                  flush => Flush, detail => Detail, drive => Grant}),
     Serving = B#bot{units = Units#{Lun := Unit#{transport => Transport}}},
-    logger:notice("erx_usb_bot: medium LUN ~b ready: ~b blocks of ~b bytes", [Lun, Capacity, ?ERX_SCSI_BLOCK_LENGTH]),
+    logger:notice("erx_usb_bot: medium LUN ~b ready: ~b blocks of ~b bytes as disk~b",
+                  [Lun, Capacity, ?ERX_SCSI_BLOCK_LENGTH, Drive]),
     case Removable of
         true -> effect(Lun, wait, Serving);
         false -> {[], Serving}

@@ -35,16 +35,26 @@ finds the medium once it is ready (on USB it may come back as another
 drive). So an earlier mount's requests are answered, or refused
 unissued, before a new mount can send its first.
 
-Its decisions are the pure step/2, over three events (an ask, a window
-served, a window ended) and two actions (an answer, an end of a medium);
-this module's process performs them. It monitors each window it is told
-of and knows a window's end only by that monitor's reference, so no
-message another process makes up ends a medium in its eyes.
+**Occupied.** On USB a drive is a place a medium takes when it becomes
+ready (docs/design-usb.md, "Media and drives"): the function of the
+medium's unit occupies the grant with occupy/2 before it starts the
+medium's block service, and the drive is free again when that medium's
+window ends, or when the function ends before serving one. The grant is
+the drive's one record of who holds it, so two media never hold one
+drive.
+
+Its decisions are the pure step/2, over four events (an ask, a window
+served, an occupant's ask to take the drive, the end of a window or an
+occupant) and three actions (an answer, an end of a medium, a monitor
+forgotten); this module's process performs them. It monitors each window
+and occupant it is told of and knows an end only by that monitor's
+reference, so no message another process makes up ends a medium or frees
+a drive in its eyes.
 """.
 
 -behaviour(gen_server).
 
--export([start_link/0, window/1, serve/3]).
+-export([start_link/0, window/1, serve/3, occupy/2]).
 -export([new/0, step/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
@@ -61,14 +71,19 @@ message another process makes up ends a medium in its eyes.
 The grant's state: the drive's medium, none or its window, the monitor of
 that window, its issuer and whether a holder was handed the window; the
 monitor of the window whose end the grant asked for and waits on, or
-none; and the asks held meanwhile, oldest first.
+none; the asks held meanwhile, oldest first; and the monitor of the
+occupant that took the drive and has served no medium under it yet, or
+none.
 """.
 -type state() :: #{medium := none | #{window := pid(), monitor := reference(), issuer := issuer(),
                                       answered := boolean()},
                    ending := none | reference(),
-                   asks := [gen_server:from()]}.
--type event() :: {ask, gen_server:from()} | {serve, pid(), reference(), issuer()} | {ended, reference()}.
--type action() :: {answer, gen_server:from(), {ok, pid()} | {error, no_medium}} | {end_medium, issuer()}.
+                   asks := [gen_server:from()],
+                   occupant := none | reference()}.
+-type event() :: {ask, gen_server:from()} | {serve, pid(), reference(), issuer()} | {ended, reference()}
+               | {occupy, gen_server:from(), reference()}.
+-type action() :: {answer, gen_server:from(), {ok, pid()} | {error, no_medium} | ok | taken}
+                | {end_medium, issuer()} | {forget, reference()}.
 
 -doc "Starts a grant, linked to the caller, which knows of no medium yet.".
 -spec start_link() -> {ok, pid()}.
@@ -93,14 +108,29 @@ nothing, so a grant that is gone or slow holds up no medium's issuer.
 serve(Grant, Window, Issuer = {IssuerPid, _Medium}) when is_pid(Window), is_pid(IssuerPid) ->
     gen_server:cast(Grant, {serve, Window, Issuer}).
 
+-doc """
+Makes Pid the occupant of Grant's drive when the drive is free, and
+answers `ok`, or `taken` when it is not. A drive is free while it has no
+occupant and holds no medium. The occupant is the USB function whose
+unit's medium takes the drive: it starts that medium's block service with
+the grant, and the grant holds the drive for the medium from its serve/3
+on. The drive is free again when the medium's window ends, or, before any
+medium is served, when the occupant's process ends; so no path by which a
+medium or its function ends has to give the drive back. A block device's
+drive is never occupied: its one medium is the device's.
+""".
+-spec occupy(pid(), pid()) -> ok | taken.
+occupy(Grant, Pid) when is_pid(Pid) ->
+    gen_server:call(Grant, {occupy, Pid}).
+
 %% ---------------------------------------------------------------------------
 %% The pure core
 %% ---------------------------------------------------------------------------
 
--doc "A grant that knows of no medium.".
+-doc "A grant that knows of no medium and has no occupant.".
 -spec new() -> state().
 new() ->
-    #{medium => none, ending => none, asks => []}.
+    #{medium => none, ending => none, asks => [], occupant => none}.
 
 -doc """
 The grant's next state on Event, and its actions in order. While the
@@ -118,15 +148,27 @@ step({ask, From}, State = #{medium := #{monitor := Monitor, issuer := Issuer, an
     {State#{ending := Monitor, asks := [From]}, [{end_medium, Issuer}]};
 step({serve, Window, Monitor, Issuer}, State) ->
     {State#{medium := #{window => Window, monitor => Monitor, issuer => Issuer, answered => false}}, []};
+step({occupy, From, Occupant}, State = #{medium := none, occupant := none}) ->
+    {State#{occupant := Occupant}, [{answer, From, ok}]};
+step({occupy, From, Occupant}, State) ->
+    {State, [{answer, From, taken}, {forget, Occupant}]};
+step({ended, Occupant}, State = #{occupant := Occupant}) ->
+    {State#{occupant := none}, []};
 step({ended, Monitor}, State = #{medium := Medium, ending := Ending}) ->
-    Forgotten = case Medium of
-                    #{monitor := Monitor} -> State#{medium := none};
-                    _NoneOrOther -> State
-                end,
-    case Ending of
-        Monitor -> answer_held(Forgotten#{ending := none});
-        _NoneOrAnother -> {Forgotten, []}
-    end.
+    {Forgotten, Forget} = case Medium of
+                              #{monitor := Monitor} -> free(State#{medium := none});
+                              _NoneOrOther -> {State, []}
+                          end,
+    {Next, Answers} = case Ending of
+                          Monitor -> answer_held(Forgotten#{ending := none});
+                          _NoneOrAnother -> {Forgotten, []}
+                      end,
+    {Next, Forget ++ Answers}.
+
+%% A medium's end frees its drive: the occupant that took it is forgotten, so its own
+%% later end is no event of this grant.
+free(State = #{occupant := none}) -> {State, []};
+free(State = #{occupant := Occupant}) -> {State#{occupant := none}, [{forget, Occupant}]}.
 
 %% Every held ask answered from the medium held now, which they are then handed.
 answer_held(State = #{medium := none, asks := Asks}) ->
@@ -145,6 +187,8 @@ init([]) ->
 -doc false.
 handle_call(window, From, State) ->
     perform(step({ask, From}, State));
+handle_call({occupy, Pid}, From, State) when is_pid(Pid) ->
+    perform(step({occupy, From, monitor(process, Pid)}, State));
 handle_call(_Other, _From, State) ->
     {reply, {error, badarg}, State}.
 
@@ -169,4 +213,6 @@ perform({State, Actions}) ->
 act({answer, From, Reply}) ->
     gen_server:reply(From, Reply);
 act({end_medium, {Issuer, Medium}}) ->
-    Issuer ! {?MODULE, end_medium, Medium}.
+    Issuer ! {?MODULE, end_medium, Medium};
+act({forget, Monitor}) ->
+    demonitor(Monitor, [flush]).
