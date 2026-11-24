@@ -281,7 +281,7 @@ nothing.
 | pending | the mint refused | none | the session stopped; `unavailable`; the row freed |
 | cookie | the grace's end | none | the row freed |
 | pending | the grace's end | pending | the state to return to becomes none |
-| any | the owner's end | none | the row freed; its request id forgotten |
+| any | the owner's end | none | the row freed; its request id forgotten; a pending row answers `unavailable` to the ended caller, so the facet frees the forward's slot in flight |
 | any | an answer whose request id no row holds | unchanged | dropped |
 
 The last two rows need no further effect: a session whose owner ended is

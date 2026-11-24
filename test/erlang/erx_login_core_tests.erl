@@ -111,7 +111,11 @@ late_answers_and_graces_change_nothing_test_() ->
 the_owner_s_end_frees_every_row_test_() ->
     [{atom_to_list(S),
       fun() ->
-              {T, []} = erx_login_core:step({down, owner()}, reach(S)),
+              {T, Effects} = erx_login_core:step({down, owner()}, reach(S)),
+?assertEqual(case outstanding(S) of
+                 {step, _} -> [{reply, ?FROM, {error, unavailable}}];
+                 none -> []
+             end, Effects),
               ?assertEqual(#{}, erx_login_core:rows(T)),
               ?assertEqual(0, erx_login_core:count(facet(), T))
       end} || S <- states()].

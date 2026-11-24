@@ -76,11 +76,11 @@ handle_call(_Request, _From, S) ->
 handle_cast(_Message, S) -> {noreply, S}.
 
 -doc false.
-handle_info({'DOWN', Monitor, process, Owner, _Reason}, #{monitors := Monitors} = S) ->
-    case Monitors of
-        #{Owner := Monitor} -> {noreply, core({down, Owner}, S#{monitors := maps:remove(Owner, Monitors)})};
-        #{} -> {noreply, S}
-    end;
+%% An owner's end. Any other 'DOWN', of a server one of the steps asked, goes to
+%% check_response/3 below, which answers that step failed.
+handle_info({'DOWN', Monitor, process, Owner, _Reason}, #{monitors := Monitors} = S)
+  when map_get(Owner, Monitors) =:= Monitor ->
+    {noreply, core({down, Owner}, S#{monitors := maps:remove(Owner, Monitors)})};
 handle_info({'$erx_login_grace', Step}, S) ->
     {noreply, core({grace, Step}, S)};
 handle_info({'$erx_login_unchecked', Step}, S) ->
