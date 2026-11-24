@@ -28,6 +28,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* What the ring holds; it never overwrites a byte it holds. */
 #define ERX_CONSOLE_RING_BYTES		4096
 /*
@@ -61,7 +65,8 @@ typedef enum erx_console_route {
  * changes the members. tail, open and head are byte positions that
  * only grow, modulo 2^32; a position's offset in bytes is its low bits.
  * tail..open holds whole lines, each ending in a newline, and open..head the
- * line still open.
+ * line still open; the close moves open to head, so after it the last line
+ * of tail..open may have no newline.
  */
 typedef struct erx_console_ring {
 	uint32_t		tail;		/* the oldest byte held */
@@ -168,5 +173,9 @@ bool erx_console_reply_next_line(const erx_console_reply_t *reply,
 
 /* The loss line's text, which the close and the root's record share. */
 erx_console_loss_text_t erx_console_loss_text(uint64_t lost);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ERX_CORE_CONSOLE_RING_H */

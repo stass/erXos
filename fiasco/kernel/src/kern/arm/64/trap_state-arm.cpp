@@ -1,3 +1,5 @@
+// Modified by erXos: a trap dump closes the ring console's route before its
+// report (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
 
 #include "entry_frame.h"
@@ -15,6 +17,7 @@ public:
 //----------------------------------------------------------------------------
 IMPLEMENTATION:
 
+#include "erx_console_ring.h"
 #include "mem.h"
 #include "mem_layout.h"
 
@@ -82,6 +85,8 @@ IMPLEMENT
 void
 Trap_state::dump() const
 {
+  Erx_console_ring::close();
+
   static constinit char const *const excpts[] =
   {
     /* 0 */ "undef insn", "WFx", nullptr, "MCR (CP15)",

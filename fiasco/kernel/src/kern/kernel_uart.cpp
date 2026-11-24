@@ -1,3 +1,5 @@
+// Modified by erXos: the ring console stands in the UART console's place
+// (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
 
 #include "initcalls.h"
@@ -60,6 +62,7 @@ IMPLEMENTATION [serial]:
 #include "kernel_console.h"
 #include "uart.h"
 #include "config.h"
+#include "erx_console_ring.h"
 #include "kip.h"
 #include "koptions.h"
 #include "panic.h"
@@ -148,7 +151,7 @@ PRIVATE static FIASCO_INIT
 void
 Kernel_uart::init_filter_console()
 {
-  Kconsole::console()->register_console(_kernel_uart, 0);
+  Kconsole::console()->register_console(Erx_console_ring::wrap(_kernel_uart), 0);
 }
 
 // ------------------------------------------------------------------------
@@ -166,7 +169,7 @@ void
 Kernel_uart::init_filter_console()
 {
   _fcon.construct(_kernel_uart, Config::serial_esc);
-  Kconsole::console()->register_console(_fcon, 0);
+  Kconsole::console()->register_console(Erx_console_ring::wrap(_fcon), 0);
 }
 
 // ------------------------------------------------------------------------

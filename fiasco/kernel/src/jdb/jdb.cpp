@@ -1,3 +1,5 @@
+// Modified by erXos: the debugger closes the ring console's route where it takes the
+// console (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
 
 #include <cxx/function>
@@ -177,6 +179,7 @@ IMPLEMENTATION:
 
 #include "config.h"
 #include "delayloop.h"
+#include "erx_console_ring.h"
 #include "feature.h"
 #include "jdb_core.h"
 #include "jdb_entry_frame.h"
@@ -750,6 +753,7 @@ PRIVATE static
 bool
 Jdb::open_debug_console(Cpu_number cpu)
 {
+  Erx_console_ring::close();
   in_service = 1;
   __libc_backend_printf_local_force_unlock();
   save_disable_irqs(cpu);

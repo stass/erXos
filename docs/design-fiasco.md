@@ -3724,7 +3724,8 @@ leaves the ring only whole, and the route closes before a stop prints its first 
   operation 4, after Fiasco's 0 to 3, `kern/vlog.cpp:31-37`) moves `uart` to `ring`, leaves `ring` as it is, and returns the
   ring's whole lines; under `closed` it returns an empty reply, no line and no loss count, and leaves the ring and its
   count to the close's write-out, so a take never hands out the rest of a line the write-out has begun, whatever lock
-  the glue holds across it. **Close** (operation 5) moves any route to `closed`. The root and `sigma0` hold the log
+  the glue holds across it. **Close** (operation 5) moves any route to `closed`. Both need the log object's `CW` right, as its read does, so a
+  copy with fewer rights can do neither. The root and `sigma0` hold the log
   object (`kern/std_workload.cpp:43-48,73-78`; a task holds none, `liberx/backend/fiasco/task_start.c:95-96`); that `sigma0`
   calls neither rests on `sigma0` being the boot's own trusted code, not on a check. The kernel also closes the route
   itself, at the head of each of the four functions a stop's report begins in on AArch64, before the report's first byte:
@@ -4204,7 +4205,7 @@ no test can drive the change:
   the head of each function a stop's report begins in: `panic` (`kern/kernel_panic.cc`), `assert_fail`
   (`kern/assertion.cpp`), `Trap_state::dump` (`kern/arm/64/trap_state-arm.cpp`) and the development kernel's
   `Jdb::open_debug_console` (`jdb/jdb.cpp`), all reaching the core through the glue file
-  `fiasco/kernel/src/erx/erx_console_ring.cpp`, whose references to the printf lock and the console multiplexer are lines
+  `fiasco/kernel/src/erx/erx_console_ring.cpp`, whose references to the printf lock and the console base class are lines
   of `fiasco/erx_glue_imports.txt`: an estimate of about 80 lines, unverified. The route machine, the ring with its line
   framing, bound and loss count, the close's escaped rendering, the reply's layout and its line reader are the C17 core
   `kernel/core/console_ring.c`, in `erx_cores.a`, which the root links too; the log core gains `erx_log_bytes`, a label and

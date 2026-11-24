@@ -113,8 +113,9 @@ endif
 
 # erXos's glue onto the C17 cores (Makeconf, ERX_CORE_ARCHIVE).
 VPATH			+= erx
-INTERFACES_KERNEL	+= erx_handoff
+INTERFACES_KERNEL	+= erx_handoff erx_console_ring
 CXXFLAGS_erx_handoff	+= $(ERX_GLUE_CXXFLAGS)
+CXXFLAGS_erx_console_ring	+= $(ERX_GLUE_CXXFLAGS)
 
 #
 # ABI Subsystem

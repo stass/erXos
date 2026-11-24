@@ -1,9 +1,12 @@
+// Modified by erXos: a failed assertion closes the ring console's route before its
+// report (docs/design-fiasco.md, "The kernel's lines").
 IMPLEMENTATION:
 
 #include <cassert>
 #include <cstdio>
 #include <stdlib.h>
 
+#include "erx_console_ring.h"
 #include "kernel_console.h"
 #include "thread.h"
 
@@ -12,6 +15,8 @@ void
 assert_fail(char const *expr_msg, char const *file, unsigned int line,
             void const *caller)
 {
+  Erx_console_ring::close();
+
   // Make sure that GZIP mode is off.
   //
   // We need to use the console_unchecked() method here to avoid potential

@@ -1,3 +1,5 @@
+// Modified by erXos: operations 4 and 5 are the ring console's take and close
+// (docs/design-fiasco.md, "The kernel's lines").
 INTERFACE:
 
 #include "icu_helper.h"
@@ -34,6 +36,8 @@ public:
     Read     = 1,
     Set_attr = 2,
     Get_attr = 3,
+    Erx_take  = 4, ///< erXos: the ring console's take
+    Erx_close = 5, ///< erXos: the ring console's close
   };
 
 private:
@@ -45,6 +49,7 @@ private:
 IMPLEMENTATION:
 
 #include "entry_frame.h"
+#include "erx_console_ring.h"
 #include "map_util.h"
 #include "mem_space.h"
 #include "l4_buf_iter.h"
@@ -217,6 +222,18 @@ Vlog::kinvoke(L4_obj_ref ref, L4_fpage::Rights rights, Syscall_frame *f,
       return get_attr(rights, f, s_msg);
     case Op::Read:
       return get_input(rights, f, s_msg);
+    // Both need the right Read needs, so a reduced copy can do neither.
+    case Op::Erx_take:
+      if (!have_receive(s_msg))
+        return commit_result(0);
+      if (!(rights & L4_fpage::Rights::CW()))
+        return commit_result(-L4_err::EPerm);
+      return commit_result(0, Erx_console_ring::take(s_msg));
+    case Op::Erx_close:
+      if (!(rights & L4_fpage::Rights::CW()))
+        return commit_result(-L4_err::EPerm);
+      Erx_console_ring::close();
+      return commit_result(0);
     default:
       return commit_result(-L4_err::ENosys);
     }

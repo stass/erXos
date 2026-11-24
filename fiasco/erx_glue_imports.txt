@@ -7,7 +7,11 @@
 # glue object with an undefined symbol its file does not list fails the build.
 # The cores' own erx_ functions need no entry.
 _ZN3Kip10global_kipE boot-handoff erx_handoff.cpp
+_ZN7Console5stateEm console-ring erx_console_ring.cpp
 _ZN8Koptions1oEv boot-handoff erx_handoff.cpp
+_ZdlPv console-ring erx_console_ring.cpp
+__libc_backend_printf_lock console-ring erx_console_ring.cpp
+__libc_backend_printf_unlock console-ring erx_console_ring.cpp
 panic boot-handoff erx_handoff.cpp
 printf boot-handoff erx_handoff.cpp
 puts boot-handoff erx_handoff.cpp
