@@ -244,13 +244,13 @@ leave_raw_with_vmin_zero() ->
     ok = erx_session_relay:tty(Open, {tcsetattr, Raw, sigttou_ignored}).
 
 %% Waits until the console watches its open for the group's ask. No message tells a
-%% case that, so it reads the console's state, whose one map with a `watching` key is
-%% the reader's.
+%% case that, so it reads the console's state, whose one `{relay, Map}` is the
+%% reader of a relay.
 watching(Console) -> watching(Console, 50).
 
 watching(Console, Tries) ->
     State = sys:get_state(Console),
-    case [W || #{watching := W} <- tuple_to_list(State)] of
+    case [W || {relay, #{watching := W}} <- tuple_to_list(State)] of
         [true] -> ok;
         [false] when Tries > 0 -> timer:sleep(20), watching(Console, Tries - 1);
         _ -> error({no_watch, State})
