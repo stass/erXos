@@ -645,6 +645,20 @@ class ProductionImageTest < Minitest::Test
     assert_match erlang.fetch(:pattern), "1> #{eshell}"
   end
 
+  # erx:i()'s processes listing is an ordinary listing, which has no continuation: it is its
+  # first page, marked [partial] when the page's 1,000 entries or inspect_reply_max cut it
+  # (docs/design-live.md, "A path is data" and Bounds). A production boot's processes pass
+  # inspect_reply_max, so the header may end in [partial]; an empty listing and a listing
+  # that failed whole still fail.
+  def test_the_processes_listing_is_its_first_page_whole_or_cut
+    point = Erx::ProductionImage::Run.console_checkpoints(machine: DEVELOPMENT).find { |row| row.fetch(:name) == 'inspect-processes' }
+    assert_match point.fetch(:pattern), "/processes  130 entries\r\n"
+    assert_match point.fetch(:pattern), "/processes  423 entries [partial]\r\n"
+    refute_match point.fetch(:pattern), "/processes  0 entries\r\n"
+    refute_match point.fetch(:pattern), "/processes  [error]\r\n"
+    refute_match point.fetch(:pattern), "/processes  [unsupported]\r\n"
+  end
+
   # A log line can land in the middle of the long output (docs/design-live.md, "Log lines
   # and program output"), such as a kernel record after the output's first 4096 bytes. The
   # output still counts when each log line among it is whole; a lost byte still fails.

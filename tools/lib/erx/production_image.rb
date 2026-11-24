@@ -1426,7 +1426,11 @@ module Erx
          console_point('inspect-memory', /\A  memory_total +root pool +\[partial\]\r*\n\z/n),
          console_point('inspect-uptime', /\A  uptime +kernel +[1-9][0-9]*\r*\n\z/n),
          console_point('inspect-used', /\A  used +root pool +\[partial\]\r*\n\z/n),
-         console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries\r*\n\z}n),
+         # An ordinary listing is its first page, [partial] when the page cut it
+         # (docs/design-live.md, "A path is data"). This boot's processes pass
+         # inspect_reply_max, so the point does not show that every domain before
+         # the cut answered (docs/todo-inspection.md, erx:i()'s processes section).
+         console_point('inspect-processes', %r{\A/processes  [1-9][0-9]* entries(?: \[partial\])?\r*\n\z}n),
          console_point('inspect-scope', /\Aroot pool: pages of the root's pool:/n),
          console_point('inspect-answer', /\Aok\r*\n\z/n, type: PROC_EXPRESSION),
          # ls -1 /proc, sorted, then the console process's status, the machine's and the system
