@@ -118,9 +118,9 @@ group_status_hides_the_input_test() ->
         [exit(Pid, kill) || Pid <- [Reader, Group, Driver]]
     end.
 
-%% A group's status does not show the text the user killed, which the line editor keeps
-%% in the group's process dictionary: sys:get_status shows a hiding process's dictionary
-%% empty, as its crash report does.
+%% A group keeps the text the user killed in its state, where format_status/1 hides it,
+%% not in its process dictionary, which process_info/2 shows any process of the runtime:
+%% neither shows the killed text.
 group_status_hides_the_kill_buffer_test() ->
     Killed = secret(),
     Test = self(),
@@ -132,9 +132,21 @@ group_status_hides_the_kill_buffer_test() ->
         Group ! {Driver, {read, Ref, binary_to_list(Killed) ++ "\^U"}},
         Again = receive {asked, Group, R2} -> R2 after 5000 -> error(no_ask) end,
         ?assert(is_reference(Again)),
+        ?assertNot(holds(Killed, erlang:process_info(Group, dictionary))),
         ?assertNot(holds(Killed, sys:get_status(Group)))
     after
         [exit(Pid, kill) || Pid <- [Reader, Group, Driver]]
+    end.
+
+%% sys:get_status shows a hiding process's dictionary empty, as its crash report does:
+%% the hiding server holds its secret in its dictionary too.
+status_of_a_hiding_server_shows_no_dictionary_test() ->
+    Secret = secret(),
+    {ok, Server} = gen_server:start(otp_report_status_hiding, Secret, []),
+    try
+        ?assertNot(holds(Secret, sys:get_status(Server)))
+    after
+        exit(Server, kill)
     end.
 
 %% The group's driver: each ask for input, to the test.

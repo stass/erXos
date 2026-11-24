@@ -798,13 +798,10 @@ to the corpus and follow rc
      `test/host/edlin_lost_test.rb`. `group`'s history rule is kept, keyed on the damage rather than on a NUL:
      without it a damaged line left by Up comes back by Down after the recalled line was emptied, which ended
      the damage, and runs (edit 81 of design-runtime.md).
-* [Medium] group and sys, typed text in a group's status (`otp/lib/stdlib/src/sys.erl`, `get_status/5`;
-  `otp/lib/stdlib/src/edlin.erl`, the kill buffer): with `sys:log` on, `sys:get_status` returns the raw
-  sys debug list, which holds the group's events with what was typed; and the kill buffer lives in the
-  group's process dictionary, which `process_info/2` shows to any process of the runtime. Keep the kill
-  buffer in the group's state, where `format_status/1` hides it, and let one function of `gen` decide
-  for the calling process whether it hides its terms, for both `proc_lib` and `sys` (they test
-  `'$initial_call'` differently today), hiding the debug list too.
+* [Medium] sys, typed text in a group's status (`otp/lib/stdlib/src/sys.erl`, `get_status/5`): with
+  `sys:log` on, `sys:get_status` returns the raw sys debug list, which holds the group's events with what
+  was typed. Let one function of `gen` decide for the calling process whether it hides its terms, for both
+  `proc_lib` and `sys` (they test `'$initial_call'` differently today), hiding the debug list too.
 * [Medium] group, the rest of a delivery in the history search and the external editor
   (`otp/lib/kernel/src/group.erl`, `get_line_edlin/3`): as on stock, the clauses for `search_found`,
   `search_quit` and `search_cancel` drop the input `edlin` hands back after the key (`_Cs`), and
@@ -820,10 +817,6 @@ to the corpus and follow rc
   [design-live.md](design-live.md#lost-input). `erx_console` sends groups no `{error, _}` and keeps one ask, so
   neither is reached on the target. Hold a loss for an error ending of a request that has taken input, and let a
   stray answer damage every unfinished request (`lose/1`), which changes the stray-loss row of the design's table.
-* [Low] `user_drv`'s job menu (`otp/lib/kernel/src/user_drv.erl`, `switch_loop/3`): `edlin:init/1` copies the
-  group's kill buffer with its damage, and the menu calls `edlin:edit_line/3` undamaged each time, so a yank of
-  damaged text there is not refused. Host only: `erx_console` replaces `user_drv` on the target. Thread the
-  damage through `switch_loop`'s state.
 * [Low] UART lines other than the console, a full receiver (`erx_pl011`, `erx_hostlink`, `erx_line`): a PL011
   serving the host link or Bluetooth sends its bytes as they come, so its receiver's mailbox is the only bound. If a
   bound is ever wanted there, a full store stops draining instead of dropping: mask the receive interrupt until the

@@ -133,7 +133,13 @@
           %% loss of a damaged request that ended other than by Ctrl-C or the end
           %% of input (pop_state/2), of input an error dropped (fail/3), or of an
           %% answer to no outstanding ask.
-          held_loss = false :: boolean()
+          held_loss = false :: boolean(),
+
+          %% erXos: the line editor's kill buffer, the text the user last killed
+          %% with its damage, which every edit takes and returns (edlin:read/0). It
+          %% lives here, which format_status/1 hides, and not in the process
+          %% dictionary, which process_info/2 shows any process of the runtime.
+          kill = edlin:empty_kill() :: edlin:kill()
         }).
 
 -spec start(pid()) -> pid().
@@ -192,15 +198,14 @@ init([Drv, Shell, Options]) ->
     {ok, init, State, {next_event, internal, [Shell, Options]}}.
 
 %% erXos, edit 75: what the user typed stays out of the group's reports and of what
-%% format_status/1 gives sys:get_status: the shell history, the line being typed
-%% (the input state of the request in progress and of each request a nested one
-%% pushed, and buf, the keys read ahead of a request) and the driver's input
-%% waiting in the queue or postponed, each such event keeping its shape with its
-%% characters emptied. The
-%% sys log, which holds the same events, is shown empty. The data is beside the
-%% state name, as gen_statem hands it over; stock OTP matches the state name here
-%% and returns a record, which crashes on every call. Any other map, such as
-%% proc_lib's #{reason => Reason}, holds no input.
+%% format_status/1 gives sys:get_status: the shell history, the kill buffer, the line
+%% being typed (the input state of the request in progress and of each request a
+%% nested one pushed, and buf, the keys read ahead of a request) and the driver's
+%% input waiting in the queue or postponed, each such event keeping its shape with
+%% its characters emptied. The sys log, which holds the same events, is shown empty.
+%% The data is beside the state name, as gen_statem hands it over; stock OTP matches
+%% the state name here and returns a record, which crashes on every call. Any other
+%% map, such as proc_lib's #{reason => Reason}, holds no input.
 format_status(Status) ->
     maps:map(fun(data, #state{} = Data) -> hidden_input(Data);
                 (Key, Events) when Key =:= queue; Key =:= postponed ->
@@ -210,7 +215,7 @@ format_status(Status) ->
              end, Status).
 
 hidden_input(#state{ input = Input, input_queue = Pushed } = Data) ->
-    Data#state{ line_history = undefined, buf = [],
+    Data#state{ line_history = undefined, buf = [], kill = edlin:empty_kill(),
                 input = hidden_input_state(Input),
                 input_queue = queue:from_list([{State, hidden_input_state(PushedInput)}
                                                || {State, PushedInput} <- queue:to_list(Pushed)]) }.
@@ -484,10 +489,11 @@ xterm(data, Buf, Data = #state{ input = #input_state{
                                            collect = {CollectF, CollectAs} } = InputState }) ->
 
     %% Get a single line using edlin
-    case get_line_edlin(Buf, Pbs, Cont, Lines, Encoding, Damaged, Data) of
-        {done, NewLines, RemainBuf, Damaged1} ->
-            %% erXos: the request's damage after the edit, which pop_state/2 reads.
-            Edited = Data#state{ input = InputState#input_state{ damaged = Damaged1 } },
+    case get_line_edlin(Buf, Pbs, Cont, Lines, Encoding, {Damaged, Data#state.kill}, Data) of
+        {done, NewLines, RemainBuf, {Damaged1, Kill}} ->
+            %% erXos: the request's damage after the edit, which pop_state/2 reads, and
+            %% the kill buffer.
+            Edited = Data#state{ input = InputState#input_state{ damaged = Damaged1 }, kill = Kill },
             CurrentLine = case RemainBuf of
                               %% erXos: edlin hands the end of input on only once it has
                               %% dropped the line (edit 81), so the reader reads the end.
@@ -527,13 +533,15 @@ xterm(data, Buf, Data = #state{ input = #input_state{
                 {'EXIT',_} ->
                     fail({error,err_func(io_lib, CollectF, CollectAs)}, RemainBuf, Edited);
                 _NewState ->
-                    xterm(data, RemainBuf, Data#state{ input = InputState#input_state{ cont = undefined, lines = NewLines,
-                                                                                      damaged = Damaged1 } })
+                    xterm(data, RemainBuf, Edited#state{ input = InputState#input_state{ cont = undefined, lines = NewLines,
+                                                                                        damaged = Damaged1 } })
             end;
-        {blink, NewCont, Damaged1} ->
-            {keep_state, ask(Data#state{ input = InputState#input_state{ cont = NewCont, damaged = Damaged1 } }), 1000};
-        {more_chars, NewCont, Damaged1} ->
-            {keep_state, ask(Data#state{ input = InputState#input_state{ cont = NewCont, damaged = Damaged1 } }) }
+        {blink, NewCont, {Damaged1, Kill}} ->
+            {keep_state, ask(Data#state{ input = InputState#input_state{ cont = NewCont, damaged = Damaged1 },
+                                         kill = Kill }), 1000};
+        {more_chars, NewCont, {Damaged1, Kill}} ->
+            {keep_state, ask(Data#state{ input = InputState#input_state{ cont = NewCont, damaged = Damaged1 },
+                                         kill = Kill }) }
     end;
 
 xterm(info, {io_request,From,ReplyAs,Req}, State)
@@ -994,7 +1002,7 @@ err_func(_, F, _) ->
 -record(get_line_edlin_state, {history, encoding, expand_fun, expand_below,
                                search, search_quit_prompt, search_result}).
 
-get_line_edlin(Chars, Pbs, undefined, Lines, Encoding, Damage,
+get_line_edlin(Chars, Pbs, undefined, Lines, Encoding, Read,
                #state{ driver = Drv, line_history = History,
                        expand_fun = ExpandFun, expand_below = ExpandBelow}) ->
     {more_chars,Cont1,Rs} = case Lines of
@@ -1002,20 +1010,20 @@ get_line_edlin(Chars, Pbs, undefined, Lines, Encoding, Damage,
                                 _ -> edlin:start(Pbs, Lines)
                             end,
     send_drv_reqs(Drv, Rs),
-    get_line_edlin(edlin:edit_line(Chars, Cont1, Damage), Drv, #get_line_edlin_state{
+    get_line_edlin(edlin:edit_line(Chars, Cont1, Read), Drv, #get_line_edlin_state{
                                                           history = new_stack(History),
                                                           encoding = Encoding,
                                                           expand_fun = ExpandFun,
                                                           expand_below = ExpandBelow });
-get_line_edlin(Chars, _Pbs, {EdlinCont, GetLineState}, _Lines, _Encoding, Damage,
+get_line_edlin(Chars, _Pbs, {EdlinCont, GetLineState}, _Lines, _Encoding, Read,
                #state{ driver = Drv }) ->
-    get_line_edlin(edlin:edit_line(cast(Chars, list), EdlinCont, Damage),
+    get_line_edlin(edlin:edit_line(cast(Chars, list), EdlinCont, Read),
                    Drv, GetLineState).
 
-get_line_edlin({{done, Cont, Rest, Rs}, D}, Drv, _State) ->
+get_line_edlin({{done, Cont, Rest, Rs}, Read}, Drv, _State) ->
     send_drv_reqs(Drv, Rs),
-    {done, Cont, Rest, D};
-get_line_edlin({{open_editor, _Cs, Cont, Rs}, D}, Drv, State) ->
+    {done, Cont, Rest, Read};
+get_line_edlin({{open_editor, _Cs, Cont, Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
     Buffer = edlin:current_line(Cont),
     send_drv(Drv, {open_editor, Buffer}),
@@ -1024,24 +1032,24 @@ get_line_edlin({{open_editor, _Cs, Cont, Rs}, D}, Drv, State) ->
             send_drv_reqs(Drv, edlin:erase_line()),
             {more_chars,NewCont,NewRs} = edlin:start(edlin:prompt(Cont)),
             send_drv_reqs(Drv, NewRs),
-            get_line_edlin(edlin:edit_line(Cs1, NewCont, D), Drv, State);
+            get_line_edlin(edlin:edit_line(Cs1, NewCont, Read), Drv, State);
         {Drv, not_supported} ->
-            get_line_edlin(edlin:edit_line(_Cs, Cont, D), Drv, State)
+            get_line_edlin(edlin:edit_line(_Cs, Cont, Read), Drv, State)
     end;
-get_line_edlin({{format_expression, _Cs, {line, _, _, _} = Cont, Rs}, D}, Drv, State) ->
+get_line_edlin({{format_expression, _Cs, {line, _, _, _} = Cont, Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
     Cs1 = format_expression(Cont, Drv),
     send_drv_reqs(Drv, edlin:erase_line()),
     {more_chars,NewCont,NewRs} = edlin:start(edlin:prompt(Cont)),
     send_drv_reqs(Drv, NewRs),
-    get_line_edlin(edlin:edit_line(Cs1, NewCont, D), Drv, State);
+    get_line_edlin(edlin:edit_line(Cs1, NewCont, Read), Drv, State);
 %% Move Up, Down in History: Ctrl+P, Ctrl+N
-get_line_edlin({{history_up,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
+get_line_edlin({{history_up,Cs,{_,_,_,Mode0}=Cont,Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
-    case up_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
+    case up_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), Read)) of
         {none,_Ls} ->
             send_drv(Drv, beep),
-            get_line_edlin(edlin:edit_line(Cs, Cont, D), Drv, State);
+            get_line_edlin(edlin:edit_line(Cs, Cont, Read), Drv, State);
         {Lcs,Ls} ->
             send_drv_reqs(Drv, edlin:erase_line()),
             {more_chars,{A,B,C,_},Nrs} = edlin:start(edlin:prompt(Cont)),
@@ -1051,15 +1059,15 @@ get_line_edlin({{history_up,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
               edlin:edit_line1(
                 string:to_graphemes(
                   lists:sublist(Lcs, 1, length(Lcs)-1)),
-                Ncont, D),
+                Ncont, Read),
               Drv, State#get_line_edlin_state{ history = Ls })
     end;
-get_line_edlin({{history_down,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
+get_line_edlin({{history_down,Cs,{_,_,_,Mode0}=Cont,Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
-    case down_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), D)) of
+    case down_stack(keep_line(State#get_line_edlin_state.history, edlin:current_line(Cont), Read)) of
         {none,_Ls} ->
             send_drv(Drv, beep),
-            get_line_edlin(edlin:edit_line(Cs, Cont, D), Drv, State);
+            get_line_edlin(edlin:edit_line(Cs, Cont, Read), Drv, State);
         {Lcs,Ls} ->
             send_drv_reqs(Drv, edlin:erase_line()),
             {more_chars,{A,B,C,_},Nrs} = edlin:start(edlin:prompt(Cont)),
@@ -1068,7 +1076,7 @@ get_line_edlin({{history_down,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
             get_line_edlin(edlin:edit_line1(string:to_graphemes(lists:sublist(Lcs,
                                                                               1,
                                                                               length(Lcs)-1)),
-                                            Ncont, D),
+                                            Ncont, Read),
                            Drv, State#get_line_edlin_state{ history = Ls })
     end;
 %% ^R = backward search, ^S = forward search.
@@ -1081,16 +1089,16 @@ get_line_edlin({{history_down,Cs,{_,_,_,Mode0}=Cont,Rs}, D}, Drv, State) ->
 %% new modes: search, search_quit, search_found. These are added to
 %% the regular ones (none, meta_left_sq_bracket) and handle special
 %% cases of history search.
-get_line_edlin({{search,Cs,Cont,Rs}, D}, Drv, State) ->
+get_line_edlin({{search,Cs,Cont,Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
     %% drop current line, move to search mode. We store the current
     %% prompt ('N>') and substitute it with the search prompt.
     Pbs = prompt_bytes("\033[;1;4msearch:\033[0m ", State#get_line_edlin_state.encoding),
     {more_chars,Ncont,_Nrs} = edlin:start(Pbs, {search,none}),
-    get_line_edlin(edlin:edit_line1(Cs, Ncont, D), Drv,
+    get_line_edlin(edlin:edit_line1(Cs, Ncont, Read), Drv,
                    State#get_line_edlin_state{ search = new_search,
                                                search_quit_prompt = Cont});
-get_line_edlin({{Help, Before, Cs0, Cont, Rs}, D}, Drv, State)
+get_line_edlin({{Help, Before, Cs0, Cont, Rs}, Read}, Drv, State)
     when Help =:= help; Help =:= help_full ->
     send_drv_reqs(Drv, Rs),
     NLines = case Help of
@@ -1130,8 +1138,8 @@ get_line_edlin({{Help, Before, Cs0, Cont, Rs}, D}, Drv, State)
             send_drv(Drv, {put_expand, unicode,
                            [unicode:characters_to_binary(Docs1)], NLines})
     end,
-    get_line_edlin(edlin:edit_line(Cs0, Cont, D), Drv, State);
-get_line_edlin({{Expand, Before, Cs0, Cont,Rs}, D}, Drv, State = #get_line_edlin_state{ expand_fun = ExpandFun })
+    get_line_edlin(edlin:edit_line(Cs0, Cont, Read), Drv, State);
+get_line_edlin({{Expand, Before, Cs0, Cont,Rs}, Read}, Drv, State = #get_line_edlin_state{ expand_fun = ExpandFun })
   when Expand =:= expand; Expand =:= expand_full ->
     send_drv_reqs(Drv, Rs),
     {Found, CompleteChars, Matches} = ExpandFun(Before, []),
@@ -1164,11 +1172,11 @@ get_line_edlin({{Expand, Before, Cs0, Cont,Rs}, D}, Drv, State = #get_line_edlin
                          [$\e, $l | Cs1]
                  end
          end,
-    get_line_edlin(edlin:edit_line(Cs, Cont, D), Drv, State);
+    get_line_edlin(edlin:edit_line(Cs, Cont, Read), Drv, State);
 
 %% The search item was found and accepted (new line entered on the exact
 %% result found)
-get_line_edlin({{search_found,_Cs,_,Rs}, D}, Drv, State) ->
+get_line_edlin({{search_found,_Cs,_,Rs}, Read}, Drv, State) ->
     LineCont = case State#get_line_edlin_state.search_result of
                    [] -> {[],{[],[]},[]};
                    SearchResult ->
@@ -1182,11 +1190,11 @@ get_line_edlin({{search_found,_Cs,_,Rs}, D}, Drv, State) ->
     send_drv_reqs(Drv, edlin:redraw_line(Found)),
     %% erXos: edlin finishes the line, as it finishes every line, so a damaged read's
     %% line stays in the editor here too.
-    get_line_edlin(edlin:finish_line(Found, Rs, D), Drv,
+    get_line_edlin(edlin:finish_line(Found, Rs, Read), Drv,
                    State#get_line_edlin_state{ search_result = []});
 %% The search mode has been exited, but the user wants to remain in line
 %% editing mode wherever that was, but editing the search result.
-get_line_edlin({{search_quit,_Cs,_,Rs}, D}, Drv, State) ->
+get_line_edlin({{search_quit,_Cs,_,Rs}, Read}, Drv, State) ->
     %% Load back the old prompt with the correct line number.
     case edlin:prompt(State#get_line_edlin_state.search_quit_prompt) of
         Prompt -> % redraw the line and keep going with the same stack position
@@ -1199,16 +1207,16 @@ get_line_edlin({{search_quit,_Cs,_,Rs}, D}, Drv, State) ->
             NCont = {line,Prompt,L,{normal,none}},
             send_drv_reqs(Drv, [delete_line|Rs]),
             send_drv_reqs(Drv, edlin:redraw_line(NCont)),
-            get_line_edlin({{more_chars, NCont ,[]}, D}, Drv,
+            get_line_edlin({{more_chars, NCont ,[]}, Read}, Drv,
                            State#get_line_edlin_state{ history = pad_stack(State#get_line_edlin_state.history),
                                                        search_result = [] })
     end;
-get_line_edlin({{search_cancel,_Cs,_,Rs}, D}, Drv, State = #get_line_edlin_state{ search_quit_prompt = NCont }) ->
+get_line_edlin({{search_cancel,_Cs,_,Rs}, Read}, Drv, State = #get_line_edlin_state{ search_quit_prompt = NCont }) ->
     send_drv_reqs(Drv, [delete_line|Rs]),
     send_drv_reqs(Drv, edlin:redraw_line(NCont)),
-    get_line_edlin({{more_chars, NCont, []}, D}, Drv, State#get_line_edlin_state{ search_result = [] });
+    get_line_edlin({{more_chars, NCont, []}, Read}, Drv, State#get_line_edlin_state{ search_result = [] });
 %% Search mode is entered.
-get_line_edlin({{What,{line,Prompt,{_,{RevCmd0,_},_},{search, none}}=Cont0,Rs}, D},
+get_line_edlin({{What,{line,Prompt,{_,{RevCmd0,_},_},{search, none}}=Cont0,Rs}, Read},
                Drv, State = #get_line_edlin_state{ search = OldSearch, history = Ls0 }) ->
     %% Figure out search direction. ^S and ^R are returned through edlin
     %% whenever we received a search while being already in search mode.
@@ -1229,7 +1237,7 @@ get_line_edlin({{What,{line,Prompt,{_,{RevCmd0,_},_},{search, none}}=Cont0,Rs}, 
             %% expand area being cleared.
             Rs1 = [R||{move_expand,_}=R<-Rs],
             send_drv_reqs(Drv, Rs1),
-            {What, {Cont0, State#get_line_edlin_state{ search = RevCmd }}, D};
+            {What, {Cont0, State#get_line_edlin_state{ search = RevCmd }}, Read};
        true ->
             {Ls, SearchResult, NewStack} = case Search(Ls1, Cmd) of
                                                {none, Ls2} ->
@@ -1245,11 +1253,11 @@ get_line_edlin({{What,{line,Prompt,{_,{RevCmd0,_},_},{search, none}}=Cont0,Rs}, 
                                                    {Ls2, Lines, {[],{RevCmd, []},[]}}
                                            end,
             Cont = {line,Prompt,NewStack,{search, none}},
-            {What, {Cont, State#get_line_edlin_state{ history = Ls, search = RevCmd, search_result = SearchResult }}, D}
+            {What, {Cont, State#get_line_edlin_state{ history = Ls, search = RevCmd, search_result = SearchResult }}, Read}
     end;
-get_line_edlin({{What,Cont0,Rs}, D}, Drv, State) ->
+get_line_edlin({{What,Cont0,Rs}, Read}, Drv, State) ->
     send_drv_reqs(Drv, Rs),
-    {What, {Cont0, State}, D}.
+    {What, {Cont0, State}, Read}.
 
 format_expression(Cont, Drv) ->
     FormatingCommand = application:get_env(stdlib, format_shell_func, default),
@@ -1409,9 +1417,9 @@ down_stack({stack,U,C,D}) ->
 %% must not then bring the damaged line back undamaged. Text a damaged read stores
 %% keeps its damage or is not stored; the kill buffer keeps it (edlin:do_op/4), and the
 %% history stack, whose lines a search reads as text, does not store it.
-keep_line(Stack, _Line, true) ->
+keep_line(Stack, _Line, {true, _Kill}) ->
     Stack;
-keep_line(Stack, Line, false) ->
+keep_line(Stack, Line, {false, _Kill}) ->
     save_line(Stack, Line).
 
 save_line({stack, U, {}, []}, Line) ->

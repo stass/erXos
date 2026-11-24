@@ -17,7 +17,8 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: whereis_group/0 answers for erx_console too.
+%% Modified by erXos: whereis_group/0 answers for erx_console too, and the job menu
+%% carries its own read through its edits (switch_loop/3, edlin:read/0).
 %%
 %% %CopyrightEnd%
 %%
@@ -704,15 +705,19 @@ switch_loop(internal, init, State) ->
             NewTTYState =
                 io_requests([{insert_chars,unicode,~"\nUser switch command (enter 'h' for help)\n"}],
                             State#state.tty),
-	    %% init edlin used by switch command and have it copy the
-	    %% text buffer from current group process
-	    edlin:init(gr_cur_pid(State#state.groups)),
+	    %% init edlin used by switch command
+	    %% erXos: the menu starts with an empty kill buffer of its own: a group's lives
+	    %% in the group's state, which no other process reads (edlin:init/0).
+	    edlin:init(),
             {keep_state, State#state{ tty = NewTTYState },
              {next_event, internal, line}}
     end;
 switch_loop(internal, line, State) ->
     {more_chars, Cont, Rs} = edlin:start(" --> "),
-    {keep_state, {Cont, State#state{ tty = io_requests(Rs, State#state.tty) }}};
+    %% erXos: the menu's read, which edlin takes and returns with every edit; it takes
+    %% no loss of input and no text killed elsewhere, so it is never damaged.
+    Read = {false, edlin:empty_kill()},
+    {keep_state, {{Cont, Read}, State#state{ tty = io_requests(Rs, State#state.tty) }}};
 switch_loop(internal, {line, Line}, State) ->
     case erl_scan:string(Line) of
         {ok, Tokens, _} ->
@@ -742,21 +747,18 @@ switch_loop(internal, {line, Line}, State) ->
             {keep_state, State#state{ tty = NewTTYState },
              {next_event, internal, line}}
     end;
-switch_loop(info,{ReadHandle,{data,Cs}}, {Cont, #state{ read = ReadHandle } = State}) ->
-    %% erXos: the job menu's read takes no loss of input and keeps no damage, so a
-    %% yank of damaged text copied by edlin:init/1 is not refused here; user_drv runs
-    %% only on a host, where erx_console does not replace it (docs/todo-shell.md).
-    {Result, _Damage} = edlin:edit_line(unicode:characters_to_list(Cs), Cont, false),
+switch_loop(info,{ReadHandle,{data,Cs}}, {{Cont, Read0}, #state{ read = ReadHandle } = State}) ->
+    {Result, Read} = edlin:edit_line(unicode:characters_to_list(Cs), Cont, Read0),
     case Result of
         {done,{[Line],_,_},_Rest, Rs} ->
             {keep_state, State#state{ tty = io_requests(Rs, State#state.tty) },
              {next_event, internal, {line, Line}}};
         {more_chars,NewCont,Rs} ->
             {keep_state,
-             {NewCont, State#state{ tty = io_requests(Rs, State#state.tty)}}};
+             {{NewCont, Read}, State#state{ tty = io_requests(Rs, State#state.tty)}}};
         {blink,NewCont,Rs} ->
             {keep_state,
-             {NewCont, State#state{ tty = io_requests(Rs, State#state.tty)}},
+             {{NewCont, Read}, State#state{ tty = io_requests(Rs, State#state.tty)}},
              1000};
         {_What, _Cs, _NewCont, _Rs}  ->
             keep_state_and_data;

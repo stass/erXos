@@ -69,6 +69,10 @@ class OtpReportStatusTest < Minitest::Test
     Seed.new(fault: "a hiding process's status dictionary kept", source: "#{STDLIB}/src/sys.erl",
              anchor: '                true -> [];',
              replacement: '                true -> get();',
+             catching_case: 'status_of_a_hiding_server_shows_no_dictionary_test'),
+    Seed.new(fault: "the group's kill buffer kept", source: "#{KERNEL}/src/group.erl",
+             anchor: 'line_history = undefined, buf = [], kill = edlin:empty_kill(),',
+             replacement: 'line_history = undefined, buf = [],',
              catching_case: 'group_status_hides_the_kill_buffer_test')
   ].freeze
 

@@ -38,20 +38,6 @@ a_yank_of_undamaged_text_finishes_the_line_test() ->
     {{done, Line, [], _}, false} = typed(["pwd", "\^U", "\^Y", "\r"]),
     ?assertEqual("pwd\n", edlin:current_line(Line)).
 
-%% The kill buffer edlin:init/1 copies from another process keeps its damage.
-a_copied_kill_buffer_keeps_its_damage_test() ->
-    Test = self(),
-    Killer = spawn_link(fun() ->
-                                typed(["rm -rf /tmp/bu", lost, "\^U"]),
-                                Test ! {killed, self()},
-                                receive stop -> ok end
-                        end),
-    receive {killed, Killer} -> ok end,
-    edlin:init(Killer),
-    Killer ! stop,
-    {more_chars, Start, _} = edlin:start("> "),
-    ?assertMatch({{more_chars, _, _}, true}, typed_from(Start, ["\^Y\r"])).
-
 %% A loss rings the bell and drops the escape sequence under way, so the byte after it
 %% is a character of the line, not the end of a key.
 a_loss_drops_the_escape_sequence_under_way_test() ->
@@ -358,17 +344,15 @@ a_group_damages_a_read_a_password_read_set_aside_test() ->
         ?assertEqual(none, answer(Outer))
     end).
 
-%% What the editor makes of Inputs, in turn, at a fresh undamaged prompt: the last
-%% result and the damage.
+%% What the editor makes of Inputs, in turn, at a fresh undamaged prompt with an empty
+%% kill buffer: the last result and the damage.
 typed(Inputs) ->
     edlin:init(),
     {more_chars, Start, _} = edlin:start("> "),
-    typed_from(Start, Inputs).
-
-%% The same from the editor state Start, with the process's kill buffer as it is.
-typed_from(Start, Inputs) ->
-    lists:foldl(fun(Input, {{_, Cont, _}, Damage}) -> edlin:edit_line(Input, Cont, Damage) end,
-                {{more_chars, Start, []}, false}, Inputs).
+    {Result, {Damage, _Kill}} =
+        lists:foldl(fun(Input, {{_, Cont, _}, Read}) -> edlin:edit_line(Input, Cont, Read) end,
+                    {{more_chars, Start, []}, {false, edlin:empty_kill()}}, Inputs),
+    {Result, Damage}.
 
 with_group(Fun) ->
     with_group([{dumb, false}], Fun).

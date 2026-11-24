@@ -1576,7 +1576,9 @@ nothing. Each of the group's modes then does one thing:
   after it is emptied again. Moving through the history or searching it
   keeps the damage, since the line it shows replaces what the user sees,
   not what the read lost. Text keeps the damage of the read it came from
-  wherever `edlin` stores it: a kill in a damaged read stores its text
+  wherever `edlin` stores it: the kill buffer, which the caller keeps beside
+  the read and a group in its state, never in the process dictionary
+  another process can read; a kill in a damaged read stores its text
   damaged, and a yank of damaged text damages the read it lands in, the
   same read or a later one,
   so `Ctrl-U` then `Ctrl-Y` cannot bring a damaged line back undamaged;
@@ -1729,7 +1731,7 @@ fail, so the case proves the code under it ran.
 | the same, a multi-line edit: a loss in its second line, that line emptied, Enter | no line finishes until the first line is emptied too | the current line's emptiness taken for the buffer's |
 | the same: a loss, a history move, Enter | no line finishes | the history move rebuilding the line state without the damage |
 | the same: a loss, then more text, Enter and a pasted password in one delivery, then text in the next | no line finishes; the bell rings once at Enter; the password is dropped and the next delivery's text joins the line | the refused Enter keeping the rest of its delivery |
-| the same: `rm -rf /tmp/bu`, a loss, `Ctrl-U`, `Ctrl-Y`, Enter; the kill, `Ctrl-C`, and a yank and Enter in the next request; and a yank and Enter in a process whose `edlin:init/1` copied the kill buffer | no line finishes in any | a kill storing its text without the damage; a yank ignoring the damage |
+| the same: `rm -rf /tmp/bu`, a loss, `Ctrl-U`, `Ctrl-Y`, Enter; the kill, `Ctrl-C`, and a yank and Enter in the next request | no line finishes in any; after the kill neither `process_info/2` of the group nor `sys:get_status` shows the killed text (`otp_report_status_tests`) | a kill storing its text without the damage; a yank ignoring the damage; a kill buffer kept in the process dictionary |
 | the same: a damaged read's history search, accepted with Enter, left with `Ctrl-A` to edit, or cancelled, then Enter | no line finishes | a search's ending rebuilding the line state without the damage |
 | the same: read A undamaged, read B from another process, a loss answering no outstanding ask, B's line and Enter; B's buffer emptied, a new line and Enter; then A resumes and Enter | B finishes no line until its buffer is emptied, then returns the new line; A finishes no line | the stray loss dropped, or only held for the next request |
 | the same: a stray loss while no request reads, then a read, a line and Enter | no line finishes | the stray loss dropped |

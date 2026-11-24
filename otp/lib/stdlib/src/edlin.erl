@@ -17,8 +17,9 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%
-%% Modified by erXos: every editing call takes the read's damage and returns it
-%% (edit_line/3), and a loss of input, the input lost, damages the read; no line of a
+%% Modified by erXos: every editing call takes the read, its damage and the kill buffer,
+%% and returns it (edit_line/3), so no typed text lives in the process dictionary
+%% (init/0); a loss of input, the input lost, damages the read; no line of a
 %% damaged read is finished (finish/5), the end of input drops it, and an edit that
 %% empties the buffer ends the damage (damage_after/4). Text keeps the damage of the
 %% read it came from: the kill buffer holds it beside the text (do_op/4). Edits 80 and
@@ -191,7 +192,8 @@ supports multiple lines.
 %% A simple Emacs-like line editor.
 %% About Latin-1 characters: see the beginning of erl_scan.erl.
 
--export([init/0,init/1,start/1,start/2,edit_line/3]).
+-export([init/0,empty_kill/0,start/1,start/2,edit_line/3]).
+-export_type([read/0, kill/0]).
 -export([erase_line/0,erase_inp/1,redraw_line/1]).
 -export([length_before/1,length_after/1,prompt/1]).
 -export([current_line/1, current_chars/1]).
@@ -218,24 +220,23 @@ supports multiple lines.
 
 -doc false.
 init() ->
-    put(key_map, edlin_key:get_key_map()),
-    put(kill_buffer, {false, []}).
+    put(key_map, edlin_key:get_key_map()).
 
+%% erXos: the kill buffer holds the text the user last killed with the damage of the read
+%% it was killed in, and the caller keeps it beside the read (read/0), not edlin in the
+%% process dictionary, which process_info/2 shows any process of the runtime: a group
+%% keeps it in its state, which format_status/1 hides (edit 75 of design-runtime.md).
+-type kill() :: {Damage :: boolean(), Text :: string()}.
+
+%% erXos: the read an editing call takes and returns: whether it lost input, and the
+%% kill buffer.
+-type read() :: {Damage :: boolean(), kill()}.
+
+%% erXos: the kill buffer that holds nothing.
 -doc false.
-init(Pid) ->
-    init(),
-    %% copy the kill_buffer from the process Pid
-    CopiedKillBuf =
-        case erlang:process_info(Pid, dictionary) of
-	        {dictionary,Dict} ->
-		            case proplists:get_value(kill_buffer, Dict) of
-		                    undefined -> {false, []};
-		                    Buf       -> Buf
-		            end;
-	        undefined ->
-		            {false, []}
-	    end,
-    put(kill_buffer, CopiedKillBuf).
+-spec empty_kill() -> kill().
+empty_kill() ->
+    {false, []}.
 
 %% start(Prompt)
 %% edit(Characters, Continuation)
@@ -274,11 +275,11 @@ keymap() ->
 
 -type continuation() :: {line, _, _, _} | {_, _, _}.
 -doc false.
-%% erXos: Input is characters, the end of input or a loss of input, and Damage whether
-%% the read lost input; the result comes back with the read's damage after it.
--spec edit_line(Input, continuation(), Damage) -> {Result, Damage} when
+%% erXos: Input is characters, the end of input or a loss of input, and Read the read;
+%% the result comes back with the read after it.
+-spec edit_line(Input, continuation(), Read) -> {Result, Read} when
       Input :: unicode:chardata() | eof | lost,
-      Damage :: boolean(),
+      Read :: read(),
       Result ::
           {done, continuation(), Rest :: unicode:chardata() | eof, [user_drv:request()]} |
           {open_editor | format_expression | history_up | history_down | search,
@@ -290,36 +291,36 @@ keymap() ->
           {search_found | search_quit | search_cancel,
            Cs :: unicode:chardata(), [user_drv:request()]} |
           {blink | more_chars, continuation(), [user_drv:request()]}.
-edit_line(Cs, {line,P,L,{blink,N_Rs}}, D) ->
-    edit(Cs, P, L, {normal, none}, N_Rs, D);
-edit_line(Cs, {line,P,L,M}, D) ->
-    edit(Cs, P, L, M, [], D).
+edit_line(Cs, {line,P,L,{blink,N_Rs}}, Read) ->
+    edit(Cs, P, L, {normal, none}, N_Rs, Read);
+edit_line(Cs, {line,P,L,M}, Read) ->
+    edit(Cs, P, L, M, [], Read).
 
 %% Called when in search mode
 -doc false.
-edit_line1(Cs, {line,P,L,{blink,N_Rs}}, D) ->
-    edit(Cs, P, L, {normal, none}, N_Rs, D);
-edit_line1(Cs, {line,P,{B,{[],[]},A},{normal,none}}, D) ->
+edit_line1(Cs, {line,P,L,{blink,N_Rs}}, Read) ->
+    edit(Cs, P, L, {normal, none}, N_Rs, Read);
+edit_line1(Cs, {line,P,{B,{[],[]},A},{normal,none}}, Read) ->
     [CurrentLine|Lines] = [string:to_graphemes(Line) || Line <- reverse(string:split(Cs, "\n",all))],
     Cont = {Lines ++ B,{reverse(CurrentLine),[]},A},
     Rs = redraw(P, Cont, []),
-    {{more_chars, {line,P,Cont,{normal,none}},[delete_line|Rs]}, D};
-edit_line1(Cs, {line,P,L,M}, D) ->
-    edit(Cs, P, L, M, [], D).
+    {{more_chars, {line,P,Cont,{normal,none}},[delete_line|Rs]}, Read};
+edit_line1(Cs, {line,P,L,M}, Read) ->
+    edit(Cs, P, L, M, [], Read).
 
-edit([C|Cs], P, Line, {blink,_}, [_|Rs], D) ->	%Remove blink here
-    edit([C|Cs], P, Line, {normal,none}, Rs, D);
-edit([], P, L, {blink,N}, Rs, D) ->
-    {{blink,{line,P,L, {blink,N}},reverse(Rs)}, D};
-edit([], P, L, EditState, Rs, D) ->
-    {{more_chars,{line,P,L,EditState},reverse(Rs)}, D};
-edit(eof, P, L, EditState, Rs, D) ->
-    finish(eof, {line,P,L,EditState}, [], Rs, D);
+edit([C|Cs], P, Line, {blink,_}, [_|Rs], Read) ->	%Remove blink here
+    edit([C|Cs], P, Line, {normal,none}, Rs, Read);
+edit([], P, L, {blink,N}, Rs, Read) ->
+    {{blink,{line,P,L, {blink,N}},reverse(Rs)}, Read};
+edit([], P, L, EditState, Rs, Read) ->
+    {{more_chars,{line,P,L,EditState},reverse(Rs)}, Read};
+edit(eof, P, L, EditState, Rs, Read) ->
+    finish(eof, {line,P,L,EditState}, [], Rs, Read);
 %% erXos: a loss of input drops the escape sequence under way, rings the bell and
 %% damages the read (edit 80).
-edit(lost, P, L, {Mode, _EscapePrefix}, Rs, _D) ->
-    {{more_chars,{line,P,L,{Mode,none}},reverse(Rs, [beep])}, true};
-edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) ->
+edit(lost, P, L, {Mode, _EscapePrefix}, Rs, {_D, Kill}) ->
+    {{more_chars,{line,P,L,{Mode,none}},reverse(Rs, [beep])}, {true, Kill}};
+edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, Read) ->
     {ShellMode, NextMode} = case ShellMode1 of
         {_, _}=M -> M;
         Mode -> {Mode, Mode}
@@ -327,11 +328,11 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) 
     case edlin_key:get_valid_escape_key(Buf, EscapePrefix) of
         {escape_prefix, EscapePrefix1} ->
             case ShellMode of
-                tab_expand -> edit(Buf, P, MultiLine, {normal, none}, Rs0, D);
-                _ -> edit([], P, MultiLine, {NextMode, EscapePrefix1}, Rs0, D)
+                tab_expand -> edit(Buf, P, MultiLine, {normal, none}, Rs0, Read);
+                _ -> edit([], P, MultiLine, {NextMode, EscapePrefix1}, Rs0, Read)
             end;
         {invalid, _I, Rest} ->
-            edit(Rest, P, MultiLine, {NextMode, none}, Rs0, D);
+            edit(Rest, P, MultiLine, {NextMode, none}, Rs0, Read);
         {insert, C1, Cs2} ->
             %% If its a printable character
             %% we could in theory override it in the keymap,
@@ -351,17 +352,17 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) 
             end,
             case Op of
                 tab_expand_quit ->
-                    edit(Buf, P, MultiLine, {normal,none}, Rs0, D);
+                    edit(Buf, P, MultiLine, {normal,none}, Rs0, Read);
                 search_quit ->
-                    {{search_quit,Cs2,{line,P,MultiLine,{normal, none}},reverse(Rs0)}, D};
+                    {{search_quit,Cs2,{line,P,MultiLine,{normal, none}},reverse(Rs0)}, Read};
                 _ ->
                     case do_op(Op, MultiLine, Rs0) of
                         {blink,N,MultiLine1,Rs} ->
-                            edit(Cs2, P, MultiLine1, {blink,N}, Rs, D);
+                            edit(Cs2, P, MultiLine1, {blink,N}, Rs, Read);
                         {redraw, {_LB1, {_Bef1, _Aft1}, _LA1}=MultiLine1, Rs} ->
-                            edit(Cs2, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs), D);
+                            edit(Cs2, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs), Read);
                         {{_LB1, {_Bef1, _Aft1}, _LA1}=MultiLine1,Rs} ->
-                            edit(Cs2, P, MultiLine1, {NextMode, none}, Rs, D)
+                            edit(Cs2, P, MultiLine1, {NextMode, none}, Rs, Read)
                     end
             end;
         {key, Key, Cs} ->
@@ -369,61 +370,61 @@ edit(Buf, P, {LB, {Bef,Aft}, LA}=MultiLine, {ShellMode1, EscapePrefix}, Rs0, D) 
             Cont = {line,P,MultiLine,{NextMode, none}},
             case Value of
                 {mode, Mode1} ->
-                    edit(Buf, P, MultiLine, {{Mode1, ShellMode}, none}, Rs0, D);
-                none -> edit(Cs, P, MultiLine, {NextMode,none}, Rs0, D);
-                search -> {{search,Cs,Cont,reverse(Rs0)}, D};
-                search_found -> {{search_found,Cs,Cont,reverse(Rs0)}, D};
-                search_cancel -> {{search_cancel,Cs,Cont,reverse(Rs0)}, D};
-                search_quit -> {{search_quit,Cs,Cont,reverse(Rs0)}, D};
-                format_expression -> {{format_expression,Cs,Cont,reverse(Rs0)}, D};
-                open_editor -> {{open_editor,Cs,Cont,reverse(Rs0)}, D};
-                history_up -> {{history_up,Cs,Cont,reverse(Rs0)}, D};
-                history_down -> {{history_down,Cs,Cont,reverse(Rs0)}, D};
+                    edit(Buf, P, MultiLine, {{Mode1, ShellMode}, none}, Rs0, Read);
+                none -> edit(Cs, P, MultiLine, {NextMode,none}, Rs0, Read);
+                search -> {{search,Cs,Cont,reverse(Rs0)}, Read};
+                search_found -> {{search_found,Cs,Cont,reverse(Rs0)}, Read};
+                search_cancel -> {{search_cancel,Cs,Cont,reverse(Rs0)}, Read};
+                search_quit -> {{search_quit,Cs,Cont,reverse(Rs0)}, Read};
+                format_expression -> {{format_expression,Cs,Cont,reverse(Rs0)}, Read};
+                open_editor -> {{open_editor,Cs,Cont,reverse(Rs0)}, Read};
+                history_up -> {{history_up,Cs,Cont,reverse(Rs0)}, Read};
+                history_down -> {{history_down,Cs,Cont,reverse(Rs0)}, Read};
                 new_line ->
                     MultiLine1 = {[lists:reverse(Bef)|LB],{[],Aft},LA},
-                    edit(Cs, P, MultiLine1, {NextMode, none}, reverse(redraw(P, MultiLine1, Rs0)), D);
+                    edit(Cs, P, MultiLine1, {NextMode, none}, reverse(redraw(P, MultiLine1, Rs0)), Read);
                 new_line_finish ->
-                    finish(enter, Cont, Cs, Rs0, D);
+                    finish(enter, Cont, Cs, Rs0, Read);
                 redraw_line ->
                     Rs1 = erase_line(Rs0),
                     Rs = redraw(P, MultiLine, Rs1),
-                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, D);
+                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, Read);
                 clear ->
                     Rs = redraw(P, MultiLine, [clear|Rs0]),
-                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, D);
+                    edit(Cs, P, MultiLine, {NextMode, none}, Rs, Read);
                 help ->
                     {{help, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
-                    reverse(Rs0)}, D};
+                    reverse(Rs0)}, Read};
                 help_full ->
                     {{help_full, chars_before(MultiLine), Cs,{line, P, MultiLine, {help, none}},
-                    reverse(Rs0)}, D};
+                    reverse(Rs0)}, Read};
                 tab_expand ->
                     {{expand, chars_before(MultiLine), Cs,
                      {line, P, MultiLine, {tab_expand, none}},
-                     reverse(Rs0)}, D};
+                     reverse(Rs0)}, Read};
                 tab_expand_full ->
                     {{expand_full, chars_before(MultiLine), Cs,
                      {line, P, MultiLine, {tab_expand, none}},
-                     reverse(Rs0)}, D};
+                     reverse(Rs0)}, Read};
                 tab_expand_quit ->
                     %% When exiting tab expand mode, we want to evaluate the key in normal mode
                     %% we send a {move_rel, 0} event to make sure the paging area is cleared
-                    edit(Buf, P, MultiLine, {normal,none}, [{move_rel, 0}|Rs0], D);
+                    edit(Buf, P, MultiLine, {normal,none}, [{move_rel, 0}|Rs0], Read);
                 Op ->
                     Op1 = case ShellMode of
                         search ->
                             {search, Op};
                         _ -> Op
                     end,
-                    case do_op(Op1, MultiLine, Rs0, D) of
-                        {{blink,N,MultiLine1,Rs}, D1} ->
-                            edit(Cs, P, MultiLine1, {blink,N}, Rs, D1);
-                        {{redraw, MultiLine1, Rs}, D1} ->
+                    case do_op(Op1, MultiLine, Rs0, Read) of
+                        {{blink,N,MultiLine1,Rs}, Read1} ->
+                            edit(Cs, P, MultiLine1, {blink,N}, Rs, Read1);
+                        {{redraw, MultiLine1, Rs}, Read1} ->
                             edit(Cs, P, MultiLine1, {NextMode, none}, redraw(P, MultiLine1, Rs),
-                                 damage_after(D1, ShellMode, MultiLine, MultiLine1));
-                        {{MultiLine1,Rs}, D1} ->
+                                 damage_after(Read1, ShellMode, MultiLine, MultiLine1));
+                        {{MultiLine1,Rs}, Read1} ->
                             edit(Cs, P, MultiLine1, {NextMode, none}, Rs,
-                                 damage_after(D1, ShellMode, MultiLine, MultiLine1))
+                                 damage_after(Read1, ShellMode, MultiLine, MultiLine1))
                     end
             end
     end.
@@ -611,59 +612,55 @@ do_op(beep, {LB,{Bef, Aft},LA}, Rs) ->
 do_op(_, {LB,{Bef, Aft},LA}, Rs) ->
     {{LB,{Bef,Aft},LA},[beep|Rs]}.
 
-%% erXos: the operations that store text or take it back, with the read's damage D, which
-%% they return. Text keeps the damage of the read it came from wherever edlin stores it
-%% (edit 81): the kill buffer holds {Damage, Text}, a kill stores its text with D, and a
-%% yank of damaged text damages the read it lands in, so a damaged line killed and yanked
-%% back, in its own read, a later one or another group's (init/1), stays damaged. Every
-%% other operation is do_op/3's and keeps D.
-do_op(forward_delete_word, {LB,{Bef, []},[NextLine|LA]}, Rs, D) ->
+%% erXos: the operations that store text or take it back, with Read, the read's damage
+%% and the kill buffer, which they return. Text keeps the damage of the read it came from
+%% wherever edlin stores it (edit 81): the kill buffer holds {Damage, Text}, a kill
+%% stores its text with the read's damage (killed/2), and a yank of damaged text damages
+%% the read it lands in (yanked/1), so a damaged line killed and yanked back, in its own
+%% read or a later one, stays damaged. Every other operation is do_op/3's and keeps Read.
+do_op(forward_delete_word, {LB,{Bef, []},[NextLine|LA]}, Rs, Read) ->
     NewLine = {LB, {Bef, NextLine}, LA},
-    {{redraw, NewLine, Rs}, D};
-do_op(forward_delete_word, {LB,{Bef, Aft0},LA}, Rs, D) ->
+    {{redraw, NewLine, Rs}, Read};
+do_op(forward_delete_word, {LB,{Bef, Aft0},LA}, Rs, Read) ->
     {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
     {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
-    kill(reverse(Kill), D),
-    {{redraw, {LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, D};
-do_op(backward_delete_word, {[PrevLine|LB],{[], Aft},LA}, Rs, D) ->
+    {{redraw, {LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, killed(reverse(Kill), Read)};
+do_op(backward_delete_word, {[PrevLine|LB],{[], Aft},LA}, Rs, Read) ->
     NewLine = {LB, {lists:reverse(PrevLine), Aft}, LA},
-    {{redraw, NewLine,Rs}, D};
-do_op(backward_delete_word, {LB,{Bef0, Aft},LA}, Rs, D) ->
+    {{redraw, NewLine,Rs}, Read};
+do_op(backward_delete_word, {LB,{Bef0, Aft},LA}, Rs, Read) ->
     {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
     {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
-    kill(Kill, D),
-    {{{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, D};
-do_op(kill_word, {LB,{Bef, Aft0},LA}, Rs, D) ->
+    {{{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, killed(Kill, Read)};
+do_op(kill_word, {LB,{Bef, Aft0},LA}, Rs, Read) ->
     {Aft1,Kill0,N0} = over_non_word(Aft0, [], 0),
     {Aft,Kill,N} = over_word(Aft1, Kill0, N0),
-    kill(reverse(Kill), D),
-    {{redraw,{LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, D};
-do_op(backward_kill_word, {LB,{Bef0, Aft},LA}, Rs, D) ->
+    {{redraw,{LB, {Bef,Aft}, LA},[{delete_chars,N}|Rs]}, killed(reverse(Kill), Read)};
+do_op(backward_kill_word, {LB,{Bef0, Aft},LA}, Rs, Read) ->
     {Bef1,Kill0,N0} = over_non_word(Bef0, [], 0),
     {Bef,Kill,N} = over_word(Bef1, Kill0, N0),
-    kill(Kill, D),
-    {{redraw,{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, D};
-do_op(kill_line, {LB, {Bef, Aft}, LA}, Rs, D) ->
-    kill(Aft, D),
-    {{redraw,{LB, {Bef,[]}, LA},[{delete_chars,cp_len(Aft)}|Rs]}, D};
-do_op(backward_kill_line, {LB,{Bef, Aft},LA}, Rs, D) ->
-    kill(reverse(Bef), D),
-    {{{LB, {[], Aft}, LA}, [{delete_chars, -cp_len(Bef)} | Rs]}, D};
-do_op(yank, {LB,{Bef, []},LA}, Rs, D) ->
-    {KillDamage, Kill} = get(kill_buffer),
-    {{{LB, {reverse(Kill, Bef),[]}, LA},[{insert_chars, unicode,Kill}|Rs]}, D orelse KillDamage};
-do_op(yank, {LB,{Bef, Aft},LA}, Rs, D) ->
-    {KillDamage, Kill} = get(kill_buffer),
+    {{redraw,{LB,{Bef,Aft},LA},[{delete_chars,-N}|Rs]}, killed(Kill, Read)};
+do_op(kill_line, {LB, {Bef, Aft}, LA}, Rs, Read) ->
+    {{redraw,{LB, {Bef,[]}, LA},[{delete_chars,cp_len(Aft)}|Rs]}, killed(Aft, Read)};
+do_op(backward_kill_line, {LB,{Bef, Aft},LA}, Rs, Read) ->
+    {{{LB, {[], Aft}, LA}, [{delete_chars, -cp_len(Bef)} | Rs]}, killed(reverse(Bef), Read)};
+do_op(yank, {LB,{Bef, []},LA}, Rs, {_D, {_, Kill}} = Read) ->
+    {{{LB, {reverse(Kill, Bef),[]}, LA},[{insert_chars, unicode,Kill}|Rs]}, yanked(Read)};
+do_op(yank, {LB,{Bef, Aft},LA}, Rs, {_D, {_, Kill}} = Read) ->
     {{redraw,{LB, {reverse(Kill, Bef),Aft}, LA},[{insert_chars, unicode,Kill}|Rs]},
-     D orelse KillDamage};
-do_op(Op, MultiLine, Rs, D) ->
-    {do_op(Op, MultiLine, Rs), D}.
+     yanked(Read)};
+do_op(Op, MultiLine, Rs, Read) ->
+    {do_op(Op, MultiLine, Rs), Read}.
 
-%% erXos: stores Text, killed in a read whose damage is D, in the kill buffer. A kill of
-%% nothing empties the buffer, as on stock, and stores no damage, so a later yank of
-%% nothing damages nothing.
-kill(Text, D) ->
-    put(kill_buffer, {D andalso Text =/= [], Text}).
+%% erXos: the read after Text was killed in it: the kill buffer holds Text with the read's
+%% damage D. A kill of nothing empties the buffer, as on stock, and stores no damage, so a
+%% later yank of nothing damages nothing.
+killed(Text, {D, _Kill}) ->
+    {D, {D andalso Text =/= [], Text}}.
+
+%% erXos: the read after a yank of the kill buffer, damaged if the text was.
+yanked({D, {KillDamage, _Text} = Kill}) ->
+    {D orelse KillDamage, Kill}.
 
 blink(beep, C, {LB, {Bef, Aft}, LA}, Rs) ->
     {{LB,{[C|Bef], Aft},LA}, [beep,{insert_chars, unicode, [C]}|Rs]};
@@ -937,20 +934,20 @@ key_action(ShellMode, Key) ->
 %% is, and the end handed on as Rest, which group gives the reader in place of a line, so
 %% the read ends rather than waiting for an end the console sends only once. Stock
 %% finishes every line.
-finish(How, {line,_P,MultiLine,_EditState}, Rest, Rs, false) ->
-    {finished(How, MultiLine, Rest, Rs), false};
-finish(eof, {line,_P,MultiLine,_EditState}, _Rest, Rs0, true) ->
+finish(How, {line,_P,MultiLine,_EditState}, Rest, Rs, {false, _Kill} = Read) ->
+    {finished(How, MultiLine, Rest, Rs), Read};
+finish(eof, {line,_P,MultiLine,_EditState}, _Rest, Rs0, {true, _Kill} = Read) ->
     {done, _Dropped, [], Rs} = finished(eof, MultiLine, [], [beep|Rs0]),
-    {{done, ?EMPTY_BUFFER, eof, Rs}, true};
-finish(_How, {line,P,MultiLine,EditState}, _Rest, Rs, true) ->
-    edit([], P, MultiLine, EditState, [beep|Rs], true).
+    {{done, ?EMPTY_BUFFER, eof, Rs}, Read};
+finish(_How, {line,P,MultiLine,EditState}, _Rest, Rs, {true, _Kill} = Read) ->
+    edit([], P, MultiLine, EditState, [beep|Rs], Read).
 
-%% erXos: the read's damage after an operation in ShellMode took the buffer from Before
+%% erXos: the read after an operation in ShellMode took the buffer from Before
 %% to After. An edit in the normal mode that empties the whole buffer, every line of a
 %% multi-line edit together, discards it (edit 81); a key that leaves an empty buffer
 %% empty keeps it, and so does an edit of a search term.
-damage_after(true, normal, Before, ?EMPTY_BUFFER) when Before =/= ?EMPTY_BUFFER -> false;
-damage_after(D, _ShellMode, _Before, _After) -> D.
+damage_after({true, Kill}, normal, Before, ?EMPTY_BUFFER) when Before =/= ?EMPTY_BUFFER -> {false, Kill};
+damage_after(Read, _ShellMode, _Before, _After) -> Read.
 
 %% The finished line and the requests that show it so: Enter moves to the line's end and
 %% starts a new one, the end of input moves to the end, and an accepted search has shown
@@ -968,11 +965,11 @@ finished(found, L, [], Rs) ->
     {done,L,"\n",reverse(Rs)}.
 
 %% erXos: group's accepted history search, Cont the found line, finished through
-%% finish/5 with Rs the requests to send with it and D the read's damage. No input
+%% finish/5 with Rs the requests to send with it and Read the read (edit_line/3). No input
 %% follows the line: finished hands group stock's newline after it.
 -doc false.
-finish_line(Cont, Rs, D) ->
-    finish(found, Cont, [], reverse(Rs), D).
+finish_line(Cont, Rs, Read) ->
+    finish(found, Cont, [], reverse(Rs), Read).
 
 %% Grapheme length in codepoints
 gc_len(CP) when is_integer(CP) -> 1;
