@@ -386,6 +386,10 @@ copies `boot/` into the Mac's TFTP root and prints the TFTP server's
 command line. A board booted this way lacks the card's packages; the
 board's EEPROM setting and the Mac's Internet Sharing are in the guide
 ([Netbooting from a Mac](../guide/raspberry-pi-4.md#netbooting-from-a-mac)).
+A board whose EEPROM boots over HTTP instead takes a signed FAT image of
+the same files, which `tools/erx netboot`'s **HTTP form (designed)**
+makes and a boot server hands out
+([design-platforms.md](../design-platforms.md#the-http-form)).
 
 ## C.7 Hosted mode
 

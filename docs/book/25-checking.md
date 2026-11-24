@@ -790,17 +790,21 @@ board, and FreeBSD as the behaviour erXos matches.
 Nobody needs to stand at the board while erXos's own benchmarks run on
 it. A benchmark image has no shell, so it cannot be told to reboot;
 instead every boot of it ends by resetting the machine, and the board
-then boots whatever the development host is serving over the network at
-that moment. The host serves a **queue of boot sets (designed)**, one
-complete set of boot files per run, and changes the served set only when
-the kernel's banner, early in a boot, names the image that booted: by
-then the firmware has read every file, so nothing the board reads can
-change underneath it. Ten runs are ten entries of one set, a paired run
-alternates two, and the queue ends with the set the board was found
-with, so the last benchmark boot's reset brings the board back on it. A
-change that comes too late, or a banner lost on the serial line, costs
-one more run, never a wrong result; only a hang below the benchmark's
-own deadline needs the board's power cycled by hand.
+then boots what the development host serves it next over the network.
+The host's boot server hands out a **queue of signed boot
+images (designed)**: the first download takes the first image, the next
+download the next, and every download after the last benchmark image
+takes the image the board was found with, so the last benchmark boot's
+reset brings the board back on it. The host changes nothing while the
+board walks the queue, and the server ties each download's image to the
+signature it sent with it, so no boot ever loads half of one image and
+half of another. Ten runs are ten images of one build, a paired run
+alternates two. Each image carries a name the host drew for it, which
+the benchmark prints before and after every result, so a result is
+counted for the boot that printed it even when bytes are lost on the
+serial line; a lost line costs that line's result, never a wrong one.
+Only a hang below the benchmark's own deadline needs the board's power
+cycled by hand.
 
 ## 25.10 What the checks cannot say
 

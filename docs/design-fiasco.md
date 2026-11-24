@@ -1788,7 +1788,8 @@ existing `erx_watchdog_parse`; `erx.det=1`; `erx.devsync=1`; `erx.group_report=1
 strings. Other words are ignored, as a boot loader's may be there. A release build refuses the boot on `erx.det=1` or `erx.devsync=1` with a
 fixed reason, as erXos's kernel does ([design-kernel.md](design-kernel.md#configuration)). A malformed `erx.` word, and an `erx.` word of no known kind, refuses the
 boot with a fixed reason. Bootstrap cuts the record at the last whole word, so a parser never sees half
-a word.
+a word. A test root that runs no program reads its `erx.arg` words itself: the bench root takes its first as
+its boot's name ([design-bench.md](design-bench.md#the-bench-images-boot-set)).
 
 `erx.group_report=1` is the native form of the hosted backend's `ERX_HOSTED_GROUP_REPORT`. Once the
 system's group exists, `liberx/backend/fiasco/park_report.c` starts a worker thread of the root that

@@ -117,36 +117,45 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   its `CLOCK` line also notes that line's absence as a refusal; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
   `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
 * [Medium] benchmarks, the Raspberry Pi 4's boot set (`tools/lib/erx/boot_image.rb`, `native_bench.rb`,
-  `test/guest/native_bench/guest.c`, [design-bench.md](design-bench.md#the-bench-images-boot-set)): `BootImage`
-  takes the platform (`Fiasco#build_for`, `#first_stage_path`, `Machine#check_single_file`); `NativeBench` lays a
-  board set out with `BootPartition.lay_out(erofs: nil)`; every end of the bench root is
-  `ERX_FIASCO_END_ASKED_RESET`; the guest's deadline thread, its number per profile form in `NativeBench`, and
-  QEMU's `bench-done` checkpoint taking `erx: bench: deadline`. Tests: the board set boots in QEMU's `raspi4b`
-  model with its banner, its cells and `erx: end reset`, seeded with the main build's first stage and with
-  `ASKED_OFF`; the hang seed ends by the guest's deadline, seeded with the thread not started. One implementer.
+  `boot_partition.rb`, `test/guest/native_bench/guest.c`,
+  [design-bench.md](design-bench.md#the-bench-images-boot-set)): `BootImage` takes the platform
+  (`Fiasco#build_for`, `#first_stage_path`, `Machine#check_single_file`); `BootPartition` writes a set's files and
+  record without the volume, the card or its compression, and `NativeBench` lays each distinct board set out once
+  with it; every end of the bench root is `ERX_FIASCO_END_ASKED_RESET`; the root takes its first `erx.arg` word as
+  its boot's name and prints `erx: bench: boot NAME` once up and after each `BENCH` and `CLOCK` line, with `done`
+  and `deadline` forms, and `NativeBench` passes thirty-two zeros under QEMU; the guest's deadline thread, its
+  number per profile form in `NativeBench`, and QEMU's `bench-done` checkpoint taking the two naming forms. Tests:
+  the board set boots in QEMU's `raspi4b` model with its banner, its naming lines, its cells and `erx: end reset`,
+  seeded with the main build's first stage and with `ASKED_OFF`; the hang seed ends by the guest's deadline with
+  its earlier cells `rejected`, seeded with the thread not started. One implementer.
 * [Medium] benchmarks, the cycle counter's probe (`test/guest/native_task/program.c`,
   `liberx/backend/fiasco/arch/aarch64/clock.c`, [design-bench.md](design-bench.md#the-cycle-counter)):
   `MODE_CYCLES`, the cycle read beside `erx_fiasco_counter`, the root's probe on board sets and the `CLOCK` line's
   `cycles_per_tick`. Test on the board: the count times the counter's frequency within 2% of `/proc/sensors`'s
   `arm_clock`, seeded with the system counter read twice. Needs the boot set's item first. One implementer.
 * [Medium] benchmarks, the board's log and `tools/erx bench import` for erXos logs (`BoardLog`,
-  [design-bench.md](design-bench.md#importing-a-log)): the pure splitter at banners and end lines, the `pi4`
-  record with the set's firmware hashes and per-boot logs, and board logs as seeds of the bench lines' fuzz
-  target. Test: three boots split, a cut banner's boot attributed to none, seeded with a split at end lines alone.
-  One implementer.
-* [Medium] benchmarks, the board walk (`tools/lib/erx/netboot.rb`, `BoardWalk`, `BoardConsole`,
-  [design-bench.md](design-bench.md#the-walk)): `Netboot.prepare` and `point`, with `stage` made of them; the pure
-  walk, tested exhaustively against a fake board, seeded with the change on the end line and with the index hash
-  unchecked; the console reader; the ssh `reboot` and `/proc/sensors/status` reads; `tools/erx bench NAME --env
-  pi4-4gb-erxos`. Needs the log's item first. Reaches the board only through a stager the board's boot order
-  uses, which waits on [design-bench.md's open decision](design-bench.md#which-network-boot-the-stager-drives).
-  One implementer.
+  [design-bench.md](design-bench.md#importing-a-log)): the pure reader that places each line between two naming
+  lines of one entry, the queue's and the walk's files, the `pi4` record with the entry's set's firmware hashes,
+  per-boot logs, `restored` and `returned`, and board logs as seeds of the bench lines' fuzz target. Tests: three
+  entries placed, a dropout over one entry's end and the next one's start, a log cut inside an entry, seeded with
+  placement by the nearest naming line before and with the cut boot taken as timed out. Needs the boot set's item
+  first. One implementer.
 * [Medium] tooling, the board's network boot (`tools/lib/erx/netboot.rb`,
-  [design-platforms.md](design-platforms.md#netbooting-from-a-mac)): the board on the desk boots over HTTP from a
-  signed `boot.img` that scripts outside the tree make and serve, and its EEPROM's boot order has no TFTP entry,
-  while the tree's netboot and its design serve TFTP. Waits on
-  [design-bench.md's open decision](design-bench.md#which-network-boot-the-stager-drives); its recommendation is
-  netboot's HTTP form behind `prepare` and `point`, with the key read by path and never kept.
+  [design-platforms.md](design-platforms.md#the-http-form)): netboot's HTTP form, which replaces the scratch
+  stager: an entry's FAT image by fsimg, read back through `FatVolume`, and its signature; the queue sibling with
+  `sets/` and numbered entries; `prepare` and `point`, with the HTTP `stage` made of them; the signing key opened
+  once without following a link and taken only as the user's own regular file with no group or other permission;
+  and the boot server's pure decision over `Web::Http.read` (two names, a download bound to one entry at its first
+  request, the queue's cursor), tested exhaustively against a fake bootloader, seeded with the image opened at its
+  own request, the cursor moved at the signature's request and the name check widened. The server's part waits on
+  [design-bench.md's open decision](design-bench.md#where-the-boot-server-runs), where the server runs; the
+  stager's part does not. One implementer.
+* [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, [design-bench.md](design-bench.md#the-walk)):
+  the pure walk over the queue's names, tested exhaustively, seeded with the end deadline restarted at each naming
+  line and with the return taken from any banner; the console reader with its byte and line limits; the ssh
+  `reboot` and `/proc/sensors/status` reads through `LineEscape`; `tools/erx bench NAME --env pi4-4gb-erxos`; and
+  the run on the desk's board, seeded with the last entry made from the first. Needs the log's and the network
+  boot's items first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
   other systems' logs and the analyser's captures; `bench/peer/erx_peer_bench.c`;

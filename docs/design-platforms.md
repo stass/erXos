@@ -1788,9 +1788,10 @@ card. The Pi 4's bootloader, in its EEPROM, fetches the boot files over
 TFTP from `boot/` beside the card, the firmware's network boot root
 ([design-fiasco.md](design-fiasco.md#the-raspberry-pi-4)); `tools/erx
 netboot` stages them, and the [guide](guide/raspberry-pi-4.md#netbooting-from-a-mac)
-has the steps. A benchmark run on the board serves a queue of builds this
-way and lets the board walk it by itself
-([design-bench.md](design-bench.md#running-on-the-raspberry-pi-4)).
+has the steps. A board whose EEPROM boots over HTTP, as the one on the
+desk does, is served by [the HTTP form](#the-http-form), through which a
+benchmark run serves a queue of builds and lets the board walk it by
+itself ([design-bench.md](design-bench.md#running-on-the-raspberry-pi-4)).
 
 **This is a development setup only.** With the network first in the boot
 order, whatever answers DHCP and TFTP on the board's network chooses the
@@ -1815,6 +1816,65 @@ reply names, so Internet Sharing's DHCP server, which knows nothing of TFTP,
 is taken to be enough (unverified): the bootloader matches the reply on its
 option 43, which Internet Sharing does not send. A bootloader of 2025-09-23 or later is needed, whose TFTP
 lets the block counter roll over for large files.
+
+#### The HTTP form
+
+The board on the desk boots over HTTP instead: its EEPROM's boot order is
+`0xf17`, HTTP, then the card, then a restart, and its bootloader fetches
+`boot.sig` and then `boot.img`, a FAT image it loads whole as a RAM disk,
+from the development host, and boots the image only when the signature,
+RSA-2048 over the image's SHA-256, verifies against the public half of a
+key the EEPROM holds ([design-bench.md, References](design-bench.md#references));
+that the bootloader refuses an image whose signature fails is unverified
+on the board.
+`Netboot`'s HTTP form serves it, behind the same steps as the TFTP form:
+
+* **An entry** is one boot image and its signature, in a directory of its
+  own. `boot.img` is a FAT32 volume of a boot set's listed files, each
+  checked against the set's build record, written by fsimg as
+  `PiMedium.write` writes the card's slot volume and read back through
+  `FatVolume` (`tools/lib/erx/pi_medium.rb:67-83`), within the
+  bootloader's RAM disk limit, 180 MB (`pi4_http_stage.rb:24`, from the
+  firmware's `boot_ramdisk` documentation, unverified here). `boot.sig`
+  is the image's SHA-256, a `ts:` line and the signature, the format
+  `rpi-eeprom-digest` writes.
+* **A queue** is a fresh sibling of the served link holding each distinct
+  set's files once, under `sets/`, and its entries, numbered from 1. A
+  stage is a queue of one entry; a benchmark run's queue is its bench
+  boots and, last, the pair the board was found with
+  ([design-bench.md](design-bench.md#running-on-the-raspberry-pi-4)).
+* **`point`** renames the served link to a queue, as the TFTP form
+  renames its root, under the same lock beside the link; `stage` then
+  removes the stale siblings.
+* **The boot server** answers `GET` and `HEAD` of `/PREFIX/boot.sig` and
+  `/PREFIX/boot.img`, the EEPROM's `HTTP_PATH`, and no other name, so no
+  other file in or near the served tree is ever sent, and no byte of a
+  request becomes part of a path. At a `GET` of `boot.sig` it resolves
+  the link; on a target other than the one it served last it starts at
+  entry 1. It opens both files of the cursor's entry, without following a
+  link and only when both are regular files, answers the signature, and
+  answers the same client's next `GET` of `boot.img` from the file it
+  opened then. Once that image has gone out whole, the next download
+  takes the next entry, and every download after the last entry takes
+  the last. A `boot.img` request with no download begun, or an entry
+  without both files, is answered 404, which sends the bootloader on to
+  the card; `HEAD` begins nothing. It answers one connection at a time,
+  so its cursor and the download in progress have one writer.
+
+So a download is bound to one entry at its first request: a change of
+the link at any moment, an interrupted stage's included, gives every
+download one image with its own signature. The server answers the board
+on its own link, whose requests are untrusted; it reads them through
+`Web::Http.read`, the host tool's bounded and fuzzed reader, and shows
+none of their bytes but through `LineEscape`. Where it runs, in the tree
+or as the script outside it, is an open decision of
+[design-bench.md](design-bench.md#where-the-boot-server-runs).
+
+The signature says only which image a network boot loaded. The card the
+bootloader falls back to after a refused or failed download is not
+signed, so with the HTTP form first in the boot order whoever can stop
+the board's download chooses the card, though not what is on it. The
+key's rules are [design-bench.md's](design-bench.md#the-network-boot-the-stager-drives).
 
 #### The soak
 
