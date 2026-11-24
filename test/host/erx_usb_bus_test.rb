@@ -16,7 +16,7 @@ require_relative '../fixtures/erlang_build'
 # must fail.
 class ErxUsbBusTest < Minitest::Test
   # erx_blk holds the mass-storage function's write path and block transport.
-  APPLICATIONS = %w[erx_usb erx_blk].freeze
+  APPLICATIONS = %w[erx erx_usb erx_blk].freeze
   # The places' grants need the 9P grammar, generated into OTP's preloaded sources, and
   # the stand-ins of the erx modules a grant calls; the HID function is a stand-in the
   # cases end at will.
@@ -32,6 +32,9 @@ class ErxUsbBusTest < Minitest::Test
     test/erlang/erx_pcie_log_capture.erl
   ].freeze
   DEADLINE_SECONDS = '300'
+  # The domain's drive records, as the domain library writes them: drives 0 and 1 on
+  # the USB controllers (docs/design-fiasco.md, "Drive records").
+  DRIVE_RECORDS = %w[-erx_record drive usb 0 -erx_record drive usb 1].freeze
   # Every EUnit timeout scaled by 12: the default per-case timeout from 5 s to 60 s, above
   # the cases' own waits (WAIT_MS), and any explicit {timeout, N, ...} to 12 N s.
   EUNIT_OPTIONS = '[verbose, {scale_timeouts, 12}]'
@@ -135,7 +138,7 @@ class ErxUsbBusTest < Minitest::Test
     Dir.mktmpdir('erx-usb-bus-test') do |work|
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell',
-                      '-kernel', 'logger_level', 'none', '-pa', work,
+                      '-kernel', 'logger_level', 'none', '-pa', work, *DRIVE_RECORDS,
                       '-eval', "halt(case eunit:test(erx_usb_bus_tests, #{EUNIT_OPTIONS}) of ok -> 0; _ -> 1 end)",
                       chdir: work, stdin_data: '')
     end

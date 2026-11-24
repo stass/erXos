@@ -14,12 +14,13 @@ require_relative '../fixtures/erlang_build'
 # which make check supplies), against the sources as they are and against each seeded
 # fault, where the named case must fail.
 class ErxUsbPlacesTest < Minitest::Test
-  APPLICATIONS = %w[erx_usb].freeze
+  APPLICATIONS = %w[erx erx_blk erx_usb].freeze
   # The grammar is generated into OTP's preloaded sources, outside the applications, so it
   # is compiled with the cases; the stand-ins replace the erx modules the grant calls.
   TESTS = %w[
     build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl
     test/erlang/erx_usb_places_prop.erl
+    test/erlang/erx_usb_drives_prop.erl
     test/erlang/stand_in/erx_dist.erl
     test/erlang/stand_in/erx_connections.erl
   ].freeze
@@ -82,7 +83,7 @@ class ErxUsbPlacesTest < Minitest::Test
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell',
                       '-kernel', 'logger_level', 'none', '-pa', work,
-                      '-eval', 'halt(case eunit:test(erx_usb_places_prop, [verbose]) of ok -> 0; _ -> 1 end)',
+                      '-eval', 'halt(case eunit:test([erx_usb_places_prop, erx_usb_drives_prop], [verbose]) of ok -> 0; _ -> 1 end)',
                       chdir: work, stdin_data: '')
     end
   end

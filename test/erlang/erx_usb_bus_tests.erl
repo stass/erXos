@@ -193,7 +193,7 @@ a_medium_is_logged_as_ready_and_as_ended_test() ->
                  end),
             ok
         end),
-        ?assertEqual(["erx_usb_bot: medium LUN 0 ready: 128 blocks of 512 bytes",
+        ?assertEqual(["erx_usb_bot: medium LUN 0 ready: 128 blocks of 512 bytes as disk0",
                       "erx_usb_bot: medium LUN 0 ended: killed"], Lines)
     end).
 
@@ -269,6 +269,63 @@ a_transport_crash_ends_only_its_medium_test() ->
         ?assertEqual({ok, Written}, erx_blk:read(Found, 3, 1)),
         ?assertEqual({ok, Other}, erx_blk:read(Serving, 3, 1)),
         ?assertEqual([Function], functions(erx_usb_bot))
+    end).
+
+%% A ready medium takes the lowest free drive of the domain's records (the runner names
+%% drives 0 and 1), and that drive's grant alone hands out the medium's window: the
+%% transport's own, over the whole medium.
+a_medium_takes_the_lowest_free_drive_test() ->
+    with_bus(#{[1] => stick}, fun() ->
+        configured([1]),
+        Transport = transport(),
+        [{0, Grant0}, {1, Grant1}] = drives(),
+        {ok, Window} = erx_blk_drive:window(Grant0),
+        ?assertEqual([Transport], [parent(Window)]),
+        ?assertEqual({ok, binary:copy(<<0>>, 512)}, erx_blk_window:read(Window, 127, 1)),
+        ?assertEqual({error, no_medium}, erx_blk_drive:window(Grant1))
+    end).
+
+%% The function's own end_medium clause (erx_blk_drive's ask again): the grant asked a
+%% second time for the window it handed out sends the function the medium's end, the
+%% old transport and window stop, the held ask is answered no_medium, and the unit's
+%% readiness sequence makes the next medium under a new transport, which takes drive 0
+%% again, lowest first, and whose window the grant hands out.
+a_grant_asked_again_ends_its_medium_through_the_function_test() ->
+    with_bus(#{[1] => stick}, fun() ->
+        configured([1]),
+        Old = transport(),
+        [{0, Grant} | _] = drives(),
+        {ok, OldWindow} = erx_blk_drive:window(Grant),
+        Watch = monitor(process, Old),
+        Ask = gen_server:send_request(Grant, window),
+        receive {'DOWN', Watch, process, Old, _} -> ok
+        after ?WAIT_MS -> error(old_transport_lives)
+        end,
+        ?assertNot(is_process_alive(OldWindow)),
+        ?assertEqual({reply, {error, no_medium}}, gen_server:receive_response(Ask, ?WAIT_MS)),
+        wait_until(fun() -> transports() =/= [] end,
+                   erlang:monotonic_time(millisecond) + ?ERX_USB_BOT_POLL_MS + ?WAIT_MS),
+        [New] = transports(),
+        ?assertNotEqual(Old, New),
+        {ok, NewWindow} = erx_blk_drive:window(Grant),
+        ?assertEqual(New, parent(NewWindow))
+    end).
+
+%% A unit whose medium becomes ready when every drive is taken is not served: a card
+%% reader of three units on a domain of two drives serves two media, and its third shows
+%% no drive, while the function runs on.
+a_medium_finding_every_drive_taken_shows_no_drive_test() ->
+    with_bus(#{[1] => {stick, 3}}, fun() ->
+        {ok, Lines} = erx_pcie_log_capture:logged(fun() ->
+            configured([1]),
+            wait(fun() -> {messages, Queued} = process_info(self(), messages),
+                          length([L || {logged, L} <- Queued, lists:suffix("ready: no drive", L)]) =:= 1
+                 end),
+            ok
+        end),
+        ?assertMatch([_, _], transports()),
+        ?assertMatch([_], [L || L <- Lines, lists:suffix("ready: no drive", L)]),
+        ?assertMatch([_], functions(erx_usb_bot))
     end).
 
 %% The function's crash report shows none of the unit's INQUIRY text, nor the write data
@@ -568,6 +625,11 @@ transport() ->
     wait(fun() -> transports() =/= [] end),
     [Transport] = transports(),
     Transport.
+
+%% The domain's drives and their grants, from the places under erx_usb's top supervisor.
+drives() ->
+    {places, Places, _, _} = lists:keyfind(places, 1, supervisor:which_children(erx_usb)),
+    erx_usb_places_sup:drives(Places).
 
 %% How often the function reset its device's pipe at Address, or sent the class reset.
 pipe_resets(Ref, Address) ->

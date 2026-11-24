@@ -42,6 +42,31 @@ the_end_of_a_window_the_grant_no_longer_holds_changes_nothing_test() ->
     {State, []} = run([{serve, w1, m1, e1}, {serve, w2, m2, e2}]),
     ?assertEqual({State, []}, erx_blk_drive:step({ended, m1}, State)).
 
+%% A free grant takes one occupant; a second is refused and its monitor forgotten.
+a_free_grant_takes_one_occupant_test() ->
+    {Taken, [{answer, f1, ok}]} = erx_blk_drive:step({occupy, f1, o1}, erx_blk_drive:new()),
+    ?assertEqual({Taken, [{answer, f2, taken}, {forget, o2}]}, erx_blk_drive:step({occupy, f2, o2}, Taken)).
+
+%% The occupant's end frees the grant before it serves any medium.
+an_occupant_s_end_frees_the_grant_test() ->
+    ?assertMatch({_, [{answer, f2, ok}]}, run([{occupy, f1, o1}, {ended, o1}, {occupy, f2, o2}])).
+
+%% The end of the medium served under an occupant frees the grant, though the occupant
+%% lives on: its monitor is forgotten, so its later end changes nothing.
+a_medium_s_end_frees_the_grant_test() ->
+    {Served, []} = run([{occupy, f1, o1}, {serve, w1, m1, e1}]),
+    {Freed, Forgot} = erx_blk_drive:step({ended, m1}, Served),
+    ?assertEqual([{forget, o1}], Forgot),
+    ?assertMatch({_, [{answer, f2, ok}]}, erx_blk_drive:step({occupy, f2, o2}, Freed)),
+    ?assertEqual({Freed, []}, erx_blk_drive:step({ended, o1}, Freed)).
+
+%% A grant that holds a medium is taken, whether or not an occupant took it, so the
+%% medium's window is never handed to a second medium.
+a_grant_holding_a_medium_is_taken_test() ->
+    ?assertMatch({_, [{answer, f1, taken}, {forget, o1}]}, run([{serve, w1, m1, e1}, {occupy, f1, o1}])),
+    ?assertMatch({_, [{answer, f2, taken}, {forget, o2}]},
+                 run([{occupy, f1, o1}, {serve, w1, m1, e1}, {ended, o1}, {occupy, f2, o2}])).
+
 %% ---------------------------------------------------------------------------
 %% The pure core, every sequence
 %% ---------------------------------------------------------------------------
