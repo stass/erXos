@@ -79,9 +79,10 @@ class NativeBenchTest < Minitest::Test
   # The guest's sample counts are the landing profiles' (one source): the root is built
   # with them, and a seeded build adds only its fault.
   def test_the_root_is_built_with_the_landing_profiles_sizes
-    fast, periodic = Erx::NativeBench::LANDING_PROFILES.values_at('fast', 'periodic')
+    fast, periodic, sustained = Erx::NativeBench::LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
     sizes = ["-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
-             "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u"]
+             "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u", "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u",
+             "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u"]
     plain = Erx::NativeBench.flags
     assert_equal sizes, plain.grep(/SAMPLES|WARMUP/)
     assert_equal plain + ['-DERX_BENCH_SEED_LOST_WAKE'], Erx::NativeBench.flags(seeded: seed('wake', 'lost wake').root_flags)

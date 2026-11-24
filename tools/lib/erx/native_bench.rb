@@ -9,6 +9,7 @@ require_relative 'boot_image'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'native_root'
+require_relative 'native_task'
 require_relative 'qemu'
 require_relative 'qemu_gate'
 require_relative 'runner'
@@ -37,8 +38,11 @@ module Erx
     # A seeded fault of a benchmark's guest: the flags its root and its task add for it, and
     # whether a boot's cells show it.
     Seed = Data.define(:name, :root_flags, :task_flags, :caught)
-    # A benchmark's guest: the files of GUEST its root and its task add, and its seeds.
-    Guest = Data.define(:root, :task, :seeds)
+    # A benchmark's guest: the files of GUEST its root and its task add, its seeds, and
+    # whether its image packs test/guest/native_task's program, which its cells launch.
+    Guest = Data.define(:root, :task, :seeds, :native_task) do
+      def initialize(root:, task:, seeds:, native_task: false) = super
+    end
 
     # The cells of operation that came back failed.
     def self.failed(cells, operation) = cells.select { |cell| cell.operation == operation && cell.status == 'failed' }
@@ -47,6 +51,8 @@ module Erx
     def self.uncounted?(cells, operation) = failed(cells, operation).any? { |cell| cell.reason == NULLCALL_UNCOUNTED }
 
     GUESTS = {
+      # share-equal's spinners are native_task's MODE_SHARE.
+      'sched' => Guest.new(root: %w[sched.c], task: [], seeds: [].freeze, native_task: true),
       # The root skips one wake: wake-same-cpu fails with a lost wake.
       'wake' => Guest.new(root: %w[wake.c], task: [], seeds: [
         Seed.new(name: 'lost wake', root_flags: ['-DERX_BENCH_SEED_LOST_WAKE'], task_flags: [],
@@ -66,7 +72,9 @@ module Erx
     # "Profiles"); the root is built with their sizes (flags).
     LANDING_PROFILES = {
       'fast' => BenchRecord::Profile.new(name: 'fast', warmup: 1000, samples: 10_000, runs: 1),
-      'periodic' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 2000, runs: 1)
+      'periodic' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 2000, runs: 1),
+      # Three 1 s windows after a 2 s warm-up, in milliseconds (docs/design-bench.md, "Profiles").
+      'sustained' => BenchRecord::Profile.new(name: 'sustained', warmup: 2000, samples: 3, runs: 1)
     }.freeze
     FAILED_LINE = /^erx: bench: .* FAILED/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
@@ -89,9 +97,10 @@ module Erx
     # sizes, which test/guest/native_bench takes from them alone, and a seed's flags for
     # that side.
     def flags(seeded: [])
-      fast, periodic = LANDING_PROFILES.values_at('fast', 'periodic')
+      fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
       ['-DERX_FIASCO_TEST_HOOKS', "-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
-       "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"", *seeded].freeze
+       "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u",
+       "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u", "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u", "-DERX_BENCH_UNCOUNTED=\"#{NULLCALL_UNCOUNTED}\"", *seeded].freeze
     end
 
     # The profile each operation of benchmark ran at, in its landing form.
@@ -167,6 +176,11 @@ module Erx
 
       # The test task's program, for a guest whose cells launch one.
       def programs(native, guest, build, seed)
+        if guest.native_task
+          return { NativeTask::PROGRAM_PATH => native.build_task(name: 'native-task', sources: NativeTask::PROGRAM_SOURCES,
+                                                                 directory: File.join(build, 'task'),
+                                                                 flags: ['-DERX_FIASCO_TEST_HOOKS']) }
+        end
         return {} if guest.task.empty?
 
         { TASK_PATH => native.build_task(name: 'native-bench-task', sources: [*TASK_SOURCES, *guest.task.map { |file| "#{GUEST}/#{file}" }],

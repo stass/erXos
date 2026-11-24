@@ -9,9 +9,15 @@ require_relative '../bench_suite'
 # service's; each window's lines say how each thread shared it (docs/design-bench.md, "A
 # sustained cell").
 operation = Erx::BenchSuite::Operation
+cell = Erx::BenchSuite::LandingCell
 Erx::BenchSuite.declare_benchmark(
   operations: [
     operation.new(name: 'share-equal', profile: 'sustained', result: 'every thread runs in each window')
   ],
-  landing: {}
+  landing: {
+    'native' => [
+      cell.new(operation: 'share-equal', load: 'idle', placement: 'other-cpu',
+               parameters: { 'threads' => 4, 'window-ms' => 1000 })
+    ]
+  }
 )

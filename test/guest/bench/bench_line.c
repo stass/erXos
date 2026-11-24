@@ -197,6 +197,16 @@ finish(text_t *t)
 	return (t->len);
 }
 
+static void
+counts(text_t *t, const erx_bench_cell_t *cell)
+{
+	open_value(t, "counts", "{");
+	number(t, "lost", cell->lost);
+	number(t, "early", cell->early);
+	number(t, "missed", cell->missed);
+	close_value(t, "}");
+}
+
 size_t
 erx_bench_line_cell(char *buf, size_t size, const erx_bench_cell_t *cell)
 {
@@ -222,6 +232,11 @@ erx_bench_line_cell(char *buf, size_t size, const erx_bench_cell_t *cell)
 	string(&t, "status", cell->status);
 	if (cell->reason != NULL)
 		string(&t, "reason", cell->reason);
+	if (cell->sustained) {
+		number(&t, "samples", cell->windows);
+		counts(&t, cell);
+		return (finish(&t));
+	}
 	number(&t, "samples", cell->hist->samples);
 	histogram(&t, "histogram", cell->hist);
 	if (cell->hist->samples != 0) {
@@ -232,11 +247,7 @@ erx_bench_line_cell(char *buf, size_t size, const erx_bench_cell_t *cell)
 	for (size_t i = 0; i < cell->nlargest && i < ERX_BENCH_LARGEST; i++)
 		pair(&t, cell->largest[i].sequence, cell->largest[i].value);
 	close_value(&t, "]");
-	open_value(&t, "counts", "{");
-	number(&t, "lost", cell->lost);
-	number(&t, "early", cell->early);
-	number(&t, "missed", cell->missed);
-	close_value(&t, "}");
+	counts(&t, cell);
 	if (cell->raw != NULL) {
 		open_value(&t, "raw", "[");
 		for (size_t i = 0; i < cell->nraw; i++) {

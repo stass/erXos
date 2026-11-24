@@ -71,6 +71,12 @@ typedef struct {
 	uint64_t uncertainty;
 	/* A periodic cell's classification, whose late histogram is hist; NULL otherwise. */
 	const erx_bench_periodic_t *periodic;
+	/*
+	 * A sustained cell: its samples are its windows, which its WINDOW lines carry, and it has
+	 * no histogram, extremes or largest samples (docs/design-bench.md, "A sustained cell").
+	 */
+	bool sustained;
+	uint64_t windows;
 } erx_bench_cell_t;
 
 /*

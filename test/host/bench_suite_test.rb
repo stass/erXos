@@ -43,7 +43,7 @@ class BenchSuiteTest < Minitest::Test
   end
 
   def test_the_suite_cells_are_each_boots_benchmarks
-    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-wake hvf-4cpu-xdomain-wake], Suite.suite_cells.sort
+    assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-wake hvf-4cpu-xdomain-wake], Suite.suite_cells.sort
     declared = Erx::QemuGate.suites.find { |suite| suite.name == 'bench' }
     assert_equal Suite.suite_cells, declared.cells
     refute declared.offload
