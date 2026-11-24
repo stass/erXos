@@ -60,6 +60,8 @@ init(#{hang := Watcher}) ->
 init(#{behind := Behind}) ->
     {ok, Behind}.
 
+admit({crash, Secret}, _From, _Behind) ->
+    error({badmatch, Secret});
 admit(Request, _From, Behind) ->
     {forward, Behind, Request, Behind}.
 
@@ -298,3 +300,12 @@ watched(Pid, Monitor) ->
     receive {seen, From} ->
         From ! {self(), receive {'DOWN', Monitor, process, Pid, Reason} -> {down, Reason} after 1000 -> alive end}
     end.
+
+%% A callback that crashes on a request whose reason holds the request ends the facet with
+%% the reason's leading atom alone: its grantee's caller gets no answer and its monitors
+%% see no byte of the request (docs/design-domains.md, "A facet's end carries no terms").
+a_callback_crash_ends_the_facet_with_an_atom_test() ->
+    Facet = operations_facet(echo(), #{operations => [crash]}),
+    Monitor = monitor(process, Facet),
+    ?assertEqual(none, call(Facet, {crash, <<"sentinel passphrase">>})),
+    ?assertEqual(badmatch, receive {'DOWN', Monitor, process, _, R} -> R after 1000 -> timeout end).

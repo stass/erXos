@@ -2480,9 +2480,10 @@ passphrase or another domain's bytes, and every grantee of every facet
 in front of the service would otherwise receive it
 ([design-login.md](design-login.md#secrets)). A forward whose service
 ends before it replies already answers its caller `{error, failed}`. A
-facet process that crashes in its callback still ends with the crash's
-reason, so a callback whose requests carry secrets keeps its `admit/3`
-a total function, as the login facet's does.
+crash of the facet's own process, in its callback or in the behaviour,
+ends it the same way, with the leading atom of the crash's reason,
+which the facet logs with its callback's name and nothing more of the
+reason, so the rule holds whatever ends a facet.
 
 **The facet table.** Every facet is an instance of an interface that
 `abi/services` declares: the system manifest's service row names the

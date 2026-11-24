@@ -328,13 +328,14 @@ system domain takes out of a process:
   a login service that crashes with a request in its reason ends every
   login facet with an atom, and no front end's caller or monitor sees
   more. A forward whose service ends before it replies answers its
-  caller `{error, failed}`, a fixed term. This is a rule of the facet
-  behaviour, so it holds for every service behind a facet, not only for
-  this one.
+  caller `{error, failed}`, a fixed term, and a crash of the facet's own
+  process, in its callback or in the behaviour, ends it with its reason's
+  leading atom too. This is a rule of the facet behaviour, so it holds
+  for every service behind a facet, not only for this one.
 * **The facet's own process never crashes on a request.**
   `erx_login_facet`'s `admit/3` is a total function: every request it
-  does not admit answers `badarg`, so the facet process never ends with
-  a request in its reason. Its fuzz target checks that `admit/3`
+  does not admit answers `badarg`, so no front end's request ends the
+  facet for its other connections. Its fuzz target checks that `admit/3`
   returns on every input.
 * **No dump or `process_info` shows a secret.** The login facet's
   process, the login service and the principal service, the three that

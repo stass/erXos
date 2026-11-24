@@ -70,12 +70,12 @@ What arrives is sorted by its shape before the callback sees a request:
 Every other message, a local one without an envelope included, is dropped
 and counted: a facet acts for its grantee alone.
 
-The behaviour catches nothing its callback raises. A crash inside the
-callback, in operation/1, admit/3 or message/2, ends the facet with the
-crash's reason, the one end that is no atom, and that reason, which can
-hold the grantee's request, reaches the grantee's callers and monitors. So
-a callback keeps operation/1, admit/3 and message/2 total: each answers
-every term, refusing what it does not take, and never raises on a request.
+From its export on, a facet ends with an atom whatever ends it: a crash of
+its callback, in operation/1, admit/3 or message/2, or of the facet itself,
+ends it with the leading atom of the crash's reason too, logged with the
+callback's name and that atom alone, since the reason can hold the
+grantee's request. A callback still refuses what it does not take, since
+a crash ends the facet for every caller of its grantee's.
 
 A grant's operations, the names its manifest row lists (erx_domain_lib:configured/0),
 are checked through the callback's operation/1, which maps a request or a message of
@@ -314,10 +314,27 @@ init(Parent, Tag, Callback, #{grantee := Grantee, ends_with := EndsWith} = Grant
         {error, Reason} -> exit({export, Reason})
     end,
     Parent ! {Tag, ok},
-    loop(#{callback => Callback, cb_state => CbState, grantee => Grantee, operations => Operations,
-           max_request => maps:get(max_request, Grant, ?MAX_REQUEST),
-           in_flight => maps:get(in_flight, Grant, ?IN_FLIGHT), exports => Exports,
-           ends_with => Monitors, forwards => #{}, dropped => 0, refused => 0}).
+    serve(#{callback => Callback, cb_state => CbState, grantee => Grantee, operations => Operations,
+            max_request => maps:get(max_request, Grant, ?MAX_REQUEST),
+            in_flight => maps:get(in_flight, Grant, ?IN_FLIGHT), exports => Exports,
+            ends_with => Monitors, forwards => #{}, dropped => 0, refused => 0}).
+
+%% The exported facet's life. The loop's one end of its own is the leading atom of an end
+%% of ends_with; a crash, of the callback or of the loop, ends the facet with its reason's
+%% leading atom as well, so its grantee's callers and monitors see no term of a request
+%% (docs/design-domains.md, "A facet's end carries no terms").
+-spec serve(state()) -> no_return().
+serve(#{callback := Callback} = State) ->
+    try
+        loop(State)
+    catch
+        exit:End when is_atom(End) ->
+            exit(End);
+        _Class:Reason ->
+            Name = erx_report:reason_name(Reason),
+            logger:error("facet of ~ts crashed: ~ts", [Callback, Name]),
+            exit(Name)
+    end.
 
 %% The monitor of a process or port the facet ends with (is_end/1), and whether a local
 %% one has already ended.

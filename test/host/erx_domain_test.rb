@@ -212,6 +212,12 @@ class ErxDomainTest < Minitest::Test
               file: 'erlang/apps/erx/src/erx_facet.erl',
               from: '                false -> eperm', to: '                false -> ok',
               tests: 'erx_facet_tests', caught_by: 'admits_only_its_grants_operations_test'),
+# A facet whose callback crash ends it with the crash's reason whole hands a request
+# of one caller's, a passphrase, to every monitor of the facet.
+Fault.new(name: 'a facet that ends with its callback crash whole',
+          file: 'erlang/apps/erx/src/erx_facet.erl',
+          from: '            Name = erx_report:reason_name(Reason),', to: '            Name = Reason,',
+          tests: 'erx_facet_tests', caught_by: 'a_callback_crash_ends_the_facet_with_an_atom_test'),
     # A grant listing operations to a callback that cannot check them would admit them all.
     Fault.new(name: 'a facet started for operations no callback checks',
               file: 'erlang/apps/erx/src/erx_facet.erl',
