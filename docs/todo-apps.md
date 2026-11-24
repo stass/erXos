@@ -9,7 +9,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erx_svc` (the SDK's tree server and mint, started before a session's ready report when its template or
   package declares `serves svc`), `erx_svc_status` (format and parser, with its fuzz target) and
   `erx_svc_client` (reads and commands at `svc_wait_max`, with the chokepoint source check); the `serves` field
-  in `abi/manifest.txt`'s session template and `abi/formats/package.txt`'s declaration, and the manifest
+  in `abi/manifest.txt`'s session template and `abi/formats/package.txt`'s declaration, and admission
+  carrying the declaration's `serves` in `erx_app_admit`'s `Admitted` to the registry entry, for the
+  session's plan ([design-packaging.md](design-packaging.md#admission)); the manifest
   check refusing a facet row of `svc`; the limits `svc_wait_max`, `svc_status_max` and `svc_ctl_max` in
   `abi/services/files.txt`; the domain service's session providers (a keeper's `Start` with `row`, the plan's `serves=svc`) and derived `svc` grants, with their connections counted by the manifest check
   ([design-system.md](design-system.md#facets-a-configured-domain-serves)); the namespace's
