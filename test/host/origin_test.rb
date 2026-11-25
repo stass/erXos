@@ -829,4 +829,38 @@ class OriginTest < Minitest::Test
     write_file('bootstrap.beam', "\0other".b)
     assert_raises(Erx::Error) { @origin.check }
   end
+
+  ERXOS_HEADER = "%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n%% SPDX-License-Identifier: BSD-2-Clause\n"
+
+  def own(bytes) = Erx::Attribution.for_own_file(bytes: bytes)
+
+  # An erXos file is attributed by its SPDX line: its prose discusses the
+  # Erlang distribution, licenses and copyright as subjects, and a ported
+  # file carries the notice its line names.
+  def test_own_file_takes_its_declaration_over_its_prose
+    prose = "#{ERXOS_HEADER}%% The distribution carrier; the license of each input is checked.\n-module(m).\n"
+    assert_equal({ 'license' => 'BSD-2-Clause', 'evidence' => 'file SPDX', 'reviewed' => false }, own(prose))
+    ported = "%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>\n" \
+             "%% SPDX-License-Identifier: BSD-2-Clause AND BSD-3-Clause\n%%\n%% FreeBSD: sys/netinet/if_ether.c\n" \
+             "#{BSD_DISCLAIMER.gsub(/^/, '%% ')}-module(m).\n"
+    assert_equal 'BSD-2-Clause AND BSD-3-Clause', own(ported).fetch('license')
+  end
+
+  # What an erXos file's declaration cannot understate: a stock GNU notice
+  # it does not name, or a second declaration; and a file with neither a
+  # declaration nor a notice is unresolved.
+  def test_own_file_cannot_understate_its_license
+    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE, own("#{ERXOS_HEADER}-module(m).\n#{GPL_NOTICE}").fetch('license')
+    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE,
+                 own("#{ERXOS_HEADER}-module(m).\n%% SPDX-License-Identifier: MIT\n").fetch('license')
+    assert_equal 'GPL-2.0-only', own("-module(m).\n#{GPL_NOTICE}").fetch('license')
+    ['Taken from a GPLed driver.', 'Parts are under the EUPL-1.2.', 'See the GNU Free Documentation License.'].each do |line|
+      assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE, own("#{ERXOS_HEADER}%% #{line}\n-module(m).\n").fetch('license'), line
+    end
+    assert_equal 'BSD-2-Clause', own("#{ERXOS_HEADER}%% GPLEV0 holds the pin levels.\n-module(m).\n").fetch('license')
+    mixed = GPL_NOTICE.sub(' */', ' Parts are under the MPL 2.0. */')
+    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE,
+                 own("/* SPDX-License-Identifier: GPL-2.0-only */\n-module(m).\n#{mixed}").fetch('license')
+    assert_equal 'NOASSERTION', own("%% The distribution carrier.\n-module(m).\n").fetch('license')
+  end
 end

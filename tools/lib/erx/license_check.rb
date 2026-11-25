@@ -80,9 +80,13 @@ module Erx
     # The grant a build of build_kind takes from license for the input exempt? describes;
     # raises when it takes none. font_data: true says the license's FONT_DATA_ONLY licenses
     # cover font data in the input (LicenseExpression.select).
+    # The refusal names the input and its license, since the expression alone
+    # does not say which of an image's files to look at.
     def select(license, status:, label:, path:, build_kind:, font_data: false)
       LicenseExpression.select(license, allow_restricted: exempt?(status:, label:, license:, path:, build_kind:),
                                         font_data:)
+    rescue Error => e
+      raise e.exception("#{label} (#{license}): #{e.message}")
     end
 
     # Whether select takes a grant for an input that holds no font data, as the release

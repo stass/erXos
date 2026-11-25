@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'fileutils'
 require 'minitest/autorun'
 require 'tmpdir'
@@ -15,8 +16,7 @@ class TerminalGenerationTest < Minitest::Test
                         otp/lib/stdlib/uc_spec/EastAsianWidth.txt].freeze
   WIDTH_MODULE = 'erlang/apps/erx_win/src/erx_vt_width.erl'
   WIDTH_HEADER = 'include/erx/vt_width.h'
-  FIXTURE_REVIEW = { 'rules' => [], 'default_license' => 'Unicode-3.0',
-                     'default_evidence' => 'terminal generation fixture' }.freeze
+  UNICODE_INPUTS = GENERATION_FILES.grep(%r{\Aotp/lib/stdlib/uc_spec/}).freeze
 
   def self.output_plan
     @output_plan ||= Erx::TerminalRules.plan(root: ROOT)
@@ -164,7 +164,7 @@ class TerminalGenerationTest < Minitest::Test
   # under any other license is refused rather than relabelled.
   def test_an_input_imported_under_another_license_is_refused
     Dir.mktmpdir('erx-terminal-license-') do |directory|
-      root = generation_root(directory, review: FIXTURE_REVIEW.merge('default_license' => 'MIT'))
+      root = generation_root(directory, license: 'MIT')
       error = assert_raises(Erx::Error) { Erx::TerminalRules.plan(root: root) }
       assert_equal 'terminal input differs from its pinned OTP origin', error.message
     end
@@ -219,14 +219,21 @@ end
   end
 
 
-  # A minimal tree generation can run in: its sources, the two Unicode inputs
+  # A minimal tree generation can run in: its sources, the Unicode inputs
   # (extra adds files or replaces their bytes) and an OTP import recorded over
-  # exactly the otp/ files written.
-  def generation_root(root, extra: {}, review: FIXTURE_REVIEW)
-    GENERATION_FILES.to_h { |path| [path, File.binread(File.join(ROOT, path))] }.merge(extra).each do |path, bytes|
+  # exactly the otp/ files written, whose review judges each Unicode input's
+  # written bytes to be under LICENSE, as OTP's own review must: their data
+  # names characters such as COPYRIGHT SIGN, so the notice reader leaves them
+  # unrecognised.
+  def generation_root(root, extra: {}, license: 'Unicode-3.0')
+    written = GENERATION_FILES.to_h { |path| [path, File.binread(File.join(ROOT, path))] }.merge(extra)
+    written.each do |path, bytes|
       FileUtils.mkdir_p(File.dirname(File.join(root, path)))
       File.binwrite(File.join(root, path), bytes)
     end
+    judged = UNICODE_INPUTS.to_h { |path| [path.delete_prefix('otp/'), Digest::SHA256.hexdigest(written.fetch(path))] }
+    review = { 'rules' => [{ 'files' => judged, 'license' => license, 'evidence' => 'terminal generation fixture' }],
+               'default_license' => license, 'default_evidence' => 'terminal generation fixture' }
     Erx::Origin.new(root: File.join(root, 'otp'))
                .write(repository: 'https://example.invalid/otp.git', revision: 'fixture',
                       archive_sha256: '0' * 64, review: review)

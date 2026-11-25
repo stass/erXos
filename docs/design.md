@@ -2018,7 +2018,13 @@ hold by construction:
   `SPDX-License-Identifier: BSD-2-Clause`; a file of an
   imported tree is under its tree's `ORIGIN.md`; a fetched artifact has
   its `deps.lock` entry; a generated file takes the provenance of the
-  inputs its build rule records. Each file's license is recorded with its
+  inputs its build rule records. A file outside every imported tree,
+  erXos's own or generated, has the license of the one SPDX declaration
+  line of its header, which must name every license a stock GNU grant or
+  a notice listed in `config/imports/notices.txt` in it grants; its other
+  comments are erXos's prose, not read as notices, except that one naming
+  a copyleft license in other words records the file as unrecognised.
+  Each file's license is recorded with its
   provenance: an imported file's entry in its `ORIGIN.md` holds the
   license a reviewed rule of its import's review assigned to exactly those
   bytes, pinned by their SHA-256; or the SPDX identifier of the one

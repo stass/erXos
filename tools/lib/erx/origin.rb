@@ -77,13 +77,27 @@ module Erx
     # permissive notices' opening phrases are marks too, since some of them
     # hold no license word, and so is the X11 clause that follows an MIT
     # notice.
+    # The copyleft families both marks below name.
+    COPYLEFT_FAMILIES = /copyleft|CeCILL|\b(?:CDDL|MPL|EPL)\b|Mozilla Public|Eclipse Public|Creative Commons/in
     LICENSE_MARK = Regexp.union(
-      /licen[cs]|public domain|copyleft|CeCILL|proprietary|confidential|commercial/in, /\b[AL]?GPL/in,
-      /\b(?:CDDL|MPL|EPL)\b|Mozilla Public|Eclipse Public|Creative Commons|\bCC BY/in,
+      /licen[cs]|public domain|proprietary|confidential|commercial/in, /\b[AL]?GPL/in,
+      COPYLEFT_FAMILIES, /\bCC BY/in,
       /Permission is hereby granted|Permission to use, copy, modify/in,
       /Redistribution and use in source and binary forms|Copying and distribution of this file/in,
       /Except as contained in this notice/in
     )
+    # The names of copyleft and other reciprocal licenses, which an erXos
+    # file's prose may not hold unread (for_own_file). GPL is any word it
+    # opens but the BCM2711's GPLEN and GPLEV registers.
+    COPYLEFT_MARK = Regexp.union(
+      COPYLEFT_FAMILIES, /General Public Licen[cs]e|\b[AL]?GPL(?!E[NV][0-9]*\b)/in,
+      /\b(?:EUPL|GFDL|OSL|SSPL|APSL|CPL|MS-RL|ODbL|RPL)\b|Sleepycat|\bCC[ -]BY-SA/in,
+      /Free Documentation|European Union Public|Open Software Licen|Server Side Public|Common Public Licen/in,
+      /Common Development and Distribution|Apple Public Source|Reciprocal Public|Open Database Licen/in
+    )
+    # The blocks of an erXos file that are read: those of an imported file,
+    # and every block naming a copyleft license.
+    OWN_FILE_MARK = Regexp.union(LICENSE_MARK, COPYLEFT_MARK)
     # The reviewed notices: each row the SHA-256 of a notice block's
     # normalised text, the file it was reviewed in and the license it grants,
     # POINTER for the pointer to a package declaration, which grants nothing
@@ -241,7 +255,8 @@ module Erx
         return { 'license' => judgement.license, 'evidence' => judgement.evidence, 'reviewed' => true }
       end
 
-      reading = read_notices(bytes, notices: notices || listed_notices, import: review.import)
+      notices ||= listed_notices
+      reading = read_notices(bytes, reader: ->(text) { block_licenses(text, notices: notices, import: review.import) })
       declared = declaration(path, reading.declaration, review: review) || attached(path, sidecar)
       return within(declared, licenses: reading.licenses) if declared
       return notice_attribution(reading.licenses) unless reading.licenses.empty?
@@ -250,6 +265,28 @@ module Erx
       return { 'license' => package.license, 'evidence' => package.evidence, 'reviewed' => true } if package
 
       { 'license' => review.default_license, 'evidence' => review.default_evidence, 'reviewed' => true }
+    rescue Unrecognized => e
+      unrecognized(e.message)
+    end
+
+    # An erXos file outside every import tree, written by hand or by one of
+    # erXos's generators. The style guide gives it a copyright line and one
+    # SPDX declaration in its header, which names every third-party license
+    # the file carries (design.md, "provenance"); the rest of its comments
+    # are erXos's prose, which discusses licenses, distribution and copyright
+    # as subjects, so no other block is read as a notice to recognise whole.
+    # What the declaration cannot understate is still read: a stock GNU grant
+    # sentence or a block the reviewed table lists must be named by it, and a
+    # block naming a copyleft license in any other words leaves the file
+    # unrecognised. A file without a declaration takes the license those
+    # notices grant, else NOASSERTION, which no build admits.
+    def for_own_file(bytes:)
+      notices = listed_notices
+      reading = read_notices(bytes, mark: OWN_FILE_MARK, reader: ->(text) { prose_licenses(text, notices: notices) })
+      return within(spdx_attribution(reading.declaration), licenses: reading.licenses) if reading.declaration
+      return notice_attribution(reading.licenses) unless reading.licenses.empty?
+
+      { 'license' => 'NOASSERTION', 'evidence' => 'no SPDX declaration', 'reviewed' => false }
     rescue Unrecognized => e
       unrecognized(e.message)
     end
@@ -266,9 +303,12 @@ module Erx
       end
       return { 'license' => correction.license, 'evidence' => correction.evidence, 'reviewed' => true } if correction
 
-      { 'license' => declared_license(expression), 'evidence' => 'file SPDX', 'reviewed' => false }
+      spdx_attribution(expression)
     end
     private_class_method :declaration
+
+    def spdx_attribution(expression) = { 'license' => declared_license(expression), 'evidence' => 'file SPDX', 'reviewed' => false }
+    private_class_method :spdx_attribution
 
     def attached(path, sidecar)
       expression = spdx(sidecar)
@@ -317,8 +357,10 @@ module Erx
     # one SPDX declaration, on a line of its own in its header, and no other
     # mention of one. Every block that holds a license mark, every comment
     # block of the header and every comment block beside a marked one is
-    # read (block_licenses).
-    def read_notices(bytes, notices:, import:)
+    # read by READER, which gives the licenses one block's text grants
+    # (block_licenses, or prose_licenses for an erXos file, whose MARK also
+    # reads every block naming a copyleft license).
+    def read_notices(bytes, reader:, mark: LICENSE_MARK)
       bytes = bytes.b
       if bytes.include?("\0")
         words = bytes.delete("\0").scan(LICENSE_MARK).size
@@ -334,7 +376,7 @@ module Erx
         raise Unrecognized, "#{mentions} SPDX mentions; one declaration line in the header is read"
       end
 
-      licenses = read_blocks(blocks).flat_map { |block| block_licenses(block.text, notices: notices, import: import) }
+      licenses = read_blocks(blocks, mark: mark).flat_map { |block| reader.call(block.text) }
       Reading.new(declaration: declarations.first, licenses: licenses.uniq)
     end
     private_class_method :read_notices
@@ -342,8 +384,8 @@ module Erx
     # The blocks the reader must account for: each holding a license mark,
     # each comment block of the header and each comment block beside a
     # marked one.
-    def read_blocks(blocks)
-      marked = blocks.map { |block| block.text.match?(LICENSE_MARK) }
+    def read_blocks(blocks, mark: LICENSE_MARK)
+      marked = blocks.map { |block| block.text.match?(mark) }
       blocks.each_with_index.select do |block, index|
         beside = (index.positive? && marked[index - 1]) || marked[index + 1]
         marked[index] || (block.comment && (block.header || beside))
@@ -369,6 +411,28 @@ module Erx
       raise Unrecognized, 'a block neither a reviewed notice, a stock GNU notice nor free of legal words'
     end
     private_class_method :block_licenses
+
+    # The licenses one block of an erXos file's prose grants: a listed
+    # notice's, and each stock GNU grant sentence's, wherever it stands among
+    # other sentences. Any other sentence that names a copyleft license, and
+    # is not stock GNU boilerplate, is a notice no reader recognises, so it
+    # leaves the file unrecognised, as does a pointer to a package's
+    # declaration, which a file outside every package cannot defer to.
+    def prose_licenses(text, notices:)
+      row = notices[Digest::SHA256.hexdigest(text)]
+      raise Unrecognized, 'a pointer to a package declaration in a file of no package' if row&.license == POINTER
+      return [row.license] if row
+
+      text.scan(SENTENCE).map(&:strip).filter_map do |sentence|
+        grant = gnu_grant(sentence)
+        if grant.nil? && sentence.match?(COPYLEFT_MARK) && !gnu_boilerplate?(sentence)
+          raise Unrecognized, 'a sentence names a copyleft license in words no reader recognises'
+        end
+
+        grant
+      end
+    end
+    private_class_method :prose_licenses
 
     # The texts of a file's read blocks that only the notice table can
     # account for: neither stock GNU notices nor free of legal words. These
@@ -516,8 +580,9 @@ module Erx
     # declaration, so a form this test does not know fails closed. Content
     # cannot prove who wrote a file: this refuses a third-party file as it
     # arrives, not one whose notices someone rewrote. Origin#check admits a new
-    # file on this test and PackProvenance attributes one on it, so the two
-    # cannot disagree.
+    # file on this test and PackProvenance admits one on it, then attributes
+    # it by for_own_file, which this test's lines make BSD-2-Clause or
+    # unrecognised.
     def erxos_addition?(bytes)
       bytes = bytes.b
       return false if bytes.include?("\0")

@@ -1160,6 +1160,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   declaration silently wins over a sidecar that disagrees. OTP holds 10 sidecars. Read a sidecar as a file
   is read (one declaration, every other block plain or listed), and leave the file unrecognised when the
   file and its sidecar both declare and disagree.
+* [Medium] notice reader, `tools/lib/erx/origin.rb` (`for_own_file`): an erXos file's prose is read only
+  for stock GNU grants, listed notices and the names `COPYLEFT_MARK` lists, so a license that list does not
+  name, a permissive third-party notice the SPDX line leaves out, a GNU grant split around a line of code,
+  or a restriction beside a grant is not caught; and `within` checks only that the declaration names each
+  granted license, so `MIT OR GPL-2.0-or-later` over a GPL grant stands. Read every block of an erXos file
+  that holds a copyright line other than erXos's (`ERXOS_COPYRIGHT`) or a grant phrase as an imported
+  block, listing in `config/imports/notices.txt` the FreeBSD notices the ported `erx_net` files carry,
+  and require each granted license in an AND-joined part of the declaration.
 * [Low] notice reader, `tools/lib/erx/origin.rb` (`PATTERN_FLAGS`): without `File::FNM_DOTMATCH` a package
   rule or correction pattern skips dotfiles and dot directories, which take the default instead
   (`.gitignore` files under Fiasco's `tool/kconfig` and `libfdt/lib/contrib`). Add the flag and re-derive.

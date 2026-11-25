@@ -250,10 +250,11 @@ class GlyphsTest < Minitest::Test
 
   # DIRECTORY's files as an import at release v1.0 with a LICENSE.txt whose
   # first line is COPYRIGHT, each file's license the first of RULES whose
-  # pattern it matches.
+  # pattern it matches: package rules, which a font's file of no notice of
+  # its own takes.
   def import(directory, rules:, copyright:)
     File.write(File.join(directory, 'LICENSE.txt'), "#{copyright}\n")
-    review = { 'rules' => rules.map { |pattern, license| { 'pattern' => pattern, 'license' => license, 'evidence' => 'test' } },
+    review = { 'rules' => rules.map { |pattern, license| { 'kind' => 'package', 'pattern' => pattern, 'license' => license, 'evidence' => 'test' } },
                'default_license' => 'NOASSERTION', 'default_evidence' => 'test' }
     Erx::Origin.new(root: directory).write(repository: 'https://example.invalid/fonts', revision: 'v1.0 (test)',
                                            archive_sha256: '0' * 64, review: review)

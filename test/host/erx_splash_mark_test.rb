@@ -59,12 +59,12 @@ class ErxSplashMarkTest < Minitest::Test
   end
 
   # The image's provenance record resolves a generated source by its own
-  # SPDX line, as pack_provenance.rb does, with no fallback; that header is
-  # what licenses the logo bitmap under BSD-2-Clause.
+  # SPDX line, as pack_provenance.rb does for a file outside every import,
+  # with no fallback; that header is what licenses the logo bitmap under
+  # BSD-2-Clause.
   def test_the_generated_module_declares_bsd_2_clause
     module_text = MARK.erlang(MARK.rasterise([square(0, 0, 1, 1)], width: 2))
-    review = { 'rules' => [], 'default_license' => 'NOASSERTION', 'default_evidence' => '' }
-    resolved = Erx::Attribution.for_file(MARK::OUTPUT, bytes: module_text, sidecar: nil, review: review)
+    resolved = Erx::Attribution.for_own_file(bytes: module_text)
     assert_equal 'BSD-2-Clause', resolved.fetch('license')
   end
 end

@@ -224,7 +224,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   the notice table lists only Fiasco's blocks: a re-derivation records every OTP, musl and
   OpenSSL file whose notice holds a legal word as `LicenseRef-unrecognized-notice` until
   its block is reviewed and listed, OpenSSL's Apache-2.0 header, which nearly every
-  OpenSSL file carries, first. List those blocks (`fiasco_origins.rb --notices` reads only
+  OpenSSL file carries, first. OTP's Unicode data under `lib/stdlib/uc_spec` is recorded
+  so too (its character names, such as COPYRIGHT SIGN, are legal words); terminal
+  generation needs it as Unicode-3.0, so those files want reviewed judgements pinned to
+  their bytes. List those blocks (`fiasco_origins.rb --notices` reads only
   the Fiasco trees), review them, then re-derive the three inventories and run the link
   audit.
 

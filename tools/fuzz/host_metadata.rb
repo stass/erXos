@@ -70,6 +70,7 @@ module Erx
         Attribution.for_file('fixture.c', bytes: bytes, sidecar: nil,
                              review: Attribution.review('rules' => [], 'default_license' => 'MIT',
                                                         'default_evidence' => 'reviewed fuzz fixture'))
+        Attribution.for_own_file(bytes: bytes)
       when 'dependencies'
         DependencySchema.parse(bytes)
       when 'svd'
