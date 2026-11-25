@@ -31,6 +31,36 @@
       "filename": "vmlinuz-virt",
       "license": "GPL-2.0-only",
       "status": "permanent"
+    },
+    {
+      "id": "rpi-kernel8",
+      "kind": "file",
+      "version": "6.18.50-v8+ #2004",
+      "url": "https://raw.githubusercontent.com/raspberrypi/firmware/6f0881cba8bea8ec24956a5718714730e9936ec5/boot/kernel8.img",
+      "sha256": "f80aa8bb092c0df9401065ec1b4ee8b8846c4d9a1bb3272662b50acbd89da68b",
+      "filename": "kernel8.img",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    },
+    {
+      "id": "rpi-kernel8-dtb",
+      "kind": "file",
+      "version": "6.18.50-v8+ #2004",
+      "url": "https://raw.githubusercontent.com/raspberrypi/firmware/6f0881cba8bea8ec24956a5718714730e9936ec5/boot/bcm2711-rpi-4-b.dtb",
+      "sha256": "75761b73c284e26623e4d1624bff13e67bce2ae620880efd81d6571a3739fcfb",
+      "filename": "bcm2711-rpi-4-b.dtb",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    },
+    {
+      "id": "rpi-kernel8-license",
+      "kind": "file",
+      "version": "6.18.50-v8+ #2004",
+      "url": "https://raw.githubusercontent.com/raspberrypi/firmware/6f0881cba8bea8ec24956a5718714730e9936ec5/boot/COPYING.linux",
+      "sha256": "af8067302947c01fd9eee72befa54c7e3ef8a48fecde7fd71277f2290b2bf0f7",
+      "filename": "COPYING.linux",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
     }
   ]
 }

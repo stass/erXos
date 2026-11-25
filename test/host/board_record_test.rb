@@ -30,8 +30,10 @@ class BoardRecordTest < Minitest::Test
   end
 
   # A set's directory holding its build record as BootPartition writes one: the
-  # partition's files with their SHA-256, the source, and the inputs the record reads.
-  def set_directory(name, kernel:, clock: 1_500_000_000)
+  # partition's files with their SHA-256, the source, the inputs the record reads and
+  # what the card's config.txt set; linux, when given, is Linux's facts as LinuxBoard's
+  # set records them.
+  def set_directory(name, kernel:, clock: 1_500_000_000, linux: nil)
     directory = File.join(@scratch, name)
     FileUtils.mkdir_p(directory)
     files = { 'kernel8.img' => kernel, 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 }
@@ -41,7 +43,7 @@ class BoardRecordTest < Minitest::Test
                 'inputs' => { 'platform' => 'raspi4b',
                               'firmware' => [{ 'id' => 'rpi-firmware-start4', 'filename' => 'start4.elf' },
                                              { 'id' => 'rpi-firmware-fixup4', 'filename' => 'fixup4.dat' }],
-                              'bl31' => { 'compiler' => COMPILER } } }
+                              'bl31' => { 'compiler' => COMPILER }, 'linux' => linux }.compact }
     receipt['arm_clock_hz'] = clock if clock
     receipt['total_mem_mib'] = 1024
     path = File.join(directory, 'boot.receipt.json')
@@ -67,7 +69,7 @@ class BoardRecordTest < Minitest::Test
 
   def recorded(queue, walk: walk(), log: Fuzz.board_log, readings: { 'before' => "cpu_temp 41.2\n", 'after' => nil })
     read = Erx::BoardLog.read(log, queue: queue, asked: Fuzz.board_asked * queue.sets.size, walk: walk)
-    sets = queue.sets.map { |set| Erx::BoardRecord.set(set) }
+    sets = queue.sets.map { |set| Erx::BoardRecord.set(set, benchmark: queue.benchmark) }
     Erx::BoardRecord.records(read, sets: sets,
                                    run: Erx::BoardRecord.run(queue: queue, walk: walk, read: read, readings: readings,
                                                              started_by: 'manual', arm_clock_hz: Erx::BoardRecord.clock(sets)))
@@ -136,8 +138,36 @@ class BoardRecordTest < Minitest::Test
   def test_a_set_whose_build_record_changed_since_the_walk_is_refused
     one = set_directory('wake', kernel: '11' * 32)
     File.write(File.join(one.directory, 'boot.receipt.json'), ' ', mode: 'a')
-    error = assert_raises(Erx::Error) { Erx::BoardRecord.set(one) }
+    error = assert_raises(Erx::Error) { Erx::BoardRecord.set(one, benchmark: 'wake') }
     assert_match(/not the one the walk's entries were made from/, error.message)
+  end
+
+  LINUX = { 'kernel' => { 'id' => 'rpi-kernel8', 'version' => '6.18.50', 'sha256' => '44' * 32 }, 'init_sha256' => '55' * 32 }.freeze
+
+  # A set whose build record names Linux (LinuxBoard) is Linux's: the record's
+  # environment is pi4-4gb-linux, its subject holds Linux's facts, and its boots ask
+  # erx_peer_bench's counterparts rather than erXos's native cells.
+  def test_a_set_whose_build_record_names_linux_is_recorded_as_linuxs
+    set = Erx::BoardRecord.set(set_directory('linux', kernel: '11' * 32, linux: LINUX), benchmark: 'wake')
+    assert_equal 'pi4-4gb-linux', set.environment.name
+    assert_equal '55' * 32, set.subject.details.fetch('init_sha256')
+    assert_equal '11' * 32, set.subject.details.fetch('kernel8_sha256')
+    assert_equal Erx::PeerBench.asked('wake', cpus: 4, clock: 'counter'), set.asked
+    erxos = Erx::BoardRecord.set(set_directory('erxos', kernel: '11' * 32), benchmark: 'wake')
+    assert_equal 'pi4-4gb-erxos', erxos.environment.name
+    assert_equal Erx::NativeBench.asked(Erx::BenchSuite.benchmark('wake'), cpus: 4), erxos.asked
+  end
+
+  def test_an_import_of_a_queue_of_another_environment_is_refused
+    directory = File.join(@scratch, 'walk')
+    FileUtils.mkdir_p(directory)
+    Erx::BoardFiles.write_queue(directory, queue([set_directory('linux', kernel: '11' * 32, linux: LINUX)], [0, 0, 0]))
+    log = File.join(directory, 'console.log')
+    File.write(log, Fuzz.board_log)
+    error = assert_raises(Erx::Error) do
+      Erx::BoardRecord.import('wake', environment: 'pi4-4gb-erxos', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+    end
+    assert_match(/holds a set of pi4-4gb-linux, not of pi4-4gb-erxos/, error.message)
   end
 
   def test_an_import_of_a_log_that_names_no_boot_is_refused
@@ -148,11 +178,11 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log([*Fuzz::FIRMWARE_LINES, Fuzz.banner(**Fuzz::FOUND), 'erXos']))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('wake', environment: 'pi4-4gb-erxos', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/names no boot/, error.message)
     other = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('vm', environment: 'pi4-4gb-erxos', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/is a walk of wake/, other.message)
   end
@@ -169,7 +199,7 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log(Fuzz::FIRMWARE_LINES))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('wake', environment: 'pi4-4gb-erxos', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/names no boot/, error.message)
   end

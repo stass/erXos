@@ -11,6 +11,16 @@
  * which it kills it: a backstop, since the build sets it after the program's own alarm.
  * However the program ends, by its exit, a signal or that kill, init says how unless it
  * exited with 0 and powers the machine off (launch.h).
+ *
+ * Built with ERX_INIT_BOARD, it is process 1 of Linux on the Raspberry Pi 4
+ * (docs/design-bench.md, "Linux on the same board"). The netboot entry appends its boot
+ * name to the command line as a last word "erx.arg=NAME", which reaches init after
+ * "--"; init takes it off the program's arguments and prints the naming line
+ * "erx: bench: boot NAME" before the run and its end line after, as erXos's bench root
+ * does, so the board's log ties the console's lines to the entry. A board is not
+ * powered off, which would halt it until a person cycles its power: once the end line
+ * has left the console, init restarts the board, which then boots the queue's next
+ * entry, as erXos's bench boots do.
  */
 
 #define _XOPEN_SOURCE 700
@@ -23,6 +33,7 @@
 
 #define PEER		"/erx_peer_bench"
 #define EXEC_FAILED	127
+#define BOOT_WORD	"erx.arg="
 
 /*
  * The child's side: it starts the program with the signal mask init was given, before,
@@ -64,13 +75,62 @@ run(char **argv)
 	report(PEER, await(peer, PEER, &chld, deadline));
 }
 
+#ifdef ERX_INIT_BOARD
+/*
+ * The boot name of the last of the argc words of argv when it is the netboot entry's
+ * "erx.arg=NAME", taken off argv; NULL when there is none.
+ */
+static const char *
+boot_name(int argc, char **argv)
+{
+	const size_t word = sizeof(BOOT_WORD) - 1;
+	char *last;
+
+	if (argc < 2)
+		return (NULL);
+	last = argv[argc - 1];
+	if (strncmp(last, BOOT_WORD, word) != 0)
+		return (NULL);
+	argv[argc - 1] = NULL;
+	return (last + word);
+}
+
+/*
+ * Restarts the board once what init printed has left the console, so the end line is
+ * not cut off by the restart. Answers only when the restart is refused; process 1 then
+ * returns, and the kernel's panic=-1 restarts the board.
+ */
+static void
+restart(void)
+{
+	fflush(stdout);
+	tcdrain(STDOUT_FILENO);
+	sync();
+	reboot(RB_AUTOBOOT);
+	printf("erx: init: the restart was refused\n");
+	fflush(stdout);
+}
+#endif
+
 int
 main(int argc ERX_UNUSED, char **argv)
 {
+#ifdef ERX_INIT_BOARD
+	const char *name = boot_name(argc, argv);
+
+	if (name != NULL)
+		printf("erx: bench: boot %s\n", name);
+#endif
 	if (mount("proc", "/proc", "proc", 0, NULL) == 0)
 		run(argv);
 	else
 		printf("erx: init: /proc did not mount\n");
+#ifdef ERX_INIT_BOARD
+	if (name != NULL)
+		printf("erx: bench: boot %s done\n", name);
+	restart();
+#else
 	power_off();
+#endif
 	return (1);
 }

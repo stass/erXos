@@ -76,7 +76,8 @@ module Erx
     # no other build replaces what a session boots. Answers the kernel's path, the
     # initramfs and the subject facts a record keeps. seeded are a seeded fault's flags
     # (NativeBench::Seed#root_flags), which the program takes as the native bench root does.
-    def build(root:, runner:, seeded: [])
+    # board builds /init for the Raspberry Pi 4 (bench/linux/init.c, ERX_INIT_BOARD).
+    def build(root:, runner:, seeded: [], board: false)
       dependencies = lock(root: root, runner: runner)
       parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       output = Dir.mktmpdir("build-#{Process.pid}-", parent)
@@ -84,7 +85,7 @@ module Erx
       peer_flags = [*PeerBench.flags, *seeded]
       peer = compile(root: root, usr: usr, output: output, runner: runner, source: PEER, flags: peer_flags)
       init = compile(root: root, usr: usr, output: output, runner: runner, source: INIT,
-                     flags: ["-DERX_INIT_DEADLINE_S=#{DEADLINE_SECONDS}u"])
+                     flags: ["-DERX_INIT_DEADLINE_S=#{DEADLINE_SECONDS}u", *(board ? ['-DERX_INIT_BOARD'] : [])])
       initrd = File.join(output, 'initramfs.cpio')
       File.binwrite(initrd, initramfs(init: File.binread(init), peer: File.binread(peer)))
       kernel = dependencies.fetched_file(KERNEL)
@@ -155,7 +156,7 @@ module Erx
 
     def compiler = ENV.fetch('ERX_CLANG') { raise Error, 'linux guest: set ERX_CLANG to the LLVM clang' }
 
-    private_class_method :pin_of, :c_flags, :compiler
+    private_class_method :c_flags, :compiler
 
     # Linux's guest for one boot (BenchSystem), native or posix: one boot of the kernel and its
     # initramfs, whose erx_peer_bench prints a BENCH line for every cell of the boot, a

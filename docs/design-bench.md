@@ -1897,11 +1897,11 @@ not corrected.
 | --- | --- | --- | --- |
 | erXos | the subject | netboot, walked by the board itself ([Running on the Raspberry Pi 4](#running-on-the-raspberry-pi-4)) | the bench images |
 | L4Re | a pinned L4Re snapshot of the Fiasco revision erXos's fork came from, built by its own build system, without virtualization support as erXos's fork is | netboot, as erXos's Fiasco does | L4Re's own IPC benchmark (`github.com/l4re/ipcbench` at `14868232`, as in [L4Re's guest](#l4res-guest)); in the configuration erXos's fork uses, which is the comparison, and in L4Re's published configuration as a diagnostic: a printed per-IPC mean, half a round trip, more than a tenth from the page's 505, 702 and 305 cycles is reported beside the comparison and looked into, and does not by itself void it |
-| Linux | Raspberry Pi OS Lite, 64-bit, pinned, with the vendor's stock kernel; its real-time kernel as a second row for `wake` only, if the image offers one (unverified) | its own SD card | `erx_peer_bench` |
+| Linux | the vendor's stock 64-bit kernel, `kernel8.img` of the pinned firmware's own commit, with its device tree; a real-time kernel as a second row for `wake` only, once one is pinned | netboot, as erXos's bench sets do ([Linux on the same board](#linux-on-the-same-board)) | `erx_peer_bench`, under the initramfs of [Linux's guest](#linuxs-guest) |
 
-Each image is fetched by the fetch step at a pinned URL and SHA-256, and
-written to its own card; nothing from it enters the tree, and nothing of
-it runs on the host. The clock is held by `config.txt` for every
+Each system's files are fetched by the fetch step at a pinned URL and
+SHA-256 and netbooted; nothing from them enters the tree, and nothing of
+them runs on the host, and the board's SD card is not written. The clock is held by `config.txt` for every
 system, whatever its own frequency driver does; no system's governor is
 relied on.
 
@@ -1912,7 +1912,7 @@ the same way for each, by the firmware rather than by the system. The
 platform record names the clock (`config/platforms/raspi4b.json`,
 `arm_clock_hz`, 1500 MHz, which every Raspberry Pi 4 Model B revision
 runs by default), and `BootPartition.config_txt`, which writes the
-`config.txt` of erXos's cards, of every bench set and of L4Re's set,
+`config.txt` of erXos's cards, of every bench set, of L4Re's set and of Linux's,
 writes it as `arm_freq=1500` and holds it with `force_turbo=1`. Raspberry
 Pi's `config.txt` documentation (`overclocking.adoc` of
 `github.com/raspberrypi/documentation` at `20d5b6f5`, SHA-256
@@ -1961,8 +1961,9 @@ erXos boot's probe that disagrees with its run's clock by more than 2%
 says the clock was not held; the reader compares the two by hand, and
 the table does not correct for it.
 
-`bench/peer/erx_peer_bench.c` is one C17 file under erXos's license that
-Linux compiles on the board with its own compiler; the record
+`bench/peer/erx_peer_bench.c` is one C17 file under erXos's license,
+built for Linux on the host by erXos's compiler with erXos's programs'
+code-generation flags, as for [Linux's guest](#linuxs-guest); the record
 keeps the compiler's version and flags. It runs the POSIX counterpart of
 each operation and prints the same `BENCH` lines, so one reader imports
 every system's. It reads the system counter directly where the system
@@ -2096,6 +2097,60 @@ imported. The import prints the board's side-by-side table: the record
 beside erXos's newest board record of the benchmark, each system in its
 own form, erXos on four CPUs and L4Re on one, so the rows name no CPU
 form (`BenchSideBySide.tables` with `forms: false`).
+
+### Linux on the same board
+
+Linux reaches the board as erXos's bench sets do: a boot set, signed
+with the tree's netboot key into one entry of a queue whose last entry
+is the found pair, the way back
+([The board's way back to its found set](#the-boards-way-back-to-its-found-set)).
+The set is erXos's boot partition (`BootPartition`) with the same pinned
+firmware, the same BL31 and the same `config.txt`, written for no
+overlay, since the vendor's tree carries none of erXos's, and with one
+line more, `initramfs initramfs.cpio 0x10000000`: the firmware's own
+placement, `followkernel`, puts the archive just after the device tree,
+which BL31 opens out in place to add its PSCI nodes, overwriting the
+archive's start, so the archive goes to 256 MiB, above the kernel and far
+below the tree. Its `kernel8.img`,
+`bcm2711-rpi-4-b.dtb` and `COPYING.linux` are the vendor's, pinned in
+Linux's own lock (`bench/linux/deps.lock`) at the commit of
+`raspberrypi/firmware` the firmware's pins name; its initramfs is
+[Linux's guest](#linuxs-guest)'s, whose `/init` is built for the board.
+Its `cmdline.txt` is `console=ttyS0,115200 quiet
+cpufreq.default_governor=performance panic=-1 maxcpus=N -- ARGS`: the
+mini UART the firmware's `enable_uart` sets up, no kernel messages below
+warnings on it, so none lands inside a `BENCH` line, the governor that
+holds the configured frequency, a restart on a panic, the run's CPU count and the program's arguments; the netboot
+entry appends its boot name as a last word, `erx.arg=NAME`.
+
+The board's `/init` takes that word off the program's arguments and
+prints the naming line before the run and its end line after it, as
+erXos's bench root does, so the console's lines of the run are tied to
+the entry. It does not power the board off, which would halt it until a
+person cycles its power: once its end line has left the console, it
+restarts the board through Linux's own reboot, as erXos's bench boots
+restart it, and the next download is the queue's next entry, the way
+back after the last. One queue therefore walks Linux's sets unattended,
+like erXos's.
+
+`tools/erx bench NAME --env pi4-4gb-linux --console DEVICE|tcp:HOST:PORT
+--ssh DEST --key FILE` is [the walk](#the-walk) of a benchmark that has
+an `erx_peer_bench` counterpart, with Linux's set laid out under
+`build/linux-board` as its subject in place of erXos's bench images: the
+same queue behind the same served link, pointed back and removed after
+the run, the same `queue.json` and `walk.json`, and the same reboot
+request to the system running before it. Linux prints no banner, so the
+walk knows no identity for its boots, and it waits for a boot's end as
+long as `/init` waits for the program. Its record is
+[the record of a board run](#the-record-of-a-board-run), read by the
+one reader of the board's log, and `tools/erx bench import NAME --env
+pi4-4gb-linux --queue FILE LOG` imports a kept log the same way: a set
+whose build record names Linux among its inputs is recorded in
+environment `pi4-4gb-linux`, with Linux's facts as its subject, and its
+boots are held to what `erx_peer_bench` runs for the benchmark rather
+than to erXos's native cells. An import whose queue holds a set of
+another environment than the one named is refused. A run takes the
+board's four CPUs, since the environment's name carries no count.
 
 ### The interrupt probe
 
@@ -3306,9 +3361,10 @@ measured duration.
 
 ### Linux's configuration
 
-Every Linux row runs the vendor's stock kernel. A separately identified
-real-time kernel is a second row for `wake` only, since the published
-Pi 4 latencies are of a real-time kernel.
+Every Linux row on the board runs the vendor's stock kernel
+([Linux on the same board](#linux-on-the-same-board)). A separately
+identified real-time kernel is a second row for `wake` only, since the
+published Pi 4 latencies are of a real-time kernel.
 
 ### How FD32's ten runs combine
 

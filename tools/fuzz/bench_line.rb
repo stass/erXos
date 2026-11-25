@@ -49,13 +49,6 @@ module Erx
     FIRMWARE_LINES = ['RPi: BOOTLOADER release VERSION:a1b2c3d4 DATE: 2026/01/01', 'HTTP: GET boot.sig',
                       'HTTP: GET boot.img', 'MESS:00:00:05.012712:0: arasan: arasan_emmc_open'].freeze
 
-    # The record facts of board_queue's one set, as BoardRecord.set reads them.
-    BOARD_SET = BoardRecord::SetFacts.new(
-      environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}),
-      subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {}),
-      arm_clock_hz: nil
-    )
-
     module_function
 
     def board_queue
@@ -74,6 +67,15 @@ module Erx
       cells = BOARD_OPERATIONS.map { |operation| BenchSuite::LandingCell.new(operation: operation, load: 'idle', placement: 'same-cpu', parameters: {}) }
       [BenchMeasurement::Asked.new(benchmarks: [BenchMeasurement::Wanted.new(benchmark: WAKE, cells: cells, profiles: PROFILES)],
                                    clock: 'counter', pairs: [[0, 1]])]
+    end
+
+    # The record facts of board_queue's one set, as BoardRecord.set reads them.
+    def board_set
+      BoardRecord::SetFacts.new(
+        environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}),
+        subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {}), asked: board_asked.first,
+        arm_clock_hz: nil
+      )
     end
 
     def banner(build:, index:) = "erx: boot image build #{build} index #{index} flags 0x1 archive 0x40231000+0x2e000 bootargs 2"
@@ -190,7 +192,7 @@ module Erx
 
       run = BoardRecord.run(queue: queue, walk: nil, read: read, readings: { 'before' => text, 'after' => nil }, started_by: 'manual',
                             arm_clock_hz: nil)
-      made = BoardRecord.records(read, sets: [BOARD_SET], run: run)
+      made = BoardRecord.records(read, sets: [board_set], run: run)
       raise "a board log's record dropped a boot" unless made.sum { |recorded| recorded.record.boots.size } == queue.entries.size
 
     rescue Erx::Error

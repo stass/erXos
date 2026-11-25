@@ -1519,11 +1519,13 @@ module Erx
       0
     end
 
-    # tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR]
-    # [--runs N] [--profile landing|full] [--set DIR ...] (docs/design-bench.md, "The walk"): every
-    # refusal before anything is built, then the default set built (or each --set read) and
-    # the walk (BoardRun). The environment is the board's for a benchmark with a native
-    # bench guest, whose set BoardSets lays out.
+    # tools/erx bench NAME --env pi4-4gb-erxos|pi4-4gb-linux --console DEVICE|tcp:HOST:PORT --ssh DEST
+    # --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR ...]
+    # (docs/design-bench.md, "The walk"): every refusal before anything is built, then the
+    # default set built (or each --set read) and the walk (BoardRun). The environment is
+    # erXos's on the board for a benchmark with a native bench guest, whose set BoardSets
+    # lays out, and Linux's for one with an erx_peer_bench counterpart, whose set LinuxBoard
+    # lays out ("Linux on the same board").
     def self.bench_board(name, arguments)
       require_relative 'lib/erx/l4re_board'
       return bench_board_l4re(name, arguments) if arguments.each_cons(2).include?(['--env', L4ReBoard::ENVIRONMENT]) ||
@@ -1544,13 +1546,14 @@ module Erx
         flags.on('--set DIR') { |value| options[:sets] << File.expand_path(value) }
       end.parse!(arguments)
       no_arguments(arguments)
+      require_relative 'lib/erx/linux_board'
       BenchSuite.benchmark(name)
-      declared = NativeBench::GUESTS.key?(name) ? [BoardRun::ENVIRONMENT] : []
+      declared = [(BoardRun::ENVIRONMENT if NativeBench::GUESTS.key?(name)), (LinuxBoard::ENVIRONMENT if PeerBench::BOOTS.key?(name))].compact
       raise Error, "bench #{name} declares no environment #{options[:env]}; it declares: #{declared.join(', ').then { |listed| listed.empty? ? 'none run on a board' : listed }}" unless
         declared.include?(options[:env])
 
       missing = %i[console ssh key].reject { |option| options[option] }
-      raise Error, "bench --env #{BoardRun::ENVIRONMENT} needs #{missing.map { |option| "--#{option}" }.join(', ')}" unless missing.empty?
+      raise Error, "bench --env #{options[:env]} needs #{missing.map { |option| "--#{option}" }.join(', ')}" unless missing.empty?
       raise Error, 'bench: --runs is below 1' unless options[:runs].positive?
       raise Error, 'bench: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
 
@@ -1560,11 +1563,7 @@ module Erx
       NetbootEntry.signing_key(options[:key])
       subjects = options[:sets].map { |directory| BoardRun.directory_subject(directory) }
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
-      if subjects.empty?
-        laid = NativeBench::BoardSets.new(root: ROOT, platform: Platform.load(root: ROOT, name: Netboot::PLATFORM), runner: runner)
-                                     .call([name]).fetch(name)
-        subjects = [BoardRun.laid_subject(laid)]
-      end
+      subjects = [bench_board_subject(name, options[:env], runner)] if subjects.empty?
 
       clock = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
       fsimg = Fsimg.locate(root: ROOT)
@@ -1573,7 +1572,7 @@ module Erx
         prepare: ->(**queue) { Netboot.prepare(**queue, runner: runner, fsimg: fsimg) },
         console: ->(log:) { BoardConsole.open(options[:console], log: log, clock: clock) },
         clock: clock, out: Terminal.method(:puts), codec: ABI::Codec.new(ABI::Generator.plan(root: ROOT).schema),
-        record: ->(ran) { bench_board_record(name, ran, history) }
+        record: ->(ran) { bench_board_record(name, options[:env], ran, history) }
       ).call(benchmark: name, subjects: subjects, runs: options[:runs], key: options[:key])
       walk.ending == 'returned' ? 0 : 1
     end
@@ -1581,14 +1580,30 @@ module Erx
     # The records of a board walk that ended (BoardRecord), one per set, written under
     # history; when they cannot be, the walk's files stay for `tools/erx bench import`,
     # whose command line is printed before the failure is raised.
-    def self.bench_board_record(name, ran, history)
+    # The walk's subject of benchmark name's default set for the board environment env:
+    # erXos's bench images (NativeBench::BoardSets), or Linux's set (LinuxBoard), each laid
+    # out under the tree's build directory.
+    def self.bench_board_subject(name, env, runner)
+      require_relative 'lib/erx/source_revision'
+      require 'tmpdir'
+      platform = Platform.load(root: ROOT, name: Netboot::PLATFORM)
+      return BoardRun.laid_subject(NativeBench::BoardSets.new(root: ROOT, platform: platform, runner: runner).call([name]).fetch(name)) if
+        env == BoardRun::ENVIRONMENT
+
+      LinuxBoard.lay_out(root: ROOT, runner: runner, platform: platform, name: name,
+                         directory: Dir.mktmpdir("#{name}-", OutputDirectory.prepare(root: ROOT, path: File.join(ROOT, LinuxBoard::OUTPUT))),
+                         compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''),
+                         revision: SourceRevision.read(root: ROOT, runner: runner))
+    end
+
+    def self.bench_board_record(name, env, ran, history)
       require_relative 'lib/erx/board_record'
       log = BoundedFile.read(File.join(ran.directory, BoardRun::LOG), maximum: BoardLog.max_bytes(ran.queue))
       made = BoardRecord.recorded(log, queue: ran.queue, walk: ran.walk, readings: { 'before' => ran.before&.text, 'after' => ran.after.text },
                                        started_by: 'manual')
       BoardRecord.write(made, history: history, root: ROOT).each { |run| Terminal.puts("bench: recorded #{run}") }
     rescue Error, SystemCallError
-      import = ['tools/erx', 'bench', 'import', name, '--env', BoardRun::ENVIRONMENT, '--queue', File.join(ran.directory, BoardFiles::QUEUE),
+      import = ['tools/erx', 'bench', 'import', name, '--env', env, '--queue', File.join(ran.directory, BoardFiles::QUEUE),
                 File.join(ran.directory, BoardRun::LOG)]
       Terminal.puts("bench: the board run's record was not written; once the cause below is fixed, import it with: #{Netboot.shell_line(import)}")
       raise
@@ -1653,6 +1668,7 @@ module Erx
       require_relative 'lib/erx/board_record'
       require_relative 'lib/erx/l4re_board'
       require_relative 'lib/erx/board_run'
+      require_relative 'lib/erx/linux_board'
       options = {}
       OptionParser.new do |flags|
         flags.on('--env NAME') { |value| options[:env] = value }
@@ -1663,13 +1679,14 @@ module Erx
       return bench_import_l4re(arguments, options) if options[:env] == L4ReBoard::ENVIRONMENT
       raise OptionParser::InvalidArgument, 'usage: tools/erx bench import NAME --env ENV --queue FILE [--profile landing] LOG' unless
         arguments.size == 2 && options[:queue]
-      raise Error, "bench import: --env #{options[:env]} is not #{BoardRun::ENVIRONMENT}, the one environment a board log is imported into" unless
-        options[:env] == BoardRun::ENVIRONMENT
+      boards = [BoardRun::ENVIRONMENT, LinuxBoard::ENVIRONMENT]
+      raise Error, "bench import: --env #{options[:env]} is not #{boards.join(' or ')}, the environments a board log is imported into" unless
+        boards.include?(options[:env])
       raise Error, 'bench import: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
 
       name, log = arguments
       BenchSuite.benchmark(name)
-      BoardRecord.import(name, queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history)
+      BoardRecord.import(name, environment: options[:env], queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history)
                  .each { |run| Terminal.puts("bench: recorded #{run}") }
       0
     end

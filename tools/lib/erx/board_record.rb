@@ -16,6 +16,7 @@ require_relative 'error'
 require_relative 'json_input'
 require_relative 'line_escape'
 require_relative 'native_bench'
+require_relative 'peer_bench'
 
 module Erx
   # The record of a board run (docs/design-bench.md, "The record of a board run"): one
@@ -34,9 +35,10 @@ module Erx
     # The board every walk runs on (docs/design-bench.md, "Running on the Raspberry Pi 4").
     CPUS = 4
 
-    # What a set's record holds of the set: its environment, its subject, and the ARM clock
-    # its config.txt set (CardSettings), nil when its build record states none.
-    SetFacts = Data.define(:environment, :subject, :arm_clock_hz)
+    # What a set's record holds of the set: its environment, its subject, what its boots
+    # ask (BenchMeasurement::Asked), and the ARM clock its config.txt set (CardSettings),
+    # nil when its build record states none.
+    SetFacts = Data.define(:environment, :subject, :asked, :arm_clock_hz)
 
     module_function
 
@@ -45,8 +47,11 @@ module Erx
     # as the record lists them, its source revision, its kernel8.img's SHA-256 and the
     # compiler that built it (BL31's, the set's one compiler). The walk names every set
     # by its absolute directory, so the record reads the set the walk booted wherever the
-    # import runs.
-    def set(boot_set)
+    # import runs. A set whose record names Linux among its inputs is Linux's
+    # (LinuxBoard): its environment's system is linux, its subject holds Linux's facts,
+    # and its boots ask erx_peer_bench's counterparts of benchmark rather than erXos's
+    # native cells.
+    def set(boot_set, benchmark:)
       raise Error, "board record: the set #{boot_set.directory} is not named by an absolute directory" unless
         File.absolute_path?(boot_set.directory)
 
@@ -59,10 +64,11 @@ module Erx
       files = BootPartition.listed_files(receipt)
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
+      receipt.fetch('inputs').fetch('linux', nil) => Hash | nil => linux
       card = CardSettings.read(receipt, label: path)
       SetFacts.new(
         environment: BenchRecord::Environment.new(
-          kind: 'pi4', model: nil, cpus: CPUS, system: 'erxos',
+          kind: 'pi4', model: nil, cpus: CPUS, system: linux ? 'linux' : 'erxos',
           details: { 'memory_mib' => card.memory_mib,
                      'firmware' => firmware.to_h { |source| [source.fetch('filename'), files.fetch(source.fetch('filename'))] } }
             .compact
@@ -70,8 +76,10 @@ module Erx
         subject: BenchRecord::Subject.new(
           revision: commit, dirty: dirty,
           details: { 'kernel8_sha256' => files.fetch(BootPartition::KERNEL), 'record_sha256' => boot_set.record_sha256,
-                     'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }.compact
+                     'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }
+                     .merge(linux || {}).compact
         ),
+        asked: linux ? PeerBench.asked(benchmark, cpus: CPUS, clock: 'counter') : NativeBench.asked(BenchSuite.benchmark(benchmark), cpus: CPUS),
         arm_clock_hz: card.arm_clock_hz
       )
     rescue NoMatchingPatternError, KeyError, TypeError, NoMethodError
@@ -109,14 +117,13 @@ module Erx
 
     # The records of the walk whose console log is log, of queue, with the walk's
     # outcomes (or nil) and the sensor readings; read is BoardLog's read of it, against
-    # what the queue's benchmark asks at the landing profile on the board.
+    # what each set's boots ask of the queue's benchmark at the landing profile.
     def recorded(log, queue:, walk:, readings:, started_by:)
-      read = BoardLog.read(log, queue: queue, asked: Array.new(queue.sets.size, asked(queue.benchmark)), walk: walk)
+      sets = queue.sets.map { |boot_set| set(boot_set, benchmark: queue.benchmark) }
+      read = BoardLog.read(log, queue: queue, asked: sets.map(&:asked), walk: walk)
       yield read if block_given?
-      sets = queue.sets.map { |boot_set| set(boot_set) }
-      records(read, sets: sets,
-                    run: run(queue: queue, walk: walk, read: read, readings: readings, started_by: started_by,
-                                   arm_clock_hz: clock(sets)))
+      records(read, sets: sets, run: run(queue: queue, walk: walk, read: read, readings: readings, started_by: started_by,
+                                         arm_clock_hz: clock(sets)))
     end
 
     # The ARM clock every one of sets states, or nil when they state none or differ.
@@ -130,8 +137,9 @@ module Erx
     # `tools/erx bench import NAME --queue FILE LOG` (docs/design-bench.md, "Importing a
     # log"): the records of the walk of NAME whose queue file is queue and whose console
     # log is log, with walk.json beside the queue when the walk wrote it, written under
-    # history. A log no line of which names a boot is refused.
-    def import(name, queue:, log:, root:, history:)
+    # history. A log no line of which names a boot is refused, and so is a queue with a set
+    # of an environment other than environment, the one the command line names.
+    def import(name, environment:, queue:, log:, root:, history:)
       walked = BoardFiles.read_queue(queue)
       raise Error, "board record: #{queue} is a walk of #{walked.benchmark}, not of #{name}" unless walked.benchmark == name
 
@@ -143,12 +151,10 @@ module Erx
         raise Error, "board record: #{log} names no boot of the queue, so no line of it is tied to a boot" if
           read.boots.all? { |boot| boot.cells.all? { |cell| cell.reason == BoardLog::UNNAMED } }
       end
+      others = made.map { |recorded| recorded.record.environment.name }.uniq - [environment]
+      raise Error, "board record: #{queue} holds a set of #{others.join(', ')}, not of #{environment}" unless others.empty?
+
       write(made, history: history, root: root)
     end
-
-    # What a board set of benchmark asks: its native landing cells on the board's CPUs.
-    def asked(benchmark) = NativeBench.asked(BenchSuite.benchmark(benchmark), cpus: CPUS)
-
-    private_class_method :asked
   end
 end
