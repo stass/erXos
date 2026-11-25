@@ -92,6 +92,16 @@ module Erx
       end
     end
 
+    # Stock OTP's installed tree and the libraries its programs load, exported
+    # for Linux's Erlang guest (design-bench.md, "Linux's Erlang guest").
+    def install(flavour: 'emu', jobs: 4)
+      result = finish_build(execute(operation: 'install', flavour: flavour, jobs: jobs, deadline: 3000))
+      unless result.fetch('artifacts').fetch('mandatory_evidence') == 'complete'
+        raise Error, "Linux oracle install export is incomplete; report: #{result.fetch('report')}"
+      end
+      result
+    end
+
     def run(suite, flavour: 'emu', jobs: 4, deadline: 14_400, test_suite: nil, testcase: nil)
       raise Error, 'unsupported Linux oracle suite' unless SUITES.include?(suite)
       unless deadline.is_a?(Integer) && deadline.between?(1, 80_000)

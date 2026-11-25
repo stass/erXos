@@ -335,6 +335,17 @@ class OracleContainerTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::ContainerOracleJob.suite_flavour_options(suite: 'kernel', flavour: 'unknown') }
   end
 
+  def test_loader_listing_names_every_loaded_file_and_refuses_an_unresolved_one
+    listing = "\tlinux-vdso.so.1 (0x0000ffff9b5e2000)\n" \
+              "\tlibtinfo.so.6 => /lib/aarch64-linux-gnu/libtinfo.so.6 (0x0000ffff9b540000)\n" \
+              "\tlibc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ffff9b390000)\n" \
+              "\t/lib/ld-linux-aarch64.so.1 (0x0000ffff9b5a5000)\n"
+    assert_equal %w[/lib/aarch64-linux-gnu/libtinfo.so.6 /lib/aarch64-linux-gnu/libc.so.6 /lib/ld-linux-aarch64.so.1],
+                 Erx::ContainerOracleJob.loader_paths(listing)
+    assert_raises(Erx::Error) { Erx::ContainerOracleJob.loader_paths("\tlibz.so.1 => not found\n" + listing) }
+    assert_raises(Erx::Error) { Erx::ContainerOracleJob.loader_paths("\tstatically linked\n") }
+  end
+
   def test_detached_readiness_accepts_an_initially_empty_attached_log
     adapter, = lifecycle
     result = adapter.detached_fixture

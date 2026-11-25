@@ -27,6 +27,23 @@ module Erx
       suite == 'emulator' ? ["FLAVOR=#{flavour}"] : []
     end
 
+    # The installed programs whose loaded libraries an install export brings
+    # out for Linux's Erlang guest (design-bench.md, "Linux's Erlang guest").
+    GUEST_PROGRAMS = %w[beam.smp erlexec erl_child_setup epmd inet_gethost].freeze
+    LOADED = %r{\A\t(?:\S+ => )?(/\S+) \(0x\h+\)\z}.freeze
+    UNLINKED = /\A\tlinux-vdso\.so\.\d+ \(0x\h+\)\z/.freeze
+
+    # The dynamic loader's listing (ldd) names each file it maps with its
+    # path; the kernel's vDSO is no file. Anything else, a library the
+    # loader did not find among them, refuses the listing.
+    def self.loader_paths(listing)
+      paths = listing.lines(chomp: true).reject { |line| UNLINKED.match?(line) }.map do |line|
+        LOADED.match(line)&.[](1) or raise Error, 'dynamic loader listing has an unresolved or unknown line'
+      end
+      raise Error, 'dynamic loader listing names no file' if paths.empty?
+      paths
+    end
+
     def self.suite_state(command)
       case command.fetch('state')
       when 'succeeded' then 'completed'
@@ -78,6 +95,10 @@ module Erx
 
       build = build_stock
       return context.merge('state' => 'completed', 'operation' => operation, 'build' => build) if operation == 'build'
+      if operation == 'install'
+        list_libraries
+        return context.merge('state' => 'completed', 'operation' => operation, 'build' => build)
+      end
 
       suite = @plan.fetch('suite')
       hooks = '/tmp/erx-oracle/hooks'
@@ -128,7 +149,7 @@ module Erx
     end
 
     def verify_plan
-      unless @plan.is_a?(Hash) && %w[build run probe detached].include?(@plan['operation']) &&
+      unless @plan.is_a?(Hash) && %w[build run probe detached install].include?(@plan['operation']) &&
              FLAVOURS.include?(@plan['flavour']) && @environment.is_a?(Hash)
         raise Error, 'invalid container oracle job'
       end
@@ -338,6 +359,21 @@ module Erx
         'cxx' => identity('/usr/bin/g++', ['--version']),
         'build_environment' => environment, 'verification' => verification,
         'erlang_distribution' => 'passed', 'reporting_source' => reporting_source }
+    end
+
+    # Written to the workspace for the exporter, which copies each listed
+    # file from its own copy of the image; it runs no program to learn them.
+    def list_libraries
+      directories = Dir.glob(File.join(@install, 'lib/erlang/erts-*/bin'))
+      raise Error, 'installed tree has no single ERTS directory' unless directories.size == 1
+      paths = GUEST_PROGRAMS.flat_map do |program|
+        listing = @runner.run(['/usr/bin/ldd', File.join(directories.first, program)],
+                              name: "oracle-libraries-#{program}", deadline: 30, env: @environment)
+        self.class.loader_paths(File.read(listing.fetch('log')))
+      end.uniq.sort
+      File.open('/tmp/erx-oracle/libraries.json', File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
+        output.write(JSON.generate('version' => 1, 'libraries' => paths) + "\n")
+      end
     end
 
     def install_reporting_source

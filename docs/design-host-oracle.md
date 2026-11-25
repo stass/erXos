@@ -117,8 +117,9 @@ export mount make the input tree stable throughout inspection and copying.
 
 The exporter constructs a bounded file plan from a closed set of evidence
 roots: the guest result, event stream, runner logs, image-license evidence
-when requested, and the selected suite's Common Test log tree. It does not
-copy the source or installed-runtime tree wholesale. The Common Test walk
+when requested, and the selected suite's Common Test log tree. It never
+copies the source tree, and copies the installed-runtime tree only in the
+install export below. The Common Test walk
 prunes its private fixture directories, `log_private` and the pinned
 per-case/per-configuration forms `log_private.<number>` and
 `log_private.cfg.<number>`. These contain test data, including deliberately
@@ -129,7 +130,28 @@ to success, failure, timeout and cancellation; missing or unfinished records
 remain missing or unfinished. Progress messages already captured by the
 attached host runner remain available independently of artifact export.
 
-Traversal uses `lstat` and does not follow links. Only directories and
+**The install export.** Linux's Erlang guest
+([design-bench.md](design-bench.md#linuxs-erlang-guest)) runs the oracle's
+stock OTP outside the container, so one operation, `install`, builds as
+`build` does and then has the image's dynamic loader (`ldd`) list the
+files that `beam.smp`, `erlexec`, `erl_child_setup`, `epmd` and
+`inet_gethost` map, into the workspace's `libraries.json`. Its export's
+roots are the guest result, the runner logs, the installed tree at
+`install/` and each listed library at `libraries/` followed by its listed
+path. The list is the workload's and untrusted: a listed path is absolute,
+normalized and in the image's library directories (`/lib`, `/lib64`,
+`/usr/lib`, `/usr/lib64`), and the exporter resolves it in its own root
+filesystem, the pinned image, which no workload wrote, to a regular file
+that lies in those directories too; it copies that file's bytes under the
+listed name, so a loader name that is a link (Debian's interpreter is one)
+arrives as the file the guest needs at the path its loader asks for. Every
+tree file and every library is required evidence, and an export with no
+tree file or no library, or one cut short by an entry or inventory
+bound, is incomplete. The tree's own links (`bin/*`,
+`lib/erlang/bin/epmd`) are excluded like any link but are not required,
+since the guest runs the regular files under `erts-*/bin`.
+
+Traversal of the workspace uses `lstat` and does not follow links. Only directories and
 ordinary file contents are exported; symlinks, sockets, devices and FIFOs
 are recorded as excluded types. Hard-linked ordinary files are copied as
 independent bytes and charged separately. The plan bounds total entries,

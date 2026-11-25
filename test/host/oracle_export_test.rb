@@ -395,4 +395,164 @@ class OracleExportTest < Minitest::Test
     replace_inventory(inventory)
     assert_raises(Erx::Error) { verify }
   end
+
+  # The installed tree at its prefix, and a made-up image root laid out as
+  # Debian's merged /usr is: /lib is a link to usr/lib, and the interpreter
+  # and one library name are links to regular files beside them.
+  LIBRARY_DIRECTORY = 'usr/lib/aarch64-linux-gnu'.freeze
+
+  def system_file(path, bytes)
+    target = File.join(@system, path)
+    FileUtils.mkdir_p(File.dirname(target))
+    File.open(target, 'wb', 0o644) { |file| file.write(bytes) }
+  end
+
+  def install_evidence(libraries: ['/lib/ld-linux-aarch64.so.1', '/lib/aarch64-linux-gnu/libc.so.6',
+                                   '/lib/aarch64-linux-gnu/libtinfo.so.6'])
+    write('result.json', '{"state":"completed"}')
+    write('logs/runner.log', 'runner evidence')
+    write('install/lib/erlang/erts-16.0/bin/beam.smp', 'beam program')
+    write('install/lib/erlang/erts-16.0/bin/epmd', 'epmd program')
+    write('install/lib/erlang/bin/erl', '#!/bin/sh')
+    FileUtils.mkdir_p(File.join(@source, 'install/bin'))
+    File.symlink('../lib/erlang/bin/erl', File.join(@source, 'install/bin/erl'))
+    File.symlink('../erts-16.0/bin/epmd', File.join(@source, 'install/lib/erlang/bin/epmd'))
+    write('libraries.json', JSON.generate('version' => 1, 'libraries' => libraries))
+    @system = File.join(@directory, 'system')
+    system_file("#{LIBRARY_DIRECTORY}/ld-linux-aarch64.so.1", 'loader bytes')
+    system_file("#{LIBRARY_DIRECTORY}/libc.so.6", 'libc bytes')
+    system_file("#{LIBRARY_DIRECTORY}/libtinfo.so.6.4", 'tinfo bytes')
+    File.symlink('libtinfo.so.6.4', File.join(@system, LIBRARY_DIRECTORY, 'libtinfo.so.6'))
+    File.symlink('aarch64-linux-gnu/ld-linux-aarch64.so.1', File.join(@system, 'usr/lib/ld-linux-aarch64.so.1'))
+    File.symlink('usr/lib', File.join(@system, 'lib'))
+    system_file('etc/secret', 'not a library')
+  end
+
+  def export_install(changes: {})
+    export(operation: 'install', suite: nil, changes: changes, system_root: @system)
+  end
+
+  def reasons(result)
+    result.fetch('omissions').to_h { |issue| [issue.fetch('path'), [issue.fetch('reason'), issue.fetch('required')]] }
+  end
+
+  def test_install_copies_the_tree_and_the_listed_libraries_under_their_listed_names
+    install_evidence
+    result = export_install
+    paths = result.fetch('files').map { |file| file.fetch('path') }
+    assert_equal %w[install/lib/erlang/bin/erl install/lib/erlang/erts-16.0/bin/beam.smp
+                    install/lib/erlang/erts-16.0/bin/epmd libraries/lib/aarch64-linux-gnu/libc.so.6
+                    libraries/lib/aarch64-linux-gnu/libtinfo.so.6 libraries/lib/ld-linux-aarch64.so.1
+                    logs/runner.log result.json], paths
+    assert_equal 'loader bytes', File.binread(File.join(@destination, 'libraries/lib/ld-linux-aarch64.so.1'))
+    assert_equal 'tinfo bytes', File.binread(File.join(@destination, 'libraries/lib/aarch64-linux-gnu/libtinfo.so.6'))
+    assert result.fetch('files').all? { |file| file.fetch('required') == (file.fetch('path') != 'logs/runner.log') }
+    # Links in the tree are recorded, never followed, and are not evidence the export owes.
+    assert_equal({ 'install/bin/erl' => ['excluded_symlink', false],
+                   'install/lib/erlang/bin/epmd' => ['excluded_symlink', false] }, reasons(result))
+    assert_equal 'partial', result.fetch('state')
+    assert_equal 'complete', result.fetch('mandatory_evidence')
+    refute File.exist?(File.join(@destination, 'libraries.json'))
+    assert_equal result, verify
+  end
+
+  def test_install_refuses_library_names_and_links_outside_the_library_directories
+    install_evidence(libraries: ['/etc/secret', '/lib/../etc/secret', 'lib/aarch64-linux-gnu/libc.so.6',
+                                 '/lib/aarch64-linux-gnu/escape.so', '/lib/aarch64-linux-gnu/absolute.so',
+                                 '/lib/aarch64-linux-gnu/libc.so.6'])
+    File.symlink('../../../etc/secret', File.join(@system, LIBRARY_DIRECTORY, 'escape.so'))
+    File.symlink(File.join(@system, 'etc/secret'), File.join(@system, LIBRARY_DIRECTORY, 'absolute.so'))
+    result = export_install
+    assert_equal %w[libraries/lib/aarch64-linux-gnu/libc.so.6],
+                 result.fetch('files').map { |file| file.fetch('path') }.grep(/\Alibraries/)
+    refused = result.fetch('omissions').reject { |issue| issue.fetch('reason') == 'excluded_symlink' }
+    assert_equal 5, refused.size
+    refute result.fetch('omissions').any? { |issue| issue.fetch('path').include?('secret') && issue.fetch('reason') == 'invalid_library_list' }
+    assert refused.all? { |issue| issue.fetch('required') }
+    assert refused.all? { |issue| %w[outside_library_directories invalid_library_list].include?(issue.fetch('reason')) }
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+    refute Dir.glob(File.join(@destination, '**/*secret*')).any?
+    refute File.exist?(File.join(@destination, 'libraries/etc'))
+    assert_equal result, verify
+  end
+
+  def test_install_tree_links_to_directories_are_not_followed
+    install_evidence
+    FileUtils.mkdir_p(File.join(@directory, 'outside'))
+    File.write(File.join(@directory, 'outside/leak'), 'outside bytes')
+    File.symlink(File.join(@directory, 'outside'), File.join(@source, 'install/lib/erlang/escape'))
+    result = export_install
+    assert_equal ['excluded_symlink', false], reasons(result).fetch('install/lib/erlang/escape')
+    refute Dir.glob(File.join(@destination, '**/leak')).any?
+  end
+
+  def test_install_size_bounds_leave_the_export_partial
+    install_evidence
+    write('install/lib/erlang/lib/big.beam', 'x' * 64)
+    result = export_install(changes: { 'file_bytes' => 32 })
+    assert_equal ['file_bytes_limit', true], reasons(result).fetch('install/lib/erlang/lib/big.beam')
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+    install_total = Dir.mktmpdir('erx-', @directory)
+    @destination = install_total
+    result = export_install(changes: { 'total_bytes' => 40 })
+    assert result.fetch('omissions').any? { |issue| issue.fetch('reason') == 'total_bytes_limit' && issue.fetch('required') }
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+    system_file("#{LIBRARY_DIRECTORY}/libc.so.6", 'c' * 64)
+    @destination = Dir.mktmpdir('erx-', @directory)
+    result = export_install(changes: { 'file_bytes' => 32 })
+    assert_equal ['file_bytes_limit', true], reasons(result).fetch('libraries/lib/aarch64-linux-gnu/libc.so.6')
+  end
+
+  def test_missing_or_malformed_library_list_leaves_install_partial
+    install_evidence
+    File.unlink(File.join(@source, 'libraries.json'))
+    assert_equal ['missing', true], reasons(export_install).fetch('libraries.json')
+    @destination = Dir.mktmpdir('erx-', @directory)
+    write('libraries.json', '{"version":1,"libraries":[1]}')
+    assert_equal ['invalid_library_list', true], reasons(export_install).fetch('libraries.json')
+    @destination = Dir.mktmpdir('erx-', @directory)
+    File.unlink(File.join(@source, 'libraries.json'))
+    File.symlink(File.join(@directory, 'system/etc/secret'), File.join(@source, 'libraries.json'))
+    assert_equal ['excluded_symlink', true], reasons(export_install).fetch('libraries.json')
+    @destination = Dir.mktmpdir('erx-', @directory)
+    File.unlink(File.join(@source, 'libraries.json'))
+    write('libraries.json', '{"version":1,"libraries":[]}')
+    result = export_install
+    assert_empty result.fetch('omissions').reject { |issue| issue.fetch('reason') == 'excluded_symlink' }
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+  end
+
+  def test_install_cut_short_by_the_inventory_budget_is_never_complete
+    install_evidence
+    budget = 4096 + JSON.generate(export_install).bytesize / 2
+    @destination = Dir.mktmpdir('erx-', @directory)
+    result = export_install(changes: { 'inventory_bytes' => budget })
+    assert result.fetch('omissions').any? { |issue| issue.fetch('reason') == 'inventory_limit' }
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+    assert_equal result, verify(changes: { 'inventory_bytes' => budget })
+  end
+
+  def test_a_special_library_list_is_recorded_not_fatal
+    install_evidence
+    File.unlink(File.join(@source, 'libraries.json'))
+    @sockets << UNIXServer.new(File.join(@source, 'libraries.json'))
+    assert_equal ['excluded_special', true], reasons(export_install).fetch('libraries.json')
+  end
+
+  def test_host_accepts_tree_and_library_records_only_for_an_install_export
+    install_evidence
+    export_install
+    inventory = read_inventory
+    replace_inventory(inventory.merge('operation' => 'build'))
+    assert_raises(Erx::Error) { verify }
+    replace_inventory(inventory)
+    path = 'libraries/etc/secret'
+    FileUtils.mkdir_p(File.join(@destination, 'libraries/etc'), mode: 0o700)
+    File.open(File.join(@destination, path), 'wb', 0o600) { |file| file.write('s') }
+    inventory.fetch('files') << { 'path' => path, 'size' => 1, 'required' => true,
+                                  'type' => 'file', 'sha256' => Digest::SHA256.hexdigest('s') }
+    inventory.fetch('files').sort_by! { |file| file.fetch('path').b }
+    replace_inventory(inventory)
+    assert_raises(Erx::Error) { verify }
+  end
 end

@@ -15,19 +15,34 @@ module Erx
                        'path_bytes' => 2048, 'file_bytes' => 64 * 1024 * 1024,
                        'total_bytes' => 1024 * 1024 * 1024,
                        'inventory_bytes' => 32 * 1024 * 1024 }.freeze
-    OPERATIONS = %w[probe build run detached].freeze
+    OPERATIONS = %w[probe build run detached install].freeze
     SUITES = %w[emulator kernel stdlib compiler].freeze
     REASONS = %w[missing excluded_symlink excluded_special unreadable file_limit file_bytes_limit
                  total_bytes_limit depth_limit path_limit entry_limit inventory_limit copy_failed
-                 private_fixture source_unavailable].freeze
+                 private_fixture source_unavailable invalid_library_list outside_library_directories].freeze
+    # The install export brings out the installed tree and the libraries the
+    # image's dynamic loader listed for its programs during the workload. The
+    # list names image paths; each is copied under libraries/ at its listed
+    # name, from the regular file it resolves to in the image's library
+    # directories.
+    LIBRARY_LIST = 'libraries.json'
+    LIBRARY_DIRECTORIES = %w[lib lib64 usr/lib usr/lib64].freeze
+    LIBRARY_LIST_KEYS = %w[libraries version].freeze
+    LIBRARY_LIST_BYTES = 64 * 1024
+    PLAN_KEYS = %w[identity from].freeze
     PRIVATE_FIXTURE = /\Alog_private(?:\.\d+|\.cfg\.\d+)?\z/.freeze
     CHUNK_BYTES = 65_536
     module_function
 
-    def call(source:, destination:, operation:, suite: nil, limits: DEFAULT_LIMITS,
+    # system_root is the image whose libraries an install export copies: the
+    # exporter's own root filesystem, which no workload wrote. Tests name a
+    # made-up tree instead; its absolute links resolve on the host and so
+    # fall outside its library directories.
+    def call(source:, destination:, operation:, suite: nil, limits: DEFAULT_LIMITS, system_root: '/',
              open_destination: File.method(:open), list_source_directory: Dir.method(:each_child))
       Export.new(source: source, destination: destination, operation: operation, suite: suite, limits: limits,
-                 open_destination: open_destination, list_source_directory: list_source_directory).call
+                 system_root: system_root, open_destination: open_destination,
+                 list_source_directory: list_source_directory).call
     end
 
     def verify(destination:, limits: DEFAULT_LIMITS)
@@ -68,8 +83,17 @@ module Erx
       end
 
       def required?(path, operation, ct_root)
-        path == 'result.json' || (operation == 'run' && path == 'events.jsonl')
+        path == 'result.json' || (operation == 'run' && path == 'events.jsonl') ||
+          (operation == 'install' && (path == 'install' || install_member?(path)))
       end
+
+      def install_member?(path) = path.start_with?('install/') || library?(path)
+
+      def library?(path) = path.start_with?(*LIBRARY_DIRECTORIES.map { |directory| "libraries/#{directory}/" })
+
+      # The design exports no links; one inside the installed tree is an
+      # expected exclusion, since the guest runs the regular files they name.
+      def required_link?(path, operation) = !(operation == 'install' && path.start_with?('install/'))
 
       def ct_path?(path, ct_root)
         ct_root && path.start_with?(ct_root + '/') &&
@@ -84,7 +108,8 @@ module Erx
         path == 'result.json' || path.start_with?('logs/') ||
           (operation == 'run' && (path == 'events.jsonl' || ct_path?(path, ct_root))) ||
           (operation == 'probe' && path.start_with?('image-licenses/')) ||
-          (operation == 'detached' && %w[parent-finished detached-heartbeat detached-ready].include?(path))
+          (operation == 'detached' && %w[parent-finished detached-heartbeat detached-ready].include?(path)) ||
+          (operation == 'install' && install_member?(path))
       end
 
       def status(inventory)
@@ -96,6 +121,11 @@ module Erx
         mandatory = paths.include?('result.json') && omissions.none? { |issue| issue.fetch('required') }
         if operation == 'run'
           mandatory &&= paths.include?('events.jsonl')
+        elsif operation == 'install'
+          # A plan cut short by a budget may have dropped required files
+          # without a record of each, so it is never complete evidence.
+          mandatory &&= %w[install/ libraries/].all? { |prefix| paths.any? { |path| path.start_with?(prefix) } } &&
+                        omissions.none? { |issue| %w[entry_limit inventory_limit].include?(issue.fetch('reason')) }
         end
         [omissions.any? { |issue| issue.fetch('reason') != 'private_fixture' } ? 'partial' : 'complete',
          mandatory ? 'complete' : 'partial']
@@ -132,8 +162,9 @@ module Erx
     private_constant :Rules
 
     class Export
-      def initialize(source:, destination:, operation:, suite:, limits:,
+      def initialize(source:, destination:, operation:, suite:, limits:, system_root: '/',
                      open_destination: File.method(:open), list_source_directory: Dir.method(:each_child))
+        @system_root = File.expand_path(system_root)
         @open_destination = open_destination
         @list_source_directory = list_source_directory
         @source = File.expand_path(source)
@@ -194,8 +225,10 @@ module Erx
         roots.concat(['events.jsonl', @ct_root]) if @operation == 'run'
         roots << 'logs'
         roots << 'image-licenses' if @operation == 'probe'
+        roots << 'install' if @operation == 'install'
         roots.concat(%w[parent-finished detached-heartbeat detached-ready]) if @operation == 'detached'
         roots.each { |path| walk(path) unless @stopped }
+        plan_libraries if @operation == 'install' && !@stopped
         total = 0
         selected = []
         @candidates.sort_by { |file| [file.fetch('required') ? 0 : 1, file.fetch('path').b] }.each do |file|
@@ -233,7 +266,7 @@ module Erx
           begin
             stat = source_stat(path)
             if stat.symlink?
-              issue(path, 'excluded_symlink', required: required)
+              issue(path, 'excluded_symlink', required: required && Rules.required_link?(path, @operation))
             elsif stat.directory?
               collision(path)
               names = []
@@ -249,26 +282,102 @@ module Erx
                 pending.concat(names.sort.reverse.map { |name| path.b + '/'.b + name })
               end
             elsif stat.file?
-              collision(path)
-              if stat.size > @limits.fetch('file_bytes')
-                issue(path, 'file_bytes_limit', required: required)
-              else
-                file = { 'path' => path, 'size' => stat.size, 'required' => required, 'identity' => Rules.identity(stat) }
-                preview = file.reject { |name, _| name == 'identity' }.merge('type' => 'file', 'sha256' => '0' * 64)
-                failure = Rules.omission(path, reason: 'copy_failed', required: required, limits: @limits)
-                @candidates << file if admit_metadata(preview, alternative: failure)
-              end
+              admit_file(path, stat, required: required, from: File.join(@source, path))
             else
               issue(path, 'excluded_special', required: required)
             end
           rescue Errno::ENOENT, Errno::ENOTDIR
             issue(path, 'missing', required: required)
           rescue Errno::ELOOP
-            issue(path, 'excluded_symlink', required: required)
+            issue(path, 'excluded_symlink', required: required && Rules.required_link?(path, @operation))
           rescue Errno::EACCES, Errno::EPERM
             issue(path, 'unreadable', required: required)
           end
         end
+      end
+
+      def admit_file(path, stat, required:, from:)
+        collision(path)
+        if stat.size > @limits.fetch('file_bytes')
+          issue(path, 'file_bytes_limit', required: required)
+        else
+          file = { 'path' => path, 'size' => stat.size, 'required' => required,
+                   'identity' => Rules.identity(stat), 'from' => from }
+          preview = published(file).merge('sha256' => '0' * 64)
+          failure = Rules.omission(path, reason: 'copy_failed', required: required, limits: @limits)
+          @candidates << file if admit_metadata(preview, alternative: failure)
+        end
+      end
+
+      def published(file) = file.reject { |name, _| PLAN_KEYS.include?(name) }.merge('type' => 'file')
+
+      # The list is the workload's, so untrusted: a listed name must lie in
+      # the image's library directories, and so must the regular file it
+      # resolves to there. Links are followed only in the image, never in
+      # the workspace.
+      def plan_libraries
+        names = library_list or return
+        roots = LIBRARY_DIRECTORIES.filter_map do |directory|
+          File.realpath(File.join(@system_root, directory))
+        rescue SystemCallError
+          nil
+        end.uniq
+        names.each do |name|
+          break if @stopped
+          path = library_path(name)
+          next issue(LIBRARY_LIST, 'invalid_library_list', required: true) unless path
+          next issue(path, 'outside_library_directories', required: true) unless Rules.library?(path)
+          @entries += 1
+          if @entries > @limits.fetch('entries')
+            issue(path, 'entry_limit', required: true)
+            @stopped = true
+            next
+          end
+          begin
+            resolved = File.realpath(File.join(@system_root, path.delete_prefix('libraries/')))
+            next issue(path, 'outside_library_directories', required: true) unless resolved.start_with?(*roots.map { |root| root + '/' })
+            stat = File.lstat(resolved)
+            next issue(path, 'excluded_special', required: true) unless stat.file?
+            admit_file(path, stat, required: true, from: resolved)
+          rescue Errno::ENOENT, Errno::ENOTDIR
+            issue(path, 'missing', required: true)
+          rescue Errno::ELOOP
+            issue(path, 'excluded_symlink', required: true)
+          rescue Errno::EACCES, Errno::EPERM
+            issue(path, 'unreadable', required: true)
+          end
+        end
+      end
+
+      # A listed name is absolute; its staging path keeps it under libraries/.
+      # A malformed name is refused without echoing it into the inventory.
+      def library_path(name)
+        return nil unless name.start_with?('/') && Rules.relative(name.delete_prefix('/'), @limits)
+        Rules.relative("libraries#{name}", @limits)
+      end
+
+      def library_list
+        stat = source_stat(LIBRARY_LIST)
+        unless stat.file?
+          issue(LIBRARY_LIST, stat.symlink? ? 'excluded_symlink' : 'excluded_special', required: true)
+          return nil
+        end
+        bytes = Rules.read_regular(File.join(@source, LIBRARY_LIST), maximum: LIBRARY_LIST_BYTES)
+        list = JsonInput.parse(bytes, max_bytes: LIBRARY_LIST_BYTES, label: 'oracle library list')
+        unless list.is_a?(Hash) && list.keys.sort == LIBRARY_LIST_KEYS && list['version'] == 1 &&
+               list['libraries'].is_a?(Array) && list['libraries'].all?(String)
+          raise Error, 'invalid oracle library list'
+        end
+        list.fetch('libraries').uniq
+      rescue Errno::ENOENT, Errno::ENOTDIR
+        issue(LIBRARY_LIST, 'missing', required: true)
+        nil
+      rescue Errno::EACCES, Errno::EPERM
+        issue(LIBRARY_LIST, 'unreadable', required: true)
+        nil
+      rescue Error
+        issue(LIBRARY_LIST, 'invalid_library_list', required: true)
+        nil
       end
 
       # Check every selected-root ancestor too: lstat of a leaf alone would
@@ -329,7 +438,7 @@ module Erx
         created = false
         hash = Digest::SHA256.new
         begin
-          File.open(File.join(@source, path), File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |input|
+          File.open(file.fetch('from'), File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |input|
             unless input.stat.file? && Rules.identity(input.stat) == file.fetch('identity')
               raise Error, 'oracle artifact changed after planning'
             end
@@ -350,7 +459,7 @@ module Erx
               end
             end
           end
-          file.reject { |name, _| name == 'identity' }.merge('type' => 'file', 'sha256' => hash.hexdigest).freeze
+          published(file).merge('sha256' => hash.hexdigest).freeze
         rescue SystemCallError, IOError, Error => error
           begin
             File.unlink(target) if created
