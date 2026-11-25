@@ -41,7 +41,13 @@
  *     release ordering; the leader loads each state with acquire ordering before it
  *     counts the CPU, and reads registers only for a state erx_machine_stop_has_regs
  *     accepts;
- *   - the clock the census reads is a free-running counter that the stop does not stop.
+ *   - the clock the census reads is a free-running counter that the stop does not stop,
+ *     read in program order, and it never wraps, so a reading outside the census's
+ *     window means the bound has passed or the counter is broken;
+ *   - a CPU's depth (erx_machine_stop_claim) is raised by one at each entry into a stop
+ *     path, before anything else that entry does: every claim, and every park that
+ *     erx_machine_stop_check decides, goes through one routine that raises it first, so
+ *     a CPU that faults after any write to its slot claims at depth two or more.
  *
  * The admitted set and the census sets are one u64, a bit for each CPU below
  * ERX_CPU_LIMIT; every `cpu` the glue passes is the kernel's number of a CPU, below
@@ -54,6 +60,7 @@ typedef enum erx_stop_claim {
 	ERX_STOP_FOLLOW,		/* another CPU leads: publish `concurrent` and park */
 	ERX_STOP_NESTED,		/* it leads and failed again: print one line and end */
 	ERX_STOP_NESTED_SILENT,		/* it failed again inside the nested stop: end, printing nothing */
+	ERX_STOP_FOLLOW_SILENT,		/* another CPU leads and this one failed again: park, publishing nothing */
 } erx_stop_claim_t;
 
 /* Where a running CPU loads the stop word. */
@@ -97,10 +104,14 @@ typedef struct erx_stop_leader {
 uint32_t	erx_machine_stop_word(uint32_t cpu);
 
 /*
- * The claim's decision over the word the swap observed, the claiming CPU and its depth,
- * the number of this CPU's entries into the stop counting this one. A CPU that finds its
- * own word leads the stop and has failed inside it: it never follows, so it never waits
- * on itself.
+ * The claim's decision over the word the swap observed, the claiming CPU and its depth.
+ * The depth counts this CPU's entries into a stop path, this one included: each claim,
+ * and each park that erx_machine_stop_check decides (at the request, a lock's wait, the
+ * admission). A CPU that finds its own word leads the stop and has failed inside it: it
+ * never follows, so it never waits on itself. A CPU that finds another's word at depth
+ * two or more has parked or followed already and failed again: it parks and publishes
+ * nothing, so its first publication stands, or its slot stays zero if the fault came
+ * before the state's store.
  */
 erx_stop_claim_t	erx_machine_stop_claim(uint32_t observed, uint32_t cpu, uint32_t depth);
 
@@ -123,9 +134,11 @@ erx_stop_admission_t	erx_machine_stop_admission_next(erx_stop_admission_t admiss
  * set, the request to every CPU of it but the leader, and the census rounds. `loaded` is
  * the admitted set after LOAD_ADMITTED and the published CPUs (a bit for each CPU whose
  * slot state erx_machine_stop_published accepts) after LOOK, and is ignored otherwise;
- * `now_ns` is the clock after ASK and LOOK. A round ends the census when every CPU asked
- * has published, or when ERX_STOP_CENSUS_MS have passed since the request, or when the
- * clock reads earlier than the request; otherwise the next step is LOOK again.
+ * `now_ns` is the clock after ASK and LOOK. A round ends the census, complete, when every
+ * CPU asked has published, which it checks first; otherwise it ends the census,
+ * incomplete, when the clock reads outside the window from the request's time up to
+ * ERX_STOP_CENSUS_MS after it, earlier than the request or the bound or more after it;
+ * otherwise the next step is LOOK again.
  */
 erx_stop_leader_t	erx_machine_stop_leader_begin(uint32_t cpu);
 erx_stop_leader_t	erx_machine_stop_leader_next(erx_stop_leader_t leader, uint64_t loaded, uint64_t now_ns);
@@ -140,7 +153,7 @@ bool	erx_machine_stop_has_regs(erx_stop_cpu_state_t state);
  * A CPU's state in the record, once the leader has reached RECORD, given the state its
  * slot held when the leader looked: the leader is `leader`; a CPU outside the census is
  * `offline`, whatever it published later; an asked CPU is the state it published, or
- * `unanswered` when it published none.
+ * `unanswered`: unpublished when the census ended.
  */
 erx_stop_cpu_state_t	erx_machine_stop_final(const erx_stop_leader_t *leader, uint32_t cpu,
 			    erx_stop_cpu_state_t published);

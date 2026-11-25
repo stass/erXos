@@ -13,7 +13,10 @@
  * behave so for the admission and the claim, which litmus tests check separately. Each
  * CPU has a fixed kind, every assignment of kinds is explored, and every interleaving of
  * the CPUs' steps and the clock's ticks is reached by a depth-first search over the
- * world's states.
+ * world's states. At most one CPU in a run faults again inside the stop: once it has
+ * parked, or just before the store that publishes its slot, so the slot stays zero. One
+ * is enough: a CPU that parks again silently writes nothing another CPU reads, and the
+ * zero slot it may leave is the one a CPU that never answers leaves too.
  */
 
 #include <inttypes.h>
@@ -29,6 +32,7 @@
 #define	MAX_CPUS	4
 #define	TICKS		2	/* the clock reads 0, 1 or 2 census bounds */
 #define	CENSUS_NS	((uint64_t)ERX_STOP_CENSUS_MS * 1000000u)
+#define	DEPTH_CAP	3	/* where a CPU's count of entries stops; one fault again reaches 2 */
 
 /* What each CPU does in an exploration. */
 enum kind {
@@ -40,12 +44,14 @@ enum kind {
 	KINDS
 };
 
-enum phase { PHASE_ADMIT, PHASE_RUN, PHASE_PARKED, PHASE_LEAD, PHASE_RECORDED };
+/* PHASE_FAULTING: it decided to park and faulted before its slot's store. */
+enum phase { PHASE_ADMIT, PHASE_RUN, PHASE_PARKED, PHASE_FAULTING, PHASE_LEAD, PHASE_RECORDED };
 
 typedef struct cpu {
 	uint8_t			kind;
 	uint8_t			phase;
 	bool			ran_on;		/* its admission said RUN */
+	uint8_t			depth;		/* its entries into a stop path, up to DEPTH_CAP */
 	uint32_t		word_seen;	/* what its admission's LOAD_WORD loaded */
 	erx_stop_admission_t	admission;
 	erx_stop_leader_t	leader;
@@ -58,6 +64,7 @@ typedef struct world {
 	uint64_t		admitted;
 	uint32_t		slot[MAX_CPUS];
 	bool			pending[MAX_CPUS];
+	bool			faulted;	/* a CPU has faulted again inside the stop */
 	int			leader;
 	cpu_t			cpu[MAX_CPUS];
 } world_t;
@@ -75,7 +82,7 @@ fail(const char *why)
 /* The world's state, packed for the visited set; every field that steps can change. */
 _Static_assert(ERX_STOP_CPU_STATE_UNANSWERED < 8, "a slot state packs in 3 bits");
 _Static_assert(ERX_STOP_STEP_RECORD < 16, "a step packs in 4 bits");
-_Static_assert(PHASE_RECORDED < 8 && MAX_CPUS <= 4 && TICKS < 4, "the key's other widths");
+_Static_assert(PHASE_RECORDED < 8 && MAX_CPUS <= 4 && TICKS < 4 && DEPTH_CAP < 4, "the key's other widths");
 typedef struct key {
 	uint64_t	w[3];
 } key_t;
@@ -84,14 +91,15 @@ static key_t
 world_key(const world_t *w)
 {
 	key_t k = { { 0, 0, 0 } };
-	uint64_t a = w->word | (w->admitted << 4) | ((uint64_t)w->ticks << 8);
+	uint64_t a = w->word | (w->admitted << 4) | ((uint64_t)w->ticks << 8) | ((uint64_t)w->faulted << 26);
 
 	for (unsigned i = 0; i < w->ncpus; i++) {
 		const cpu_t *c = &w->cpu[i];
 		uint64_t s = c->phase | ((uint64_t)c->ran_on << 3) | ((uint64_t)c->word_seen << 4) |
 		    ((uint64_t)c->admission.taken << 7) | ((uint64_t)c->admission.step << 9) |
 		    ((uint64_t)c->leader.step << 13) | ((uint64_t)(c->leader.asked & 0xf) << 17) |
-		    ((uint64_t)(c->leader.since_ns / CENSUS_NS) << 21) | ((uint64_t)c->leader.complete << 23);
+		    ((uint64_t)(c->leader.since_ns / CENSUS_NS) << 21) | ((uint64_t)c->leader.complete << 23) |
+		    ((uint64_t)c->depth << 24);
 
 		a |= ((uint64_t)w->slot[i] << (10 + 3 * i)) | ((uint64_t)w->pending[i] << (22 + i));
 		k.w[1 + i / 2] |= s << (32 * (i % 2));
@@ -140,6 +148,8 @@ publish(world_t *w, unsigned cpu, erx_stop_cpu_state_t state)
 		fail("a slot published twice");
 	if (!erx_machine_stop_published(state))
 		fail("a CPU published a state the census does not count");
+	if (w->cpu[cpu].depth >= 2)
+		fail("a CPU that faulted again inside the stop published");
 	w->slot[cpu] = state;
 	w->cpu[cpu].phase = PHASE_PARKED;
 }
@@ -192,24 +202,59 @@ check_world(const world_t *w)
 	}
 }
 
+/* One more entry into a stop path: a claim, or a park the check decided. */
 static void
-take_request(world_t *w, unsigned i)
+enter(cpu_t *c)
 {
-	erx_stop_cpu_state_t state = erx_machine_stop_check(ERX_STOP_AT_REQUEST, w->word, i);
+	if (c->depth < DEPTH_CAP)
+		c->depth++;
+}
 
-	w->pending[i] = false;
-	if (state != 0)
+/*
+ * A CPU parks with `state`: its slot's store, or, when `store` is false, a fault just
+ * before that store, so the slot stays zero and the CPU enters the stop again.
+ */
+static void
+park(world_t *w, unsigned i, erx_stop_cpu_state_t state, bool store)
+{
+	if (store) {
 		publish(w, i, state);
+		return;
+	}
+	w->faulted = true;
+	w->cpu[i].phase = PHASE_FAULTING;
+}
+
+/* A park the check decides, at `point`; nothing when the check says run on. */
+static void
+check_park(world_t *w, unsigned i, erx_stop_point_t point, bool store)
+{
+	erx_stop_cpu_state_t state = erx_machine_stop_check(point, w->word, i);
+
+	if (state == 0)
+		return;
+	enter(&w->cpu[i]);
+	park(w, i, state, store);
 }
 
 static void
-enter_stop(world_t *w, unsigned i)
+take_request(world_t *w, unsigned i, bool store)
 {
+	w->pending[i] = false;
+	check_park(w, i, ERX_STOP_AT_REQUEST, store);
+}
+
+/* An entry into the stop: a CPU's first failure, or a parked CPU's fault again. */
+static void
+enter_stop(world_t *w, unsigned i, bool store)
+{
+	cpu_t *c = &w->cpu[i];
 	uint32_t observed = w->word;
 
 	if (observed == 0)
 		w->word = erx_machine_stop_word(i);
-	switch (erx_machine_stop_claim(observed, i, 1)) {
+	enter(c);
+	switch (erx_machine_stop_claim(observed, i, c->depth)) {
 	case ERX_STOP_LEAD:
 		if (w->leader >= 0)
 			fail("two leaders");
@@ -218,17 +263,22 @@ enter_stop(world_t *w, unsigned i)
 		w->cpu[i].leader = erx_machine_stop_leader_begin(i);
 		break;
 	case ERX_STOP_FOLLOW:
-		publish(w, i, ERX_STOP_CPU_STATE_CONCURRENT);
+		park(w, i, ERX_STOP_CPU_STATE_CONCURRENT, store);
+		break;
+	case ERX_STOP_FOLLOW_SILENT:
+		if (c->depth < 2)
+			fail("a first entry parks without publishing");
+		c->phase = PHASE_PARKED;
 		break;
 	default:
-		fail("a first entry judged nested");
-		w->cpu[i].phase = PHASE_PARKED;
+		fail("a CPU that does not lead judged nested");
+		c->phase = PHASE_PARKED;
 		break;
 	}
 }
 
 static void
-admission_step(world_t *w, unsigned i)
+admission_step(world_t *w, unsigned i, bool store)
 {
 	cpu_t *c = &w->cpu[i];
 
@@ -249,7 +299,8 @@ admission_step(world_t *w, unsigned i)
 		c->ran_on = true;
 		c->phase = PHASE_RUN;
 	} else if (c->admission.step == ERX_STOP_STEP_PARK) {
-		publish(w, i, c->admission.state);
+		enter(c);
+		park(w, i, c->admission.state, store);
 	}
 }
 
@@ -295,40 +346,62 @@ leader_step(world_t *w, unsigned i)
 	}
 }
 
-/* The worlds one step after `w`: each CPU's enabled steps and the clock's tick. */
+/*
+ * The worlds one step after `w`: each CPU's enabled steps and the clock's tick. Until a
+ * CPU has faulted again, each CPU step comes in two ways: a park it makes stores its
+ * slot, or the CPU faults just before the store (a step that does not park gives the
+ * same world both ways, which the visited set drops); and a parked CPU may fault again.
+ * A CPU that faults again passes `store` as true: the claim must park it silently, and
+ * a claim that has it follow instead publishes, which publish() catches.
+ */
+#define	SUCCESSORS_MAX	(4 * MAX_CPUS + 1)
+
 static unsigned
 successors(const world_t *w, world_t *next)
 {
-	unsigned n = 0;
+	unsigned n = 0, ways = w->faulted ? 1 : 2;
 
 	for (unsigned i = 0; i < w->ncpus; i++) {
 		const cpu_t *c = &w->cpu[i];
 
 		switch (c->phase) {
 		case PHASE_ADMIT:
-			next[n] = *w;
-			admission_step(&next[n++], i);
+			for (unsigned way = 0; way < ways; way++) {
+				next[n] = *w;
+				admission_step(&next[n++], i, way == 0);
+			}
 			break;
 		case PHASE_RUN:
 			if (c->kind == KIND_LOCK_WAIT) {
-				erx_stop_cpu_state_t state = erx_machine_stop_check(ERX_STOP_AT_LOCK_WAIT, w->word, i);
-
-				if (state != 0) {
+				if (erx_machine_stop_check(ERX_STOP_AT_LOCK_WAIT, w->word, i) == 0)
+					break;
+				for (unsigned way = 0; way < ways; way++) {
 					next[n] = *w;
-					publish(&next[n++], i, state);
+					check_park(&next[n++], i, ERX_STOP_AT_LOCK_WAIT, way == 0);
 				}
 				break;
 			}
 			if (c->kind == KIND_MASKED)
 				break;
-			if (w->pending[i]) {
+			for (unsigned way = 0; w->pending[i] && way < ways; way++) {
 				next[n] = *w;
-				take_request(&next[n++], i);
+				take_request(&next[n++], i, way == 0);
 			}
-			if (c->kind == KIND_FAILER) {
+			for (unsigned way = 0; c->kind == KIND_FAILER && way < ways; way++) {
 				next[n] = *w;
-				enter_stop(&next[n++], i);
+				enter_stop(&next[n++], i, way == 0);
 			}
+			break;
+		case PHASE_PARKED:
+			if (!w->faulted) {
+				next[n] = *w;
+				next[n].faulted = true;
+				enter_stop(&next[n++], i, true);
+			}
+			break;
+		case PHASE_FAULTING:
+			next[n] = *w;
+			enter_stop(&next[n++], i, true);
 			break;
 		case PHASE_LEAD:
 			next[n] = *w;
@@ -353,7 +426,7 @@ static world_t	*stack;
 static uint64_t
 explore(unsigned ncpus, const uint8_t *kinds)
 {
-	world_t start, next[2 * MAX_CPUS + 1];
+	world_t start, next[SUCCESSORS_MAX];
 	uint64_t states = 0;
 	size_t depth = 0;
 
@@ -435,6 +508,9 @@ check_claim(void)
 			why = "a successful swap does not lead";
 		if (erx_machine_stop_claim(other, cpu, 1) != ERX_STOP_FOLLOW)
 			why = "another CPU's word does not follow";
+		for (uint32_t depth = 2; depth < 8; depth++)
+			if (erx_machine_stop_claim(other, cpu, depth) != ERX_STOP_FOLLOW_SILENT)
+				why = "a follower that faulted again publishes";
 		if (erx_machine_stop_claim(own, cpu, 2) != ERX_STOP_NESTED)
 			why = "a second entry of the leader does not print and end";
 		for (uint32_t depth = 3; depth < 8; depth++)
@@ -455,7 +531,7 @@ check_claim(void)
 static void
 check_census_clock(void)
 {
-	erx_stop_leader_t l = erx_machine_stop_leader_begin(0);
+	erx_stop_leader_t l = erx_machine_stop_leader_begin(0), end;
 	const char *why = NULL;
 
 	l = erx_machine_stop_leader_next(l, 0, 0);
@@ -465,10 +541,18 @@ check_census_clock(void)
 		why = "the census asks the wrong CPUs";
 	if (erx_machine_stop_leader_next(l, 0x2, 1000 + CENSUS_NS - 1).step != ERX_STOP_STEP_LOOK)
 		why = "the census ends before its bound";
-	if (erx_machine_stop_leader_next(l, 0x2, 1000 + CENSUS_NS).step != ERX_STOP_STEP_RECORD)
-		why = "the census outlives its bound";
-	if (erx_machine_stop_leader_next(l, 0x2, 999).step != ERX_STOP_STEP_RECORD)
-		why = "a clock read before the request keeps the census waiting";
+	end = erx_machine_stop_leader_next(l, 0x2, 1000 + CENSUS_NS);
+	if (end.step != ERX_STOP_STEP_RECORD || end.complete)
+		why = "the census outlives its bound, or calls itself complete with a CPU missing";
+	end = erx_machine_stop_leader_next(l, 0x2, 999);
+	if (end.step != ERX_STOP_STEP_RECORD || end.complete)
+		why = "a clock read before the request keeps the census waiting, or calls it complete";
+	end = erx_machine_stop_leader_next(l, 0x6, 999);
+	if (end.step != ERX_STOP_STEP_RECORD || !end.complete)
+		why = "a full census read with a clock before the request is not complete";
+	end = erx_machine_stop_leader_next(l, 0x6, 1000 + 2 * CENSUS_NS);
+	if (end.step != ERX_STOP_STEP_RECORD || !end.complete)
+		why = "a full census read past its bound is not complete";
 	l = erx_machine_stop_leader_next(l, 0xff, 1000);
 	if (l.step != ERX_STOP_STEP_RECORD || !l.complete || erx_machine_stop_leader_next(l, 0, UINT64_MAX).step != ERX_STOP_STEP_RECORD)
 		why = "a complete census does not record, or leaves RECORD";

@@ -7551,7 +7551,8 @@ the core `kernel/core/machine_stop.c`, and it never returns:
 
 1. **One stop.** The first CPU to claim the machine's stop word proceeds,
    as the stop's leader. A CPU that finds the word claimed by another CPU
-   publishes its registers as `concurrent` and parks; a nested stop on the
+   publishes its registers as `concurrent` and parks, and one that faults
+   again after it parked publishes nothing more; a nested stop on the
    leader prints one line and halts, or resets while a machine lease is
    held.
 2. **A fresh stack.** It switches to the CPU's panic stack, found through

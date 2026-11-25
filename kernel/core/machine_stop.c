@@ -48,7 +48,7 @@ erx_machine_stop_claim(uint32_t observed, uint32_t cpu, uint32_t depth)
 	if (observed == 0)
 		return (ERX_STOP_LEAD);
 	if (observed != erx_machine_stop_word(cpu))
-		return (ERX_STOP_FOLLOW);
+		return (depth >= 2 ? ERX_STOP_FOLLOW_SILENT : ERX_STOP_FOLLOW);
 	return (depth == 2 ? ERX_STOP_NESTED : ERX_STOP_NESTED_SILENT);
 }
 
@@ -95,7 +95,10 @@ erx_machine_stop_leader_begin(uint32_t cpu)
 	return ((erx_stop_leader_t){ .cpu = cpu, .step = ERX_STOP_STEP_FENCE });
 }
 
-/* Whether the census has run out of time; a clock earlier than the request ends it too. */
+/*
+ * Whether the census has run out of time: the reading lies outside its window, from the
+ * request's time up to, but not including, the bound after it.
+ */
 static bool
 census_expired(uint64_t since_ns, uint64_t now_ns)
 {

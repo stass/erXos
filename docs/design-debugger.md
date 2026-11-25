@@ -315,7 +315,7 @@ every other:
 | `waiting` | it found the stop word while it waited for a spinlock with interrupts masked | those at the wait, and the lock's address |
 | `concurrent` | it entered a stop of its own and found the stop claimed | those at its own entry |
 | `starting` | it found the stop word at its admission, before it ran anything | those at its admission |
-| `unanswered` | it was admitted and had published nothing when the bound ran out | none |
+| `unanswered` | it was in the leader's census and was unpublished when the census ended | none |
 
 `waiting` is how a deadlock shows itself: two CPUs that each name the
 lock they wait for are most of the diagnosis. `concurrent` is how a
@@ -568,10 +568,23 @@ return:
 
 1. **Claim.** It compares and swaps the machine's stop word, in the
    anchor, from zero to its own CPU number plus one. The core turns the
-   word it observed and the CPU's own depth into one of three decisions:
+   word it observed and the CPU's own depth into one of four decisions.
+   A CPU's **depth** counts its entries into a stop path, this one
+   included: each claim, and each park the core's check decides, at the
+   stop request, in a lock's wait or at the admission
+   ([Stopping every CPU](#stopping-every-cpu)). Each kernel raises the
+   depth first, in the one routine every claim and every such park goes
+   through, before the claim or any write to the slot, so a CPU that
+   parked and faults again comes back at depth two or more.
    * **lead**: the swap succeeded, and this CPU is the leader;
-   * **follow**: another CPU leads the stop, so this one publishes its
-     slot as `concurrent` and parks;
+   * **follow**: another CPU leads the stop, and this is the CPU's first
+     entry, so it publishes its slot as `concurrent` and parks;
+   * **follow silently**: another CPU leads the stop, and this CPU is at
+     depth two or more: it parked or followed already and has faulted
+     again. It parks and publishes nothing, so its first publication
+     stands. If the fault cut that publication short before the state's
+     store, the slot reads zero, and the record shows the CPU as
+     `unanswered`, or `offline` outside the census;
    * **nested**: this CPU leads the stop and has faulted again inside it.
      At depth two it prints one line, `erx: nested stop`, through the
      polled write and ends the machine; at any greater depth it ends
@@ -584,10 +597,19 @@ return:
    inter-processor interrupt, to every CPU of the set but itself, and
    wakes every CPU that sleeps in a spinlock's wait.
 4. **Census.** It waits until every CPU it asked has published its slot,
-   or `stop_census_ms` (100) have passed. Each round the core decides
-   from the CPUs asked, those published, the time and the bound: wait, or
-   finish with every CPU's state. A CPU still silent at the bound is
-   `unanswered`, and the census is then **incomplete**. A CPU outside the
+   or the clock leaves the census's window. The window runs from the
+   time of the request up to `stop_census_ms` (100) after it; a reading
+   earlier than the request, or the bound or more after it, falls
+   outside. Each round the core decides from the CPUs asked, those
+   published, the time and the window: wait, or finish with every CPU's
+   state. It looks at the slots first, so a round in which every CPU
+   asked has published ends the census **complete**, whatever the clock
+   reads. A round with a CPU missing and a reading outside the window
+   ends it **incomplete**, and each CPU unpublished when the census ended
+   is `unanswered`. The clock is a free-running counter the stop does not
+   stop; each kernel reads it in program order and it never wraps, so a
+   reading outside the window means the bound has passed or the counter
+   is broken, and either way the leader stops waiting. A CPU outside the
    set needs no second look: it parks at its own admission
    ([Stopping every CPU](#stopping-every-cpu)).
 5. **Record.** It walks its own frame pointers, at most 64 frames, each
@@ -1316,6 +1338,7 @@ kernel does; a release kernel links none
 | Failure | Detection | What remains | What the user sees |
 | --- | --- | --- | --- |
 | a fault inside the stop on the leader, the hold included | the claim's depth | the machine ends; what was printed stays printed | `erx: nested stop` at depth two; at a greater depth nothing more |
+| a CPU that parked or followed faults again | the claim's depth | its first publication; a zero slot if the fault came before the state's store | nothing on the console; the CPU's first state in the record, or `unanswered` (`offline` outside the census) when its slot stayed zero |
 | two CPUs stop at once | the stop word | one record | the other CPU as `concurrent` |
 | a CPU does not answer | the census bound | the others' slots; a report printed best effort | the CPU as `unanswered`, named in the report's first line; under QEMU or a probe, its registers from outside |
 | a CPU finishes starting after the stop | the stop word, at its admission | its slot | nothing on the console; `offline` in the record if the census had ended, and `starting` in its slot |
@@ -1390,7 +1413,7 @@ Each test is paired with the seeded fault that proves it ran.
 
 | Test | What passes | Seeded fault that must make it fail |
 | --- | --- | --- |
-| the stop core, exhaustive, on the host | for up to 4 CPUs, every interleaving of entries into the stop, request deliveries, CPUs in a lock's wait, CPUs that never unmask, CPUs at each step of their admission before, during and after the census, and the bound: exactly one leader; every CPU in exactly one state; every CPU that passes its admission is in the leader's set or parked `starting`; registers only where a slot was published; a nested stop never waits; the census ends by the bound | the claim treating its own CPU's word as another's, so a nested stop waits on itself; the census marking an asked CPU `stopped` without its slot; the admission loading the stop word before it sets its bit, so one interleaving lets a CPU run on unasked |
+| the stop core, exhaustive, on the host | for up to 4 CPUs, every interleaving of entries into the stop, request deliveries, CPUs in a lock's wait, CPUs that never unmask, CPUs at each step of their admission before, during and after the census, and the bound: exactly one leader; every CPU in exactly one state; every CPU that passes its admission is in the leader's set or parked `starting`; registers only where a slot was published; a nested stop never waits; a CPU that parked or followed and faults again, after its slot's store or just before it, publishes nothing more; the census ends by the bound | the claim treating its own CPU's word as another's, so a nested stop waits on itself; the claim following at every depth, so a CPU that faults again publishes a second time; the census marking an asked CPU `stopped` without its slot; the admission loading the stop word before it sets its bit, so one interleaving lets a CPU run on unasked |
 | the admission's ordering, a litmus test at the milestone gate | under the architecture's memory model, never both at once: the leader's load missing a CPU's bit, and that CPU's load missing the stop word | the barrier removed from either side |
 | the hold's machine, exhaustive, on the host | over every state and event: a reply only to a line that passed every check; no reply to a damaged line; `range` for every range that leaves the map, over maps of one to 16 ranges and ranges that straddle, touch and wrap; the hold ends at `end` and at the silence bound and at no other time | the range check comparing the range's start alone; the silence clock restarted by a damaged line |
 | the readable-RAM map, on the host | over boot maps the test builds: a virtual entry that spans every `ram` range changes nothing; an `excluded` entry inside a `ram` range splits it, rounded outward; overlapping and touching `ram` ranges join; a map of 17 ranges, an entry whose end overflows and a `used` entry that leaves the result are each refused, never cut; and over random maps, every page of the result lies in a `ram` entry and in no `excluded` one, and the result is sorted, disjoint and whole pages | the subtraction skipped: the interior exclusion is readable; a 17th range dropped without a refusal |
