@@ -15,7 +15,8 @@ A row is in one of three states:
 * pending, a login whose one outstanding step, the check, the session's start
   or the line's mint, is named by its step id; it keeps the facet's reply
   address, the state to return to on a failed check, none or the cookie, and
-  the session once it has started;
+  the session once it has started, which a root_line row never has: it mints
+  the line of the console's root session, which it borrows and never stops;
 * logged in, holding the session, which is final: the row goes only with its
   owner.
 
@@ -55,7 +56,8 @@ the manifest, which makes its terminals its own.
 -type request() :: {cookie, {ok, binary()} | error}
                  | {key_ok, User :: binary(), KeyBlob :: binary()}
                  | {login_key, User :: binary(), KeyBlob :: binary(), verified | not_verified}
-                 | {login_passphrase, User :: binary(), Passphrase :: binary(), Peer :: binary()}.
+                 | {login_passphrase, User :: binary(), Passphrase :: binary(), Peer :: binary()}
+                 | {root_line, {ok, Console :: pos_integer()} | none}.
 
 -doc """
 What the core reacts to: a request of an owner through a grant, the answer
@@ -73,8 +75,9 @@ Principal}` or `not_found`; a start `{ok, Session}` or `{error, Reason}`; a mint
 What erx_login carries out: a reply to the facet; a monitor or its removal for
 an owner; a grace to arm; the passphrase check, at the grant's terminal; the
 lookup of a key among a principal's login keys; a key_ok query; a session's
-start, ending with the owner and the facet; a line's mint; a session's stop;
-and a log line of a closed reason.
+start, ending with the owner and the facet; a line's mint, of a session the
+row started or of the console's root session, `{console, Id}`; a session's
+stop; and a log line of a closed reason.
 """.
 -type effect() :: {reply, from(), term()}
                 | {monitor, pid()}
@@ -85,7 +88,8 @@ and a log line of a closed reason.
                 | {find_key, step_id(), User :: binary(), KeyBlob :: binary()}
                 | {key_ok, from(), User :: binary(), KeyBlob :: binary()}
                 | {start, step_id(), Principal :: pos_integer(), erx_domain:start()}
-                | {mint, step_id(), Line :: atom(), Session :: term(), Grantee :: pos_integer(), Facet :: pid()}
+                | {mint, step_id(), Line :: atom(), Session :: term() | {console, pos_integer()},
+                   Grantee :: pos_integer(), Facet :: pid()}
                 | {stop, Session :: term()}
                 | {log, start_refused | mint_refused, Reason :: term()}.
 
@@ -93,7 +97,7 @@ and a log line of a closed reason.
 -type row() :: #{state := cookie, grant := grant(), cookie := binary(), grace := step_id()}
              | #{state := pending, grant := grant(), phase := checking | starting | minting,
                  step := step_id(), from := from(), back := back(), session => term()}
-             | #{state := logged_in, grant := grant(), session := term()}.
+             | #{state := logged_in, grant := grant(), session := term() | none}.
 
 -opaque table() :: #{rows := #{pid() => row()}, counts := #{pid() => pos_integer()},
                      next := non_neg_integer()}.
@@ -169,7 +173,25 @@ request(Owner, Row, #{holder := Holder} = Grant, From, {login_passphrase, User, 
              Monitor ++ [{check, Step, User, Passphrase, network, {Holder, Peer}}]};
         full ->
             {T, [{reply, From, {error, unavailable}}]}
-    end.
+    end;
+%% root_line (docs/design-login.md, "Operations"): the line of the session the console
+%% logged root in to, which the service read before the request reached the core, minted
+%% for the grantee with the facet as its opening, so it ends with the grant. No session
+%% starts and none is kept, so a failed mint stops nothing.
+request(Owner, none, Grant, From, {root_line, {ok, Console}}, T) ->
+    case taken(Owner, none, Grant, T) of
+        {ok, T1, Monitor} ->
+            #{line := Line, grantee := Grantee, facet := Facet} = Grant,
+            {Step, T2} = next_step(T1),
+            {put_row(Owner, pending(Grant, minting, Step, From, none), T2),
+             Monitor ++ [{mint, Step, Line, {console, Console}, Grantee, Facet}]};
+        full ->
+            {T, [{reply, From, {error, unavailable}}]}
+    end;
+request(_Owner, none, _Grant, From, {root_line, none}, T) ->
+    {T, [{reply, From, {error, unavailable}}]};
+request(_Owner, #{state := cookie}, _Grant, From, {root_line, _Console}, T) ->
+    {T, [{reply, From, {error, badarg}}]}.
 
 %% The answer to a pending row's one outstanding step.
 answer(Owner, #{phase := checking, grant := Grant} = Row, Answer, T)
@@ -199,11 +221,14 @@ answer(Owner, #{phase := starting, grant := Grant} = Row, {ok, Session}, T) ->
      [{mint, Step, Line, Session, Grantee, Facet}]};
 answer(Owner, #{phase := starting, from := From}, Refused, T) ->
     {free(Owner, T), [{log, start_refused, Refused}, {demonitor, Owner}, {reply, From, {error, unavailable}}]};
-answer(Owner, #{phase := minting, from := From, grant := Grant, session := Session}, {ok, Line}, T) ->
-    {put_row(Owner, #{state => logged_in, grant => Grant, session => Session}, T), [{reply, From, {ok, Line}}]};
-answer(Owner, #{phase := minting, from := From, session := Session}, Refused, T) ->
+answer(Owner, #{phase := minting, from := From, grant := Grant} = Row, {ok, Line}, T) ->
+    {put_row(Owner, #{state => logged_in, grant => Grant, session => maps:get(session, Row, none)}, T),
+     [{reply, From, {ok, Line}}]};
+%% Only a session the row started is stopped; a root_line row's is the console's.
+answer(Owner, #{phase := minting, from := From} = Row, Refused, T) ->
+    Stop = [{stop, Session} || #{session := Session} <- [Row]],
     {free(Owner, T),
-     [{log, mint_refused, Refused}, {stop, Session}, {demonitor, Owner}, {reply, From, {error, unavailable}}]}.
+     [{log, mint_refused, Refused}] ++ Stop ++ [{demonitor, Owner}, {reply, From, {error, unavailable}}]}.
 
 %% The session's start: its ends_with names the owner and the facet, and a
 %% web_line's session has the web display (docs/design-login.md, "Operations").

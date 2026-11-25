@@ -1738,13 +1738,22 @@ class ManifestDomainsTest < Minitest::Test
     end
   end
 
-  # The login front ends of docs/design-login.md, "Who holds it", and two domains that are
-  # none: the Bluetooth domain and another, each a configured domain of its name.
-  LOGIN_DOMAINS = %w[ssh web btconsole bluetooth alpha].freeze
+  # The configured login front ends of docs/design-login.md, "Who holds it", and two
+  # domains that are none: the Bluetooth domain and another, each a configured domain of
+  # its name.
+  LOGIN_DOMAINS = %w[ssh web bluetooth alpha].freeze
+  # bleuart's principal, whose session template is the third front end. Only the build
+  # check reads it, so it needs no domain quota.
+  BLEUART = "principal bleuart\n  memory 1048576\n  grant @share.users\n  domains 0\n  names 1\n" \
+            "  default_limits @limits.native\n  ceiling_limits @limits.native\n"
 
-  # The login service, served by server, and the domains LOGIN_DOMAINS names.
-  def with_login(server: 'system')
-    with_domains(*LOGIN_DOMAINS.map { |name| self.class.domain(name) }) + self.class.session +
+  # The login service, served by server, the domains LOGIN_DOMAINS names, root's
+  # template and bleuart's; or, with bleuart_domain, a configured domain named bleuart in
+  # place of its principal and template, since no domain shares a principal's name.
+  def with_login(server: 'system', bleuart_domain: false)
+    domains = LOGIN_DOMAINS + (bleuart_domain ? %w[bleuart] : [])
+    bleuart = bleuart_domain ? '' : BLEUART + self.class.session('bleuart')
+    with_domains(*domains.map { |name| self.class.domain(name) }) + bleuart + self.class.session +
       "service login\n  server #{server}\n  interface login\n"
   end
 
@@ -1760,12 +1769,12 @@ class ManifestDomainsTest < Minitest::Test
   SSH_LOGIN = { grantee: '@domain.ssh', operations: 'cookie,key_ok,login_key,login_passphrase', line: 'tty_line',
                 logins: 128 }.freeze
   WEB_LOGIN = { grantee: '@domain.web', operations: 'login_passphrase', line: 'web_line', logins: 16 }.freeze
-  BTCONSOLE_LOGIN = { grantee: '@domain.btconsole', operations: 'login_passphrase', line: 'tty_line', logins: 8 }.freeze
+  BLEUART_LOGIN = { grantee: '@session.bleuart', operations: 'root_line', line: 'tty_line', logins: 1 }.freeze
 
   # login_grant (docs/design-login.md, "Who holds it"): each front end's row, as the
   # table states it, packs, the three together and each alone.
   def test_a_login_grant_to_each_front_end_packs
-    holders = [SSH_LOGIN, WEB_LOGIN, BTCONSOLE_LOGIN]
+    holders = [SSH_LOGIN, WEB_LOGIN, BLEUART_LOGIN]
     view = @codec.open('manifest', admit(with_login + holders.each_with_index.map { |row, at| login_grant("lg#{at}", **row) }.join).bytes)
     assert_equal 3, rows(view, 'facets').count { |row| view.string(row.fetch('name')).start_with?('lg') }
     holders.each { |row| admit(with_login + login_grant('lg', **row)) }
@@ -1773,19 +1782,30 @@ class ManifestDomainsTest < Minitest::Test
 
   # Each seeded violation differs from an accepted row in one thing and is refused: the
   # service served by a configured domain; a row to a domain the table does not list (the
-  # Bluetooth domain, another) or to a session template; a row whose line, logins or
-  # operations (one more, one fewer) differ from its holder's; and two rows for one
-  # holder. A row to the system domain is refused by normalize_facets's rule that the
-  # system domain takes no facet of its own service, before the login check.
+  # Bluetooth domain, another), to a configured domain that shares bleuart's name, or to
+  # another session template; a row whose line, logins or operations (one more, one
+  # fewer) differ from its holder's; and two rows for one holder. A row to the system
+  # domain is refused by normalize_facets's rule that the system domain takes no facet of
+  # its own service, before the login check.
   def test_a_login_grant_is_held_to_its_front_end_s_row
     web = ->(**change) { login_grant('lg', **WEB_LOGIN, **change) }
     ssh = ->(**change) { login_grant('lg', **SSH_LOGIN, **change) }
+    bleuart = ->(**change) { login_grant('lg', **BLEUART_LOGIN, **change) }
     {
       ['service.server', with_login(server: '@domain.alpha') + web.call] => /service login is served by a configured domain/,
       ['facet.grantee', with_login + web.call(grantee: '@domain.bluetooth')] =>
         /login grant lg is granted to domain bluetooth, which docs\/design-login.md lists as no login front end/,
       ['facet.grantee', with_login + web.call(grantee: '@domain.alpha')] => /login grant lg is granted to domain alpha/,
-      ['facet.grantee', with_login + web.call(grantee: '@session.system')] => /login grant lg is granted to a session template/,
+      ['facet.grantee', with_login + web.call(grantee: '@session.system')] =>
+        /login grant lg is granted to session template system, which docs\/design-login.md lists as no login front end/,
+      ['facet.grantee', with_login(bleuart_domain: true) + bleuart.call(grantee: '@domain.bleuart')] =>
+        /login grant lg is granted to domain bleuart, which docs\/design-login.md lists as no login front end/,
+      ['facet.parameter', with_login + bleuart.call(logins: 2)] =>
+        /login grant lg to session template bleuart allows 2 logins, where bleuart's login row allows 1/,
+      ['facet.operations', with_login + web.call(operations: 'login_passphrase,root_line')] =>
+        /login grant lg to domain web lists root_line, which web's login row does not/,
+      ['facet.operations', with_login + bleuart.call(operations: 'login_passphrase')] =>
+        /login grant lg to session template bleuart lists login_passphrase, which bleuart's login row does not/,
       ['facet.grantee', with_login + web.call(grantee: 'system')] => /the system domain takes no facet of its own service/,
       ['facet.parameter', with_login + web.call(line: 'tty_line')] =>
         /login grant lg to domain web mints tty_line, where web's login row mints web_line/,

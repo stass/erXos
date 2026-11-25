@@ -14,7 +14,8 @@ bounds, before the service sees it:
 * `cookie`;
 * `{key_ok, User, KeyBlob}`;
 * `{login_key, User, Exchange, Alg, KeyBlob, Sig, Peer}`;
-* `{login_passphrase, User, Passphrase, Peer}`.
+* `{login_passphrase, User, Passphrase, Peer}`;
+* `root_line`.
 
 User is a principal's name, a system identifier, which erx_ident:new/1 alone
 checks (docs/design-system.md, "Identifiers"); Passphrase 1 to
@@ -48,13 +49,16 @@ queue are kept out of a crash dump.
 -type request() :: cookie
                  | {key_ok, binary(), binary()}
                  | {login_key, binary(), binary(), binary(), binary(), binary(), binary()}
-                 | {login_passphrase, binary(), binary(), binary()}.
+                 | {login_passphrase, binary(), binary(), binary()}
+                 | root_line.
 -export_type([request/0]).
 
 -doc "Request when the interface takes it, or `{error, badarg}`.".
 -spec decode(term()) -> {ok, request()} | {error, badarg}.
 decode(cookie) ->
     {ok, cookie};
+decode(root_line) ->
+    {ok, root_line};
 decode({key_ok, User, KeyBlob} = Request) when ?IS_LOGIN_BLOB(KeyBlob) ->
     user(User, Request);
 decode({login_key, User, Exchange, Alg, KeyBlob, Sig, Peer} = Request)
@@ -74,10 +78,10 @@ user(User, Request) ->
     end.
 
 -doc "The operation of a request decode/1 admits; error for any other term.".
--spec operation(term()) -> {ok, cookie | key_ok | login_key | login_passphrase} | error.
+-spec operation(term()) -> {ok, cookie | key_ok | login_key | login_passphrase | root_line} | error.
 operation(Request) ->
     case decode(Request) of
-        {ok, cookie} -> {ok, cookie};
+        {ok, Bare} when is_atom(Bare) -> {ok, Bare};
         {ok, Decoded} -> {ok, element(1, Decoded)};
         {error, badarg} -> error
     end.

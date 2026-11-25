@@ -32,7 +32,8 @@ options names one, a module whose check_request/4 sends the check and returns
 its request id. The service has no key login's verifier and reads no
 principal's login keys, so key_ok and login_key answer `unavailable`.
 `domain`, the module that starts, mints and stops sessions, is erx_domain
-unless a test names a stand-in.
+unless a test names a stand-in, and `console`, whose login_session/0 answers
+the session the console logged root in to for root_line, is erx_console.
 """.
 -behaviour(gen_server).
 
@@ -41,7 +42,7 @@ unless a test names a stand-in.
 
 -include("erx_login.hrl").
 
--type options() :: #{checker => module() | none, domain => module()}.
+-type options() :: #{checker => module() | none, domain => module(), console => module()}.
 
 -doc "Starts the service with no checker and erx_domain as its domain edge.".
 -spec start_link() -> gen_server:start_ret().
@@ -59,6 +60,7 @@ init(Options) ->
     {ok, #{core => erx_login_core:new(),
            checker => maps:get(checker, Options, none),
            domain => maps:get(domain, Options, erx_domain),
+           console => maps:get(console, Options, erx_console),
            monitors => #{},
            requests => gen_server:reqids_new()}}.
 
@@ -67,6 +69,8 @@ handle_call({login, {login_passphrase, User, Passphrase, Peer}, Caller, Grant}, 
     {noreply, core({request, Caller, Grant, From, {login_passphrase, User, Passphrase, Peer}}, S)};
 handle_call({login, cookie, Caller, Grant}, From, S) ->
     {noreply, core({request, Caller, Grant, From, {cookie, entropy()}}, S)};
+handle_call({login, root_line, Caller, Grant}, From, #{console := Console} = S) ->
+    {noreply, core({request, Caller, Grant, From, {root_line, console_session(Console)}}, S)};
 handle_call({login, _KeyRequest, _Caller, _Grant}, _From, S) ->
     {reply, {error, unavailable}, S};
 handle_call(_Request, _From, S) ->
@@ -107,6 +111,13 @@ view(_State) ->
 answered({reply, Reply}) -> Reply;
 answered({error, {_Reason, _Server}}) -> {error, failed}.
 
+%% The session the console logged root in to, or none while it holds none or is not
+%% running (docs/design-login.md, "Operations").
+console_session(Console) ->
+    try Console:login_session()
+    catch exit:_ -> none
+    end.
+
 entropy() ->
     try {ok, erx_bytes:entropy(?ERX_LOGIN_COOKIE_BYTES)}
     catch error:_ -> error
@@ -135,13 +146,18 @@ carry({check, Step, User, Passphrase, network, Terminal}, #{checker := Checker} 
 carry({start, Step, Principal, Start}, #{domain := Domain} = S) ->
     requested(Domain:start_session_request(Principal, Start), Step, S);
 carry({mint, Step, Line, Session, Grantee, Facet}, #{domain := Domain} = S) ->
-    requested(Domain:line_request(Line, Domain:id(Session), Grantee, Facet), Step, S);
+    requested(Domain:line_request(Line, session_id(Session, Domain), Grantee, Facet), Step, S);
 carry({stop, Session}, #{domain := Domain} = S) ->
     ok = Domain:stop(Session, shutdown),
     S;
 carry({log, What, Reason}, S) ->
     logger:error("erx_login: ~ts: ~0P", [What, Reason, 8]),
     S.
+
+%% The id of the session a line is minted of: the console's root session, which a
+%% root_line row borrows, or the session the row started.
+session_id({console, Id}, _Domain) -> Id;
+session_id(Session, Domain) -> Domain:id(Session).
 
 requested(Request, Step, #{requests := Requests} = S) ->
     S#{requests := gen_server:reqids_add(Request, Step, Requests)}.

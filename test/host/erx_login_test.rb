@@ -69,7 +69,15 @@ class ErxLoginTest < Minitest::Test
              catching_case: 'each_permanent_child_restarts_once_within_the_period_test'),
     Seed.new(fault: 'a user name checked by a rule of its own that admits any name', path: FACET,
              anchor: 'case erx_ident:new(User) of', replacement: 'case erx_ident:new(<<"a">>) of',
-             catching_case: 'a_user_name_is_a_system_identifier_test')
+             catching_case: 'a_user_name_is_a_system_identifier_test'),
+    Seed.new(fault: "root_line's caller named as the opening, so the line outlives the grant", path: CORE,
+             anchor: '{mint, Step, Line, {console, Console}, Grantee, Facet}',
+             replacement: '{mint, Step, Line, {console, Console}, Grantee, Owner}',
+             catching_case: 'root_line_mints_the_console_s_session_with_the_facet_as_opening_test'),
+    Seed.new(fault: "a failed root_line mint taken as a login's, which stops the console's session", path: CORE,
+             anchor: 'Stop = [{stop, Session} || #{session := Session} <- [Row]],',
+             replacement: 'Stop = [{stop, maps:get(session, Row, console)}],',
+             catching_case: 'root_minting answered')
   ].freeze
 
   def test_the_cases_pass

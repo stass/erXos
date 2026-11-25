@@ -6,7 +6,10 @@
 # principal's login keys hold a public key; login_key and login_passphrase log in and,
 # on a match, answer the line of a new session of the principal, which ends with the
 # calling process and with the facet (docs/design-login.md, "A session ends with what it
-# was started for"). A facet row names two parameters: line, the session line the
+# was started for"). root_line, which only a development manifest may list, answers the
+# line of the session the console logged root in to, minted for the grantee, with no
+# credential and no session started (docs/design-login.md, "Operations"). A facet row
+# names two parameters: line, the session line the
 # grant's logins mint, one of the served_by session interfaces (?ERX_LINES), and logins,
 # the grant's bound on rows of the login service's table. login_grant holds every row to
 # docs/design-login.md's table of front ends ("Who holds it"), an allow-list. The grant's
@@ -19,6 +22,7 @@ service login 22
   operation key_ok 2
   operation login_key 3
   operation login_passphrase 4
+  operation root_line 5
   parameter line 1 identifier one bytes 31 checked_by login_grant
   parameter logins 2 u64 one range 1 128 checked_by login_grant
   quantity max_request 131072

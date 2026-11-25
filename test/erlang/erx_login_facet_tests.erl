@@ -194,3 +194,10 @@ another_front_end_sees_no_passphrase_test_() ->
         ?assertEqual(checker_crashed, Reason),
         ?assertEqual(nomatch, binary:match(term_to_binary(Reason), ?SENTINEL))
     end).
+
+%% root_line takes no argument: the bare atom is its request, and any argument is badarg.
+root_line_is_an_operation_of_no_argument_test() ->
+    ?assertEqual({ok, root_line}, erx_login_facet:decode(root_line)),
+    ?assertEqual({ok, root_line}, erx_login_facet:operation(root_line)),
+    ?assertEqual({error, badarg}, erx_login_facet:decode({root_line, <<"root">>})),
+    ?assertEqual(error, erx_login_facet:operation({root_line})).

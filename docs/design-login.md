@@ -72,8 +72,8 @@ the principal service directly ([design-live.md](design-live.md#the-console)).
 * **What is built.** The facet, its service and its core
   (`erlang/apps/erx_domain/src/erx_login_facet.erl`, `erx_login.erl`,
   `erx_login_core.erl`) and the manifest check's table of holders
-  (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), with the four
-  operations below and not `root_line`; the development manifest
+  (`tools/lib/erx/manifest.rb`, `LOGIN_HOLDERS`), with the five
+  operations below; the development manifest
   declares the service and no row grants it
   (`config/manifest/development.txt`). No passphrase checker is built,
   so `login_passphrase` answers `unavailable`. SSH runs stage 1 of

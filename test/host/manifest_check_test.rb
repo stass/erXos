@@ -1754,6 +1754,18 @@ class ManifestCheckTest < Minitest::Test
     refused(Erx::Manifest::Unsupported, 'machine.flags', source, context(build_kind: 'release'), message: /M11/)
   end
 
+  # docs/design-login.md, "Who holds it": a release manifest's row listing root_line is
+  # refused as such, ahead of the release build's refusal, so no release image hands
+  # anyone the console's root session.
+  def test_a_release_manifest_grants_no_root_line
+    source = @source.sub('flags development', 'flags none') +
+             "facet lg\n  grantee @domain.alpha\n  service @service.login\n  operations root_line\n" \
+             "  max_request 131072\n  in_flight 8\n  reductions 100000\n  period_ns 1000000000\n  max_heap_size 65536\n" \
+             "  parameter line \"tty_line\"\n  parameter logins 1\n"
+    refused(Erx::Manifest::Invalid, 'facet.operations', source, context(build_kind: 'release'),
+            message: /facet lg lists root_line, which a release manifest grants no one/)
+  end
+
   def test_a_build_kind_conflict_is_still_refused
     refused(Erx::Manifest::Invalid, 'machine.flags', @source, context(build_kind: 'release'),
             message: /configuration conflicts with checked build kind/)

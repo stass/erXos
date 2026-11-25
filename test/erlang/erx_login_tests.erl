@@ -9,7 +9,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([start_session_request/2, line_request/4, id/1, stop/2, check_request/4, log/2]).
+-export([start_session_request/2, line_request/4, id/1, stop/2, check_request/4, log/2, login_session/0]).
 
 -define(SENTINEL, <<"sentinel-passphrase-7f3a">>).
 
@@ -19,6 +19,8 @@ start_session_request(Principal, Start) -> gen_server:send_request(stub, {start,
 line_request(Line, Session, Grantee, Facet) -> gen_server:send_request(stub, {mint, Line, Session, Grantee, Facet}).
 id({erx_domain, Id, _Node, _Pid}) -> Id.
 stop(Session, _Reason) -> stub ! {stopped, Session}, ok.
+%% The console's root session as its case sets it, {ok, Id} or none.
+login_session() -> gen_server:call(stub, {console}).
 %% A checker that crashes the service while its last message and its state hold the
 %% passphrase; the crash reason itself names none (docs/design-login.md, "Secrets").
 check_request(_User, <<"crash", _/binary>>, network, _Terminal) -> error(checker_crashed);
@@ -99,6 +101,32 @@ one_login_per_owner_test_() ->
         ?assertEqual({error, badarg}, login(Owner, cookie)),
         ?assertEqual(1, length([S || {start, _, _} = S <- seen()]))
     end).
+
+%% root_line (docs/design-login.md, "Operations"): the console's root session's line,
+%% minted for the grantee with the facet as the opening; no session started.
+root_line_mints_the_console_s_root_session_s_line_test_() ->
+    with((matching())#{console => {ok, 5}}, #{console => ?MODULE}, fun(_Login) ->
+        Owner = connection(),
+        ?assertEqual({ok, list_to_pid("<0.77.0>")}, login(Owner, root_line)),
+        Facet = self(),
+        ?assertEqual([{console}, {mint, tty_line, 5, 7, Facet}], seen()),
+        ?assertEqual({error, badarg}, login(Owner, root_line))
+    end).
+
+%% With no console session root_line answers unavailable and keeps no row; a mint the
+%% domain service refuses answers unavailable and stops nothing, the console's session
+%% least of all.
+root_line_without_a_session_or_a_mint_is_unavailable_test_() ->
+    [with((matching())#{console => none}, #{console => ?MODULE}, fun(Login) ->
+         ?assertEqual({error, unavailable}, login(connection(), root_line)),
+         ?assertEqual({error, unavailable}, login(connection(), root_line)),
+         ?assertMatch({monitors, []}, process_info(Login, monitors))
+     end),
+     with((matching())#{console => {ok, 5}, mint => {error, no_line}}, #{console => ?MODULE}, fun(Login) ->
+         ?assertEqual({error, unavailable}, login(connection(), root_line)),
+         ?assertEqual([{console}, {mint, tty_line, 5, 7, self()}], seen()),
+         ?assertMatch({monitors, []}, process_info(Login, monitors))
+     end)].
 
 a_refused_mint_stops_the_session_it_started_test_() ->
     with((matching())#{mint => {error, no_line}}, #{checker => ?MODULE}, fun(_Login) ->

@@ -25,10 +25,12 @@ req(Request) -> {request, owner(), grant(), ?FROM, Request}.
 
 -define(PASS, {login_passphrase, <<"alice">>, <<"secret">>, <<"peer">>}).
 -define(KEY(Verdict), {login_key, <<"alice">>, <<"blob">>, Verdict}).
+-define(ROOT, {root_line, {ok, 5}}).
 
 %% Each state the table names, reached by the core's own steps from an empty table.
 states() ->
-    [none, cookie, checking_from_none, checking_from_cookie, passphrase_from_cookie, starting, minting, logged_in].
+    [none, cookie, checking_from_none, checking_from_cookie, passphrase_from_cookie, starting, minting, logged_in,
+     root_minting, root_logged_in].
 
 reach(State) ->
     lists:foldl(fun(Event, T) -> element(1, erx_login_core:step(Event, T)) end,
@@ -43,7 +45,10 @@ path(passphrase_from_cookie) -> path(cookie) ++ [req(?PASS)];
 %% the mint 3 along the key path.
 path(starting) -> path(checking_from_cookie) ++ [{answer, {step, 1}, {found, 42}}];
 path(minting) -> path(starting) ++ [{answer, {step, 2}, {ok, session}}];
-path(logged_in) -> path(minting) ++ [{answer, {step, 3}, {ok, line}}].
+path(logged_in) -> path(minting) ++ [{answer, {step, 3}, {ok, line}}];
+%% root_line's mint is step 0, of the console's root session, domain 5.
+path(root_minting) -> [req(?ROOT)];
+path(root_logged_in) -> path(root_minting) ++ [{answer, {step, 0}, {ok, line}}].
 
 %% The step id outstanding in each pending state, and the grace of a cookie row.
 outstanding(checking_from_none) -> {step, 0};
@@ -51,17 +56,18 @@ outstanding(checking_from_cookie) -> {step, 1};
 outstanding(passphrase_from_cookie) -> {step, 1};
 outstanding(starting) -> {step, 2};
 outstanding(minting) -> {step, 3};
+outstanding(root_minting) -> {step, 0};
 outstanding(_State) -> none.
 
 requests() ->
     [{cookie, {ok, ?COOKIE}}, {cookie, error}, {key_ok, <<"alice">>, <<"blob">>},
-     ?KEY(verified), ?KEY(not_verified), ?PASS].
+     ?KEY(verified), ?KEY(not_verified), ?PASS, ?ROOT, {root_line, none}].
 
 %% The design's table for a request: {next state of the owner's row, effect kinds, answer}.
 expected_request(S, _Request) when S =:= checking_from_none; S =:= checking_from_cookie; S =:= passphrase_from_cookie;
-                                   S =:= starting; S =:= minting ->
+                                   S =:= starting; S =:= minting; S =:= root_minting ->
     {pending, [reply], {error, badarg}};
-expected_request(logged_in, _Request) -> {logged_in, [reply], {error, badarg}};
+expected_request(S, _Request) when S =:= logged_in; S =:= root_logged_in -> {logged_in, [reply], {error, badarg}};
 expected_request(none, {cookie, {ok, _}}) -> {cookie, [monitor, arm_grace, reply], {ok, ?COOKIE}};
 expected_request(cookie, {cookie, {ok, _}}) -> {cookie, [arm_grace, reply], {ok, ?COOKIE}};
 expected_request(none, {cookie, error}) -> {none, [reply], {error, unavailable}};
@@ -71,7 +77,10 @@ expected_request(none, {login_key, _, _, _}) -> {none, [reply], {error, no_match
 expected_request(cookie, {login_key, _, _, not_verified}) -> {cookie, [reply], {error, no_match}};
 expected_request(cookie, {login_key, _, _, verified}) -> {pending, [find_key], none};
 expected_request(none, {login_passphrase, _, _, _}) -> {pending, [monitor, check], none};
-expected_request(cookie, {login_passphrase, _, _, _}) -> {pending, [check], none}.
+expected_request(cookie, {login_passphrase, _, _, _}) -> {pending, [check], none};
+expected_request(none, {root_line, {ok, _}}) -> {pending, [monitor, mint], none};
+expected_request(none, {root_line, none}) -> {none, [reply], {error, unavailable}};
+expected_request(cookie, {root_line, _}) -> {cookie, [reply], {error, badarg}}.
 
 the_table_holds_for_every_state_and_request_test_() ->
     [{lists:flatten(io_lib:format("~p x ~p", [S, element(1, R)])),
@@ -100,6 +109,10 @@ answers(starting) ->
 answers(minting) ->
     [{{ok, line}, {logged_in, [reply], {ok, line}}},
      {{error, no_line}, {none, [log, stop, demonitor, reply], {error, unavailable}}}];
+%% A failed mint of the console's session stops nothing: root_line started none.
+answers(root_minting) ->
+    [{{ok, line}, {logged_in, [reply], {ok, line}}},
+     {{error, no_line}, {none, [log, demonitor, reply], {error, unavailable}}}];
 answers(_State) -> [].
 
 every_pending_step_answers_as_the_table_says_test_() ->
@@ -195,6 +208,20 @@ the_start_ends_with_the_owner_and_the_facet_test() ->
     {T1, _} = erx_login_core:step({request, owner(), Web, ?FROM, ?PASS}, erx_login_core:new()),
     {_T2, [{start, _, 42, WebStart}]} = erx_login_core:step({answer, {step, 0}, {match, 42}}, T1),
     ?assertEqual(#{ends_with => [owner(), facet()], display => web}, WebStart).
+
+%% root_line mints the grant's line of the console's root session for the grantee, with
+%% the facet, not the caller, as the opening, so the line ends with the grant.
+root_line_mints_the_console_s_session_with_the_facet_as_opening_test() ->
+    Facet = facet(),
+    Owner = owner(),
+    ?assertMatch({_T, [{monitor, Owner}, {mint, {step, 0}, tty_line, {console, 5}, 7, Facet}]},
+                 erx_login_core:step(req(?ROOT), erx_login_core:new())).
+
+%% With no console session root_line keeps no row, so the owner's next call is answered.
+root_line_with_no_console_session_keeps_no_row_test() ->
+    {T, [{reply, ?FROM, {error, unavailable}}]} = erx_login_core:step(req({root_line, none}), erx_login_core:new()),
+    ?assertEqual(#{}, erx_login_core:rows(T)),
+    ?assertMatch({_, [{monitor, _}, {mint, _, _, _, _, _}]}, erx_login_core:step(req(?ROOT), T)).
 
 the_mint_names_the_grant_s_line_and_grantee_test() ->
     {_T, [{mint, _Step, tty_line, session, 7, Facet}]} =

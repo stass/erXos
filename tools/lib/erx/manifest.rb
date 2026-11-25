@@ -685,8 +685,21 @@ module Erx
                 'context.platform.msi_frame')
       end
 
+      # No release image hands anyone the console's root session (docs/design-login.md,
+      # "Who holds it"): a release manifest's facet row listing root_line, the login
+      # operation only a development build's console session answers, is refused, whatever
+      # the rest of the manifest says and ahead of the release build's other refusals.
+      def check_release_root_line
+        listed = records('facet').find do |record|
+          token = one(record, 'operations')
+          !token.quoted && token.value.split(',').include?('root_line')
+        end
+        invalid("facet #{listed.name} lists root_line, which a release manifest grants no one", 'facet.operations') if listed
+      end
+
       def check_mode(development:, partial:)
         unless development
+          check_release_root_line
           raise Unsupported.new('a release build needs the confinement check that M11 brings', field: 'machine.flags')
         end
         REFUSED.each { |kind, reason| unsupported(reason, kind) unless records(kind).empty? }
@@ -2674,22 +2687,26 @@ module Erx
       # lists, by name, and its bound on rows of the login service's table.
       LoginHolder = Data.define(:line, :operations, :logins)
 
-      # The login facet's holders, by configured domain name: the table of
-      # docs/design-login.md, "Who holds it", the allow-list check_login_grants holds every
-      # login row to.
+      # The login facet's holders, by the grantee's kind and name (grantee_identity): the
+      # table of docs/design-login.md, "Who holds it", the allow-list check_login_grants
+      # holds every login row to. The SSH and web front ends are configured domains;
+      # bleuart is the session template of the principal of its name
+      # (docs/design-bluetooth.md, "The console"), so a configured domain named bleuart is
+      # no holder.
       LOGIN_HOLDERS = {
-        'ssh' => LoginHolder.new(line: 'tty_line', operations: %w[cookie key_ok login_key login_passphrase].freeze, logins: 128),
-        'web' => LoginHolder.new(line: 'web_line', operations: %w[login_passphrase].freeze, logins: 16),
-        'btconsole' => LoginHolder.new(line: 'tty_line', operations: %w[login_passphrase].freeze, logins: 8)
+        %w[domain ssh] => LoginHolder.new(line: 'tty_line', operations: %w[cookie key_ok login_key login_passphrase].freeze,
+                                          logins: 128),
+        %w[domain web] => LoginHolder.new(line: 'web_line', operations: %w[login_passphrase].freeze, logins: 16),
+        %w[session bleuart] => LoginHolder.new(line: 'tty_line', operations: %w[root_line].freeze, logins: 1)
       }.freeze
 
       # login_grant (docs/design-login.md, "Who holds it"). Every service whose checker is
       # login_grant is served by the system domain, whose login service checks what a front
       # end forwards, so no configured domain serves the login interface and receives a
-      # person's passphrase or key as a login. Each grant of one goes to a configured domain LOGIN_HOLDERS names, at most one
+      # person's passphrase or key as a login. Each grant of one goes to a grantee LOGIN_HOLDERS names, at most one
       # row a holder, with exactly its entry's line, operations and logins and the
       # interface's max_request and in_flight: no row on the
-      # system domain, a session template, the Bluetooth domain or any other domain. The
+      # system domain, another session template, the Bluetooth domain or any other domain. The
       # entries' lines are served_by session interfaces, so no rule checks line against
       # ?ERX_LINES. facets, values and operations are parallel arrays: each facet row, its
       # resolved parameters by key and its operation numbers (facet_operations).
@@ -2702,27 +2719,30 @@ module Erx
           next unless checked.call(service)
 
           holder = fetch_login_holder(row, tables)
-          named = "login grant #{row.fetch('name')} to domain #{holder}"
+          named = "login grant #{row.fetch('name')} to #{login_holder_named(holder)}"
           check_login_row(named, holder, given, login_operation_names(service, numbers))
           check_login_quantities(named, row, service)
           holder
         end
         twice = holders.tally.find { |_holder, count| count > 1 }
-        invalid("domain #{twice.first} holds more than one login grant", 'facet.grantee') if twice
+        invalid("#{login_holder_named(twice.first)} holds more than one login grant", 'facet.grantee') if twice
       end
 
-      # The configured domain a login row is granted to, by name, which LOGIN_HOLDERS lists,
+      # The grantee a login row is granted to, by kind and name, which LOGIN_HOLDERS lists,
       # or the row is refused. normalize_facets refuses a grant to the system domain first,
       # as it does every facet of a service the system domain serves.
       def fetch_login_holder(row, tables)
         named = "login grant #{row.fetch('name')}"
-        invalid("#{named} is granted to a session template or the system domain, which is no login front end", 'facet.grantee') unless
-          row.fetch('grantee_kind') == grantee_kind('domain')
-        holder = domain_name(tables, row.fetch('grantee'))
-        invalid("#{named} is granted to domain #{holder}, which docs/design-login.md lists as no login front end", 'facet.grantee') unless
-          LOGIN_HOLDERS.key?(holder)
+        invalid("#{named} is granted to the apps row's template, which is no login front end", 'facet.grantee') if
+          app_template?(row, tables)
+        holder = grantee_identity(row, tables)
+        invalid("#{named} is granted to #{login_holder_named(holder)}, which docs/design-login.md lists as no login front end",
+                'facet.grantee') unless LOGIN_HOLDERS.key?(holder)
         holder
       end
+
+      # A holder's kind and name as a refusal names it.
+      def login_holder_named((kind, name)) = kind == 'domain' ? "domain #{name}" : "session template #{name}"
 
       # A login row's operation numbers by the names its interface declares for them.
       def login_operation_names(service, numbers)
@@ -2734,14 +2754,15 @@ module Erx
       # and logins.
       def check_login_row(named, holder, given, names)
         entry = LOGIN_HOLDERS.fetch(holder)
-        invalid("#{named} mints #{given.fetch('line')}, where #{holder}'s login row mints #{entry.line}", 'facet.parameter') unless
+        whose = holder.last
+        invalid("#{named} mints #{given.fetch('line')}, where #{whose}'s login row mints #{entry.line}", 'facet.parameter') unless
           given.fetch('line') == entry.line
-        invalid("#{named} allows #{given.fetch('logins')} logins, where #{holder}'s login row allows #{entry.logins}", 'facet.parameter') unless
+        invalid("#{named} allows #{given.fetch('logins')} logins, where #{whose}'s login row allows #{entry.logins}", 'facet.parameter') unless
           given.fetch('logins') == entry.logins
         extra = names - entry.operations
-        invalid("#{named} lists #{extra.join(', ')}, which #{holder}'s login row does not", 'facet.operations') unless extra.empty?
+        invalid("#{named} lists #{extra.join(', ')}, which #{whose}'s login row does not", 'facet.operations') unless extra.empty?
         missing = entry.operations - names
-        invalid("#{named} omits #{missing.join(', ')}, which #{holder}'s login row lists", 'facet.operations') unless missing.empty?
+        invalid("#{named} omits #{missing.join(', ')}, which #{whose}'s login row lists", 'facet.operations') unless missing.empty?
       end
 
       # A login row's max_request and in_flight against the login interface's quantities
@@ -2919,14 +2940,20 @@ module Erx
       def grantee_release(facet, tables)
         return DomainStartup::APP_TEMPLATE.release if app_template?(facet, tables)
 
-        grantee = facet.fetch('grantee')
-        kind, name = case facet.fetch('grantee_kind')
-                     when grantee_kind('domain') then ['domain', tables.fetch('domains').fetch(grantee).fetch('name')]
-                     when grantee_kind('session')
-                       principal = tables.fetch('sessions').fetch(grantee).fetch('principal')
-                       ['session', tables.fetch('principals').fetch(principal).fetch('name')]
-                     end
+        kind, name = grantee_identity(facet, tables)
         release_name(records(kind).find { |record| record.name == name }, field: "#{kind}.release")
+      end
+
+      # A facet's grantee, a configured domain or a principal's session template, as the
+      # record kind and name its manifest row has: ['domain', NAME] or ['session',
+      # PRINCIPAL]. Neither the system domain nor the apps row's template is one.
+      def grantee_identity(facet, tables)
+        grantee = facet.fetch('grantee')
+        case facet.fetch('grantee_kind')
+        when grantee_kind('domain') then ['domain', tables.fetch('domains').fetch(grantee).fetch('name')]
+        when grantee_kind('session')
+          ['session', tables.fetch('principals').fetch(tables.fetch('sessions').fetch(grantee).fetch('principal')).fetch('name')]
+        end
       end
 
       # Whether a facet row may set front: a development build's row granting the display to
