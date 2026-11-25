@@ -34,10 +34,8 @@ mask. The pure core, record/5 and listing/4, takes the answers as data.
 
 -include("generated/erx_abi.hrl").
 
-%% The system domain's id, its node's creation (docs/design-domains.md: no
-%% node has a creation below 4): its group, budget and threads are the ones
-%% the root can name (docs/design-fiasco.md, "Reporting kernel objects").
--define(SYSTEM_DOMAIN, 4).
+%% The system domain's group, budget and threads, under ERX_SYSTEM_DOMAIN_ID, are the
+%% ones the root can name (docs/design-fiasco.md, "Reporting kernel objects").
 %% No machine has more CPUs, and no space more threads, than a listing reads.
 -define(MAX_CPUS, 64).
 -define(MAX_THREADS, 128).
@@ -46,7 +44,7 @@ mask. The pure core, record/5 and listing/4, takes the answers as data.
 
 -doc "The id of the domain whose group, budget and threads these records describe.".
 -spec system_domain() -> non_neg_integer().
-system_domain() -> ?SYSTEM_DOMAIN.
+system_domain() -> ?ERX_SYSTEM_DOMAIN_ID.
 
 %%% Effects: the calls, made on the inspector's own capabilities.
 
@@ -81,7 +79,7 @@ for group/1, which the Fiasco backend refuses as it does any other budget handle
 budget(Domain) ->
     domain_object(budget, Domain).
 
-domain_object(Kind, ?SYSTEM_DOMAIN = Domain) ->
+domain_object(Kind, ?ERX_SYSTEM_DOMAIN_ID = Domain) ->
     collect(Kind, [domains, Domain, Kind], erx_object_info:info(Kind, ?ERX_CAP_SELF, 0));
 domain_object(Kind, Domain) ->
     collect(Kind, [domains, Domain, Kind], erx_domain_lib:info(Kind, Domain)).
@@ -139,7 +137,7 @@ entry(cpu, Index, _Answer) ->
     {ok, [cpus, Index], Index};
 entry(thread, _Index, {ok, Bytes}) ->
     case erx_schema:decode_report(thread, Bytes) of
-        {ok, _Reported, #{id := Id}} -> {ok, [domains, ?SYSTEM_DOMAIN, threads, Id], Id};
+        {ok, _Reported, #{id := Id}} -> {ok, [domains, ?ERX_SYSTEM_DOMAIN_ID, threads, Id], Id};
         error -> error
     end.
 

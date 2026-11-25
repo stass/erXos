@@ -27,7 +27,6 @@
  * the page, and starts ERTS on it. Everything host-specific about a start is here.
  */
 
-#define HOSTED_DOMAIN_ID	4
 #define MCPU_PER_CPU		1000
 #define NS_PER_S		UINT64_C(1000000000)
 
@@ -201,7 +200,7 @@ main(int argc, char **argv)
 	wall_offset_init();
 
 	const erx_boot_inputs_t inputs = {
-		.domain_id = HOSTED_DOMAIN_ID,
+		.domain_id = ERX_SYSTEM_DOMAIN_ID,
 		.flags = ERX_BOOT_ROOT,
 		.pack_flags = erx_release_pack_flags(),
 		.capacity_mcpu = MCPU_PER_CPU * cpus,

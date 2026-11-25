@@ -649,6 +649,11 @@ layout erx_boot_connection wire_le 8 64
   field domain_pid_serial u32 52
   field ctl_slots u32 56
   padding 60 4
+# The system domain's id, the domain_id of its boot information. A domain's id is its
+# node's creation, and stock ERTS gives no node a creation below 4 (erlang:setnode/2), so
+# the system domain is 4 and the domain service hands out the ids above it
+# (docs/design-domains.md, "Domain ids, pids and references").
+limit system_domain_id u32 4
 layout erx_boot_info wire_le 8 296
   field version u32 0
   field abi_version u32 4

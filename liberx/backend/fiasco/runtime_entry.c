@@ -42,13 +42,6 @@
 #include "liberx/backend/fiasco/vc_mbox.h"
 #include "liberx/backend/runtime_entry.h"
 
-/*
- * The system domain's id is 4 because a domain's id is its node's creation and stock
- * ERTS gives no node a creation below 4 (docs/design-domains.md, "Domain ids, pids and
- * references"). It is a rule of the domain design, not an ABI constant: the hosted entry
- * names the same number.
- */
-#define SYSTEM_DOMAIN_ID	4
 #define MCPU_PER_CPU		1000
 
 int	main(int, char **, char **);
@@ -171,7 +164,7 @@ erx_fiasco_program_start(const erx_boot_handoff_view_t *handoff, const erx_manif
 		if (reason != NULL)
 			return (reason);
 	}
-	inputs.domain_id = SYSTEM_DOMAIN_ID;
+	inputs.domain_id = ERX_SYSTEM_DOMAIN_ID;
 	inputs.flags = ERX_BOOT_ROOT | (boot_args->det ? ERX_BOOT_DET : 0);
 	inputs.pack_flags = handoff->flags;
 	inputs.capacity_mcpu = MCPU_PER_CPU * (uint32_t)__builtin_popcountll(cpuset);

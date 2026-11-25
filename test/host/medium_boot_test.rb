@@ -195,10 +195,7 @@ class MediumBootTest < Minitest::Test
   def test_the_domain_cell_names_the_archives_indexes_and_must_see_every_end
     helpers, expression = Boot.domain_lib_lines(DOMAIN, grant: GRANT)
     assert_match(/\ADlSpec=\#\{id=>17,name=><<"cell">>,principal=>1,runtime=>41,release=>7,release_files=>30,memory=>167772160,outer=>1048576,/, helpers)
-    # The library refuses an id at or below the system domain's, so the service's ids
-    # start above it; the shell's own calls of the library are refused.
-    header = File.read(File.expand_path('../../include/erx/dom.h', __dir__))
-    assert_equal Integer(header[/^#define\s+ERX_DOM_SYSTEM_ID\s+([0-9]+)u$/, 1], 10), Boot::SYSTEM_DOMAIN_ID
+    # The shell's own calls of the library are refused.
     assert_includes expression, 'DlNotCreate=Lib:create(Spec)'
     assert_includes expression, 'DlNotService=Lib:configured(17,0,self())'
     assert_includes expression, 'DlNotStop=Lib:stop(5,0)'

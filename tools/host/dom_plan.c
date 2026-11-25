@@ -37,7 +37,7 @@
  * order, are what the archive will hold at the entry's start (an image's
  * manifest), which erx_dom_boot_image judges as the boot does. The order
  * lines give every configured row once, in boot order, and the domain at
- * place n (from 0) has id ERX_DOM_SYSTEM_ID + 1 + n. An introduce line
+ * place n (from 0) has id ERX_SYSTEM_DOMAIN_ID + 1 + n. An introduce line
  * names two places; each party reads a side of its own profile's lane
  * size, as the boot sizes it. A session line names a session template, the
  * system principal's for root's console session or the template of an
@@ -293,8 +293,8 @@ main(int argc, char **argv)
 	 * The order lines name every configured row once, and every session
 	 * line a template; each domain and session has an id of its own.
 	 */
-	if (in.norder != lib.view.nconfigured || in.nsessions > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID ||
-	    in.norder > ERX_DOM_ID_MAX - ERX_DOM_SYSTEM_ID - in.nsessions ||
+	if (in.norder != lib.view.nconfigured || in.nsessions > ERX_DOM_ID_MAX - ERX_SYSTEM_DOMAIN_ID ||
+	    in.norder > ERX_DOM_ID_MAX - ERX_SYSTEM_DOMAIN_ID - in.nsessions ||
 	    (planned = calloc((size_t)in.norder + 1, sizeof(*planned))) == NULL)
 		return (2);
 	for (uint32_t place = 0; place < in.norder; place++) {
@@ -311,7 +311,7 @@ main(int argc, char **argv)
 
 	for (uint32_t place = 0; place < in.norder; place++) {
 		row = in.order[place];
-		status = erx_dom_plan_configured(&lib.view, ERX_DOM_SYSTEM_ID + 1 + place, row, ERX_DOM_PID_NONE, &plan);
+		status = erx_dom_plan_configured(&lib.view, ERX_SYSTEM_DOMAIN_ID + 1 + place, row, ERX_DOM_PID_NONE, &plan);
 		if (status == ERX_OK)
 			status = erx_dom_plan_record(&lib.view, &plan);
 		printf("domain %" PRIu32 " %d\n", place, (int)status);
@@ -319,14 +319,14 @@ main(int argc, char **argv)
 	for (uint32_t index = 0; index < in.npairs; index++) {
 		a = in.pairs[index].a;
 		b = in.pairs[index].b;
-		status = erx_dom_plan_connect(&lib.view, ERX_DOM_SYSTEM_ID + 1 + a, ERX_DOM_SYSTEM_ID + 1 + b,
+		status = erx_dom_plan_connect(&lib.view, ERX_SYSTEM_DOMAIN_ID + 1 + a, ERX_SYSTEM_DOMAIN_ID + 1 + b,
 		    lib.view.configured[in.order[a]].lane, lib.view.configured[in.order[b]].lane, 0, 0, &link);
 		if (status == ERX_OK)
 			status = erx_dom_link_record(&lib.view, &link);
 		printf("introduce %" PRIu32 " %d\n", index, (int)status);
 	}
 	for (uint32_t index = 0; index < in.nsessions; index++) {
-		id = ERX_DOM_SYSTEM_ID + 1 + in.norder + index;
+		id = ERX_SYSTEM_DOMAIN_ID + 1 + in.norder + index;
 		status = erx_dom_plan_session(&lib.view, id, in.sessions[index], DOM_PLAN_SESSION_NAME,
 		    sizeof(DOM_PLAN_SESSION_NAME) - 1, NULL, 0, ERX_DOM_PID_NONE, &plan);
 		if (status == ERX_OK)

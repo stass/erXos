@@ -7,6 +7,7 @@ require 'socket'
 require_relative 'code_load'
 require_relative 'error'
 require_relative 'etf'
+require_relative 'generated_abi'
 require_relative 'hostlink_client'
 
 module Erx
@@ -25,7 +26,7 @@ module Erx
   module ReloadGuest
     SECONDS = 300
     SUBJECT = 'erx_reload_subject'
-    SYSTEM_DOMAIN = 4
+    SYSTEM_DOMAIN = ABI::Generated.constant('system_domain_id')
     # The versions of the subject a run loads: the first and the probe's 32 reloads.
     VERSIONS = 33
     PROBE_SOURCE = 'test/fixtures/hostlink/erx_reload_probe.erl'

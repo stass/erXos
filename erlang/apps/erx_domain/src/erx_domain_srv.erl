@@ -160,8 +160,6 @@ reach it only through facets, which arrive with the connections.
 %% window opens (throttle/2).
 -define(MINT_LOG_BURST, 10).
 -define(MINT_LOG_WINDOW, 60000).
-%% The system domain's id, a grantee whose registry is the service's own runtime's.
--define(SYSTEM_ID, 4).
 %% A domain that has not ended, whose domain pid stands for it (erx_domain_core:ended/5).
 -define(IS_LIVE(Life), (Life =:= built orelse Life =:= running orelse Life =:= ready orelse Life =:= stopping)).
 
@@ -1891,7 +1889,7 @@ is_ready(Id, Core) ->
 %% (docs/design-system.md, "Facets a configured domain serves"): the system principal's
 %% for the system domain, and for any other the one its record names, a configured row's
 %% or a session's template's. The core mints only for a grantee that is ready.
-principal_name(?SYSTEM_ID, #{principals := #{system := System}} = State) ->
+principal_name(?ERX_SYSTEM_DOMAIN_ID, #{principals := #{system := System}} = State) ->
     user_name(System, State);
 principal_name(GranteeId, #{core := Core} = State) ->
     {ok, #{principal := Principal}} = erx_domain_core:fetch(GranteeId, Core),
@@ -1932,7 +1930,7 @@ mint_act({mint, Tag, Mint, Name, GranteeId, Limits}, #{core := Core, mint_config
     {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Owner(Mint), Core),
     Pid ! {Ref, mint, Mint, {erx_facet_mint, Tag, Name, GranteeId, principal_name(GranteeId, State), Limits}},
     State;
-mint_act({install, Tag, ?SYSTEM_ID, Name, Facet}, #{agent := Agent} = State) ->
+mint_act({install, Tag, ?ERX_SYSTEM_DOMAIN_ID, Name, Facet}, #{agent := Agent} = State) ->
     %% The system domain's agent writes its registry, as every domain's does, and answers
     %% the processes waiting for an installation before it answers here, so the
     %% installation is acknowledged only once its waiters have heard of it. A grant to
@@ -1942,7 +1940,7 @@ mint_act({install, Tag, ?SYSTEM_ID, Name, Facet}, #{agent := Agent} = State) ->
         ok -> ok;
         {error, Reason} -> error({connection_agent, Reason})
     end,
-    mints({installed, ?SYSTEM_ID, Tag}, State);
+    mints({installed, ?ERX_SYSTEM_DOMAIN_ID, Tag}, State);
 mint_act({install, Tag, GranteeId, Name, Facet}, #{core := Core} = State) ->
     %% The core installs only in a grantee that is ready and has not ended.
     {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(GranteeId, Core),

@@ -51,10 +51,9 @@ receiver, and the shell's printer of its stream, one escaped line per entry.
 -export([await_start/3]).
 -export_type([spec/0, request/0, scope/0, domain_id/0, window/0]).
 
-%% The system domain's id, its node's creation (docs/design-domains.md: no node has a
-%% creation below 4). In Phase 1 every process this runtime sees is the system
-%% domain's.
--define(SYSTEM_DOMAIN, 4).
+%% In Phase 1 every process this runtime sees is the system domain's,
+%% ERX_SYSTEM_DOMAIN_ID.
+-include("generated/erx_abi.hrl").
 -define(MAX_SELECT, 16).
 -define(MAX_DOMAIN, 16#ffffffff).
 -define(TICK_MS, 10).
@@ -331,13 +330,13 @@ in_scope(_Domain, all) -> true;
 in_scope(Domain, Domains) -> lists:member(Domain, Domains).
 
 %% The domains this runtime can trace: in Phase 1, its own.
-domains() -> [?SYSTEM_DOMAIN].
+domains() -> [?ERX_SYSTEM_DOMAIN_ID].
 
 %% A live process of this runtime is the system domain's; any other pid names nothing
 %% this runtime can trace.
 domain_of(Pid) when node(Pid) =:= node() ->
     case is_process_alive(Pid) of
-        true -> {ok, ?SYSTEM_DOMAIN};
+        true -> {ok, ?ERX_SYSTEM_DOMAIN_ID};
         false -> error
     end;
 domain_of(_Pid) ->
@@ -399,7 +398,7 @@ trace_init(#{select := Select, kernel := Kernel}, Target, Caller, Tag) ->
                         true -> [backend | [{kernel, Cpu} || Cpu <- lists:seq(0, cpus() - 1)]];
                         false -> []
                     end,
-            Erts = [{erts, ?SYSTEM_DOMAIN} || Select =/= []],
+            Erts = [{erts, ?ERX_SYSTEM_DOMAIN_ID} || Select =/= []],
             Expect = #{ref => Ref, timer => none, receiver => erlang:monitor(process, Receiver),
                        session => Session =/= none},
             Trace0 = #trace{expect = Expect, receiver = Receiver, session = Session,
@@ -442,7 +441,7 @@ open_session(Select) ->
     end.
 
 select(Session, Pid) when is_pid(Pid) -> trace:process(Session, Pid, true, ?FLAGS);
-select(Session, ?SYSTEM_DOMAIN) -> trace:process(Session, all, true, ?FLAGS).
+select(Session, ?ERX_SYSTEM_DOMAIN_ID) -> trace:process(Session, all, true, ?FLAGS).
 
 %% The kernel's CPUs, one ring each, as ERTS counts them.
 cpus() ->
@@ -484,7 +483,7 @@ step(Trace0) ->
     #trace{batch = {_Count, Batch}} = Trace1 = read_rings(Trace0, Now, ?READS_PER_ROUND),
     Messages = lists:reverse(Batch),
     #trace{window = Window, merger = Merger} = Trace2 =
-        merge(Trace1#trace{batch = {0, []}}, fun(M) -> erx_tracer:erts(M, ?SYSTEM_DOMAIN, Messages, Pair, Now) end),
+        merge(Trace1#trace{batch = {0, []}}, fun(M) -> erx_tracer:erts(M, ?ERX_SYSTEM_DOMAIN_ID, Messages, Pair, Now) end),
     {Window1, Merger1, Late} = report(Window, Merger, Now),
     Trace3 = send(Trace2#trace{window = Window1, merger = Merger1}, Late),
     merge(Trace3, fun(M) -> erx_tracer:release(M, Now) end).

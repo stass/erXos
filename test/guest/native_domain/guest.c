@@ -187,7 +187,7 @@ typedef enum run_action {
 	RUN_ORIGINS,	/* starts it, then plays the system party of the origins case */
 	RUN_CRASH	/* starts it, waits, then reads its crash area (crash_read) */
 } run_action_t;
-static uint32_t next_id = ERX_DOM_SYSTEM_ID + 1;
+static uint32_t next_id = ERX_SYSTEM_DOMAIN_ID + 1;
 
 static void
 say(const char *text)

@@ -38,8 +38,6 @@
  */
 
 #define ERX_DOM_SPEC_VERSION	1u
-/* The system domain's id; every other domain's id is above it. */
-#define ERX_DOM_SYSTEM_ID	4u
 /* The last id the domain service's counter hands out. */
 #define ERX_DOM_ID_MAX		UINT32_C(0xfffffffe)
 /* A domain name, an identifier (docs/design-system.md, "Identifiers"). */
@@ -209,7 +207,7 @@ typedef struct erx_dom_remains {
 	uint64_t	bytes;		/* the outer budget's, given back at its destroy */
 } erx_dom_remains_t;
 
-/* One connection row; a is ERX_DOM_SYSTEM_ID for a system connection. */
+/* One connection row; a is ERX_SYSTEM_DOMAIN_ID for a system connection. */
 typedef struct erx_dom_connection {
 	uint32_t	number;		/* 0 for a free row */
 	uint32_t	a, b;		/* domain ids */

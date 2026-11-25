@@ -45,7 +45,6 @@ state is a bug of the caller and fails with a badmatch.
 
 -include("generated/erx_abi.hrl").
 
--define(SYSTEM_ID, 4).
 -define(ID_MAX, 16#ffffffff).
 -define(NAMES_QUOTA, 64).
 %% The prefix of the system principal's session names.
@@ -111,7 +110,7 @@ state is a bug of the caller and fails with a badmatch.
 -doc "The state of a boot whose machine is named Host, an identifier.".
 -spec new(binary()) -> state().
 new(Host) when is_binary(Host) ->
-    #{host => Host, next_id => ?SYSTEM_ID + 1, names => #{}, bound => #{}, domains => #{},
+    #{host => Host, next_id => ?ERX_SYSTEM_DOMAIN_ID + 1, names => #{}, bound => #{}, domains => #{},
       deaths => #{}, restarts => #{}}.
 
 -spec host(state()) -> binary().

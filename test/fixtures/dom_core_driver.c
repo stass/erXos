@@ -469,7 +469,7 @@ running(uint32_t slot, uint32_t kind, erx_grant_t grant)
 #define MUTATION(name, body)						\
 	static void name(erx_dom_spec_t *s) { (void)s; body; }
 MUTATION(m_id_zero, s->id = 0)
-MUTATION(m_id_system, s->id = ERX_DOM_SYSTEM_ID)
+MUTATION(m_id_system, s->id = ERX_SYSTEM_DOMAIN_ID)
 MUTATION(m_id_last, s->id = UINT32_C(0xffffffff))
 MUTATION(m_id_in_use, domains[2].id = s->id)
 MUTATION(m_unknown_flag, s->flags |= 0x80)

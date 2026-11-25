@@ -86,9 +86,9 @@ reset_view(void)
 	domains[3] = (erx_dom_t){ .id = 8, .state = ERX_DOM_BUILDING,
 	    .budget = { 801 }, .outer = { 802 }, .connections = 1, .labels = 1 };
 	connections[0] = (erx_dom_connection_t){ .number = 1,
-	    .a = ERX_DOM_SYSTEM_ID, .b = 5, .budget_b = { 511 } };
+	    .a = ERX_SYSTEM_DOMAIN_ID, .b = 5, .budget_b = { 511 } };
 	connections[1] = (erx_dom_connection_t){ .number = 2,
-	    .a = ERX_DOM_SYSTEM_ID, .b = 6, .budget_b = { 611 } };
+	    .a = ERX_SYSTEM_DOMAIN_ID, .b = 6, .budget_b = { 611 } };
 	view = (erx_dom_view_t){ .domains = domains, .max_domains = NDOMAINS,
 	    .connections = connections, .max_connections = NCONNECTIONS,
 	    .remains = remains, .max_remains = 2 * NCONNECTIONS,
@@ -561,7 +561,7 @@ connect_cases(void)
 	connect_case("connect_ok", 5, 6, 65536, 16384);
 	connect_case("connect_same", 5, 5, 65536, 65536);
 	connect_case("connect_unknown", 5, 9, 65536, 65536);
-	connect_case("connect_system", ERX_DOM_SYSTEM_ID, 5, 65536, 65536);
+	connect_case("connect_system", ERX_SYSTEM_DOMAIN_ID, 5, 65536, 65536);
 	connect_case("connect_ended", 5, 7, 65536, 65536);
 	connect_case("connect_building", 8, 5, 65536, 65536);
 	connect_case("connect_lane_odd", 5, 6, 65537, 65536);
@@ -614,7 +614,7 @@ teardown_cases(void)
 	teardown_case("retire_zero", erx_dom_plan_retire(&view, 0, &teardown),
 	    &teardown);
 	connections[2] = (erx_dom_connection_t){ .number = 9,
-	    .a = ERX_DOM_SYSTEM_ID, .b = 7 };
+	    .a = ERX_SYSTEM_DOMAIN_ID, .b = 7 };
 	teardown_case("retire_busy_system",
 	    erx_dom_plan_retire(&view, 7, &teardown), &teardown);
 	remains_cases();
@@ -642,7 +642,7 @@ end_cases(void)
 	record_case("fault_ended", 7, ERX_FAULT_MEMORY, 77, 0);
 	record_case("exit_building", 8, ERX_FAULT_EXIT, 77, 0);
 	record_case("exit_unknown", 9, ERX_FAULT_EXIT, 77, 0);
-	record_case("exit_system", ERX_DOM_SYSTEM_ID, ERX_FAULT_EXIT, 77, 0);
+	record_case("exit_system", ERX_SYSTEM_DOMAIN_ID, ERX_FAULT_EXIT, 77, 0);
 	record_case("exit_wide_label", (UINT64_C(1) << 32) + 5, ERX_FAULT_EXIT,
 	    77, 0);
 
@@ -1077,7 +1077,7 @@ device_seeded(void)
 		plan.steps[plan.nsteps++].target = ERX_DOM_OBJ_DEV_RESOURCE + 1;
 	});
 	SEED("dev_dma_and_memory", plan.steps[plan.nsteps++] = dma);
-	SEED("dev_system_holder", plan.holder = ERX_DOM_SYSTEM_ID);
+	SEED("dev_system_holder", plan.holder = ERX_SYSTEM_DOMAIN_ID);
 	SEED("dev_too_many", plan.nsteps = ERX_DOM_UNIT_STEPS + 1);
 	SEED("dev_line_unmade", plan.devices[0].line = 1);
 	SEED("dev_offset_outside", plan.devices[0].offset = 0x1000);

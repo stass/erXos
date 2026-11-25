@@ -74,14 +74,17 @@ live(Name, Core0) ->
     {stopped, _, Core3} = erx_domain_core:ended(Id, {stopped, 0}, none, 0, Core2),
     {Domain, Core3}.
 
-%% D1: ids start above the system domain's 4, increase, and are never reused,
-%% whether a creation succeeded or was refused.
+%% D1: ids start above the system domain's, the ABI's ERX_SYSTEM_DOMAIN_ID, increase,
+%% and are never reused, whether a creation succeeded or was refused.
 ids_increase_test() ->
+    First = ?ERX_SYSTEM_DOMAIN_ID + 1,
     Core0 = erx_domain_core:new(<<"erxos">>),
-    {#{id := 5, node := 'web@erxos'}, Core1} = live(<<"web">>, Core0),
-    {#{id := 6}, Core2} = admit(<<"web">>, 1, request, Core1),
-    Core3 = erx_domain_core:failed(6, Core2),
-    {#{id := 7, node := 'web@erxos'}, _} = admit(<<"web">>, 1, request, Core3).
+    {#{id := First, node := 'web@erxos'}, Core1} = live(<<"web">>, Core0),
+    Second = First + 1,
+    {#{id := Second}, Core2} = admit(<<"web">>, 1, request, Core1),
+    Core3 = erx_domain_core:failed(Second, Core2),
+    Third = First + 2,
+    {#{id := Third, node := 'web@erxos'}, _} = admit(<<"web">>, 1, request, Core3).
 
 names_test() ->
     Core0 = erx_domain_core:new(<<"erxos">>),

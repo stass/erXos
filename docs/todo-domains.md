@@ -114,11 +114,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   row does not take NULL and [Handles](design-fiasco.md#handles) sends a value a call does not take to the
   lookup, which answers `ERX_ESTALE`. Drop the pre-check on both backends and expect `ERX_ESTALE`, so the rule
   holds without an exception.
+* [Low] the system domain's id in Erlang tests: thirteen modules under `test/erlang` (`erx_ble_facet_tests` among
+  them) write `-define(SYSTEM, 4)`, and `erx_inspect_facet_tests` and `erx_inspect_worker_tests` write `{pid, 4, ...}`,
+  copies of the ABI row `system_domain_id` the code they test compares with. Include `generated/erx_abi.hrl`, as
+  `erx_domain_tests` does, and use `?ERX_SYSTEM_DOMAIN_ID`.
 
-* [Low] the system domain's id (`include/erx/dom.h` `ERX_DOM_SYSTEM_ID`): written by hand in C and copied into Ruby
-  as `MediumBoot::SYSTEM_DOMAIN_ID` (kept in step by `medium_boot_test.rb`), `CodeCommands::SYSTEM_DOMAIN`,
-  `reload_guest.rb` and `ProductionImage::Run::TRACE_DOMAIN`. Make it a row of `abi/erx_abi.txt`, generate the
-  define, and read it in Ruby through `Erx::ABI`, so no copy can drift.
 * [Medium] facet parameters, the `member` kind (`liberx/system/dom_boot_view.c` `boot_parameter`,
   `otp/erts/emulator/nifs/erxos/erx_domain_terms.c` `parameter_term`): no test drives a packed member row through the
   C view and the NIF. Extend `test/host/facet_parameters_test.rb` and `test/erlang/erx_facet_parameters_tests.erl`
@@ -361,7 +361,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   host planner builds the boot view from the packed manifest with the root's own builder,
   but three things still rest on two sides. (1) The boot order and the introductions come
   from Ruby's rows as plan lines, not from the packed `boot_order` and `introductions`
-  tables, and a domain's id (`ERX_DOM_SYSTEM_ID + 1 +` its place) and each party's lane
+  tables, and a domain's id (`ERX_SYSTEM_DOMAIN_ID + 1 +` its place) and each party's lane
   side are the planner's rule alone; put the walk of both tables in one pure function the
   boot sequencer will call too. (2) Each file's `offset` and `size` are 0 on the host while
   the root reads the entry's span, so a release slice's `STEP_MAP` size differs between

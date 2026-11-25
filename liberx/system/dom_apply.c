@@ -574,7 +574,7 @@ apply_bootinfo(apply_t *apply)
 		    .side = { .raw = apply->installed[ERX_DOM_OBJ_DOM_SIDE] },
 		    .peer_side = { .raw = apply->installed[ERX_DOM_OBJ_SYS_SIDE] },
 		    .peer_bell = { .raw = apply->installed[ERX_DOM_OBJ_SYS_BELL] },
-		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_DOM_SYSTEM_ID,
+		    .label = ERX_DOM_SYSTEM_LABEL, .peer = ERX_SYSTEM_DOMAIN_ID,
 		    .out_size = spec->system_lane, .in_size = plan->reader,
 		    .domain_pid_number = spec->domain_pid.number, .domain_pid_serial = spec->domain_pid.serial,
 		    .ctl_slots = spec->connections };
@@ -984,7 +984,7 @@ teardown_set(erx_dom_lib_t *lib, const erx_dom_teardown_t *teardown, handle_set_
 	*slot = teardown->index;
 	if (teardown->kind == ERX_DOM_DISCONNECT) {
 		row = &lib->view.connections[teardown->index];
-		if (row->a != ERX_DOM_SYSTEM_ID) {
+		if (row->a != ERX_SYSTEM_DOMAIN_ID) {
 			*set = set_of_link(&lib->links[teardown->index]);
 			*slot = lib->view.max_domains;
 			return (true);

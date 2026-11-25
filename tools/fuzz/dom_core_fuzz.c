@@ -348,7 +348,7 @@ fuzz_life(const fuzz_input_t *in, bool connect)
 		    fuzz_naming(conns, in->a) == 0)
 			abort();
 		for (uint32_t index = 0; index < 3; index++)
-			if (conns[index].number != 0 && conns[index].a == ERX_DOM_SYSTEM_ID &&
+			if (conns[index].number != 0 && conns[index].a == ERX_SYSTEM_DOMAIN_ID &&
 			    conns[index].b == in->a)
 				abort();
 	}
@@ -464,7 +464,7 @@ fuzz_check(const fuzz_input_t *in, uint32_t origin, const erx_dom_view_t *view,
 	    spec->name_len != in->req.name_len ||
 	    memcmp(spec->name, in->req.name, spec->name_len) != 0))
 		abort();
-	if (spec->id <= ERX_DOM_SYSTEM_ID || plan->slot >= view->max_domains ||
+	if (spec->id <= ERX_SYSTEM_DOMAIN_ID || plan->slot >= view->max_domains ||
 	    view->domains[plan->slot].id != 0)
 		abort();
 	for (uint32_t index = 0; index < view->max_domains; index++)
@@ -512,7 +512,7 @@ fuzz_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	if (plan->connection_row != ERX_DOM_NO_ROW) {
 		row = &view->connections[plan->connection_row];
 		if (row->number != plan->connection ||
-		    row->a != ERX_DOM_SYSTEM_ID || row->b != spec->id)
+		    row->a != ERX_SYSTEM_DOMAIN_ID || row->b != spec->id)
 			abort();
 	}
 }
@@ -554,7 +554,7 @@ LLVMFuzzerTestOneInput(const uint8_t *bytes, size_t length)
 		    .outer = { 62 }, .connections = 2, .labels = 1 },
 		    { .id = 7, .state = ERX_DOM_BUILT, .budget = { 71 },
 		    .outer = { 72 }, .connections = 1, .labels = 1 } },
-		.conns = { { .number = 1, .a = ERX_DOM_SYSTEM_ID, .b = 5,
+		.conns = { { .number = 1, .a = ERX_SYSTEM_DOMAIN_ID, .b = 5,
 		    .budget_b = { 53 } }, { .number = 2, .a = 5, .b = 6,
 		    .budget_a = { 54 }, .budget_b = { 63 }, .closing = true },
 		    { .number = 3, .a = 9, .b = 5, .budget_a = { 93 },

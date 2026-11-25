@@ -1218,7 +1218,7 @@ dom_plan_in(const erx_dom_spec_t *spec, const erx_dom_view_t *view,
 	if (view->ending)
 		return (ERX_EBUSY);
 	if (spec->version != ERX_DOM_SPEC_VERSION ||
-	    spec->id <= ERX_DOM_SYSTEM_ID || spec->id > ERX_DOM_ID_MAX ||
+	    spec->id <= ERX_SYSTEM_DOMAIN_ID || spec->id > ERX_DOM_ID_MAX ||
 	    (spec->flags & ~ERX_DOM_FLAGS_KNOWN) != 0)
 		return (ERX_EINVAL);
 	/* The vault's domain waits for the vault (M11). */
@@ -1353,7 +1353,7 @@ erx_dom_plan_record(erx_dom_view_t *view, const erx_dom_plan_t *plan)
 	if (connected) {
 		row = &view->connections[plan->connection_row];
 		row->number = plan->connection;
-		row->a = ERX_DOM_SYSTEM_ID;
+		row->a = ERX_SYSTEM_DOMAIN_ID;
 		row->b = spec->id;
 		row->closing = false;
 		view->next_connection = dom_next_number(plan->connection);

@@ -237,12 +237,12 @@ DEVICES = {
        "made[ERX_DOM_OBJ_AREA_B] ? plan->a : 0) && false)\n\t\treturn (ERX_EINVAL);",
        'seeded area_reader_writer '],
     'quota counts the system connection' =>
-      ['if (row->number != 0 && row->a != ERX_DOM_SYSTEM_ID &&', 'if (row->number != 0 &&', 'case connect_ok '],
+      ['if (row->number != 0 && row->a != ERX_SYSTEM_DOMAIN_ID &&', 'if (row->number != 0 &&', 'case connect_ok '],
     'side charged to the writer' =>
       ['.budget = ERX_DOM_OBJ_LINK_BUDGET_A, .size = side_b };',
        '.budget = ERX_DOM_OBJ_LINK_BUDGET_B, .size = side_b };', 'case connect_ok '],
     'retire ignores the system connection' =>
-      ['row->a == ERX_DOM_SYSTEM_ID && row->b == id)', 'row->a == ERX_DOM_SYSTEM_ID && row->b == 0)',
+      ['row->a == ERX_SYSTEM_DOMAIN_ID && row->b == id)', 'row->a == ERX_SYSTEM_DOMAIN_ID && row->b == 0)',
        'case retire_busy_system '],
     'retire destroys the outer budget a survivor maps' =>
       ['if (life_rows_naming(view, id) == 0) {', 'if (life_rows_naming(view, id) <= 1) {', 'case retire_held '],
@@ -252,7 +252,7 @@ DEVICES = {
       ['principal->carved -= dom->own_bytes;', 'principal->carved -= dom->own_bytes + dom->outer_bytes;',
        'case retire_held_record '],
     'disconnect destroys a system connection\'s null child' =>
-      ["if (row->a != ERX_DOM_SYSTEM_ID)\n\t\t\tdraft.destroy", "draft.destroy", 'case disconnect_system '],
+      ["if (row->a != ERX_SYSTEM_DOMAIN_ID)\n\t\t\tdraft.destroy", "draft.destroy", 'case disconnect_system '],
     'classify trusts a stop the library did not make' =>
       ["\tif (exit->space == system_space)\n",
        "\tif (exit->space == system_space || noted.kind != ERX_DOM_END_NONE)\n", 'act exit_halt_first '],

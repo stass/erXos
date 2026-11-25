@@ -40,8 +40,6 @@ code monitors.
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 -export_type([reply/0, target/0]).
 
-%% The system domain's id (docs/design-domains.md: no node has a creation below 4).
--define(SYSTEM_DOMAIN, 4).
 -include("generated/erx_abi.hrl").
 
 %% The store's limit: the overlay limit's default (docs/design-live.md, "Overlays").
@@ -309,7 +307,7 @@ serve({load, Manifest}, Store) ->
         {error, _} = Refused ->
             {Refused, Store}
     end;
-serve({history, ?SYSTEM_DOMAIN, Name}, Store) ->
+serve({history, ?ERX_SYSTEM_DOMAIN_ID, Name}, Store) ->
     {{ok, erx_code_store:history(Store, Name)}, Store};
 serve({history, _DomainId, _Name}, Store) ->
     {{error, scope}, Store}.

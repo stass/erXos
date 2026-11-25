@@ -5,9 +5,9 @@
 -moduledoc """
 The echo service of the test-only application erx_echo_test: its mint, and the
 erx_facet callback of each facet the mint starts. The mint acts only on a mint
-request in the system domain's envelope, {erx_origin, 4, {erx_facet_mint, Tag,
-echo, Grantee, Principal, Limits}} (erx_facet:provide/2): it starts a facet bound to
-Grantee within Limits, ending with the mint, and replies with it, or with the
+request in the system domain's envelope, {erx_origin, S, {erx_facet_mint, Tag,
+echo, Grantee, Principal, Limits}}, S the system domain's id
+(erx_facet:provide/2): it starts a facet bound to Grantee within Limits, ending with the mint, and replies with it, or with the
 reason start/3 failed. Anything else it drops. A facet answers {echo, Term}
 with {echo, Term} and refuses every other request.
 
@@ -27,12 +27,12 @@ docs/design-runtime.md), so the message is dropped and the reason arrives as
 %% erx_facet's callbacks; erx_facet is not on this application's compile path.
 -export([init/1, admit/3]).
 
--define(SYSTEM_ID, 4).
+-include("generated/erx_abi.hrl").
 
 -spec mint() -> no_return().
 mint() ->
     receive
-        {erx_origin, ?SYSTEM_ID, {erx_facet_mint, Tag, echo, Grantee, Principal, Limits}}
+        {erx_origin, ?ERX_SYSTEM_DOMAIN_ID, {erx_facet_mint, Tag, echo, Grantee, Principal, Limits}}
           when is_integer(Tag), Tag > 0, is_integer(Grantee), Grantee > 0, is_binary(Principal),
                is_map(Limits) ->
             Grant = Limits#{grantee => Grantee, ends_with => [self()]},

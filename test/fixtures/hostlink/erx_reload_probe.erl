@@ -37,8 +37,9 @@ seen them all, and a `failed` line if anything of the probe crashes.
 
 -export([run/0]).
 
+-include("generated/erx_abi.hrl").
+
 -define(SUBJECT, erx_reload_subject).
--define(SYSTEM_DOMAIN, 4).
 %% The reloads after the first version; the host reads the number from the ready line.
 -define(LOADS, 32).
 %% The observer's poll interval and the time the workers go on after the last load, in ms.
@@ -89,7 +90,7 @@ check() ->
 %% The history of the subject when the probe starts: the probe is loaded in one batch with
 %% the first version, so exactly one load is committed.
 initial_history() ->
-    {ok, [Head | _] = History} = erx_code:history(?SYSTEM_DOMAIN, ?SUBJECT),
+    {ok, [Head | _] = History} = erx_code:history(?ERX_SYSTEM_DOMAIN_ID, ?SUBJECT),
     {Head, length(History)}.
 
 start_worker(Scheduler, Counts, Seen) ->
@@ -148,7 +149,7 @@ observe(Probe, _Counts, _Head, Committed) when Committed > ?LOADS ->
     Probe ! {observed, self()};
 observe(Probe, Counts, Head, Committed) ->
     timer:sleep(?POLL_MS),
-    {ok, [Newest | _] = History} = erx_code:history(?SYSTEM_DOMAIN, ?SUBJECT),
+    {ok, [Newest | _] = History} = erx_code:history(?ERX_SYSTEM_DOMAIN_ID, ?SUBJECT),
     case lists:splitwith(fun(Entry) -> Entry =/= Head end, History) of
         {New, [Head | _]} ->
             Next = Committed + length(New),

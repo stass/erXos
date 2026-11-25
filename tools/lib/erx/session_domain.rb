@@ -5,6 +5,7 @@
 require_relative 'crash_frame'
 require_relative 'error'
 require_relative 'fiasco'
+require_relative 'generated_abi'
 require_relative 'hostlink_guest'
 require_relative 'medium_boot'
 require_relative 'output_directory'
@@ -250,7 +251,7 @@ module Erx
     MACHINE = "erx:i([]).\r"
     MACHINE_UPTIME = /\A +uptime +kernel +[0-9]+\r*\n\z/n
     # V10 across the session's facet (docs/design-live.md, Invariants): the records of the
-    # system domain's processes <4.N.0> below N = V10_PROCESSES, each a query of its own, as
+    # system domain's processes <S.N.0>, S its id, below N = V10_PROCESSES, each a query of its own, as
     # either domain asks for them (V10_RECORDS). The system domain's Erlang shell notes
     # erx:exports/1 of every process those records name as a group leader, a link or a
     # monitor; root's session reads the same records through its facet, at scope `all`; and
@@ -258,13 +259,14 @@ module Erx
     # exactly as before, so the answers handed root's domain no name.
     V10_PROCESSES = 100
     V10_RECORDS = "V10Rs = [V10R || V10N <- lists:seq(0, #{V10_PROCESSES - 1}), " \
-                  '{ok, V10R} <- [erx_inspector:inspect([processes, {pid, 4, V10N, 0}])]], '
+                  '{ok, V10R} <- [erx_inspector:inspect([processes, ' \
+                  "{pid, #{ABI::Generated.constant('system_domain_id')}, V10N, 0}])]], "
     V10_BEFORE = 'V10Pid = fun({pid, V10D, V10N, V10S}) -> ' \
                  'list_to_pid(lists:flatten(io_lib:format("<~b.~b.~b>", [V10D, V10N, V10S]))) end, ' \
                  "#{V10_RECORDS}" \
                  'V10Names = lists:usort([V10Pid(V10I) || #{attrs := V10A} <- V10Rs, ' \
                  'V10K <- [group_leader, links, monitors], {_, {ok, V10V}} <- [maps:get(V10K, V10A, none)], ' \
-                 'V10I <- lists:flatten([V10V]), element(2, V10I) =:= 4]), ' \
+                 "V10I <- lists:flatten([V10V]), element(2, V10I) =:= #{ABI::Generated.constant('system_domain_id')}]), " \
                  'V10Before = [{V10X, erx:exports(V10X)} || V10X <- V10Names, is_process_alive(V10X)], ' \
                  'io:format("~0kp~n", [{v10_names, length(V10Names) > 10, ' \
                  "[V10M || \#{attrs := \#{monitors := {_, {ok, [_ | _] = V10M}}}} <- V10Rs] =/= []}]).\r"

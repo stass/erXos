@@ -1494,7 +1494,7 @@ module Erx
       TRACE_STOP = "erx:trace_stop(R),trace_stopped.\r"
       TRACE_REDRAW = '(?:[^\n]*\e\[J)?'
       TRACE_TIME = "\\A#{TRACE_REDRAW} *[0-9]+\\.[0-9]{9}".freeze
-      TRACE_DOMAIN = 4
+      TRACE_DOMAIN = ABI::Generated.constant('system_domain_id')
       TRACE_PID = "<#{TRACE_DOMAIN}\\.[0-9]+\\.0>".freeze
       def self.trace_checkpoints(machine:)
         boot = Qemu.boot_transcript(memory_mib: machine.memory_mib).map do |point|

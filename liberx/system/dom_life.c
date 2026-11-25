@@ -105,7 +105,7 @@ life_gives_back(const erx_dom_view_t *view, const erx_dom_t *dom)
 static uint32_t
 life_slot(const erx_dom_view_t *view, uint64_t id)
 {
-	if (id <= ERX_DOM_SYSTEM_ID || id > ERX_DOM_ID_MAX)
+	if (id <= ERX_SYSTEM_DOMAIN_ID || id > ERX_DOM_ID_MAX)
 		return (view->max_domains);
 	for (uint32_t index = 0; index < view->max_domains; index++)
 		if (view->domains[index].id == id)
@@ -126,7 +126,7 @@ life_connections(const erx_dom_view_t *view, uint32_t id)
 
 	for (uint32_t index = 0; index < view->max_connections; index++) {
 		row = &view->connections[index];
-		if (row->number != 0 && row->a != ERX_DOM_SYSTEM_ID &&
+		if (row->number != 0 && row->a != ERX_SYSTEM_DOMAIN_ID &&
 		    (row->a == id || row->b == id))
 			count++;
 	}
@@ -502,14 +502,14 @@ erx_dom_plan_disconnect(const erx_dom_view_t *view, uint32_t number,
 			continue;
 		draft.index = index;
 		/* A system connection keeps both sides on the domain's child. */
-		if (row->a != ERX_DOM_SYSTEM_ID)
+		if (row->a != ERX_SYSTEM_DOMAIN_ID)
 			draft.destroy[draft.ndestroy++] = row->budget_a;
 		draft.destroy[draft.ndestroy++] = row->budget_b;
 		/*
 		 * A retired party's remains go with the last row naming it. A
 		 * system connection never names one: a retire waits for it.
 		 */
-		for (uint32_t party = 0; party < 2 && row->a != ERX_DOM_SYSTEM_ID; party++) {
+		for (uint32_t party = 0; party < 2 && row->a != ERX_SYSTEM_DOMAIN_ID; party++) {
 			remains = life_remains_last(view, party == 0 ? row->a : row->b);
 			if (remains != view->max_remains)
 				draft.remains[draft.nremains++] = remains;
@@ -554,7 +554,7 @@ erx_dom_plan_retire(const erx_dom_view_t *view, uint32_t id,
 	/* The system connection's child holds both its sides, which the system domain unmaps first. */
 	for (uint32_t index = 0; index < view->max_connections; index++) {
 		row = &view->connections[index];
-		if (row->number != 0 && row->a == ERX_DOM_SYSTEM_ID && row->b == id)
+		if (row->number != 0 && row->a == ERX_SYSTEM_DOMAIN_ID && row->b == id)
 			return (ERX_EBUSY);
 	}
 	/* Every other child of an outer budget is a connection's (A5). */
@@ -1311,7 +1311,7 @@ erx_dom_unit_check(const erx_dom_unit_plan_t *plan)
 	bool keeping = false;
 
 	if (plan->nsteps > ERX_DOM_UNIT_STEPS ||
-	    plan->holder <= ERX_DOM_SYSTEM_ID || plan->ndevices == 0 ||
+	    plan->holder <= ERX_SYSTEM_DOMAIN_ID || plan->ndevices == 0 ||
 	    plan->ndevices > ERX_DOM_DEVICES_MAX)
 		return (ERX_EINVAL);
 	for (uint32_t index = 0; index < plan->nsteps; index++) {

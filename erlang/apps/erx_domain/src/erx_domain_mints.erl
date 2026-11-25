@@ -163,7 +163,6 @@ from one counter, so a tag names one of them at most.
          pair_area/3]).
 -export_type([state/0, config/0, event/0, action/0, grant/0, key/0, pair/0, query/0]).
 
--define(SYSTEM_ID, 4).
 -define(DEADLINE, 10000).
 
 -include("generated/erx_abi.hrl").
@@ -576,7 +575,7 @@ request_line(Asker, Name, Session, Peer, Opening, #{lines := Lines, line_ops := 
 
 %% Whether Peer is a domain whose end the core hears, so no line operation outlives it:
 %% the system domain, a ready session, or a configured row's ready incarnation.
-live_peer(?SYSTEM_ID, _State) ->
+live_peer(?ERX_SYSTEM_DOMAIN_ID, _State) ->
     true;
 live_peer(Peer, #{sessions := Sessions, rows := Rows}) ->
     sets:is_element(Peer, Sessions)
@@ -591,7 +590,7 @@ start_line(Asker, {Session, _Name} = Key, Peer, Opening,
     Armed = State#{next_tag := Tag + 1},
     Op = #{asker => Asker, opening => Opening},
     case Peer of
-        ?SYSTEM_ID ->
+        ?ERX_SYSTEM_DOMAIN_ID ->
             {[{arm, Tag, Deadline}, line_mint(Key, Peer, Tag, Opening, State)],
              Armed#{line_ops := Ops#{Key => Op#{state => {minting, Pair, Tag}}}}};
         _ ->
@@ -874,7 +873,7 @@ current_pair({Grantee, _Installed} = Key, #{rows := Rows} = State) ->
     end.
 
 ready_id(system, _State) ->
-    ?SYSTEM_ID;
+    ?ERX_SYSTEM_DOMAIN_ID;
 ready_id({session, Id}, #{sessions := Sessions}) ->
     case sets:is_element(Id, Sessions) of
         true -> Id;

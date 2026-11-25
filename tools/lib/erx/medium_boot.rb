@@ -8,6 +8,7 @@ require 'json'
 require_relative 'abi_model'
 require_relative 'abi_source'
 require_relative 'boot_record'
+require_relative 'generated_abi'
 require_relative 'error'
 require_relative 'fiasco'
 require_relative 'manifest_edit'
@@ -104,13 +105,13 @@ module Erx
                  "  runtime @artifact.#{ProductionImage::DOMAIN_RUNTIME_ARTIFACT}\n  release @artifact.#{DOMAIN_BOOT.name}\n" \
                  "  restarts 0\n  restart_period_s 5\n  args \"#{DOMAIN_ARGS.join(' ')}\"\n"
 
-    # The system domain's id, ERX_DOM_SYSTEM_ID (include/erx/dom.h): the library refuses
+    # The system domain's id, the ABI's system_domain_id: the library refuses
     # any id at or below it, and the domain service gives ids in turn above it, so the
     # medium manifest's configured domains, the site manifest's (Platform#site_manifest_source)
     # and the cell's erts row, take the first ids in boot order, which is name order: erts,
     # network, storage; the cell's two creates the library refuses the next two, and its
     # seven domains the seven after.
-    SYSTEM_DOMAIN_ID = 4
+    SYSTEM_DOMAIN_ID = ABI::Generated.constant('system_domain_id')
     CONFIGURED_ID = SYSTEM_DOMAIN_ID + 1
     NETWORK_ID = SYSTEM_DOMAIN_ID + 2
     STORAGE_ID = SYSTEM_DOMAIN_ID + 3
