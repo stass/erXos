@@ -268,7 +268,7 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `erx_draw_cload_frame`, so the differential test of the codec against it compares `erx_draw_image` with the
   stand-in, not with 9front's decoder. Link `display/libmemdraw/cload.c` behind it and delete the stand-in.
   `cloadmemimage`'s `badrect` bounds are narrower than the stand-in's, so keep the harness's rectangles within them.
-* [Low] `tools/lib/erx/`: git is run from many call sites, each of which must pass `GitEnvironment.isolated` and `-c core.fsmonitor=false` itself (`checks.rb`, `submodule.rb`, `source_revision.rb` do; `dependencies.rb` `export_commit`, `fiasco.rb` `import_git` and `net_bench_freebsd.rb` `tree_state` do not). One git funnel with a chokepoint check would make the isolation hold by construction.
+* [Low] `tools/lib/erx/`: git is run from many call sites, each of which must pass `GitEnvironment.isolated` and `-c core.fsmonitor=false` itself (`checks.rb`, `submodule.rb`, `source_revision.rb` do; `dependencies.rb` `export_commit` and `net_bench_freebsd.rb` `tree_state` do not). One git funnel with a chokepoint check would make the isolation hold by construction.
 * [Low] `tools/lib/erx/lvgl.rb`, `Lvgl::Program::LICENSE`: the archive's license expression is hand-kept against
   `display/lvgl/lv_conf.h` and LVGL's sources, so an option turned on there (an image decoder, another font) or a
   third-party file no option guards (as FrogFS's `decomp_raw.c`, which the Makefile leaves out) is not attributed
@@ -1189,11 +1189,9 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `--trace` names no linker script (`-T`, `INCLUDE`), and a script can put bytes into the output.
   NativeRoot names its script in the receipt's `inputs`; check that Fiasco's audit attributes the
   kernel's, bootstrap's and sigma0's scripts, and add them if it does not.
-* [Low] build, git started by host tooling (`tools/lib/erx/fiasco.rb`, `submodule.rb`, `source_revision.rb`):
+* [Low] build, git started by host tooling (`tools/lib/erx/submodule.rb`, `source_revision.rb`):
   each site builds its own argv, so "git runs no program a repository names" holds only where someone
-  remembered it. `Fiasco#import_git`'s `git archive` runs plain `git` in the Fiasco clone, applying the
-  filters its attributes and configuration name (the archive's SHA-256 catches altered output, not the
-  filter program running). One argv constructor in `GitEnvironment` (fsmonitor off, no pager, no lazy
+  remembered it. One argv constructor in `GitEnvironment` (fsmonitor off, no pager, no lazy
   fetch, the isolated environment) with a build check that no other `'git'` argv exists would make it hold
   for every site.
 * [Medium] `tools/erx web --open`, [The host tool's front end](design-web.md#the-host-tools-front-end): not

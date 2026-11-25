@@ -6,6 +6,7 @@
 require 'optparse'
 require_relative 'lib/erx/origin'
 require_relative 'lib/erx/fiasco'
+require_relative 'lib/erx/sources'
 require_relative 'import_origins'
 
 module Erx

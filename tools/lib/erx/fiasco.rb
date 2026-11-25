@@ -12,7 +12,6 @@ require_relative 'build_memo'
 require_relative 'host_os'
 require_relative 'boot_file'
 require_relative 'json_input'
-require_relative 'sources'
 require_relative 'fiasco_inputs'
 require_relative 'fiasco_parts'
 require_relative 'fiasco_config'
@@ -66,52 +65,6 @@ module Erx
         'sha256' => '3eb24fe67cf4eb7968ba5379016befd3fb72977066a3708468290e9a9ca9f4ff'
       }.freeze
     }.freeze
-    # The paths of each imported part that no erXos build uses, which the import
-    # removes; each part's ORIGIN.md records them as exclusions. l4re-core keeps
-    # only CORE_PACKAGES besides.
-    UNUSED_PATHS = {
-      'kernel' => %w[
-        src/lib/regex src/lib/simple_malloc src/lib/gcov src/lib/perfctr
-        src/kern/arm/bsp/qcom src/test src/jdb/jdb_cov_module.cpp src/drivers/stream_crc32.cpp
-        src/Makerules.UTEST src/Makerules.CODERULES
-      ],
-      'l4re-core' => %w[
-        libc/uclibc-ng libc/musl/libpthread cxx/lib/start
-        libc/musl/Makefile libc/musl/libm libc/musl/librt libc/musl/libpthread_vars.mk
-        libc/musl/libc/Makefile libc/musl/libc/Make.rules libc/musl/libc/includes
-        libc/musl/libc/impl-libc-api.c libc/musl/libc/mman-utcb-safe.c libc/musl/libc/musl-pthread-impl.c
-        libc/musl/libc/ssp-local.c libc/musl/libc/vfs.cc
-        libc/musl/libc/ARCH-aarch64 libc/musl/libc/ARCH-arm libc/musl/libc/ARCH-i386 libc/musl/libc/ARCH-x86_64
-        libc/musl/libc/ARCH-mips/impl-libc-api-arch.c libc/musl/libc/ARCH-riscv/impl-libc-api-arch.c
-        libc/musl/libc/ARCH-all/src/exit/abort.c libc/musl/libc/ARCH-all/src/network
-        libc/musl/libc/ARCH-all/src/passwd libc/musl/libc/ARCH-all/src/signal/raise.c
-        libc/musl/libc/ARCH-all/src/stdio/__lockfile.c libc/musl/libc/ARCH-all/src/thread
-        libc/musl/libc/ARCH-all/src/unistd libc_backends/lib/sig
-      ],
-      'bootstrap' => %w[
-        server/src/ARCH-mips server/src/platform-mips.h server/src/platform/baikal.cc
-        server/src/platform/boston.cc server/src/platform/ci20.cc server/src/platform/ci40.cc
-        server/src/platform/malta.cc server/src/platform/sead3.cc
-        server/src/platform/rcar4_r52.cc server/src/platform/rcar4_r52_crt0_init.h
-      ],
-      'mk' => %w[conf/test/lib_test.lua doc/source/pthreads.dox tool/bin/tap-wrapper-plugins]
-    }.transform_values(&:freeze).freeze
-    CORE_PACKAGES = %w[
-      compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io
-      l4re l4re_c l4sys l4util ldscripts libc libc-headers libc-minimal
-      libc_backends libsigma0
-      minimal_l4re sigma0
-    ].freeze
-    UART_FILES = %w[
-      Makefile Control Kconfig.L4 LICENSE.spdx README
-      include/Makefile include/io_regblock.h include/poll_timeout_counter.h
-      include/ARCH-arm64/asm_access.h
-      uart/Makefile uart/include/Makefile
-      uart/include/device.h uart/include/uart_base.h uart/include/uart_pl011.h
-      uart/src/Makefile uart/src/uart_pl011.cc
-      uart/include/uart_16550.h uart/include/uart_16550_dw.h uart/include/uart_bcm2835.h
-      uart/src/uart_16550.cc uart/src/uart_16550_dw.cc uart/src/uart_bcm2835.cc
-    ].freeze
     # The boards whose bootstrap is a build of its own, by platform record name, and the
     # configuration of each (docs/design-fiasco.md, "The Raspberry Pi 4"). The Pi's is
     # Fiasco's generic platform, linked static at 2 MiB, with RAM at 0 and the mini UART's
@@ -163,32 +116,6 @@ module Erx
       @linker = linker
       @source = File.join(@root, 'fiasco')
       @build = File.join(@root, 'build/fiasco')
-    end
-
-    # One-time import accepts explicit local caches. Normal builds only read
-    # the committed trees, and never contact a remote or inspect those caches.
-    def import_sources(kernel_repo:, core_repo:, archive_cache:)
-      raise Error, 'Fiasco source destination already exists' if File.exist?(@source)
-
-      OutputDirectory.prepare(root: @root, path: File.dirname(@source))
-      Dir.mktmpdir('.fiasco-import-', File.dirname(@source)) do |temporary|
-        stage = File.join(temporary, 'fiasco')
-        FileUtils.mkdir_p(stage)
-        identities = []
-        identities << import_git(kernel_repo, commit: KERNEL_COMMIT,
-                                 sha256: KERNEL_SHA256, name: 'kernel',
-                                 temporary: temporary, stage: stage)
-        identities << import_git(core_repo, commit: CORE_COMMIT,
-                                 sha256: CORE_SHA256, name: 'l4re-core',
-                                 temporary: temporary, stage: stage)
-        ARCHIVES.each do |name, pin|
-          identities << import_archive(name, pin: pin, cache: archive_cache,
-                                       temporary: temporary, stage: stage)
-        end
-        trim_sources(stage)
-        File.write(File.join(stage, 'IMPORTS.json'), JSON.pretty_generate(identities) + "\n")
-        File.rename(stage, @source)
-      end
     end
 
     def build(jobs: 4)
@@ -517,58 +444,6 @@ module Erx
         FileUtils.remove_entry(File.join(@build, 'images'))
       end
       File.write(marker, JSON.pretty_generate(expected) + "\n")
-    end
-
-    def import_git(repository, commit:, sha256:, name:, temporary:, stage:)
-      archive = File.join(temporary, "#{name}.tar")
-      @runner.run(['git', '--no-replace-objects', '-C', File.expand_path(repository), 'archive', '--format=tar',
-                   "--output=#{archive}", commit], name: "import-#{name}", deadline: 120)
-      Sources.unpack(archive: archive, sha256: sha256,
-                     destination: File.join(stage, name), owner_root: temporary, source_directory: '.', runner: @runner)
-      { 'part' => name, 'repository' => "https://github.com/kernkonzept/#{name == 'kernel' ? 'fiasco' : name}",
-        'revision' => commit, 'archive_sha256' => sha256 }
-    end
-
-    def import_archive(name, pin:, cache:, temporary:, stage:)
-      filename = "#{name}-#{pin.fetch('commit')}.tar.gz"
-      candidates = Dir.glob(File.join(File.expand_path(cache), '**', filename))
-      raise Error, "expected one cached archive for #{name}" unless candidates.size == 1
-      archive = candidates.first
-      extracted = File.join(temporary, "unpacked-#{name}")
-      Sources.unpack(archive: archive, sha256: pin.fetch('sha256'),
-                     destination: extracted, owner_root: temporary,
-                     source_directory: "#{name}-#{pin.fetch('commit')}", runner: @runner)
-      File.rename(extracted, File.join(stage, name))
-      { 'part' => name, 'repository' => "https://github.com/kernkonzept/#{name}",
-        'revision' => pin.fetch('commit'), 'archive_sha256' => pin.fetch('sha256') }
-    end
-
-    def trim_sources(stage)
-      core = File.join(stage, 'l4re-core')
-      keep = CORE_PACKAGES + %w[LICENSE.spdx Makefile README.md SECURITY.md]
-      Dir.children(core).reject { |path| keep.include?(path) }.each do |path|
-        FileUtils.remove_entry(File.join(core, path))
-      end
-      UNUSED_PATHS.each do |part, paths|
-        paths.each { |path| FileUtils.remove_entry(File.join(stage, part, path)) }
-      end
-      retain_uart(File.join(stage, 'drivers-frst'))
-    end
-
-    def retain_uart(directory)
-      selected = Dir.mktmpdir('.uart-', File.dirname(directory))
-      UART_FILES.each do |relative|
-        source = File.join(directory, relative)
-        next if relative == 'README' && !File.exist?(source)
-        raise Error, "missing pinned UART import file: #{relative}" unless File.file?(source)
-        target = File.join(selected, relative)
-        FileUtils.mkdir_p(File.dirname(target))
-        FileUtils.copy_file(source, target)
-      end
-      FileUtils.remove_entry(directory)
-      File.rename(selected, directory)
-    ensure
-      FileUtils.remove_entry(selected) if selected && File.exist?(selected)
     end
 
     # The C17 cores, built with LLVM from the captured inputs. The stack
