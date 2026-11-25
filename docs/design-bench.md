@@ -394,8 +394,12 @@ the cost is recorded beside it.
 A profile fixes how an operation is sampled and what its summary may
 claim. Its two sizes are the landing form, run at the landing gate, and
 the full form, run at the gates that name the benchmark and on demand.
-A run is one boot of each image the benchmark needs. The sizes are
-starting values, to be revised by the first calibration runs.
+A form's run is one boot of each image the benchmark needs, so a form
+of three runs boots each image three times: three records of one boot
+each in QEMU, one record of three boots on a board's walk
+([The record](#the-record)), and three boots of a comparison either way.
+The sizes are starting values, to be revised by the first calibration
+runs.
 
 | Profile | Sampling | Landing form | Full form | Summary |
 | --- | --- | --- | --- | --- |
@@ -537,21 +541,31 @@ keeps the host's load average before and after.
 
 ### The record
 
-One run is one invocation of `tools/erx bench`: one or more boots of one
-subject in one environment. Its directory is
+One run is the record of one subject's boots in one environment by one
+invocation of `tools/erx bench`: a QEMU boot's run holds its one boot,
+and a board's walk writes one run for each set it boots, holding that
+set's boots, one per queued entry
+([The record of a board run](#the-record-of-a-board-run)). Each boot
+has a **position**: its entry's position in the walk's queue, or 1 for
+a QEMU run's one boot. A boot is the unit the comparison
+counts ([Comparison](#comparison)). The run's directory is
 `<history>/bench/<environment>/<run>/`, where `<history>` is
 `ERX_BENCH_HISTORY` or `~/erxos-history`, and `<run>` is the UTC time,
-the source revision's first twelve hex digits and `-dirty` when the tree
-was:
+the source revision's first twelve hex digits, `-dirty` when the tree
+was, and the first twelve hex digits of the SHA-256 of the subject's
+fields as JSON, so that two sets of one revision that one walk
+boots are two runs:
 
 ```
-run.json                     the manifest
-<benchmark>/<operation>.json every cell of the operation, each keyed by its
-                             conditions, with its histogram, largest samples
-                             and raw samples if few
-boot-<n>.serial.log          each boot's console
-boot-<n>.qemu.log            each boot's QEMU output
-compare.json                 a comparison made against this run, if any
+run.json                            the manifest
+boot-<n>/<benchmark>/<operation>.json
+                                    every cell of the operation in the boot at
+                                    position n, each keyed by its conditions,
+                                    with its histogram, largest samples and
+                                    raw samples if few
+boot-<n>.serial.log                 that boot's console
+boot-<n>.qemu.log                   that boot's QEMU output
+compare.json                        a comparison made against this run, if any
 ```
 
 `run.json` holds, as CLAUDE.md requires and the comparison needs:
@@ -560,10 +574,9 @@ compare.json                 a comparison made against this run, if any
 | --- | --- |
 | environment | kind, machine model, CPU count, memory, operating system and its version, accelerator, QEMU version and machine type, firmware files' SHA-256 on a board |
 | subject | source revision and whether the tree was dirty, image SHA-256, every workload source's SHA-256, compiler version, the complete compile and link flags, the system manifest, runtime flavour and scheduler flags, the Fiasco configuration |
-| run | date, the tool's revision, what started it (`landing`, `milestone`, `gate G5`, `manual`), the host's load before and after, a board's temperature and throttle state at the start and end where readable, `reused_from` for a reused boot |
-| clock | the calibration above |
-| cells | per cell: benchmark, operation, the cell's conditions (load cell, placement, workload parameters, clock, batch size), profile and its sizes, status and reason, sample count, the summary the profile allows, lost, early and missed counts, and its operation file |
-| baseline | for a run that was compared: the baseline run's path |
+| run | date, the tool's revision, what started it (`landing`, `milestone`, `gate G5`, `manual`), the host's load before and after, `reused_from` for a reused boot, and the run's other facts, such as a board walk's sensor readings and how the walk ended |
+| boots | per boot, in ascending positions: its position; its own facts, such as a board entry's name, its `boot.img` SHA-256 and the walk's outcome for it; its clock, the calibration above; and its cells: benchmark, operation, the cell's conditions (load cell, placement, workload parameters, clock, batch size), profile and its sizes, status and reason, sample count, the summary the profile allows, lost, early and missed counts, and its operation file. A boot holds each cell once; every boot of a run holds its own |
+| baseline | for a run that was compared: the baseline runs' paths |
 
 A cell's status is one of:
 
@@ -584,16 +597,19 @@ program, which prints only a total and its mean, is a `mean`: the
 operation count, the interval over all of them and the mean the program
 printed, in that program's clock, and nothing else. Its samples,
 percentiles, maximum, minimum, and lost, early and missed counts are
-absent, never zero, and its run has no `clock` group, since that program
+absent, never zero, and its boot has no `clock` group, since that program
 measures no calibration; the rule that a boot needs one `CLOCK` line binds
 boots that print `BENCH` lines. A `mean` is `measured` when its program
 reported the cell and printed no error for it. It is shown in the
 side-by-side table and never compared.
 
-A file is at most 1 MiB, a log at most 64 MiB, and a run directory is
+A file is at most 1 MiB and a log at most 64 MiB, each bound applying
+to every boot's files apart, and a run directory is
 created exclusively, never over another. Every file name is derived from
-the validated declarations (benchmark and operation names), never from
-a guest's line. Records are never edited; a
+the validated declarations (benchmark and operation names) and the
+boot's position, never from a guest's line, and the reader derives each
+operation file the same way and refuses a manifest that names another.
+Records are never edited; a
 number changes by a new run. A record of an older format is refused with
 a diagnostic, never read.
 
@@ -624,8 +640,13 @@ committing it there by hand, and an uncommitted run is scratch.
 
 `BenchCompare` is a pure function of records. It compares one statistic
 (the median, 99th and 99.9th percentiles, the maximum, or a sustained
-cell's longest gap) of one cell between a **baseline**, at least three runs, and a
-**candidate**.
+cell's longest gap) of one cell between a **baseline**, at least three
+boots, and a **candidate**, one boot or three. Each boot of a record is
+one side, whatever its cell's status, so one run of three boots is as
+many as three runs of one, and a boot that booted twice (its cells
+`rejected`) or never began (`not_run`) stays a side and makes the
+comparison inconclusive rather than shorter. A boot without the cell
+ran other cells, and is refused.
 
 * **Comparable.** The two sides must have equal environments and equal
   cells: the same operation, load cell, placement, workload parameters,
@@ -640,9 +661,9 @@ cell's longest gap) of one cell between a **baseline**, at least three runs, and
   QEMU, machine type, CPU count and memory are the ones that must be
   equal, and the subjects are shown beside the numbers, not matched.
 * **The noise band.** The band of a statistic is the range of its values
-  across the baseline's runs, widened by one histogram bucket.
-* **The verdict.** `same` when every candidate run lies within the band;
-  `slower` when at least two of three candidate runs lie above it and the
+  across the baseline's boots, widened by one histogram bucket.
+* **The verdict.** `same` when every candidate boot lies within the band;
+  `slower` when at least two of three candidate boots lie above it and the
   candidates' median exceeds the baseline's by more than the advisory
   threshold; `faster` the mirror; `inconclusive` otherwise. A sustained
   cell is judged on its longest gap over all windows, an exact number
@@ -651,7 +672,7 @@ cell's longest gap) of one cell between a **baseline**, at least three runs, and
   so any difference there is a real change of the measured virtual time,
   though not necessarily of instructions executed.
 * **Inconclusive is not a pass.** A comparison is inconclusive when the
-  baseline has fewer than three runs, when either side's cell is not
+  baseline has fewer than three boots, when any side's cell is not
   `measured`, when either host's load average exceeded half its CPUs (a
   starting value, revised with the thresholds), or when the verdict above
   is mixed. A change that CLAUDE.md requires numbers for has not
@@ -659,7 +680,7 @@ cell's longest gap) of one cell between a **baseline**, at least three runs, and
   that ran it reported.
 * **A replayed boot is not a new run.** A log the gate's store replays
   ([The gates](#the-gates)) is evidence of the run that recorded it. It
-  never counts as a calibration run, an independent baseline run or a
+  never counts as a calibration run, an independent baseline boot or a
   side of a paired run.
 * **Maxima and misses stand apart.** A maximum, a missed period or a lost
   wake is reported in every comparison even when every percentile is
@@ -669,15 +690,16 @@ cell's longest gap) of one cell between a **baseline**, at least three runs, and
 candidate run today differ by everything else the host did. Only a paired
 comparison can say `slower` or `faster`: `tools/erx bench NAME --paired
 --image-a BASE --image-b CAND` boots the two images alternately, three
-times each (A B A B A B), on one host in one session, and compares them by
+times each (A B A B A B), on one host in one session, each boot a record
+of its own, and compares them by
 the rule above. The developer builds the two images; the tool builds
-nothing. A comparison with a recorded baseline and one candidate run, as
+nothing. A comparison with a recorded baseline and one candidate boot, as
 the landing gate makes, can say only `same` or `outside the band`, the
 second meaning that a paired run is needed.
 
 **Advisory thresholds.** The thresholds below are starting values. After
-the first three runs of an unchanged subject in an environment, each
-becomes the larger of its starting value and the spread those runs
+the first three boots of an unchanged subject in an environment, each
+becomes the larger of its starting value and the spread those boots
 showed, recorded with the runs. They never fail a gate.
 
 | Environment | Median | 99th percentile | 99.9th percentile |
@@ -711,7 +733,7 @@ advisory comparison and never through it:
 
 ### The three limits
 
-Exactly three limits fail a gate, each becoming hard once three runs of it
+Exactly three limits fail a gate, each becoming hard once three boots of it
 are recorded in its environment; until then each is reported as the
 others are:
 
@@ -775,10 +797,14 @@ as a change's suite when the change touches what CLAUDE.md's "Latency is
 UX" lists. A passing suite says that every benchmark ran and gave right
 answers; it is not the before and after numbers that rule asks for.
 Those are its comparison, which the report prints for every cell against
-the newest committed run of the same environment whose source revision
-is an ancestor of the candidate's, with no dirty tree. A comparison that
-is `inconclusive`, `no baseline` included, does not fail the suite, and
-does not supply the numbers either: the change then needs a paired run.
+the committed runs of the same environment whose source revision is an
+ancestor of the candidate's, with no dirty tree, that hold the cell,
+taken newest first until they hold three boots (`BenchCompare.baseline`):
+one landing run
+is one boot, so its newest run alone would always leave the baseline
+short. A comparison that is `inconclusive`, `no baseline` included, does
+not fail the suite, and does not supply the numbers either: the change
+then needs a paired run.
 
 The suite's boots go through the gate's store of passing boots
 ([design-build.md, Reusing passing boots](design-build.md#reusing-passing-boots)),
@@ -1115,7 +1141,7 @@ the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
    times the boot and end deadlines, plus the return's, whatever the board
    prints. Each boot's bytes, from the end of the entry before, are
    bounded as they are read by the record's limit on a boot's log, 64 MiB
-   (`BenchRecord::LOG_BYTES`, `bench_record.rb:37`), not only when the
+   (`BenchRecord::LOG_BYTES`), not only when the
    record is written; a line longer than a `BENCH` line's 64 KiB is cut
    there and refused, and the rest of it, to its newline, goes to the log
    alone.
@@ -1157,8 +1183,13 @@ signing input: a boot name only selects an entry the host prepared.
 ### The record of a board run
 
 The record is the one of [The record](#the-record), in
-`bench/pi4-4gb-erxos/<run>/`, one per subject, so a paired walk writes
-one for each set and a comparison:
+`bench/pi4-4gb-erxos/<run>/`, one per subject: a walk writes one for
+each distinct set it boots, holding that set's boots, one per queued
+entry of the set, at the entry's position in the queue, and a paired
+walk writes a comparison beside them. Each boot is one side of the
+comparison, so a walk of three entries of one set is a whole
+baseline, and an entry that never began or booted twice stays a boot
+of its record and makes the comparison inconclusive:
 
 * **environment**: kind `pi4`, system `erxos`, four CPUs and 4,096 MiB,
   and the SHA-256 of every firmware file from the build record of the
@@ -1167,18 +1198,22 @@ one for each set and a comparison:
   `kernel8.img` and of its build record, the root's flags and the
   compiler;
 * **run**: the sensor readings before the run and after the return, each
-  named for when it was read; each entry's name, position in the queue
-  and `boot.img` SHA-256, and the walk's outcome for it; how the walk
-  ended; and two facts kept apart: `restored`, whether the link named the
-  found target again at the run's end (on the host), and `returned`,
-  what the board booted after the last entry (`booted`, `unexpected`
-  with the banner's build and index hash, `unknown` or `not_seen`);
-* **boots**: `boot-<n>.serial.log` is the console from the end of the
-  entry before it, or the run's start, to the end of the entry's own last
-  line and the `erx: end` line after it, so the bootloader's and the
-  firmware's lines stay in the log of the boot that follows them; the
-  bytes after the last entry, the return among them, end the last
-  entry's log.
+  named for when it was read; how the walk ended; and two facts kept
+  apart: `restored`, whether the link named the found target again at
+  the run's end (on the host), and `returned`, what the board booted
+  after the last entry (`booted`, `unexpected` with the banner's build
+  and index hash, `unknown` or `not_seen`);
+* **boots**: each of the set's entries, at its position in the queue,
+  with its name and `boot.img` SHA-256, the walk's outcome for it and
+  how it ended, its clock and its cells, which `BoardLog` judges from
+  its lines ([Importing a log](#importing-a-log)): an entry that never
+  began has its cells `not_run`, and one that booted twice has them
+  `rejected`. Its `boot-<n>.serial.log` is the console from the end of
+  the entry before it in the queue, or the run's start, to the end of
+  the entry's own last line and the `erx: end` line after it, so the
+  bootloader's and the firmware's lines stay in the log of the boot
+  that follows them; the bytes after the last entry, the return among
+  them, end the last entry's log.
 
 ### Importing a log
 
@@ -2171,7 +2206,7 @@ from it, and the board's `boot.img` request would then be answered 404.
 | a comparison of TCG or deterministic records with any other kind | refused: `TCG numbers are not compared with HVF or native numbers` |
 | a replayed boot offered as a calibration, baseline or paired run | refused: `a replayed log is not a new run` |
 | a record that does not parse, or of an older format | refused with the file and the reason |
-| a baseline with fewer than three runs, or none | the comparison is `inconclusive`, not an error |
+| a baseline with fewer than three boots, or none | the comparison is `inconclusive`, not an error |
 | `--paired` without two images | refused |
 | `--systems` naming a system not in `erxos`, `l4re`, `freebsd`, `linux`, or one with no guest in the environment (FreeBSD under HVF) | refused before any boot, naming it |
 | `--systems` for a system whose pins the fetch step has not fetched | refused before any boot, naming the missing source |
@@ -2222,7 +2257,7 @@ fault that must fail it:
 | the writer's destination | a record under a temporary separate repository is written; one inside a second worktree of the erXos repository, a history root that is a symbolic link into the tree, a separate repository whose `bench` directory is a symbolic link into an erXos worktree, and a plain directory that is no git work tree are each refused | the worktree check dropped: the write into the second worktree succeeds; the destination's walk dropped, leaving the root's check: the write through the `bench` link succeeds |
 | comparability | a TCG record against a native one is refused, `g3`'s TCG report holds no ratio, and two cells differing only in batch size are refused | the kind check dropped: the report shows a ratio; the batch size left out of the cell: the comparison is made |
 | the percentile rule | 1,000 samples give a 99th percentile and 999 do not; 10,000 give a 99.9th and 9,999 do not; 20 give a median and 19 do not | the count test written `>= 9`: 999 samples report a 99th percentile |
-| the verdict | three baseline runs and three candidates: within the band is `same`, two of three above it by more than the threshold `slower`, one of three `inconclusive` | one of three accepted as `slower` |
+| the verdict | three baseline boots and three candidates: within the band is `same`, two of three above it by more than the threshold `slower`, one of three `inconclusive` | one of three accepted as `slower` |
 | FD32's predicate | ten runs a side: a patched median inside the unpatched medians' spread carries the patch, one above it does not, one within a bucket of the edge is `inconclusive`, and a single patched run outside the spread with the median inside still carries it | the generic verdict used instead: the single outlying run rejects the patch |
 | a replayed log | a replayed boot's numbers appear in the report and are refused as a baseline run | the replay mark ignored: a replayed log counts as a third baseline run |
 | the histogram (C and Erlang, on the host) | samples spread over twenty octaves each land in a bucket whose bounds contain them and whose width is at most 1/64 of its lower bound | an off-by-one in the sub-bucket index: a sample lands outside its bucket |
@@ -2238,7 +2273,7 @@ fault that must fail it:
 | the GPIO probe's matching | the importer, given a capture whose third stimulus has no response before the fourth, ends the cell after the second sample, `partial`, and matches no later edge of that capture | the next response matched to the third stimulus: the cell holds a sample for it |
 | the window accounting (C, on the host) | at a 24 MHz counter and a 1,000 us slice, a gap of 0.6 ms is one lost turn whose ticks are added to `waited`, a gap of 0.4 ms is a pass, and a window no read fell in is one gap of its whole length with no pass | the slice taken as ticks without the frequency: the 0.4 ms gap counts as a lost turn |
 | a sustained cell | twelve `WINDOW` lines, three windows of four threads, then `share-equal`'s `BENCH` line give a `measured` cell with each thread's share and the longest gap; with one `WINDOW` line dropped the cell is `rejected`, and with a thread making no pass in window 1 it is `failed` | the line count check removed: the cell missing a line is `measured`; the idle-window check removed: the starved cell is `measured` |
-| a sustained comparison | three baseline runs whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
+| a sustained comparison | three baseline boots whose longest gaps are 4 to 6 ms and three candidates at 30 ms give `slower` | the direction reversed, as for a rate: the verdict is `faster` |
 | a system's environment | an erXos and a Linux record of one model and CPU count under HVF are named `...-erxos` and `...-linux`, their comparison is refused naming the system, and the side-by-side table sets them beside each other | the system left out of the name: the two records share an environment and the comparison gives a verdict |
 | Linux's guest | a one-CPU boot of the Linux guest gives `measured` cells through `BenchMeasurement`, a `CLOCK` line, and its serial log in the run directory | `erx_peer_bench` built with the seeded lost wake the native bench root takes (`-DERX_BENCH_SEED_LOST_WAKE`): `wake-same-cpu` comes back `failed` with one lost wake, which only the binary in that initramfs can have produced |
 | the zboot payload, if QEMU needs it unpacked | the inflated kernel matches the pin's `decoded_sha256` and boots | the pin's decoded hash altered by one digit: the boot step refuses the kernel before QEMU starts |

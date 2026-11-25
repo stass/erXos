@@ -389,7 +389,7 @@ entries are in alphabetical order.
 * **NIF**: A native implemented function: a C function in a shared library that a module loads and that stands in for an Erlang function. [Chapter 3, section 3.5.4](03-erlang.md#354-bifs-nifs-and-ports)
 * **`no_facet`**: The refusal of a call that needs a facet the caller's domain does not hold, before the call reaches anything. [Chapter 11, section 11.6.1](11-security.md#1161-one-grant-one-grantee-one-process)
 * **node**: A running ERTS that takes part in distribution. [Chapter 3, section 3.6.2](03-erlang.md#362-nodes)
-* **noise band (designed)**: The range of a benchmark's number over at least three runs of the baseline; a candidate inside it is the same. [Chapter 25, section 25.9](25-checking.md#259-measuring-the-system)
+* **noise band (designed)**: The range of a benchmark's number over at least three boots of the baseline; a candidate inside it is the same. [Chapter 25, section 25.9](25-checking.md#259-measuring-the-system)
 * **nonce**: A random number used once; the two sides of the four-way handshake exchange one each. [Chapter 18, section 18.3](18-wifi.md#183-keys)
 * **`NOTICES`**: The file of every license and copyright notice an image holds, written from the image's closure and carried as `system/NOTICES`. [Appendix D, section D.4.2](d-dependencies.md#d42-every-image-carries-the-notices-of-what-it-holds)
 * **notification**: A signal that does not block the sender and that the receiver collects when it is ready. [Chapter 2, section 2.2.3](02-microkernels.md#223-shared-memory-beside-messages)

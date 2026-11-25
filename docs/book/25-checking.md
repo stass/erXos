@@ -757,7 +757,7 @@ which its share of the processor follows.
 Two records are compared only when their environments are equal, so a
 number taken under TCG can never be set against a native one. The
 comparison is a rule, not a judgement. The **noise band (designed)** of
-a number is its range over at least three runs of the baseline. A
+a number is its range over at least three boots of the baseline. A
 candidate inside the band is the same; one outside it is slower or
 faster only in a **paired run (designed)**, where the two images boot
 alternately on one host in one session, so that the host's own drift

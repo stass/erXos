@@ -148,7 +148,8 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   from the first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
-  other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
+  board walk's record (one per set, from `BoardLog`, its run and boot facts typed from their closed sets:
+  `returned`, `restored`, each entry's outcome) and the other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
   landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
   side's first compile; FreeBSD's way for the `wake` handshake's A to see B asleep, without which
   `erx_peer_bench` reports both wake cells unsupported there; which operations have a Linux counterpart is
