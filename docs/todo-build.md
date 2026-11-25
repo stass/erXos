@@ -184,9 +184,10 @@ design does not have, to be deleted so no side-by-side table can show it under s
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.
   L4Re's board guest ([design-bench.md](design-bench.md#l4re-on-the-board)): `tools/erx bench NAME --env pi4-4gb-l4re`
   lays out `build/l4re-raspi4b/bootstrap.raw` as a one-CPU bench set, netboots it, types the debugger's reboot and imports
-  the log (`tools/erx bench import NAME --env pi4-4gb-l4re --subject FILE LOG`); what remains is the first board boot, which
-  checks that upstream `bootstrap` finds the mini UART and runs at `0x200000`, that Fiasco honours the one-CPU tree, that
-  ESC and `^` reach its debugger and reboot the board, and how long bootstrap takes to `Benchmarks done.`.
+  the log (`tools/erx bench import NAME --env pi4-4gb-l4re --subject FILE LOG`). Its first board run reached `Benchmarks
+  done.` on one CPU and ESC and `^` reached the debugger, which then asked for Return; what remains is a run that shows the
+  typed Return reboots the board back to erXos without help, and a host-side time stamp for bootstrap to `Benchmarks done.`
+  (the console log carries none).
 * [Medium] benchmarks, L4Re's board run (`tools/lib/erx/l4re_board.rb`): its served-link lifecycle (lock, queue left
   check, prepare, point, point back or remove, the restore message) repeats `BoardRun`'s and has drifted from it: a
   failed point-back is not part of the run's outcome, and an interrupt ends with no ending said. One funnel both runs

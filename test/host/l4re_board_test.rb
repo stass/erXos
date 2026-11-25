@@ -149,7 +149,7 @@ class L4ReBoardTest < Minitest::Test
   def test_the_run_types_only_reboot_and_the_debuggers_keys_and_points_the_link_back
     console = Console.new([line('Benchmarks done.', 1), line("erx: boot image build #{'0' * 16} index #{'a' * 64} rest", 2)])
     outcome, target, queues = ran(->(**) { console })
-    assert_equal [true, 'returned', ["reboot\r", "\e", '^'], 'found', []],
+    assert_equal [true, 'returned', ["reboot\r", "\e", '^', "\r"], 'found', []],
                  [outcome.done, outcome.ending, console.typed, target, queues]
   end
 

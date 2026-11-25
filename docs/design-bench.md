@@ -1996,8 +1996,9 @@ the queue while the board runs and back at the found target when the
 run ends. The console log from the reboot to `Benchmarks done.`, or to
 a deadline of 300 seconds, is the run's log. L4Re does not reset the
 board, so the run does what a person at the console would: it types
-Fiasco's kernel debugger's reboot, ESC and then `^` a second later, on
-the console it holds, and waits for erXos's banner from the way-back
+Fiasco's kernel debugger's reboot on the console it holds, a key a
+second: ESC, `^`, and the Return the debugger asks for to confirm it
+(`Return reboots, "k" enters L4 kernel debugger...`), and waits for erXos's banner from the way-back
 entry, within the boot deadline of [the walk](#the-walk). The debugger
 is in the image because erXos's kernel configuration leaves Fiasco's
 `JDB` at its default, which is on; the run's deadline types the reboot
@@ -2023,8 +2024,8 @@ the set's device tree keeps only the boot CPU's node, so Fiasco starts
 no other CPU: `BootPartition.lay_out_set` with `boot_cpu_only` removes
 every other `cpu@N` node from a copy of the board's tree
 (`BoardTree.boot_cpu_only`), and the set's record says so
-(`board_tree_cpus`). Whether Fiasco's generic platform honours that is
-unverified until the first board boot. Fiasco prints a line for each
+(`board_tree_cpus`). Fiasco's generic platform honours it: on the board
+it starts only CPU0, and ipcbench finds one CPU. Fiasco prints a line for each
 CPU it starts (`CPU0: ID_PFR...` for the boot CPU, `CPUn booted (same
 IDs as CPU0).` for another); a log that names more than one is not
 imported. The import prints the board's side-by-side table: the record

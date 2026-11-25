@@ -29,7 +29,7 @@ module Erx
   # build's bootstrap.raw is laid out as a bench set whose device tree keeps one CPU, and
   # netbooted as a queue of one entry with the found target as the way back. The run asks
   # the board to reboot, reads the console to `Benchmarks done.` or the run's deadline,
-  # types the kernel debugger's reboot (ESC, then ^), and waits for erXos's banner from
+  # types the kernel debugger's reboot (ESC, ^, Return), and waits for erXos's banner from
   # the way back; the link is pointed back at the found target however the run ends. The
   # run's log is imported as a record of environment pi4-4gb-l4re, its cells through
   # L4Re's importer (Ipcbench), and set beside erXos's newest board record of the
@@ -48,10 +48,11 @@ module Erx
     DONE_SECONDS = L4ReBench::DONE.fetch(:seconds)
     # From the debugger's reboot to erXos's banner.
     RETURN_SECONDS = BoardRun::BOOT_SECONDS
-    # Fiasco's kernel debugger: ESC enters it from the console, and its ^ reboots the
-    # machine. The pause between them lets the debugger take the console first.
-    DEBUGGER = "\e"
-    REBOOT = '^'
+    # Fiasco's kernel debugger's reboot, key by key: ESC enters the debugger from the
+    # console, ^ asks for the reboot, and Return confirms it (the debugger answers ^ with
+    # `Return reboots, "k" enters L4 kernel debugger...`). The pause before each key after
+    # the first lets the debugger take the one before.
+    DEBUGGER_REBOOT = ["\e", '^', "\r"].freeze
     TYPE_PAUSE_SECONDS = 1
     # A line Fiasco prints for each CPU it starts: the boot CPU's identification
     # registers, or a further CPU that has the boot CPU's.
@@ -260,14 +261,14 @@ module Erx
         typed
       end
 
-      # Types the kernel debugger's reboot: ESC, a pause for the debugger to take the
-      # console, then ^. Whether both were written.
+      # Types the kernel debugger's reboot (DEBUGGER_REBOOT), stopping at the first key
+      # that cannot be written; whether every key was.
       def debugger_reboot(console)
-        say("bench: typing the kernel debugger's reboot (ESC, then ^)")
-        return false unless console.type(DEBUGGER)
-
-        @pause.call(TYPE_PAUSE_SECONDS)
-        console.type(REBOOT)
+        say("bench: typing the kernel debugger's reboot (ESC, ^, Return)")
+        DEBUGGER_REBOOT.each_with_index.all? do |key, index|
+          @pause.call(TYPE_PAUSE_SECONDS) if index.positive?
+          console.type(key)
+        end
       end
 
       def said(state)
