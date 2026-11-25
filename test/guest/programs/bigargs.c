@@ -8,27 +8,44 @@
  * channel's 16 KiB ring (tools/lib/erx/programs.rb, the bigargs case): one
  * argument of BIG bytes of 'x', which reaches it only if the session writes
  * the message as room returns and liberx's executor copies it as it is
- * published. So the executor parks on the program's doorbell at least once,
- * and this program checks, beside the argument, what its first thread's
+ * published. Beside the argument it checks what its first thread's
  * argument registers held (docs/design-programs.md, "The channel"): the
  * five object values of program_arg, each a capability, all distinct, then
  * the two CPU feature words musl's auxiliary vector holds, and 0 past them;
- * that every doorbell delivery the executor took carried the channel's
- * fixed label, ERX_PROG_CHANNEL_LABEL; and that the feature words claim
- * what a domain's do (test/guest/native_musl/guest.c, case_auxv). It ends
- * with 0 when all agree, and with a code of its own for the first that does
- * not.
+ * that the session's ring of the program's doorbell reaches the executor
+ * with the channel's fixed label, ERX_PROG_CHANNEL_LABEL, the label that
+ * also wakes a sender waiting for room, and that no delivery carried
+ * another; and that the feature words claim what a domain's do
+ * (test/guest/native_musl/guest.c, case_auxv). It ends with 0 when all
+ * agree, and with a code of its own for the first that does not.
+ *
+ * The startup message need not make the session ring. The session runs in
+ * a band above a program's, so on a CPU they share it refills the ring
+ * before the executor finds it empty, and the executor never arms its read.
+ *
+ * So main rings it another way: it sleeps, so the executor, with the lane
+ * empty, arms its read, publishing its wake, and parks; then it probes
+ * itself, a request the program's handler answers with ok. The reply is the
+ * first record past the wake, so its write crosses it and the session rings
+ * the doorbell. The executor counts the label once it finds the lane empty
+ * again, which may come after main looks on another CPU, so main sleeps and
+ * probes until the count moves, at most PROBES times.
  */
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <string.h>
 #include <sys/auxv.h>
+#include <time.h>
 
 #include "liberx/backend/api.h"
 #include "liberx/program/program.h"
+#include "liberx/program/signal.h"
 
 #define BIG	130000u
+#define PROBES	100u
+#define NAP_NS	1000000L
 
 int	main(int, char **, char **);
 
@@ -76,10 +93,31 @@ registers_hold_the_install(const uint64_t regs[ERX_ARCH_START_ARGS])
 	return (erx_object_destroy(mem) == ERX_OK);
 }
 
+/*
+ * After a sleep of NAP, which lets the executor arm its read and park, probes
+ * the program itself, until the executor has counted a ring with the
+ * channel's label, at most PROBES times: 0 once it has, 5 if it never does,
+ * and 8 for a probe the handler does not answer with ok.
+ */
+static int
+probes_ring(const erx_prog_self_t *self)
+{
+	const struct timespec nap = { .tv_sec = 0, .tv_nsec = NAP_NS };
+
+	for (unsigned probe = 0; probe < PROBES; probe++) {
+		nanosleep(&nap, NULL);
+		if (atomic_load_explicit(&self->rings, memory_order_relaxed) != 0)
+			return (0);
+		if (erx_prog_kill((int)self->pid, 0) != 0)
+			return (8);
+	}
+	return (atomic_load_explicit(&self->rings, memory_order_relaxed) != 0 ? 0 : 5);
+}
 int
 main(int argc, char **argv, char **envp)
 {
 	const erx_prog_self_t *const self = erx_prog_self();
+	int status;
 
 	(void)envp;
 	if (argc != 2 || strcmp(argv[0], "bigargs") != 0)
@@ -92,8 +130,8 @@ main(int argc, char **argv, char **envp)
 	}
 	if (!registers_hold_the_install(self->regs))
 		return (4);
-	if (self->rings == 0)
-		return (5);
+	if ((status = probes_ring(self)) != 0)
+		return (status);
 	if (self->strays != 0)
 		return (6);
 	if (!features_given())

@@ -284,10 +284,13 @@ module Erx
             receive {P, {exit_status, S}} -> {args, S} after #{WAIT_MS} -> {args, timeout, P} end
           end)().
        ERLANG
-       Case.new(name: 'bigargs', seconds: 60, answer: '{bigargs,0}', expression: line(<<~ERLANG)),
+       # bigargs runs under a handler, which answers the probes of itself that make the
+       # session ring its doorbell (test/guest/programs/bigargs.c).
+       Case.new(name: 'bigargs', seconds: 60, answer: '{bigargs,{exited,0}}', expression: line(<<~ERLANG)),
          (fun() ->
-            P = erx_program:start(#{spec('bigargs', 8, argv: '[<<"bigargs">>, binary:copy(<<"x">>, 130000)]')}),
-            receive {P, {exit_status, S}} -> {bigargs, S} after #{WAIT_MS} -> {bigargs, timeout, P} end
+            {ok, H, Monitor, []} = erx_prog_handler:start(#{handler_spec('bigargs', argv: '[<<"bigargs">>, binary:copy(<<"x">>, 130000)]')}),
+            Status = receive {'DOWN', Monitor, process, H, Why} -> case Why of {shutdown, {program_exit, S}} -> S; _ -> {lost, Why} end after #{WAIT_MS} -> timeout end,
+            {bigargs, Status}
           end)().
        ERLANG
        # Lease 5 names no window buffer this session holds, so the start's take refuses it.
