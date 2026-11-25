@@ -11,7 +11,8 @@ require_relative '../etf'
 # Each cell's parameters are the request's binary size and its encoded size, the bytes
 # term_to_binary makes of {echo, B}, which the echo facet's 512-byte max_request bounds
 # (Erx::SystemDomain::Regrant::FACET_LIMITS). xdomain-throughput and xdomain-stall need
-# what the echo fixture lacks and are designed with G5's runs.
+# what the echo fixture lacks and are designed with G5's runs. What Linux runs is stock
+# OTP 29.1.2's, the same module on Linux's Erlang guest (docs/design-bench.md, "Counterparts").
 operation = Erx::BenchSuite::Operation
 cell = Erx::BenchSuite::LandingCell
 etf = Erx::Etf
@@ -20,8 +21,11 @@ request = etf::Tuple.new(elements: [etf::Atom.new(name: 'echo'), ("\xa5".b * byt
 parameters = { 'bytes' => bytes, 'encoded' => etf.encode(request).bytesize }
 Erx::BenchSuite.declare_benchmark(
   operations: [
-    operation.new(name: 'local-rtt', profile: 'fast', result: 'the reply equals the request'),
-    operation.new(name: 'xdomain-pingpong', profile: 'fast', result: 'the reply equals the request')
+    operation.new(name: 'local-rtt', profile: 'fast', result: 'the reply equals the request',
+                  counterparts: { 'linux' => 'stock OTP: two processes of one node, the same module and message' }),
+    operation.new(name: 'xdomain-pingpong', profile: 'fast', result: 'the reply equals the request',
+                  counterparts: { 'linux' => 'stock OTP: two nodes over TCP loopback distribution; the echo process is ' \
+                                               'registered on the other node' })
   ],
   landing: {
     'xdomain' => [

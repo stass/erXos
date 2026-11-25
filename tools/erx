@@ -1577,6 +1577,7 @@ module Erx
       history = BenchRecord.history
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
       guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner)),
+                XdomainBench::Guest.new(run: XdomainBench::Run.new(root: ROOT, runner: runner)),
                 L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
                                      qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner)]

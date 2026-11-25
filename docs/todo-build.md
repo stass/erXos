@@ -157,8 +157,10 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
   side's first compile; FreeBSD's way for the `wake` handshake's A to see B asleep, without which
   `erx_peer_bench` reports both wake cells unsupported there; which operations have a Linux counterpart is
-  written in four places (the design's table, the `linux` counterparts of `benches/*.rb`, which `vm`, `sched` and
-  `xdomain` do not declare though the program measures them, the program's unsupported lines, and
+  written in four places (the design's table, the `linux` counterparts of `benches/*.rb`, which `vm` and `sched` do not
+  declare though the program measures them, while `xdomain`'s are stock OTP's on Linux's Erlang guest and the
+  program still times a UNIX-domain socket pair for them (`xdomain_run`, `PeerBench::BOOTS`, its fixture), a row the
+  design does not have, to be deleted so no side-by-side table can show it under stock OTP's heading, the program's unsupported lines, and
   `peer_bench_test.rb`'s list), where the test should derive its list from the declarations; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
   the reader's closed clock set has no name for its `CLOCK_MONOTONIC` fallback, which the design says is
   recorded as such; its fast-run, sweep-print and spinner loops moved into `test/guest/bench` beside
@@ -173,7 +175,10 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   landing profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'
   sizes; and a boot whose guest raises (a QEMU or transcript timeout) is a note and no record, where the design's
   `timed_out` status would record its unreported cells, which needs `BenchMeasurement.boot` to mark them
-  `timed_out` from a partial serial log.
+  `timed_out` from a partial serial log. A session checks every guest's refusal of a listed system, not only
+  the guests its plan boots, so `bench xdomain --systems erxos,linux` is refused when Linux's C pins are not
+  fetched though only the Erlang guest would boot, and `--profile full` names the native image's refusal for an
+  xdomain session.
 * [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)),
   `tools/lib/erx/linux_guest.rb`, `bench/peer/erx_peer_bench.c`: the guest boots in a session; what remains is
   that no seeded hang shows `/init`'s deadline killing the program and powering off, and nothing in `make check`

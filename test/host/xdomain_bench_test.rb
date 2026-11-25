@@ -4,6 +4,7 @@
 
 require 'minitest/autorun'
 require_relative '../../tools/lib/erx/bench_suite'
+require_relative '../../tools/fuzz/bench_line'
 require_relative '../../tools/lib/erx/xdomain_bench'
 
 # The xdomain bench image's pure parts (docs/design-bench.md, "5. `xdomain`: one message,
@@ -70,5 +71,49 @@ class XdomainBenchTest < Minitest::Test
     assert_equal steps.first.line, points[2].fetch(:type)
     refute points.last.key?(:type)
     assert_match points.last.fetch(:pattern), "#{Bench::DONE}\r\n"
+  end
+
+  # The session's guest of the xdomain boot (Erx::BenchSystem): it boots the image at the
+  # session's CPU count and judges the guest's lines against the benchmark's own cells, so a
+  # boot cut short at a checkpoint keeps the cells it reported and the rest are timed_out.
+  class FakeRun
+    attr_reader :calls
+
+    def initialize(measured)
+      @measured = measured
+      @calls = []
+    end
+
+    def memory_mib = 512
+
+    def call(asked, accel:, cpus:)
+      @calls << [asked.benchmarks.map { |wanted| wanted.benchmark.name }, accel, cpus]
+      @measured
+    end
+  end
+
+  def test_the_session_guest_boots_the_image_and_keeps_a_cut_boots_cells
+    xdomain = Erx::BenchSuite.benchmark('xdomain')
+    parameters = xdomain.landing.fetch('xdomain').first.parameters
+    conditions = { 'load' => 'idle', 'placement' => 'runtime', 'parameters' => parameters, 'clock' => 'counter',
+                   'batch' => 1 }
+    samples = Erx::NativeBench::LANDING_PROFILES.fetch('fast').samples
+    rtt = Erx::BenchLineFuzz.line('wake-same-cpu', benchmark: 'xdomain', operation: 'local-rtt', conditions: conditions,
+                                                   samples: samples, histogram: [[1000, 1000, samples]], min: 1000, max: 1000,
+                                                   largest: (0...16).map { |index| [index, 1000] })
+    run = FakeRun.new({ serial: 'serial.log', lines: [Erx::BenchLineFuzz.clock_line(pairs: []), rtt],
+                        image_sha256: 'ab' * 32, workloads: {}, compiler: 'clang', qemu_version: '10.1.0',
+                        reused_from: nil, timed_out: 'QEMU checkpoint timed out: bench-done' })
+    guest = Bench::Guest.new(run: run)
+    assert_equal %w[erxos xdomain], [guest.system, guest.boot]
+    assert_equal [1, 4], guest.forms(4)
+    assert_nil guest.refusal('landing')
+    assert_match(/landing profiles only/, guest.refusal('full'))
+    booted = guest.call(xdomain, cells: xdomain.landing.fetch('xdomain'), cpus: 1, accel: 'hvf')
+    assert_equal [[['xdomain'], 'hvf', 1]], run.calls
+    assert_empty booted.refused
+    assert_equal [%w[local-rtt measured], %w[xdomain-pingpong timed_out]],
+                 booted.cells.map { |cell| [cell.operation, cell.status] }
+    assert_equal 'ab' * 32, booted.subject.fetch('image_sha256')
   end
 end

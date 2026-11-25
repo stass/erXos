@@ -169,6 +169,30 @@ module Erx
       end
     end
 
+    # erXos's guest of the xdomain boot in a comparison session (BenchSystem): one boot of
+    # the image at the session's CPU count, its lines judged against the cells of the one
+    # benchmark the session runs, as the landing boot judges its own, so a boot cut short
+    # at a checkpoint keeps the cells it reported and the rest are timed_out. The image
+    # times every cell of the benchmark in its boot, so the cells a session asks only decide
+    # that it boots, as for LinuxGuest::Guest.
+    class Guest
+      def initialize(run:)
+        @run = run
+      end
+
+      def system = 'erxos'
+      def boot = BOOT
+      def forms(cpus) = [1, cpus].uniq
+      def refusal(profile) = ("erxos's xdomain bench image is built with the landing profiles only" unless profile == 'landing')
+
+      def call(benchmark, cells:, cpus:, accel:)
+        asked = XdomainBench.asked([benchmark])
+        measured = @run.call(asked, accel: accel, cpus: cpus)
+        answer = BenchMeasurement.boot(measured.fetch(:lines), asked, timed_out: !measured.fetch(:timed_out).nil?)
+        BenchLanding.booted(measured, answer, memory_mib: @run.memory_mib)
+      end
+    end
+
     # The xdomain boot of the landing matrix (docs/design-bench.md, "The gates"): one boot,
     # recorded (BenchLanding). It has no seeded boot: xdomain's seed is a sensitivity run.
     class Landing

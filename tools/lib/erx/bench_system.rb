@@ -27,8 +27,8 @@ module Erx
   #                   one boot of those cells at cpus CPUs, as a Booted; a guest whose
   #                   program reports every cell of the boot (LinuxGuest::Guest) answers
   #                   them all, and its record keeps each
-  # erXos's native bench image is the first (NativeBench::Guest); L4ReBench::Guest and
-  # LinuxGuest::Guest are the others.
+  # erXos's are its native bench image (NativeBench::Guest) and its xdomain bench image
+  # (XdomainBench::Guest); L4ReBench::Guest and LinuxGuest::Guest are the others.
   module BenchSystem
     # What one boot of a guest gives back: the clock group and cells its lines were
     # judged to (clock nil for a guest whose program prints only means), the reasons of
