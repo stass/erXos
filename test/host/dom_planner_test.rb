@@ -187,6 +187,19 @@ class DomPlannerTest < Minitest::Test
     assert_equal ManifestContextFixture.rows(source, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
+  # The Bluetooth suite's bleuart cell (BtDomain.bleuart_manifest): the cells' medium
+  # manifest with the system principal's session template kept and the Pi 4's bleuart
+  # records, on the medium machine: the check admits it, bleuart's grants pack, and the
+  # library plans its configured domains.
+  def test_the_library_plans_the_bleuart_cells_domains
+    board = Erx::Platform.load(root: ROOT, name: Erx::BtDomain::BLEUART_PLATFORM).manifest_source(ROOT)
+    source = Erx::BtDomain.bleuart_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM, board: board)
+    arguments = ManifestContextFixture.manifest_arguments(@codec, source)
+    context = Erx::Manifest::Context.new(**arguments.merge(platform: Erx::MediumBoot.machine(PLATFORM).record))
+    admitted = Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal ManifestContextFixture.rows(source, 'domain'), admitted.report.fetch('child_plan_instances')
+  end
+
   # The Raspberry Pi 4's development manifest, with its Bluetooth domain and the domain's
   # line grant on UART0, on the board's own record: the check admits it, and the library
   # plans the storage, display, PCIe, network, USB and Bluetooth domains, whose grants fit

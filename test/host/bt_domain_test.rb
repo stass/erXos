@@ -85,4 +85,33 @@ class BtDomainTest < Minitest::Test
     error = assert_raises(Erx::Error) { Erx::BtDomain::Serial.check("serial failed \e]0;x\a\n", log: LOG) }
     refute_includes error.message, "\e"
   end
+
+  # The bleuart cell's manifest keeps the system principal's session template, so the
+  # console logs root in and root_line has a session to answer, carries the Pi 4's
+  # bleuart records whole, and grows max_domains by its one domain; it has no echo
+  # domain, so nus has one handler.
+  def test_the_bleuart_manifest_runs_bleuart_beside_root_s_session
+    board = Erx::Platform.load(root: ROOT, name: Erx::BtDomain::BLEUART_PLATFORM).manifest_source(ROOT)
+    source = Erx::BtDomain.bleuart_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM, board: board)
+    assert_includes source, "session system\n"
+    assert_includes source, "start bleuart\n  enable YES\n  published_enable NO\n"
+    assert_includes source, "  operations root_line\n"
+    %w[inspect start].each { |facet| assert_includes source, "facet #{facet}\n  grantee @session.system\n" }
+    refute_includes source, "domain echo\n"
+    plain = Erx::BtDomain.app_manifest(PLATFORM.manifest_source(ROOT), platform: PLATFORM)
+    domains = ->(text) { Erx::Manifest::Edit.value(text, record: 'machine', field: 'max_domains') }
+    assert_equal domains.call(plain) + 1, domains.call(source)
+  end
+
+  # bleuart's peers pass on their own passing lines alone: the shell peer's is not the
+  # absent peer's, nor the serial peer's.
+  def test_the_bleuart_rows_want_their_own_peer_s_line
+    shell = Erx::BtDomain::Serial::BLEUART_SHELL
+    Erx::BtDomain::Serial.check("bleuart passed shell\n", log: LOG, script: shell)
+    Erx::BtDomain::Serial.check("bleuart passed absent\n", log: LOG, script: Erx::BtDomain::Serial::BLEUART_ABSENT)
+    ["bleuart passed absent\n", "bleuart failed ps on the line lists the system domain's login service\n",
+     "serial passed 65536 247\n"].each do |output|
+      assert_raises(Erx::Error) { Erx::BtDomain::Serial.check(output, log: LOG, script: shell) }
+    end
+  end
 end

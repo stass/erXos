@@ -156,17 +156,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The console";
   docs/design-login.md, build order 7): the `bleuart` release and `erx_bleuart` with its relay test, the login facet's
   `root_line`, `bleuart`'s holder row, the release-manifest refusal and `ble_grant`'s admission of a `start` row's
-  template whose principal's `domains` quota is 1 are built. Left: its rows in the Raspberry Pi 4's and QEMU's
-  development manifests, the published medium's packing of `published_enable` in `enable`'s place, the Bumble cell
-  and probe B-P7; the Bluetooth suite's manifest drops root's session template (`MediumBoot.manifest`), so the cell
-  needs root's session and `bleuart`'s room beside the echo's. After a loss of input or the shell's end the phone stays
-  connected to no tty until it disconnects: the `ble` facet has no operation by which a handler ends a link.
-  bleuart's "a gap ends the shell" holds for the drops it and the Bluetooth domain see; numbered input checked at the
-  tty (todo-shell.md, the input-loss event, step 3) would make it hold by construction. erx_gatt_serial drops a
-  `subscribed` while its owner is behind, silently: a dropped `notify` leaves bleuart's output held while input still
-  reaches root's shell; it should be a `serial_lost` too.
+  template whose principal's `domains` quota is 1, its rows in the Raspberry Pi 4's development manifest and the
+  Bluetooth suite's `-bleuart` cell (a scan shows the UART service, a central gets root's `% ` prompt, `echo` answers
+  and `ps` lists no system process, and after `service bleuart stop` a scan shows none) are built. Left: probe B-P7,
+  and the Bumble row's cases the cell does not run yet: `Ctrl-C` interrupting `sleep 100`, the disconnect that leaves
+  no shell in root's session (with its seeded fault, `tty_hangup` left unsent), the reconnect's new prompt, and the
+  UART service back after `service bleuart start`. bleuart's input is the master core's numbered input, so "a gap
+  ends the shell" holds by construction once the tty checks the numbers (todo-shell.md, the input-loss event); until
+  then it holds for the drops bleuart and the Bluetooth domain see. erx_gatt_serial drops a `subscribed` while its
+  owner is behind, silently: a dropped `notify` leaves bleuart's output held while input still reaches root's shell;
+  it should be a `serial_lost` too.
   The unlanded branch `login-8`, the phone console, is superseded and does not land. CLAUDE.md's
   fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
+* [Low] bluetooth, `bleuart` (`erx_bleuart_core`, the `ble` facet): after a loss of input or the shell's end the phone
+  stays connected to no tty until it disconnects; a handler's `{disconnect, Conn}` on the `ble` facet would let
+  `bleuart` drop the link.
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each
   connection, each bond with no key, and the counters) is not declared in `abi/inspection.txt`, and the domain
   serves none of it; declare the path and serve it from the domain's agent, with `unknown` for a value the

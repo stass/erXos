@@ -225,6 +225,53 @@ module Erx
       Manifest::Edit.offering(medium(source, platform: platform), service: 'ble', gatt: APP_GATT)
     end
 
+    # The bleuart cell (docs/design-bluetooth.md, "The console", and "Decisions", 7):
+    # bleuart in the echo's place, since both handle nus. Its records are the Raspberry
+    # Pi 4's development manifest's, their one source (BLEUART_RECORDS): the principal,
+    # its session template, its ble and login grants and its start row. STOPPED is the line
+    # the console prints at `service bleuart stop`.
+    BLEUART_CELL = '-bleuart'
+    BLEUART_PLATFORM = 'raspi4b'
+    BLEUART_RECORDS = [%w[principal bleuart], %w[session bleuart], %w[facet bleuart_ble], %w[facet bleuart_login],
+                       %w[start bleuart]].freeze
+    # Root's session's grants that the cell keeps, from the development manifest it boots
+    # (config/manifest/development.txt) for `service bleuart stop`: inspect, through which
+    # it reads the rows at /proc/apps, and start, the start service's tree, through which
+    # it stops bleuart's row.
+    ROOT_SESSION_RECORDS = [%w[facet inspect], %w[facet start]].freeze
+    # The connections bleuart's session makes: its system connection, its ble connection
+    # and the line root_line mints (config/manifest/raspi4b-development.txt).
+    BLEUART_CONNECTIONS = 3
+    STOP_BLEUART = "service bleuart stop\r"
+    # A command's output reaches the console CR CR LF (docs/todo-session.md).
+    STOPPED = /\AStopping bleuart\.\r*\n/n
+    STOP_SECONDS = 60
+
+    # The bleuart cell's manifest from the development manifest's text, source, on platform,
+    # and the Pi 4's, board: the cells' medium manifest (medium) with the system principal's
+    # session templates back, which MediumBoot drops, so the console logs root in and
+    # root_line has root's session to answer; and bleuart's records, with room for its
+    # principal's memory, its domain and its connections. Root's session gets back its
+    # grants of ROOT_SESSION_RECORDS from source, which MediumBoot drops with the template.
+    def self.bleuart_manifest(source, platform:, board:)
+      rows = named_records(board, BLEUART_RECORDS)
+      text = medium(source, platform: platform) + ProductionImage.sessions(source) +
+             Manifest::Frontend.records_text(named_records(source, ROOT_SESSION_RECORDS) + rows)
+      Manifest::Edit.grow(text, { %w[machine root_memory] => rows.first.decimal('memory'), %w[machine max_domains] => 1,
+                                  %w[machine max_connections] => BLEUART_CONNECTIONS })
+    end
+
+    # The records of the manifest text source that names lists as [kind, name] pairs, in
+    # that order; a name the manifest does not have is refused.
+    def self.named_records(source, names)
+      records = Manifest::Frontend.read(source).records
+      names.map do |kind, name|
+        records.fetch(kind, []).find { |record| record.name == name } ||
+          raise(Error, "the development manifest has no #{kind} #{name}")
+      end
+    end
+    private_class_method :named_records
+
     # The line typed at the Erlang shell, one expression per element: the wait for the
     # domain (PcieDomain::WAIT); BtFacts, run at the domain, its controller process's
     # bring-up facts (erx_bt_hci:facts/0) printed there as a string, or none before the
@@ -318,11 +365,26 @@ module Erx
       check = lambda do |_text|
         seen = DisplayDomain.await_log(log, wait_seconds: APP_SECONDS) { |text| text.match?(ECHOING) }
         raise Error, "the #{APP_NAME} app logged no attach of nus within #{APP_SECONDS} s" unless seen.match?(ECHOING)
-      raise Error, "the system did not admit the #{APP_NAME} package" unless seen.match?(ADMITTED)
+        raise Error, "the system did not admit the #{APP_NAME} package" unless seen.match?(ADMITTED)
 
         serial.call
       end
       [*points[0...-1], points.last.merge(verify: check, verify_seconds: APP_SECONDS + Serial::BOUND_SECONDS).freeze].freeze
+    end
+
+    # The bleuart cell's checkpoints: the production checkpoints, the last at the command
+    # shell, where the shell peer (Serial::BLEUART_SHELL, run by peer) gets root's shell on
+    # the line; then `service bleuart stop` typed at the console, and at its STOPPED line the
+    # absent peer finds nus gone from the advertising data. points must end at the command
+    # shell.
+    def bleuart_checkpoints(points, peer:)
+      raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
+
+      [*points[0...-1],
+       points.last.merge(verify: ->(_text) { peer.call(Serial::BLEUART_SHELL) }, verify_seconds: Serial::BOUND_SECONDS,
+                         type: STOP_BLEUART).freeze,
+       { name: 'bleuart-stopped', pattern: STOPPED, seconds: STOP_SECONDS, verify_seconds: Serial::BOUND_SECONDS,
+         verify: ->(_text) { peer.call(Serial::BLEUART_ABSENT) } }.freeze].freeze
     end
 
     # Bumble's apps/controllers.py, unmodified, with its two controllers joined by its local
@@ -399,15 +461,26 @@ module Erx
       end
     end
 
-    # The serial row (docs/design-bluetooth.md, "On QEMU against Bumble", stage 3):
-    # test/bt/peer/serial_peer.py on the controllers' second port, under the runner's
-    # deadline tool, standard input closed, its standard output in out and its standard
-    # error, where Bumble's warnings go, in log. The row passes when the peer exits 0 having
-    # printed its one passing line; check reads at most MAX_OUTPUT bytes of what it printed.
+    # A peer of test/bt/peer on the controllers' second port (docs/design-bluetooth.md, "On
+    # QEMU against Bumble"), under the runner's deadline tool, standard input closed, its
+    # standard output in STEM.out and its standard error, where Bumble's warnings go, in
+    # STEM.log. A run passes when the peer exits 0 having printed its one passing line,
+    # PASSED; check reads at most MAX_OUTPUT bytes of what it printed. words come before the
+    # transport on its command line.
     module Serial
-      SCRIPT = 'test/bt/peer/serial_peer.py'
-      # The peer's own bounds: its scan, its connection, 64 KiB of writes with response and
-      # their drain, with a margin. The checkpoint's verify may take this long.
+      Script = Data.define(:path, :words, :passed, :stem)
+      # The serial row, stage 3: 64 KiB through the handler of nus and back.
+      SERIAL = Script.new(path: 'test/bt/peer/serial_peer.py', words: [].freeze,
+                          passed: /\Aserial passed [0-9]+ [0-9]+\n\z/, stem: 'serial-peer')
+      # bleuart's rows ("The console"): root's shell on the line, then nus gone from the
+      # advertising data once bleuart has stopped (BtDomain.bleuart_checkpoints).
+      BLEUART_SHELL = Script.new(path: 'test/bt/peer/bleuart_peer.py', words: %w[shell].freeze,
+                                 passed: /\Ableuart passed shell\n\z/, stem: 'bleuart-shell')
+      BLEUART_ABSENT = Script.new(path: 'test/bt/peer/bleuart_peer.py', words: %w[absent].freeze,
+                                  passed: /\Ableuart passed absent\n\z/, stem: 'bleuart-absent')
+      # A peer's own bounds: the serial peer's scan, its connection, 64 KiB of writes with
+      # response and their drain, with a margin, which bound bleuart's peers too. A
+      # checkpoint's verify may take this long.
       SECONDS = 300
       # The longest the row may take: the peer's deadline, its kill's grace and the
       # interpreter's start.
@@ -415,15 +488,14 @@ module Erx
       MAX_OUTPUT = 4096
       # The deadline tool's status when the deadline passed (GNU timeout).
       TIMED_OUT = 124
-      PASSED = /\Aserial passed [0-9]+ [0-9]+\n\z/
 
       module_function
 
-      def run(environment, root:, port:, directory:, timeout_program:)
-        out = File.join(directory, 'serial-peer.out')
-        log = File.join(directory, 'serial-peer.log')
+      def run(environment, root:, port:, directory:, timeout_program:, script: SERIAL)
+        out = File.join(directory, "#{script.stem}.out")
+        log = File.join(directory, "#{script.stem}.log")
         argv = [timeout_program, '-k', Controllers::KILL_AFTER_SECONDS.to_s, SECONDS.to_s,
-                *environment.argv(File.join(root, SCRIPT), "tcp-client:127.0.0.1:#{port}")]
+                *environment.argv(File.join(root, script.path), *script.words, "tcp-client:127.0.0.1:#{port}")]
         status = nil
         Thread.handle_interrupt(Object => :never) do
           pid = Process.spawn(*argv, in: File::NULL, out: [out, 'w', 0o600], err: [log, 'w', 0o600], pgroup: true)
@@ -433,23 +505,25 @@ module Erx
             ProcessGroup.terminate(pid) unless status
           end
         end
-        raise Error, "the serial peer did not end within #{SECONDS} s; see #{log}" if status.exitstatus == TIMED_OUT
+        raise Error, "the peer #{script.stem} did not end within #{SECONDS} s; see #{log}" if status.exitstatus == TIMED_OUT
 
-        check(File.open(out, 'rb') { |file| file.read(MAX_OUTPUT) }.to_s, log: log)
-        raise Error, "the serial peer exited #{status.exitstatus.inspect} after its passing line; see #{log}" unless status.success?
+        check(File.open(out, 'rb') { |file| file.read(MAX_OUTPUT) }.to_s, log: log, script: script)
+        raise Error, "the peer #{script.stem} exited #{status.exitstatus.inspect} after its passing line; see #{log}" unless status.success?
       end
 
       # The peer's output is its one passing line, or Error with what it printed, escaped,
       # and the log its standard error went to.
-      def check(output, log:)
-        raise Error, "the serial peer printed #{output.b.inspect}, not its passing line; see #{log}" unless PASSED.match?(output.b)
+      def check(output, log:, script: SERIAL)
+        raise Error, "the peer #{script.stem} printed #{output.b.inspect}, not its passing line; see #{log}" unless
+          script.passed.match?(output.b)
       end
     end
 
-    # Boots the echo domain's image, then the app cell's medium, each under HVF with one CPU
-    # against Bumble's controllers. Returns { "hvf-1cpu" => 'passed', "hvf-1cpu-app" =>
-    # 'passed' }; a boot that does not reach the bring-up's facts, the echo's start or the
-    # serial row's pass raises.
+    # Boots the echo domain's image, then the app cell's medium, then the bleuart cell's,
+    # each under HVF with one CPU against Bumble's controllers. Returns { "hvf-1cpu" =>
+    # 'passed', "hvf-1cpu-app" => 'passed', "hvf-1cpu-bleuart" => 'passed' }; a boot that
+    # does not reach the bring-up's facts, the echo's start, the serial row's pass or
+    # bleuart's raises.
     class Run
       CELL_CPUS = 1
 
@@ -464,23 +538,27 @@ module Erx
         @machine = MediumBoot.machine(platform)
         @manifest = BtDomain.manifest(platform.manifest_source(@root), platform: platform)
         @app_manifest = BtDomain.app_manifest(platform.manifest_source(@root), platform: platform)
+        board = Platform.load(root: @root, name: BLEUART_PLATFORM).manifest_source(@root)
+        @bleuart_manifest = BtDomain.bleuart_manifest(platform.manifest_source(@root), platform: platform, board: board)
       end
 
-      # The cells' names: the echo domain's, then the app cell's.
+      # The cells' names: the echo domain's, the app cell's, then the bleuart cell's.
       def self.cells
         cell = "#{QemuCells::LOCAL_ACCELERATOR}-#{CELL_CPUS}cpu"
-        [cell, "#{cell}#{APP_CELL}"].freeze
+        [cell, "#{cell}#{APP_CELL}", "#{cell}#{BLEUART_CELL}"].freeze
       end
 
       # Packs the test image, which carries ECHO_BOOT, once, and boots it; then packs the
-      # app cell's medium, which carries the echo package, and boots it.
+      # app cell's medium, which carries the echo package, and boots it; then the bleuart
+      # cell's, which carries bleuart's release.
       def call(jobs: 4, build: true)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        echo_cell, app_cell = Run.cells
+        echo_cell, app_cell, bleuart_cell = Run.cells
         echo_boot(echo_cell, fiasco)
         app_boot(app_cell, fiasco)
-        { echo_cell => 'passed', app_cell => 'passed' }
+        bleuart_boot(bleuart_cell, fiasco)
+        { echo_cell => 'passed', app_cell => 'passed', bleuart_cell => 'passed' }
       end
 
       private
@@ -513,7 +591,26 @@ module Erx
                                                                                             root: @root, runner: @runner,
                                                                                             compiler: @compiler, linker: @linker).package
         apps = ImageApps.plan([package], enable: [APP_NAME])
-        built, written = production(fiasco).build_medium(directory: File.join(directory, 'image'), manifest_source: @app_manifest,
+        medium_boot(directory, fiasco, manifest: @app_manifest, apps: apps) do |points, log|
+          ->(serial) { BtDomain.app_checkpoints(points, log: log, serial: serial) }
+        end
+      end
+
+      # The bleuart cell: a medium of bleuart_manifest with no package, whose start table
+      # runs bleuart at boot, booted as the app cell's is, to the command shell, where
+      # bleuart's rows are checked (BtDomain.bleuart_checkpoints).
+      def bleuart_boot(cell, fiasco)
+        medium_boot(cell_directory(cell), fiasco, manifest: @bleuart_manifest, apps: ImageApps.none) do |points, _log|
+          ->(peer) { BtDomain.bleuart_checkpoints(points, peer: peer) }
+        end
+      end
+
+      # A medium of manifest carrying apps, in directory: the harness plays the firmware
+      # (MediumBoot.firmware_tree) and boots the medium's committed slot under the
+      # checkpoints the block answers, given the production checkpoints and the boot's
+      # serial log, as a lambda of the peer runner (served).
+      def medium_boot(directory, fiasco, manifest:, apps:)
+        built, written = production(fiasco).build_medium(directory: File.join(directory, 'image'), manifest_source: manifest,
                                                          apps: apps)
         medium = written.fresh(directory: directory)
         choice = BootRecord.read(medium)
@@ -523,9 +620,8 @@ module Erx
                                         choice: choice, cpus: CELL_CPUS, directory: directory)
         boot = File.join(directory, 'boot')
         points = ProductionImage::Run.checkpoints(built, root: @root, watchdog: MediumBoot::Run::WATCHDOG, cpus: CELL_CPUS,
-                                                         manifest_source: @app_manifest, memory_mib: @machine.memory_mib)
-        log = Qemu.serial_log(boot)
-        served(directory, ->(serial) { BtDomain.app_checkpoints(points, log: log, serial: serial) }) do |checkpoints, line|
+                                                         manifest_source: manifest, memory_mib: @machine.memory_mib)
+        served(directory, yield(points, Qemu.serial_log(boot))) do |checkpoints, line|
           qemu.run(platform: @machine.platform, accel: QemuCells::LOCAL_ACCELERATOR, cpus: CELL_CPUS, image: image,
                    memory_mib: @machine.memory_mib, directory: boot, dtb: tree, disks: disks, line: line,
                    checkpoints: checkpoints)
@@ -544,21 +640,23 @@ module Erx
       end
 
       # Bumble's controllers served for a boot's length, their log bumble.log in directory
-      # beside the peer's, and the block given the checkpoints that points_for answers for
-      # the serial row's lambda and the line to join to the first controller. Their deadline
-      # outlasts QEMU's, the checkpoints' seconds and the serial row's, by their own wait to
-      # listen and a minute for QEMU's start.
+      # beside the peers', and the block given the checkpoints that points_for answers for
+      # the peer runner's lambda, which runs a Serial::Script (the serial row's by default),
+      # and the line to join to the first controller. Their deadline outlasts QEMU's and the
+      # checkpoints' seconds, each verify's included, by their own wait to listen and a
+      # minute for QEMU's start.
       def served(directory, points_for)
         Bumble.use(root: @root, runner: @runner) do |environment|
           serial = nil
           # serial is set below, once the controllers' ports are known, before any checkpoint runs.
-          checkpoints = points_for.call(-> { serial.call })
+          checkpoints = points_for.call(->(script = Serial::SERIAL) { serial.call(script) })
           seconds = checkpoints.sum { |point| point.fetch(:seconds) + point.fetch(:verify_seconds, 0) } +
                     Controllers::LISTEN_SECONDS + 60
           Controllers.serve(environment, log: File.join(directory, 'bumble.log'), seconds: seconds,
                                          timeout_program: @runner.timeout_program) do |ports|
-            serial = lambda do
-              Serial.run(environment, root: @root, port: ports.peer, directory: directory, timeout_program: @runner.timeout_program)
+            serial = lambda do |script|
+              Serial.run(environment, root: @root, port: ports.peer, directory: directory, timeout_program: @runner.timeout_program,
+                                      script: script)
             end
             yield checkpoints, QemuPlan::Line.new(port: ports.line)
           end
