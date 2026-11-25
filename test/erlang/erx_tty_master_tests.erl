@@ -63,7 +63,7 @@ the_checks_test_() ->
 
 %% A repeat of the output last taken is answered again, with the size.
 %% Input messages are numbered in one sequence, bytes and losses alike,
-%% from 0; a disconnected master sends neither and numbers neither.
+%% from 0, connected or not.
 input_is_numbered_test() ->
     {_, M0} = erx_tty_master:connect({24, 80}, erx_tty_master:new()),
     {[{send, {tty_input, 0, <<"ab">>}}], M1} = erx_tty_master:input(<<"ab">>, M0),
@@ -72,10 +72,8 @@ input_is_numbered_test() ->
         erx_tty_master:input(<<(binary:copy(<<"x">>, 4096))/binary, "c">>, M2),
     ?assertEqual(4096, byte_size(Big)),
     Away = erx_tty_master:disconnect(M3),
-    {[], Away} = erx_tty_master:lost(Away),
-    {[], Away} = erx_tty_master:input(<<"d">>, Away),
-    {_, Back} = erx_tty_master:connect({24, 80}, Away),
-    ?assertMatch({[{send, {tty_lost, 4}}], _}, erx_tty_master:lost(Back)).
+    {[{send, {tty_lost, 4}}], Away1} = erx_tty_master:lost(Away),
+    ?assertMatch({[{send, {tty_input, 5, <<"d">>}}], _}, erx_tty_master:input(<<"d">>, Away1)).
 
 %% tty_lost is the master's message: a tty that sends it is detached.
 a_tty_sending_a_loss_is_detached_test() ->

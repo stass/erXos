@@ -44,18 +44,33 @@ opened() ->
     {[], C} = run([{tty, ?ROOT, {tty_open, tty()}}], new()),
     C.
 
-%% The tty input actions, the bytes root's tty is sent, in order.
-input(Actions) -> [Bytes || {to_tty, _, {tty_input, Bytes}} <- Actions].
+%% The bytes root's tty takes of the relay's messages, in order, as its own side of
+%% them, erx_tty_link, reads them: the relay's input is input only if the tty takes it.
+input(Actions) ->
+    {Taken, _Link} = lists:foldl(fun({to_tty, _, Message}, {Bytes, L0}) ->
+                                         {More, L} = erx_tty_link:master(Message, L0),
+                                         {Bytes ++ [B || {input, B} <- More], L};
+                                    (_Action, Acc) ->
+                                         Acc
+                                 end, {[], erx_tty_link:new(present)}, Actions),
+    Taken.
 
 input_in_order_test() ->
     {Actions, _} = run([{serial, <<"cd /t">>}, {serial, <<"mp\r">>}], opened()),
-    ?assertEqual([{to_tty, tty(), {tty_input, <<"cd /t">>}}, {to_tty, tty(), {tty_input, <<"mp\r">>}}],
-                 Actions).
+    ?assertEqual([<<"cd /t">>, <<"mp\r">>], input(Actions)).
+
+%% Input reaches the tty whether or not the client has subscribed to tx.
+input_before_the_subscription_test() ->
+    {Actions, _} = run([{serial, <<"a">>}, {subscribed, notify}, {serial, <<"b">>},
+                        {subscribed, none}, {serial, <<"c">>}], opened()),
+    ?assertEqual([<<"a">>, <<"b">>, <<"c">>], input(Actions)).
 
 %% A gap ends the relay, so the bytes after it never complete the line before it.
 a_loss_hangs_the_tty_up_test() ->
-    ?assertEqual({[{to_tty, tty(), {tty_input, <<"cd /t">>}}, {to_tty, tty(), tty_hangup}, ?LOST, stop], ended},
-                 status(run([{serial, <<"cd /t">>}, serial_lost, {serial, <<"mp\r">>}], opened()))).
+    {Actions, C} = run([{serial, <<"cd /t">>}, serial_lost, {serial, <<"mp\r">>}], opened()),
+    ?assertEqual([<<"cd /t">>], input(Actions)),
+    ?assertEqual({[{to_tty, tty(), tty_hangup}, ?LOST, stop], ended},
+                 status({lists:nthtail(1, Actions), C})).
 
 %% Bytes before the tty names itself have nowhere to go: they are a loss.
 bytes_before_the_tty_end_the_relay_test() ->

@@ -560,6 +560,7 @@ nothing_from_the_console() ->
     ?assertEqual(none, receive
                            {tty_taken, _} = M -> M;
                            {tty_input, _, _} = M -> M;
+                           {tty_lost, _} = M -> M;
                            {tty_size, _, _} = M -> M
                        after ?QUIET_MS -> none
                        end).

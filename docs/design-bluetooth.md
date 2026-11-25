@@ -2432,8 +2432,9 @@ operation of its login grant, `root_line`
   bound. The headroom is for the writes `erx_gatt_serial` holds when a
   master's send reaches it, at most the `bt_write_queue` the link keeps
   unanswered, which it forwards while the master waits on that send:
-  * **Input.** Each `{serial, Conn, Bytes}` is a `{tty_input, Bytes}`,
-    in order. A `{serial_lost, Conn}` ends the relay, as does a write
+  * **Input.** Each `{serial, Conn, Bytes}` is the master core's
+    input, numbered `{tty_input, N, Bytes}` messages, in order, whether
+    or not the client has subscribed to `tx`. A `{serial_lost, Conn}` ends the relay, as does a write
     before the tty names itself, which has no tty to go to: the master
     sends `tty_hangup`, which ends the shell, and takes nothing more of
     the connection, so for every drop `bleuart` and the Bluetooth domain

@@ -16,7 +16,7 @@ require_relative '../fixtures/erlang_build'
 # compiled from source with warnings as errors on stock's emulator (ERX_ERL and
 # ERX_ERLC, which make check supplies).
 class ErxBleuartTest < Minitest::Test
-  APPLICATIONS = %w[erx erx_bt_client erx_bleuart].freeze
+  APPLICATIONS = %w[erx erx_session erx_bt_client erx_bleuart].freeze
   TESTS = %w[test/erlang/erx_bleuart_core_tests.erl test/erlang/erx_bleuart_tests.erl].freeze
   MODULES = TESTS.map { |test| File.basename(test, '.erl') }.freeze
 

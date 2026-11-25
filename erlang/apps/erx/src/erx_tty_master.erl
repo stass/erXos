@@ -139,18 +139,22 @@ written, if any, is taken.
 -spec disconnect(master()) -> master().
 disconnect(M) -> M#master{connected = false}.
 
--doc "Bytes typed at the line, sent to a connected tty in parts of at most 4 KiB.".
+-doc """
+Bytes typed at the line, sent to the tty in parts of at most 4 KiB, connected or not:
+the console types only into the session that has the line, and a client of Nordic's
+UART service may type before it subscribes to the output. A refused tty gets nothing.
+""".
 -spec input(binary(), master()) -> {[action()], master()}.
-input(Bytes, M = #master{connected = true, input = N}) ->
+input(Bytes, M = #master{refused = false, input = N}) ->
     Parts = parts(Bytes),
     {[{send, {tty_input, N + I, Part}} || {I, Part} <- lists:enumerate(0, Parts)],
      M#master{input = N + length(Parts)}};
 input(_Bytes, M) ->
     {[], M}.
 
--doc "Input was lost at the line, here among its bytes: a connected tty is told so.".
+-doc "Input was lost at the line, here among its bytes: the tty is told so, unless refused.".
 -spec lost(master()) -> {[action()], master()}.
-lost(M = #master{connected = true, input = N}) ->
+lost(M = #master{refused = false, input = N}) ->
     {[{send, {tty_lost, N}}], M#master{input = N + 1}};
 lost(M) ->
     {[], M}.

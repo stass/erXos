@@ -10,9 +10,10 @@ messages (docs/design-live.md, "Between domains"). erx_bleuart_channel carries i
 actions out. Each step takes one event and returns the actions it decides, in
 order, and the next state.
 
-* **Input.** Each `{serial, Bytes}`, a write of `rx`, is `{tty_input, Bytes}` to
-  the tty, in order and in parts of at most 4 KiB, whether or not the client has
-  subscribed. A `serial_lost`, a gap in the stream, ends the relay, as does a write
+* **Input.** Each `{serial, Bytes}`, a write of `rx`, is the master's input
+  (erx_tty_master:input/2), numbered `{tty_input, N, Part}` messages to the tty in
+  order and in parts of at most 4 KiB, whether or not the client has subscribed.
+  A `serial_lost`, a gap in the stream, ends the relay, as does a write
   before the tty names itself, which has no tty to go to: so the bytes after a gap
   never complete a line the bytes before it began.
 * **Output.** Every message from the tty is checked by the console's own master
@@ -43,8 +44,6 @@ its own start, before the line answers the `open_tty` that erx_bleuart waits on.
 
 -export([new/2, step/2, status/1]).
 
-%% The most bytes one tty_input carries.
--define(MAX_INPUT, 4096).
 %% The client's notices, the relay's only bytes of its own.
 -define(INPUT_LOST, <<"\r\nbleuart: input was lost; the shell has ended\r\n">>).
 -define(SHELL_ENDED, <<"\r\nbleuart: the shell has ended\r\n">>).
@@ -89,8 +88,8 @@ status(#core{}) -> open.
 -spec step(event(), core()) -> {[action()], core()}.
 step(_Event, C = #core{ended = true}) ->
     {[], C};
-step({serial, Bytes}, C = #core{tty = Tty}) when is_pid(Tty) ->
-    {[{to_tty, Tty, {tty_input, Part}} || Part <- parts(Bytes)], C};
+step({serial, Bytes}, C = #core{tty = Tty, master = M}) when is_pid(Tty) ->
+    master(erx_tty_master:input(Bytes, M), C);
 step({serial, _Bytes}, C = #core{tty = none}) ->
     hang_up(?INPUT_LOST, C);
 step(serial_lost, C) ->
@@ -138,12 +137,6 @@ master({Actions, M}, C = #core{tty = Tty}) ->
 carried({write, N, Bytes}, _Tty) -> {write, N, Bytes};
 carried({send, Message}, Tty) -> {to_tty, Tty, Message};
 carried({lost, N}, _Tty) -> {lost_output, N}.
-
-%% Bytes in parts of at most 4 KiB, the most a tty_input carries (erx_tty_link drops a
-%% longer one). A write of rx is at most att_value_max bytes, so it is one part today.
-parts(<<Part:?MAX_INPUT/binary, Rest/binary>>) when Rest =/= <<>> -> [Part | parts(Rest)];
-parts(<<>>) -> [];
-parts(Part) -> [Part].
 
 %% The end of the relay: tty_hangup to a tty it knows, the client's notice unless it
 %% disconnected, then stop.
