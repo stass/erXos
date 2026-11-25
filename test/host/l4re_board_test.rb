@@ -45,6 +45,11 @@ class L4ReBoardTest < Minitest::Test
     assert_equal ['not_returned', nil], [state.ending, action]
   end
 
+  def test_erxos_banner_before_benchmarks_done_ends_the_run_typing_nothing
+    state, action = Board.step(Board.start(at: 0), line('erx: boot image build 0123456789abcdef index ' + ('a' * 64) + ' x', 40))
+    assert_equal ['no_l4re', false, nil], [state.ending, state.done, action]
+  end
+
   def test_a_closed_console_ends_the_run_where_it_is
     state, = Board.step(Board.start(at: 0), Walk::Stop.new(ending: 'console_closed', at: 5))
     assert_equal ['console_closed', false], [state.ending, state.done]
@@ -86,8 +91,16 @@ class L4ReBoardTest < Minitest::Test
     assert File.file?(File.join(run, 'run.json'))
   end
 
+  # The run's log runs on to erXos's return boot, which starts every CPU of its own.
+  def test_cpus_started_after_benchmarks_done_are_erxos_return_and_not_counted
+    returned = ['erx: boot image build 0123456789abcdef index ' + ('a' * 64) + ' x', LOG[1],
+                *(1..3).map { |cpu| "CPU#{cpu} booted (same IDs as CPU0)." }]
+    _, record = imported([*LOG, *returned])
+    assert_equal 1, record.environment.cpus
+  end
+
   def test_a_log_showing_more_than_one_cpu_is_not_imported
-    error = assert_raises(Erx::Error) { imported([*LOG, 'CPU1 booted (same IDs as CPU0).']) }
+    error = assert_raises(Erx::Error) { imported([*LOG[0..1], 'CPU1 booted (same IDs as CPU0).', *LOG[2..]]) }
     assert_match(/CPUs 0, 1/, error.message)
   end
   # A console standing in for the board's: each read answers the next scripted event;
@@ -140,12 +153,13 @@ class L4ReBoardTest < Minitest::Test
                  [outcome.done, outcome.ending, console.typed, target, queues]
   end
 
-  def test_a_console_that_cannot_be_written_or_opened_still_leaves_the_link_on_the_found_target
+  def test_a_console_that_cannot_be_written_ends_the_run_with_the_link_on_the_found_target
     console = Console.new([line('Benchmarks done.', 1)], typable: false)
     outcome, target, queues = ran(->(**) { console }, shell: Shell.new(true))
     assert_equal [true, 'console_closed', ["\e"], 'found', []], [outcome.done, outcome.ending, console.typed, target, queues]
-    teardown
-    setup
+  end
+
+  def test_a_console_that_cannot_be_opened_leaves_the_link_on_the_found_target
     outcome, target, queues = ran(->(**) { raise Erx::Error, 'no console' })
     assert_equal ['no console', 'found', []], [outcome.message, target, queues]
   end

@@ -187,6 +187,15 @@ design does not have, to be deleted so no side-by-side table can show it under s
   the log (`tools/erx bench import NAME --env pi4-4gb-l4re --subject FILE LOG`); what remains is the first board boot, which
   checks that upstream `bootstrap` finds the mini UART and runs at `0x200000`, that Fiasco honours the one-CPU tree, that
   ESC and `^` reach its debugger and reboot the board, and how long bootstrap takes to `Benchmarks done.`.
+* [Medium] benchmarks, L4Re's board run (`tools/lib/erx/l4re_board.rb`): its served-link lifecycle (lock, queue left
+  check, prepare, point, point back or remove, the restore message) repeats `BoardRun`'s and has drifted from it: a
+  failed point-back is not part of the run's outcome, and an interrupt ends with no ending said. One funnel both runs
+  use would own it. The run also holds its log to no byte limit, as `BoardWalk` does (a flooding TCP console writes
+  until the deadlines), and does not compare the returned banner with the found target's identity.
+* [Low] benchmarks, L4Re's import (`L4ReBoard.import`): the one-CPU check passes a log with no `CPU0: ID_PFR` line,
+  and a line that starts with a CR is not matched; `BoardTree.boot_cpu_only` leaves phandle references to the removed
+  CPU nodes (`cpu-map`, a PMU's `interrupt-affinity`, `__symbols__`); `bench NAME` picks L4Re's run by scanning argv
+  for `--env pi4-4gb-l4re`, so an abbreviated `--en` takes erXos's path and is refused there.
 * [Low] benchmarks, the comparison session's gaps (`tools/lib/erx/bench_session.rb`,
   [design-bench.md](design-bench.md#a-comparison-session)): erXos's native guest and Linux's offer only the
   landing profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'

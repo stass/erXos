@@ -83,11 +83,13 @@ module Erx
     # The next state after event (a BoardWalk event whose lines carry classify's value)
     # and the action it asks for: :reboot when the debugger's reboot is to be typed, else
     # nil. The run's deadline types the reboot too, since the debugger may still answer
-    # when ipcbench has not finished. Pure.
+    # when ipcbench has not finished. erXos's banner before the done line means the queue's
+    # entry did not boot L4Re: the run ends there, typing nothing into erXos. Pure.
     def step(state, event)
       case [state.phase, event]
       in [_, BoardWalk::Stop] then [state.with(ending: event.ending), nil]
       in [:running, BoardWalk::Line] if event.kept == :done then [returning(state, event.at, done: true), :reboot]
+      in [:running, BoardWalk::Line] if event.kept == :banner then [state.with(ending: 'no_l4re'), nil]
       in [:running, _] if event.at >= state.deadline then [returning(state, event.at, done: false), :reboot]
       in [:returning, BoardWalk::Line] if event.kept == :banner then [state.with(ending: 'returned'), nil]
       in [:returning, _] if event.at >= state.deadline then [state.with(ending: 'not_returned'), nil]
@@ -96,6 +98,13 @@ module Erx
     end
 
     def returning(state, at, done:) = state.with(phase: :returning, deadline: at + RETURN_SECONDS, done: done)
+
+    # The lines of L4Re's run: the log's up to its first done line, which the run's log
+    # runs past to erXos's return boot and its own CPUs; all of them when none is done.
+    def run_lines(lines)
+      done = lines.index { |line| L4ReBench::DONE.fetch(:pattern).match?(line) }
+      done ? lines.first(done + 1) : lines
+    end
 
     # The CPUs lines say Fiasco started, in order.
     def started_cpus(lines) = lines.filter_map { |line| STARTED_CPU.match(line.b)&.[](:cpu)&.to_i }.uniq.sort
@@ -126,7 +135,7 @@ module Erx
     def import(name, subject:, log:, root:, history:, revision:)
       benchmark = BenchSuite.benchmark(name)
       bytes = BoundedFile.read(log, maximum: BenchRecord::LOG_BYTES)
-      lines = bytes.split(/\r?\n/n)
+      lines = run_lines(bytes.split(/\r?\n/n))
       cpus = started_cpus(lines)
       raise Error, "bench import: #{log} shows Fiasco starting CPUs #{cpus.join(', ')}; only a one-CPU boot is imported" if
         cpus.size > 1
@@ -264,9 +273,10 @@ module Erx
       def said(state)
         done = state.done ? 'Benchmarks done.' : 'no Benchmarks done. by the deadline'
         case state.ending
-        when 'returned' then "#{done}; the board came back on the found target"
+        when 'returned' then "#{done}; erXos's banner came from the way back"
         when 'not_returned' then "#{done}; #{NOT_RETURNED}"
-        else "#{done}; the run ended: #{state.ending}"
+        when 'no_l4re' then "#{done}; erXos's banner came before L4Re ran: the queue's entry did not boot, and nothing was typed"
+        else "#{done}; the run ended: #{state.ending}; if the board is in L4Re, ESC then ^ on its console reboots it, or a power cycle"
         end
       end
 

@@ -19,11 +19,12 @@ module Erx
   # at most a BENCH line's 64 KiB and its end, is handed to the walk as a BoardWalk event.
   # A line longer than that is cut there and never handed on; it and the rest of it, to
   # its newline, are handed on only as bytes, so the walk still holds them to the boot's
-  # byte limit. At most one line's bytes are held between reads. The walk types on the
-  # console only to ask for a reboot that ssh could not (type).
+  # byte limit. At most one line's bytes are held between reads. A run types on the
+  # console only constant keys: reboot when ssh could not ask for it, and L4Re's run the
+  # kernel debugger's reboot (type).
   #
-  # Every byte is the board's and untrusted: the console only classifies lines
-  # (BoardLog.classify) and counts them; it shows none.
+  # Every byte is the board's and untrusted: the console only classifies lines (with
+  # BoardLog.classify, or the run's own classifier) and counts them; it shows none.
   class BoardConsole
     BAUD = 115_200
     CHUNK = 4096
