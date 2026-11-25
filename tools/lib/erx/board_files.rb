@@ -138,6 +138,12 @@ module Erx
                                            'identity' => walk.returned.identity&.to_h&.transform_keys(&:to_s) })
     end
 
+    # Writes queue's file, or walk's, into directory; a file already there is refused.
+    def write_queue(directory, queue) = write(File.join(directory, QUEUE), queue_json(queue))
+    def write_walk(directory, walk) = write(File.join(directory, WALK), walk_json(walk))
+
+    def write(path, text) = File.open(path, File::WRONLY | File::CREAT | File::EXCL, 0o644) { |file| file.write("#{text}\n") }
+
     # The queue file at path (Queue).
     def read_queue(path)
       keywords(parsed(path)) => { benchmark:, sets: Array => sets, entries: Array => entries, return_identity: identity, **nil }
@@ -168,6 +174,6 @@ module Erx
     # constructor, which the readers refuse.
     def keywords(object) = object.is_a?(Hash) ? object.transform_keys(&:to_sym) : raise(TypeError)
 
-    private_class_method :parsed, :keywords
+    private_class_method :parsed, :keywords, :write
   end
 end

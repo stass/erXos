@@ -118,10 +118,10 @@ module Erx
       staged(link, queue, set)
     end
 
-    # The boot set of medium, the production image's directory: its boot/ and the files
-    # its card's build record lists, which must include kernel8.img.
-    def boot_set(medium)
-      record = read_record(File.join(medium, BootPartition::RECORD))
+    # The boot set of medium, the production image's directory or a bench set's: its boot/
+    # and the files its build record, named record, lists, which must include kernel8.img.
+    def boot_set(medium, record: BootPartition::RECORD)
+      record = read_record(File.join(medium, record))
       digests = BootPartition.listed_files(record)
       raise Error, "netboot: the build record lists no #{BootPartition::KERNEL}" unless digests.key?(BootPartition::KERNEL)
 

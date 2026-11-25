@@ -34,10 +34,16 @@ module Erx
     # The argument vector of the exec, for target :system or [:domain, D]; raises Error for a
     # word the machine's shell could read as more than one argument.
     def argv(dest:, target:, blobs:)
-      raise Error, "--ssh #{dest}: a destination does not begin with '-'" if dest.empty? || dest.start_with?('-')
-
-      ['ssh', '-T', '--', dest, 'load', *target_flags(target),
+      ['ssh', '-T', '--', destination(dest), 'load', *target_flags(target),
        *blobs.flat_map { |blob| ['-m', "#{word(blob.name, 'module')}:#{blob.bytes.bytesize}"] }]
+    end
+
+    # dest, refused when it is empty or ssh could take it as an option; a board run's ssh
+    # calls check theirs here too.
+    def destination(dest)
+      raise Error, "--ssh #{LineEscape.escape(dest)}: a destination does not begin with '-'" if dest.empty? || dest.start_with?('-')
+
+      dest
     end
 
     # Loads blobs as one batch over ssh; returns a CodeLoad::Result naming every module as
