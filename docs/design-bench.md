@@ -875,7 +875,7 @@ host serves over HTTP
 ### What the code does today
 
 * **A bench image builds for the board.** `NativeBench::Run` builds
-  Fiasco for its platform (`fiasco.build_for`,
+  Fiasco for its platform when asked to rebuild (`fiasco.build_for`,
   `tools/lib/erx/native_bench.rb:257`) and keeps a board's builds apart
   from QEMU virt's (`board_part`, `:288`); `BootImage` packs the
   platform's own first stage (`first_stage`,
@@ -936,10 +936,11 @@ host serves over HTTP
   board is unverified.
 * **The host reads the board's console, live or afterwards.** The walk
   reads it through `BoardConsole` while it runs, which classifies each
-  line with `BoardLog.classify` (`tools/lib/erx/board_console.rb:113`);
-  `tools/erx bench import` reads a saved log of it afterwards
-  (`bench_import`, `tools/erx:1591`); and both runs' records come from one
-  reader of board logs (`BoardLog.read`, `tools/lib/erx/board_record.rb:108`).
+  line it holds whole with `BoardLog.classify`
+  (`tools/lib/erx/board_console.rb:113`); `tools/erx bench import` reads a
+  saved log of it afterwards (`bench_import`, `tools/erx:1591`); and both
+  runs' records come from one reader of board logs (`BoardLog.read`,
+  `tools/lib/erx/board_log.rb:78`), which `BoardRecord.recorded` calls.
   `BoardConsole` opens a serial device; a console served as a TCP port
   reaches it only through a pty a relay outside the tree fills
   ([Raspberry Pi 4 guide](guide/raspberry-pi-4.md)).
