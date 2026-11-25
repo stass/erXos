@@ -1,3 +1,6 @@
+/* Modified by erXos: L4Re's libpthread is not imported and erXos builds only
+ * the minimal libc, which has no thread descriptor, so nothing here comes
+ * from libpthread's pthread-api.h. */
 #ifndef _PTHREAD_IMPL_H
 #define _PTHREAD_IMPL_H
 
@@ -11,8 +14,6 @@
 #include "libc.h"
 #include "syscall.h"
 #include "atomic.h"
-
-#include "pthread-api.h"
 
 #ifndef TP_OFFSET
 #define TP_OFFSET 0
@@ -29,8 +30,6 @@
 hidden void __set_tp(void *tls_tp);
 
 void *__tls_get_addr(tls_mod_off_t *);
-hidden int __init_tp(pthread_descr);
-hidden pthread_descr __copy_tls(unsigned char *);
 hidden void __reset_tls();
 
 // Taken from commit dcd60371500a74d489372cac7240674c992c2484:

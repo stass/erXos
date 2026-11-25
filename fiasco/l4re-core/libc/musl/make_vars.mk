@@ -1,3 +1,5 @@
+# Modified by erXos: L4Re's libpthread is not imported, so its internal
+# headers are on no include path.
 include $(L4DIR)/mk/Makeconf
 
 LIBCSRC_DIR ?= $(SRC_DIR)
@@ -10,11 +12,6 @@ CONTRIB_DIR := $(LIBCSRC_DIR_ABS)/contrib/musl
 LIBC_SRC_DIRS := $(CONTRIB_DIR)/ldso $(CONTRIB_DIR)/src $(LIBCSRC_DIR_ABS)/libc/ARCH-all/src
 LIBC_DST_DIR  := $(OBJ_DIR)/src
 
-# pthread source file directory
-PTHLIB_DIR    := $(PKGDIR)/../libpthread
-
-# include directory for pthread internals
-PTHREAD_INCDIR  = $(PTHLIB_DIR)/src/sysdeps/$(LIBC_ARCH_FAMILY) $(PTHLIB_DIR)/src
 PRIVATE_INCDIR += $(LIBCSRC_DIR)/libc/includes
 
 LIBC_DYNLINKER = /rom/libc.so.1
@@ -51,7 +48,7 @@ LIBC_ARCH := $(LIBC_ARCH_$(BUILD_ARCH))
 
 # LIBC_ARCH_FAMILY is the ABI-agnostic CPU family name used for the L4Re-provided
 # glue that is written to cover all ABIs of a CPU family via the preprocessor
-# (libc/ARCH-<family> and libpthread sysdeps/<family>). It matches LIBC_ARCH for
+# (libc/ARCH-<family>). It matches LIBC_ARCH for
 # every arch except MIPS and RISC-V, whose ABI-specific LIBC_ARCH (e.g. mips64,
 # riscv64) differs from the shared family directory name (mips, riscv).
 LIBC_ARCH_FAMILY_mips := mips

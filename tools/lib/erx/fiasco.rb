@@ -73,7 +73,7 @@ module Erx
     CORE_PACKAGES = %w[
       compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io
       l4re l4re_c l4sys l4util ldscripts libc libc-headers libc-minimal
-      libc_backends libpthread libsigma0
+      libc_backends libsigma0
       minimal_l4re sigma0
     ].freeze
     UART_FILES = %w[
@@ -519,7 +519,9 @@ module Erx
       Dir.children(core).reject { |path| keep.include?(path) }.each do |path|
         FileUtils.remove_entry(File.join(core, path))
       end
-      FileUtils.remove_entry(File.join(core, 'libc/uclibc-ng'))
+      %w[libc/uclibc-ng libc/musl/libpthread cxx/lib/start].each do |path|
+        FileUtils.remove_entry(File.join(core, path))
+      end
       retain_uart(File.join(stage, 'drivers-frst'))
     end
 

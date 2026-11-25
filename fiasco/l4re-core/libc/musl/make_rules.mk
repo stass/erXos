@@ -1,4 +1,5 @@
 # vi:ft=make
+# Modified by erXos: no libpthread headers on the include path.
 CPPFLAGS  += -nostdinc -ffreestanding
 CFLAGS    += -fno-builtin -std=c99 $(GCCNOSTACKPROTOPT)
 CXXFLAGS  += -fno-builtin $(GCCNOSTACKPROTOPT)
@@ -20,9 +21,6 @@ PRIVATE_INCDIR += $(CONTRIB_DIR)/src/internal
 PRIVATE_INCDIR += $(CONTRIB_DIR)/include
 
 PRIVATE_INCDIR_vfs.cc += $(CONTRIB_DIR)/include
-
-# Include libpthread internal headers (should go to non-minimal Make.rules?)
-PRIVATE_INCDIR += $(PTHREAD_INCDIR)
 
 BID_ASM_FILE_EXTENSIONS += .s
 

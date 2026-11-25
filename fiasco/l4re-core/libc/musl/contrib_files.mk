@@ -1,3 +1,6 @@
+# Modified by erXos: the minimal libc leaves out abort, raise and uselocale,
+# which read the libpthread thread descriptor that it does not have; a program
+# that links its assert must define abort itself.
 LIBC_BUILD_MINIMAL = $(filter minimal,$(LIBC_BUILD_MODE))
 
 define SRC_misc
@@ -15,7 +18,7 @@ endef
 
 define SRC_signal
   psignal
-  raise
+  $(if $(LIBC_BUILD_MINIMAL),,raise)
   sigaddset
   sigandset
   sigdelset
@@ -373,7 +376,7 @@ endef
 
 # Only not minimal: _Exit?
 define SRC_exit
-  abort
+  $(if $(LIBC_BUILD_MINIMAL),,abort)
   assert
   atexit
   exit
@@ -415,7 +418,7 @@ define SRC_locale
   setlocale
   strcoll
   strxfrm
-  uselocale
+  $(if $(LIBC_BUILD_MINIMAL),,uselocale)
 endef
 
 define SRC_locale_fp

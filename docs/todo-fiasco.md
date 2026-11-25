@@ -476,6 +476,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] Release licensing, `tools/fiasco_origins.rb` and `fiasco/l4re-core/ORIGIN.md`: a file with
+  no grant of its own is recorded under the package declaration of `LICENSE.spdx` that covers its
+  path, falling back to the root package's MIT, and that fallback recorded L4Re's libpthread, which
+  `LICENSE.spdx` does not name, as MIT. Re-check every row whose evidence is the root package
+  declaration against the file's own notice and refuse the fallback for a directory the declaration
+  does not name.
 * [Medium] Kernel lines case, `tools/lib/erx/fiasco.rb` (`Fiasco.new(kernel:)`, `kernel_path`):
   a Fiasco object given a test kernel packs it into any medium built through it, and only
   `MediumKind.test`'s `test_programs` marks a medium as test code, so a development medium built

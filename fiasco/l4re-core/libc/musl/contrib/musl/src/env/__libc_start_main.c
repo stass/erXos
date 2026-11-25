@@ -1,3 +1,5 @@
+/* Modified by erXos: the minimal libc, the only one erXos builds, has no
+ * libpthread to initialize. */
 #include <elf.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -6,8 +8,6 @@
 #include "syscall.h"
 #include "atomic.h"
 #include "libc.h"
-
-#include "pthread-api.h"
 
 static void dummy(void) {}
 weak_alias(dummy, _init);
@@ -57,9 +57,6 @@ void __init_libc(char **envp, char *pn)
 	__progname = __progname_full = pn;
 	for (i=0; pn[i]; i++) if (pn[i]=='/') __progname = pn+i+1;
 
-#ifndef L4_MINIMAL_LIBC
-	__pthread_initialize_minimal(aux);
-#endif
 	__init_ssp((void *)aux[AT_RANDOM]);
 
 	if (aux[AT_UID]==aux[AT_EUID] && aux[AT_GID]==aux[AT_EGID]

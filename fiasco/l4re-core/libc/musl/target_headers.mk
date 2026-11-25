@@ -1,3 +1,5 @@
+# Modified by erXos: musl's own pthread.h is installed in place of L4Re's
+# libpthread headers, which are not imported.
 define HDR_mips
   sgidefs.h
   sys/asm.h
@@ -78,6 +80,7 @@ define HDR_common
   nl_types.h
   paths.h
   poll.h
+  pthread.h
   pty.h
   pwd.h
   sched.h
