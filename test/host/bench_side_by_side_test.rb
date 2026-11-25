@@ -48,10 +48,10 @@ class BenchSideBySideTest < Minitest::Test
                      counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 }, detail: {})
   end
 
-  def mean(operation)
+  def mean(operation, total: 4_213_000, printed: 421.3)
     Record::Cell.new(benchmark: 'probe', operation: operation, form: 'mean', conditions: conditions(operation, 'cycles'),
                      profile: nil, status: 'measured', reason: nil, counts: nil,
-                     detail: { 'count' => 10_000, 'total' => 4_213_000, 'mean' => 421.3 })
+                     detail: { 'count' => 10_000, 'total' => total, 'mean' => printed })
   end
 
   def boot(system, cpus, cells, clock:, round: 0)
@@ -114,9 +114,17 @@ class BenchSideBySideTest < Minitest::Test
     assert_equal({ 'count' => Tables::Quantity.new(amount: 10_000, unit: 'operations'),
                    'mean' => Tables::Quantity.new(amount: 421.3, unit: 'cycles') }, entry.values)
     line = Tables.render([table]).find { |text| text.include?('421.3') }
-    assert_match(/mean 421\.3 cycles/, line)
-    refute_match(/\bns\b|\bratio\b/, line)
-  end
+  assert_match(/mean 421\.3 cycles/, line)
+  refute_match(/\bns\b|\bratio\b/, line)
+end
+
+# ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table
+# shows the total over the calls, one round trip, beside erXos's round trips.
+def test_a_mean_is_shown_as_its_total_over_its_count
+  halved = boot('l4re', 1, [mean('same', total: 4_200_000, printed: 210)], clock: nil)
+  l4re = column(Tables.tables(BENCHMARK, [runs.first, halved], systems: %w[erxos l4re]).first.rows.first, 'l4re')
+  assert_equal Tables::Quantity.new(amount: 420.0, unit: 'cycles'), l4re.entries.first.values.fetch('mean')
+end
 
   def test_the_rendered_table_names_its_layer_and_each_counterpart
     lines = Tables.render([table])

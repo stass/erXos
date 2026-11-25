@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require_relative 'bench_system'
 require_relative 'error'
@@ -25,20 +26,37 @@ module Erx
 
     # What the container build exported into directory: bootstrap.elf and the build
     # record written beside it, a JSON object of the pins, hashes, resolved
-    # configuration, toolchain and boot arguments, which every run's subject keeps.
+    # configuration, toolchain and boot arguments, which every run's subject keeps. The
+    # record names the ELF it was written for by its SHA-256, so a stale record never
+    # describes a rebuilt ELF.
     Build = Data.define(:directory) do
       def bootstrap = File.join(directory, 'bootstrap.elf')
       def record_path = File.join(directory, 'build-record.json')
       def built? = File.file?(bootstrap) && File.file?(record_path)
 
-      # The build record, refused unless it is a JSON object with string keys.
+      # The build record of the ELF as it is now, refused unless it is a JSON object whose
+      # keys and strings are printable ASCII and whose bootstrap_sha256 is the ELF's.
       def record
-        value = JSON.parse(File.read(record_path, 1 << 20))
-        raise Error, "#{record_path} is not a JSON object" unless BenchRecord.plain_hash?(value)
+        value = JSON.parse(File.binread(record_path, 1 << 20))
+        raise Error, "#{record_path} is not a JSON object of printable ASCII" unless
+          BenchRecord.plain_hash?(value) && L4ReBench.printable?(value)
+        unless value['bootstrap_sha256'] == Digest::SHA256.file(bootstrap).hexdigest
+          raise Error, "#{record_path} was not written for #{bootstrap}: rebuild L4Re's guest"
+        end
 
         value
-      rescue JSON::ParserError => e
-        raise Error, "#{record_path} is not JSON: #{e.message}"
+      rescue JSON::ParserError
+        raise Error, "#{record_path} is not JSON"
+      end
+    end
+
+    # Whether every key and string of a parsed JSON value is printable ASCII.
+    def self.printable?(value)
+      case value
+      when Hash then value.all? { |key, item| printable?(key) && printable?(item) }
+      when Array then value.all? { |item| printable?(item) }
+      when String then value.b.match?(/\A[ -~]*\z/n)
+      else true
       end
     end
 
@@ -69,12 +87,16 @@ module Erx
         subject = @build.record
         report = @qemu.run(platform: @platform, accel: accel, cpus: 1, image: @build.bootstrap, memory_mib: MEMORY_MIB,
                            checkpoints: [DONE], hostlink: QemuPlan::NO_HOSTLINK, directory: directory(accel))
+        # The ELF QEMU booted is the one the record names, even if it was rebuilt meanwhile.
+        unless report.fetch('image_sha256') == subject.fetch('bootstrap_sha256')
+          raise Error, "#{@build.bootstrap} changed during its boot; its record does not describe the boot"
+        end
         serial = report.fetch('serial_log')
         answer = Ipcbench.import(File.binread(serial).split(/\r?\n/n), benchmark: benchmark.name, cells: cells)
         BenchSystem::Booted.new(
           clock: nil, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
           environment: { 'memory_mib' => MEMORY_MIB, 'machine' => 'virt', 'qemu' => report['qemu_version'] }.compact,
-          subject: subject.merge('bootstrap_sha256' => report.fetch('image_sha256')),
+          subject: subject,
           logs: [{ serial: serial }], reused_from: report['reused_from']
         )
       end

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'minitest/autorun'
 require 'tmpdir'
@@ -31,7 +32,8 @@ class L4ReBenchTest < Minitest::Test
       @asked = plan
       serial = File.join(@directory, 'serial.log')
       File.binwrite(serial, "#{LINES.join("\r\n")}\r\n")
-      { 'serial_log' => serial, 'image_sha256' => 'b' * 64, 'qemu_version' => '11.0.0', 'reused_from' => nil }
+      { 'serial_log' => serial, 'image_sha256' => Digest::SHA256.file(plan.fetch(:image)).hexdigest,
+        'qemu_version' => '11.0.0', 'reused_from' => nil }
     end
   end
 
@@ -47,13 +49,16 @@ class L4ReBenchTest < Minitest::Test
                          landing: { 'native' => [*names, 'erxos-only'].map { |name| cell.call(name) } })
   end
 
-  def with_guest(built: true)
+  ELF = "\x7fELF".b
+  ELF_SHA256 = Digest::SHA256.hexdigest(ELF)
+
+  def with_guest(built: true, record: { 'l4re_mk' => 'c' * 40, 'compiler' => 'gcc', 'bootstrap_sha256' => ELF_SHA256 })
     Dir.mktmpdir do |directory|
       build = L4Re::Build.new(directory: File.join(directory, 'l4re'))
       Dir.mkdir(build.directory)
       if built
-        File.binwrite(build.bootstrap, "\x7fELF".b)
-        File.write(build.record_path, JSON.generate('l4re_mk' => 'c' * 40, 'compiler' => 'gcc'))
+        File.binwrite(build.bootstrap, ELF)
+        File.binwrite(build.record_path, record.is_a?(String) ? record : JSON.generate(record))
       end
       qemu = Qemu.new(directory)
       yield L4Re::Guest.new(build: build, qemu: qemu, platform: :virt), qemu, build
@@ -81,7 +86,7 @@ class L4ReBenchTest < Minitest::Test
       assert_equal %w[measured measured rejected], booted.cells.map(&:status)
       assert_equal({ 'count' => 10_000, 'total' => 4_200_000, 'mean' => 210 }, booted.cells[1].detail)
       assert_equal 1, booted.refused.size
-      assert_equal({ 'l4re_mk' => 'c' * 40, 'compiler' => 'gcc', 'bootstrap_sha256' => 'b' * 64 }, booted.subject)
+      assert_equal({ 'l4re_mk' => 'c' * 40, 'compiler' => 'gcc', 'bootstrap_sha256' => ELF_SHA256 }, booted.subject)
       host = Erx::BenchSystem::Host.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 12, revision: 'a' * 40, dirty: false)
       record = Erx::BenchSystem.record(booted, system: 'l4re', cpus: 1, host: host, date: Time.now.utc, started_by: 'manual',
                                                 load: nil)
@@ -89,7 +94,20 @@ class L4ReBenchTest < Minitest::Test
     end
   end
 
-  def test_a_guest_not_built_is_refused_before_any_boot
+  # A record written for another ELF, or holding what a terminal or the record could
+  # not show, describes no boot: the guest refuses it before QEMU starts.
+  def test_a_stale_or_unprintable_build_record_is_refused_before_the_boot
+    cells = nullcall.landing.fetch('native').first(3)
+    [{ 'bootstrap_sha256' => 'b' * 64 }, { 'bootstrap_sha256' => ELF_SHA256, 'compiler' => "gcc \e[31m" },
+     %({"bootstrap_sha256":"#{ELF_SHA256}","\xff":"x"}).b].each do |record|
+      with_guest(record: record) do |guest, qemu, _build|
+        assert_raises(Erx::Error) { guest.call(nullcall, cells: cells, cpus: 1, accel: 'hvf') }
+        assert_nil qemu.asked
+      end
+    end
+  end
+
+def test_a_guest_not_built_is_refused_before_any_boot
     with_guest(built: false) do |guest, _qemu, build|
       assert_match(/#{Regexp.escape(build.bootstrap)}/, guest.refusal('landing'))
       error = assert_raises(Erx::Error) do

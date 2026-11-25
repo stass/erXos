@@ -24,16 +24,16 @@ module Erx
     # A total is a difference of the 64-bit cycle counter.
     COUNTER_LIMIT = 2**64
 
-    # A program the comparison reads: its log tag, the erXos operation it is set beside
-    # (the counterparts table of docs/design-bench.md), its result line's word and the
-    # operations it counts per call.
-    Program = Data.define(:tag, :operation, :word, :per_call) do
+    # A program the comparison reads: its log tag, the erXos benchmark and operation it is
+    # set beside (the counterparts table of docs/design-bench.md), its result line's word
+    # and the operations it counts per call.
+    Program = Data.define(:tag, :benchmark, :operation, :word, :per_call) do
       def count = CALLS * per_call
     end
     PROGRAMS = [
-      Program.new(tag: 'sc:single', operation: 'kernel', word: 'syscall', per_call: 1),
-      Program.new(tag: 'ipc:1AS', operation: 'root-same-space', word: 'IPC', per_call: 2),
-      Program.new(tag: 'ipc:2AS', operation: 'root-cross-space', word: 'IPC', per_call: 2)
+      Program.new(tag: 'sc:single', benchmark: 'nullcall', operation: 'kernel', word: 'syscall', per_call: 1),
+      Program.new(tag: 'ipc:1AS', benchmark: 'nullcall', operation: 'root-same-space', word: 'IPC', per_call: 2),
+      Program.new(tag: 'ipc:2AS', benchmark: 'nullcall', operation: 'root-cross-space', word: 'IPC', per_call: 2)
     ].freeze
 
     # One line of a read program: a :result (its word, count, total and mean), an
@@ -44,7 +44,7 @@ module Erx
     # exact form is pinned from the first boot's log (docs/design-bench.md, "L4Re's
     # guest"); until then it is one to four spaces, bars or colons.
     TAGGED = /\A(?<tag>#{Regexp.union(PROGRAMS.map(&:tag)).source})[ |:]{1,4}/n
-    RESULT = %r{\ACPU[ ]+\d{1,3}[ ]done[ ](?<count>\d{1,9})[ ](?<word>IPC|syscall)s[ ]in[ ](?<total>\d{1,20})
+    RESULT = %r{\ACPU[ ]{1,2}\d{1,3}[ ]done[ ](?<count>\d{1,9})[ ](?<word>IPC|syscall)s[ ]in[ ](?<total>\d{1,20})
                 [ ]cpu-cycles,[ ](?<mean>\d{1,20})[ ]cpu-cycles/(?<per>IPC|syscall)\z}xn
     ERROR = /\A(?:caller: ipc err|IPC error)[ -~]*\z/n
 
@@ -85,7 +85,7 @@ module Erx
     # program prints; failed when it printed an error; measured from its one result; and
     # not run when no line reports it.
     def judge(asked, benchmark:, lines:)
-      program = PROGRAMS.find { |candidate| candidate.operation == asked.operation }
+      program = PROGRAMS.find { |candidate| [candidate.benchmark, candidate.operation] == [benchmark, asked.operation] }
       return cell(asked, benchmark, 'not_run', "ipcbench has no program for #{asked.operation}") unless program
 
       tag = program.tag
@@ -109,9 +109,10 @@ module Erx
     private_class_method :judge
 
     # A result is its program's when it counts the program's operations in its word and
-    # its mean is the total over them, truncated, on a counter of 64 bits.
+    # its mean is the total over them, truncated, on a counter of 64 bits. A total of
+    # zero is a counter that did not count, not a free operation.
     def consistent?(result, program)
-      result.word == program.word && result.count == program.count && result.total < COUNTER_LIMIT &&
+      result.word == program.word && result.count == program.count && result.total.positive? && result.total < COUNTER_LIMIT &&
         result.mean == result.total / result.count
     end
     private_class_method :consistent?

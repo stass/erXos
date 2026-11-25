@@ -87,8 +87,25 @@ class IpcbenchTest < Minitest::Test
   def test_a_total_beyond_sixty_four_bits_or_a_long_line_is_rejected
     huge = KERNEL.sub('1234567', (2**64).to_s).sub(', 123 ', ", #{2**64 / 10_000} ")
     assert_equal 'rejected', by_operation([huge, SAME, CROSS]).fetch('kernel').status
-    long = "#{SAME} #{'9' * Ipcbench::MAX_LINE}"
+    long = SAME.sub('CPU  0', "CPU#{' ' * Ipcbench::MAX_LINE}0")
     assert_equal 'rejected', by_operation([KERNEL, long, CROSS]).fetch('root-same-space').status
+  end
+
+  # A counter that did not count prints a total of zero, which is no measurement.
+  def test_a_total_of_zero_is_rejected
+    zero = 'sc:single | CPU  0 done 10000 syscalls in 0 cpu-cycles, 0 cpu-cycles/syscall'
+    assert_equal 'rejected', by_operation([zero, SAME, CROSS]).fetch('kernel').status
+  end
+
+  def test_an_unreadable_line_outranks_an_error_line
+    cells = by_operation([KERNEL, 'ipc:1AS | caller: ipc err', 'ipc:1AS | ??', CROSS])
+    assert_equal 'rejected', cells.fetch('root-same-space').status
+  end
+
+  # A program is set beside one benchmark's operation, not any operation of its name.
+  def test_another_benchmarks_operation_of_the_same_name_is_not_run
+    result = Ipcbench.import([KERNEL], benchmark: 'vm', cells: [cell('kernel')])
+    assert_equal %w[not_run], result.fetch(:cells).map(&:status)
   end
 
   def test_an_operation_ipcbench_has_no_program_for_is_not_run

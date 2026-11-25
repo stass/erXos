@@ -91,9 +91,13 @@ module Erx
       summary = cell.summary
       return {} if summary.empty?
 
+      # A mean is shown as its total over its count, one operation of the cell: a
+      # program's printed mean may count each operation as more than one (ipcbench's
+      # IPC mean is half a round trip), and the record keeps it as printed.
       if cell.form == 'mean'
-        { 'count' => Quantity.new(amount: summary.fetch('count'), unit: 'operations'),
-          'mean' => amount(summary.fetch('mean'), cell.conditions.clock, clock) }
+        count = summary.fetch('count')
+        { 'count' => Quantity.new(amount: count, unit: 'operations'),
+          'mean' => amount(summary.fetch('total').fdiv(count), cell.conditions.clock, clock) }
       else
         STATISTICS.to_h { |name| [name, summary[name].is_a?(Hash) ? summary[name]['value'] : summary[name]] }
                   .compact.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock) }

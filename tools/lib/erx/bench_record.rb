@@ -308,8 +308,8 @@ module Erx
 
       count, total, mean = detail.values_at(*MEAN_FIELDS)
       check(detail.keys.sort == MEAN_FIELDS.sort && count.is_a?(Integer) && count.positive? &&
-            total.is_a?(Integer) && !total.negative? && mean.is_a?(Numeric) && !mean.negative?,
-            'a measured mean is not a positive count, a total and a mean')
+            total.is_a?(Integer) && total.positive? && mean.is_a?(Numeric) && !mean.negative?,
+            'a measured mean is not a positive count, a positive total and a mean')
     end
 
     # Where a run happened, what ran, when, its boot's calibration and its cells. A run
