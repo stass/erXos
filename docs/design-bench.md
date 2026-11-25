@@ -2572,8 +2572,13 @@ tree it unpacked itself), shows how:
 So each port's archive is pinned in `bench/genode/deps.lock` as
 `genode-port-<port>`, under the file name `prepare_port` asks for, at
 the archive's HTTPS address and a SHA-256 its publisher states where
-one does (FreeBSD's release `MANIFEST` for `libc`'s `src.txz`); a port
-has one archive. Genode's tree is copied in owned by root, except
+one does (FreeBSD's release `MANIFEST` for `libc`'s `src.txz`). `libc`,
+which has one archive, is the only port the guest needs: with it
+prepared, the probe built `core`, `init`, `timer`, `lib/ld`,
+`lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` for `base-hw` on
+`virt_qemu_arm_v8a`, and `tool/depot/create` built the binary archives
+of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and `posix`, with
+no other port prepared and no error. Genode's tree is copied in owned by root, except
 `contrib/` and `depot/`, which are the build's own, empty and writable
 by the build user. The build's script, erXos's and run as that user,
 runs `prepare_port` for each pinned port once offline, takes the
@@ -2599,9 +2604,15 @@ the container's root (`docker cp -`) before the build starts, owned by
 root as the tree is. `erx_peer_bench` is built as a Genode
 component from a target description of erXos's (`bench/genode/`), with
 Genode's C library, a VFS that gives the program `/tmp` as a file
-system in memory, and the program's `posix_spawn` where Genode's C
-library offers it (unverified). That Genode's C library derives from
-FreeBSD's is unverified in the documents read. What comes back is the
+system in memory. Built so in the probe, from a target description
+that links `posix`, `libc` and `libm`, the program compiles on its
+FreeBSD branch, so Genode's build defines `__FreeBSD__` (whether its
+headers or its flags do is unverified), and every call it makes there
+links but `cpuset_setaffinity`, which Genode's C library lacks: how the
+program places its threads on Genode is not yet designed. That the
+other calls work is settled only by a boot. Genode's C library is built
+from FreeBSD 12.0's `src.txz`, the archive the `libc` port asks for.
+What comes back is the
 boot image and the resolved configuration, as L4Re's build returns its
 files, bounded and read only as data.
 

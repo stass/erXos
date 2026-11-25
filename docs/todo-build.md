@@ -478,11 +478,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `GenodeFetch.lock` compare only the sources of the running host, so a source pinned for another host
   (`host:`) passes their refusal unseen; nothing is fetched for it. Refuse any host-bound entry in a side lock.
 * [Medium] Genode's guest, its container build (`bench/genode/deps.lock`, docs/design-bench.md "Genode's
-  guest"): not built. The offline probe prepared `libc`'s port from its pinned archive and built `lib/ld` for
-  `base-hw` on `virt_qemu_arm_v8a`; still to do: pin the interpreters of Genode's run tool and
-  `tool/check_abi` (neither starts in the image: "required file not found") as `genode-tool-*`, build `libc`
-  with the real flex, list the further ports `posix` needs from `prepare_port`'s errors, and write the build.
-  A port with more than one archive does not fit `genode-port-<port>`; the first one changes the id form.
+  guest"): not built. Every input is pinned: the offline probe, with only `libc`'s port prepared and the
+  pinned tool packages extracted into the container's root, built `libc`, `vfs`, `posix`, `init`, `timer` and
+  `core` for `base-hw` on `virt_qemu_arm_v8a` and their binary archives, and compiled `erx_peer_bench` against
+  Genode's C library. Still to do: decide how Genode's boot image is made (Genode's run tool takes a run
+  script, which is Tcl), decide how the program places its threads on Genode (it links but for
+  `cpuset_setaffinity`, which Genode's C library lacks), then write the build as a `tools/erx` module on
+  `L4ReBuild`'s model, with the target description in `bench/genode/`, and boot the image under erXos's own
+  QEMU harness.
 * [Low] Large pinned files, `Dependencies` fetch deadline (`tools/lib/erx/dependencies.rb`): `fetch --genode`
   downloaded FreeBSD's 160 MB `src.txz` in about 170 s of its 200 s deadline, so a slower link fails the fetch.
   Scale the deadline with the file's size, or give a pin its own.
