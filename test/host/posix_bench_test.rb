@@ -27,7 +27,8 @@ class PosixBenchTest < Minitest::Test
     [['limits session', 'memory'], ['principal system', 'memory'], %w[machine root_memory]].each do |record, field|
       assert_equal value(@source, record, field) + (48 * MIB), value(edited, record, field), "#{record} #{field}"
     end
-    assert_equal value(@source, 'runtime_limits system', 'tmp'), value(edited, 'runtime_limits system', 'tmp')
+    # The system principal's ceiling, the system domain's runtime limits, admits that cap.
+    assert_equal 48 * MIB, value(edited, 'runtime_limits system', 'tmp')
     assert_equal @platform.memory_mib + 48, Erx::PosixBench.machine(@platform).memory_mib
   end
 

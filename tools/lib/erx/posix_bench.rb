@@ -40,12 +40,16 @@ module Erx
     # The image's manifest: source, the development manifest, with root's session's /tmp
     # cap set to TMP_MIB. /tmp is charged to the session's budget as it is used, so the
     # session's memory grows by as much, and so do the system principal's memory, which
-    # admits the session, and the machine's root_memory, which holds the principal's.
+    # admits the session, and the machine's root_memory, which holds the principal's. A
+    # session's runtime limits stay within its principal's ceiling (dom_limits_within,
+    # liberx/system/dom_core.c), the system principal's native limits, whose runtime
+    # limits are the system domain's own, so their /tmp cap is raised to TMP_MIB too: a
+    # cap, charged only as the system domain's /tmp is used, which nothing here uses.
     def manifest(source)
       tmp = TMP_MIB << 20
       grown = Manifest::Edit.grow(source, { ['limits session', 'memory'] => tmp, ['principal system', 'memory'] => tmp,
                                             %w[machine root_memory] => tmp })
-      Manifest::Edit.set(grown, { ['runtime_limits session', 'tmp'] => tmp })
+      Manifest::Edit.set(grown, { ['runtime_limits session', 'tmp'] => tmp, ['runtime_limits system', 'tmp'] => tmp })
     end
 
     # The machine the image boots on: the platform's own, with TMP_MIB more RAM for the
