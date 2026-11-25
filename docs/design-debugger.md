@@ -317,6 +317,12 @@ every other:
 | `starting` | it found the stop word at its admission, before it ran anything | those at its admission |
 | `unanswered` | it was in the leader's census and was unpublished when the census ended | none |
 
+Which states have registers is the enum's `registers` attribute. The
+record's writer and checker and the harness's reader take it from the
+generated predicate, and the stop core derives from it the states a CPU
+publishes for itself (every one with registers but `leader`), so a new
+state states it once.
+
 `waiting` is how a deadlock shows itself: two CPUs that each name the
 lock they wait for are most of the diagnosis. `concurrent` is how a
 second, simultaneous failure stays visible: its message is lost, where it

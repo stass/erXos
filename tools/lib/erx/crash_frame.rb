@@ -46,7 +46,8 @@ module Erx
     # A CPU's stop state by value, and the states a reader has registers for
     # (docs/design-debugger.md, "CPU stop states").
     STATES = SCHEMA.types.fetch('stop_cpu_state').members.invert.freeze
-    WITH_REGISTERS = %w[leader stopped waiting concurrent starting].map { |name| CODEC.member('stop_cpu_state', name) }.freeze
+    WITH_REGISTERS = SCHEMA.types.fetch('stop_cpu_state').attributes.fetch('registers')
+                            .map { |name| CODEC.member('stop_cpu_state', name) }.freeze
     CPU_ENTRIES = CODEC.constant('crash_cpus')
     CPU_SIZE = CODEC.layout_size('erx_crash_cpu')
     # An entry's words past its number and state, which only a state with registers sets.

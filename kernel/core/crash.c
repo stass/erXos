@@ -22,7 +22,6 @@
 #include <stdint.h>
 
 #include "erx/core/boot_pair.h"
-#include "erx/core/machine_stop.h"
 #include "erx/crash.h"
 #include "erx/log.h"
 
@@ -40,7 +39,17 @@ _Static_assert(ERX_FAULT_OFF_PC == offsetof(erx_crash_fault_t, pc), "pc");
 _Static_assert(ERX_FAULT_OFF_THREAD == offsetof(erx_crash_fault_t, thread), "thread");
 _Static_assert(ERX_FAULT_OFF_SPACE == offsetof(erx_crash_fault_t, space), "space");
 _Static_assert(ERX_FAULT_OFF_STATUS == offsetof(erx_crash_fault_t, status), "status");
-_Static_assert(ERX_CRASH_CPU_SIZE == ERX_CRASH_CPU_BYTES, "CPU entry bytes");
+_Static_assert(ERX_CRASH_CPU_SIZE == sizeof(erx_crash_cpu_entry_t), "entry size");
+_Static_assert(ERX_CRASH_CPU_OFF_CPU == offsetof(erx_crash_cpu_entry_t, cpu), "entry cpu");
+_Static_assert(ERX_CRASH_CPU_OFF_STATE == offsetof(erx_crash_cpu_entry_t, state), "entry state");
+_Static_assert(ERX_CRASH_CPU_OFF_PC == offsetof(erx_crash_cpu_entry_t, pc), "entry pc");
+_Static_assert(ERX_CRASH_CPU_OFF_SP == offsetof(erx_crash_cpu_entry_t, sp), "entry sp");
+_Static_assert(ERX_CRASH_CPU_OFF_FP == offsetof(erx_crash_cpu_entry_t, fp), "entry fp");
+_Static_assert(ERX_CRASH_CPU_OFF_RETURN_ADDRESS ==
+    offsetof(erx_crash_cpu_entry_t, return_address), "entry return address");
+_Static_assert(ERX_CRASH_CPU_OFF_PROCESSOR_STATE ==
+    offsetof(erx_crash_cpu_entry_t, processor_state), "entry processor state");
+_Static_assert(ERX_CRASH_CPU_OFF_AUX == offsetof(erx_crash_cpu_entry_t, aux), "entry aux");
 
 /* Bytes after the crc field, where the CRC starts. */
 #define ERX_CRASH_CRC_START	(ERX_CRASH_BRIEF_OFF_CRC + sizeof(uint32_t))
@@ -283,7 +292,8 @@ erx_crash_log_tail(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst
 static void
 erx_crash_write_cpus(const erx_crash_input_t *input, erx_crash_record_t *record)
 {
-	erx_crash_cpu_t entry, *out;
+	const erx_crash_cpu_entry_t *entry;
+	erx_crash_cpu_t *out;
 	uint32_t ncpus;
 
 	if (input->cpus == NULL)
@@ -291,20 +301,19 @@ erx_crash_write_cpus(const erx_crash_input_t *input, erx_crash_record_t *record)
 	ncpus = input->ncpus < ERX_CPU_LIMIT ? input->ncpus : ERX_CPU_LIMIT;
 	record->header.ncpus = ncpus;
 	for (uint32_t cpu = 0; cpu < ncpus && cpu < ERX_CRASH_CPUS; cpu++) {
-		__builtin_memcpy(&entry, (const uint8_t *)input->cpus + cpu * sizeof(entry),
-		    sizeof(entry));
+		entry = &input->cpus[cpu];
 		out = &record->cpus[cpu];
 		out->cpu = cpu;
-		out->state = erx_stop_cpu_state_name(entry.state) != NULL ? entry.state :
+		out->state = erx_stop_cpu_state_name(entry->state) != NULL ? entry->state :
 		    ERX_STOP_CPU_STATE_UNANSWERED;
-		if (!erx_machine_stop_has_regs(out->state))
+		if (!erx_stop_cpu_state_registers(out->state))
 			continue;
-		out->pc = entry.pc;
-		out->sp = entry.sp;
-		out->fp = entry.fp;
-		out->return_address = entry.return_address;
-		out->processor_state = entry.processor_state;
-		out->aux = entry.aux;
+		out->pc = entry->pc;
+		out->sp = entry->sp;
+		out->fp = entry->fp;
+		out->return_address = entry->return_address;
+		out->processor_state = entry->processor_state;
+		out->aux = entry->aux;
 	}
 }
 
@@ -391,7 +400,7 @@ erx_crash_cpus_fit(const uint8_t *bytes, uint32_t ncpus)
 		__builtin_memcpy(&entry, at, sizeof(entry));
 		if (entry.cpu != cpu || erx_stop_cpu_state_name(entry.state) == NULL)
 			return (false);
-		if (!erx_machine_stop_has_regs(entry.state) &&
+		if (!erx_stop_cpu_state_registers(entry.state) &&
 		    !erx_crash_all_zero(at + ERX_CRASH_CPU_OFF_PC,
 		    sizeof(entry) - ERX_CRASH_CPU_OFF_PC))
 			return (false);

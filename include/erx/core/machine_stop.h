@@ -39,8 +39,8 @@
  *     binding's (docs/design-debugger.md, "Unverified facts", P7);
  *   - a CPU publishes its slot by writing its registers, then storing its state with
  *     release ordering; the leader loads each state with acquire ordering before it
- *     counts the CPU, and reads registers only for a state erx_machine_stop_has_regs
- *     accepts;
+ *     counts the CPU, and reads registers only for a state that carries them
+ *     (erx_stop_cpu_state_registers, generated from the ABI file);
  *   - the clock the census reads is a free-running counter that the stop does not stop,
  *     read in program order, and it never wraps, so a reading outside the census's
  *     window means the bound has passed or the counter is broken;
@@ -143,11 +143,12 @@ erx_stop_admission_t	erx_machine_stop_admission_next(erx_stop_admission_t admiss
 erx_stop_leader_t	erx_machine_stop_leader_begin(uint32_t cpu);
 erx_stop_leader_t	erx_machine_stop_leader_next(erx_stop_leader_t leader, uint64_t loaded, uint64_t now_ns);
 
-/* Whether a slot's state is one a CPU publishes for itself, so the census counts it. */
+/*
+ * Whether a slot's state is one a CPU publishes for itself, so the census counts it:
+ * every state that carries registers but the leader's, so a counted CPU always has
+ * its registers in the record.
+ */
 bool	erx_machine_stop_published(erx_stop_cpu_state_t state);
-
-/* Whether a reader has registers for a CPU in `state`. */
-bool	erx_machine_stop_has_regs(erx_stop_cpu_state_t state);
 
 /*
  * A CPU's state in the record, once the leader has reached RECORD, given the state its

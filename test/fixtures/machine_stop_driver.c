@@ -168,7 +168,7 @@ check_record(const world_t *w, const cpu_t *lead)
 				fail("the leader is not `leader` in the record");
 			continue;
 		}
-		if (erx_machine_stop_has_regs(final) && w->slot[j] != final)
+		if (erx_stop_cpu_state_registers(final) && w->slot[j] != final)
 			fail("registers claimed for a CPU whose slot does not hold them");
 		if ((lead->leader.asked & bit(j)) == 0 && final != ERX_STOP_CPU_STATE_OFFLINE)
 			fail("a CPU outside the census is not `offline`");

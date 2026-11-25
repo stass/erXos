@@ -41,7 +41,7 @@ module Erx
       kernel/core/admit.c kernel/core/debug_log.c kernel/core/dispatch.c kernel/core/log.c
       build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c
       liberx/backend/fiasco/arch/aarch64/clock.c build/gen/liberx/backend/fiasco/generated/calls.c liberx/backend/fiasco/log.c
-      liberx/backend/fiasco/end.c liberx/backend/fiasco/end_how.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/machine_stop.c
+      liberx/backend/fiasco/end.c liberx/backend/fiasco/end_how.c kernel/core/crash.c kernel/core/crash_frame.c
       test/guest/debug_log_probe/guest.c test/guest/debug_log_probe/probe.c
     ].freeze
     GUEST_FLAGS = %w[-I build/gen/kernel/generated -I kernel/core -I build/gen/liberx/backend/fiasco/generated

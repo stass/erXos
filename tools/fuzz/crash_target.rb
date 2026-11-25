@@ -13,8 +13,7 @@ record = Erx::CrashFrameFuzz.brief_record
 log = Erx::CrashFrameFuzz.frame_of(record)
 
 Erx::PackFuzz.declare_target(
-  sources: %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c
-              kernel/core/machine_stop.c],
+  sources: %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c],
   seeds: Erx::PackFuzz.indexed_seeds(
     ["\x00#{record}", "\x00#{record * 2}", "\x01\x01#{"\x00" * 1000}", "\x01\x00#{record}",
      "\x02#{log}", "\x02text\r\n#{log.gsub("\n", "\r\n")}tail\n", "\x02#{log.lines[0...-1].join}",

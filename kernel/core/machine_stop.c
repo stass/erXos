@@ -138,14 +138,7 @@ erx_machine_stop_leader_next(erx_stop_leader_t leader, uint64_t loaded, uint64_t
 bool
 erx_machine_stop_published(erx_stop_cpu_state_t state)
 {
-	return (state == ERX_STOP_CPU_STATE_STOPPED || state == ERX_STOP_CPU_STATE_WAITING ||
-	    state == ERX_STOP_CPU_STATE_CONCURRENT || state == ERX_STOP_CPU_STATE_STARTING);
-}
-
-bool
-erx_machine_stop_has_regs(erx_stop_cpu_state_t state)
-{
-	return (state == ERX_STOP_CPU_STATE_LEADER || erx_machine_stop_published(state));
+	return (state != ERX_STOP_CPU_STATE_LEADER && erx_stop_cpu_state_registers(state));
 }
 
 erx_stop_cpu_state_t

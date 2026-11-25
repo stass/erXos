@@ -59,7 +59,7 @@ module Erx
                  #{BACKEND}/entropy.c liberx/backend/core/entropy_line.c liberx/backend/core/entropy_take.c kernel/core/rng.c kernel/core/rng_seed.c kernel/crypto/blake3/blake3.c kernel/crypto/blake3/blake3_portable.c
                  kernel/crypto/chacha20/chacha.c
                  #{BACKEND}/watchdog_thread.c #{BACKEND}/pm_wdt.c #{BACKEND}/vc_mbox.c #{BACKEND}/bcm2711_pins.c kernel/core/bcm2711_pins.c kernel/core/vc_mailbox.c kernel/core/vc_property.c #{BACKEND}/end.c #{BACKEND}/end_how.c liberx/backend/core/trace_ring.c #{BACKEND}/trace.c
-                 #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/machine_stop.c kernel/core/log.c
+                 #{BACKEND}/arch/aarch64/clock.c kernel/core/crash.c kernel/core/crash_frame.c kernel/core/log.c
                  kernel/core/watchdog.c kernel/core/pm_wdt.c kernel/core/admit.c kernel/core/console_ring.c kernel/core/debug_log.c kernel/core/dispatch.c
                  build/gen/kernel/generated/abi_decode.c build/gen/kernel/generated/abi_run.c].freeze
     # What ERTS's lane port driver (erx_lane_drv.c) calls: the lanes, the funnel and the

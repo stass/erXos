@@ -67,7 +67,7 @@ class CrashTest < Minitest::Test
 
   # Full paths: the sanitizer gate looks for each core source's path in this file's text.
   def core_sources
-    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c kernel/core/machine_stop.c]
+    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c]
       .map { |file| File.join(@root, file) }
   end
 
@@ -368,8 +368,8 @@ class CrashTest < Minitest::Test
     assert_operator lines.size, :>, 100
   end
 
-  # The states a reader has registers for (docs/design-debugger.md, "CPU stop states").
-  WITH_REGISTERS = %w[leader stopped waiting concurrent starting].map { |name| STATE.fetch(name) }.freeze
+  # The states a reader has registers for: the ABI file's registers attribute.
+  WITH_REGISTERS = FRAME::WITH_REGISTERS
   REGISTER_WORDS = %w[pc sp fp return_address processor_state aux].freeze
 
   def entry_offset(index) = FRAME::CPUS_OFFSET + index * CODEC.layout_size('erx_crash_cpu')

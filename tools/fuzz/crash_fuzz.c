@@ -67,8 +67,9 @@ fuzz_u32(const uint8_t *bytes, size_t offset)
 
 /*
  * The CPU entries: entry N is CPU N in a state 1 to 7 for N below the count,
- * with nothing past its state unless the state is leader, stopped, waiting,
- * concurrent or starting (2 to 6); every entry past the count is zero.
+ * with nothing past its state unless the state carries registers, a fact of
+ * the ABI file read from its generated predicate; every entry past the count
+ * is zero.
  */
 static bool
 fuzz_entries_expected(const uint8_t *bytes, uint32_t ncpus)
@@ -84,7 +85,7 @@ fuzz_entries_expected(const uint8_t *bytes, uint32_t ncpus)
 			state = fuzz_u32(entry, 4);
 			if (fuzz_u32(entry, 0) != cpu || state < 1 || state > 7)
 				return (false);
-			from = state >= 2 && state <= 6 ? ERX_CRASH_CPU_SIZE : 8;
+			from = erx_stop_cpu_state_registers(state) ? ERX_CRASH_CPU_SIZE : 8;
 		}
 		for (size_t index = from; index < ERX_CRASH_CPU_SIZE; index++) {
 			if (entry[index] != 0)
@@ -286,7 +287,7 @@ fuzz_write(const uint8_t *bytes, size_t length)
 {
 	static const uint8_t regs[ERX_CRASH_REGS_BYTES] = { 1 };
 	static uint64_t frames[64] = { 0x1000, 0x1001 };
-	static erx_crash_cpu_t cpus[ERX_CRASH_CPUS];
+	static erx_crash_cpu_entry_t cpus[ERX_CRASH_CPUS];
 	static _Alignas(8) uint8_t back[ERX_CRASH_SIZE];
 	static const erx_crash_end_t ends[] = { ERX_CRASH_END_FAULT,
 	    ERX_CRASH_END_WATCHDOG, ERX_CRASH_END_TASK };

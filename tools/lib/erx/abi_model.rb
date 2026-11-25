@@ -594,13 +594,18 @@ module Erx
       end
 
       # An enum's `attribute NAME` lines: the closed set of names its member
-      # lines may carry after their value. A flags type takes none.
+      # lines may carry after their value. A flags type takes none. Each
+      # attribute becomes C's erx_<enum>_<attribute>(), so a name that C
+      # already gives the enum (its _t, _name and _describe) is refused.
+      RESERVED_ATTRIBUTES = %w[t name describe].freeze
+
       def declared_attributes(declaration, flags:)
         declaration.members.select { |line| line.words.first == 'attribute' }.each_with_object([]) do |line, names|
           line.fail!('attributes belong to an enum, not to flags') if flags
           line.fail!('attribute is a member line of its enum') unless line.indent == 2
           arity(line, 2)
           attribute = Names.local(line.words[1], line: line)
+          line.fail!("attribute #{attribute} is a name C gives the enum") if RESERVED_ATTRIBUTES.include?(attribute)
           line.fail!("duplicate attribute #{attribute}") if names.include?(attribute)
           names << attribute
         end.freeze

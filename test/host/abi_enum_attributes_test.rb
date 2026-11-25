@@ -56,7 +56,8 @@ class AbiEnumAttributesTest < Minitest::Test
       'on flags' => ["abi 1\nflags mode u32\n  attribute hot\n  bit on 0 hot\n", /attributes belong to an enum, not to flags/],
       'a word after a bit' => ["abi 1\nflags mode u32\n  bit on 0 hot\n", /expected 2 fields for bit/],
       'an attribute line of three words' => [ROLES.sub('attribute writer', 'attribute writer extra'), /expected 1 fields for attribute/],
-      'not a name' => [ROLES.sub('attribute writer', 'attribute Writer'), /invalid local identifier/]
+      'not a name' => [ROLES.sub('attribute writer', 'attribute Writer'), /invalid local identifier/],
+      'a name C gives the enum' => [ROLES.gsub('writer', 'name'), /attribute name is a name C gives the enum/]
     }
     refused.each do |label, (text, message)|
       error = assert_raises(Erx::ABI::SchemaError, label) { schema(text) }

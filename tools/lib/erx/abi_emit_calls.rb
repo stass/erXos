@@ -581,9 +581,11 @@ module Erx
       end
 
       # What the crash core's seam needs of the ABI: every value the glue
-      # hands the crash record's writer, the sizes of its registers and of
-      # its CPU entries among them, spelled as include/erx/abi.h spells it,
-      # so a file that includes both redefines nothing differently.
+      # hands the crash record's writer, the size of its registers among
+      # them, spelled as include/erx/abi.h spells it, so a file that
+      # includes both redefines nothing differently. The CPU entries are a
+      # struct of the seam (include/erx/core/crash.h) that the crash core
+      # pins to the generated layout.
       def crash_seam(schema)
         members = %w[crash_cause crash_form boot_value boot_slot].flat_map do |name|
           schema.types.fetch(name).members.keys.sort.map { |member| "#{Model.constant_prefix(name)}_#{member}" }
@@ -598,8 +600,7 @@ module Erx
          '#include <stddef.h>', '#include <stdint.h>', '',
          *constants.map { |item| CEmitter.constant_definition(item) },
          "#define ERX_CRASH_FAULT_KINDS UINT32_C(#{format('0x%x', kinds)})",
-         "#define ERX_CRASH_REGS_BYTES #{regs.size}",
-         "#define ERX_CRASH_CPU_BYTES #{schema.types.fetch('erx_crash_cpu').size}", '',
+         "#define ERX_CRASH_REGS_BYTES #{regs.size}", '',
          *%w[boot_value boot_slot].flat_map { |name| CEmitter.enum_name_lookup(schema.types.fetch(name)) },
          '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")
       end

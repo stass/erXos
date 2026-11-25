@@ -53,7 +53,7 @@ static size_t driver_frame_used;
 static erx_log_t driver_log;
 
 static void driver_command(char *);
-static const void *driver_cpus(char *);
+static const erx_crash_cpu_entry_t *driver_cpus(char *);
 static erx_crash_end_t driver_end(const char *);
 static _Noreturn void driver_fail(const char *);
 static void driver_print_hex(const uint8_t *, size_t);
@@ -142,10 +142,10 @@ driver_end(const char *word)
  * The entries STATES names, entry N for CPU N, with every register word set
  * to a value that names its CPU and its word; NULL for "-".
  */
-static const void *
+static const erx_crash_cpu_entry_t *
 driver_cpus(char *states)
 {
-	static erx_crash_cpu_t cpus[ERX_CPU_LIMIT];
+	static erx_crash_cpu_entry_t cpus[ERX_CPU_LIMIT];
 	char *state, *rest;
 	uint64_t base;
 	size_t count;
@@ -159,8 +159,8 @@ driver_cpus(char *states)
 		if (count == ERX_CPU_LIMIT)
 			driver_fail("bad write: more states than CPUs");
 		base = UINT64_C(0x1000) * (count + 1);
-		cpus[count] = (erx_crash_cpu_t){ .cpu = 0xee,
-		    .state = (erx_stop_cpu_state_t)strtoul(state, NULL, 10),
+		cpus[count] = (erx_crash_cpu_entry_t){ .cpu = 0xee,
+		    .state = (uint32_t)strtoul(state, NULL, 10),
 		    .pc = base + 1, .sp = base + 2, .fp = base + 3,
 		    .return_address = base + 4, .processor_state = base + 5,
 		    .aux = base + 6 };

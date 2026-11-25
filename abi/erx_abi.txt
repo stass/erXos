@@ -368,14 +368,16 @@ enum crash_cause u32
   value watchdog 3
   value panic 4
 # Each CPU's state in a stop of the machine (docs/design-debugger.md, "CPU stop
-# states"). Zero is a stop slot nothing has published.
+# states"). Zero is a stop slot nothing has published. A state that carries
+# registers is one a reader has a CPU's registers for.
 enum stop_cpu_state u32
+  attribute registers
   value offline 1
-  value leader 2
-  value stopped 3
-  value waiting 4
-  value concurrent 5
-  value starting 6
+  value leader 2 registers
+  value stopped 3 registers
+  value waiting 4 registers
+  value concurrent 5 registers
+  value starting 6 registers
   value unanswered 7
 
 bytes pack_magic 8 value 4552585041434b00

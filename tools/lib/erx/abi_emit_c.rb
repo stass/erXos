@@ -80,6 +80,7 @@ module Erx
         out.concat(MarksEmitter.encoders(schema))
         out.concat(status_table(schema))
         out.concat(enum_name_tables(schema))
+        out.concat(enum_attribute_predicates(schema))
         out.concat(signal_tables(schema))
         out.concat(event_tables(schema))
         out.concat(service_operation_table(schema)) if schema.types.key?(FACET_LAYOUT)
@@ -272,6 +273,26 @@ module Erx
          "/* The name of a #{type.name} member, as the ABI file spells it, or NULL. */",
          'static inline const char *', "#{name(type.name)}_name(#{c_type(type.base)} value)", '{',
          "\tswitch (value) {", *cases, "\tdefault:", "\t\treturn (NULL);", "\t}", '}', "#endif /* #{guard} */", '']
+      end
+
+      # For each attribute an enum declares, erx_<enum>_<attribute>(value):
+      # true for the members that carry it, false for every other value, as
+      # erx_abi_enums's ENUM_ATTRIBUTE/1 is in Erlang and the type's
+      # attributes are in the Ruby schema, so the ABI file is the fact's one
+      # statement.
+      def enum_attribute_predicates(schema)
+        schema.type_order.map { |type_name| schema.types.fetch(type_name) }
+              .select { |type| type.is_a?(EnumType) && !type.flags }
+              .flat_map { |type| type.attributes.flat_map { |attribute, holders| enum_attribute_predicate(type, attribute, holders) } }
+      end
+
+      def enum_attribute_predicate(type, attribute, holders)
+        prefix = Model.constant_prefix(type.name)
+        cases = holders.sort_by { |member| [type.members.fetch(member), member] }
+                       .map { |member| "\tcase #{constant("#{prefix}_#{member}")}:" }
+        ["/* Whether a #{type.name} value is a member that carries #{attribute}. */",
+         'static inline bool', "#{name(type.name)}_#{attribute}(#{c_type(type.base)} value)", '{',
+         "\tswitch (value) {", *cases, "\t\treturn (true);", "\tdefault:", "\t\treturn (false);", "\t}", '}', '']
       end
 
       # The signal table's lookups by number. Each table is indexed by
