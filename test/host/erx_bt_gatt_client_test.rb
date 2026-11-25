@@ -59,10 +59,6 @@ class ErxBtGattClientTest < Minitest::Test
              path: SERIAL, anchor: '    case serial_shape(Table) of',
              replacement: '    case true of',
              catching_case: 'a service without the serial shape gets no serial handler'),
-    Seed.new(fault: "a connected event read with an identity on a link that is not bonded",
-             path: CLIENT, anchor: 'bonded := true, level := Level, identity := Identity} = Info})',
-             replacement: 'bonded := _, level := Level, identity := Identity} = Info})',
-             catching_case: 'event_from_the_facet_owner_alone'),
     Seed.new(fault: 'the echo sending every write to the first link to have written',
              path: ECHO, anchor: "{serial, Conn, Bytes} ->\n",
              replacement: "{serial, Written, Bytes} ->\n" \

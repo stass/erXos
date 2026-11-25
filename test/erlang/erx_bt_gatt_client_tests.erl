@@ -105,6 +105,7 @@ reports_show_no_bytes() ->
     {Link, Conn} = joined_link(),
     {ok, Serial} = erx_gatt_serial:start_link(nus, self()),
     unlink(Serial),
+    _ = sys:get_state(Serial),
     Secret = <<"passphrase 0123456789">>,
     erx_gatt_srv ! {erx_bt_link, Link, {write, 7, {nus, rx}, Secret}},
     receive {serial, Conn, Secret} -> ok after ?WAIT_MS -> error(no_serial) end,
@@ -293,8 +294,9 @@ start_waits_for_the_facet() ->
     register(erx_connections, Agent),
     Test = self(),
     Starter = spawn(fun() -> Test ! {started, erx_echo:start_link()}, receive stop -> ok end end),
-    receive {started, Started} -> ?assertMatch({ok, _}, Started) after ?WAIT_MS -> error(no_start) end,
+    receive {started, {ok, _}} -> ok after ?WAIT_MS -> error(no_start) end,
     erx_facets:install(#{ble => Facet}),
+    _ = sys:get_state(erx_gatt_serial),
     {Link, _Conn} = joined_link(),
     echoed(Link, 9, <<"late">>),
     [kill(P) || P <- [Starter, Agent]].

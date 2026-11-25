@@ -35,7 +35,7 @@ init([]) ->
     {ok, {#{strategy => one_for_one, intensity => 5, period => 10},
           [#{id => echo, start => {?MODULE, start_link, []}}]}}.
 
--doc "Starts the echo, linked to the caller, once its handler has attached `nus`.".
+-doc "Starts the echo, linked to the caller; its handler attaches `nus` once the session holds `ble`.".
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     proc_lib:start_link(?MODULE, echo_init, [self()]).
