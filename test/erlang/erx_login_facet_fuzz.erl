@@ -19,6 +19,8 @@
 
 -define(ROUNDS, 30000).
 -define(MIN_ACCEPTED, ?ROUNDS div 10).
+%% The interface's operations, restated from abi/services/login.txt; good/1 builds each.
+-define(OPERATIONS, [cookie, key_ok, login_key, login_passphrase, root_line]).
 %% One byte past a system identifier's bound (docs/design-system.md, "Identifiers"), so
 %% names reach the bound and cross it; erx_ident:new/1 is the oracle that judges them.
 -define(IDENT_EDGE, (?ERX_IDENTIFIER_MAX + 1)).
@@ -55,11 +57,12 @@ round_of(Request) ->
         _Disagreeing -> error({operation_disagrees, Request, Said, Operation})
     end.
 
-operation_of(cookie) -> cookie;
+operation_of(Bare) when is_atom(Bare) -> Bare;
 operation_of(Request) -> element(1, Request).
 
 %% The interface, restated from abi/services/login.txt.
 in_bounds(cookie) -> true;
+in_bounds(root_line) -> true;
 in_bounds({key_ok, User, Blob}) -> user(User) andalso bytes(Blob, 1, ?ERX_LOGIN_BLOB_MAX);
 in_bounds({login_key, User, Exchange, Alg, Blob, Sig, Peer}) ->
     user(User) andalso bytes(Exchange, 1, ?ERX_LOGIN_EXCHANGE_MAX) andalso bytes(Alg, 1, ?ERX_LOGIN_BLOB_MAX)
@@ -75,13 +78,7 @@ user(User) -> erx_ident:new(User) =/= {error, bad_identifier}.
 
 %% A request: a third within the interface, the rest mutated or random.
 request() ->
-    Good = case rand:uniform(4) of
-               1 -> cookie;
-               2 -> {key_ok, name(), bin(1, ?ERX_LOGIN_BLOB_MAX)};
-               3 -> {login_key, name(), bin(1, ?ERX_LOGIN_EXCHANGE_MAX), bin(1, ?ERX_LOGIN_BLOB_MAX),
-                     bin(1, ?ERX_LOGIN_BLOB_MAX), bin(1, ?ERX_LOGIN_BLOB_MAX), bin(0, ?ERX_LOGIN_PEER_MAX)};
-               4 -> {login_passphrase, name(), bin(1, ?ERX_LOGIN_PASSPHRASE_MAX), bin(0, ?ERX_LOGIN_PEER_MAX)}
-           end,
+    Good = good(lists:nth(rand:uniform(length(?OPERATIONS)), ?OPERATIONS)),
     case rand:uniform(9) of
         N when N =< 3 -> Good;
         4 -> mutate(Good, fun(_) -> bin(?ERX_LOGIN_EXCHANGE_MAX + 1, ?ERX_LOGIN_EXCHANGE_MAX + 1) end);
@@ -89,12 +86,21 @@ request() ->
         6 -> mutate(Good, fun(_) -> other_type() end);
         7 -> mutate(Good, fun(_) -> <<>> end);
         8 when is_tuple(Good) -> list_to_tuple(lists:droplast(tuple_to_list(Good)));
-        8 -> {cookie};
+        8 -> {Good};
         9 -> other_type()
     end.
 
-%% Good with one argument after the operation replaced by Change of it.
-mutate(cookie, _Change) -> {cookie, <<>>};
+%% A request of Operation, its binaries at and near each bound.
+good(cookie) -> cookie;
+good(key_ok) -> {key_ok, name(), bin(1, ?ERX_LOGIN_BLOB_MAX)};
+good(login_key) -> {login_key, name(), bin(1, ?ERX_LOGIN_EXCHANGE_MAX), bin(1, ?ERX_LOGIN_BLOB_MAX),
+                  bin(1, ?ERX_LOGIN_BLOB_MAX), bin(1, ?ERX_LOGIN_BLOB_MAX), bin(0, ?ERX_LOGIN_PEER_MAX)};
+good(login_passphrase) -> {login_passphrase, name(), bin(1, ?ERX_LOGIN_PASSPHRASE_MAX), bin(0, ?ERX_LOGIN_PEER_MAX)};
+good(root_line) -> root_line.
+
+%% Good with one argument after the operation replaced by Change of it; a bare operation,
+%% which has no argument, gains one.
+mutate(Bare, _Change) when is_atom(Bare) -> {Bare, <<>>};
 mutate(Good, Change) ->
     At = 1 + rand:uniform(tuple_size(Good) - 1),
     setelement(At, Good, Change(element(At, Good))).

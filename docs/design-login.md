@@ -608,7 +608,7 @@ the facet with the web's network front end.
    and when the process had ended before the monitor was taken
    (`noproc`), and treats each alike; where one fails, it says so before
    building on it.
-5. **Open: how `bleuart` gets root's line without a login.** `tty_line`
+5. **Decided: how `bleuart` gets root's line without a login.** `tty_line`
    reaches a grantee only as the reply of a declared facet's operation
    ([design-system.md](design-system.md#a-sessions-lines)), and no
    manifest row grants a line, so `bleuart`, which has no credential,
@@ -628,6 +628,6 @@ the facet with the web's network front end.
      but no `start` row, so no `service bleuart`, and a `ble` grant on
      root's template, which every root session would hold.
 
-   Recommended: `root_line`, the smallest change that keeps `bleuart` an
+   Decided: `root_line`, the smallest change that keeps `bleuart` an
    app the start table switches, and the one that puts every handover
    of a session line to a front end behind one facet and one allow-list.
