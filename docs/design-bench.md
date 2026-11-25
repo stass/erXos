@@ -2005,10 +2005,13 @@ too, since the debugger may still answer when ipcbench has not
 finished. A board that shows no banner by then is left to a person: the
 run says so, the link names the found target again, and a power cycle
 brings the board back on it. Nothing of erXos enters L4Re's image. The
-run is `tools/erx bench NAME --env pi4-4gb-l4re --console DEVICE --ssh
-DEST --key FILE` (`L4ReBoard`), whose console is opened for writing as
-well as reading; a relay in front of the Glasgow's port passes what is
-written to its pty on to the board.
+run is `tools/erx bench NAME --env pi4-4gb-l4re --console
+DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR]` (`L4ReBoard`),
+whose console is the one [the walk](#the-walk) reads, a device or the
+Glasgow's TCP port, written through `BoardConsole#type`; when ssh
+cannot ask erXos to reboot into the queue, the run types `reboot` on
+that console as the walk does, and a console that cannot be written
+ends the run as closed, the link pointed back.
 
 **Import.** `tools/erx bench import NAME --env pi4-4gb-l4re --subject
 FILE LOG` makes the record from that log and the build record of
