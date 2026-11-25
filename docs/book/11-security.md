@@ -682,9 +682,10 @@ cover the atoms inside other domains' messages (section 11.5.1).
 Login with a passphrase, into a session of one's own principal, is
 designed and not built. The console opens root's session at boot with
 no login, and SSH logs root in with the development key, or with the
-keys placed on a board's card. The login facet that SSH, the web and
-the phone console are to log in through is built and parked: no
-manifest grants it, and no passphrase checker is built, so its
+keys placed on a board's card. The login facet that SSH and the web
+are to log in through is built; the one row that holds it is
+`bleuart`'s on the Raspberry Pi 4's development manifest, for
+`root_line` alone, and no passphrase checker is built, so its
 passphrase login answers `unavailable` until the vault's checker
 exists. The vault derives for every name alike, under limits of 5
 failures per name and per terminal, each less than a minute after the
