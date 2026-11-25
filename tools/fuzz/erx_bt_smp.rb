@@ -24,9 +24,8 @@ module ErxBtSmpFuzz
   # Each run is under this deadline, and tools/erx gives the whole runner 300.
   DEADLINE_SECONDS = '60'
 
-  # A seeded fault: the module's anchor replaced, and the pattern of the error terms the run
-  # may fail with, each with its opening brace so one verdict is not read inside another. A
-  # fault that two checks catch names both, whichever the round order reaches first.
+  # A seeded fault: the module's anchor replaced, and the error term the run must fail
+  # with, matched with its opening brace so one verdict is not read inside another.
   Fault = Data.define(:fault, :module_path, :anchor, :replacement, :verdict)
 
   FAULTS = [
@@ -34,17 +33,17 @@ module ErxBtSmpFuzz
               module_path: SMP,
               anchor: 'data(?ERX_SMP_CODE_PAIRING_CONFIRM, <<Value:16/binary>>) ->',
               replacement: 'data(?ERX_SMP_CODE_PAIRING_CONFIRM, <<Value:16/binary, _/binary>>) ->',
-              verdict: /\{length_disagrees,/),
+              verdict: '{length_disagrees,'),
     Fault.new(fault: "a public key's coordinates kept in the wire's octet order",
               module_path: SMP,
               anchor: '{pairing_public_key, {reversed(X), reversed(Y)}};',
               replacement: '{pairing_public_key, {X, Y}};',
-              verdict: /\{(?:decoded|sent)_wrongly,/),
+              verdict: '{decoded_wrongly,'),
     Fault.new(fault: 'the curve check removed, so an off-curve key reaches the key agreement',
               module_path: CORE,
               anchor: 'require(erx_smp_crypto:on_curve(Key), ?ERX_SMP_REASON_DHKEY_CHECK_FAILED, dhkey),',
               replacement: '',
-              verdict: /\{core_raised,/)
+              verdict: '{core_raised,')
   ].freeze
 
   module_function
@@ -64,7 +63,7 @@ module ErxBtSmpFuzz
     raise "seed anchor for #{fault.fault} is not unique" unless source.scan(fault.anchor).size == 1
 
     output, status = fuzz({ fault.module_path => source.sub(fault.anchor) { fault.replacement } }, seed: seed)
-    abort("#{fault.fault}: the fuzz run passed:\n#{output}") if status.success? || !output.match?(fault.verdict)
+    abort("#{fault.fault}: the fuzz run passed:\n#{output}") if status.success? || !output.include?(fault.verdict)
   end
 
   # In a directory of its own, which also takes the crash dump of a failed round; a

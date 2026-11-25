@@ -64,18 +64,19 @@ input(3, Fresh) -> {pdu, {pairing_public_key, key(Fresh)}};
 input(4, _Fresh) -> {pdu, {pairing_request, written_request()}};
 input(_, _Fresh) -> {pdu, decoded(input())}.
 
-%% A pairing as far as the phone's public key, which the step that takes the request
-%% and the window's opening of it make possible: a fresh responder, a request, the
-%% window open under the request's own tag, then a public key of key/1's kinds. Chance
-%% inputs reach the key's checks only when they happen to be in this order.
+%% A pairing as far as the phone's public key, which a chance order of inputs reaches
+%% rarely: a fresh responder, a request, the window open under the request's own tag,
+%% then a public key of key/1's kinds, delivered as a peer does, as bytes read back
+%% and checked against the layout before the responder takes them.
 pairing(Fresh) ->
-    {Asked, Requested} = step({pdu, {pairing_request, written_request()}}, core()),
-    Mode = lists:nth(rand:uniform(2), [display, nodisplay]),
-    Opened = case [Tag || {admit, Tag} <- Asked] of
-                 [Tag] -> element(2, step({admission, Tag, {open, Mode, Fresh}}, Requested));
-                 [] -> Requested
-             end,
-    element(2, step({pdu, {pairing_public_key, key(Fresh)}}, Opened)).
+    {[{admit, Tag} | _], Requested} = step({pdu, {pairing_request, written_request()}}, core()),
+    {_, Opened} = step({admission, Tag, {open, lists:nth(rand:uniform(2), [display, nodisplay]), Fresh}}, Requested),
+    <<Code, Data/binary>> = Bytes = erx_smp:encode({pairing_public_key, key(Fresh)}),
+    Expected = term(Code, Data),
+    Decoded = decoded(Bytes),
+    Expected =:= Decoded orelse verdict({decoded_wrongly, Bytes, Expected, Decoded}),
+    {_, Next} = step({pdu, Decoded}, Opened),
+    Next.
 
 step(Input, Core) ->
     {Actions, Next} = try erx_smp_core:step(Input, Core)
@@ -96,7 +97,7 @@ key(#{public := Own}) ->
     end.
 
 generated() ->
-    {<<4, X:32/binary, Y:32/binary>>, _} = crypto:generate_key(ecdh, secp256r1),
+    {<<4, X:32/binary, Y:32/binary>>, _} = crypto:generate_key(ecdh, secp256r1, rand:bytes(32)),
     {X, Y}.
 
 %% An honest-looking request: Secure Connections, bonding and the identity key, with a

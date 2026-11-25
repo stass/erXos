@@ -128,8 +128,8 @@ boundary() ->
 
 status() -> case rand:uniform(3) of 1 -> rand:uniform(256) - 1; _ -> 0 end.
 
-%% An ACL packet's data: mostly a whole frame, because a link that reads a frame that is
-%% cut or overruns ends, and the checks of a link that goes on (the packets outstanding
+%% An ACL packet's data: mostly a whole frame, because a link that is given a frame
+%% that is cut and then another start, or that overruns, ends, and the checks of a link that goes on (the packets outstanding
 %% at its share, say) need a link that lives; else a frame cut or lengthened, a frame's
 %% header with a random length, or random bytes.
 packet(Table) ->
@@ -149,18 +149,18 @@ frame(Table) ->
 
 cid() -> lists:nth(rand:uniform(6), [4, 4, 5, 6, 6, rand:uniform(65536) - 1]).
 
-%% A payload for its channel: an ATT request or command on the attribute table's handles,
-%% an SMP command of a random code, a signaling command, or random bytes.
-%% A handle of the table or past it, half the time the configuration of a characteristic
-%% that can be subscribed to, so that a write of 1 or 2 to it, which changes the link's
-%% configuration, is not left to the chance of one handle in fourteen.
+%% A handle in the first fourteen of the table's, or half the time the configuration of a
+%% characteristic that can be subscribed to, so that a write of 1 or 2 to it, which changes
+%% the link's configuration, does not wait for the chance of one handle in the table.
 handle(Table) ->
     case rand:uniform(2) of
         1 -> rand:uniform(14);
-        2 -> {ok, #{configuration := Handle}} = erx_gatt_db:characteristic(lists:nth(rand:uniform(2), ?SUBSCRIBABLE), Table),
+        2 -> {ok, #{configuration := Handle}} = erx_gatt_db:characteristic(lists:nth(rand:uniform(length(?SUBSCRIBABLE)), ?SUBSCRIBABLE), Table),
              Handle
     end.
 
+%% A payload for its channel: an ATT request or command on the attribute table's handles,
+%% an SMP command of a random code, a signaling command, or random bytes.
 payload(4, Table) ->
     Handle = handle(Table),
     lists:nth(rand:uniform(6), [<<16#12, Handle:16/little, (rand:bytes(rand:uniform(24) - 1))/binary>>,
