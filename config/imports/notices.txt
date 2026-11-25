@@ -9,7 +9,10 @@
 # POINTER row counts only in the import its file's first path component
 # names (bootstrap, kernel, l4re-core, ...), so the same pointer text
 # reviewed in two imports has one row for each, and a pointer listed for
-# one import leaves a file of another unrecognised. List the blocks to
+# one import leaves a file of another unrecognised. Rows other than
+# POINTER rows also serve blocks that another import still holds, such as
+# erXos's own musl; such a row names that import's file by its path from
+# the repository root (musl/...). List the blocks to
 # review with `ruby tools/fiasco_origins.rb --notices`. Rows are sorted by
 # hash.
 001424187820ffbcdd6ead3e999a058b3685abc77f3a07e28216fe921dd85d8b musl/src/complex/csqrt.c BSD-2-Clause

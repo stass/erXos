@@ -482,10 +482,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   development image can carry a bootstrap that links a source under terms a release may not carry
   and nothing says so until a release build. Run the audit over every bootstrap a pack carries, or
   record its result beside the image.
-* [Medium] Fiasco inventory regeneration, `tools/fiasco_origins.rb`: `write` refuses an
-  existing `ORIGIN.md` and builds a fresh one with no `changes` rows and generic exclusion
-  reasons, so it cannot re-derive the kernel's inventory (its `kobject_rpc.h` row) or
-  `l4re-core`'s (its libgcc exclusion reasons) without losing them, and only the kernel's
+* [Medium] Fiasco inventory re-derivation, `fiasco/*/ORIGIN.md`: each part's `ORIGIN.md`
+  is the one record of its import, and no tool re-derives an inventory from its pinned
+  archive while keeping its `changes` rows, its exclusion reasons (`l4re-core`'s libgcc
+  and unused-file reasons) and the kernel's `kobject_rpc.h` row; only the kernel's
   pinned archive is cached. The re-attribution of the file-notice precedence was made by a
   scratch script from the tree's bytes and the kernel archive; 68 rows of files erXos
   modified in `l4re-core` (31), `bootstrap` (22), `mk` (9), `libfdt` (3) and
@@ -500,6 +500,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   settles them reads the pinned archives, of which only the kernel's is cached; the
   `bootstrap` sources among the ten are likely in its link closure (unverified). A
   re-attribution mode that keeps every other field is the fix.
+* [Low] Restoring a trimmed Fiasco file, `fiasco/*/ORIGIN.md`: no tool brings back a
+  file an inventory excludes, and `Origin#check_addition` (`tools/lib/erx/origin.rb`)
+  refuses a file under an excluded path. A build that comes to need one takes three
+  steps by hand: drop or narrow the exclusion that covers it, restore the file from the
+  commit that imported it, and re-add its `files` row (path, SHA-256, license as
+  Attribution reads it). Write them down where an import's maintainer finds them, or give
+  the inventory tool a restore command that does all three.
 * [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.for_file`): a
   read block that `config/imports/notices.txt` does not list, that is not a stock GNU
   notice and that holds a legal word leaves a file `LicenseRef-unrecognized-notice`, and

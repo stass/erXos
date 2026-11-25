@@ -42,29 +42,6 @@ module Erx
       'libl4sys.p.a' => UserLibrary.new(license: 'MIT', sources: %w[l4sys/include l4sys/lib cxx/lib/tl/include]
                                           .map { "fiasco/l4re-core/#{it}" }.freeze)
     }.freeze
-    KERNEL_COMMIT = '07ea18e1f293bda6b9f75e59707ee1c70cf4321f'
-    CORE_COMMIT = 'e2e2d5af9de7aa0e1df2a25ebadee54488fa4a49'
-    # SHA-256 of git archives with no prefix, at the full commits above.
-    KERNEL_SHA256 = 'e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee'
-    CORE_SHA256 = '6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f'
-    ARCHIVES = {
-      'mk' => {
-        'commit' => '22cc26e5c971f65a1425d8cae87d793c2573528a',
-        'sha256' => '98c8b2b81391cfee4797586e150fc74bd5ba48a2decdcb18e7daa5ccc3db3097'
-      }.freeze,
-      'bootstrap' => {
-        'commit' => 'a4f4ad182c78a97a1c50098511092dd32f05c63d',
-        'sha256' => 'e6ec5fa08e6ae44ef88263428c2f5936ce0bd804b99626858a330b141e7043dc'
-      }.freeze,
-      'libfdt' => {
-        'commit' => '5756062b7067dd831b0ef7a7f841a3f63a8b8a22',
-        'sha256' => '4c5d66c202a33c3af29dc7b4315d8ec56357936db9a8a8193773c724d063392f'
-      }.freeze,
-      'drivers-frst' => {
-        'commit' => '6459d70997da1a2ad97775c8772b4a41284b0a9e',
-        'sha256' => '3eb24fe67cf4eb7968ba5379016befd3fb72977066a3708468290e9a9ca9f4ff'
-      }.freeze
-    }.freeze
     # The boards whose bootstrap is a build of its own, by platform record name, and the
     # configuration of each (docs/design-fiasco.md, "The Raspberry Pi 4"). The Pi's is
     # Fiasco's generic platform, linked static at 2 MiB, with RAM at 0 and the mini UART's

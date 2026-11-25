@@ -221,7 +221,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `config/imports/notices.txt` (`Attribution.for_file`). Their profiles are in the current
   form (OTP's vendored trees are `package` rules; the single-file judgements of OTP and
   musl name each file's SHA-256), but the inventories were not re-derived from them, and
-  the notice table lists only Fiasco's blocks: a re-derivation records every OTP, musl and
+  the notice table lists Fiasco's blocks and the few musl blocks erXos's musl import
+  shares with Fiasco's embedded copy, not the rest: a re-derivation records every OTP, musl and
   OpenSSL file whose notice holds a legal word as `LicenseRef-unrecognized-notice` until
   its block is reviewed and listed, OpenSSL's Apache-2.0 header, which nearly every
   OpenSSL file carries, first. OTP's Unicode data under `lib/stdlib/uc_spec` is recorded

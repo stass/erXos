@@ -5,8 +5,6 @@
 
 require 'optparse'
 require_relative 'lib/erx/origin'
-require_relative 'lib/erx/fiasco'
-require_relative 'lib/erx/sources'
 require_relative 'import_origins'
 
 module Erx
@@ -119,106 +117,13 @@ module Erx
       nil
     end
     private_class_method :recorded_bytes
-
-    def write(root:, kernel_archive:, core_archive:, cache:, part: nil)
-      project = File.expand_path(root)
-      source_root = OutputDirectory.check(root: project, path: File.join(project, 'fiasco'))
-      facts = JsonInput.parse(BoundedFile.read(File.join(source_root, 'IMPORTS.json'), maximum: 1_048_576),
-                              max_bytes: 1_048_576, label: 'Fiasco import records')
-      validate_identities(facts)
-      runner = Runner.new(owner_root: project, log_dir: File.join(project, 'build/logs'))
-      facts.each do |fact|
-        name = fact.fetch('part')
-        next if part && part != name
-        directory = OutputDirectory.check(root: project, path: File.join(source_root, name))
-        raise Error, "external source part: #{name}" if File.symlink?(directory)
-        output = File.join(directory, 'ORIGIN.md')
-        raise Error, "origin already exists: #{name}" if File.exist?(output) || File.symlink?(output)
-        archive = case name
-                  when 'kernel' then File.expand_path(kernel_archive)
-                  when 'l4re-core' then File.expand_path(core_archive)
-                  else cached_archive(cache, fact: fact)
-                  end
-        parent = OutputDirectory.prepare(root: project, path: File.join(project, 'build'))
-        Dir.mktmpdir('.fiasco-origin-', parent) do |temporary|
-          unpacked = File.join(temporary, 'original')
-          Sources.unpack(archive: archive, sha256: fact.fetch('archive_sha256'),
-                         destination: unpacked, owner_root: temporary,
-                         source_directory: %w[kernel l4re-core].include?(name) ? '.' : "#{name}-#{fact.fetch('revision')}",
-                         runner: runner)
-          original = unpacked
-          excluded = project_selection(original, current: directory)
-          prepare_origin(original, fact: fact, exclusions: excluded)
-          File.link(File.join(original, 'ORIGIN.md'), output)
-        end
-        origin = Origin.new(root: directory)
-        begin
-          origin.check
-        rescue Error
-          File.unlink(output)
-          raise
-        end
-      end
-    end
-
-    def prepare_origin(directory, fact:, exclusions:)
-      Origin.new(root: directory).write(repository: fact.fetch('repository'),
-                                         revision: fact.fetch('revision'),
-                                         archive_sha256: fact.fetch('archive_sha256'),
-                                         review: profile(directory, part: fact.fetch('part')),
-                                         exclusions: exclusions)
-    end
-
-    def cached_archive(cache, fact:)
-      filename = "#{fact.fetch('part')}-#{fact.fetch('revision')}.tar.gz"
-      paths = Dir.glob(File.join(File.expand_path(cache), '**', filename))
-      raise Error, "expected one pinned archive for #{fact.fetch('part')}" unless paths.size == 1
-      paths.first
-    end
-
-    # Build the baseline from verified upstream bytes, keeping exactly the
-    # selected path set. Current edits cannot silently become the baseline.
-    def project_selection(original, current:)
-      current_paths = ImportOrigins.payload_paths(current).reject { |path| path == 'ORIGIN.md' }
-      original_paths = ImportOrigins.payload_paths(original)
-      unknown = current_paths - original_paths
-      raise Error, "new file in initial Fiasco import: #{unknown.first}" unless unknown.empty?
-      excluded = original_paths - current_paths
-      excluded.each { |path| File.unlink(File.join(original, path)) }
-      directories = Dir.glob(File.join(original, '**/*'), File::FNM_DOTMATCH)
-                       .select { |path| File.directory?(path) && !File.symlink?(path) }
-                       .reject { |path| ['.', '..'].include?(File.basename(path)) }
-      directories.sort_by(&:bytesize).reverse_each { |path| Dir.rmdir(path) if Dir.empty?(path) }
-      excluded.map { |path| { 'path' => path, 'reason' => 'outside the frozen bootstrap, sigma0 and kernel source selection' } }
-    end
-
-    def validate_identities(facts)
-      expected = {
-        'kernel' => [Fiasco::KERNEL_COMMIT, Fiasco::KERNEL_SHA256],
-        'l4re-core' => [Fiasco::CORE_COMMIT, Fiasco::CORE_SHA256]
-      }.merge(Fiasco::ARCHIVES.transform_values { |pin| [pin.fetch('commit'), pin.fetch('sha256')] })
-      unless facts.is_a?(Array) && facts.size == expected.size &&
-             facts.all? { |fact| fact.is_a?(Hash) && fact.keys.sort == %w[archive_sha256 part repository revision] }
-        raise Error, 'invalid frozen Fiasco import identities'
-      end
-      actual = facts.to_h { |fact| [fact.fetch('part'), [fact.fetch('revision'), fact.fetch('archive_sha256')]] }
-      raise Error, 'frozen Fiasco import identity mismatch' unless actual == expected
-      facts.each do |fact|
-        repository = fact.fetch('part') == 'kernel' ? 'fiasco' : fact.fetch('part')
-        unless fact.fetch('repository') == "https://github.com/kernkonzept/#{repository}"
-          raise Error, 'frozen Fiasco repository mismatch'
-        end
-      end
-    end
-
   end
 end
 
 if $PROGRAM_NAME == __FILE__
   options = { root: File.expand_path('..', __dir__) }
   parser = OptionParser.new do |arguments|
-    arguments.banner = "usage: ruby tools/fiasco_origins.rb --kernel-archive FILE --core-archive FILE --cache DIRECTORY\n" \
-                       '       ruby tools/fiasco_origins.rb --notices [--original PART=DIRECTORY]...'
+    arguments.banner = 'usage: ruby tools/fiasco_origins.rb --notices [--original PART=DIRECTORY]...'
     arguments.on('--notices', 'list the notice blocks the notice table must review') { options[:notices] = true }
     arguments.on('--original PART=DIRECTORY', 'an unpacked original tree of a part, for its changed files') do |value|
       part, directory = value.split('=', 2)
@@ -226,26 +131,15 @@ if $PROGRAM_NAME == __FILE__
 
       (options[:originals] ||= {})[part] = File.expand_path(directory)
     end
-    arguments.on('--kernel-archive FILE') { |value| options[:kernel_archive] = value }
-    arguments.on('--core-archive FILE') { |value| options[:core_archive] = value }
-    arguments.on('--cache DIRECTORY') { |value| options[:cache] = value }
     arguments.on('--root DIRECTORY') { |value| options[:root] = value }
-    arguments.on('--part NAME', Erx::FiascoOrigins::PARTS) { |value| options[:part] = value }
   end
   begin
     remaining = parser.parse(ARGV)
     raise OptionParser::InvalidArgument, remaining.join(' ') unless remaining.empty?
-    if options.delete(:notices)
-      Erx::FiascoOrigins.notices(root: options.fetch(:root), originals: options.fetch(:originals, {}))
-                        .each { |row| Erx::Terminal.puts(row) }
-      exit 0
-    end
-    %i[kernel_archive core_archive cache].each do |name|
-      raise OptionParser::MissingArgument, "--#{name.to_s.tr('_', '-')}" unless options[name]
-    end
-    raise OptionParser::InvalidArgument, remaining.join(' ') unless remaining.empty?
-    Erx::FiascoOrigins.write(**options)
-    Erx::Terminal.puts('recorded frozen Fiasco origins')
+    raise OptionParser::MissingArgument, '--notices' unless options[:notices]
+
+    Erx::FiascoOrigins.notices(root: options.fetch(:root), originals: options.fetch(:originals, {}))
+                      .each { |row| Erx::Terminal.puts(row) }
   rescue OptionParser::ParseError => error
     Erx::Terminal.puts(error.message)
     exit 2
