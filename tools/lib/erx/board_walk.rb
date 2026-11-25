@@ -85,11 +85,10 @@ module Erx
     # What the run says of an ended state, for a person: why the walk ended and what the
     # board needs.
     def said(plan, state)
-      return BoardFiles::STOPPED_BY.fetch(state.ending) if BoardFiles::STOPPED_BY.key?(state.ending) && state.ending != 'halted'
-
       case state.ending
       in 'returned' then "the walk ended: every entry was sent; #{returned_said(state.returned)}"
       in 'halted' then "#{BoardFiles::STOPPED_BY.fetch('halted')}; its power needs cycling"
+      in 'booted_again' | 'byte_limit' | 'console_closed' | 'interrupted' then BoardFiles::STOPPED_BY.fetch(state.ending)
       in 'end_deadline'
         "the walk ended: entry #{state.position + 1} did not end within the end deadline; the board hangs below " \
           'the bench root, and its power needs cycling'
@@ -109,8 +108,7 @@ module Erx
     # Counts a line's bytes into the boot they belong to (the module's comment).
     def count(plan, state, kept, bytes)
       claimed = kept&.kind == :naming && kept.name && plan.names.index(kept.name)
-      own = claimed && claimed == state.position && state.phase == :running
-      if own
+      if claimed && claimed == state.position && state.phase == :running
         state.with(bytes: state.bytes + state.pending + bytes, pending: 0, open: true)
       elsif claimed && state.outcomes[claimed].nil? && claimed >= state.position
         state.with(bytes: state.pending + bytes, pending: 0, open: true)
@@ -201,7 +199,7 @@ module Erx
       case returned.status
       in 'booted' then 'the board booted the found pair again'
       in 'unexpected' then "the board booted another build, #{returned.identity.build} index #{returned.identity.index}"
-      in 'unknown' then 'the board booted a build whose identity the found target does not name'
+      in 'unknown' then "the board booted a build, but the found pair's identity is not known, so not which"
       in 'not_seen' then 'no banner came within the return deadline'
       end
     end

@@ -185,19 +185,20 @@ module Erx
         Netboot.point(root: @link, target: queue_path)
         yield
         say("bench: #{LineEscape.escape(@link)} serves the queue of #{plan.names.size} entries; the log is #{File.join(directory, LOG)}")
-        unless @shell.reboot
-          say('bench: ssh could not ask the board to reboot; reset it by hand, and the walk waits the boot deadline')
-        end
         walk(plan, console)
       ensure
         console.close
       end
     end
 
-    # The console's events through BoardWalk until the walk ends; a signal is the walk's
-    # interruption, returned to be raised once the link is back and walk.json written.
+    # Asks the board to reboot, then hands the console's events to BoardWalk until the walk
+    # ends; a signal, from the reboot request on, is the walk's interruption, returned to be
+    # raised once the link is back and walk.json written.
     def walk(plan, console)
       state = BoardWalk.start(plan, at: @clock.call)
+      say('bench: ssh could not ask the board to reboot; reset it by hand, and the walk waits the boot deadline') unless
+        @shell.reboot
+
       until state.ended?
         console.read(state.deadline).each do |event|
           state = BoardWalk.step(plan, state, event)
@@ -257,6 +258,8 @@ module Erx
     end
 
     def plan_of(entries, names)
+      # One end deadline for the walk: the longest guest deadline of its sets, so a paired
+      # walk's shorter set waits as long as the longer.
       guest = entries.map(&:deadline_seconds).max
       BoardWalk::Plan.new(names: names, identities: entries.map(&:identity), return_identity: nil,
                           deadlines: BoardWalk::Deadlines.new(boot_seconds: BOOT_SECONDS,

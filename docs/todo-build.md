@@ -137,12 +137,15 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   and no subdirectory, so an entry's `boot.img` is checked by a reader independent of fsimg only for `kernel8.img`'s
   placement and its root files with short names; the device tree, `overlays/` and other long-named files are checked
   only by the test's extraction with fsimg itself. A long-name and subdirectory walk in `FatVolume` closes it.
-* [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, [design-bench.md](design-bench.md#the-walk)):
-  the pure walk over the queue's names, tested exhaustively, seeded with the end deadline restarted at each naming
-  line and with the return taken from any banner; the console reader with its byte and line limits; the ssh
-  `reboot` and `/proc/sensors/status` reads through `LineEscape`; `tools/erx bench NAME --env pi4-4gb-erxos`; and
-  the run on the desk's board, seeded with the last entry made from the first. Needs the log's and the network
-  boot's items first. One implementer.
+* [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, `BoardRun`,
+  [design-bench.md](design-bench.md#the-walk)): the walk, the console, the ssh calls and `tools/erx bench NAME
+  --env pi4-4gb-erxos` are built and tested on the host with fakes; what remains is (1) the return identity, which
+  the walk takes as unknown because nothing reads a staged `kernel8.img`'s build and index hash (the found stage's
+  `sets/1/kernel8.img`), so `returned` is never `booted` until that reader exists; (2) `--profile full`, refused
+  because `NativeBench::BoardSets` builds only the landing form; (3) the record, handed to `BoardRun`'s seam and
+  blocked on the record's shape (the record item above); (4) the first run on the desk's board, which checks
+  `BoardConsole.set_line`'s `stty` on the macOS serial device (unverified) and is seeded with the last entry made
+  from the first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
   other systems' logs and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
