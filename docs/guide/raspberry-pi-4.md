@@ -28,7 +28,16 @@ to `screenlog.0`. A Glasgow Interface Explorer's UART applet can be the
 adapter instead; it serves the console as a TCP port, port 2300 in the
 setup this guide was checked with, which `nc localhost 2300` opens. The
 board benchmarks' walk (`tools/erx bench NAME --env pi4-4gb-erxos
---console DEVICE`) opens a serial device and cannot read a TCP port.
+--console DEVICE`) opens a serial device, not a TCP port; with the
+Glasgow, it works through a pty: a relay holds the applet's one TCP
+connection, copies every byte it reads into a pty's master, and the
+slave's path is the walk's `DEVICE`. The relay must keep what a write to
+the master does not take and write it once the master is writable again:
+a pty's input queue on macOS holds about 1 KiB, a non-blocking write
+beyond that takes only part, and a relay that drops the rest cuts every
+longer line there and joins it to the next one, so the walk rejects the
+cells whose `BENCH` lines were cut. The same relay can serve further TCP
+clients, such as `nc`, to type at the board while the walk reads.
 A second adapter on UART3, the host link, is optional:
 ground to pin 9, receive to pin 7 (GPIO 4), transmit to pin 29 (GPIO 5),
 also 115200 8N1. A development card's `cmdline.txt` holds `erx.hostlink=1`,

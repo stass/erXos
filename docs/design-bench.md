@@ -874,17 +874,17 @@ host serves over HTTP
 
 ### What the code does today
 
-* **No board build of a bench image.** `NativeBench::Run` takes a
-  `platform:` only to link the root task (`NativeRoot`), and always boots
-  QEMU (`tools/lib/erx/native_bench.rb`, `Run#boot`). `BootImage#build`
-  packs the main Fiasco build's first stage, `Fiasco#image_path`, whatever
-  the platform (`tools/lib/erx/boot_image.rb:48`). Only the production
-  image packs a board's own first stage (`Fiasco#build_for` and
-  `#first_stage_path`, `production_image.rb:507` and `:695`) and checks the
-  single file against the board's RAM and device tree
-  (`Machine#check_single_file`, `:697`). A test root's place is already the
-  development machine's: `NativeRoot.development_place`, 64 MiB into RAM,
-  which `Machine.development` also takes.
+* **A bench image builds for the board.** `NativeBench::Run` builds
+  Fiasco for its platform (`fiasco.build_for`,
+  `tools/lib/erx/native_bench.rb:257`) and keeps a board's builds apart
+  from QEMU virt's (`board_part`, `:288`); `BootImage` packs the
+  platform's own first stage (`first_stage`,
+  `tools/lib/erx/boot_image.rb:76`) and checks the single file against
+  that first stage's load address (`:58`). `NativeBench::BoardSets`
+  builds each distinct benchmark's image for the board and lays it out as
+  a boot partition's files and build record in `build/bench-board/`
+  (`native_bench.rb:321`). `Run#boot` boots only QEMU (`:290`); the
+  board's boots are the walk's.
 * **The bench root ends with a reset.** Its done, its deadline and every
   setup failure end through one funnel with
   `erx_fiasco_end(ERX_FIASCO_END_ASKED_RESET, NULL)` (`end_with`,
@@ -934,8 +934,15 @@ host serves over HTTP
   `fiasco/kernel/src/kern/arm/perf_cnt-arm.cpp:211-228`); whether the
   firmware's levels above the kernel leave that read untrapped on the
   board is unverified.
-* **No reader of a board's console.** `tools/erx bench import` does not
-  exist, and nothing on the host reads the board's console while it runs.
+* **The host reads the board's console, live or afterwards.** The walk
+  reads it through `BoardConsole` while it runs, which classifies each
+  line with `BoardLog.classify` (`tools/lib/erx/board_console.rb:113`);
+  `tools/erx bench import` reads a saved log of it afterwards
+  (`bench_import`, `tools/erx:1591`); and both runs' records come from one
+  reader of board logs (`BoardLog.read`, `tools/lib/erx/board_record.rb:108`).
+  `BoardConsole` opens a serial device; a console served as a TCP port
+  reaches it only through a pty a relay outside the tree fills
+  ([Raspberry Pi 4 guide](guide/raspberry-pi-4.md)).
 
 ### The construction: the server hands out a queue
 
