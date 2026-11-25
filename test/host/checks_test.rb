@@ -167,6 +167,29 @@ class ChecksTest < Minitest::Test
     end
   end
 
+  # tools/erx and tools/lib/erx load nothing under test/, however the load is spelled;
+  # a test, a fuzz target and a load of tooling's own files may.
+  def test_host_tooling_loads_no_test_code
+    write('tools/lib/erx/own.rb', "require 'json'\nrequire_relative 'pack'\nload(path)\nrequire File.join(root, name)\n" \
+                                  "# require_relative '../../../test/fixtures/x'\nvalue = 'test/fixtures/x.c'\n")
+    write('tools/fuzz/target.rb', "require_relative '../../test/fixtures/seeds'\n")
+    write('test/host/a_test.rb', "require_relative '../fixtures/seeds'\n")
+    assert checks.run
+    { 'tools/lib/erx/fixture.rb' => ["require_relative '../../../test/fixtures/x'\n", 'require_relative test/fixtures/x'],
+      'tools/erx' => ["#!/usr/bin/env ruby\nrequire_relative '../test/fixtures/x'\n", 'require_relative test/fixtures/x'],
+      'tools/lib/erx/deferred.rb' => ["def call\n  require_relative('../../../test/x')\nend\n", 'require_relative test/x'],
+      'tools/lib/erx/rooted.rb' => ["load 'test/fixtures/x.rb'\n", 'load test/fixtures/x.rb'],
+      'tools/lib/erx/joined.rb' => ["require File.join(ROOT, 'test/fixtures/x')\n", 'require of a path naming test/'],
+      'tools/lib/erx/computed.rb' => ["require_relative File.join('../../..', FIXTURE)\n",
+                                      'require_relative of a computed path'] }.each do |relative, (source, wrong)|
+      path = write(relative, source)
+      error = assert_raises(Erx::Error) { checks.run }
+      line = source.lines.index { |text| text.match?(/require|load/) } + 1
+      assert_equal "host tooling loads test code: #{relative}:#{line} #{wrong}", error.message
+      File.unlink(path)
+    end
+  end
+
   # Only the QEMU harnesses that boot test code, the oracle's run and the block device
   # suite's, build a test image; the production image module defines
   # the entry point. The identifier anywhere else in host tooling, as a call, a symbol for

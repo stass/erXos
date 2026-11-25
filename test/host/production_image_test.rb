@@ -20,7 +20,7 @@ class ProductionImageTest < Minitest::Test
   PLATFORM = Erx::Platform.development(ROOT)
   DEVELOPMENT = Erx::ProductionImage::Machine.development(PLATFORM)
   KIND = Erx::ProductionImage::MediumKind
-  TEST_ROOT = Erx::TrustStore::TestRoot.new(path: 'build/fixture.pem', source: 'test/fixtures/quotes_fixture.rb')
+  TEST_ROOT = Erx::TrustStore::TestRoot.new(path: 'build/fixture.pem', source: 'tools/lib/erx/quotes_fixture.rb')
   TEST_PROGRAM = Erx::ProductionImage::Added.new(entries: [{ 'path' => 'bin/probe' }].freeze, inputs: [].freeze, imports: {}.freeze)
   CLOCK = Erx::ImageApps::Package.new(path: '/p/clock.app', name: 'clock', memory: 1 << 22, sha256: "\xab".b * 32, license: 'MIT')
 
@@ -808,7 +808,7 @@ class ProductionImageTest < Minitest::Test
   # test image, and the one build refuses one for an image without the test-code mark, so
   # no production image trusts a test root.
   def test_only_a_test_image_adds_a_trust_root
-    root = Erx::TrustStore::TestRoot.new(path: 'build/fixture.pem', source: 'test/fixtures/quotes_fixture.rb')
+    root = Erx::TrustStore::TestRoot.new(path: 'build/fixture.pem', source: 'tools/lib/erx/quotes_fixture.rb')
     error = assert_raises(Erx::Error) { Erx::ProductionImage.check_test_roots([root], test_code: false) }
     assert_match(%r{only a test image adds a trust root: build/fixture\.pem}, error.message)
     Erx::ProductionImage.check_test_roots([root], test_code: true)

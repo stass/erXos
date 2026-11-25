@@ -25,7 +25,7 @@ require_relative 'release_medium'
 require_relative 'runner'
 require_relative 'runtime'
 require_relative 'toolchain_provenance'
-require_relative '../../../test/fixtures/pack_root'
+require_relative 'pack_root'
 
 module Erx
   # The system release as an archive of its own: ReleaseFiles through Pack#build with the
@@ -90,8 +90,8 @@ module Erx
         OutputDirectory.prepare(root: @root, path: @directory)
         tools = PackTools.build(root: @root, owner_root: @root, directory: File.join(@directory, 'tools'),
                                 runner: @runner, compiler: @compiler, sanitizers: [])
-        root_task = PackRootFixture.build(root: @root, directory: File.join(@directory, 'root'), codec: @codec,
-                                          runner: @runner, compiler: @compiler, linker: @linker)
+        root_task = PackRoot.build(root: @root, directory: File.join(@directory, 'root'), codec: @codec,
+                                   runner: @runner, compiler: @compiler, linker: @linker)
         system_release = ReleaseFiles.new(root: @root, otp: @otp, directory: @directory, runner: @runner, codec: @codec, oracle: @oracle)
         files = system_release.entries
         manifest_source = @platform.manifest_source(@root)

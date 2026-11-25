@@ -85,7 +85,7 @@ class TrustStoreTest < Minitest::Test
     end
   end
 
-  def fixture_root(path) = Erx::TrustStore::TestRoot.new(path: path, source: 'test/fixtures/quotes_fixture.rb')
+  def fixture_root(path) = Erx::TrustStore::TestRoot.new(path: path, source: 'tools/lib/erx/quotes_fixture.rb')
 
   def test_an_empty_directory_is_no_store
     Dir.mktmpdir('trust-store-') do |directory|

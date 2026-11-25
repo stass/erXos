@@ -496,9 +496,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 * [Medium] the kiosk cell (`tools/lib/erx/kiosk.rb`), left from its review: its boot repeats
   MediumBoot::Run's (fresh medium, slot parse, firmware tree, the boot value spliced after the image's
-  identity) instead of sharing one MediumBoot function; it loads `test/fixtures/dashboard_screen.rb`
-  from tools/lib, whose `generated_tree` sets the host tests' sanitizer environment in the gate process,
-  so the renderer and the part of ErlangBuild it needs belong in tools/lib without that side effect;
+  identity) instead of sharing one MediumBoot function;
   `packages: refused` is logged for admission refusals only, not for a header the file check refuses;
   AppPack builds an app's beams into the app directory's own `ebin/`, which each run of the cell or of
   `tools/erx pack --app` leaves in the source tree (`examples/.gitignore` ignores it), where the
@@ -529,7 +527,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] `examples/dashboard` (`erx_dashboard.app.src`): the live quotes need `ssl` and `inets`, which
   `erx_quotes` starts at run time but no `.app` file declares; settle whether the `.app` names them.
 
-* [Medium] `kiosk/hvf-1cpu-quotes` (`test/fixtures/quotes_fixture.rb`, `tools/lib/erx/kiosk.rb`): the
+* [Medium] `kiosk/hvf-1cpu-quotes` (`tools/lib/erx/quotes_fixture.rb`, `tools/lib/erx/kiosk.rb`): the
   fixture answers only Kraken's Ticker requests, not the OHLC history request the dashboard's [README](../examples/dashboard/README.md#the-qemu-cell) ("The
   QEMU cell") names, so each quote's history fails with a 404 and the cell does not check the
   `quotes: QUOTE history N entries` lines the cell passes on.

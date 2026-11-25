@@ -6,7 +6,7 @@ require 'fileutils'
 require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
-require_relative '../fixtures/dashboard_screen'
+require_relative '../../tools/lib/erx/dashboard_screen'
 require_relative '../../tools/lib/erx/app_pack'
 require_relative '../../tools/lib/erx/kiosk'
 require_relative '../../tools/lib/erx/runner'
@@ -43,8 +43,8 @@ class ErxDashboardTest < Minitest::Test
   def test_pure_parts_pass_under_eunit
     sdk = self.class.sdk
     Dir.mktmpdir('erx-dashboard-test') do |work|
-      DashboardScreen.compile(work, app: DASHBOARD, sdk: sdk, runner: self.class.runner, tests: TESTS)
-      output = run!(sdk.erl, '-noshell', *DashboardScreen.code_path(work, sdk: sdk), '-eval',
+      Erx::DashboardScreen.compile(work, app: DASHBOARD, sdk: sdk, runner: self.class.runner, tests: TESTS)
+      output = run!(sdk.erl, '-noshell', *Erx::DashboardScreen.code_path(work, sdk: sdk), '-eval',
                     'halt(case eunit:test(erx_dashboard_view_tests, [verbose]) of ok -> 0; _ -> 1 end).',
                     chdir: work)
       assert_match(/All \d+ tests passed/, output)
@@ -58,9 +58,9 @@ class ErxDashboardTest < Minitest::Test
     sdk = self.class.sdk
     program = Erx::Lvgl::Build.new(root: ROOT, runner: self.class.runner).call
     Dir.mktmpdir('erx-dashboard-start') do |work|
-      DashboardScreen.compile(work, app: DASHBOARD, sdk: sdk, runner: self.class.runner, tests: START_TESTS)
+      Erx::DashboardScreen.compile(work, app: DASHBOARD, sdk: sdk, runner: self.class.runner, tests: START_TESTS)
       File.mkfifo(File.join(work, 'roots.fifo'))
-      output = run!(sdk.erl, '-noshell', *DashboardScreen.code_path(work, sdk: sdk), '-eval',
+      output = run!(sdk.erl, '-noshell', *Erx::DashboardScreen.code_path(work, sdk: sdk), '-eval',
                     'halt(case eunit:test(erx_dashboard_start_tests, [verbose]) of ok -> 0; _ -> 1 end).',
                     chdir: work, env: { 'ERX_LVGL' => program, 'TMPDIR' => work })
       assert_match(/Test passed/, output)
@@ -76,7 +76,7 @@ class ErxDashboardTest < Minitest::Test
   TIME = [[2026, 11, 15], [9, 41, 0]].freeze
   def test_the_screen_is_the_reference
     references = File.join(ROOT, 'test/display/reference')
-    image = DashboardScreen.picture(TIME, app: DASHBOARD, sdk: self.class.sdk, runner: self.class.runner,
+    image = Erx::DashboardScreen.picture(TIME, app: DASHBOARD, sdk: self.class.sdk, runner: self.class.runner,
                                           reason: Erx::Kiosk::OFFLINE_REASON)
     if ENV['ERX_RECORD_REFERENCE'] == '1'
       digest, picture = Erx::ScreenReference.encode(image)

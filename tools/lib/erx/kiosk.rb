@@ -4,9 +4,11 @@
 
 require 'digest'
 require 'fileutils'
+require_relative 'dashboard_screen'
 require_relative 'display_domain'
 require_relative 'image_apps'
 require_relative 'medium_boot'
+require_relative 'quotes_fixture'
 require_relative 'screen_reference'
 require_relative 'source_revision'
 
@@ -89,7 +91,7 @@ module Erx
     # first round, sol's retry after its failure and the TLS handshakes of each.
     QUOTES_SECONDS = 240
     # The fixture's source, which writes the test root and so is its receipt's source.
-    FIXTURE = 'test/fixtures/quotes_fixture.rb'
+    FIXTURE = 'tools/lib/erx/quotes_fixture.rb'
     # The minute Run#call draws before the boots, to build and compile the renderer.
     WARM_MINUTE = [[1970, 1, 1], [0, 0, 0]].freeze
     # How long the harness waits after the command shell for the dashboard's line, and
@@ -371,10 +373,8 @@ module Erx
       end
 
       # The quotes cell's boot against the fixture, its root in the image's store unless
-      # trusted is false, when the store takes another root in its place. The fixture is
-      # loaded here, when the cell runs, so loading the suite loads no test code.
+      # trusted is false, when the store takes another root in its place.
       def quotes_boot(cell, package, fiasco, work, trusted:)
-        require_relative File.join('../../..', FIXTURE)
         roots = FileUtils.mkdir_p(File.join(work, "#{cell}-roots")).first
         context = QuotesFixture.chain(File.join(roots, 'fixture.pem'))
         QuotesFixture.chain(File.join(roots, 'other.pem')) unless trusted
@@ -443,10 +443,8 @@ module Erx
       end
 
       # The dashboard at app as a function from a minute to the picture the host's
-      # erx-lvgl draws of it over sdk, on the SDK's emulator (DashboardScreen). The fixture
-      # is loaded here, when the cell runs, so loading the suite loads no test code.
+      # erx-lvgl draws of it over sdk, on the SDK's emulator (DashboardScreen).
       def drawing(app:, sdk:)
-        require_relative '../../../test/fixtures/dashboard_screen'
         ->(minute) { DashboardScreen.picture(minute, app: app, sdk: sdk, runner: @runner, reason: OFFLINE_REASON) }
       end
     end

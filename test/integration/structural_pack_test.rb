@@ -5,7 +5,9 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../fixtures/structural_pack'
+require_relative '../fixtures/first_stage_fixture'
+require_relative '../fixtures/generated_tree'
+require_relative '../../tools/lib/erx/structural_pack'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/pack_tools'
@@ -34,9 +36,11 @@ class StructuralPackTest < Minitest::Test
   end
 
   def fixture(name)
-    StructuralPackFixture.build(root: @root, directory: File.join(@directory, name), codec: @codec,
-                                runner: @runner, tools: @tools, compiler: @compiler,
-                                linker: @linker, external: @external)
+    first_stage = File.join(@directory, "#{name}.first-stage")
+    File.binwrite(first_stage, FirstStageFixture.bytes)
+    Erx::StructuralPack.build(root: @root, directory: File.join(@directory, name), codec: @codec,
+                              runner: @runner, tools: @tools, compiler: @compiler,
+                              linker: @linker, external: @external, first_stage: first_stage)
   end
 
   def test_full_structural_wire_fixture_is_byte_identical_across_clean_builds

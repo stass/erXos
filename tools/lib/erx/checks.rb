@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'prism'
 require 'set'
 require_relative 'bounded_file'
 require_relative 'git_environment'
@@ -85,6 +86,19 @@ module Erx
       )
       | [.]from_json\b                                    # json's core additions
     /x
+    # Host tooling (tools/erx and tools/lib/erx) never loads a file under test/: a
+    # test fixture may set up the test process as it loads (the sanitizer
+    # environment, the generated tree), which no command may inherit, so what
+    # tooling needs from a fixture lives in tools/lib/erx. The check parses each
+    # source (Prism), so it finds every require, require_relative and load call,
+    # deferred ones included. A literal path is resolved as the call resolves it; a
+    # computed one is refused for require_relative, whose path is fixed by nature,
+    # and for require or load when a literal in it names test/. A computed path that
+    # names test/ only through a constant is beyond it; tools/fuzz, whose targets
+    # load their seed fixtures, is outside it.
+    TOOL_CODE = %r{\Atools/(?:erx\z|lib/erx/)}
+    LOAD_CALLS = %i[require require_relative load].freeze
+    TEST_TREE = %r{(?:\A|/)test/}
 
     # ProductionImage#build adds nothing to the system release; its test entry point adds
     # test code and marks the archive (ERX_PACK_TEST_CODE). This check enforces two things
@@ -203,6 +217,7 @@ module Erx
       own_sources.each { |relative| check_own_source(relative, listed: listed_set) }
       check_doc_links(names, own_sources)
       check_json_parsing(own_sources)
+      check_tool_loads(own_sources)
       check_named_only(own_sources)
       check_area_mappers(listed)
       check_erofs_reads(listed)
@@ -345,6 +360,40 @@ module Erx
         end
       end
     end
+
+    def check_tool_loads(own_sources)
+      own_sources.grep(TOOL_CODE).each do |relative|
+        path = File.join(@root, relative)
+        next unless ruby_source?(path)
+
+        descendants(Prism.parse_file(path).value).each do |node|
+          next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && LOAD_CALLS.include?(node.name)
+
+          wrong = test_load(node, File.dirname(relative))
+          raise Error, "host tooling loads test code: #{relative}:#{node.location.start_line} #{wrong}" if wrong
+        end
+      end
+    end
+
+    # What is wrong with call, a require, require_relative or load in directory, or nil.
+    def test_load(call, directory)
+      argument = call.arguments&.arguments&.first
+      case argument
+      in nil then nil
+      in Prism::StringNode
+        base = call.name == :require_relative ? File.join('/', directory) : '/'
+        target = File.expand_path(argument.unescaped, base).delete_prefix('/')
+        "#{call.name} #{target}" if target.start_with?('test/')
+      else
+        return 'require_relative of a computed path' if call.name == :require_relative
+
+        "#{call.name} of a path naming test/" if descendants(argument).any? do |node|
+          node.is_a?(Prism::StringNode) && TEST_TREE.match?(node.unescaped)
+        end
+      end
+    end
+
+    def descendants(node) = [node, *node.compact_child_nodes.flat_map { |child| descendants(child) }]
 
     # Imports included: prim_file and kernel are imports, and a write from either counts.
     def check_ns_writers(listed)

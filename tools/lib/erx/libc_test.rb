@@ -29,7 +29,7 @@ module Erx
     HELPER = /_dso\z/
     # A static test's further objects, as src/functional/tls_align.mk names them.
     EXTRA_OBJECTS = { 'functional/tls_align' => ['functional/tls_align_dso'] }.freeze
-    # The boot image's 16 MiB budget (test/fixtures/structural_pack.rb), less room for its kernel and root.
+    # The boot image's 16 MiB budget (tools/lib/erx/structural_pack.rb), less room for its kernel and root.
     BATCH_BYTES = 12 * 1024 * 1024
     TASK_SECONDS = 60
     # What the QEMU gate holds to passing: threads and robust mutexes, TLS, stdio and

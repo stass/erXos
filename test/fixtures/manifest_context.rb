@@ -9,17 +9,14 @@ require_relative '../../tools/lib/erx/device_kinds'
 require_relative '../../tools/lib/erx/domain_startup'
 require_relative '../../tools/lib/erx/gatt_decl'
 require_relative '../../tools/lib/erx/production_image'
+require_relative '../../tools/lib/erx/structural_pack'
 
 module ManifestContextFixture
   module_function
 
-  # The release image the development manifest names, as ReleaseMedium.image describes
-  # a built one: two blocks at the slot's images start, and their one tree block after
-  # them.
-  def images
-    { 'release' => { 'kind' => 'erofs_image', 'extents' => [{ 'slot_offset' => 0, 'length' => 8192 }],
-                     'tree' => { 'offset' => 8192, 'length' => 4096, 'salt' => '5a' * 32, 'root_hash' => 'a5' * 32 } } }
-  end
+  # The release image and the platform are the structural pack's, so a unit test's
+  # context and the structural archive's agree.
+  def images = Erx::StructuralPack.images
 
   # The tree's own device kinds, which the checked context carries.
   def device_kinds = Erx::DeviceKinds.context_rows(File.expand_path('../..', __dir__))
@@ -27,16 +24,7 @@ module ManifestContextFixture
   # The names of the services the tree's abi/gatt declares, which the checked context carries.
   def gatt_services(codec) = Erx::GattDecl.services(root: File.expand_path('../..', __dir__), schema: codec.schema).map(&:name)
 
-  def platform
-    { 'name' => 'fixture', 'cpuset' => 1, 'console' => '/uart@0', 'hostlink' => '',
-      'ram_bytes' => 1 << 30, 'fiasco_reserve' => 64 << 20,
-      'units' => [{ 'key' => 'uart0', 'devices' => [
-        { 'selector' => 'dt', 'role' => 'uart', 'path' => '/uart@0', 'bridge' => '',
-          'compatible' => 'arm,pl011', 'bus' => 0, 'device' => 0, 'function' => 0,
-          'dma' => 'none', 'flags' => 0, 'dma_memory' => 0, 'placement_key' => 'uart0',
-          'base' => 0, 'size' => 4096, 'line' => 33, 'clock' => 24_000_000 }
-      ] }] }
-  end
+  def platform = Erx::StructuralPack.platform
 
   def image(codec)
     { 'magic' => codec.constant('image_magic'), 'version' => codec.constant('image_version'),

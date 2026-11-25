@@ -4,7 +4,8 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
-require_relative '../fixtures/pack_root'
+require_relative '../fixtures/generated_tree'
+require_relative '../../tools/lib/erx/pack_root'
 require_relative '../../tools/lib/erx/abi'
 require_relative '../../tools/lib/erx/abi_binary'
 require_relative '../../tools/lib/erx/pack_tools'
@@ -31,10 +32,10 @@ class PackFixtureTest < Minitest::Test
     tools = Erx::PackTools.build(root: @root, owner_root: @directory, directory: File.join(@directory, 'tools'),
                                  runner: @runner, compiler: @compiler)
     planner = Erx::ElfPlanner.new(helper: tools.fetch('planner'), runner: @runner, codec: @codec)
-    first = PackRootFixture.build(root: @root, directory: File.join(@directory, 'first'),
-                                  codec: @codec, runner: @runner, compiler: @compiler, linker: @linker)
-    second = PackRootFixture.build(root: @root, directory: File.join(@directory, 'second'),
-                                   codec: @codec, runner: @runner, compiler: @compiler, linker: @linker)
+    first = Erx::PackRoot.build(root: @root, directory: File.join(@directory, 'first'),
+                                codec: @codec, runner: @runner, compiler: @compiler, linker: @linker)
+    second = Erx::PackRoot.build(root: @root, directory: File.join(@directory, 'second'),
+                                 codec: @codec, runner: @runner, compiler: @compiler, linker: @linker)
     assert_equal Digest::SHA256.file(first.fetch('artifact')).hexdigest,
                  Digest::SHA256.file(second.fetch('artifact')).hexdigest
     oracle = @runner.run([ENV.fetch('ERX_READELF', 'llvm-readelf'), '--program-headers', '--wide',

@@ -13,7 +13,7 @@ require_relative 'pack_tools'
 require_relative 'platform'
 require_relative 'production_image'
 require_relative 'toolchain_provenance'
-require_relative '../../../test/fixtures/structural_pack'
+require_relative 'structural_pack'
 
 module Erx
   # A bootable file for Fiasco from what the build holds: platform's first stage
@@ -47,9 +47,9 @@ module Erx
     def build(directory:, stand_in_root: nil, programs: {}, images: {}, jit: [])
       OutputDirectory.fresh(root: @root, path: directory)
       recipe = File.join(directory, 'recipe')
-      fixture = StructuralPackFixture.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,
-                                            compiler: @compiler, linker: @linker, external: external,
-                                            extra_files: extra_files(stand_in_root, programs, images, jit), first_stage: first_stage)
+      fixture = StructuralPack.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,
+                                     compiler: @compiler, linker: @linker, external: external,
+                                     extra_files: extra_files(stand_in_root, programs, images, jit), first_stage: first_stage)
       report = fixture.fetch('report')
       ProductionImage::Machine.development(@platform)
                               .check_single_file(File.size(report.fetch('single_path')), load_address: @fiasco.first_stage_address(@platform))

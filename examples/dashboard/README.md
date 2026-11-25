@@ -243,7 +243,7 @@ release medium with no network device and compares the screen with the
 reference picture, every quote at `no data:`. Its cell
 `kiosk/hvf-1cpu-quotes` checks live quotes without the internet: a test
 image whose trust store adds the root of an offline HTTPS fixture
-(`test/fixtures/quotes_fixture.rb`), and restricted QEMU user networking
+(`tools/lib/erx/quotes_fixture.rb`), and restricted QEMU user networking
 whose one `cmd:` guest forward, for the table's address and port 443,
 relays each connection to the fixture on the host's loopback, so nothing
 the guest sends leaves the host. The fixture's chain is valid from the
