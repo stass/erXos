@@ -33,7 +33,7 @@ class FiascoInputsTest < Minitest::Test
       File.write(File.join(outside, 'fiasco/private-config'), 'outside data')
       File.symlink(outside, File.join(project, 'config'))
       error = assert_raises(Erx::Error) { Erx::FiascoInputs.new(root: project).prepare }
-      assert_includes error.message, 'missing or linked Fiasco input directory: config/fiasco'
+      assert_includes error.message, 'missing or linked Fiasco input: config/fiasco'
       refute File.exist?(File.join(project, 'build/fiasco/inputs'))
     end
   end
@@ -50,6 +50,9 @@ class FiascoInputsTest < Minitest::Test
                          File.join(root, 'build/gen/include/erx/core'), File.join(root, 'build/gen/kernel'),
                          File.join(root, 'build/gen/liberx')])
       File.write(File.join(root, 'kernel/core/watchdog.c'), "int watchdog;\n")
+      File.write(File.join(root, 'liberx/elf_plan.c'), "int erx_elf_plan;\n")
+      File.write(File.join(root, 'liberx/image_plan.c'), "int erx_image_plan;\n")
+      File.write(File.join(root, 'liberx/erx_funnel.c'), "int erx_funnel;\n")
       File.write(File.join(root, 'include/erx/core/watchdog.h'), "extern int watchdog;\n")
       File.write(File.join(root, 'build/gen/include/erx/core/abi_trap.h'), "#define ERX_TRAP 1\n")
       inputs = Erx::FiascoInputs.new(root: root)
@@ -136,6 +139,41 @@ class FiascoInputsTest < Minitest::Test
     with_inputs do |root, _source, inputs, record|
       File.write(File.join(root, 'kernel/core/watchdog.c'), "int watchdog = 1;\n")
       refute_equal inputs.component_id(record, component: 'kernel'), inputs.component_id(inputs.prepare, component: 'kernel')
+    end
+  end
+
+  # Of liberx the build reads only the sources the cores' archive compiles,
+  # so instrumenting another of its files, capturing, and reverting the file
+  # (git checkout) leaves the capture valid, and the private copy cannot
+  # hold, nor the build read, a file the record does not name.
+  def test_a_liberx_file_the_cores_do_not_compile_is_no_build_input
+    with_inputs do |root, _source, inputs, _record|
+      funnel = File.join(root, 'liberx/erx_funnel.c')
+      File.write(funnel, "int erx_funnel; /* instrumentation */\n")
+      record = inputs.prepare
+      File.write(funnel, "int erx_funnel;\n")
+      File.write(File.join(root, 'liberx/erx_new.c'), "int erx_new;\n")
+      assert_equal record, inputs.verify
+      refute File.exist?(File.join(inputs.tree, 'liberx/erx_funnel.c'))
+      assert_equal "int erx_elf_plan;\n", File.read(inputs.path('liberx/elf_plan.c'))
+    end
+  end
+
+  def test_a_changed_liberx_source_the_cores_compile_still_refuses
+    with_inputs do |root, _source, inputs, record|
+      File.write(File.join(root, 'liberx/image_plan.c'), "int erx_image_plan = 1;\n")
+      error = assert_raises(Erx::Error) { inputs.verify }
+      assert_includes error.message, 'differ from the recorded build inputs'
+      changed = inputs.prepare
+      refute_equal inputs.component_id(record, component: 'users'), inputs.component_id(changed, component: 'users')
+    end
+  end
+
+  def test_a_missing_liberx_source_is_refused
+    with_inputs do |root, _source, inputs, _record|
+      File.delete(File.join(root, 'liberx/elf_plan.c'))
+      error = assert_raises(Erx::Error) { inputs.prepare }
+      assert_includes error.message, 'liberx/elf_plan.c'
     end
   end
 end

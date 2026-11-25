@@ -8,6 +8,7 @@ require 'find'
 require 'tmpdir'
 require 'set'
 require_relative 'bounded_file'
+require_relative 'core_archive'
 require_relative 'json_input'
 require_relative 'output_directory'
 
@@ -16,13 +17,19 @@ module Erx
   # describes the private copy, never a later view of repository contents.
   class FiascoInputs
     # The inherited parts and their configuration, and the erXos sources the
-    # Fiasco kernel links: the C17 cores, their headers and the stack
+    # Fiasco kernel and bootstrap link: the C17 cores, their headers and the stack
     # proof's declarations (CoreArchive), with the generated C they include
     # and compile (Generated), which the caller brings up to date. Only the
     # generated C is captured: the tree's stamp and its other outputs would
-    # discard a build that none of them reaches.
+    # discard a build that none of them reaches. Of liberx only the sources
+    # the boot archive compiles (CoreArchive::BOOT_SOURCES) are captured, and
+    # no include path reaches the directory: its other files, which the
+    # runtimes build, are no input of this build, so editing or reverting one
+    # leaves the record valid. Each of these roots is one file; every other
+    # root is a directory.
     GENERATED_ROOTS = %w[build/gen/include build/gen/kernel build/gen/liberx].freeze
-    ERXOS_ROOTS = (%w[kernel include liberx] + GENERATED_ROOTS).freeze
+    BOOT_LIBERX_SOURCES = CoreArchive::BOOT_SOURCES.select { |source| source.start_with?('liberx/') }.freeze
+    ERXOS_ROOTS = (%w[kernel include] + BOOT_LIBERX_SOURCES + GENERATED_ROOTS).freeze
     ROOTS = (%w[fiasco config/fiasco] + ERXOS_ROOTS).freeze
     # The inputs only the kernel build reads; every other input is the user
     # build's. A change to one of them discards that build's outputs.
@@ -201,8 +208,9 @@ module Erx
       roots = snapshot ? [''] : ROOTS
       roots.each do |relative_root|
         start = relative_root.empty? ? base : File.join(base, relative_root)
-        unless File.directory?(start) && !File.symlink?(start) && File.realpath(start) == start
-          raise Error, "missing or linked Fiasco input directory: #{relative_root}"
+        kind_holds = BOOT_LIBERX_SOURCES.include?(relative_root) ? File.file?(start) : File.directory?(start)
+        unless kind_holds && !File.symlink?(start) && File.realpath(start) == start
+          raise Error, "missing or linked Fiasco input: #{relative_root}"
         end
         # A nested root's ancestors (config, build and build/gen) are directories
         # of the copy too, as a snapshot of it lists them.
