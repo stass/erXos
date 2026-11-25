@@ -19,6 +19,9 @@ module Erx
   # Microsoft, "FAT32 File System Specification", version 1.03, sections 3 (boot sector,
   # BPB and the FAT type by cluster count, 3.5), 4 (the FAT) and 6 (directory entries).
   module FatVolume
+    # The fsimg arguments that give every time in a FAT volume it writes 1980-01-01,
+    # FAT's first representable date, so the volume's bytes are reproducible.
+    FSIMG_EPOCH = %w[-R -e 315532800].freeze
     ENTRY = 32
     LONG_NAME = 0x0f
     LONG_NAME_MASK = 0x3f

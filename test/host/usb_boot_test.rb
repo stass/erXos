@@ -127,6 +127,38 @@ class UsbBootTest < Minitest::Test
     assert_equal ["  restarts 1\n"], restart.lines - stick.lines
   end
 
+  # Both boots keep the development manifest's session template and the media facet it
+  # is granted, so the console's login starts root's session with /media mounted.
+  def test_both_boots_keep_root_s_session_and_its_media_facet
+    source = Erx::UsbBoot.manifest_source(ROOT, platform: PLATFORM)
+    [0, 1].map { |restarts| Erx::UsbBoot.manifest(source, restarts: restarts) }.each do |manifest|
+      assert_equal 1, manifest.scan(/^session system$/).size
+      assert_includes manifest, "facet media\n  grantee @session.system\n  service @service.media\n"
+    end
+  end
+
+  # Each boot starts at root's session's command shell, which the console's login gives
+  # the line, and goes through the Ctrl-G menu to the system's shell, where erl starts
+  # the Erlang shell the lines are typed at.
+  def test_each_boot_goes_from_root_s_session_to_the_system_s_erlang_shell
+    shell = { name: 'release-shell', pattern: /y/n, seconds: 30 }.freeze
+    [Erx::UsbBoot.method(:checkpoints), Erx::UsbBoot.method(:restart_checkpoints)].each do |checkpoints|
+      points = checkpoints.call([shell], socket: @socket, side: ->(_) {}, note: ->(_) {})
+      assert_equal %w[release-shell root_1-shell menu system-shell erlang-shell usb-enum],
+                   points.first(6).map { |point| point.fetch(:name) }
+      assert_equal [nil, "\a", 's', "erl\r", Erx::UsbBoot.line], points.first(5).map { |point| point[:type] }
+      assert_raises(Erx::Error) { checkpoints.call([shell.merge(type: "x\r")], socket: @socket, side: ->(_) {}, note: ->(_) {}) }
+    end
+  end
+
+  # root_body writes the volume's path as its characters, so a quote or backslash in it
+  # cannot end the string the shell's line holds.
+  def test_root_s_body_writes_the_path_as_its_characters
+    body = Erx::UsbBoot.root_body(volume: 'a"b\\c')
+    assert_includes body, 'file:list_dir([97,34,98,92,99])'
+    refute_includes body, 'a"b'
+  end
+
   # The restart line's answer holds three texts, each starting with its stages, and each
   # true stage the restart boot names passes its cell; a stage inside a text's data, its
   # quotes escaped, is not read, nor one the boot does not name.

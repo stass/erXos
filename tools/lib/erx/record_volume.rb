@@ -28,15 +28,12 @@ module Erx
     # Byte offsets inside the volume: the record and the reset count.
     PLACE = MediumImage.constant('record_select_start') * SECTOR_BYTES
     COUNT_OFFSET = MediumImage.constant('record_count_start') * SECTOR_BYTES
-    # Every time in a medium's FAT volumes is 1980-01-01, FAT's first representable date,
-    # so the bytes are reproducible.
-    EPOCH = %w[-R -e 315532800].freeze
     # The volume's fsimg arguments: its format, then its one placed file, which fsimg
     # names by its absolute path in the volume and places at a byte offset of it.
     # 512-byte clusters make its 5 MiB data area 10,240 clusters, a FAT16 by count, and
     # the record one cluster of its own. ERXOS is the label users are told to copy
     # authorized_keys to.
-    FORMAT = ['-F', 'fat16', *EPOCH, '-s', BYTES.to_s, '-L', 'ERXOS', '-o', 'cluster=512'].freeze
+    FORMAT = ['-F', 'fat16', *FatVolume::FSIMG_EPOCH, '-s', BYTES.to_s, '-L', 'ERXOS', '-o', 'cluster=512'].freeze
     ARGUMENTS = [*FORMAT, '-o', "place=/#{FILE}@#{PLACE}"].freeze
     DEADLINE = 300
 

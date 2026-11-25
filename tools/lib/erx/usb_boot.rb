@@ -5,8 +5,10 @@
 require 'digest'
 require 'fileutils'
 require_relative 'bounded_file'
+require_relative 'fat_volume'
 require_relative 'fsimg'
 require_relative 'pcie_domain'
+require_relative 'session_domain'
 
 module Erx
   # The first cases of the `usb` QEMU suite (docs/design-usb.md, "QEMU suites"): qemu-xhci
@@ -15,7 +17,10 @@ module Erx
   # domain's start and the controller's bus group once the domain holds its facets
   # (docs/design-usb.md, "Who holds a controller"). The suite boots that manifest without
   # its web domain, which it tests nothing of, and, but for the restart cell's boot, with
-  # the USB domain's restarts 0, so a failure is seen, not restarted away.
+  # the USB domain's restarts 0, so a failure is seen, not restarted away. It keeps the
+  # session template, so the console's login at boot starts root's session, root_1, with
+  # the media tree mounted at /media, and root_1's command shell takes the line; Ctrl-G
+  # gives it to the system's shell, where erl starts the Erlang shell (first_key).
   #
   # From the system's Erlang shell the keyboard's two lines run. The first (line) waits for
   # the domain and polls, at the USB domain's node, the controller's and the bus's states
@@ -43,9 +48,10 @@ module Erx
   # holds the medium, a window proxy its facet {drive, 0} answers, and through the proxy
   # reads the harness's sectors equal, writes a pattern, reads it back equal and flushes:
   # the medium's path from the stick to the media domain (docs/design-drives.md, "How the
-  # grant reaches the media domain"), in the gap before its one volume, a FAT16 volume
-  # the ask that got the proxy mounted. Last, in root's session, it lists the volume at
-  # /media/disk0/s1 and reads its one file (root_body). Then
+  # grant reaches the media domain"), in the gap before the medium's one volume, a FAT16
+  # volume. Last, at root's session's node, it lists the
+  # volume at /media/disk0/s1 and reads its one file (root_body), through the session's
+  # own namespace. Then
   # the harness ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
@@ -72,12 +78,11 @@ module Erx
     def self.manifest_source(root, platform:) =
       Manifest::Edit.without_domain(platform.manifest_source(root), LEFT_OUT, units: platform.record.fetch('units'))
 
-    # The suite's manifest, from manifest_source's text: MediumBoot's medium manifest with no
-    # configured row of its own and no room added, and the USB domain's restarts, none but
-    # in the restart cell's boot.
-    def self.manifest(source, restarts: 0)
-      Manifest::Edit.set(MediumBoot.manifest(source, row: '', domains: 0), { ["domain #{DOMAIN}", 'restarts'] => restarts })
-    end
+    # The suite's manifest, from manifest_source's text: that text with the USB domain's
+    # restarts, none but in the restart cell's boot. It keeps the session template and the
+    # facets granted to it, the media facet among them, so the console's login at boot
+    # starts root's session with the media tree at /media, as the production image does.
+    def self.manifest(source, restarts: 0) = Manifest::Edit.set(source, { ["domain #{DOMAIN}", 'restarts'] => restarts })
 
     # The keyboard's five stages, in order; the stick's, read at the USB domain; and those
     # the harness reads after the boot. Each is a side cell.
@@ -118,8 +123,6 @@ module Erx
       FILE_TEXT = "erxos usb stick file\n"
       # The MBR type of a FAT16 volume addressed by LBA.
       FAT16_LBA = 0x0e
-      # FAT's first time, the volume's every time, so its bytes are reproducible.
-      EPOCH = '315532800'
 
       module_function
 
@@ -153,7 +156,7 @@ module Erx
         FileUtils.mkdir_p(tree)
         File.binwrite(File.join(tree, FILE), FILE_TEXT)
         runner.run([Fsimg.checked(root: root, runner: runner), 'cW', '-f', volume, '-F', 'fat16',
-                    '-s', (VOLUME_SECTORS * SECTOR).to_s, '-L', 'ERXOS', '-o', 'cluster=1024', '-R', '-e', EPOCH,
+                    '-s', (VOLUME_SECTORS * SECTOR).to_s, '-L', 'ERXOS', '-o', 'cluster=1024', *FatVolume::FSIMG_EPOCH,
                     '-C', tree, '.'], name: 'usb-stick-volume', deadline: 60)
         File.binwrite(path, image(BoundedFile.read(volume, maximum: VOLUME_SECTORS * SECTOR)))
       end
@@ -195,10 +198,13 @@ module Erx
     # 200 ms and the follower poll's 100. The second waits at most 15 s for the tracer.
     ANSWER_SECONDS = PcieDomain::HOLD_SECONDS + 90
     TYPED_SECONDS = 30
-    # The third line's three calls, each inside UbAt's minute: at the USB domain a 20 s poll and
-    # one request, at the media domain a 20 s poll and four, and in root's session a listing
-    # and a read; the fourth's and fifth's polls, 20 s each, and the fourth's second.
-    STICK_SECONDS = 190
+    # How long UbAt (AT) lets a call run. The third line makes STICK_CALLS of them, at the
+    # USB domain, at the media domain and in root's session, each bounded by it, with
+    # ten seconds more for the shell to print the answer. The fourth's and fifth's polls
+    # take 20 s each, and the fourth's another second.
+    AT_SECONDS = 60
+    STICK_CALLS = 3
+    STICK_SECONDS = (STICK_CALLS * AT_SECONDS) + 10
     GONE_SECONDS = 30
     # The restart line's wait for another incarnation, 1200 rounds of 100 ms, then the
     # enumeration's and the follower's polls as in the first line.
@@ -349,16 +355,21 @@ MEDIA_BODY = [
 
     # The body of the fun the third line runs last, in root's session, once the media domain
     # holds the medium: whether volume, a directory, lists Stick::FILE and reads it as
-    # Stick::FILE_TEXT, through the session's own namespace. The file's text is written as
-    # its bytes, so no byte of it needs quoting in the shell's line.
+    # Stick::FILE_TEXT, through the session's own namespace. The paths and the name are
+    # written as their characters' list (chars) and the file's text as its bytes, so
+    # nothing of them needs quoting in the shell's line.
     def self.root_body(volume: STICK_VOLUME) = [
-      "RtList=file:list_dir(\"#{volume}\")",
-      "RtRead=file:read_file(\"#{volume}/#{Stick::FILE}\")",
-      "RtAnswer={[{listed,case RtList of {ok,RtNames}->lists:member(\"#{Stick::FILE}\",RtNames);_->false end}," \
+      "RtList=file:list_dir(#{chars(volume)})",
+      "RtRead=file:read_file(#{chars("#{volume}/#{Stick::FILE}")})",
+      "RtAnswer={[{listed,case RtList of {ok,RtNames}->lists:member(#{chars(Stick::FILE)},RtNames);_->false end}," \
       "{file_read,RtRead=:={ok,<<#{Stick::FILE_TEXT.bytes.join(',')}>>}}],{RtList,RtRead}}",
       'RtText=iolist_to_binary(io_lib:format("~0kP",[RtAnswer,40]))',
       'binary:part(RtText,0,min(byte_size(RtText),1000))'
     ].join(',').freeze
+
+    # text, UTF-8, as an Erlang string written as the list of its characters' code
+    # points, which Erlang reads as that string whatever the text holds. Pure.
+    private_class_method def self.chars(text) = "[#{text.encode(Encoding::UTF_8).codepoints.join(',')}]"
 
     # StUntil(F, K): whether F() turns true, polled every 200 ms at most K times.
     STICK_UNTIL = 'StUntil=fun StU(_,0)->false;StU(StF,StK)->case StF() of true->true;' \
@@ -385,7 +396,7 @@ MEDIA_BODY = [
     ].join(',').freeze
 
     # UbAt(Node, Fun): Fun run at Node, or the class and reason of its failure.
-    AT = 'UbAt=fun(UbN,UbF)->try erpc:call(UbN,UbF,60000) catch UbC:UbR->{UbC,UbR} end end'
+    AT = "UbAt=fun(UbN,UbF)->try erpc:call(UbN,UbF,#{AT_SECONDS * 1000}) catch UbC:UbR->{UbC,UbR} end end"
 
     # The first line typed at the Erlang shell: the enumeration at the USB domain, and only
     # then the tracer and the follower's wait at the display domain, each bound in turn.
@@ -472,14 +483,21 @@ MEDIA_BODY = [
       client&.close
     end
 
-    # The production checkpoints to the command shell, then the Erlang shell, the first
-    # line and its answer, after which the key is typed through socket, and the second line
-    # and its answer, after which next_line is typed. Each answer's text goes through note, and
-    # each stage of it that sides names through side as its cell.
+    # The production checkpoints to the system's command shell; root's session's command
+    # shell, which the console's login gives the line; through the Ctrl-G menu to the
+    # system's shell, where erl starts the Erlang shell; then the first line and its
+    # answer, after which the key is typed through socket, and the second line and its
+    # answer, after which next_line is typed. Each answer's text goes through note, and
+    # each stage of it that sides names through side as its cell. points must end at the
+    # command shell and type nothing there, since root's session takes the line next.
     def self.first_key(points, socket:, sides:, side:, note:, next_line:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
+      raise Error, 'the production checkpoints type at the shell' if points.last.key?(:type)
 
-      [*points[0...-1], points.last.merge(type: ProductionImage::Run::ERL_LINE).freeze,
+      [*points, SessionDomain.session_shell('root_1-shell', ProductionImage::Run::CTRL_G),
+       { name: 'menu', pattern: ProductionImage::Run::CTRL_G_MENU, seconds: 30, type: 's' }.freeze,
+       { name: 'system-shell', pattern: ProductionImage::Run::MENU_LEFT, seconds: 30,
+         type: ProductionImage::Run::ERL_LINE }.freeze,
        ProductionImage::Run::ERLANG_SHELL.merge(type: line).freeze,
        { name: 'usb-enum', pattern: /\A#{PcieDomain::PROMPT}\{usb_enum,/n, seconds: ANSWER_SECONDS,
          verify: lambda do |text|

@@ -48,7 +48,7 @@ module Erx
     # fat_format is that format for a FAT32 of bytes labelled label, which netboot's HTTP
     # form uses for its boot.img (NetbootEntry); PLACE places kernel8.img at the slot's boot
     # start, so check_slot reads either volume back.
-    def self.fat_format(bytes:, label:) = ['-F', 'fat32', *RecordVolume::EPOCH, '-s', bytes.to_s, '-L', label,
+    def self.fat_format(bytes:, label:) = ['-F', 'fat32', *FatVolume::FSIMG_EPOCH, '-s', bytes.to_s, '-L', label,
                                            '-o', 'cluster=1024'].freeze
     SLOT_FORMAT = fat_format(bytes: SLOT_FAT_BYTES, label: 'ERXSLOTA')
     PLACE = ['-o', "place=/#{BOOT_FILE}@#{BOOT_PLACE}"].freeze
