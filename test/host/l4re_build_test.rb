@@ -37,7 +37,7 @@ class L4ReBuildTest < Minitest::Test
     refute create.any? { |argument| argument.start_with?('--mount', '--volume', '-v', '--privileged', '--env') }
     image = create.index('example.org/image@sha256:' + 'a' * 64)
     assert_equal ['-i', *Erx::L4ReBuild::ENVIRONMENT, '/usr/bin/timeout', '-k', '10'], create[image + 1, Erx::L4ReBuild::ENVIRONMENT.size + 4]
-    assert_equal ['/bin/sh', '/tmp/inputs/build.sh', '8'], create.last(3)
+    assert_equal ['/bin/sh', '/tmp/inputs/build.sh', '8', 'arm_virt', 'elfimage', 'elf'], create.last(6)
   end
 
   # docker cp creates only the last component of its destination, so mk, which holds
@@ -129,7 +129,7 @@ class L4ReBuildTest < Minitest::Test
   # within its bound, are written, and anything else refuses the whole archive.
   def test_an_archive_other_than_the_expected_regular_files_is_refused
     Dir.mktmpdir('erx-l4re-build-') do |work|
-      expected = Erx::L4ReBuild::OUTPUTS.keys.to_h { |name| [name, "#{name}\n"] }
+      expected = Erx::L4ReBuild.outputs_of(Erx::L4ReBuild::TARGETS.fetch('virt')).keys.to_h { |name| [name, "#{name}\n"] }
       archive(File.join(work, 'good.tar'), expected)
       Erx::L4ReBuild.unpack(archive: File.join(work, 'good.tar'), out: File.join(work, 'good'))
       assert_equal expected, expected.keys.to_h { |name| [name, File.read(File.join(work, 'good', name))] }
@@ -157,11 +157,36 @@ assert_raises(Erx::Error) { Erx::L4ReBuild.unpack(archive: File.join(work, "bare
     end
   end
 
+  # The board's build (docs/design-bench.md, "L4Re on the board") differs only in what the
+  # script is told to make and what comes back: L4Re's generic platform's raw image,
+  # exported and recorded under its own name, and read back from its own directory.
+  def test_the_board_target_makes_the_generic_platforms_raw_image_and_records_it
+    targets = Erx::L4ReBuild::TARGETS
+    script = ->(target) { Erx::L4ReBuild.plan(endpoint: ENDPOINT, name: 'n', image: 'i', inputs: '/w', archive: '/w/o', jobs: 2, trees: {}, target: target).fetch(:create).argv.last(5) }
+    assert_equal %w[/tmp/inputs/build.sh 2 arm_virt elfimage elf], script.call(targets.fetch('virt'))
+    assert_equal %w[/tmp/inputs/build.sh 2 arm_gen rawimage raw], script.call(targets.fetch('raspi4b'))
+    board = targets.fetch('raspi4b')
+    assert_path_exists File.join(ROOT, board.defconfig.fetch(:erxos))
+    refute_equal targets.fetch('virt').output, board.output
+    Dir.mktmpdir('erx-l4re-build-') do |out|
+      { 'globalconfig.out' => "CONFIG_A=y\n", 'l4re.kconfig' => "CONFIG_PLATFORM_TYPE_arm_gen=y\n", 'compiler' => "gcc 12\n",
+        'bootstrap.raw' => 'raw' }.each { |name, body| File.write(File.join(out, name), body) }
+      record = Erx::L4ReBuild.record(sources: [], image: 'i', out: out, defconfig: "CONFIG_A=y\n", target: board,
+                                     l4re_defconfig: "CONFIG_PLATFORM_TYPE_arm_gen=y\nCONFIG_DRIVERS_FRST_UART_DRV_8250=y\n")
+      assert_equal ['CONFIG_DRIVERS_FRST_UART_DRV_8250: defconfig y, resolved n'], record.fetch('l4re_config_difference')
+      assert_raises(Erx::Error) { Erx::L4ReBuild.record(sources: [], image: 'i', out: out, defconfig: '', target: targets.fetch('virt')) }
+      assert_equal ['arm_gen', 'bootstrap.raw', Digest::SHA256.hexdigest('raw')],
+                   record.values_at('l4re_platform', 'bootable', 'bootstrap_sha256')
+      File.write(File.join(out, 'build-record.json'), JSON.generate(record))
+      assert_equal record, Erx::L4ReBench::Build.new(directory: out, bootable: board.bootable).record
+    end
+  end
+
   # The record names every pin and the ELF by its hash, as L4ReBench::Build reads it back.
   def test_the_record_names_the_pins_the_compiler_and_the_elf_it_describes
     Dir.mktmpdir('erx-l4re-build-') do |out|
       File.write(File.join(out, 'globalconfig.out'), "CONFIG_A=y\n")
-      File.write(File.join(out, 'l4re.kconfig'), "CONFIG_BUILD_ARCH_arm64=y\n")
+      File.write(File.join(out, 'l4re.kconfig'), "CONFIG_BUILD_ARCH_arm64=y\nCONFIG_PLATFORM_TYPE_arm_virt=y\n")
       File.write(File.join(out, 'compiler'), "gcc (Debian 12.2.0-14+deb12u1) 12.2.0\nCopyright\n")
       File.write(File.join(out, 'bootstrap.elf'), "\x7FELF")
       sources = [{ 'id' => 'l4re-mk', 'kind' => 'git', 'commit' => 'c' * 40 },

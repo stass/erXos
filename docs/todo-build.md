@@ -182,7 +182,12 @@ design does not have, to be deleted so no side-by-side table can show it under s
   Includes the development-only Fiasco patch that stamps the interrupt entry
   ([design-bench.md](design-bench.md#the-interrupt-entrys-stamp)), the check of the Glasgow's stock applets for the
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.
-  L4Re's pins, its build and its importer come from the L4Re guest package below, built for the board's platform.
+  L4Re's board guest ([design-bench.md](design-bench.md#l4re-on-the-board)): `tools/erx build l4re --platform raspi4b`
+  builds `build/l4re-raspi4b/bootstrap.raw`; what remains is laying it out as a bench set (`BootPartition.lay_out_set`),
+  the netboot of its queue with the found target as the way back, `bench import NAME --env pi4-4gb-l4re --subject FILE LOG`
+  (a record of environment `pi4`, system `l4re`, from `Ipcbench.import`), the side-by-side table of the board's two records,
+  and the first board boot, which checks that upstream `bootstrap` finds the mini UART and runs at `0x200000`; it waits on
+  [L4Re's way back](design-bench.md#l4res-way-back), since without it every L4Re boot ends with a power cycle.
 * [Low] benchmarks, the comparison session's gaps (`tools/lib/erx/bench_session.rb`,
   [design-bench.md](design-bench.md#a-comparison-session)): erXos's native guest and Linux's offer only the
   landing profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'

@@ -1963,6 +1963,52 @@ stock OTP 29.1.2 to the system; until then they are `none`.
 seL4's published numbers stay context: seL4 is not among the systems
 approved to boot on the board.
 
+### L4Re on the board
+
+L4Re's board guest is the guest of [L4Re's guest](#l4res-guest), from the
+same lock, container and kernel configuration, built for the board as
+erXos's own Fiasco image is built for it ([design-fiasco.md](design-fiasco.md#the-raspberry-pi-4)):
+`tools/erx build l4re --platform raspi4b` configures L4Re from erXos's
+`config/fiasco/user-raspi4b.defconfig` (Fiasco's generic platform,
+`arm_gen`, which reads the memory map, the console's UART and PSCI's
+calling method from the device tree, position-independent as
+`mk/platforms/arm_gen.conf` requires, with the PL011 and 16550-family
+UART drivers) and makes the target `rawimage E=ipcbench
+PLATFORM_TYPE=arm_gen`, whose `images/bootstrap_ipcbench.raw` comes back
+as `bootstrap.raw` with its build record in `build/l4re-raspi4b`
+(`L4ReBuild::TARGETS`). Fiasco is configured from
+`config/fiasco/kernel.defconfig`, as erXos's board kernel is, so the
+board's two kernels again differ by the fork's patches and their
+compilers. Fiasco's own `rpi` platform is not used, as erXos's board
+build does not use it.
+
+**Boot.** The image is the bootable file of a bench set laid out as
+erXos's are (`BootPartition.lay_out_set`): the same pinned firmware,
+BL31, device tree, overlays and `config.txt`, frequencies,
+`kernel_address` and `total_mem` among them, so the two systems' boot
+sets differ by `kernel8.img` alone, and each record keeps every file's
+SHA-256. The firmware loads it at `0x200000` and BL31 enters it there;
+a position-independent `bootstrap` runs where it is loaded. The set is
+netbooted through the HTTP form as a walk's queue is: one entry for
+L4Re and the found target's pair as the way back (`Netboot.prepare`
+with the found target, under the stager's lock), the link pointed at
+the queue while the board runs and back at the found target when the
+run ends. The console log from the reboot to `Benchmarks done.`, or to
+a deadline of 300 seconds, is the run's log. L4Re does not reset the
+board: the board comes back on the way-back entry only at its next
+reset, a power cycle (see [L4Re's way back](#l4res-way-back)).
+
+**Import.** `tools/erx bench import NAME --env pi4-4gb-l4re --subject
+FILE LOG` makes the record from that log and the build record of
+`build/l4re-raspi4b`, the importer of [L4Re's guest](#l4res-guest)
+giving its cells; the environment is `pi4` with system `l4re` and one
+CPU. ipcbench pins none of the threads the comparison reads, so, as
+under HVF, one CPU is the only form in which their placement is known:
+the set's device tree keeps only the boot CPU's node, so Fiasco starts
+no other CPU. Whether Fiasco's generic platform honours that is
+unverified until the first board boot, whose banner shows the CPUs
+Fiasco started; a log that shows more than one is not imported.
+
 ### The interrupt probe
 
 The probe that found the late interrupt timed a path from inside it. Its
@@ -3239,6 +3285,24 @@ unchanged: a bench set is signed and checked as every staged build is,
 and a development build runs only trusted code, which a bench image is.
 
 ## Open decisions
+
+### L4Re's way back
+
+Nothing in L4Re's guest resets the board, so after `Benchmarks done.`
+the board stays in L4Re until a power cycle, and only then boots the
+way-back entry. A stub of a few instructions ahead of `bootstrap.raw`
+in `kernel8.img`, built by erXos, could arm the power-management
+watchdog (`hw/svd/pm_wdt/pm_wdt.svd`; its time field counts in units of
+1/65536 s, so its longest window is about 16 s, unverified on the board)
+and branch to `bootstrap` with the firmware's registers kept, so the
+board resets by itself about 16 s after L4Re starts and boots the way
+back unattended. It costs nothing inside a cell, but it adds erXos code
+to the image of the system erXos is compared with, and a run longer than
+the window is cut. **Recommendation: the stub,** if the time from
+`bootstrap` to `Benchmarks done.`, unmeasured on the board, is well within
+the window: the first board boot measures it, and a longer run keeps the
+power cycle; until it is decided, each board run of L4Re ends with a power
+cycle.
 
 ### A hardware watchdog in the bench root
 

@@ -24,13 +24,16 @@ module Erx
     # here, as at a deadline.
     DONE = { name: 'l4re-benchmarks-done', pattern: /Benchmarks done\./n, seconds: 300 }.freeze
 
-    # What the container build exported into directory: bootstrap.elf and the build
+    # What the container build exported into directory: the bootable file, bootstrap.elf
+    # for QEMU virt or bootstrap.raw for the board (L4ReBuild::TARGETS), and the build
     # record written beside it, a JSON object of the pins, hashes, resolved
     # configuration, toolchain and boot arguments, which every run's subject keeps. The
-    # record names the ELF it was written for by its SHA-256, so a stale record never
-    # describes a rebuilt ELF.
-    Build = Data.define(:directory) do
-      def bootstrap = File.join(directory, 'bootstrap.elf')
+    # record names the file it was written for by its SHA-256, so a stale record never
+    # describes a rebuilt image.
+    Build = Data.define(:directory, :bootable) do
+      def initialize(directory:, bootable: 'bootstrap.elf') = super
+
+      def bootstrap = File.join(directory, bootable)
       def record_path = File.join(directory, 'build-record.json')
       def built? = File.file?(bootstrap) && File.file?(record_path)
 

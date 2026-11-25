@@ -969,13 +969,16 @@ module Erx
       end
       jobs = 4
       docker_context = nil
+      l4re_platform = nil
       parser = OptionParser.new do |options|
         options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
         options.on('--docker-context NAME', "Docker context of L4Re's container build (build l4re only)") { |value| docker_context = value }
+        options.on('--platform NAME', %w[virt raspi4b], "L4Re's guest's board: virt, the default, or raspi4b (build l4re only)") { |value| l4re_platform = value }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
       raise OptionParser::InvalidArgument, 'build l4re needs --docker-context NAME' if (component == 'l4re') != !docker_context.nil?
+      raise OptionParser::InvalidArgument, '--platform applies only to build l4re' if l4re_platform && component != 'l4re'
       path = case component
              when 'runtime' then build_runtime(jobs)
              when 'jit-runtime' then build_jit_runtime(jobs)
@@ -987,19 +990,20 @@ module Erx
              when 'openssl' then build_openssl(jobs)
              when 'release-kernel' then Fiasco.new(root: ROOT).build_release_kernel(jobs: jobs)
              when 'web' then WebBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
-             when 'l4re' then build_l4re(jobs, docker_context)
+             when 'l4re' then build_l4re(jobs, docker_context, l4re_platform || 'virt')
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")
       0
     end
 
-    # L4Re's guest (L4ReBuild): built in the oracle's arm64 image on the Docker context,
-    # leaving bootstrap.elf and its build record in build/l4re.
-    def self.build_l4re(jobs, context)
+    # L4Re's guest (L4ReBuild): built in the oracle's arm64 image on the Docker context for
+    # platform, leaving its bootable file and build record in build/l4re (QEMU virt) or
+    # build/l4re-raspi4b (the Raspberry Pi 4).
+    def self.build_l4re(jobs, context, platform)
       require_relative 'lib/erx/l4re_build'
       L4ReBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')),
-                      context: context, jobs: jobs)
+                      context: context, jobs: jobs, target: L4ReBuild::TARGETS.fetch(platform))
     end
 
     # The development boot image in QEMU with its serial line on this terminal,
