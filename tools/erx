@@ -51,6 +51,7 @@ begin
   require_relative 'lib/erx/bench_g5'
   require_relative 'lib/erx/bench_session'
   require_relative 'lib/erx/l4re_bench'
+  require_relative 'lib/erx/genode_fetch'
   require_relative 'lib/erx/l4re_fetch'
   require_relative 'lib/erx/linux_guest'
   require_relative 'lib/erx/posix_bench'
@@ -1142,13 +1143,14 @@ module Erx
       side = nil
       sets = package_sets
       parser = OptionParser.new do |options|
-        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re or --linux, its build/l4re-sources/build/downloads or build/linux-sources/build/downloads) as the source cache") { |value| cache = value }
+        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re, --linux or --genode, its build/l4re-sources/build/downloads, build/linux-sources/build/downloads or build/genode-sources/build/downloads) as the source cache") { |value| cache = value }
         options.on('--source ID', 'Fetch this pinned source; repeatable') { |value| source_ids << value }
         options.on('--packages NAME', "Install this package set (#{sets.keys.join(', ')}); repeatable") { |value| package_names << value }
         options.on('--docker-context NAME', 'Use this local Docker context for image fetch') { |value| docker_context = value }
         options.on('--example NAME', 'Fetch only this example and its downloads (doom), which no other fetch obtains') { |value| example = value }
         options.on('--l4re', "Fetch only L4Re's guest's sources (bench/l4re/deps.lock), which no other fetch obtains") { side = side ? :both : L4ReFetch }
         options.on('--linux', "Fetch only Linux's guest's sources (bench/linux/deps.lock), which no other fetch obtains") { side = side ? :both : LinuxGuest }
+        options.on('--genode', "Fetch only Genode's guest's sources (bench/genode/deps.lock), which no other fetch obtains") { side = side ? :both : GenodeFetch }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
@@ -1156,9 +1158,9 @@ module Erx
       raise OptionParser::InvalidArgument, "no package set #{unknown.join(', ')}; the sets are #{sets.keys.join(', ')}" unless
         unknown.empty?
       if (example || side) && !(source_ids.empty? && package_names.empty? && docker_context.nil?)
-        raise OptionParser::InvalidArgument, '--example, --l4re and --linux take no --source, --packages or --docker-context'
+        raise OptionParser::InvalidArgument, '--example, --l4re, --linux and --genode take no --source, --packages or --docker-context'
       end
-      raise OptionParser::InvalidArgument, '--example, --l4re and --linux are separate fetches' if (example && side) || side == :both
+      raise OptionParser::InvalidArgument, '--example, --l4re, --linux and --genode are separate fetches' if (example && side) || side == :both
 
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       return fetch_example(example, cache: cache, runner: runner) if example
@@ -1221,7 +1223,7 @@ module Erx
     end
 
     # A comparison guest's sources are pinned in its own lock (SideLock: L4ReFetch,
-    # LinuxGuest); the fetch above never obtains them.
+    # LinuxGuest, GenodeFetch); the fetch above never obtains them.
     def self.fetch_side(side, cache:, runner:)
       side.fetch(root: ROOT, runner: runner, cache: cache).each { |line| Terminal.puts(line) }
       0

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "genode",
+      "kind": "git",
+      "version": "26.08",
+      "url": "https://codeberg.org/genodelabs/genode.git",
+      "commit": "d18ee9e917200b059549e21f2dd9a55bfe61a0eb",
+      "sha256": "28bd90db479f4d1686bb4fb1165248b9ce17328f5204bb8a6283b2013f9b2394",
+      "directory": "genode-d18ee9e",
+      "license": "AGPL-3.0",
+      "status": "permanent"
+    },
+    {
+      "id": "genode-toolchain",
+      "kind": "file",
+      "version": "25.05",
+      "url": "https://codeberg.org/genodelabs/genode/releases/download/25.05/genode-toolchain-25.05-ubuntu-24.04.tar.xz",
+      "sha256": "6cab8e5f4490399a296a73b01695d5fb055a40f6ac04d61a3f7a7344003eb739",
+      "filename": "genode-toolchain-25.05-ubuntu-24.04.tar.xz",
+      "license": "unverified; GNU tools (GCC, binutils), copyleft",
+      "status": "permanent"
+    }
+  ]
+}
