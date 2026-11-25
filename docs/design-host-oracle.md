@@ -149,7 +149,9 @@ tree file and every library is required evidence, and an export with no
 tree file or no library, or one cut short by an entry or inventory
 bound, is incomplete. The tree's own links (`bin/*`,
 `lib/erlang/bin/epmd`) are excluded like any link but are not required,
-since the guest runs the regular files under `erts-*/bin`.
+since the guest runs the regular files under `erts-*/bin`; an export in
+which any of those five programs is not a regular file there is
+incomplete.
 
 Traversal of the workspace uses `lstat` and does not follow links. Only directories and
 ordinary file contents are exported; symlinks, sockets, devices and FIFOs

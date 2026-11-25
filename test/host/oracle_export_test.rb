@@ -400,6 +400,7 @@ class OracleExportTest < Minitest::Test
   # Debian's merged /usr is: /lib is a link to usr/lib, and the interpreter
   # and one library name are links to regular files beside them.
   LIBRARY_DIRECTORY = 'usr/lib/aarch64-linux-gnu'.freeze
+  PROGRAMS = Erx::OracleExport::INSTALL_PROGRAMS
 
   def system_file(path, bytes)
     target = File.join(@system, path)
@@ -411,8 +412,7 @@ class OracleExportTest < Minitest::Test
                                    '/lib/aarch64-linux-gnu/libtinfo.so.6'])
     write('result.json', '{"state":"completed"}')
     write('logs/runner.log', 'runner evidence')
-    write('install/lib/erlang/erts-16.0/bin/beam.smp', 'beam program')
-    write('install/lib/erlang/erts-16.0/bin/epmd', 'epmd program')
+    PROGRAMS.each { |program| write("install/lib/erlang/erts-16.0/bin/#{program}", "#{program} program") }
     write('install/lib/erlang/bin/erl', '#!/bin/sh')
     FileUtils.mkdir_p(File.join(@source, 'install/bin'))
     File.symlink('../lib/erlang/bin/erl', File.join(@source, 'install/bin/erl'))
@@ -441,7 +441,9 @@ class OracleExportTest < Minitest::Test
     result = export_install
     paths = result.fetch('files').map { |file| file.fetch('path') }
     assert_equal %w[install/lib/erlang/bin/erl install/lib/erlang/erts-16.0/bin/beam.smp
-                    install/lib/erlang/erts-16.0/bin/epmd libraries/lib/aarch64-linux-gnu/libc.so.6
+                    install/lib/erlang/erts-16.0/bin/epmd install/lib/erlang/erts-16.0/bin/erl_child_setup
+                    install/lib/erlang/erts-16.0/bin/erlexec install/lib/erlang/erts-16.0/bin/inet_gethost
+                    libraries/lib/aarch64-linux-gnu/libc.so.6
                     libraries/lib/aarch64-linux-gnu/libtinfo.so.6 libraries/lib/ld-linux-aarch64.so.1
                     logs/runner.log result.json], paths
     assert_equal 'loader bytes', File.binread(File.join(@destination, 'libraries/lib/ld-linux-aarch64.so.1'))
@@ -453,6 +455,25 @@ class OracleExportTest < Minitest::Test
     assert_equal 'partial', result.fetch('state')
     assert_equal 'complete', result.fetch('mandatory_evidence')
     refute File.exist?(File.join(@destination, 'libraries.json'))
+    assert_equal result, verify
+  end
+
+  # The guest runs these programs, so a link or an absent file in their place
+  # leaves the export incomplete, though other links in the tree do not.
+  def test_install_with_a_guest_program_linked_or_absent_is_never_complete
+    install_evidence
+    program = File.join(@source, 'install/lib/erlang/erts-16.0/bin/erlexec')
+    File.delete(program)
+    File.symlink('beam.smp', program)
+    result = export_install
+    assert_equal ['excluded_symlink', false], reasons(result).fetch('install/lib/erlang/erts-16.0/bin/erlexec')
+    assert_equal 'partial', result.fetch('mandatory_evidence')
+    assert_equal result, verify
+    File.delete(program)
+    @destination = Dir.mktmpdir('erx-', @directory)
+    result = export_install
+    refute reasons(result).key?('install/lib/erlang/erts-16.0/bin/erlexec')
+    assert_equal 'partial', result.fetch('mandatory_evidence')
     assert_equal result, verify
   end
 

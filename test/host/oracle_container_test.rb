@@ -284,6 +284,17 @@ class OracleContainerTest < Minitest::Test
     FileUtils.remove_entry(@root)
   end
 
+  # The container loads its jobs from the flat /inputs directory alone, so
+  # every library an input loads must be an input too.
+  def test_ruby_inputs_load_only_other_inputs
+    root = File.expand_path('../..', __dir__)
+    names = Erx::OracleContainer::INPUTS.values
+    loaded = Erx::OracleContainer::INPUTS.select { |_, name| name.end_with?('.rb') }.flat_map do |relative, _|
+      File.read(File.join(root, relative)).scan(/^\s*require_relative\s*\(?\s*['"]([^'"]+)['"]/).flatten
+    end
+    assert_empty loaded.map { |name| "#{name}.rb" }.uniq - names
+  end
+
   def test_platform_manifest_id_is_not_misread_as_configuration_digest
     identity = @adapter.send(:verify_image, { 'config' => '/private-config' }, @image)
     assert_equal @observed.fetch('Id'), identity.fetch('engine_image_id')
@@ -333,6 +344,13 @@ class OracleContainerTest < Minitest::Test
     assert_empty Erx::ContainerOracleJob.suite_flavour_options(suite: 'stdlib', flavour: 'jit')
     assert_equal ['FLAVOR=emu'], Erx::ContainerOracleJob.suite_flavour_options(suite: 'emulator', flavour: 'emu')
     assert_raises(Erx::Error) { Erx::ContainerOracleJob.suite_flavour_options(suite: 'kernel', flavour: 'unknown') }
+  end
+
+  # The runner admits only lower-case names without dots; beam.smp has one.
+  def test_each_guest_program_gets_a_listing_name_the_runner_admits
+    names = Erx::OracleExport::INSTALL_PROGRAMS.map { |program| Erx::ContainerOracleJob.library_listing_name(program) }
+    assert names.all? { |name| Erx::Runner::COMMAND_NAME.match?(name) }, names.inspect
+    assert_equal names.size, names.uniq.size
   end
 
   def test_loader_listing_names_every_loaded_file_and_refuses_an_unresolved_one

@@ -54,6 +54,7 @@ module Erx
       'test/oracle/reporter-source.json' => 'reporter-source.json',
       'test/oracle/common_test/ORIGIN.md' => 'reporter-ORIGIN.md',
       'tools/lib/erx/runner.rb' => 'runner.rb',
+      'tools/lib/erx/process_group.rb' => 'process_group.rb',
       'tools/lib/erx/error.rb' => 'error.rb',
       'tools/lib/erx/output_directory.rb' => 'output_directory.rb',
       'tools/lib/erx/sources.rb' => 'sources.rb',

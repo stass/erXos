@@ -43,6 +43,8 @@ module Erx
     FIRST_POLL_SECONDS = 0.001
     POLL_SECONDS = 0.05
     PROGRESS_SECONDS = 30
+    # A command's name, which names its log and report files.
+    COMMAND_NAME = /\A[a-z0-9][a-z0-9_-]*\z/.freeze
 
     # The located deadline tool, for a caller that spawns its own child (BenchBoot) and
     # wraps it the same way.
@@ -156,7 +158,7 @@ module Erx
              argv.all? { |argument| argument.is_a?(String) && !argument.include?("\0") }
         raise Error, 'command must be a nonempty string argument vector'
       end
-      raise Error, 'invalid command name' unless /\A[a-z0-9][a-z0-9_-]*\z/.match?(name)
+      raise Error, 'invalid command name' unless COMMAND_NAME.match?(name)
       unless deadline.is_a?(Integer) && deadline.positive? && deadline <= 86_400
         raise Error, 'deadline must be between 1 and 86400 seconds'
       end

@@ -9,6 +9,7 @@ require 'socket'
 require_relative 'runner'
 require_relative 'sources'
 require_relative 'json_input'
+require_relative 'oracle_export'
 
 module Erx
   # This is host tooling inside the isolated Linux oracle, not erXos code.
@@ -27,9 +28,10 @@ module Erx
       suite == 'emulator' ? ["FLAVOR=#{flavour}"] : []
     end
 
-    # The installed programs whose loaded libraries an install export brings
-    # out for Linux's Erlang guest (design-bench.md, "Linux's Erlang guest").
-    GUEST_PROGRAMS = %w[beam.smp erlexec erl_child_setup epmd inet_gethost].freeze
+    # The runner's name for the loader's listing of a program; a command name
+    # admits no dot, and beam.smp has one.
+    def self.library_listing_name(program) = "oracle-libraries-#{program.tr('.', '-')}"
+
     LOADED = %r{\A\t(?:\S+ => )?(/\S+) \(0x\h+\)\z}.freeze
     UNLINKED = /\A\tlinux-vdso\.so\.\d+ \(0x\h+\)\z/.freeze
 
@@ -366,9 +368,9 @@ module Erx
     def list_libraries
       directories = Dir.glob(File.join(@install, 'lib/erlang/erts-*/bin'))
       raise Error, 'installed tree has no single ERTS directory' unless directories.size == 1
-      paths = GUEST_PROGRAMS.flat_map do |program|
+      paths = OracleExport::INSTALL_PROGRAMS.flat_map do |program|
         listing = @runner.run(['/usr/bin/ldd', File.join(directories.first, program)],
-                              name: "oracle-libraries-#{program}", deadline: 30, env: @environment)
+                              name: self.class.library_listing_name(program), deadline: 30, env: @environment)
         self.class.loader_paths(File.read(listing.fetch('log')))
       end.uniq.sort
       File.open('/tmp/erx-oracle/libraries.json', File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|

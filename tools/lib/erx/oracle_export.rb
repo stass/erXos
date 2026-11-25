@@ -26,6 +26,11 @@ module Erx
     # name, from the regular file it resolves to in the image's library
     # directories.
     LIBRARY_LIST = 'libraries.json'
+    # The installed programs Linux's Erlang guest runs (design-bench.md,
+    # "Linux's Erlang guest"): the loader lists their libraries, and each
+    # must arrive as a regular file of the installed ERTS directory.
+    INSTALL_PROGRAMS = %w[beam.smp erlexec erl_child_setup epmd inet_gethost].freeze
+    INSTALL_PROGRAM_PATH = %r{\Ainstall/lib/erlang/erts-[^/]+/bin/([^/]+)\z}.freeze
     LIBRARY_DIRECTORIES = %w[lib lib64 usr/lib usr/lib64].freeze
     LIBRARY_LIST_KEYS = %w[libraries version].freeze
     LIBRARY_LIST_BYTES = 64 * 1024
@@ -93,6 +98,7 @@ module Erx
 
       # The design exports no links; one inside the installed tree is an
       # expected exclusion, since the guest runs the regular files they name.
+      # The guest's own programs must be such files, which status checks.
       def required_link?(path, operation) = !(operation == 'install' && path.start_with?('install/'))
 
       def ct_path?(path, ct_root)
@@ -123,9 +129,12 @@ module Erx
           mandatory &&= paths.include?('events.jsonl')
         elsif operation == 'install'
           # A plan cut short by a budget may have dropped required files
-          # without a record of each, so it is never complete evidence.
+          # without a record of each, so it is never complete evidence; and
+          # each guest program must be a regular file, since the guest runs it.
+          programs = paths.filter_map { |path| path[INSTALL_PROGRAM_PATH, 1] }
           mandatory &&= %w[install/ libraries/].all? { |prefix| paths.any? { |path| path.start_with?(prefix) } } &&
-                        omissions.none? { |issue| %w[entry_limit inventory_limit].include?(issue.fetch('reason')) }
+                        omissions.none? { |issue| %w[entry_limit inventory_limit].include?(issue.fetch('reason')) } &&
+                        (INSTALL_PROGRAMS - programs).empty?
         end
         [omissions.any? { |issue| issue.fetch('reason') != 'private_fixture' } ? 'partial' : 'complete',
          mandatory ? 'complete' : 'partial']
