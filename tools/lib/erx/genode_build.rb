@@ -52,7 +52,7 @@ module Erx
     PROGRAM_RAM = '192M'
     OUTPUT = 'build/genode'
     # What the container script leaves in /tmp/out, each with the most bytes it may hold.
-    OUTPUTS = { 'image.elf' => 64 << 20, 'config' => 1 << 20, 'compiler' => 4096 }.freeze
+    OUTPUTS = { 'image.elf' => 64 << 20, 'compiler' => 4096 }.freeze
     DEADLINE = 4 * 3600
     RUN_LOG_BYTES = 64 << 20
     ARCHIVE_BYTES = OUTPUTS.values.sum + (64 << 10)
@@ -216,7 +216,8 @@ module Erx
 
     # The build record (docs/design-bench.md, "The record"): the pins of every source,
     # the image, the tool chain's compiler, the kernel and board, the program's arguments,
-    # and the SHA-256 of the resolved run configuration and of the boot image.
+    # and the SHA-256 of the run script, which holds init's configuration the boot image
+    # carries, and of the boot image.
     def record(sources:, image:, out:, arguments:)
       {
         'sources' => sources.to_h { |source| [source.fetch('id'), source.fetch('kind') == 'git' ? source.fetch('commit') : source.fetch('sha256')] },
@@ -224,13 +225,13 @@ module Erx
         'compiler' => GuestBuild.text(out, 'compiler', label: LABEL).lines.first.to_s.strip,
         'compiler_flags' => "Genode's own for this board, and erx_peer_bench's (bench/genode/target.mk)",
         'arguments' => arguments,
-        'config_sha256' => Digest::SHA256.hexdigest(GuestBuild.text(out, 'config', label: LABEL)),
+        'run_script_sha256' => Digest::SHA256.hexdigest(run_script(arguments: arguments)),
         'image_sha256' => Digest::SHA256.file(File.join(out, 'image.elf')).hexdigest
       }
     end
 
     # Builds Genode's guest for a posix run on cpus CPUs on the engine of the docker
-    # context, leaving image.elf, the configuration and the build record in build/genode.
+    # context, leaving image.elf and the build record in build/genode.
     # Returns image.elf's path.
     def build(root:, runner:, context:, jobs:, cpus: 1)
       raise Error, 'Genode build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
@@ -321,7 +322,7 @@ module Erx
     def publish(root:, out:, record:)
       destination = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       FileUtils.rm_f(Dir.glob(File.join(destination, '*')))
-      %w[image.elf config].each { |name| FileUtils.copy_file(File.join(out, name), File.join(destination, name)) }
+      FileUtils.copy_file(File.join(out, 'image.elf'), File.join(destination, 'image.elf'))
       File.write(File.join(destination, 'record.json'), JSON.pretty_generate(record) + "\n")
       File.join(destination, 'image.elf')
     end

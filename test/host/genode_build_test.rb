@@ -133,12 +133,11 @@ class GenodeBuildTest < Minitest::Test
   def test_the_record_names_the_image_and_configuration
     Dir.mktmpdir do |out|
       File.write(File.join(out, 'image.elf'), 'ELF')
-      File.write(File.join(out, 'config'), "config\n")
       File.write(File.join(out, 'compiler'), "genode-aarch64-gcc (GCC) 14.2.0\n")
       record = Erx::GenodeBuild.record(sources: [{ 'id' => 'genode', 'kind' => 'git', 'commit' => 'c' * 40 }],
                                        image: IMAGE, out: out, arguments: %w[posix 1])
       assert_equal Digest::SHA256.hexdigest('ELF'), record.fetch('image_sha256')
-      assert_equal Digest::SHA256.hexdigest("config\n"), record.fetch('config_sha256')
+      assert_equal Digest::SHA256.hexdigest(Erx::GenodeBuild.run_script(arguments: %w[posix 1])), record.fetch('run_script_sha256')
       assert_equal 'genode-aarch64-gcc (GCC) 14.2.0', record.fetch('compiler')
       assert_equal({ 'genode' => 'c' * 40 }, record.fetch('sources'))
       File.write(File.join(out, 'compiler'), "gcc\e[31m\n")

@@ -54,11 +54,6 @@ $make run/erx_peer_bench
 
 # The run tool's output directory, by name and size, for the log.
 find "$run" -type f -exec ls -l {} +
-cp "$run/image.elf" "$out/image.elf"
-configs=$(find "$run" -type f -name config)
-if [ "$(printf '%s\n' "$configs" | wc -l)" -ne 1 ] || [ -z "$configs" ]; then
-	echo "build.sh: the run tool left not exactly one config" >&2
-	exit 1
-fi
-cp "$configs" "$out/config"
+# base-hw's boot image, with init's configuration inside it.
+cp "$run/boot/image-hw.elf" "$out/image.elf"
 genode-aarch64-gcc --version > "$out/compiler"
