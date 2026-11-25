@@ -129,8 +129,8 @@ class ReleaseFilesTest < Minitest::Test
   # driver, littlefs and F2FS run in the storage domain alone, the network stack in the
   # network domain alone, the web line in a session alone, the display's applications in
   # the display domain alone and the client side of the window system in display clients
-  # alone, the Bluetooth stack in the Bluetooth domain alone, and ntpd in its own session
-  # alone. The network client is not among them: the system release ships and starts it,
+  # alone, the Bluetooth stack in the Bluetooth domain alone, and ntpd and bleuart each
+  # in its own session alone. The network client is not among them: the system release ships and starts it,
   # so a socket call there answers {error, eacces} rather than raising undef.
   # They are named here, not taken from the allow-list, so that adding one to
   # SYSTEM_APPLICATIONS, or taking erx_net_client out of it, fails this test.
@@ -138,7 +138,7 @@ class ReleaseFilesTest < Minitest::Test
     paths = entries.map { |entry| entry.fetch('path') }
     release = File.read(File.join(@scratch, 'release/boot/start/start.rel'))
     only = %w[asn1 crypto public_key ssh ssl inets erx_blk erx_fat erx_storage erx_f2fs erx_media erx_memdraw erx_display erx_fb erx_usb erx_win erx_ui
-              erx_desk erx_web erx_net erx_wifi erx_web_line erx_tty_line erx_app erx_bt erx_bt_client erx_ntpd erx_pcie]
+              erx_desk erx_web erx_net erx_wifi erx_web_line erx_tty_line erx_app erx_bt erx_bt_client erx_bleuart erx_ntpd erx_pcie]
     assert_equal Erx::ReleaseFiles::APPLICATIONS - Erx::ReleaseFiles::SYSTEM_APPLICATIONS, only
     only.each do |application|
       refute_includes release, "{#{application},"

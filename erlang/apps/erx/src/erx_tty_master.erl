@@ -112,13 +112,19 @@ written(_N, M) ->
 
 -doc """
 The session is connected to a line of size Size: the tty gets the size if it is new,
-and then the output held is written. A refused tty is never connected.
+and then the output held is written. Size `none` is a line with no size of its own,
+such as a client of Nordic's UART service (erx_bleuart), which never sends the tty a
+size, so the tty keeps the size it opened at or `stty` gave it. A refused tty is never
+connected.
 """.
--spec connect(erx_console:size(), master()) -> {[action()], master()}.
+-spec connect(erx_console:size() | none, master()) -> {[action()], master()}.
 connect(_Size, M = #master{refused = true}) ->
     {[], M};
 connect(Size, M0) ->
-    {Sized, M1} = size(Size, M0#master{connected = true}),
+    {Sized, M1} = case Size of
+                      none -> {[], M0#master{connected = true}};
+                      _ -> size(Size, M0#master{connected = true})
+                  end,
     case M1 of
         #master{output = {held, N, Bytes}} ->
             {Sized ++ [{write, N, Bytes}], M1#master{output = {writing, N}}};

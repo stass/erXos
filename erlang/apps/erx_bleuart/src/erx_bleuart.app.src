@@ -1,0 +1,17 @@
+%% Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+%% SPDX-License-Identifier: BSD-2-Clause
+
+%% bleuart, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The
+%% console"): erx_bleuart, the application and its one process, the handler's owner;
+%% erx_bleuart_channel, the master of one client's tty of root's session; and
+%% erx_bleuart_core, that master's pure relay. The bleuart session template's -eval
+%% starts it, permanent, so its end ends the session and the start row's keeper
+%% starts it again.
+{application, erx_bleuart,
+ [{description, "erXos root shell over Nordic's UART service"},
+  {vsn, "1"},
+  {modules, [erx_bleuart, erx_bleuart_channel, erx_bleuart_core]},
+  {registered, [erx_bleuart]},
+  {applications, [kernel, stdlib, erx, erx_bt_client]},
+  {mod, {erx_bleuart, []}},
+  {env, []}]}.

@@ -50,8 +50,10 @@ module Erx
     # and not erx_app, which only the app script holds. erx_wifi, the WiFi domain's
     # (docs/design-wifi.md, "The WiFi domain"), is only loaded until the domain's
     # station starts it once it holds its facets. erx_ntpd, the ntpd session's
-    # (docs/design-time.md, "Who does what"), is started by the ntpd template's -eval.
-    DOMAIN_ONLY = %w[erx_session erx_app erx_wifi erx_ntpd].freeze
+    # (docs/design-time.md, "Who does what"), is started by the ntpd template's -eval,
+    # and erx_bleuart, the bleuart session's (docs/design-bluetooth.md, "The console"),
+    # by the bleuart template's.
+    DOMAIN_ONLY = %w[erx_session erx_app erx_wifi erx_ntpd erx_bleuart].freeze
     raise Error, "DOMAIN_ONLY names what the release does not ship: #{DOMAIN_ONLY - APPLICATIONS}" unless
       (DOMAIN_ONLY - APPLICATIONS).empty?
     # OTP's applications that only the domains' runtime images run (DomainImageApps).
@@ -211,6 +213,11 @@ module Erx
     #   base's network client, whose `grant` key the template's arguments set. It takes no
     #   shell and no erx_session: the session has no
     #   console and reaches its facets through erx:cap/1.
+    # * bleuart, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The
+    #   console"): erx_bleuart, which the bleuart template's -eval starts, and the
+    #   Bluetooth client, erx_bt_client, whose erx_gatt_serial handles nus. As ntpd's, it
+    #   takes no shell and no erx_session: the shell it gives a phone runs in root's
+    #   session, on a tty the session's line opens.
     # session and app each take SESSION_BASE, whose erx_session (DOMAIN_ONLY) they only
     # load, as every session template's -eval starts it once the domain holds its facets.
     RELEASE_SCRIPTS = { 'erts' => DOMAIN_BASE,
@@ -229,6 +236,7 @@ module Erx
                         'bt' => [*DOMAIN_BASE, 'crypto', 'erx_bt'].freeze,
                         'pcie' => [*DOMAIN_BASE, 'erx_pcie'].freeze,
                         'ntpd' => [*DOMAIN_BASE, 'erx_ntpd'].freeze,
+                        'bleuart' => [*DOMAIN_BASE, 'erx_bt_client', 'erx_bleuart'].freeze,
                         'wifi' => [*DOMAIN_BASE, 'crypto', 'erx_wifi'].freeze,
                         'media' => [*DOMAIN_BASE, 'erx_fat', 'erx_media'].freeze }.freeze
 
