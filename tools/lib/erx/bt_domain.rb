@@ -228,8 +228,8 @@ module Erx
     # The bleuart cell (docs/design-bluetooth.md, "The console", and "Decisions", 7):
     # bleuart in the echo's place, since both handle nus. Its records are the Raspberry
     # Pi 4's development manifest's, their one source (BLEUART_RECORDS): the principal,
-    # its session template, its ble and login grants and its start row. STOPPED is the line
-    # the console prints at `service bleuart stop`.
+    # its session template, its ble and login grants and its start row. STOPPED and STARTED
+    # are the lines the console prints at `service bleuart stop` and `start`.
     BLEUART_CELL = '-bleuart'
     BLEUART_PLATFORM = 'raspi4b'
     BLEUART_RECORDS = [%w[principal bleuart], %w[session bleuart], %w[facet bleuart_ble], %w[facet bleuart_login],
@@ -246,6 +246,8 @@ module Erx
     # A command's output reaches the console CR CR LF (docs/todo-session.md).
     STOPPED = /\AStopping bleuart\.\r*\n/n
     STOP_SECONDS = 60
+    START_BLEUART = "service bleuart start\r"
+    STARTED = /\AStarting bleuart\.\r*\n/n
 
     # The bleuart cell's manifest from the development manifest's text, source, on platform,
     # and the Pi 4's, board: the cells' medium manifest (medium) with the system principal's
@@ -374,9 +376,11 @@ module Erx
 
     # The bleuart cell's checkpoints: the production checkpoints, the last at the command
     # shell, where the shell peer (Serial::BLEUART_SHELL, run by peer) gets root's shell on
-    # the line; then `service bleuart stop` typed at the console, and at its STOPPED line the
-    # absent peer finds nus gone from the advertising data. points must end at the command
-    # shell.
+    # the line, interrupts a command with Ctrl-C, and reconnects to a new shell with the
+    # one before it gone; then `service bleuart stop` typed at the console, and at its
+    # STOPPED line the absent peer finds nus gone from the advertising data; then
+    # `service bleuart start`, and at its STARTED line the present peer finds nus back.
+    # points must end at the command shell.
     def bleuart_checkpoints(points, peer:)
       raise Error, 'the production checkpoints do not end at the shell' unless points.last.fetch(:name) == 'release-shell'
 
@@ -384,7 +388,9 @@ module Erx
        points.last.merge(verify: ->(_text) { peer.call(Serial::BLEUART_SHELL) }, verify_seconds: Serial::BOUND_SECONDS,
                          type: STOP_BLEUART).freeze,
        { name: 'bleuart-stopped', pattern: STOPPED, seconds: STOP_SECONDS, verify_seconds: Serial::BOUND_SECONDS,
-         verify: ->(_text) { peer.call(Serial::BLEUART_ABSENT) } }.freeze].freeze
+         verify: ->(_text) { peer.call(Serial::BLEUART_ABSENT) }, type: START_BLEUART }.freeze,
+       { name: 'bleuart-started', pattern: STARTED, seconds: STOP_SECONDS, verify_seconds: Serial::BOUND_SECONDS,
+         verify: ->(_text) { peer.call(Serial::BLEUART_PRESENT) } }.freeze].freeze
     end
 
     # Bumble's apps/controllers.py, unmodified, with its two controllers joined by its local
@@ -472,12 +478,15 @@ module Erx
       # The serial row, stage 3: 64 KiB through the handler of nus and back.
       SERIAL = Script.new(path: 'test/bt/peer/serial_peer.py', words: [].freeze,
                           passed: /\Aserial passed [0-9]+ [0-9]+\n\z/, stem: 'serial-peer')
-      # bleuart's rows ("The console"): root's shell on the line, then nus gone from the
-      # advertising data once bleuart has stopped (BtDomain.bleuart_checkpoints).
+      # bleuart's rows ("The console"): root's shell on the line, nus gone from the
+      # advertising data once bleuart has stopped, and back once it has started again
+      # (BtDomain.bleuart_checkpoints).
       BLEUART_SHELL = Script.new(path: 'test/bt/peer/bleuart_peer.py', words: %w[shell].freeze,
                                  passed: /\Ableuart passed shell\n\z/, stem: 'bleuart-shell')
       BLEUART_ABSENT = Script.new(path: 'test/bt/peer/bleuart_peer.py', words: %w[absent].freeze,
                                   passed: /\Ableuart passed absent\n\z/, stem: 'bleuart-absent')
+      BLEUART_PRESENT = Script.new(path: 'test/bt/peer/bleuart_peer.py', words: %w[present].freeze,
+                                   passed: /\Ableuart passed present\n\z/, stem: 'bleuart-present')
       # A peer's own bounds: the serial peer's scan, its connection, 64 KiB of writes with
       # response and their drain, with a margin, which bound bleuart's peers too. A
       # checkpoint's verify may take this long.

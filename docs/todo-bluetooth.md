@@ -158,10 +158,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `root_line`, `bleuart`'s holder row, the release-manifest refusal and `ble_grant`'s admission of a `start` row's
   template whose principal's `domains` quota is 1, its rows in the Raspberry Pi 4's development manifest and the
   Bluetooth suite's `-bleuart` cell (a scan shows the UART service, a central gets root's `% ` prompt, `echo` answers
-  and `ps` lists no system process, and after `service bleuart stop` a scan shows none) are built. Left: probe B-P7,
-  and the Bumble row's cases the cell does not run yet: `Ctrl-C` interrupting `sleep 100`, the disconnect that leaves
-  no shell in root's session (with its seeded fault, `tty_hangup` left unsent), the reconnect's new prompt, and the
-  UART service back after `service bleuart start`. bleuart's input is the master core's numbered input, so "a gap
+  and `ps` lists no system process, `Ctrl-C` interrupts a `top`, a reconnection gets a new prompt and `ps` lists no
+  more shells than before, after `service bleuart stop` a scan shows no UART service and after `service bleuart
+  start` it shows it again) are built. Left: probe B-P7. bleuart's input is the master core's numbered input, so "a gap
   ends the shell" holds by construction once the tty checks the numbers (todo-shell.md, the input-loss event); until
   then it holds for the drops bleuart and the Bluetooth domain see. erx_gatt_serial drops a `subscribed` while its
   owner is behind, silently: a dropped `notify` leaves bleuart's output held while input still reaches root's shell;
