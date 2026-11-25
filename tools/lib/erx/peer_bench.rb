@@ -34,6 +34,11 @@ module Erx
        "-DERX_PEER_XDOMAIN_ENCODED=#{encoded}u", "-DERX_PEER_RUN_DEADLINE_S=#{RUN_DEADLINE_SECONDS}u"].freeze
     end
 
+    # The program's arguments for a run of benchmark name on cpus CPUs: a posix run is given
+    # the count, which on erXos the program cannot ask the system for (docs/design-bench.md,
+    # "The program's clock and placement"); a native-set or xdomain run asks.
+    def arguments(name, cpus:) = BOOTS.fetch(name) == 'posix' ? [name, cpus.to_s] : [name]
+
     # What a run of benchmark name on a machine of cpus CPUs, reading clock, asks: the
     # benchmark's cells in its boot, and the pair a native-set or posix run calibrates,
     # CPU 0 and the last, on more than one CPU.

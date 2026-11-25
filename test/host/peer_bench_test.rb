@@ -3,11 +3,12 @@
 # frozen_string_literal: true
 
 require 'minitest/autorun'
+require_relative '../../tools/lib/erx/linux_guest'
 require_relative '../../tools/lib/erx/peer_bench'
 
 # bench/peer/erx_peer_bench.c's lines as the host reads them (docs/design-bench.md, "Other
 # systems on the same Raspberry Pi 4"): test/fixtures/peer_bench/linux holds one run of each
-# benchmark, as printed by the file built with PeerBench.flags: nullcall and wake by Linux's
+# benchmark, as printed by the file built with PeerBench.flags: nullcall, wake and posix by Linux's
 # guest under HVF at 4 CPUs (LinuxGuest.build and .boot, the serial log from the program's
 # first line), the others by gcc in an arm64 Linux container with 16 CPUs. Each run's
 # lines go through BenchMeasurement.boot as a native boot's do: nothing is refused, every
@@ -16,10 +17,10 @@ require_relative '../../tools/lib/erx/peer_bench'
 # declarations that the file does not follow shows here.
 class PeerBenchTest < Minitest::Test
   FIXTURES = File.expand_path('../fixtures/peer_bench/linux', __dir__)
-  CPUS = { 'nullcall' => 4, 'wake' => 4, 'vm' => 16, 'sched' => 16, 'xdomain' => 16 }.freeze
+  CPUS = { 'nullcall' => 4, 'wake' => 4, 'vm' => 16, 'sched' => 16, 'xdomain' => 16, 'posix' => 4 }.freeze
   # The operations with no counterpart in the table, which the file reports unsupported.
   UNSUPPORTED = { 'nullcall' => [], 'vm' => %w[reserve release], 'wake' => %w[trigger-take], 'sched' => [],
-                  'xdomain' => [] }.freeze
+                  'xdomain' => [], 'posix' => [] }.freeze
 
   def imported(name)
     lines = Erx::NativeBench.guest_lines(File.binread(File.join(FIXTURES, "#{name}.log")))
@@ -54,5 +55,35 @@ class PeerBenchTest < Minitest::Test
     parameters = Erx::BenchSuite.benchmark('xdomain').landing.fetch('xdomain').first.parameters
     assert_includes Erx::PeerBench.flags, "-DERX_PEER_XDOMAIN_ENCODED=#{parameters.fetch('encoded')}u"
     assert_raises(Erx::Error) { Erx::PeerBench.asked('missing', cpus: 16, clock: 'counter') }
+  end
+
+  # posix takes the CPU count as its second argument, since on erXos the program cannot ask
+  # for it, and calibrates CPU 0 against the last as a native-set run does.
+  def test_a_posix_run_is_given_the_cpu_count_and_calibrates_the_pair
+    assert_equal %w[posix 4], Erx::PeerBench.arguments('posix', cpus: 4)
+    assert_equal %w[wake], Erx::PeerBench.arguments('wake', cpus: 4)
+    assert_equal [[0, 3]], Erx::PeerBench.asked('posix', cpus: 4, clock: 'counter').pairs
+    assert_empty Erx::PeerBench.asked('posix', cpus: 1, clock: 'counter').pairs
+    assert_includes Erx::PeerBench.flags, '-DERX_BENCH_EXPENSIVE_SAMPLES=100u'
+  end
+
+  # Linux's guest boots posix with the count after the kernel's arguments, a /tmp for its
+  # files and the memory they take, which erXos's posix image is given too.
+  def test_linux_boots_posix_with_its_arguments_tmp_and_memory
+    posix = Erx::LinuxGuest.machine('posix', cpus: 4)
+    assert_equal "#{Erx::LinuxGuest::COMMAND_LINE} -- posix 4", posix.fetch(:command_line)
+    assert_equal Erx::NativeBench::MEMORY_MIB + Erx::PosixBench::TMP_MIB, posix.fetch(:memory_mib)
+    assert_equal({ command_line: "#{Erx::LinuxGuest::COMMAND_LINE} -- wake", memory_mib: Erx::NativeBench::MEMORY_MIB },
+                 Erx::LinuxGuest.machine('wake', cpus: 4))
+    assert_includes Erx::LinuxGuest.initramfs(init: ''.b, peer: ''.b), "tmp\0"
+    root = File.expand_path('../..', __dir__)
+    assert_equal 'posix', Erx::LinuxGuest::Guest.new(root: root, runner: nil, boot: 'posix').boot
+    assert_equal 'native', Erx::LinuxGuest::Guest.new(root: root, runner: nil).boot
+    assert_raises(Erx::Error) { Erx::LinuxGuest::Guest.new(root: root, runner: nil, boot: 'xdomain') }
+  end
+
+  # Both builds of the file generate code from one list of flags, NativeRoot's without its target.
+  def test_linux_compiles_with_the_erxos_programs_code_generation_flags
+    assert_equal Erx::NativeRoot::CODE_FLAGS.grep_v(/\A--target=/), Erx::LinuxGuest::CODE_FLAGS
   end
 end

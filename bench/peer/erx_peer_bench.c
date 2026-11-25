@@ -6,12 +6,17 @@
 /*
  * erx_peer_bench: the POSIX counterparts of the native bench guest's cells, for the other
  * systems erXos is compared with (docs/design-bench.md, "Other systems on the same
- * Raspberry Pi 4"). One run times one benchmark, as one boot of the native bench image
- * does, and prints its BENCH lines (and a sustained cell's WINDOW lines) and then one
- * CLOCK line, the lines the guests print, through the guests' own line library, so
- * tools/lib/erx/bench_measurement.rb reads every system alike:
+ * Raspberry Pi 4"), and posix, what a program sees (docs/design-bench.md, "What a program
+ * sees: `posix` and `erl`"), which runs on erXos too. One run times one benchmark, as one
+ * boot of the native bench image does, and prints its BENCH lines (and a sustained cell's
+ * WINDOW lines) and then one CLOCK line, the lines the guests print, through the guests'
+ * own line library, so tools/lib/erx/bench_measurement.rb reads every system alike:
  *
  *	erx_peer_bench nullcall|vm|wake|sched|xdomain
+ *	erx_peer_bench posix CPUS
+ *
+ * posix is given the machine's CPU count, 1 to 256, which it never asks the system for:
+ * on erXos musl's sysconf answers 1 whatever the machine.
  *
  * It is the one file the other system's compiler is given; it includes the guests' line,
  * histogram, clock, sweep and window sources, which come with it from the tree's
@@ -20,11 +25,15 @@
  *
  *	cc -std=c17 -O2 -pthread -I ROOT $(PeerBench.flags) ROOT/bench/peer/erx_peer_bench.c
  *
+ * erXos builds it as a program with ERX_PEER_ERXOS defined (tools/lib/erx/posix_bench.rb),
+ * and there it is posix alone: the others need fork or Linux's /proc.
+ *
  * Every interval is ticks of one clock: the architecture's system counter where user mode
  * may read it, clock "counter", and otherwise CLOCK_MONOTONIC in nanoseconds, clock
- * "monotonic". Threads are pinned with sched_setaffinity on Linux and cpuset_setaffinity
- * on FreeBSD; that and the wake handshake, which reads B's state from Linux's /proc, are
- * where the file differs by system. The main thread of a native-set
+ * "monotonic"; on erXos the counter as erx_fiasco_counter reads it. Threads are pinned with
+ * sched_setaffinity on Linux and erXos and cpuset_setaffinity on FreeBSD; that and the
+ * wake handshake, which reads B's state from Linux's /proc, are where the file differs by
+ * system. The main thread of a native-set or posix
  * benchmark runs on CPU 0, the service's CPU, and the pair its CLOCK line calibrates is
  * CPU 0 and the last, as a native boot's is; an xdomain run is not pinned.
  *
@@ -34,12 +43,13 @@
  * ends the run with no CLOCK line, so the host rejects the run rather than read part of it.
  */
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(ERX_PEER_ERXOS)
 #define _GNU_SOURCE
 #endif
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <sched.h>
 #include <setjmp.h>
@@ -57,14 +67,17 @@
 
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#if defined(__FreeBSD__)
+#if defined(ERX_PEER_ERXOS)
+#include "liberx/backend/fiasco/log.h"
+#elif defined(__FreeBSD__)
 #include <sys/param.h>
 #include <sys/cpuset.h>
 #elif !defined(__linux__)
-#error "erx_peer_bench pins threads on Linux and FreeBSD only"
+#error "erx_peer_bench pins threads on Linux, FreeBSD and erXos only"
 #endif
 
 #include "test/guest/bench/bench_hist.c"
@@ -75,6 +88,7 @@
 
 #if !defined(ERX_BENCH_FAST_WARMUP) || !defined(ERX_BENCH_FAST_SAMPLES) || !defined(ERX_BENCH_PERIODIC_SAMPLES) || \
     !defined(ERX_BENCH_SUSTAINED_SAMPLES) || !defined(ERX_BENCH_SUSTAINED_WARMUP_MS) ||                              \
+    !defined(ERX_BENCH_EXPENSIVE_WARMUP) || !defined(ERX_BENCH_EXPENSIVE_SAMPLES) ||                                 \
     !defined(ERX_PEER_XDOMAIN_BYTES) || !defined(ERX_PEER_XDOMAIN_ENCODED) || !defined(ERX_PEER_RUN_DEADLINE_S)
 #error "the build passes the landing profiles' sizes, the xdomain cells' parameters and the run's deadline"
 #endif
@@ -106,9 +120,19 @@
  * every system.
  */
 #define SHARE_SLICE_US	UINT64_C(1000)
+/*
+ * The size of posix's pattern file, and the part every sequential read and write and every
+ * pipe-stream write moves; also the largest round trip but xdomain's.
+ */
+#define PART_BYTES	65536u
+#define TRIP_BYTES_MAX	(PART_BYTES > ERX_PEER_XDOMAIN_BYTES ? PART_BYTES : ERX_PEER_XDOMAIN_BYTES)
 #define NO_COUNTERPART	"no counterpart named in the design"
 #define ONE_CPU		"the machine has one CPU"
 #define WAKE_UNREADABLE	"B's blocked state is not readable on this system"
+#define WRONG_RESULT	"wrong result"
+#define MOST_SAMPLES_2(a, b)	((a) > (b) ? (a) : (b))
+#define MOST_SAMPLES	\
+	MOST_SAMPLES_2(MOST_SAMPLES_2(ERX_BENCH_FAST_SAMPLES, ERX_BENCH_PERIODIC_SAMPLES), ERX_BENCH_EXPENSIVE_SAMPLES)
 
 /* The run's clock: its name as the lines give it, its frequency and its read. */
 static const char *clock_name;
@@ -127,8 +151,7 @@ static erx_bench_hist_t scratch;
 static erx_bench_reads_t read_pairs[READ_PAIRS];
 static erx_bench_token_t token;
 static erx_bench_round_t rounds[ROUNDS];
-static uint64_t samples[ERX_BENCH_FAST_SAMPLES > ERX_BENCH_PERIODIC_SAMPLES ? ERX_BENCH_FAST_SAMPLES :
-    ERX_BENCH_PERIODIC_SAMPLES];
+static uint64_t samples[MOST_SAMPLES];
 
 /* Ends the run with a FAILED line naming what failed: a setup failure, which prints no cell. */
 static _Noreturn void
@@ -158,6 +181,19 @@ peer_print_line(size_t length)
 
 /* The clocks. */
 
+#if defined(ERX_PEER_ERXOS)
+/*
+ * erXos's program reads the counter through erx_fiasco_counter, the one read of it a linked
+ * program may make, and does not probe: a program on Fiasco catches no signal.
+ */
+static void
+clock_choose(void)
+{
+	clock_name = "counter";
+	clock_hz = erx_fiasco_counter_hz();
+	clock_read = erx_fiasco_counter;
+}
+#else
 static uint64_t
 monotonic_ns(void)
 {
@@ -237,21 +273,38 @@ clock_choose(void)
 	clock_hz = NS_PER_SECOND;
 	clock_read = monotonic_ns;
 }
+#endif
 
-/* The CLOCK_MONOTONIC time at which the run's clock reads deadline, rounded up. */
-static struct timespec
-monotonic_at(uint64_t deadline)
+/*
+ * The probe (docs/design-bench.md, "What a program sees"): the call that last failed and
+ * its error, which a cell's untimed first run reads to tell a call the system does not
+ * offer from a wrong answer.
+ */
+static struct {
+	const char *call;
+	int error;
+} refusal;
+
+/* Whether a call answering -1 and errno on failure succeeded; a failure is kept for the probe. */
+static bool
+posix_ok(const char *call, long answer)
 {
-	const uint64_t now = clock_read(), base = monotonic_ns();
-	const uint64_t ahead = deadline > now ? deadline - now : 0;
-	uint64_t ns;
-	struct timespec at;
+	if (answer != -1)
+		return (true);
+	refusal.call = call;
+	refusal.error = errno;
+	return (false);
+}
 
-	/* Every deadline is at most PERIODIC_LEAD + 1 periods ahead, so the product fits. */
-	ns = base + (ahead * NS_PER_SECOND + clock_hz - 1) / clock_hz;
-	at.tv_sec = (time_t)(ns / NS_PER_SECOND);
-	at.tv_nsec = (long)(ns % NS_PER_SECOND);
-	return (at);
+/* Whether a call answering an error number, as pthread's do, succeeded; a failure is kept for the probe. */
+static bool
+pthread_ok(const char *call, int error)
+{
+	if (error == 0)
+		return (true);
+	refusal.call = call;
+	refusal.error = error;
+	return (false);
 }
 
 /* Pinning. */
@@ -259,7 +312,7 @@ monotonic_at(uint64_t deadline)
 static void
 pin_to(unsigned cpu)
 {
-#if defined(__linux__)
+#if defined(__linux__) || defined(ERX_PEER_ERXOS)
 	cpu_set_t set;
 
 	CPU_ZERO(&set);
@@ -295,17 +348,27 @@ peer_thread_main(void *argument)
 	return (NULL);
 }
 
-/* Starts entry(index) on a new thread, pinned to cpu where pinned is set. */
-static pthread_t
-thread_start(unsigned cpu, bool pinned, void (*entry)(uint64_t), uint64_t index)
+/* Starts entry(index) on a new thread, pinned to cpu where pinned is set; a refusal is kept for the probe. */
+static bool
+thread_try_start(pthread_t *thread, unsigned cpu, bool pinned, void (*entry)(uint64_t), uint64_t index)
 {
 	peer_start_t *const start = malloc(sizeof(*start));
-	pthread_t thread;
 
 	if (start == NULL)
 		peer_fail("no memory for a thread");
 	*start = (peer_start_t){ .cpu = cpu, .pinned = pinned, .entry = entry, .index = index };
-	if (pthread_create(&thread, NULL, peer_thread_main, start) != 0)
+	if (pthread_ok("pthread_create", pthread_create(thread, NULL, peer_thread_main, start)))
+		return (true);
+	free(start);
+	return (false);
+}
+
+static pthread_t
+thread_start(unsigned cpu, bool pinned, void (*entry)(uint64_t), uint64_t index)
+{
+	pthread_t thread;
+
+	if (!thread_try_start(&thread, cpu, pinned, entry, index))
 		peer_fail("no thread");
 	return (thread);
 }
@@ -385,31 +448,62 @@ print_clock(const erx_bench_pair_t *pair, size_t npairs)
 }
 
 /*
- * A native-set benchmark's cells between its two calibrations of CPU 0 against the last,
- * and its CLOCK line: with no pair on one CPU.
+ * A one-way cell stamped across CPU 0 and the last under the cross-CPU rule
+ * (docs/design-bench.md, "The one clock"): the pair is calibrated before and after sample()
+ * fills samples, each sample is corrected by the hull's middle and the hull's half-width
+ * is the cell's uncertainty, or the cell is unsupported with the rule's reason. A cell
+ * sample() marks failed or unsupported keeps its status, reason and counts, and no
+ * samples. Answers the pair for the CLOCK line.
  */
-static void
-calibrated(void (*cells)(void))
+static erx_bench_pair_t
+across_cell(erx_bench_cell_t cell, size_t (*sample)(erx_bench_cell_t *cell))
 {
 	erx_bench_pair_t pair = { .cpus = { 0, cpus - 1 } };
+	erx_bench_sample_t top[ERX_BENCH_LARGEST];
+	erx_bench_offset_t hull;
+	const char *unsupported;
+	size_t taken;
+	int64_t middle;
 
-	pin_to(0);
-	if (cpus == 1) {
-		cells();
-		print_clock(NULL, 0);
-		return;
-	}
 	pair.before = calibrate();
-	cells();
+	taken = sample(&cell);
 	pair.after = calibrate();
-	print_clock(&pair, 1);
+	if (strcmp(cell.status, "measured") != 0) {
+		peer_print(cell, samples, 0);
+		return (pair);
+	}
+	hull = erx_bench_offset_hull(pair.before, pair.after);
+	middle = hull.empty ? 0 : hull.low + (hull.high - hull.low) / 2;
+	for (size_t at = 0; at < taken; at++) {
+		/* A corrected sample below zero lies within the uncertainty the cell states. */
+		const int64_t corrected = (int64_t)samples[at] - middle;
+
+		samples[at] = corrected < 0 ? 0 : (uint64_t)corrected;
+	}
+	/* The bound is a tenth of the corrected median, as the host holds it. */
+	erx_bench_cell_summarize(&cell, &hist, samples, taken, top);
+	unsupported = erx_bench_cell_unsupported(true, pair.before, pair.after, erx_bench_hist_median(&hist));
+	if (unsupported != NULL) {
+		cell.status = "unsupported";
+		cell.reason = unsupported;
+		peer_print(cell, samples, 0);
+		return (pair);
+	}
+	cell.has_uncertainty = true;
+	cell.uncertainty = erx_bench_offset_half_width(hull);
+	peer_print(cell, samples, taken);
+	return (pair);
 }
 
 /*
- * A fast cell's run (docs/design-bench.md, "Short operations"): ERX_BENCH_FAST_WARMUP
- * batches of one, then ERX_BENCH_FAST_SAMPLES batches of the size the warm-up's median
- * asks, each prepared untimed, its operations timed back to back and undone untimed. A
- * sample is a batch's mean. Each step answers whether it gave the right result.
+ * A cell's run (docs/design-bench.md, "Short operations" and "Profiles"). Its operation's
+ * steps each answer whether they gave the right result: a batch is prepared untimed, its
+ * operations timed back to back and undone untimed. Every run starts with the probe, the
+ * operation made once untimed; then a fast run times ERX_BENCH_FAST_WARMUP batches of one
+ * and ERX_BENCH_FAST_SAMPLES batches of the size the warm-up's median asks, a sample a
+ * batch's mean, and an expensive run ERX_BENCH_EXPENSIVE_WARMUP operations and then
+ * ERX_BENCH_EXPENSIVE_SAMPLES, each timed alone. A run's reason is NULL exactly when it
+ * measured.
  */
 typedef struct {
 	bool (*prepare)(uint64_t at);
@@ -420,7 +514,8 @@ typedef struct {
 typedef struct {
 	uint64_t batch;
 	size_t taken;
-	bool wrong;
+	const char *status;
+	const char *reason;
 } peer_run_t;
 
 static bool
@@ -447,51 +542,101 @@ batch_run(const peer_op_t *op, uint64_t n, uint64_t *ticks)
 	return (right);
 }
 
+/* A run its probe ended: unsupported where the last refusal was ENOSYS or ENOTSUP, naming the call; else failed. */
+static peer_run_t
+probe_refused(void)
+{
+	static char reason[80];
+	const bool lacking = refusal.call != NULL && (refusal.error == ENOSYS || refusal.error == ENOTSUP);
+
+	if (!lacking)
+		return ((peer_run_t){ .batch = 1, .taken = 0, .status = "failed", .reason = WRONG_RESULT });
+	snprintf(reason, sizeof(reason), "%s answered %s", refusal.call, refusal.error == ENOSYS ? "ENOSYS" : "ENOTSUP");
+	return ((peer_run_t){ .batch = 1, .taken = 0, .status = "unsupported", .reason = reason });
+}
+
+static peer_run_t
+probe(const peer_op_t *op)
+{
+	refusal.call = NULL;
+#if !defined(ERX_PEER_SEED_NO_PROBE)
+	{
+		uint64_t ticks;
+
+		if (!batch_run(op, 1, &ticks))
+			return (probe_refused());
+	}
+#else
+	/* The seeded fault: no probe, so a call the system lacks fails the timed loop instead. */
+	(void)op;
+#endif
+	return ((peer_run_t){ .batch = 1, .taken = 0, .status = "measured", .reason = NULL });
+}
+
+static peer_run_t
+run_wrong(peer_run_t run)
+{
+	run.status = "failed";
+	run.reason = WRONG_RESULT;
+	return (run);
+}
+
 static peer_run_t
 fast_run(const peer_op_t *op)
 {
-	peer_run_t run = { .batch = 1, .taken = 0, .wrong = false };
+	peer_run_t run = probe(op);
 	uint64_t ticks;
 
+	if (run.reason != NULL)
+		return (run);
 	for (size_t at = 0; at < ERX_BENCH_HIST_BUCKETS; at++)
 		scratch.count[at] = 0;
 	scratch.samples = 0;
 	for (uint32_t warm = 0; warm < ERX_BENCH_FAST_WARMUP; warm++) {
-		if (!batch_run(op, 1, &ticks)) {
-			run.wrong = true;
-			return (run);
-		}
+		if (!batch_run(op, 1, &ticks))
+			return (run_wrong(run));
 		erx_bench_hist_add(&scratch, ticks);
 	}
 	run.batch = erx_bench_batch_for(erx_bench_hist_median(&scratch));
 	for (; run.taken < ERX_BENCH_FAST_SAMPLES; run.taken++) {
-		if (!batch_run(op, run.batch, &ticks)) {
-			run.wrong = true;
-			return (run);
-		}
+		if (!batch_run(op, run.batch, &ticks))
+			return (run_wrong(run));
 		samples[run.taken] = ticks / run.batch;
 	}
 	return (run);
 }
 
-/* Times op and prints its cell: failed with a wrong result, or when its untimed check is false. */
-static void
-fast_cell(const char *operation, const char *placement, const erx_bench_param_t *params, size_t nparams,
-    const peer_op_t *op, bool (*check)(void))
+static peer_run_t
+expensive_run(const peer_op_t *op)
 {
-	erx_bench_cell_t cell = peer_cell(operation, placement);
-	const peer_run_t run = fast_run(op);
+	peer_run_t run = probe(op);
+	uint64_t ticks;
 
-	cell.params = params;
-	cell.nparams = nparams;
+	if (run.reason != NULL)
+		return (run);
+	for (uint32_t warm = 0; warm < ERX_BENCH_EXPENSIVE_WARMUP; warm++)
+		if (!batch_run(op, 1, &ticks))
+			return (run_wrong(run));
+	for (; run.taken < ERX_BENCH_EXPENSIVE_SAMPLES; run.taken++) {
+		if (!batch_run(op, 1, &ticks))
+			return (run_wrong(run));
+		samples[run.taken] = ticks;
+	}
+	return (run);
+}
+
+/* Prints cell as run left it, failed when its untimed check is false; an expensive cell carries its raw samples. */
+static void
+run_print(erx_bench_cell_t cell, peer_run_t run, bool (*check)(void))
+{
 	cell.batch = run.batch;
-	if (run.wrong) {
-		cell.status = "failed";
-		cell.reason = "wrong result";
-	} else if (check != NULL && !check()) {
+	cell.status = run.status;
+	cell.reason = run.reason;
+	if (run.reason == NULL && check != NULL && !check()) {
 		cell.status = "failed";
 		cell.reason = "the untimed check failed";
 	}
+	cell.nraw = cell.raw != NULL ? run.taken : 0;
 	peer_print(cell, samples, run.taken);
 }
 
@@ -533,30 +678,140 @@ write_full(int fd, const void *buf, size_t size)
 	return (true);
 }
 
+/*
+ * The near end of a round trip: where the request goes and the reply comes from, the
+ * request, and whether each side polls for POLLIN before it reads (posix's poll-rtt).
+ */
+static int trip_out = -1, trip_in = -1;
+static size_t trip_bytes;
+static bool trip_polled;
+static uint64_t trip_sequence;
+static uint8_t trip_request[TRIP_BYTES_MAX];
+static uint8_t trip_reply[TRIP_BYTES_MAX];
+static uint8_t echo_message[TRIP_BYTES_MAX];
+
+/* poll for POLLIN on fd: poll's answer, -1 with its errno, or 0 when it reported anything but POLLIN. */
+static int
+poll_in(int fd)
+{
+	struct pollfd ready = { .fd = fd, .events = POLLIN, .revents = 0 };
+	const int answer = poll(&ready, 1, -1);
+
+	return (answer == 1 && (ready.revents & POLLIN) == 0 ? 0 : answer);
+}
+
 /* Echoes messages of size bytes from in to out until in ends. */
 static void
 echo(int in, int out, size_t size)
 {
-	uint8_t message[ERX_PEER_XDOMAIN_BYTES > 8 ? ERX_PEER_XDOMAIN_BYTES : 8];
+#if defined(ERX_PEER_SEED_FLIPPED_REPLY)
+	uint64_t echoed = 0;
+#endif
 
-	while (read_full(in, message, size) && write_full(out, message, size))
-		continue;
+	while ((!trip_polled || poll_in(in) == 1) && read_full(in, echo_message, size)) {
+#if defined(ERX_PEER_SEED_FLIPPED_REPLY)
+		/* The seeded fault: one reply in a hundred has a byte flipped. */
+		if (++echoed % 100 == 0)
+			echo_message[size - 1] ^= 1;
+#endif
+		if (!write_full(out, echo_message, size))
+			return;
+	}
 }
 
-/* The near end of a round trip: where the request goes and the reply comes from. */
-static int trip_out = -1, trip_in = -1;
-static size_t trip_bytes;
-static uint8_t trip_request[ERX_PEER_XDOMAIN_BYTES > 8 ? ERX_PEER_XDOMAIN_BYTES : 8];
-
-/* One round trip: the request out, the reply in, equal to the request. */
+/* One round trip: the request out, the reply in, equal to the request, whose first bytes carry its number. */
 static bool
 round_trip(uint64_t at)
 {
-	uint8_t reply[sizeof(trip_request)];
+	const uint64_t sequence = trip_sequence++;
+	int polled = 1;
 
 	(void)at;
-	return (write_full(trip_out, trip_request, trip_bytes) && read_full(trip_in, reply, trip_bytes) &&
-	    memcmp(reply, trip_request, trip_bytes) == 0);
+	memcpy(trip_request, &sequence, trip_bytes < sizeof(sequence) ? trip_bytes : sizeof(sequence));
+	if (!write_full(trip_out, trip_request, trip_bytes))
+		return (false);
+	if (trip_polled && !posix_ok("poll", polled = poll_in(trip_in)))
+		return (false);
+	return (polled == 1 && read_full(trip_in, trip_reply, trip_bytes) &&
+	    memcmp(trip_reply, trip_request, trip_bytes) == 0);
+}
+
+/* An echo thread's ends: it echoes from echo_in to echo_out until echo_in ends. */
+static int echo_in = -1, echo_out = -1;
+
+static void
+echo_thread(uint64_t index)
+{
+	(void)index;
+	echo(echo_in, echo_out, trip_bytes);
+}
+
+/* Pages: each written page holds a seed at its start and its complement at its end. */
+
+static uint8_t *vm_pages[ERX_BENCH_BATCH_MAX];
+
+static void
+page_fill(uint8_t *page, uint64_t seed)
+{
+	const uint64_t last = ~seed;
+
+	memcpy(page, &seed, sizeof(seed));
+	memcpy(page + page_bytes - sizeof(last), &last, sizeof(last));
+}
+
+static bool
+page_holds(const uint8_t *page, uint64_t seed)
+{
+	uint64_t first, last;
+
+	memcpy(&first, page, sizeof(first));
+	memcpy(&last, page + page_bytes - sizeof(last), sizeof(last));
+	return (first == seed && last == ~seed);
+}
+
+/* A page never written reads zero where page_fill writes. */
+static bool
+page_blank(const uint8_t *page)
+{
+	uint64_t first, last;
+
+	memcpy(&first, page, sizeof(first));
+	memcpy(&last, page + page_bytes - sizeof(last), sizeof(last));
+	return (first == 0 && last == 0);
+}
+
+#if !defined(ERX_PEER_ERXOS)
+/*
+ * A native-set benchmark's cells between its two calibrations of CPU 0 against the last,
+ * and its CLOCK line: with no pair on one CPU.
+ */
+static void
+calibrated(void (*cells)(void))
+{
+	erx_bench_pair_t pair = { .cpus = { 0, cpus - 1 } };
+
+	pin_to(0);
+	if (cpus == 1) {
+		cells();
+		print_clock(NULL, 0);
+		return;
+	}
+	pair.before = calibrate();
+	cells();
+	pair.after = calibrate();
+	print_clock(&pair, 1);
+}
+
+/* Times op and prints its cell: failed with a wrong result, or when its untimed check is false. */
+static void
+fast_cell(const char *operation, const char *placement, const erx_bench_param_t *params, size_t nparams,
+    const peer_op_t *op, bool (*check)(void))
+{
+	erx_bench_cell_t cell = peer_cell(operation, placement);
+
+	cell.params = params;
+	cell.nparams = nparams;
+	run_print(cell, fast_run(op), check);
 }
 
 /*
@@ -578,16 +833,6 @@ echo_process(int in, int out, int near, unsigned cpu, bool pinned)
 		_exit(0);
 	}
 	return (child);
-}
-
-/* An echo thread's ends: it echoes from echo_in to echo_out until echo_in ends. */
-static int echo_in = -1, echo_out = -1;
-
-static void
-echo_thread(uint64_t index)
-{
-	(void)index;
-	echo(echo_in, echo_out, trip_bytes);
 }
 
 /* Ends the near side's streams and reaps the echo process, which must end with 0. */
@@ -699,26 +944,6 @@ nullcall_cells(void)
  * where POSIX can make it.
  */
 
-static uint8_t *vm_pages[ERX_BENCH_BATCH_MAX];
-
-static void
-page_fill(uint8_t *page, uint64_t seed)
-{
-	const uint64_t last = ~seed;
-
-	memcpy(page, &seed, sizeof(seed));
-	memcpy(page + page_bytes - sizeof(last), &last, sizeof(last));
-}
-
-static bool
-page_holds(const uint8_t *page, uint64_t seed)
-{
-	uint64_t first, last;
-
-	memcpy(&first, page, sizeof(first));
-	memcpy(&last, page + page_bytes - sizeof(last), sizeof(last));
-	return (first == seed && last == ~seed);
-}
 
 static bool
 page_zero(const uint8_t *page)
@@ -877,6 +1102,22 @@ vm_cells(void)
  * one sample is B's return stamp less A's stamp before the signal, a one-way interval
  * across the calibrated pair.
  */
+/* The CLOCK_MONOTONIC time at which the run's clock reads deadline, rounded up. */
+static struct timespec
+monotonic_at(uint64_t deadline)
+{
+	const uint64_t now = clock_read(), base = monotonic_ns();
+	const uint64_t ahead = deadline > now ? deadline - now : 0;
+	uint64_t ns;
+	struct timespec at;
+
+	/* Every deadline is at most PERIODIC_LEAD + 1 periods ahead, so the product fits. */
+	ns = base + (ahead * NS_PER_SECOND + clock_hz - 1) / clock_hz;
+	at.tv_sec = (time_t)(ns / NS_PER_SECOND);
+	at.tv_nsec = (long)(ns % NS_PER_SECOND);
+	return (at);
+}
+
 
 static erx_bench_stamp_t stamps[ERX_BENCH_PERIODIC_SAMPLES];
 static erx_bench_periodic_t periodic;
@@ -1130,48 +1371,19 @@ wake_same_cpu(void)
 	peer_print(cell, samples, taken);
 }
 
-/* wake-cross-cpu, calibrated before and after; returns the pair for the CLOCK line. */
-static erx_bench_pair_t
-wake_cross_cpu(void)
+/* wake-cross-cpu's samples, for across_cell: a lost wake fails the cell. */
+static size_t
+wake_cross_samples(erx_bench_cell_t *cell)
 {
-	erx_bench_cell_t cell = peer_cell("wake-cross-cpu", "cross-cpu");
-	erx_bench_pair_t pair = { .cpus = { 0, cpus - 1 } };
-	erx_bench_sample_t top[ERX_BENCH_LARGEST];
-	erx_bench_offset_t hull;
-	const char *unsupported;
-	size_t taken;
-	int64_t middle;
 	bool lost;
+	const size_t taken = wake_samples(cpus - 1, UINT32_MAX, &lost);
 
-	pair.before = calibrate();
-	taken = wake_samples(cpus - 1, UINT32_MAX, &lost);
-	pair.after = calibrate();
-	hull = erx_bench_offset_hull(pair.before, pair.after);
-	middle = hull.empty ? 0 : hull.low + (hull.high - hull.low) / 2;
-	for (size_t at = 0; at < taken; at++) {
-		/* A corrected sample below zero lies within the uncertainty the cell states. */
-		const int64_t corrected = (int64_t)samples[at] - middle;
-
-		samples[at] = corrected < 0 ? 0 : (uint64_t)corrected;
-	}
-	/* The bound is a tenth of the corrected median, as the host holds it. */
-	erx_bench_cell_summarize(&cell, &hist, samples, taken, top);
-	unsupported = erx_bench_cell_unsupported(true, pair.before, pair.after, erx_bench_hist_median(&hist));
 	if (lost) {
-		/* A failure keeps its counts, not statistics no calibration vouches for. */
-		cell.status = "failed";
-		cell.reason = "lost wake";
-		cell.lost = 1;
-		taken = 0;
-	} else if (unsupported != NULL) {
-		peer_print_unsupported("wake-cross-cpu", "cross-cpu", unsupported);
-		return (pair);
-	} else {
-		cell.has_uncertainty = true;
-		cell.uncertainty = erx_bench_offset_half_width(hull);
+		cell->status = "failed";
+		cell->reason = "lost wake";
+		cell->lost = 1;
 	}
-	peer_print(cell, samples, taken);
-	return (pair);
+	return (taken);
 }
 
 #endif
@@ -1198,7 +1410,7 @@ wake_cells(void)
 		return;
 	}
 #if defined(__linux__)
-	pair = wake_cross_cpu();
+	pair = across_cell(peer_cell("wake-cross-cpu", "cross-cpu"), wake_cross_samples);
 #else
 	pair.before = calibrate();
 	peer_print_unsupported("wake-cross-cpu", "cross-cpu", WAKE_UNREADABLE);
@@ -1331,39 +1543,1012 @@ xdomain_run(void)
 	echo_reap(child);
 	print_clock(NULL, 0);
 }
+#endif
 
+/*
+ * posix: what a program sees (docs/design-bench.md, "What a program sees: `posix` and
+ * `erl`"). Ordinary POSIX calls and UNIX IPC, the same file on erXos, as a program of
+ * root's session, and on the other systems, in the cells tools/lib/erx/benches/posix.rb
+ * declares, with the parameters it gives them. The main thread runs on CPU 0; a cell's
+ * second thread runs on CPU 0 for same-cpu and on the last CPU for cross-cpu, which on one
+ * CPU is unsupported. Each cell's untimed set-up and its calls' first run are its probe:
+ * a call answering ENOSYS or ENOTSUP makes it unsupported, naming the call. Its files are
+ * in /tmp, each made untimed by the cell that reads it, and removed untimed at the end.
+ */
+
+#define POSIX_FILE	"/tmp/erx_peer_bench.file"
+#define POSIX_BIG	"/tmp/erx_peer_bench.big"
+#define POSIX_COPY	"/tmp/erx_peer_bench.copy"
+/* mutex-handoff: A holds the lock this long after B says it is about to lock it. */
+#define HANDOFF_WAITS_PER_SECOND	UINT64_C(10000)
+
+/* The pattern every file and stream is made of; and the buffers reads land in. */
+static uint8_t pattern[PART_BYTES];
+static uint8_t part[PART_BYTES];
+static uint8_t part_back[PART_BYTES];
+
+/*
+ * One cell: its name, conditions and parameters as the declaration gives them, its
+ * profile, its operation, and its untimed set-up, end and check after the loop, each
+ * optional. The numeric parameters reach the acts through posix (posix_load).
+ */
+typedef struct {
+	const char *operation;
+	const char *placement;
+	const erx_bench_param_t *params;
+	size_t nparams;
+	bool expensive;
+	peer_op_t op;
+	bool (*begin)(void);
+	void (*end)(void);
+	bool (*check)(void);
+} posix_cell_t;
+
+/* The running cell's state, set afresh for each cell. */
+static struct {
+	uint64_t bytes;		/* the bytes parameter */
+	uint64_t pages;		/* the pages parameter */
+	uint64_t ns;		/* the ns parameter: the sleep asked, which each sample is less */
+	unsigned peer_cpu;	/* the second thread's CPU */
+	int fd;			/* the cell's open file, or -1 */
+	int lowest;		/* the lowest free descriptor, which open answers first */
+	int fds[ERX_BENCH_BATCH_MAX];
+	pid_t pid;
+	uint64_t last_ns;	/* clock-gettime's last answer */
+	int there[2];		/* the pipe A writes to the peer */
+	int back[2];		/* the pipe the peer answers on */
+	pthread_t peer;
+	bool peer_started;
+} posix;
+
+static void
+posix_load(const posix_cell_t *cell)
+{
+	posix.bytes = posix.pages = posix.ns = posix.last_ns = 0;
+	posix.peer_cpu = strcmp(cell->placement, "cross-cpu") == 0 ? cpus - 1 : 0;
+	posix.fd = posix.lowest = -1;
+	posix.there[0] = posix.there[1] = posix.back[0] = posix.back[1] = -1;
+	posix.peer_started = false;
+	for (size_t at = 0; at < cell->nparams; at++) {
+		const erx_bench_param_t *const param = &cell->params[at];
+
+		if (param->text != NULL)
+			continue;
+		if (strcmp(param->name, "bytes") == 0)
+			posix.bytes = param->count;
+		else if (strcmp(param->name, "pages") == 0)
+			posix.pages = param->count;
+		else if (strcmp(param->name, "ns") == 0)
+			posix.ns = param->count;
+		else
+			peer_fail("a posix cell has a parameter no act reads");
+	}
+}
+
+/* Whether a read or write answered exactly want bytes; a refusal is kept for the probe. */
+static bool
+posix_full(const char *call, ssize_t answer, uint64_t want)
+{
+	return (posix_ok(call, (long)answer) && (uint64_t)answer == want);
+}
+
+static void
+descriptor_drop(int *fd)
+{
+	if (*fd >= 0)
+		close(*fd);
+	*fd = -1;
+}
+
+/* Trivial calls. */
+
+static bool
+getpid_begin(void)
+{
+	posix.pid = getpid();
+	return (posix.pid > 0);
+}
+
+static bool
+getpid_same(uint64_t at)
+{
+	(void)at;
+	return (getpid() == posix.pid);
+}
+
+static bool
+clock_forward(uint64_t at)
+{
+	struct timespec now;
+	uint64_t ns;
+
+	(void)at;
+	if (!posix_ok("clock_gettime", clock_gettime(CLOCK_MONOTONIC, &now)))
+		return (false);
+	ns = (uint64_t)now.tv_sec * NS_PER_SECOND + (uint64_t)now.tv_nsec;
+	if (ns < posix.last_ns)
+		return (false);
+	posix.last_ns = ns;
+	return (true);
+}
+
+/* Files. */
+
+/* Writes path afresh: bytes of the pattern, in parts. */
+static bool
+file_make(const char *path, uint64_t bytes)
+{
+	const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	bool made = posix_ok("open", fd);
+
+	for (uint64_t offset = 0; made && offset < bytes; offset += PART_BYTES)
+		made = posix_full("write", write(fd, pattern, PART_BYTES), PART_BYTES);
+	if (fd >= 0)
+		made = posix_ok("close", close(fd)) && made;
+	return (made);
+}
+
+static bool
+file_open(const char *path, int flags)
+{
+	posix.fd = open(path, flags, 0644);
+	return (posix_ok("open", posix.fd));
+}
+
+static void
+file_end(void)
+{
+	descriptor_drop(&posix.fd);
+}
+
+static bool
+made_begin(void)
+{
+	return (file_make(POSIX_FILE, PART_BYTES));
+}
+
+static bool
+read_begin(void)
+{
+	return (made_begin() && file_open(POSIX_FILE, O_RDONLY));
+}
+
+static bool
+write_begin(void)
+{
+	return (made_begin() && file_open(POSIX_FILE, O_RDWR));
+}
+
+/* open's and close's: the lowest free descriptor, which every open of the loop starts from. */
+static bool
+lowest_begin(void)
+{
+	if (!read_begin())
+		return (false);
+	posix.lowest = posix.fd;
+	file_end();
+	return (true);
+}
+
+/* The open of a batch's at'th operation: the lowest free descriptor, at above the batch's first. */
+static bool
+open_lowest(uint64_t at)
+{
+	posix.fds[at] = open(POSIX_FILE, O_RDONLY);
+	return (posix_ok("open", posix.fds[at]) && posix.fds[at] == posix.lowest + (int)at);
+}
+
+static bool
+close_opened(uint64_t at)
+{
+#if defined(ERX_PEER_SEED_LEAKED_CLOSE)
+	/* The seeded fault: one close in a hundred is skipped, so a later open answers higher. */
+	static uint64_t closes;
+
+	if (++closes % 100 == 0)
+		return (true);
+#endif
+	return (posix_ok("close", close(posix.fds[at])));
+}
+
+/* After the loop one more open still answers the lowest, so no close left a descriptor behind. */
+static bool
+lowest_check(void)
+{
+	const int fd = open(POSIX_FILE, O_RDONLY);
+	const bool lowest = fd == posix.lowest;
+
+	if (fd >= 0)
+		close(fd);
+	return (lowest);
+}
+
+static bool
+stat_right(const struct stat *st)
+{
+	return (st->st_size == (off_t)PART_BYTES && S_ISREG(st->st_mode));
+}
+
+static bool
+fstat_file(uint64_t at)
+{
+	struct stat st;
+
+	(void)at;
+	return (posix_ok("fstat", fstat(posix.fd, &st)) && stat_right(&st));
+}
+
+static bool
+stat_path(uint64_t at)
+{
+	struct stat st;
+
+	(void)at;
+	return (posix_ok("stat", stat(POSIX_FILE, &st)) && stat_right(&st));
+}
+
+static bool
+pread_first(uint64_t at)
+{
+	(void)at;
+	return (posix_full("pread", pread(posix.fd, part, posix.bytes, 0), posix.bytes));
+}
+
+static bool
+pwrite_first(uint64_t at)
+{
+	(void)at;
+	return (posix_full("pwrite", pwrite(posix.fd, pattern, posix.bytes, 0), posix.bytes));
+}
+
+/* The bytes the last pread read are the pattern. */
+static bool
+read_check(void)
+{
+	return (memcmp(part, pattern, posix.bytes) == 0);
+}
+
+/* The bytes written read back. */
+static bool
+write_check(void)
+{
+	return (pread(posix.fd, part, posix.bytes, 0) == (ssize_t)posix.bytes && read_check());
+}
+
+static bool
+big_read_begin(void)
+{
+	return (file_make(POSIX_BIG, posix.bytes) && file_open(POSIX_BIG, O_RDONLY));
+}
+
+static bool
+big_write_begin(void)
+{
+	return (file_open(POSIX_BIG, O_WRONLY | O_CREAT | O_TRUNC));
+}
+
+static bool
+copy_begin(void)
+{
+	return (file_make(POSIX_BIG, posix.bytes));
+}
+
+static bool
+read_through(uint64_t at)
+{
+	bool right = true;
+
+	(void)at;
+	for (uint64_t offset = 0; right && offset < posix.bytes; offset += PART_BYTES)
+		right = posix_full("pread", pread(posix.fd, part, PART_BYTES, (off_t)offset), PART_BYTES);
+	return (right);
+}
+
+static bool
+write_through(uint64_t at)
+{
+	bool right = true;
+
+	(void)at;
+	for (uint64_t offset = 0; right && offset < posix.bytes; offset += PART_BYTES)
+		right = posix_full("pwrite", pwrite(posix.fd, pattern, PART_BYTES, (off_t)offset), PART_BYTES);
+	return (right);
+}
+
+/* The big file copied in parts to a truncated second file, both opened and closed. */
+static bool
+copy_through(uint64_t at)
+{
+	const int from = open(POSIX_BIG, O_RDONLY), to = open(POSIX_COPY, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	bool right = posix_ok("open", from) && posix_ok("open", to);
+
+	(void)at;
+	for (uint64_t offset = 0; right && offset < posix.bytes; offset += PART_BYTES)
+		right = posix_full("read", read(from, part, PART_BYTES), PART_BYTES) &&
+		    posix_full("write", write(to, part, PART_BYTES), PART_BYTES);
+	if (from >= 0)
+		right = posix_ok("close", close(from)) && right;
+	if (to >= 0)
+		right = posix_ok("close", close(to)) && right;
+	return (right);
+}
+
+/* The copy reads back equal, and no longer. */
+static bool
+copy_check(void)
+{
+	const int from = open(POSIX_BIG, O_RDONLY), to = open(POSIX_COPY, O_RDONLY);
+	bool equal = from >= 0 && to >= 0;
+
+	for (uint64_t offset = 0; equal && offset < posix.bytes; offset += PART_BYTES)
+		equal = pread(from, part, PART_BYTES, (off_t)offset) == PART_BYTES &&
+		    pread(to, part_back, PART_BYTES, (off_t)offset) == PART_BYTES && memcmp(part, part_back, PART_BYTES) == 0;
+	equal = equal && pread(to, part_back, 1, (off_t)posix.bytes) == 0;
+	if (from >= 0)
+		close(from);
+	if (to >= 0)
+		close(to);
+	return (equal);
+}
+
+/* UNIX IPC: two pipes between A, the main thread, and its peer, a second thread. */
+
+/* Opens the pipes and starts the peer, entry, reading echo_in and answering on echo_out. */
+static bool
+pipes_peer(void (*entry)(uint64_t))
+{
+	if (!posix_ok("pipe", pipe(posix.there)) || !posix_ok("pipe", pipe(posix.back)))
+		return (false);
+	echo_in = posix.there[0];
+	echo_out = posix.back[1];
+	trip_out = posix.there[1];
+	trip_in = posix.back[0];
+	posix.peer_started = thread_try_start(&posix.peer, posix.peer_cpu, true, entry, 0);
+	return (posix.peer_started);
+}
+
+/* Closes A's end of the request pipe, which ends the peer's reads, joins it and closes the rest. */
+static void
+pipes_end(void)
+{
+	descriptor_drop(&posix.there[1]);
+	if (posix.peer_started)
+		peer_thread_join(posix.peer);
+	descriptor_drop(&posix.there[0]);
+	descriptor_drop(&posix.back[0]);
+	descriptor_drop(&posix.back[1]);
+	trip_out = trip_in = echo_in = echo_out = -1;
+	trip_polled = false;
+}
+
+static bool
+rtt_begin(void)
+{
+	if (posix.bytes > sizeof(trip_request))
+		peer_fail("a round trip is larger than its buffer");
+	trip_bytes = (size_t)posix.bytes;
+	memcpy(trip_request, pattern, trip_bytes);
+	return (pipes_peer(echo_thread));
+}
+
+static bool
+poll_begin(void)
+{
+	trip_polled = true;
+	return (rtt_begin());
+}
+
+/* pipe-stream: A's parts, each the pattern led by its number, and B's count and checksum. */
+static struct {
+	uint8_t out[PART_BYTES];
+	uint8_t in[PART_BYTES];
+	uint64_t sum;			/* the checksum of the stream A writes */
+	_Atomic uint64_t got;		/* the bytes B read of its last stream */
+	_Atomic uint64_t got_sum;	/* their checksum */
+} stream;
+
+/* The checksum of a stream so far, sum, and its next part: order matters, so a part out of place shows. */
+static uint64_t
+stream_add(uint64_t sum, const uint8_t *next)
+{
+	uint64_t word, words = 0;
+
+	for (size_t at = 0; at < PART_BYTES; at += sizeof(word)) {
+		memcpy(&word, next + at, sizeof(word));
+		words += word;
+	}
+	return (((sum << 1) | (sum >> 63)) + words);
+}
+
+/* B: reads each stream to its end, keeps its count and checksum, and answers one byte. */
+static void
+stream_reader(uint64_t index)
+{
+	const uint8_t answer = 1;
+
+	(void)index;
+	for (;;) {
+		uint64_t got = 0, sum = 0;
+
+		for (; got < posix.bytes; got += PART_BYTES) {
+			if (!read_full(echo_in, stream.in, PART_BYTES))
+				return;
+			sum = stream_add(sum, stream.in);
+		}
+		atomic_store(&stream.got, got);
+		atomic_store(&stream.got_sum, sum);
+		if (!write_full(echo_out, &answer, sizeof(answer)))
+			return;
+	}
+}
+
+static bool
+stream_begin(void)
+{
+	stream.sum = 0;
+	memcpy(stream.out, pattern, PART_BYTES);
+	for (uint64_t number = 0; number < posix.bytes / PART_BYTES; number++) {
+		memcpy(stream.out, &number, sizeof(number));
+		stream.sum = stream_add(stream.sum, stream.out);
+	}
+	atomic_store(&stream.got, 0);
+	atomic_store(&stream.got_sum, 0);
+	return (pipes_peer(stream_reader));
+}
+
+/* A: the stream in parts, then B's answer; B's count and checksum equal A's. */
+static bool
+stream_one(uint64_t at)
+{
+	uint8_t answer;
+
+	(void)at;
+	for (uint64_t number = 0; number < posix.bytes / PART_BYTES; number++) {
+		memcpy(stream.out, &number, sizeof(number));
+		if (!write_full(trip_out, stream.out, PART_BYTES))
+			return (false);
+	}
+	return (read_full(trip_in, &answer, sizeof(answer)) && answer == 1 && atomic_load(&stream.got) == posix.bytes &&
+	    atomic_load(&stream.got_sum) == stream.sum);
+}
+
+/* Threads and time. */
+
+/* cond-pingpong: A and B take turns through one mutex and two condition variables. */
+static struct {
+	pthread_mutex_t lock;
+	pthread_cond_t to_b;
+	pthread_cond_t to_a;
+	uint64_t turn;	/* odd while B's turn is due, even once B has taken it */
+	bool stop;
+	bool wrong;	/* B saw a turn out of order */
+} pingpong = { .lock = PTHREAD_MUTEX_INITIALIZER, .to_b = PTHREAD_COND_INITIALIZER,
+	.to_a = PTHREAD_COND_INITIALIZER };
+
+static void
+pingpong_b(uint64_t index)
+{
+	uint64_t next = 1;
+
+	(void)index;
+	pthread_mutex_lock(&pingpong.lock);
+	for (;;) {
+		while (pingpong.turn % 2 == 0 && !pingpong.stop)
+			pthread_cond_wait(&pingpong.to_b, &pingpong.lock);
+		if (pingpong.stop)
+			break;
+		if (pingpong.turn != next)
+			pingpong.wrong = true;
+		next = pingpong.turn + 2;
+		pingpong.turn++;
+		pthread_cond_signal(&pingpong.to_a);
+	}
+	pthread_mutex_unlock(&pingpong.lock);
+}
+
+static bool
+pingpong_begin(void)
+{
+	pingpong.turn = 0;
+	pingpong.stop = pingpong.wrong = false;
+	posix.peer_started = thread_try_start(&posix.peer, posix.peer_cpu, true, pingpong_b, 0);
+	return (posix.peer_started);
+}
+
+static void
+pingpong_end(void)
+{
+	pthread_mutex_lock(&pingpong.lock);
+	pingpong.stop = true;
+	pthread_cond_broadcast(&pingpong.to_b);
+	pthread_mutex_unlock(&pingpong.lock);
+	if (posix.peer_started)
+		peer_thread_join(posix.peer);
+}
+
+/* One sample: A's turn to B and back, every turn seen in order. */
+static bool
+pingpong_turn(uint64_t at)
+{
+	uint64_t mine;
+	bool right;
+
+	(void)at;
+	if (!pthread_ok("pthread_mutex_lock", pthread_mutex_lock(&pingpong.lock)))
+		return (false);
+	mine = ++pingpong.turn;
+	pthread_cond_signal(&pingpong.to_b);
+	while (pingpong.turn == mine)
+		pthread_cond_wait(&pingpong.to_a, &pingpong.lock);
+	right = pingpong.turn == mine + 1 && !pingpong.wrong;
+	pthread_mutex_unlock(&pingpong.lock);
+	return (right);
+}
+
+static void *
+thread_returns(void *argument)
+{
+	return (argument);
+}
+
+static bool
+create_join(uint64_t at)
+{
+	pthread_t thread;
+	void *value = NULL;
+
+	(void)at;
+	return (pthread_ok("pthread_create", pthread_create(&thread, NULL, thread_returns, &posix)) &&
+	    pthread_ok("pthread_join", pthread_join(thread, &value)) && value == &posix);
+}
+
+static bool
+sleep_once(uint64_t at)
+{
+#if defined(ERX_PEER_SEED_SHORT_SLEEP)
+	/* The seeded fault: half the sleep asked, so every sample is an early return. */
+	const uint64_t ns = posix.ns / 2;
+#else
+	const uint64_t ns = posix.ns;
+#endif
+	const struct timespec asked = { .tv_sec = (time_t)(ns / NS_PER_SECOND), .tv_nsec = (long)(ns % NS_PER_SECOND) };
+
+	(void)at;
+	return (posix_ok("nanosleep", nanosleep(&asked, NULL)));
+}
+
+/*
+ * A sleep's samples: each interval less the sleep asked, in whole ticks rounded down, so
+ * an interval under it is surely an early return, a wrong answer, which is counted and
+ * not kept.
+ */
+static void
+sleep_less(erx_bench_cell_t *cell, peer_run_t *run)
+{
+	const uint64_t asked = posix.ns * clock_hz / NS_PER_SECOND;
+	size_t kept = 0;
+
+	for (size_t at = 0; at < run->taken; at++)
+		if (samples[at] >= asked)
+			samples[kept++] = samples[at] - asked;
+	cell->early = run->taken - kept;
+	run->taken = kept;
+	if (cell->early != 0) {
+		run->status = "failed";
+		run->reason = "early return";
+	}
+}
+
+/*
+ * mutex-handoff, under the cross-CPU rule: B, on the last CPU, says it is about to lock the
+ * mutex A holds; A waits 100 us, stamps and unlocks; B stamps when its lock returns. A
+ * sample is B's stamp less A's.
+ */
+static struct {
+	pthread_mutex_t lock;
+	_Atomic uint32_t go;	/* the sample A asks B for */
+	_Atomic uint32_t about;	/* the sample B is about to lock for */
+	_Atomic uint32_t done;	/* the sample B has stamped */
+	uint32_t handed;	/* the sample A unlocked for, written under the lock */
+	uint64_t stamp;		/* B's stamp, which done publishes */
+	_Atomic bool wrong;	/* B did not get the lock A unlocked */
+} handoff = { .lock = PTHREAD_MUTEX_INITIALIZER };
+
+static void
+handoff_b(uint64_t total)
+{
+	for (uint32_t number = 1; number <= total; number++) {
+		bool locked;
+
+		while (atomic_load(&handoff.go) != number)
+			continue;
+		atomic_store(&handoff.about, number);
+		locked = pthread_mutex_lock(&handoff.lock) == 0;
+		handoff.stamp = clock_read();
+		if (!locked || handoff.handed != number)
+			atomic_store(&handoff.wrong, true);
+		if (locked)
+			pthread_mutex_unlock(&handoff.lock);
+		atomic_store(&handoff.done, number);
+	}
+}
+
+static uint64_t
+handoff_sample(uint32_t number, uint64_t wait)
+{
+	uint64_t unlocked;
+
+	if (pthread_mutex_lock(&handoff.lock) != 0)
+		peer_fail("the handoff's mutex was refused");
+	handoff.handed = number;
+	atomic_store(&handoff.go, number);
+	while (atomic_load(&handoff.about) != number)
+		continue;
+	for (const uint64_t until = clock_read() + wait; clock_read() < until;)
+		continue;
+	unlocked = clock_read();
+	pthread_mutex_unlock(&handoff.lock);
+	while (atomic_load(&handoff.done) != number)
+		continue;
+	return (handoff.stamp - unlocked);
+}
+
+/* The handoff's samples, after its warm-up, for across_cell; B is its probe's call. */
+static size_t
+handoff_samples(erx_bench_cell_t *cell)
+{
+	const uint32_t total = ERX_BENCH_FAST_WARMUP + ERX_BENCH_FAST_SAMPLES;
+	const uint64_t wait = (clock_hz + HANDOFF_WAITS_PER_SECOND - 1) / HANDOFF_WAITS_PER_SECOND;
+	pthread_t b;
+	size_t taken = 0;
+
+	atomic_store(&handoff.go, 0);
+	atomic_store(&handoff.about, 0);
+	atomic_store(&handoff.done, 0);
+	atomic_store(&handoff.wrong, false);
+	refusal.call = NULL;
+	if (!thread_try_start(&b, cpus - 1, true, handoff_b, total)) {
+		const peer_run_t run = probe_refused();
+
+		cell->status = run.status;
+		cell->reason = run.reason;
+		return (0);
+	}
+	for (uint32_t number = 1; number <= total; number++) {
+		const uint64_t sample = handoff_sample(number, wait);
+
+		if (number > ERX_BENCH_FAST_WARMUP)
+			samples[taken++] = sample;
+	}
+	peer_thread_join(b);
+	if (atomic_load(&handoff.wrong)) {
+		cell->status = "failed";
+		cell->reason = WRONG_RESULT;
+	}
+	return (taken);
+}
+
+/* Memory: areas of pages, each its own anonymous private mapping. */
+
+static size_t
+area_bytes(void)
+{
+	return ((size_t)posix.pages * page_bytes);
+}
+
+static uint8_t *
+area_page(uint64_t area, uint64_t page)
+{
+	return (vm_pages[area] + page * page_bytes);
+}
+
+static bool
+area_map(uint64_t at)
+{
+	void *const area = mmap(NULL, area_bytes(), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+
+	vm_pages[at] = area == MAP_FAILED ? NULL : area;
+	return (posix_ok("mmap", area == MAP_FAILED ? -1 : 0));
+}
+
+/* Unmaps area at, keeping its address for unmapped. */
+static bool
+area_unmap(uint64_t at)
+{
+	return (posix_ok("munmap", munmap(vm_pages[at], area_bytes())));
+}
+
+/* Every page of area at reads zero, at both ends. */
+static bool
+area_blank(uint64_t at)
+{
+	for (uint64_t page = 0; page < posix.pages; page++)
+		if (!page_blank(area_page(at, page)))
+			return (false);
+	return (true);
+}
+
+static bool
+area_blank_unmap(uint64_t at)
+{
+	const bool blank = area_blank(at);
+
+	return (area_unmap(at) && blank);
+}
+
+static bool
+munmap_act(uint64_t at)
+{
+#if defined(ERX_PEER_SEED_NOOP_MUNMAP)
+	/* The seeded fault: munmap does nothing, so the mprotect after it succeeds. */
+	(void)at;
+	return (true);
+#else
+	return (area_unmap(at));
+#endif
+}
+
+/* mprotect of area at's range fails with ENOMEM, POSIX's answer for an unmapped page. */
+static bool
+unmapped(uint64_t at)
+{
+	const int answer = mprotect(vm_pages[at], area_bytes(), PROT_READ);
+
+	if (answer == -1 && errno == ENOMEM)
+		return (true);
+	/* A refusal is kept for the probe; a success is a munmap that did nothing. */
+	(void)posix_ok("mprotect", answer);
+	return (false);
+}
+
+/* touch: a sample is a page; operation at writes page at % pages of area at / pages. */
+static uint64_t touch_written[ERX_BENCH_BATCH_MAX];
+
+static bool
+touch_prepare(uint64_t at)
+{
+	const uint64_t area = at / posix.pages;
+
+	if (at % posix.pages == 0) {
+		if (!area_map(area))
+			return (false);
+		touch_written[area] = 0;
+	}
+	touch_written[area]++;
+	return (true);
+}
+
+static bool
+touch_page(uint64_t at)
+{
+	page_fill(area_page(at / posix.pages, at % posix.pages), at);
+	return (true);
+}
+
+/* At an area's first operation, once every write is done: its pages read back, then it is unmapped. */
+static bool
+touch_undo(uint64_t at)
+{
+	const uint64_t area = at / posix.pages;
+	bool right = true;
+
+	if (at % posix.pages != 0)
+		return (true);
+	for (uint64_t page = 0; right && page < touch_written[area]; page++)
+		right = page_holds(area_page(area, page), at + page);
+	return (area_unmap(area) && right);
+}
+
+static bool
+area_fill(uint64_t at)
+{
+	for (uint64_t page = 0; page < posix.pages; page++)
+		page_fill(area_page(at, page), page);
+	return (true);
+}
+
+static bool
+map_cycle(uint64_t at)
+{
+	return (area_map(at) && area_fill(at) && area_unmap(at));
+}
+
+/* map-cycle's checks, untimed: the pages read zero, then their writes, and the range is unmapped. */
+static bool
+cycle_check(void)
+{
+	bool right = area_map(0) && area_blank(0) && area_fill(0);
+
+	for (uint64_t page = 0; right && page < posix.pages; page++)
+		right = page_holds(area_page(0, page), page);
+	return (right && area_unmap(0) && unmapped(0));
+}
+
+/* The cells, in tools/lib/erx/benches/posix.rb's order; mutex-handoff is posix_run's. */
+
+#define PARAMS(...)							\
+	.params = (const erx_bench_param_t[]){ __VA_ARGS__ },		\
+	.nparams = sizeof((const erx_bench_param_t[]){ __VA_ARGS__ }) / sizeof(erx_bench_param_t)
+#define BYTES(n)	{ .name = "bytes", .count = (n) }
+#define PAGES(n)	{ .name = "pages", .count = (n) }
+#define PEER_THREAD	{ .name = "peer", .text = "thread" }
+#define NS(n)		{ .name = "ns", .count = (n) }
+#define BIG_BYTES	UINT64_C(16777216)
+#define STREAM_BYTES	UINT64_C(67108864)
+
+static const posix_cell_t posix_cells[] = {
+	{ "getpid", "same-cpu", .op = { nothing, getpid_same, nothing }, .begin = getpid_begin },
+	{ "clock-gettime", "same-cpu", .op = { nothing, clock_forward, nothing } },
+	{ "open", "same-cpu", .op = { nothing, open_lowest, close_opened }, .begin = lowest_begin,
+	  .check = lowest_check },
+	{ "close", "same-cpu", .op = { open_lowest, close_opened, nothing }, .begin = lowest_begin,
+	  .check = lowest_check },
+	{ "fstat", "same-cpu", .op = { nothing, fstat_file, nothing }, .begin = read_begin, .end = file_end },
+	{ "stat", "same-cpu", .op = { nothing, stat_path, nothing }, .begin = made_begin },
+	{ "read", "same-cpu", PARAMS(BYTES(4096)), .op = { nothing, pread_first, nothing }, .begin = read_begin,
+	  .end = file_end, .check = read_check },
+	{ "read", "same-cpu", PARAMS(BYTES(65536)), .op = { nothing, pread_first, nothing }, .begin = read_begin,
+	  .end = file_end, .check = read_check },
+	{ "write", "same-cpu", PARAMS(BYTES(4096)), .op = { nothing, pwrite_first, nothing }, .begin = write_begin,
+	  .end = file_end, .check = write_check },
+	{ "write", "same-cpu", PARAMS(BYTES(65536)), .op = { nothing, pwrite_first, nothing }, .begin = write_begin,
+	  .end = file_end, .check = write_check },
+	{ "read-seq", "same-cpu", PARAMS(BYTES(BIG_BYTES)), .expensive = true, .op = { nothing, read_through, nothing },
+	  .begin = big_read_begin, .end = file_end },
+	{ "write-seq", "same-cpu", PARAMS(BYTES(BIG_BYTES)), .expensive = true,
+	  .op = { nothing, write_through, nothing }, .begin = big_write_begin, .end = file_end },
+	{ "copy", "same-cpu", PARAMS(BYTES(BIG_BYTES)), .expensive = true, .op = { nothing, copy_through, nothing },
+	  .begin = copy_begin, .check = copy_check },
+	{ "pipe-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
+	  .begin = rtt_begin, .end = pipes_end },
+	{ "pipe-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(65536)), .op = { nothing, round_trip, nothing },
+	  .begin = rtt_begin, .end = pipes_end },
+	{ "pipe-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
+	  .begin = rtt_begin, .end = pipes_end },
+	{ "pipe-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(65536)), .op = { nothing, round_trip, nothing },
+	  .begin = rtt_begin, .end = pipes_end },
+	{ "poll-rtt", "same-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
+	  .begin = poll_begin, .end = pipes_end },
+	{ "pipe-stream", "same-cpu", PARAMS(PEER_THREAD, BYTES(STREAM_BYTES)), .expensive = true,
+	  .op = { nothing, stream_one, nothing }, .begin = stream_begin, .end = pipes_end },
+	{ "cond-pingpong", "same-cpu", .op = { nothing, pingpong_turn, nothing }, .begin = pingpong_begin,
+	  .end = pingpong_end },
+	{ "poll-rtt", "cross-cpu", PARAMS(PEER_THREAD, BYTES(1)), .op = { nothing, round_trip, nothing },
+	  .begin = poll_begin, .end = pipes_end },
+	{ "pipe-stream", "cross-cpu", PARAMS(PEER_THREAD, BYTES(STREAM_BYTES)), .expensive = true,
+	  .op = { nothing, stream_one, nothing }, .begin = stream_begin, .end = pipes_end },
+	{ "cond-pingpong", "cross-cpu", .op = { nothing, pingpong_turn, nothing }, .begin = pingpong_begin,
+	  .end = pingpong_end },
+	{ "thread-create-join", "same-cpu", .op = { nothing, create_join, nothing } },
+	{ "nanosleep", "same-cpu", PARAMS(NS(1000000)), .expensive = true,
+	  .op = { nothing, sleep_once, nothing } },
+	{ "mmap", "same-cpu", PARAMS(PAGES(1)), .op = { nothing, area_map, area_blank_unmap } },
+	{ "mmap", "same-cpu", PARAMS(PAGES(64)), .op = { nothing, area_map, area_blank_unmap } },
+	{ "munmap", "same-cpu", PARAMS(PAGES(1)), .op = { area_map, munmap_act, unmapped } },
+	{ "munmap", "same-cpu", PARAMS(PAGES(64)), .op = { area_map, munmap_act, unmapped } },
+	{ "touch", "same-cpu", PARAMS(PAGES(64)), .op = { touch_prepare, touch_page, touch_undo } },
+	{ "map-cycle", "same-cpu", PARAMS(PAGES(64)), .op = { nothing, map_cycle, nothing }, .check = cycle_check },
+};
+
+/* Runs one cell and prints it: unsupported on one CPU across CPUs, else as its probe and run leave it. */
+static void
+posix_cell_run(const posix_cell_t *spec)
+{
+	erx_bench_cell_t cell = peer_cell(spec->operation, spec->placement);
+	peer_run_t run;
+
+	cell.params = spec->params;
+	cell.nparams = spec->nparams;
+	cell.raw = spec->expensive ? samples : NULL;
+	if (strcmp(spec->placement, "cross-cpu") == 0 && cpus == 1) {
+		cell.status = "unsupported";
+		cell.reason = ONE_CPU;
+		peer_print(cell, samples, 0);
+		return;
+	}
+	posix_load(spec);
+	refusal.call = NULL;
+	if (spec->begin != NULL && !spec->begin())
+		run = probe_refused();
+	else
+		run = spec->expensive ? expensive_run(&spec->op) : fast_run(&spec->op);
+	if (run.reason == NULL && posix.ns != 0)
+		sleep_less(&cell, &run);
+	run_print(cell, run, spec->check);
+	if (spec->end != NULL)
+		spec->end();
+}
+
+static void
+posix_run(void)
+{
+	erx_bench_pair_t pair;
+
+	for (size_t at = 0; at < sizeof(pattern); at++)
+		pattern[at] = (uint8_t)(at * 131u + (at >> 8) + 7u);
+	pin_to(0);
+	for (size_t at = 0; at < sizeof(posix_cells) / sizeof(posix_cells[0]); at++)
+		posix_cell_run(&posix_cells[at]);
+	/* unlink may be refused where the program layer lacks it; the files then stay in /tmp. */
+	(void)unlink(POSIX_FILE);
+	(void)unlink(POSIX_BIG);
+	(void)unlink(POSIX_COPY);
+	if (cpus == 1) {
+		peer_print_unsupported("mutex-handoff", "cross-cpu", ONE_CPU);
+		print_clock(NULL, 0);
+		return;
+	}
+	pair = across_cell(peer_cell("mutex-handoff", "cross-cpu"), handoff_samples);
+	print_clock(&pair, 1);
+}
+
+#if !defined(ERX_PEER_ERXOS)
 static void nullcall_run(void) { calibrated(nullcall_cells); }
 static void vm_run(void) { calibrated(vm_cells); }
 static void sched_run(void) { calibrated(share_equal); }
+#endif
 
+/* The benchmarks; posix is given the CPU count, the others ask the system. */
 static const struct {
 	const char *name;
 	void (*run)(void);
+	bool given_cpus;
 } benchmarks[] = {
-	{ "nullcall", nullcall_run },
-	{ "vm", vm_run },
-	{ "wake", wake_run },
-	{ "sched", sched_run },
-	{ "xdomain", xdomain_run },
+#if !defined(ERX_PEER_ERXOS)
+	{ "nullcall", nullcall_run, false },
+	{ "vm", vm_run, false },
+	{ "wake", wake_run, false },
+	{ "sched", sched_run, false },
+	{ "xdomain", xdomain_run, false },
+#endif
+	{ "posix", posix_run, true },
 };
+
+/* The CPU count a posix run is given, 1 to 256, or 0 for any other argument. */
+static long
+cpus_given(const char *text)
+{
+#if defined(ERX_PEER_SEED_SYSCONF_CPUS)
+	/* The seeded fault: the count the system answers, which on erXos is 1 whatever the machine. */
+	(void)text;
+	return (sysconf(_SC_NPROCESSORS_ONLN));
+#else
+	char *end;
+	unsigned long count;
+
+	if (text[0] < '1' || text[0] > '9')
+		return (0);
+	errno = 0;
+	count = strtoul(text, &end, 10);
+	return (errno == 0 && *end == '\0' && count <= 256 ? (long)count : 0);
+#endif
+}
 
 int
 main(int argc, char **argv)
 {
-	const long online = sysconf(_SC_NPROCESSORS_ONLN), page = sysconf(_SC_PAGESIZE);
-	void (*run)(void) = NULL;
+	const size_t count = sizeof(benchmarks) / sizeof(benchmarks[0]);
+	const long page = sysconf(_SC_PAGESIZE);
+	size_t chosen = count;
+	long online = 0;
 
-	for (size_t at = 0; argc == 2 && at < sizeof(benchmarks) / sizeof(benchmarks[0]); at++)
-		if (strcmp(argv[1], benchmarks[at].name) == 0) {
-			benchmark = benchmarks[at].name;
-			run = benchmarks[at].run;
-		}
-	if (run == NULL) {
+	for (size_t at = 0; argc >= 2 && at < count; at++)
+		if (strcmp(argv[1], benchmarks[at].name) == 0)
+			chosen = at;
+	if (chosen < count && argc == (benchmarks[chosen].given_cpus ? 3 : 2))
+		online = benchmarks[chosen].given_cpus ? cpus_given(argv[2]) : 1;
+	if (online == 0) {
+#if !defined(ERX_PEER_ERXOS)
 		fputs("usage: erx_peer_bench nullcall|vm|wake|sched|xdomain\n", stderr);
+#endif
+		fputs("usage: erx_peer_bench posix CPUS, CPUS from 1 to 256\n", stderr);
 		return (2);
 	}
+	if (!benchmarks[chosen].given_cpus)
+		online = sysconf(_SC_NPROCESSORS_ONLN);
 	if (online < 1 || online > 256 || page < 64)
 		peer_fail("the CPU count or the page size did not read");
+	benchmark = benchmarks[chosen].name;
 	cpus = (unsigned)online;
 	page_bytes = (size_t)page;
 	/* A write to an echo that ended fails with EPIPE, which the run reports. */
@@ -1373,7 +2558,7 @@ main(int argc, char **argv)
 	clock_choose();
 	erx_bench_read_pairs(clock_read, read_pairs, READ_PAIRS);
 	peer_say("erx: bench: timing\n");
-	run();
+	benchmarks[chosen].run();
 	peer_say("erx: bench: done\n");
 	return (0);
 }

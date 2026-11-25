@@ -269,6 +269,10 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_space/program.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_domain/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_domain/program.c'),
+                  # The peer bench's erXos build reads the counter through erx_fiasco_counter, the
+                  # one read a linked program may make (docs/design-bench.md, "The program's clock
+                  # and placement").
+                  Chokepoints::Site.new(glob: 'bench/peer/erx_peer_bench.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/boot_info_driver.c'),
                   Chokepoints::Site.new(glob: 'test/fixtures/fiasco_*_driver.c'),
                   Chokepoints::Site.new(glob: 'tools/fuzz/boot_args_fuzz.c'),

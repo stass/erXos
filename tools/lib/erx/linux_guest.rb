@@ -13,6 +13,7 @@ require_relative 'newc_archive'
 require_relative 'output_directory'
 require_relative 'peer_bench'
 require_relative 'platform'
+require_relative 'posix_bench'
 require_relative 'qemu'
 require_relative 'side_lock'
 
@@ -35,13 +36,18 @@ module Erx
     TARGET = 'aarch64-linux-musl'
     # The kernel's own defaults, plus its console and an immediate end on a panic.
     COMMAND_LINE = 'console=ttyAMA0 panic=-1'
-    PEER = 'bench/peer/erx_peer_bench.c'
+    PEER = PeerBench::SOURCE
     INIT = 'bench/linux/init.c'
     # The guest's deadline: /init kills the program this long after starting it, later
     # than the program's own deadline, so the kill is only the backstop for a program its
     # alarm did not end. QEMU's deadline for the program's end is
     # NativeBench::DEADLINE_MARGIN_SECONDS more, so /init powers the machine off first.
     DEADLINE_SECONDS = PeerBench::RUN_DEADLINE_SECONDS + 10
+    # The code-generation flags, erXos's programs' own without their target, so the program
+    # Linux runs is generated as erXos's is (docs/design-bench.md, "Fairness").
+    CODE_FLAGS = NativeRoot::CODE_FLAGS.grep_v(/\A--target=/).freeze
+    # The boots the guest runs the program for: the native set's counterparts, and posix.
+    BOOTS = %w[native posix].freeze
 
     module_function
 
@@ -57,11 +63,12 @@ module Erx
     end
 
     # The initramfs: /init, the program it runs, and the directories and console the
-    # kernel and both need.
+    # kernel and both need; /tmp holds a posix run's files.
     def initramfs(init:, peer:)
       NewcArchive.write([NewcArchive::Entry.directory('dev'), NewcArchive::Entry.directory('dev/shm'),
                          NewcArchive::Entry.character('dev/console', major: 5, minor: 1),
-                         NewcArchive::Entry.directory('proc'), NewcArchive::Entry.file('init', init, mode: 0o755),
+                         NewcArchive::Entry.directory('proc'), NewcArchive::Entry.directory('tmp'),
+                         NewcArchive::Entry.file('init', init, mode: 0o755),
                          NewcArchive::Entry.file('erx_peer_bench', peer, mode: 0o755)])
     end
 
@@ -89,15 +96,25 @@ module Erx
                    'peer_flags' => c_flags('MUSL_DEV', peer_flags).join(' ') } }
     end
 
+    # What QEMU boots a run of benchmark on cpus CPUs with: the program's arguments after the
+    # kernel's, which /init hands on, and the memory, which a posix run's /tmp adds to as it
+    # does erXos's posix image's (PosixBench::TMP_MIB).
+    def machine(benchmark, cpus:)
+      tmp = PeerBench::BOOTS.fetch(benchmark) == 'posix' ? PosixBench::TMP_MIB : 0
+      { command_line: [COMMAND_LINE, '--', *PeerBench.arguments(benchmark, cpus: cpus)].join(' '),
+        memory_mib: NativeBench::MEMORY_MIB + tmp }
+    end
+
     # One boot of the guest for benchmark at cpus CPUs, its serial log in directory.
     def boot(root:, runner:, built:, benchmark:, cpus:, accel: 'hvf', directory:)
       checkpoints = [{ name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
                      { name: 'bench-done', pattern: /\Aerx: bench: done/n,
                        seconds: DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
+      machine = machine(benchmark, cpus: cpus)
       Qemu.new(root: root, runner: runner).run(
-        platform: Platform.development(root), accel: accel, cpus: cpus, memory_mib: NativeBench::MEMORY_MIB,
+        platform: Platform.development(root), accel: accel, cpus: cpus, memory_mib: machine.fetch(:memory_mib),
         image: built.fetch(:kernel), initrd: built.fetch(:initrd), hostlink: QemuPlan::NO_HOSTLINK,
-        command_line: "#{COMMAND_LINE} -- #{benchmark}", checkpoints: checkpoints, machine_end: true, directory: directory
+        command_line: machine.fetch(:command_line), checkpoints: checkpoints, machine_end: true, directory: directory
       )
     end
 
@@ -107,7 +124,7 @@ module Erx
 
     # The compiler's flags for a program of the guest; usr is musl-dev's usr tree.
     def c_flags(usr, flags)
-      ["--target=#{TARGET}", '-std=c17', '-O2', '-pthread', '-mno-outline-atomics', '-nostdinc',
+      ["--target=#{TARGET}", *CODE_FLAGS, '-pthread', '-nostdinc',
        '-isystem', File.join(usr, 'include'), *flags]
     end
 
@@ -141,7 +158,7 @@ module Erx
     end
     private_class_method :pin_of, :c_flags, :compile, :compiler, :compiler_version
 
-    # Linux's guest for the native boot (BenchSystem): one boot of the kernel and its
+    # Linux's guest for one boot (BenchSystem), native or posix: one boot of the kernel and its
     # initramfs, whose erx_peer_bench prints a BENCH line for every cell of the boot, a
     # counterpart's timing or unsupported with its reason, and one CLOCK line, judged by
     # BenchMeasurement.boot as erXos's are (PeerBench.asked). It boots in one CPU and in
@@ -150,13 +167,17 @@ module Erx
     # program reports every cell of the boot, the cells a session asks only decide that it
     # boots, and the record keeps each line the guest printed.
     class Guest
-      def initialize(root:, runner:)
+      def initialize(root:, runner:, boot: 'native')
+        raise Error, "linux guest: no #{boot} boot" unless BOOTS.include?(boot)
+
         @root = File.expand_path(root)
         @runner = runner
+        @boot = boot
       end
 
+      attr_reader :boot
+
       def system = 'linux'
-      def boot = 'native'
       def forms(cpus) = [1, cpus].uniq
 
       def refusal(profile)
@@ -181,7 +202,8 @@ module Erx
         answer = BenchMeasurement.boot(lines, PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))
         BenchSystem::Booted.new(
           clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
-          environment: { 'memory_mib' => NativeBench::MEMORY_MIB, 'machine' => 'virt',
+          environment: { 'memory_mib' => LinuxGuest.machine(benchmark.name, cpus: cpus).fetch(:memory_mib),
+                         'machine' => 'virt',
                          'qemu' => report['qemu_version'] }.compact,
           subject: @built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
         )
