@@ -48,24 +48,41 @@ fresh() ->
       passkey => 123456}.
 
 round(Core, Fresh) ->
-    Input = case rand:uniform(10) of
-                %% A verdict or a withdrawal for one of the first requests, current or late.
-                1 -> {admission, rand:uniform(4), lists:nth(rand:uniform(5), [closed, waiting, bonded, {open, display, Fresh},
-                                                                              {open, nodisplay, Fresh}])};
-                2 -> lists:nth(rand:uniform(3), [encrypted, timeout, {withdraw, rand:uniform(4)}]);
-                3 -> {pdu, {pairing_public_key, key(Fresh)}};
-                4 -> {pdu, {pairing_request, written_request()}};
-                _ -> {pdu, decoded(input())}
-            end,
     %% A responder that has timed out ignores everything, so it starts again.
-    step(Input, case rand:uniform(50) of 1 -> core(); _ -> Core end).
+    Current = case rand:uniform(50) of 1 -> core(); _ -> Core end,
+    case rand:uniform(11) of
+        5 -> pairing(Fresh);
+        N -> element(2, step(input(N, Fresh), Current))
+    end.
+
+input(1, Fresh) ->
+    %% A verdict or a withdrawal for one of the first requests, current or late.
+    {admission, rand:uniform(4), lists:nth(rand:uniform(5), [closed, waiting, bonded, {open, display, Fresh},
+                                                             {open, nodisplay, Fresh}])};
+input(2, _Fresh) -> lists:nth(rand:uniform(3), [encrypted, timeout, {withdraw, rand:uniform(4)}]);
+input(3, Fresh) -> {pdu, {pairing_public_key, key(Fresh)}};
+input(4, _Fresh) -> {pdu, {pairing_request, written_request()}};
+input(_, _Fresh) -> {pdu, decoded(input())}.
+
+%% A pairing as far as the phone's public key, which the step that takes the request
+%% and the window's opening of it make possible: a fresh responder, a request, the
+%% window open under the request's own tag, then a public key of key/1's kinds. Chance
+%% inputs reach the key's checks only when they happen to be in this order.
+pairing(Fresh) ->
+    {Asked, Requested} = step({pdu, {pairing_request, written_request()}}, core()),
+    Mode = lists:nth(rand:uniform(2), [display, nodisplay]),
+    Opened = case [Tag || {admit, Tag} <- Asked] of
+                 [Tag] -> element(2, step({admission, Tag, {open, Mode, Fresh}}, Requested));
+                 [] -> Requested
+             end,
+    element(2, step({pdu, {pairing_public_key, key(Fresh)}}, Opened)).
 
 step(Input, Core) ->
     {Actions, Next} = try erx_smp_core:step(Input, Core)
                       catch Class:Reason -> verdict({core_raised, Input, Class, Reason})
                       end,
     [erx_smp:decode(erx_smp:encode(Pdu)) =:= Pdu orelse verdict({sent_wrongly, Pdu}) || {send, Pdu} <- Actions],
-    Next.
+    {Actions, Next}.
 
 %% A public key: random coordinates, a point moved off the curve, the debug key,
 %% erXos's own, or a fresh one on the curve.

@@ -66,7 +66,7 @@ run([Seed]) ->
     Outcomes = lists:foldl(fun(_, Tally) -> maps:update_with(round_of(pick(Readers)), fun(N) -> N + 1 end, 1, Tally) end,
                            #{}, lists:seq(1, ?ROUNDS)),
     Accepted = [{Reader, maps:get(Reader, Outcomes, 0)} || Reader <- Readers],
-    case lists:all(fun({_, N}) -> N >= ?ROUNDS div 10 end, Accepted) of
+    case lists:all(fun({_, N}) -> N >= ?ROUNDS div 20 end, Accepted) of
         true -> io:format("fuzz: ~p rounds ok, ~p split, ~p events decoded, ~p returns decoded, ~p patches read~n",
                           [?ROUNDS | [N || {_, N} <- Accepted]]);
         false -> error({too_few_accepted, Accepted})

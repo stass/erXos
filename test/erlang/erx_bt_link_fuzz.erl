@@ -28,6 +28,7 @@
 -define(ROUNDS, 20000).
 -define(SHARE, 3).
 -define(QUEUE, 16).                       % bt_notify_queue
+-define(SUBSCRIBABLE, [{svc, enc_n}, {svc, ind}]).
 -define(KEYS, [{svc, open_w}, {svc, enc_n}, {svc, ind}, {gap, device_name}]).
 
 run([Seed]) ->
@@ -64,7 +65,7 @@ core(Table) ->
 round({Core, _, Owed} = Link, Now, Table) ->
     At = Now + rand:uniform(3000) - 1,
     Input = case rand:uniform(16) of
-                N when N =< 10 -> {hci, {acl, boundary(), packet()}};
+                N when N =< 10 -> {hci, {acl, boundary(), packet(Table)}};
                 11 -> {hci, lists:nth(rand:uniform(4), [{le_long_term_key_request, 1, <<0:64>>, 0},
                                                        {le_long_term_key_request, 1, rand:bytes(8), rand:uniform(65536) - 1},
                                                        {encryption_change, status(), 1, rand:uniform(4) - 1},
@@ -127,41 +128,52 @@ boundary() ->
 
 status() -> case rand:uniform(3) of 1 -> rand:uniform(256) - 1; _ -> 0 end.
 
-%% An ACL packet's data: a whole frame, a frame cut or lengthened, a frame's header with a
-%% random length, a piece of one, or random bytes.
-packet() ->
-    Frame = frame(),
-    case rand:uniform(6) of
-        1 -> Frame;
-        2 -> Frame;
-        3 -> binary:part(Frame, 0, rand:uniform(byte_size(Frame)) - 1);
-        4 -> <<Frame/binary, (rand:bytes(rand:uniform(8)))/binary>>;
-        5 -> <<(rand:uniform(300)):16/little, (cid()):16/little, (rand:bytes(rand:uniform(40) - 1))/binary>>;
-        6 -> rand:bytes(rand:uniform(60) - 1)
+%% An ACL packet's data: mostly a whole frame, because a link that reads a frame that is
+%% cut or overruns ends, and the checks of a link that goes on (the packets outstanding
+%% at its share, say) need a link that lives; else a frame cut or lengthened, a frame's
+%% header with a random length, or random bytes.
+packet(Table) ->
+    Frame = frame(Table),
+    case rand:uniform(20) of
+        N when N =< 16 -> Frame;
+        17 -> binary:part(Frame, 0, rand:uniform(byte_size(Frame)) - 1);
+        18 -> <<Frame/binary, (rand:bytes(rand:uniform(8)))/binary>>;
+        19 -> <<(rand:uniform(300)):16/little, (cid()):16/little, (rand:bytes(rand:uniform(40) - 1))/binary>>;
+        20 -> rand:bytes(rand:uniform(60) - 1)
     end.
 
-frame() ->
+frame(Table) ->
     Cid = cid(),
-    Payload = payload(Cid),
+    Payload = payload(Cid, Table),
     <<(byte_size(Payload)):16/little, Cid:16/little, Payload/binary>>.
 
 cid() -> lists:nth(rand:uniform(6), [4, 4, 5, 6, 6, rand:uniform(65536) - 1]).
 
 %% A payload for its channel: an ATT request or command on the attribute table's handles,
 %% an SMP command of a random code, a signaling command, or random bytes.
-payload(4) ->
-    Handle = rand:uniform(14),
+%% A handle of the table or past it, half the time the configuration of a characteristic
+%% that can be subscribed to, so that a write of 1 or 2 to it, which changes the link's
+%% configuration, is not left to the chance of one handle in fourteen.
+handle(Table) ->
+    case rand:uniform(2) of
+        1 -> rand:uniform(14);
+        2 -> {ok, #{configuration := Handle}} = erx_gatt_db:characteristic(lists:nth(rand:uniform(2), ?SUBSCRIBABLE), Table),
+             Handle
+    end.
+
+payload(4, Table) ->
+    Handle = handle(Table),
     lists:nth(rand:uniform(6), [<<16#12, Handle:16/little, (rand:bytes(rand:uniform(24) - 1))/binary>>,
                                 <<16#52, Handle:16/little, (rand:bytes(rand:uniform(24) - 1))/binary>>,
                                 <<16#12, Handle:16/little, (rand:uniform(3) - 1):16/little>>,
                                 <<16#0A, Handle:16/little>>, <<16#02, (rand:uniform(300)):16/little>>,
                                 <<16#1E>>]);
-payload(6) ->
+payload(6, _Table) ->
     <<(rand:uniform(16)), (rand:bytes(rand:uniform(66) - 1))/binary>>;
-payload(5) ->
+payload(5, _Table) ->
     Data = rand:bytes(rand:uniform(30) - 1),
     <<(rand:uniform(32)), (rand:uniform(256) - 1), (byte_size(Data)):16/little, Data/binary>>;
-payload(_Cid) ->
+payload(_Cid, _Table) ->
     rand:bytes(rand:uniform(40) - 1).
 
 verdict(Term) ->

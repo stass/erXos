@@ -66,10 +66,12 @@ decode(Blob) ->
     end,
     Result.
 
+%% A generation is positive and its name is written back as it was read: a state file's own.
 generation(Name) ->
     case try erx_bt_state_file:generation(Name) catch Class:Reason -> verdict({raised, Class, Reason, Name}) end of
-        {state, N} when is_integer(N), N > 0 -> "bonds." ++ integer_to_list(N) =:= Name orelse verdict({renamed, Name});
-        {new, N} when is_integer(N), N > 0 -> "bonds." ++ integer_to_list(N) ++ ".new" =:= Name orelse verdict({renamed, Name});
+        {state, N} when is_integer(N) -> N > 0 andalso "bonds." ++ integer_to_list(N) =:= Name orelse verdict({renamed, Name});
+        {new, N} when is_integer(N) ->
+            N > 0 andalso "bonds." ++ integer_to_list(N) ++ ".new" =:= Name orelse verdict({renamed, Name});
         other -> ok;
         Other -> verdict({read_as, Other, Name})
     end.
