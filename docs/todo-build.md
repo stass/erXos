@@ -1130,6 +1130,19 @@ design does not have, to be deleted so no side-by-side table can show it under s
   Drop the `U` (llvm-ar's default is `D`), updating the test that pins the flags
   (`test/host/fiasco_test.rb`), so a reproducibility check can compare the
   archives whole.
+* [Low] Fiasco kernel builds, `Fiasco#build_kernel`
+  (`tools/lib/erx/fiasco.rb`): `bootstrap.fiasco.pre.o`, under
+  `build/fiasco/kernel` and `build/fiasco/kernel-release`, holds the
+  checkout's absolute build directory in its debug information
+  (`.debug_str`, `.debug_line_str`), so its bytes depend on where the tree
+  is checked out, even with that path replaced by `${PROJECT_ROOT}`. The
+  kernel, `bootstrap.fiasco.bin` and the boot image carry no path, but the
+  generation profile's pin of the object (`config/provenance/fiasco-generation.json`)
+  matches only the checkout that recorded it, every other checkout's
+  development audit lists it under `host_generated`, and a
+  reproducibility check that built in two checkouts would see them differ.
+  Build bootstrap with `-ffile-prefix-map` mapping the build directory to
+  a fixed name, then refresh the pin.
 * [Medium] build gates, the published media and the Doom example
   (`ProductionImage::MediumKind.published`): only `tools/erx pack
   --published` (`make pack`) builds the published QEMU medium and the Pi 4
