@@ -24,7 +24,9 @@ module ErxBootKeysFuzz
             'when Name =:= ?ERX_SSH_ED25519_NAME_BYTES ->'
   UNCHECKED = 'key_blob(<<_:19/binary, Key:32/binary>>) ->'
   DEADLINE_SECONDS = '120'
-  VERDICT = 'not_a_key_blob'
+  # The copy's blob that is no key is caught by the judge of what a round's answer is, or by
+  # the comparison with what the file was written to say, whichever the round order meets first.
+  VERDICT = /\{(?:not_a_key_blob|differs),/
 
   module_function
 
@@ -36,7 +38,7 @@ module ErxBootKeysFuzz
     output, status = fuzz(core, seed: seed)
     abort(output) unless status.success? && output.match?(/^fuzz: \d+ rounds ok, \d+ accepted$/)
     output, status = fuzz(core.sub(CHECKED, UNCHECKED), seed: seed)
-    abort("a key taken without its blob's layout checked passed:\n#{output}") if status.success? || !output.include?(VERDICT)
+    abort("a key taken without its blob's layout checked passed:\n#{output}") if status.success? || !output.match?(VERDICT)
     puts 'erx_boot_keys returns only ssh-ed25519 key blobs, and the unchecked copy does not pass'
   end
 
