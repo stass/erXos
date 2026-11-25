@@ -87,7 +87,7 @@ goes to the document of the subsystem its component pointer names.
 * [Drivers and platforms](docs/todo-drivers.md#bugs-by-subsystem): drivers and the device layer: PCIe, DMA, the device tree, GENET, SD, UART, the platforms and boards.
   54 items (2 High, 29 Medium, 23 Low).
 * [Shell and programs](docs/todo-shell.md#bugs-by-subsystem): the command shell (rc), programs, the console line and the terminal.
-  85 items (42 Medium, 43 Low).
+  88 items (44 Medium, 44 Low).
 * [Sessions and SSH](docs/todo-session.md#bugs-by-subsystem): sessions, SSH, the vault and login.
   61 items (1 High, 38 Medium, 22 Low).
 * [Apps and the start service](docs/todo-apps.md#bugs-by-subsystem): applications and packages, the demo apps.

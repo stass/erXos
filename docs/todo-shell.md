@@ -94,6 +94,14 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
   syntax prints `* Bad format function` and resets the setting for the whole node. Inferred from
   the source, not run. Settled by setting a formatter and typing `x=(a b c)` at rc; fix: format
   only a group whose shell is the Erlang shell.
+* [Medium] programs, a second request on a waiting reply slot (`erlang/apps/erx/src/erx_prog_handler_core.erl`,
+  `relay/4`, `open/6`): the core takes a request on a slot that already waits and overwrites the
+  slot's pending entry, so a program that sends `lopen` N times on one slot before its answer passes
+  the `emfile` count each time (it sees one pending open) and starts N open-file descriptions
+  (`erx_file_description`), of which the first answer is adopted and the rest are dropped while their
+  descriptions live until the handler ends. design-programs.md promises one request in flight per
+  reply slot; fix: refuse a frame on a slot in `pending`, at frame dispatch (the `piping` and `first`
+  states hold slots too), as a frame the grammar refuses is refused, with a test that sends two.
 * [Low] programs, a narrowing to `/dev` (`erlang/apps/erx/src/erx_prog_handler_core.erl`,
   `narrowed_at/4`): where no entry of the starter's table stands at `/dev`, `within [/dev]` makes
   an entry at `/dev` on the provider above it, such as the release slice's root, so the program

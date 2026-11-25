@@ -778,13 +778,17 @@ from_program(#core{opens = Opens} = C, {erx_prog, _, Slot, {file, clunk, Open}})
 %% An lopen or an lcreate, relayed to be resolved over the program's
 %% namespace from its working directory, or refused; or, for the program's
 %% first open of /dev/draw, its window opened first.
-open(#core{opens = Opens, pending = Pending} = C, Slot, Case, Path, Flags, Mode) ->
-    Opening = length([P || P <- maps:values(Pending), P =:= file_lopen orelse P =:= file_lcreate]),
+open(#core{opens = Opens, pending = Pending, first = First} = C, Slot, Case, Path, Flags, Mode) ->
+    %% The opens held and those still pending, each of which may become one:
+    %% the relayed ones, and a first open of /dev/draw waiting for its window.
+    Taken = map_size(Opens)
+        + length([P || P <- maps:values(Pending), P =:= file_lopen orelse P =:= file_lcreate])
+        + length([Waiting || {opening, _, _, _, _, _, _} = Waiting <- [First]]),
     if
         Flags band bnot ?OPEN_FLAGS =/= 0; Flags band ?ERX_P9_O_ACCMODE =:= ?ERX_P9_O_ACCMODE;
         Case =:= file_lcreate, Flags band ?EXCL_DIRECTORY =:= ?EXCL_DIRECTORY ->
             file_reply(C, Case, Slot, {error, einval});
-        map_size(Opens) + Opening >= ?ERX_PROG_FDS_MAX ->
+        Taken >= ?ERX_PROG_FDS_MAX ->
             file_reply(C, Case, Slot, {error, emfile});
         true ->
             case first_draw(C, Path, Flags) of
@@ -873,10 +877,16 @@ relay(#core{pending = Pending} = C, Slot, Waiting, Action) ->
 
 %% An open's answer: the lowest open number free names the description.
 opened(#core{opens = Opens} = C, Slot, Case, {ok, Desc}) ->
-    Open = hd([N || N <- lists:seq(0, ?ERX_PROG_FDS_MAX - 1), not is_map_key(N, Opens)]),
+    Open = lowest_free(0, Opens),
     file_reply(C#core{opens = Opens#{Open => Desc}}, Case, Slot, {ok, Open});
 opened(C, Slot, Case, {error, Errno}) ->
     file_reply(C, Case, Slot, {error, Errno}).
+
+%% The lowest open number from N up that Opens does not hold. open/6 counts
+%% every open held or on its way and refuses one at ?ERX_PROG_FDS_MAX, so the
+%% scan stops below that bound.
+lowest_free(N, Opens) when is_map_key(N, Opens) -> lowest_free(N + 1, Opens);
+lowest_free(N, _Opens) -> N.
 
 %% A read's, a write's, a seek's, a getattr's or a clunk's answer. A read's bytes are
 %% copied into the data slot, and the copy's answer, file_copied, gives the

@@ -178,7 +178,18 @@ class ErxProgHandlerTest < Minitest::Test
                  replacement: '#{point := Point} -> length(Point) =< 1', caught_by: 'first_window_test_'),
     'a check that refuses only an entry exactly at an export name' =>
       Mutant.new(file: CORE, original: 'lists:any(fun(Name) -> lists:prefix(Name, Point) end, Names)',
-                 replacement: 'lists:member(Point, Names)', caught_by: 'export_names_test_')
+                 replacement: 'lists:member(Point, Names)', caught_by: 'export_names_test_'),
+    'an open number scan that starts past 0' =>
+      Mutant.new(file: CORE, original: 'Open = lowest_free(0, Opens),', replacement: 'Open = lowest_free(1, Opens),',
+                 caught_by: 'opens_take_the_lowest_free_number_in_every_order_test_'),
+    'a first open of /dev/draw waiting for its window that the open bound does not count' =>
+      Mutant.new(file: CORE, original: '+ length([Waiting || {opening, _, _, _, _, _, _} = Waiting <- [First]]),',
+                 replacement: '+ 0 * length([First]),',
+                 caught_by: 'an_open_waiting_for_its_window_counts_toward_the_bound_test'),
+    'a clunk that does not free its number' =>
+      Mutant.new(file: CORE, original: '{Desc, Rest} -> relay(C#core{opens = Rest}, Slot, file_clunk,',
+                 replacement: '{Desc, _Rest} -> relay(C, Slot, file_clunk,',
+                 caught_by: 'opens_take_the_lowest_free_number_in_every_order_test_')
   }.freeze
 
   # Seeded runs at once: each compiles and runs the suites in its own directory; one after

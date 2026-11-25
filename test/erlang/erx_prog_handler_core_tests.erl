@@ -182,6 +182,16 @@ opens_past_the_descriptor_bound_are_emfile_test() ->
     ?assertMatch({_, [?ANSWER(7, {error, emfile})]},
                  erx_prog_handler_core:step(Full, ?ASK(7, {file, lopen, <<"x">>, 0}))).
 
+%% A first open of /dev/draw waits for its window outside the pending
+%% requests and still counts toward the bound: with 1023 opens held and it
+%% waiting, another open is emfile.
+an_open_waiting_for_its_window_counts_toward_the_bound_test() ->
+    Held = lists:foldl(fun(N, C) -> opened(C, 7, N) end, running(), lists:seq(1, 1023)),
+    {Waiting, [{first_window, none}]} =
+        erx_prog_handler_core:step(Held, ?ASK(9, {file, lopen, <<"/dev/draw">>, 2})),
+    ?assertMatch({_, [?ANSWER(8, {error, emfile})]},
+                 erx_prog_handler_core:step(Waiting, ?ASK(8, {file, lopen, <<"y">>, 0}))).
+
 read_copies_then_answers_its_count_test() ->
     C = opened(running(), 7, desc),
     {C1, Relayed} = erx_prog_handler_core:step(C, ?ASK(3, {file, read, 0, 4, 2})),
@@ -217,6 +227,50 @@ clunk_takes_the_open_out_at_once_test() ->
     ?assertEqual([{clunk, desc, 3}], Relayed),
     ?assertEqual([?ANSWER(3, ok)], Answer),
     ?assertEqual({error, ebadf}, answer(erx_prog_handler_core:step(sent(C2), ?ASK(4, {file, read, 0, 1, 0})))).
+
+%% A clunk frees its open's number, and the next open takes the lowest number
+%% free: 0, 1 and 2 open, 1 then 0 clunked, and the next three opens are 0, 1
+%% and 3.
+clunked_numbers_are_reused_lowest_first_test() ->
+    C3 = lists:foldl(fun(Desc, C) -> opened(C, 7, Desc) end, running(), [d0, d1, d2]),
+    C5 = lists:foldl(fun(Open, C) -> clunked(C, Open) end, C3, [1, 0]),
+    {C6, Open0} = lopen_answered(C5, e0),
+    {C7, Open1} = lopen_answered(C6, e1),
+    {_, Open3} = lopen_answered(C7, e2),
+    ?assertEqual([0, 1, 3], [Open0, Open1, Open3]).
+
+%% Every sequence of opens and clunks up to seven steps, a clunk of each
+%% number up to 4 whether open or not, against the rule written as a scan of
+%% a plain map: an open takes the lowest number the table does not hold, and
+%% a clunk relays the description its number names, or is ebadf. A step's
+%% description is the depth left, which only falls along a path, so no two
+%% descriptions on one path are alike.
+opens_take_the_lowest_free_number_in_every_order_test_() ->
+    {timeout, 60, fun() -> ?assertEqual(ok, opens_walk(7, running(), #{})) end}.
+
+opens_walk(0, _C, _Oracle) ->
+    ok;
+opens_walk(Depth, C, Oracle) ->
+    lists:foreach(fun(Step) ->
+                          {C1, Oracle1} = opens_step(Step, Depth, C, Oracle),
+                          opens_walk(Depth - 1, C1, Oracle1)
+                  end, [open | [{clunk, N} || N <- lists:seq(0, 4)]]).
+
+opens_step(open, Desc, C, Oracle) ->
+    {C1, Open} = lopen_answered(C, Desc),
+    ?assertEqual(hd([N || N <- lists:seq(0, map_size(Oracle)), not is_map_key(N, Oracle)]), Open),
+    {C1, Oracle#{Open => Desc}};
+opens_step({clunk, N}, _Desc, C, Oracle) ->
+    {C1, Relayed} = erx_prog_handler_core:step(C, ?ASK(3, {file, clunk, N})),
+    case maps:take(N, Oracle) of
+        {Desc, Oracle1} ->
+            ?assertEqual([{clunk, Desc, 3}], Relayed),
+            {C2, [?ANSWER(3, ok)]} = erx_prog_handler_core:step(C1, {file_done, 3, ok}),
+            {sent(C2), Oracle1};
+        error ->
+            ?assertEqual([?ANSWER(3, {error, ebadf})], Relayed),
+            {sent(C1), Oracle}
+    end.
 
 unknown_open_is_ebadf_test_() ->
     [?_assertMatch({_, [?ANSWER(3, {error, ebadf})]},
@@ -807,6 +861,18 @@ opened(C, Slot, Desc) ->
 %% C once the frame out was taken.
 sent(C) ->
     element(1, erx_prog_handler_core:step(C, {sent, ok})).
+
+%% C with an lopen answered with Desc, and the open number the answer named.
+lopen_answered(C, Desc) ->
+    {C1, _} = erx_prog_handler_core:step(C, ?ASK(7, {file, lopen, <<"x">>, 0})),
+    {C2, [?ANSWER(7, {ok, Open})]} = erx_prog_handler_core:step(C1, {file_opened, 7, {ok, Desc}}),
+    {sent(C2), Open}.
+
+%% C with Open clunked and its clunk answered.
+clunked(C, Open) ->
+    {C1, [{clunk, _, 3}]} = erx_prog_handler_core:step(C, ?ASK(3, {file, clunk, Open})),
+    {C2, [?ANSWER(3, ok)]} = erx_prog_handler_core:step(C1, {file_done, 3, ok}),
+    sent(C2).
 
 %% The reply a step sent.
 answer({_, [{send, {erx_prog, 1, _Slot, Reply}}]}) ->
