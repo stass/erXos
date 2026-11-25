@@ -215,6 +215,7 @@ master() ->
     the_facet_bounds_messages(Console),
     the_menu_lists_the_principals_live_sessions(),
     a_session_that_ends_gives_the_line_back(Console),
+    a_facet_that_ends_first_waits_for_the_domain(Console),
     a_tty_names_itself(Console),
     the_end_line_is_escaped(Console),
     the_facets_end_with_the_console(Console, Facet).
@@ -511,6 +512,36 @@ a_session_that_ends_gives_the_line_back(Console) ->
     type(<<"d\r">>),
     {ok, _} = await(<<"sys:d">>),
     ?assertEqual({error, unknown}, erx_console:connect(9)).
+
+%% No order holds between the facet's end and the domain pid's, two senders, so the
+%% facet's may reach the console first, though the facet ends only after the domain pid
+%% has. It says only domain_down; the line still says how the domain ended, from the
+%% domain pid's end. The facet here ends with a domain pid of its own, and both ends
+%% are queued while the console is suspended, the facet's first, so the console takes
+%% the facet's when the session's domain pid has already ended.
+a_facet_that_ends_first_waits_for_the_domain(Console) ->
+    Domain = spawn(fun() -> receive after infinity -> ok end end),
+    Linked = spawn(fun() -> receive after infinity -> ok end end),
+    Facet = facet(15, Linked, Console),
+    ok = erx_console:add_session(15, session(<<"root_5">>, 1, Domain)),
+    ok = tty_named(Facet),
+    tty_output(Facet, 0, <<"S15">>),
+    ok = erx_console:connect(15),
+    ?assertEqual({tty_size, 24, 80}, from_console()),
+    {ok, _} = await(<<"S15">>),
+    ?assertEqual({tty_taken, 0}, from_console()),
+    true = erlang:suspend_process(Console),
+    ended(Linked, Facet),
+    ended(Domain, Domain),
+    true = erlang:resume_process(Console),
+    {ok, Seen} = await(<<"session root_5 ended: ">>),
+    ?assertMatch({_, _}, binary:match(Seen, <<"session root_5 ended: {halt,3}\r\n">>)).
+
+%% Domain pid Pid ended with {halt, 3}, once Watched, which ends with it, has ended.
+ended(Pid, Watched) ->
+    Monitor = monitor(process, Watched),
+    exit(Pid, {domain_down, 15, {halt, 3}}),
+    receive {'DOWN', Monitor, process, _, _} -> ok after ?WAIT_MS -> error(timeout) end.
 
 %% A session the console did not hear a tty for names it through its facet: the first
 %% {tty_open, Tty} names it when Tty is the grantee's own, which the console takes every

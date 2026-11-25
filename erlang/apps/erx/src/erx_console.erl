@@ -91,7 +91,8 @@
 %% each session by domain id, the master's state (erx_tty_master, which checks every
 %% message); the name, principal and domain pid that add_session/2 names, whose domain
 %% pid it monitors; the tty, which names itself through the facet ({tty_open, Tty}, a pid
-%% of the facet's grantee); and a monitor of the facet. Either end is the session's.
+%% of the facet's grantee); and a monitor of the facet. Either end is the session's;
+%% when both have ended, the domain pid's, which says how the domain ended.
 %%
 %% It starts the sessions of its line's principal (start_session/2): at boot, once the
 %% domain service runs (login/0, boot step 4 of docs/design-system.md), and from the
@@ -753,9 +754,14 @@ info({erx_tty_message, {Facet, _Tag} = From, Domain, Message}, State) ->
     {noreply, Next};
 info({'DOWN', Monitor, process, _Pid, Reason}, State = #state{sessions = Sessions}) ->
     %% A session's domain pid or its console facet, which ends with its domain, has ended:
-    %% so has the session.
-    case [Domain || Domain := Session <- Sessions, lists:member(Monitor, monitors(Session))] of
-        [Domain] -> {noreply, session_ended(Domain, Reason, State)};
+    %% so has the session, unless its domain pid's own end is still to come
+    %% (awaits_domain_end/2).
+    case [{Domain, Session} || Domain := Session <- Sessions, lists:member(Monitor, monitors(Session))] of
+        [{Domain, Session}] ->
+            case awaits_domain_end(Monitor, Session) of
+                true -> {noreply, State};
+                false -> {noreply, session_ended(Domain, Reason, State)}
+            end;
         [] -> {noreply, State}
     end;
 info({erx_console_principal, Principal}, State = #state{principal = unknown}) ->
@@ -985,9 +991,18 @@ with_session(Domain, Update, State = #state{sessions = Sessions}) ->
             master => erx_tty_master:new()},
     State#state{sessions = Sessions#{Domain => Update(maps:get(Domain, Sessions, New))}}.
 
-%% The monitors whose 'DOWN' ends Session: its console facet's and its domain pid's.
+%% The monitors whose 'DOWN' ends Session: its console facet's and its domain pid's,
+%% the domain pid's alone once both have ended (awaits_domain_end/2).
 monitors(#{facet := Facet, domain := Domain}) ->
     [Facet || Facet =/= none] ++ [Monitor || {_Pid, Monitor} <- [Domain]].
+
+%% True when Monitor is Session's facet and Session's domain pid has ended too: the facet
+%% ends with its domain pid, and its 'DOWN' gives only the leading atom of that pid's
+%% reason, while the domain pid's own 'DOWN', which says how the domain ended, is still
+%% to come, since no order holds between two senders' signals. A facet that ends while
+%% its domain pid lives ends the session at once.
+awaits_domain_end(Facet, #{facet := Facet, domain := {Pid, _Monitor}}) -> not is_process_alive(Pid);
+awaits_domain_end(_Monitor, _Session) -> false.
 
 %% Whether Session can be connected: add_session/2 has named it, its domain pid is up,
 %% and its tty has passed every check.
