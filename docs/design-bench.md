@@ -1562,15 +1562,28 @@ network, no capabilities, a non-root user. `tools/erx build l4re`
 arm64 toolchain image and copies the fetched trees, the tool packages
 and its script (`bench/l4re/build.sh`) into it before it starts, rather
 than mounting them: the copies belong to root, so the build cannot write
-its sources, and a copy needs no path the engine's host shares with this
-one, so the engine may run on another host behind a local UNIX socket.
-The build runs in the container's own filesystem, and `bootstrap.elf`,
+its sources. The container is created with the oracle's confinement
+flags (`OracleContainer::CONFINEMENT`: no network, an init, private IPC
+and cgroup namespaces, no capabilities or privilege gain, no engine log,
+restart or health check), its swap bounded by its memory and its script
+started under `env -i`, and the engine's own inspection of it must show
+it offline, unprivileged and unmounted before anything is copied in.
+Every command names the engine by its socket, which
+`Dependencies#local_docker_connection` requires to be a local UNIX
+socket, so no TCP or SSH endpoint and no `DOCKER_*` variable chooses
+another. The engine is arm64 and runs the image natively: Docker on the
+Apple Silicon development host. Under an x86-64 engine's user-mode
+emulation (qemu-aarch64 7.0.0) gcc segfaulted at random, a few compiles
+in every pass of Fiasco's and L4Re's builds, so there the build fails at
+random rather than running slower.
+The build runs in the container's own filesystem. Its attached log is
+bounded at 64 MiB, and `/tmp/out` comes back as the tar archive
+`docker cp` streams, bounded as it is written: `bootstrap.elf`,
 `globalconfig.out`, L4Re's resolved `.kconfig` and the compiler's
-version line are copied out and read only once each is a regular file
-within its bound, its text printable ASCII. That is what keeps the build offline and off the host; nothing of
-L4Re runs on macOS. On an x86-64 engine the arm64 image runs under the
-engine's user-mode emulation, which is slower and is a property of that
-engine, not of the build. The compiler is the image's gcc for AArch64
+version line are unpacked from it only when it holds exactly those, each
+a regular file within its bound, and read only when its text is
+printable ASCII. That is what keeps the build offline and off the host;
+nothing of L4Re runs on macOS. The compiler is the image's gcc for AArch64
 Linux, without a cross prefix. The image has GNU make, Perl and m4 but
 not flex and bison, which the kconfig of both Fiasco and L4Re builds,
 nor gawk, which L4Re's build requires by name, with its library

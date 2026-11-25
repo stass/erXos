@@ -30,6 +30,13 @@ module Erx
   class OracleContainer
     OWNER_LABEL = 'org.erxos.oracle.owner'
     ROLE_LABEL = 'org.erxos.oracle.role'
+    # The create flags that confine every container a host tool runs fetched code in
+    # (design-host-oracle.md, "Container boundary"): no network, an init that reaps, private
+    # IPC and cgroup namespaces, no capabilities or privilege gain, no engine log, restart
+    # or health check.
+    CONFINEMENT = ['--network', 'none', '--init', '--ipc', 'private', '--cgroupns', 'private',
+                   '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                   '--log-driver', 'none', '--restart', 'no', '--no-healthcheck'].freeze
     FLAVOURS = %w[emu jit].freeze
     SUITES = %w[emulator kernel stdlib compiler].freeze
     RESOURCES = { 'cpus' => 4, 'memory_bytes' => 8 * 1024**3,
@@ -431,9 +438,7 @@ module Erx
                end
       ['create', '--pull', 'never', '--platform', image.fetch('platform'), '--cidfile', cid_path,
        '--label', "#{OWNER_LABEL}=#{owner}", '--label', "#{ROLE_LABEL}=#{role}",
-       '--network', 'none', '--init', '--ipc', 'private',
-       '--cgroupns', 'private', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
-       '--log-driver', 'none', '--restart', 'no', '--no-healthcheck', '--hostname', 'erx-oracle',
+       *CONFINEMENT, '--hostname', 'erx-oracle',
        '--add-host', 'erx-oracle:127.0.0.1', '--user', "#{Process.uid}:#{Process.gid}",
        '--cpus', @resources.fetch('cpus').to_s, '--memory', @resources.fetch('memory_bytes').to_s,
        '--memory-swap', @resources.fetch('memory_bytes').to_s,

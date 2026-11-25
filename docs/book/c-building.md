@@ -44,7 +44,8 @@ x86-64 is a host too. A build needs these tools
 * xz, which compresses the Raspberry Pi 4 card;
 * a JVM, which runs TLC, the TLA+ model checker;
 * Docker, a local engine or context, only for the full stock OTP
-  suites.
+  suites and for building L4Re for the benchmark comparison, which
+  needs an arm64 engine.
 
 On a Mac, Homebrew installs all of them. The build insists on LLVM,
 not Apple's clang or GCC, for its own code and for Fiasco and L4Re. It uses clang as a cross

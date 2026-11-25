@@ -9,41 +9,85 @@ require_relative '../../tools/lib/erx/l4re_build'
 
 # `tools/erx build l4re` (docs/design-bench.md, "L4Re's guest"): the plan of docker
 # commands that builds L4Re's guest in the oracle's container, the kernel configuration
-# it is given, and the checks on what it copies out. The container itself runs only in
+# it is given, and the checks on the engine, the container and what it exports. The container itself runs only in
 # the comparison session's build.
 class L4ReBuildTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
 
+  ENDPOINT = 'unix:///run/engine.sock'
+
   def plan
-    Erx::L4ReBuild.plan(context: 'ctx', name: 'erx-l4re-build-1', image: 'example.org/image@sha256:' + 'a' * 64,
-                        inputs: '/w/inputs', out: '/w/out', jobs: 8,
+    Erx::L4ReBuild.plan(endpoint: ENDPOINT, name: 'erx-l4re-build-1', image: 'example.org/image@sha256:' + 'a' * 64,
+                        inputs: '/w/inputs', archive: '/w/out.tar', jobs: 8,
                         trees: Erx::L4ReFetch::LAYOUT.values.reverse.to_h { |path| [path, "/trees/#{path}"] })
   end
 
-  # The container is offline, unprivileged and non-root, and runs the pinned image as it
-  # is cached: what keeps L4Re's fetched code from the network and the engine's host.
-  def test_the_container_is_created_offline_without_capabilities_as_a_non_root_user
-    create = plan.first
-    assert_equal %w[docker --context ctx create], create.first(4)
+  # The container is created with the oracle's confinement flags, as the non-root user,
+  # swap bounded by memory, and the script under env -i: what keeps L4Re's fetched code
+  # from the network, the engine's host and the operator's environment.
+  def test_the_container_is_created_with_the_oracles_confinement_as_a_non_root_user
+    create = plan.fetch(:create).argv
+    assert_equal ['docker', '--host', ENDPOINT, 'create'], create.first(4)
+    confinement = Erx::OracleContainer::CONFINEMENT
+    assert_equal confinement, create[create.index('--network'), confinement.size]
     {
-      '--network' => 'none', '--cap-drop' => 'ALL', '--security-opt' => 'no-new-privileges',
-      '--user' => '1000:1000', '--pull' => 'never', '--platform' => 'linux/arm64'
+      '--user' => '1000:1000', '--pull' => 'never', '--platform' => 'linux/arm64', '--memory' => '16g',
+      '--memory-swap' => '16g', '--entrypoint' => '/usr/bin/env'
     }.each { |flag, value| assert_equal value, create[create.index(flag) + 1], flag }
-    refute create.any? { |argument| argument.start_with?('--mount', '--volume', '-v', '--privileged') }
-    assert_equal ['example.org/image@sha256:' + 'a' * 64, '-k', '10'], create[create.index('/usr/bin/timeout') + 1, 3]
+    refute create.any? { |argument| argument.start_with?('--mount', '--volume', '-v', '--privileged', '--env') }
+    image = create.index('example.org/image@sha256:' + 'a' * 64)
+    assert_equal ['-i', *Erx::L4ReBuild::ENVIRONMENT, '/usr/bin/timeout', '-k', '10'], create[image + 1, Erx::L4ReBuild::ENVIRONMENT.size + 4]
     assert_equal ['/bin/sh', '/tmp/inputs/build.sh', '8'], create.last(3)
   end
 
   # docker cp creates only the last component of its destination, so mk, which holds
-  # pkg, lands before every package, and the outputs come back after the attached run.
-  def test_inputs_and_trees_are_copied_in_parents_first_and_the_outputs_copied_out_last
+  # pkg, lands before every package. The attached run's log and the streamed archive of
+  # /tmp/out are bounded as they are written, before anything of them reaches the host.
+  def test_trees_are_copied_in_parents_first_and_the_run_and_the_outputs_are_bounded
     steps = plan
-    copies = steps.select { |argv| argv[3] == 'cp' }.map(&:last)
+    copies = steps.fetch(:copies).map { |step| step.argv.last }
     assert_equal 'erx-l4re-build-1:/tmp/inputs', copies.first
     assert_operator copies.index('erx-l4re-build-1:/tmp/l4'), :<, copies.index('erx-l4re-build-1:/tmp/l4/pkg/ipcbench')
-    assert_equal Erx::L4ReFetch::LAYOUT.size + 2, copies.size
-    assert_equal %w[docker --context ctx start --attach erx-l4re-build-1], steps[-2]
-    assert_equal %w[docker --context ctx cp erx-l4re-build-1:/tmp/out /w/out], steps.last
+    assert_equal Erx::L4ReFetch::LAYOUT.size + 1, copies.size
+    start = steps.fetch(:start)
+    assert_equal ['docker', '--host', ENDPOINT, 'start', '--attach', 'erx-l4re-build-1'], start.argv
+    assert_equal Erx::L4ReBuild::RUN_LOG_BYTES, start.limit
+    export = steps.fetch(:export)
+    assert_equal ['docker', '--host', ENDPOINT, 'cp', 'erx-l4re-build-1:/tmp/out', '-'], export.argv
+    assert_equal [Erx::L4ReBuild::ARCHIVE_BYTES, '/w/out.tar'], [export.limit, export.stdout]
+    assert_operator Erx::L4ReBuild::ARCHIVE_BYTES, :>, Erx::L4ReBuild::OUTPUTS.values.sum
+  end
+
+  # A context whose endpoint is not a local UNIX socket is refused before anything is
+  # fetched or created: the endpoint names the engine every later command reaches.
+  def test_a_context_whose_endpoint_is_not_a_local_unix_socket_is_refused_before_anything_runs
+    Dir.mktmpdir('erx-l4re-build-') do |logs|
+      seen = []
+      runner = Object.new
+      runner.define_singleton_method(:run) do |argv, name:, **|
+        seen << argv
+        log = File.join(logs, name)
+        File.write(log, argv.include?('inspect') ? "tcp://engine.example:2376\n" : "ctx\n")
+        { 'log' => log }
+      end
+      error = assert_raises(Erx::Error) { Erx::L4ReBuild.build(root: ROOT, runner: runner, context: 'ctx', jobs: 2) }
+      assert_match(/ctx is not an explicit local UNIX socket endpoint/, error.message)
+      assert_equal [%w[docker context inspect ctx]], seen.map { |argv| argv.first(4) }
+    end
+  end
+
+  # The engine's own view of the container: a dropped flag or an added mount is refused.
+  def test_a_container_the_engine_holds_other_than_as_created_is_refused
+    held = { 'HostConfig' => { 'NetworkMode' => 'none', 'Init' => true, 'Privileged' => false, 'CapDrop' => ['ALL'],
+                               'CapAdd' => nil, 'SecurityOpt' => ['no-new-privileges'], 'Binds' => nil },
+             'Config' => { 'User' => '1000:1000' }, 'Mounts' => [] }
+    Erx::L4ReBuild.check_container(held)
+    [held.merge('Mounts' => [{ 'Type' => 'bind' }]),
+     held.merge('HostConfig' => held.fetch('HostConfig').merge('NetworkMode' => 'bridge')),
+     held.merge('HostConfig' => held.fetch('HostConfig').merge('CapAdd' => ['SYS_ADMIN'])),
+     held.merge('Config' => { 'User' => '' }), []].each do |value|
+      assert_raises(Erx::Error) { Erx::L4ReBuild.check_container(value) }
+    end
   end
 
   def test_only_the_compiler_lines_of_the_kernel_defconfig_change
@@ -71,20 +115,35 @@ class L4ReBuildTest < Minitest::Test
     assert_empty Erx::L4ReBuild.difference(defconfig: defconfig.sub("CONFIG_D=y\n", ''), resolved: resolved.sub('B=y', 'B=n'))
   end
 
-  # What the container copies out is untrusted: exactly the expected regular files.
-  def test_outputs_other_than_the_expected_regular_files_are_refused
-    Dir.mktmpdir('erx-l4re-build-') do |out|
-      Erx::L4ReBuild::OUTPUTS.each_key { |name| File.write(File.join(out, name), "#{name}\n") }
-      Erx::L4ReBuild.check_outputs(out)
-      File.write(File.join(out, 'extra'), '')
-      assert_match(/exported .*extra/, assert_raises(Erx::Error) { Erx::L4ReBuild.check_outputs(out) }.message)
-      File.delete(File.join(out, 'extra'))
-      File.delete(File.join(out, 'compiler'))
-      File.symlink('/etc/hosts', File.join(out, 'compiler'))
-      assert_match(/compiler as other than a regular file/, assert_raises(Erx::Error) { Erx::L4ReBuild.check_outputs(out) }.message)
-      File.delete(File.join(out, 'compiler'))
-      File.write(File.join(out, 'compiler'), 'x' * (Erx::L4ReBuild::OUTPUTS.fetch('compiler') + 1))
-      assert_raises(Erx::Error) { Erx::L4ReBuild.check_outputs(out) }
+  # The archive docker cp streams of /tmp/out, written as the test's tar.
+  def archive(path, entries)
+    File.open(path, 'wb') do |io|
+      Gem::Package::TarWriter.new(io) do |tar|
+        tar.mkdir('out', 0o755)
+        entries.each { |name, body| body == :link ? tar.add_symlink("out/#{name}", '/etc/hosts', 0o777) : tar.add_file_simple("out/#{name}", 0o644, body.bytesize) { |file| file.write(body) } }
+      end
+    end
+  end
+
+  # What the container exports is untrusted: exactly the expected regular files, each
+  # within its bound, are written, and anything else refuses the whole archive.
+  def test_an_archive_other_than_the_expected_regular_files_is_refused
+    Dir.mktmpdir('erx-l4re-build-') do |work|
+      expected = Erx::L4ReBuild::OUTPUTS.keys.to_h { |name| [name, "#{name}\n"] }
+      archive(File.join(work, 'good.tar'), expected)
+      Erx::L4ReBuild.unpack(archive: File.join(work, 'good.tar'), out: File.join(work, 'good'))
+      assert_equal expected, expected.keys.to_h { |name| [name, File.read(File.join(work, 'good', name))] }
+      {
+        'extra' => expected.merge('extra' => ''),
+        'link' => expected.merge('compiler' => :link),
+        'oversized' => expected.merge('compiler' => 'x' * (Erx::L4ReBuild::OUTPUTS.fetch('compiler') + 1)),
+        'missing' => expected.except('compiler')
+      }.each do |label, entries|
+        archive(File.join(work, "#{label}.tar"), entries)
+        assert_raises(Erx::Error, label) { Erx::L4ReBuild.unpack(archive: File.join(work, "#{label}.tar"), out: File.join(work, label)) }
+      end
+      File.write(File.join(work, 'text.tar'), 'not a tar' * 100)
+      assert_raises(Erx::Error) { Erx::L4ReBuild.unpack(archive: File.join(work, 'text.tar'), out: File.join(work, 'text')) }
     end
   end
 

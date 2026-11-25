@@ -5,13 +5,16 @@
 require 'digest'
 require 'fileutils'
 require 'json'
+require 'rubygems/package'
 require 'securerandom'
 require 'tmpdir'
 require_relative 'bounded_file'
 require_relative 'dependencies'
 require_relative 'error'
+require_relative 'json_input'
 require_relative 'l4re_bench'
 require_relative 'l4re_fetch'
+require_relative 'oracle_container'
 require_relative 'output_directory'
 
 module Erx
@@ -19,12 +22,15 @@ module Erx
   # L4Re with ipcbench, built by their own make inside the oracle's arm64 toolchain image,
   # offline and as a non-root user with no capabilities, and bootstrap.elf brought back
   # with the build record L4ReBench::Build reads. Nothing fetched runs on the host: the
-  # trees, the tool packages and the container script are copied into a created
-  # container, which may live on an engine that emulates arm64, and only the outputs are
-  # copied out, each checked as a regular file of bounded size before it is read.
+  # trees, the tool packages and the container script are copied into a container the
+  # oracle's confinement flags create on an arm64 engine reached by its local UNIX
+  # socket, and only an archive of the outputs is streamed out, bounded as it is
+  # written, then unpacked only where it holds the expected regular files within their
+  # bounds. The attached run's log is bounded too.
   #
-  # The decisions are pure (kernel_defconfig, difference, plan, record); build runs the
-  # plan's docker commands in order and always removes the container it created.
+  # The decisions are pure (kernel_defconfig, difference, plan, check_container, unpack,
+  # record); build runs the plan's docker commands and always removes the container it
+  # created and its work directory.
   module L4ReBuild
     IMAGE_ID = 'oracle-toolchain-arm64'
     PLATFORM = 'linux/arm64'
@@ -41,6 +47,19 @@ module Erx
     OUTPUTS = { 'bootstrap.elf' => 64 << 20, 'globalconfig.out' => 1 << 20, 'l4re.kconfig' => 1 << 20,
                 'compiler' => 4096 }.freeze
     DEADLINE = 4 * 3600
+    # The most bytes the attached run may log, and the archive of OUTPUTS may hold: their
+    # bounds with room for the archive's headers.
+    RUN_LOG_BYTES = 64 << 20
+    ARCHIVE_BYTES = OUTPUTS.values.sum + (64 << 10)
+    USER = '1000:1000'
+    # The script's whole environment: the container's entry starts it under env -i.
+    ENVIRONMENT = ['HOME=/tmp', 'PATH=/usr/local/bin:/usr/bin:/bin', 'LANG=C'].freeze
+
+    # One docker command of a build: its run name, arguments, deadline, the most bytes it
+    # may write (Runner's output_limit) and the path its standard output goes to.
+    Step = Data.define(:name, :argv, :deadline, :limit, :stdout) do
+      def initialize(name:, argv:, deadline: 600, limit: nil, stdout: nil) = super
+    end
 
     module_function
 
@@ -76,22 +95,44 @@ module Erx
     end
     private_class_method :settings
 
-    # The docker commands of one build, in order: create the container, copy the inputs
-    # and each tree in, run the script attached, copy the outputs out. trees maps each
-    # LAYOUT path to its fetched tree on the host.
-    def plan(context:, name:, image:, inputs:, trees:, out:, jobs:)
-      docker = ['docker', '--context', context]
+    # The docker commands of one build on the engine at endpoint: create the container,
+    # inspect it, copy the inputs and each tree in, run the script attached, and stream
+    # /tmp/out to archive as a tar. trees maps each LAYOUT path to its fetched tree on
+    # the host.
+    def plan(endpoint:, name:, image:, inputs:, trees:, archive:, jobs:)
+      docker = ['docker', '--host', endpoint]
+      memory = "#{2 * jobs}g"
       copies = [[inputs, '/tmp/inputs'], *trees.sort_by { |path, _| path.count('/') }
                                                .map { |path, tree| [tree, File.join(SOURCE_ROOT, path)] }]
-      [[*docker, 'create', '--pull', 'never', '--platform', PLATFORM, '--name', name,
-        '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
-        '--user', '1000:1000', '--env', 'HOME=/tmp', '--workdir', '/tmp', '--pids-limit', '4096',
-        '--cpus', jobs.to_s, '--memory', (2 * jobs).to_s + 'g', '--log-driver', 'none',
-        '--entrypoint', '/usr/bin/timeout', image, '-k', '10', DEADLINE.to_s,
-        '/bin/sh', '/tmp/inputs/build.sh', jobs.to_s],
-       *copies.map { |from, to| [*docker, 'cp', from, "#{name}:#{to}"] },
-       [*docker, 'start', '--attach', name],
-       [*docker, 'cp', "#{name}:/tmp/out", out]]
+      {
+        create: Step.new(name: 'l4re-build-create', argv: [
+          *docker, 'create', '--pull', 'never', '--platform', PLATFORM, '--name', name,
+          *OracleContainer::CONFINEMENT, '--user', USER, '--workdir', '/tmp', '--pids-limit', '4096',
+          '--cpus', jobs.to_s, '--memory', memory, '--memory-swap', memory,
+          '--entrypoint', '/usr/bin/env', image, '-i', *ENVIRONMENT,
+          '/usr/bin/timeout', '-k', '10', DEADLINE.to_s, '/bin/sh', '/tmp/inputs/build.sh', jobs.to_s
+        ]),
+        inspect: Step.new(name: 'l4re-build-inspect', argv: [*docker, 'inspect', '--type', 'container', name,
+                                                             '--format', '{{json .}}'], limit: 1 << 20),
+        copies: copies.map { |from, to| Step.new(name: 'l4re-build-copy', argv: [*docker, 'cp', from, "#{name}:#{to}"]) },
+        start: Step.new(name: 'l4re-build-run', argv: [*docker, 'start', '--attach', name],
+                        deadline: DEADLINE + 60, limit: RUN_LOG_BYTES),
+        export: Step.new(name: 'l4re-build-export', argv: [*docker, 'cp', "#{name}:/tmp/out", '-'],
+                         limit: ARCHIVE_BYTES, stdout: archive)
+      }
+    end
+
+    # Refuses the created container unless the engine holds it as plan created it:
+    # offline, with an init, no capability, privilege or mount, as the non-root user. An
+    # engine or daemon setting that dropped a flag would otherwise go unseen.
+    def check_container(value)
+      host = value.is_a?(Hash) ? value['HostConfig'] : nil
+      config = value.is_a?(Hash) ? value['Config'] : nil
+      confined = host.is_a?(Hash) && config.is_a?(Hash) && host['NetworkMode'] == 'none' &&
+                 host['Init'] == true && host['Privileged'] == false && host['CapDrop'] == ['ALL'] &&
+                 [nil, []].include?(host['CapAdd']) && host['SecurityOpt'] == ['no-new-privileges'] &&
+                 [nil, []].include?(host['Binds']) && value['Mounts'] == [] && config['User'] == USER
+      raise Error, "the engine does not hold L4Re's build container as created (offline, unprivileged, unmounted)" unless confined
     end
 
     # The build record of the exported outputs in out: the pins of every source and
@@ -123,54 +164,76 @@ module Erx
     end
     private_class_method :text
 
-    # Refuses out unless it is a directory holding exactly OUTPUTS, each a regular file within its bound:
-    # the container wrote it, so a link or an oversized file is never followed or read.
-    def check_outputs(out)
-      raise Error, "L4Re's build exported #{File.basename(out)} as other than a directory" unless File.lstat(out).directory?
+    # Writes OUTPUTS from archive, the tar docker cp streamed of /tmp/out, into the new
+    # directory out. The container wrote the archive, so it is refused unless it holds
+    # out's directory and exactly OUTPUTS, each a regular file within its bound: no link,
+    # device, extended header or other name is followed or written.
+    def unpack(archive:, out:)
+      Dir.mkdir(out, 0o700)
+      names = File.open(archive, 'rb') do |io|
+        Gem::Package::TarReader.new(io).filter_map do |entry|
+          next if entry.directory? && entry.full_name.delete_suffix('/') == 'out'
 
-      names = Dir.children(out).sort
-      raise Error, "L4Re's build exported #{names.join(', ')}, not #{OUTPUTS.keys.sort.join(', ')}" unless names == OUTPUTS.keys.sort
+          name = entry.full_name.delete_prefix('out/')
+          bound = entry.header.typeflag == '0' && OUTPUTS[name]
+          raise Error, "L4Re's build exported an entry other than out/ and its regular files within their bounds" unless
+            bound && entry.header.size <= bound
 
-      OUTPUTS.each do |name, maximum|
-        stat = File.lstat(File.join(out, name))
-        raise Error, "L4Re's build exported #{name} as other than a regular file of at most #{maximum} bytes" unless
-          stat.file? && stat.size <= maximum
+          File.binwrite(File.join(out, name), entry.read.to_s)
+          name
+        end
       end
+      raise Error, "L4Re's build exported #{names.size} outputs, not once each of #{OUTPUTS.keys.join(', ')}" unless
+        names.sort == OUTPUTS.keys.sort
+    rescue Gem::Package::Error
+      raise Error, "L4Re's build exported an archive that is not a tar"
     end
 
-    # Builds L4Re's guest on the docker context, leaving bootstrap.elf, globalconfig.out
-    # and the build record in build/l4re. Returns bootstrap.elf's path.
+    # Builds L4Re's guest on the engine of the docker context, leaving bootstrap.elf,
+    # globalconfig.out and the build record in build/l4re. Returns bootstrap.elf's path.
     def build(root:, runner:, context:, jobs:)
       raise Error, 'L4Re build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
-      raise Error, 'a Docker context name is letters, digits and _.+-' unless /\A[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}\z/.match?(context)
 
+      dependencies = Dependencies.new(root: root, runner: runner, docker_context: context)
+      endpoint = dependencies.local_docker_connection.fetch('endpoint')
       fetched = L4ReFetch.lock(root: root, runner: runner)
-      image = Dependencies.new(root: root, runner: runner).image_for(IMAGE_ID).fetch('reference')
+      image = dependencies.image_for(IMAGE_ID).fetch('reference')
       work = OutputDirectory.prepare(root: root, path: File.join(root, 'build/l4re-work'))
       directory = Dir.mktmpdir('build-', work)
       inputs = stage_inputs(root: root, fetched: fetched, directory: directory)
       defconfig = File.read(File.join(inputs, 'kernel.defconfig'))
-      out = File.join(directory, 'out')
       name = "erx-l4re-build-#{SecureRandom.hex(8)}"
       trees = L4ReFetch::LAYOUT.to_h { |id, path| [path, fetched.fetched_tree(id)] }
-      steps = plan(context: context, name: name, image: image, inputs: inputs, trees: trees, out: out, jobs: jobs)
+      archive = File.join(directory, 'out.tar')
+      steps = plan(endpoint: endpoint, name: name, image: image, inputs: inputs, trees: trees, archive: archive, jobs: jobs)
+      run = lambda do |step|
+        runner.run(step.argv, name: step.name, deadline: step.deadline, env: Dependencies::DOCKER_ENVIRONMENT,
+                              output_limit: step.limit, stdout: step.stdout)
+      end
       begin
-        steps.each_with_index do |argv, index|
-          runner.run(argv, name: "l4re-build-#{index}", deadline: argv.include?('start') ? DEADLINE + 60 : 600)
-        end
+        run.call(steps.fetch(:create))
+        check_container(JsonInput.parse(File.binread(run.call(steps.fetch(:inspect)).fetch('log')),
+                                        max_bytes: 1 << 20, label: "L4Re's build container"))
+        steps.fetch(:copies).each(&run)
+        run.call(steps.fetch(:start))
+        run.call(steps.fetch(:export))
       rescue StandardError
-        remove(runner: runner, context: context, name: name, raising: false)
+        remove(runner: runner, endpoint: endpoint, name: name, raising: false)
         raise
       end
-      remove(runner: runner, context: context, name: name, raising: true)
-      check_outputs(out)
+      remove(runner: runner, endpoint: endpoint, name: name, raising: true)
+      out = File.join(directory, 'out')
+      unpack(archive: archive, out: out)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, defconfig: defconfig))
+    ensure
+      FileUtils.rm_rf(directory) if directory
     end
 
     # Removes the build's container; raising is false while another failure propagates,
     # which a failed removal must not replace.
-    def remove(runner:, context:, name:, raising:)
-      runner.run(['docker', '--context', context, 'rm', '--force', name], name: 'l4re-build-remove', deadline: 120)
+    def remove(runner:, endpoint:, name:, raising:)
+      runner.run(['docker', '--host', endpoint, 'rm', '--force', name], name: 'l4re-build-remove', deadline: 120,
+                                                                         env: Dependencies::DOCKER_ENVIRONMENT)
     rescue Error
       raise if raising
     end

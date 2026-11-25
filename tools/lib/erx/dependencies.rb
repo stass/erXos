@@ -123,6 +123,10 @@ module Erx
     # below is extracted: the pin it extracted, and the digest of what it extracted.
     RECORD = '.source.json'
     TREE_DIGEST = '.tree.sha256'
+    # The variables that would redirect a docker command named by its --host endpoint,
+    # unset for each such command.
+    DOCKER_ENVIRONMENT = { 'DOCKER_CONTEXT' => nil, 'DOCKER_HOST' => nil, 'DOCKER_TLS_VERIFY' => nil,
+                           'DOCKER_CERT_PATH' => nil, 'DOCKER_API_VERSION' => nil }.freeze
     # sources are deps.lock's sources this host uses, which every caller walks;
     # elsewhere the programs it pins for other hosts, which no step here fetches.
     attr_reader :sources, :elsewhere
@@ -221,14 +225,41 @@ module Erx
                    'manifest_sha256' => source.fetch('sha256')).transform_values(&:freeze).freeze
     end
 
+    # The Docker context (the given one, else the CLI's current one) and its endpoint,
+    # refused unless that endpoint is an existing local UNIX socket: what lets a caller
+    # name the engine by its socket (`docker --host`), with DOCKER_ENVIRONMENT, so no
+    # TCP or SSH endpoint, nor a variable of the operator's, chooses another.
+    def local_docker_connection
+      context = @docker_context
+      unless context
+        command = @runner.run(['docker', 'context', 'show'], name: 'docker-context', deadline: 10)
+        context = (File.binread(command.fetch('log'), 256) || '').strip
+      end
+      unless context.is_a?(String) && /\A[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z/.match?(context)
+        raise Error, 'invalid Docker context name'
+      end
+      command = @runner.run(['docker', 'context', 'inspect', context, '--format',
+                            '{{(index .Endpoints "docker").Host}}'], name: 'docker-endpoint', deadline: 10)
+      endpoint = (File.binread(command.fetch('log'), 4096) || '').strip
+      uri = URI.parse(endpoint)
+      unless uri.scheme == 'unix' && (uri.host.nil? || uri.host.empty?) &&
+             uri.userinfo.nil? && uri.opaque.nil? && uri.port.nil? &&
+             uri.query.nil? && uri.fragment.nil? && uri.path.is_a?(String) &&
+             uri.path.start_with?('/') && File.socket?(uri.path)
+        raise Error, "Docker context #{context} is not an explicit local UNIX socket endpoint"
+      end
+      canonical = "unix://#{File.realpath(uri.path)}".freeze
+      { 'context' => context.freeze, 'endpoint' => canonical }.freeze
+    rescue URI::InvalidURIError
+      raise Error, 'invalid Docker endpoint URI'
+    end
+
     private
 
     def fetch_image(source)
       connection = local_docker_connection
       prefix = ['docker', '--host', connection.fetch('endpoint')]
-      environment = { 'DOCKER_CONTEXT' => nil, 'DOCKER_HOST' => nil,
-                      'DOCKER_TLS_VERIFY' => nil, 'DOCKER_CERT_PATH' => nil,
-                      'DOCKER_API_VERSION' => nil }
+      environment = DOCKER_ENVIRONMENT
       reference = "#{source.fetch('repository')}@sha256:#{source.fetch('sha256')}"
       @runner.run(prefix + ['pull', '--platform', source.fetch('platform'), reference],
                   name: "fetch-#{source.fetch('id')}", deadline: 900, env: environment)
@@ -257,31 +288,6 @@ module Erx
       end
     rescue KeyError, TypeError => error
       raise Error, "invalid OCI image identity: #{error.message}"
-    end
-
-    def local_docker_connection
-      context = @docker_context
-      unless context
-        command = @runner.run(['docker', 'context', 'show'], name: 'docker-context', deadline: 10)
-        context = (File.binread(command.fetch('log'), 256) || '').strip
-      end
-      unless context.is_a?(String) && /\A[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z/.match?(context)
-        raise Error, 'invalid Docker context name'
-      end
-      command = @runner.run(['docker', 'context', 'inspect', context, '--format',
-                            '{{(index .Endpoints "docker").Host}}'], name: 'docker-endpoint', deadline: 10)
-      endpoint = (File.binread(command.fetch('log'), 4096) || '').strip
-      uri = URI.parse(endpoint)
-      unless uri.scheme == 'unix' && (uri.host.nil? || uri.host.empty?) &&
-             uri.userinfo.nil? && uri.opaque.nil? && uri.port.nil? &&
-             uri.query.nil? && uri.fragment.nil? && uri.path.is_a?(String) &&
-             uri.path.start_with?('/') && File.socket?(uri.path)
-        raise Error, 'oracle fetch requires an explicit local UNIX Docker endpoint'
-      end
-      canonical = "unix://#{File.realpath(uri.path)}".freeze
-      { 'context' => context.freeze, 'endpoint' => canonical }.freeze
-    rescue URI::InvalidURIError
-      raise Error, 'invalid Docker endpoint URI'
     end
 
     def archive_path(source)
