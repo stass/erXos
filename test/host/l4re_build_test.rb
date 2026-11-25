@@ -104,6 +104,10 @@ class L4ReBuildTest < Minitest::Test
       assert_equal Digest::SHA256.hexdigest("\x7FELF"), record.fetch('bootstrap_sha256')
       File.write(File.join(out, 'build-record.json'), JSON.generate(record))
       assert_equal record, Erx::L4ReBench::Build.new(directory: out).record
+      # A control sequence in an output would reach the record and the terminal.
+      File.write(File.join(out, 'compiler'), "gcc \e]0;x\a\n")
+      assert_match(/compiler with bytes other than printable ASCII/,
+                   assert_raises(Erx::Error) { Erx::L4ReBuild.record(sources: sources, image: 'i', out: out, defconfig: '') }.message)
     end
   end
 end

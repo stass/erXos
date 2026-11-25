@@ -99,11 +99,11 @@ module Erx
     # Fiasco's from erXos's defconfig, and bootstrap.elf's SHA-256, which names the ELF it
     # describes.
     def record(sources:, image:, out:, defconfig:)
-      resolved = File.read(File.join(out, 'globalconfig.out'))
+      resolved = text(out, 'globalconfig.out')
       {
         'sources' => sources.to_h { |source| [source.fetch('id'), source.fetch('kind') == 'git' ? source.fetch('commit') : source.fetch('sha256')] },
         'image' => image, 'platform' => PLATFORM,
-        'compiler' => File.read(File.join(out, 'compiler')).lines.first.to_s.strip,
+        'compiler' => text(out, 'compiler').lines.first.to_s.strip,
         'compiler_flags' => "Fiasco's and L4Re's own for this configuration",
         'fiasco_config_sha256' => Digest::SHA256.hexdigest(resolved),
         'fiasco_config_difference' => difference(defconfig: defconfig, resolved: resolved),
@@ -112,9 +112,22 @@ module Erx
       }
     end
 
-    # Refuses out unless it holds exactly OUTPUTS, each a regular file within its bound:
+    # The text output name of out, refused unless it is printable ASCII lines: the
+    # container wrote it, and the record and the terminal show it.
+    def text(out, name)
+      bytes = File.binread(File.join(out, name))
+      raise Error, "L4Re's build exported #{name} with bytes other than printable ASCII lines" unless
+        bytes.match?(/\A[\t\n -~]*\z/n)
+
+      bytes.force_encoding(Encoding::US_ASCII)
+    end
+    private_class_method :text
+
+    # Refuses out unless it is a directory holding exactly OUTPUTS, each a regular file within its bound:
     # the container wrote it, so a link or an oversized file is never followed or read.
     def check_outputs(out)
+      raise Error, "L4Re's build exported #{File.basename(out)} as other than a directory" unless File.lstat(out).directory?
+
       names = Dir.children(out).sort
       raise Error, "L4Re's build exported #{names.join(', ')}, not #{OUTPUTS.keys.sort.join(', ')}" unless names == OUTPUTS.keys.sort
 
@@ -145,12 +158,23 @@ module Erx
         steps.each_with_index do |argv, index|
           runner.run(argv, name: "l4re-build-#{index}", deadline: argv.include?('start') ? DEADLINE + 60 : 600)
         end
-      ensure
-        runner.run(['docker', '--context', context, 'rm', '--force', name], name: 'l4re-build-remove', deadline: 120)
+      rescue StandardError
+        remove(runner: runner, context: context, name: name, raising: false)
+        raise
       end
+      remove(runner: runner, context: context, name: name, raising: true)
       check_outputs(out)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, defconfig: defconfig))
     end
+
+    # Removes the build's container; raising is false while another failure propagates,
+    # which a failed removal must not replace.
+    def remove(runner:, context:, name:, raising:)
+      runner.run(['docker', '--context', context, 'rm', '--force', name], name: 'l4re-build-remove', deadline: 120)
+    rescue Error
+      raise if raising
+    end
+    private_class_method :remove
 
     # The container's /tmp/inputs: the script, Fiasco's defconfig and the tool packages.
     def stage_inputs(root:, fetched:, directory:)
@@ -166,11 +190,12 @@ module Erx
     def publish(root:, out:, record:)
       destination = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       build = L4ReBench::Build.new(directory: destination)
+      raise Error, "L4Re's build record holds text other than printable ASCII" unless L4ReBench.printable?(record)
+
       FileUtils.rm_f([build.bootstrap, build.record_path])
       FileUtils.copy_file(File.join(out, 'globalconfig.out'), File.join(destination, 'globalconfig.out'))
       FileUtils.copy_file(File.join(out, 'bootstrap.elf'), build.bootstrap)
       File.write(build.record_path, JSON.pretty_generate(record) + "\n")
-      build.record
       build.bootstrap
     end
     private_class_method :publish

@@ -1500,14 +1500,15 @@ its sources, and a copy needs no path the engine's host shares with this
 one, so the engine may run on another host behind a local UNIX socket.
 The build runs in the container's own filesystem, and `bootstrap.elf`,
 `globalconfig.out`, L4Re's resolved `.kconfig` and the compiler's
-version line are copied out and read only as regular files within a
-bound. That is what keeps the build offline and off the host; nothing of
+version line are copied out and read only once each is a regular file
+within its bound, its text printable ASCII. That is what keeps the build offline and off the host; nothing of
 L4Re runs on macOS. On an x86-64 engine the arm64 image runs under the
 engine's user-mode emulation, which is slower and is a property of that
 engine, not of the build. The compiler is the image's gcc for AArch64
 Linux, without a cross prefix. The image has GNU make, Perl and m4 but
-not flex and bison, which the kconfig of both Fiasco and L4Re builds;
-they come from Debian bookworm arm64 packages pinned in L4Re's lock by
+not flex and bison, which the kconfig of both Fiasco and L4Re builds,
+nor gawk, which L4Re's build requires by name, with its library
+libsigsegv; they come from Debian bookworm arm64 packages pinned in L4Re's lock by
 their `snapshot.debian.org` URL and SHA-256, fetched by `fetch --l4re`,
 and unpacked by the build, as its non-root user, into a tools directory
 on its `PATH`, never installed and never fetched during the build. erXos's fork is built by clang, so the two kernels come from

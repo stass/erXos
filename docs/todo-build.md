@@ -184,14 +184,19 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   (`tools/lib/erx/ipcbench.rb`, fuzz target `tools/fuzz/ipcbench_line.rb`), the guest on the `BenchSystem` seam
   (`tools/lib/erx/l4re_bench.rb`, which refuses a session until `build/l4re/bootstrap.elf` and its build record
   exist), the on-demand fetch of L4Re's lock (`tools/erx fetch --l4re`, `bench/l4re/deps.lock`) and L4Re's
-  counterparts in the `nullcall` declaration are built. Remaining: the build in the oracle's offline container
-  with L4Re's own make, the image's gcc and `config/fiasco/kernel.defconfig`, each fetched tree mounted read-only
-  at `L4ReFetch::LAYOUT`'s path, `bootstrap.elf` and `globalconfig.out` exported and the build record (pins,
-  hashes, resolved configuration, toolchain, boot arguments, `bootstrap_sha256`) written beside them as the guest
-  reads it; the lock's package closure, which the first build names (`mk`, `l4re-core`, `bootstrap`, `libfdt`,
-  `drivers-frst`, Fiasco and ipcbench are pinned); and the first boot, which pins the log tag's separator in
-  `Ipcbench::TAGGED` and shows how ipcbench fails if HVF hides the cycle counter, for the importer's
-  `unsupported` rule. Tests: L4Re's container build, with its record read back.
+  counterparts in the `nullcall` declaration are built, and so is the container build (`tools/erx build l4re
+  --docker-context NAME`, `tools/lib/erx/l4re_build.rb`, `bench/l4re/build.sh`), with flex, bison, gawk and
+  libsigsegv pinned in L4Re's lock. Remaining: a build that completes. On an x86-64 engine the arm64 image runs under
+  the engine's user-mode QEMU, and the engine tried runs qemu-aarch64 7.0.0, under which gcc segfaults at random
+  (6 of about 400 Fiasco compiles in one pass, 4 and 14 in two passes of L4Re): the build needs an engine whose
+  emulator compiles reliably, or an arm64 engine. Then the first boot, which pins the log tag's separator in
+  `Ipcbench::TAGGED` and shows how ipcbench fails if HVF hides the cycle counter, for the importer's `unsupported`
+  rule. The container build's own gaps against the oracle's container boundary
+  ([design-host-oracle.md](design-host-oracle.md#container-boundary)): it builds its own `docker create` flags
+  (no `--init`, `--memory-swap`, `--no-healthcheck`, `env -i`, no inspection of the created container), does not
+  check that the context's endpoint is a local UNIX socket (`Dependencies#local_docker_connection` does), copies
+  `/tmp/out` before bounding it and leaves no limit on the attached run's log, and keeps each work directory under
+  `build/l4re-work`. Tests: L4Re's container build, with its record read back.
 
 ## Stopgap replacements
 
