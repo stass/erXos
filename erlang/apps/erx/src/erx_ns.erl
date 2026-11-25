@@ -470,7 +470,7 @@ ended(Pid, Table) ->
 mounted({mount_app, Point, Rights}) ->
     maybe
         {ok, #{place := {Facet, Names}, layout := Layout}} ?= app_record(),
-        {ok, Grant} ?= erx_facets:file_grant(Facet, Rights),
+        {ok, Grant} ?= erx_facets:file_grant(Facet, Rights, app_tree(Facet)),
         {ok, Fid} ?= erx_file_remote:open_fid(Grant, Names),
         {ok, Fs} ?= image(Grant, Fid, Layout),
         {ok, {mount, Point, {erofs, Fs}, Rights, {Grant, Fid}}}
@@ -479,6 +479,15 @@ mounted(Checked) ->
     {ok, Checked}.
 
 %% The app's record as the session's agent holds it, its place a facet and plain names.
+%% The tree the grant behind an app record's facet answers, which the image's reads
+%% attach to: the storage volume's one tree for an installed app, the one /packages
+%% names (packages_place/0), and the system tree for a built-in one.
+app_tree(packages) ->
+    {_, [{tree, Tree} | _]} = packages_place(),
+    Tree;
+app_tree(system) ->
+    <<"system">>.
+
 app_record() ->
     case erx_connections:app_held() of
         {ok, #{place := {Facet, Names}, layout := Layout} = Record}

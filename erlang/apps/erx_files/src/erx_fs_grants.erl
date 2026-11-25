@@ -126,7 +126,8 @@ own(Grants, Args) ->
 owned({ok, Pid, _Handle}) -> {ok, facet(Pid, ?OWN)}.
 
 %% A grant started for another domain is answered by its pid: the domain that holds
-%% it learns its tree from the mint's reply, not from the starter's handle.
+%% it names the tree in its mount, not from the starter's handle (docs/todo-storage.md,
+%% "a mount's tree").
 started({ok, Pid, _Handle}) -> {ok, Pid};
 started({error, _} = Refused) -> Refused.
 

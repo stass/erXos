@@ -242,9 +242,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 * [Medium] files, a mount's tree (`erlang/apps/erx/src/erx_ns.erl`, `place/1`, `packages_place/0`,
   `home_place/1` and the `{tree, Name}` mount option; `erx_fs:start_mounted/4`): a mount still names
-  its tree in an option, a second copy of the tree the grant's root answers, which must match it for
-  every operation beneath the entry; design-files.md ("A grant handle is built by its starter") takes
-  the tree from the grant handle `erx_fs:start_link/3,4` answers. Take it from there and drop the option.
+  its tree in an option, and `erx_ns`'s `app_tree/1` and `erx_facets:file_grant/2` (the facet's name)
+  name it again, copies of the tree the grant's root answers, which must match it for every operation
+  beneath the entry; `erx_fs_grants:own/1,2` drops the handle that carries it, and a mint's reply
+  (`erx_facets:files/2`) carries only `{Pid, Rights}`. Carry the tree in the mint's reply and the facet
+  registry, take a domain's own grants' tree from their handle (design-files.md, "The tree beneath an
+  entry"), and drop the option and the copies.
 * [Medium] storage and images, the development boot image is 68 MB (`kernel8.img` on the Pi 4 boot
   partition, 68,202,496 bytes) and stays in RAM for the whole boot; it also weighs on the Pi 4 secure-boot
   check item below. Three shrinks are open: 12.2 MB are byte-identical OTP files in both `system/lib` and

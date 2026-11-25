@@ -515,7 +515,7 @@ system_data_mount_test_() ->
 %% place, /packages (erx_ns:packages_place/0), where erx_pkg_medium reads the installed
 %% packages, and only when the manifest grants it packages.
 system_packages_mount_test_() ->
-    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"packages">>], provider := {facet, packages, <<"packages">>},
+    [{"granted", fun() -> ?assertMatch([_, #{point := [<<"packages">>], provider := {facet, packages, <<"data">>},
                                              rights := rw}],
                                        system_mounts([{system, packages, 1, #{}}, {0, packages, 1, #{}}])) end},
      {"not granted", fun() -> ?assertEqual([#{point => [], provider => release, root => [], rights => ro}],

@@ -231,11 +231,15 @@ serve(Parent, Grant, Client, Options) ->
     ConnectionMonitor = connection_monitor(Client, Options),
     case export(Client, maps:get(exports, Options, erx_dist)) of
         ok ->
-            proc_lib:init_ack(Parent, {ok, self(), {self(), erx_fs_grant:tree(Grant), erx_fs_grant:rights(Grant)}}),
+            proc_lib:init_ack(Parent, {ok, self(), handle(Grant)}),
             loop(Grant, ConnectionMonitor);
         {error, _} = Refused ->
             proc_lib:init_ack(Parent, Refused)
     end.
+
+%% The grant's handle: its pid, the tree it reaches and the rights it serves.
+handle(Grant) ->
+    {self(), erx_fs_grant:tree(Grant), erx_fs_grant:rights(Grant)}.
 
 -doc """
 What proc_lib's crash report shows of a grant that crashes: its reason's name alone. The

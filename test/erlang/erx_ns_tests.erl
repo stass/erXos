@@ -204,10 +204,11 @@ a_malformed_request_answers_einval_and_changes_nothing() ->
 
 %% The app's package, a package-shaped file (a header block, the compact fixture image
 %% and its tree, ERX_VERITY_CASES' "package"), served as clock.app at the root of an rx
-%% grant named packages, the session's packages facet, observed by the case; and the
+%% grant of the tree data, the session's packages facet, as the storage volume's
+%% packages grant answers it, observed by the case; and the
 %% app's record naming it there with its layout, as the session's agent holds it.
 app_package(Bytes) ->
-    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"packages">>},
+    {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"data">>},
                                                       {file, <<"clock.app">>, Bytes}], rx),
     unlink(Grant),
     %% The grant's start asks the tree's root once, before it answers.

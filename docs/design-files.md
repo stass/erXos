@@ -1528,7 +1528,7 @@ construction rather than by a check at each use:
   and nothing is written, since `data`'s grant is `rw`;
 * beneath a grant pid's entry is a grant of the domain's own, which the
   mount takes as `{Pid, Tree, Rights}`, built by what started the grant
-  with the tree it answered and the rights it started it with:
+  with the tree it answered and the rights it serves:
   `erx_fs:start_mounted/4`, which starts a tree's grant and mounts it,
   naming its rights once, or `erx_fs_grants:own/1,2`, whose answer
   `erx_ns:mount_own/2` mounts.
