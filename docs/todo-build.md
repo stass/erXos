@@ -150,7 +150,11 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
   other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
   landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
-  side's first compile; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
+  side's first compile; FreeBSD's way for the `wake` handshake's A to see B asleep, without which
+  `erx_peer_bench` reports both wake cells unsupported there; which operations have a Linux counterpart is
+  written in four places (the design's table, the `linux` counterparts of `benches/*.rb`, which `vm`, `sched` and
+  `xdomain` do not declare though the program measures them, the program's unsupported lines, and
+  `peer_bench_test.rb`'s list), where the test should derive its list from the declarations; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
   the reader's closed clock set has no name for its `CLOCK_MONOTONIC` fallback, which the design says is
   recorded as such; its fast-run, sweep-print and spinner loops moved into `test/guest/bench` beside
   the cell summary, so they are one implementation with the native guest's;
@@ -167,9 +171,7 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   `timed_out` from a partial serial log.
 * [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)),
   `tools/lib/erx/linux_guest.rb`, `bench/peer/erx_peer_bench.c`: the guest boots in a session; what remains is
-  that `erx_peer_bench` reports `nullcall.root-same-space` and `wake.wake-same-cpu` as having no counterpart
-  although the design's counterparts table and `benches/wake.rb` name one (two threads of one process over a
-  pipe pair; the condition-variable wake on one CPU); as process 1 its own deadline rests on `SIGALRM`, which
+  that as process 1 its own deadline rests on `SIGALRM`, which
   the kernel likely does not deliver to process 1, and its power-off on every end passing through `exit`
   (a small `/init` that forks the program and powers off when it ends would make both hold by construction);
   `NewcArchive.member` builds the header from positional fields; whether `shm_open` under `/dev/shm` needs no

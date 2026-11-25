@@ -202,7 +202,7 @@ module Erx
     # suites' runtime, need the hosted runtime built, or need Arm's register
     # archive fetched, or build OpenSSL. check ensures the rc oracle first (ensure_rc_oracle),
     # so the tests that read plan9port's rc run in it.
-    STANDALONE_INTEGRATION_TESTS = %w[domain_image fiasco_reproducible libcrypto_build native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant runtime_console runtime_device runtime_dirty_io_reductions runtime_eval_receive runtime_genet runtime_hosted_smoke runtime_literal_token runtime_prepare_loading runtime_prim_file runtime_release runtime_service_nifs sysreg_refresh oracle_log_tree].freeze
+    STANDALONE_INTEGRATION_TESTS = %w[domain_image fiasco_reproducible libcrypto_build linux_guest_seed native_seeds oracle_ct_oracle oracle_reporter qemu_gate_mutant runtime_console runtime_device runtime_dirty_io_reductions runtime_eval_receive runtime_genet runtime_hosted_smoke runtime_literal_token runtime_prepare_loading runtime_prim_file runtime_release runtime_service_nifs sysreg_refresh oracle_log_tree].freeze
 
     def self.integration_tests(root)
       excused = STANDALONE_INTEGRATION_TESTS.map { |name| "#{name}_test.rb" }

@@ -23,12 +23,14 @@
  * Every interval is ticks of one clock: the architecture's system counter where user mode
  * may read it, clock "counter", and otherwise CLOCK_MONOTONIC in nanoseconds, clock
  * "monotonic". Threads are pinned with sched_setaffinity on Linux and cpuset_setaffinity
- * on FreeBSD, the one place the file differs by system. The main thread of a native-set
+ * on FreeBSD; that and the wake handshake, which reads B's state from Linux's /proc, are
+ * where the file differs by system. The main thread of a native-set
  * benchmark runs on CPU 0, the service's CPU, and the pair its CLOCK line calibrates is
  * CPU 0 and the last, as a native boot's is; an xdomain run is not pinned.
  *
- * An operation the design's counterparts table names no counterpart for is reported
- * unsupported, never timed as something else. A setup failure prints a FAILED line and
+ * An operation the design's counterparts table names no counterpart for, or whose
+ * counterpart the system or the machine cannot run, is reported unsupported with the
+ * reason, never timed as something else. A setup failure prints a FAILED line and
  * ends the run with no CLOCK line, so the host rejects the run rather than read part of it.
  */
 
@@ -37,6 +39,7 @@
 #endif
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
 #include <setjmp.h>
@@ -92,16 +95,16 @@
 #define PERIODIC_LEAD	10u
 /* B waits this long for a wake; a wait that reaches it lost its wake. */
 #define WAKE_PATIENCE_S	1
-/*
- * A waits this long after B has released the lock inside its wait before stamping, so B
- * is asleep when it is signalled: POSIX shows no thread's state, which the native
- * handshake reads from the kernel.
- */
-#define WAKE_SETTLE_US	UINT64_C(200)
 /* The run ends by SIGALRM after this long, so a stalled side ends it with no CLOCK line. */
 #define RUN_DEADLINE_S	300u
 /* The protect check's child ends with this when its write faults. */
 #define FAULTED		3
+/* The sample the seeded lost wake's A does not wake, as the native bench root's. */
+#ifdef ERX_BENCH_SEED_LOST_WAKE
+#define SEED_SKIPPED	(ERX_BENCH_FAST_WARMUP + 3u)
+#else
+#define SEED_SKIPPED	UINT32_MAX
+#endif
 /* share-equal's landing cell's parameters, which tools/lib/erx/benches/sched.rb declares. */
 #define SHARE_THREADS	4u
 #define SHARE_WINDOW_MS	1000u
@@ -113,6 +116,7 @@
 #define SHARE_SLICE_US	UINT64_C(1000)
 #define NO_COUNTERPART	"no counterpart named in the design"
 #define ONE_CPU		"the machine has one CPU"
+#define WAKE_UNREADABLE	"B's blocked state is not readable on this system"
 
 /* The run's clock: its name as the lines give it, its frequency and its read. */
 static const char *clock_name;
@@ -614,6 +618,16 @@ echo_process(int in, int out, int near, unsigned cpu, bool pinned)
 	return (child);
 }
 
+/* An echo thread's ends: it echoes from echo_in to echo_out until echo_in ends. */
+static int echo_in = -1, echo_out = -1;
+
+static void
+echo_thread(uint64_t index)
+{
+	(void)index;
+	echo(echo_in, echo_out, trip_bytes);
+}
+
 /* Ends the near side's streams and reaps the echo process, which must end with 0. */
 static void
 echo_reap(pid_t child)
@@ -630,7 +644,11 @@ echo_reap(pid_t child)
 		peer_fail("the echo process did not end with 0");
 }
 
-/* nullcall: getppid for kernel, and an 8-byte pipe round trip for root-cross-space. */
+/*
+ * nullcall: getppid for kernel, and an 8-byte round trip over a pair of pipes from CPU 0
+ * to an echo on the cell's CPU: an echo thread of this process for root-same-space, an
+ * echo process for root-cross-space.
+ */
 
 static pid_t parent_pid;
 
@@ -641,25 +659,55 @@ ppid_call(uint64_t at)
 	return (getppid() == parent_pid);
 }
 
-/* root-cross-space from CPU 0 to an echo process on echo_cpu, over two pipes. */
+/* Opens the request pipe there and the reply pipe back, and the 8-byte request. */
 static void
-pipe_cell(const char *placement, unsigned echo_cpu)
+pipes_open(int there[2], int back[2])
 {
-	static const peer_op_t op = { nothing, round_trip, nothing };
-	int there[2], back[2];
-	pid_t child;
-
 	if (pipe(there) != 0 || pipe(back) != 0)
 		peer_fail("no pipe");
 	trip_bytes = 8;
 	memset(trip_request, 0xa5, trip_bytes);
+}
+
+static const peer_op_t pipe_trip = { nothing, round_trip, nothing };
+
+/* root-same-space: to an echo thread on echo_cpu, which ends when there[1] closes. */
+static void
+pipe_thread_cell(const char *placement, unsigned echo_cpu)
+{
+	int there[2], back[2];
+	pthread_t thread;
+
+	pipes_open(there, back);
+	echo_in = there[0];
+	echo_out = back[1];
+	thread = peer_thread_start(echo_cpu, echo_thread, 0);
+	trip_out = there[1];
+	trip_in = back[0];
+	fast_cell("root-same-space", placement, NULL, 0, &pipe_trip, NULL);
+	close(there[1]);
+	peer_thread_join(thread);
+	close(there[0]);
+	close(back[0]);
+	close(back[1]);
+	trip_out = trip_in = echo_in = echo_out = -1;
+}
+
+/* root-cross-space: to an echo process on echo_cpu. */
+static void
+pipe_process_cell(const char *placement, unsigned echo_cpu)
+{
+	int there[2], back[2];
+	pid_t child;
+
+	pipes_open(there, back);
 	/* The echo holds back[0] too, which it never reads; there[1]'s close alone ends it. */
 	child = echo_process(there[0], back[1], there[1], echo_cpu, true);
 	close(there[0]);
 	close(back[1]);
 	trip_out = there[1];
 	trip_in = back[0];
-	fast_cell("root-cross-space", placement, NULL, 0, &op, NULL);
+	fast_cell("root-cross-space", placement, NULL, 0, &pipe_trip, NULL);
 	echo_reap(child);
 }
 
@@ -669,11 +717,14 @@ nullcall_cells(void)
 	static const peer_op_t kernel = { nothing, ppid_call, nothing };
 
 	parent_pid = getppid();
-	peer_print_unsupported("root-same-space", "service-cpu", NO_COUNTERPART);
-	peer_print_unsupported("root-same-space", "other-cpu", NO_COUNTERPART);
-	pipe_cell("service-cpu", 0);
+	pipe_thread_cell("service-cpu", 0);
 	if (cpus > 1)
-		pipe_cell("other-cpu", cpus - 1);
+		pipe_thread_cell("other-cpu", cpus - 1);
+	else
+		peer_print_unsupported("root-same-space", "other-cpu", ONE_CPU);
+	pipe_process_cell("service-cpu", 0);
+	if (cpus > 1)
+		pipe_process_cell("other-cpu", cpus - 1);
 	else
 		peer_print_unsupported("root-cross-space", "other-cpu", ONE_CPU);
 	fast_cell("kernel", "same-cpu", NULL, 0, &kernel, NULL);
@@ -914,69 +965,178 @@ park_deadline(void)
 	peer_print_line(erx_bench_line_cell(line, sizeof(line), &cell));
 }
 
-/* The handshake A and B share: the sample B waits for, the one A signalled, B's stamp. */
+#if defined(__linux__)
+/*
+ * The wake handshake (docs/design-bench.md, the counterparts' C table). Thread B waits for
+ * the sequence word to reach each sample's number in pthread_cond_timedwait, its absolute
+ * deadline WAKE_PATIENCE_S away on CLOCK_MONOTONIC. Thread A takes the mutex once B has
+ * released it into that wait, reads B's state in /proc/self/task/<tid>/stat until it is
+ * S, stamps, sets the word, signals, releases the mutex and blocks reading the answer
+ * pipe; B stamps its return and writes the stamp, or that its wait timed out, to the
+ * pipe. B returning with the word changed is the wake, and ETIMEDOUT a lost wake. FreeBSD
+ * shows no thread's state there, so its way to see B blocked is settled with its board
+ * package, and until then its wake cells are unsupported (wake_cells).
+ */
 static struct {
 	pthread_mutex_t lock;
-	pthread_cond_t poke;
-	pthread_cond_t answer;
-	uint32_t waiting;
-	uint32_t poked;
-	uint32_t done;
-	bool lost;
-	uint64_t stamp;
+	pthread_cond_t poke;	/* B waits on it, on CLOCK_MONOTONIC, for word */
+	pthread_cond_t ready;	/* A waits on it for waiting */
+	uint32_t waiting;	/* the sample B waits for */
+	uint32_t word;		/* the sample A woke B for */
+	pid_t b_task;		/* B's thread, as /proc names it */
+	int answer[2];		/* the pipe B answers A on */
 } shake = { .lock = PTHREAD_MUTEX_INITIALIZER };
 
-/* B's side: for each sample, wait to be poked, stamp, answer; a wait that times out is a lost wake. */
+/* What B writes A after each sample: its stamp, and whether its wait timed out. */
+typedef struct {
+	uint64_t stamp;
+	bool lost;
+} wake_answer_t;
+
+static void
+shake_lock(void)
+{
+	if (pthread_mutex_lock(&shake.lock) != 0)
+		peer_fail("the handshake's lock was refused");
+}
+
+/* B's side of sample number: publish it, wait for the word, stamp the return. */
+static wake_answer_t
+b_sample(uint32_t number)
+{
+	struct timespec patience;
+	uint64_t stamp;
+	int waited = 0;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &patience) != 0)
+		peer_fail("CLOCK_MONOTONIC did not read");
+	patience.tv_sec += WAKE_PATIENCE_S;
+	shake_lock();
+	shake.waiting = number;
+	pthread_cond_signal(&shake.ready);
+	while (shake.word != number && waited == 0)
+		waited = pthread_cond_timedwait(&shake.poke, &shake.lock, &patience);
+	stamp = clock_read();
+	pthread_mutex_unlock(&shake.lock);
+	if (waited != 0 && waited != ETIMEDOUT)
+		peer_fail("pthread_cond_timedwait refused its wait");
+	/* ETIMEDOUT is a lost wake whatever the word reads by then, as the native park's is. */
+	return ((wake_answer_t){ .stamp = stamp, .lost = waited == ETIMEDOUT });
+}
+
+/* B: each sample, answered to A; a lost wake ends B's samples. */
 static void
 wake_b(uint64_t total)
 {
-	if (pthread_mutex_lock(&shake.lock) != 0)
-		peer_fail("the handshake's lock was refused");
-	for (uint32_t number = 1; number <= total && !shake.lost; number++) {
-		struct timespec patience;
-
-		if (clock_gettime(CLOCK_MONOTONIC, &patience) != 0)
-			peer_fail("CLOCK_MONOTONIC did not read");
-		patience.tv_sec += WAKE_PATIENCE_S;
-		shake.waiting = number;
-		pthread_cond_signal(&shake.answer);
-		while (shake.poked != number && !shake.lost)
-			shake.lost = pthread_cond_timedwait(&shake.poke, &shake.lock, &patience) == ETIMEDOUT &&
-			    shake.poked != number;
-		shake.stamp = clock_read();
-		shake.done = number;
-		pthread_cond_signal(&shake.answer);
-	}
+	shake_lock();
+	shake.b_task = gettid();
 	pthread_mutex_unlock(&shake.lock);
+	for (uint32_t number = 1; number <= total; number++) {
+		const wake_answer_t answer = b_sample(number);
+
+		if (!write_full(shake.answer[1], &answer, sizeof(answer)))
+			peer_fail("B's answer was not written");
+		if (answer.lost)
+			return;
+	}
+}
+
+/* The state letter of thread task, the field after its command's closing parenthesis. */
+static char
+task_state(pid_t task)
+{
+	char path[64], text[512];
+	const char *command_end;
+	ssize_t got;
+	int fd;
+
+	snprintf(path, sizeof(path), "/proc/self/task/%ld/stat", (long)task);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		peer_fail("B's /proc stat did not open");
+	got = read(fd, text, sizeof(text) - 1);
+	close(fd);
+	if (got <= 0)
+		peer_fail("B's /proc stat did not read");
+	text[got] = '\0';
+	/* The command may hold any byte; the fields after it are numbers. */
+	command_end = strrchr(text, ')');
+	if (command_end == NULL || command_end[1] != ' ' || command_end[2] == '\0')
+		peer_fail("B's /proc stat did not parse");
+	return (command_end[2]);
 }
 
 /*
- * A's side: per sample, once B waits and WAKE_SETTLE_US later, stamp and poke, then take
- * B's stamp less A's. A sample includes B taking the lock back from A.
+ * A's side of sample number: once B waits for it and shows asleep, stamp and, if wake is
+ * set, set the word and signal. A holds the lock B gives up only inside its wait, and
+ * after giving it up the C library's wait sleeps only in the kernel (musl's
+ * pthread_cond_timedwait.c), so S is B asleep there. Answers A's stamp.
+ */
+static uint64_t
+a_sample(uint32_t number, bool wake)
+{
+	uint64_t poked;
+
+	shake_lock();
+	while (shake.waiting != number)
+		pthread_cond_wait(&shake.ready, &shake.lock);
+	for (const uint64_t patience = clock_read() + clock_hz * WAKE_PATIENCE_S; task_state(shake.b_task) != 'S';) {
+		if (clock_read() > patience)
+			peer_fail("B never showed asleep in its wait");
+		sched_yield();
+	}
+	poked = clock_read();
+	if (wake) {
+		shake.word = number;
+		pthread_cond_signal(&shake.poke);
+	}
+	pthread_mutex_unlock(&shake.lock);
+	return (poked);
+}
+
+/*
+ * A: each sample, waking B unless the sample is skip, and B's stamp less A's from the
+ * answer pipe. Answers the samples taken after the warm-up, and sets *lost when B's wait
+ * timed out.
  */
 static size_t
-wake_a(uint32_t total, uint64_t *raw)
+wake_a(uint32_t total, uint32_t skip, uint64_t *raw, bool *lost)
 {
 	size_t taken = 0;
 
-	if (pthread_mutex_lock(&shake.lock) != 0)
-		peer_fail("the handshake's lock was refused");
-	for (uint32_t number = 1; number <= total && !shake.lost; number++) {
-		uint64_t poked;
+	*lost = false;
+	for (uint32_t number = 1; number <= total; number++) {
+		const uint64_t poked = a_sample(number, number != skip);
+		wake_answer_t answer;
 
-		while (shake.waiting != number && !shake.lost)
-			pthread_cond_wait(&shake.answer, &shake.lock);
-		for (const uint64_t settled = clock_read() + clock_hz * WAKE_SETTLE_US / 1000000; clock_read() < settled;)
-			continue;
-		poked = clock_read();
-		shake.poked = number;
-		pthread_cond_signal(&shake.poke);
-		while (shake.done != number)
-			pthread_cond_wait(&shake.answer, &shake.lock);
-		if (number > ERX_BENCH_FAST_WARMUP && !shake.lost)
-			raw[taken++] = shake.stamp - poked;
+		if (!read_full(shake.answer[0], &answer, sizeof(answer)))
+			peer_fail("B's answer was not read");
+		if (answer.lost) {
+			*lost = true;
+			break;
+		}
+		if (number > ERX_BENCH_FAST_WARMUP)
+			raw[taken++] = answer.stamp - poked;
 	}
-	pthread_mutex_unlock(&shake.lock);
+	return (taken);
+}
+
+/* One cell's handshakes with B on b_cpu and A on CPU 0, into samples. */
+static size_t
+wake_samples(unsigned b_cpu, uint32_t skip, bool *lost)
+{
+	const uint32_t total = ERX_BENCH_FAST_WARMUP + ERX_BENCH_FAST_SAMPLES;
+	pthread_t b;
+	size_t taken;
+
+	shake.waiting = shake.word = 0;
+	if (pipe(shake.answer) != 0)
+		peer_fail("no pipe");
+	b = peer_thread_start(b_cpu, wake_b, total);
+	taken = wake_a(total, skip, samples, lost);
+	peer_thread_join(b);
+	close(shake.answer[0]);
+	close(shake.answer[1]);
 	return (taken);
 }
 
@@ -986,30 +1146,43 @@ handshake_init(void)
 	pthread_condattr_t monotonic;
 
 	if (pthread_condattr_init(&monotonic) != 0 || pthread_condattr_setclock(&monotonic, CLOCK_MONOTONIC) != 0 ||
-	    pthread_cond_init(&shake.poke, &monotonic) != 0 || pthread_cond_init(&shake.answer, NULL) != 0)
+	    pthread_cond_init(&shake.poke, &monotonic) != 0 || pthread_cond_init(&shake.ready, NULL) != 0)
 		peer_fail("no condition variable");
 	pthread_condattr_destroy(&monotonic);
+}
+
+/* wake-same-cpu: A and B both on CPU 0, so one counter stamps both and needs no calibration. */
+static void
+wake_same_cpu(void)
+{
+	erx_bench_cell_t cell = peer_cell("wake-same-cpu", "same-cpu");
+	bool lost;
+	const size_t taken = wake_samples(0, SEED_SKIPPED, &lost);
+
+	if (lost) {
+		/* The samples before the lost wake stand: no calibration needs vouching for. */
+		cell.status = "failed";
+		cell.reason = "lost wake";
+		cell.lost = 1;
+	}
+	peer_print(cell, samples, taken);
 }
 
 /* wake-cross-cpu, calibrated before and after; returns the pair for the CLOCK line. */
 static erx_bench_pair_t
 wake_cross_cpu(void)
 {
-	const uint32_t total = ERX_BENCH_FAST_WARMUP + ERX_BENCH_FAST_SAMPLES;
 	erx_bench_cell_t cell = peer_cell("wake-cross-cpu", "cross-cpu");
 	erx_bench_pair_t pair = { .cpus = { 0, cpus - 1 } };
 	erx_bench_sample_t top[ERX_BENCH_LARGEST];
 	erx_bench_offset_t hull;
 	const char *unsupported;
-	pthread_t b;
 	size_t taken;
 	int64_t middle;
+	bool lost;
 
-	handshake_init();
 	pair.before = calibrate();
-	b = peer_thread_start(cpus - 1, wake_b, total);
-	taken = wake_a(total, samples);
-	peer_thread_join(b);
+	taken = wake_samples(cpus - 1, UINT32_MAX, &lost);
 	pair.after = calibrate();
 	hull = erx_bench_offset_hull(pair.before, pair.after);
 	middle = hull.empty ? 0 : hull.low + (hull.high - hull.low) / 2;
@@ -1022,7 +1195,7 @@ wake_cross_cpu(void)
 	/* The bound is a tenth of the corrected median, as the host holds it. */
 	erx_bench_cell_summarize(&cell, &hist, samples, taken, top);
 	unsupported = erx_bench_cell_unsupported(true, pair.before, pair.after, erx_bench_hist_median(&hist));
-	if (shake.lost) {
+	if (lost) {
 		/* A failure keeps its counts, not statistics no calibration vouches for. */
 		cell.status = "failed";
 		cell.reason = "lost wake";
@@ -1039,22 +1212,45 @@ wake_cross_cpu(void)
 	return (pair);
 }
 
-static void
-wake_run(void)
-{
-	erx_bench_pair_t pair;
+#endif
 
-	pin_to(0);
-	park_deadline();
-	peer_print_unsupported("wake-same-cpu", "same-cpu", NO_COUNTERPART);
+/*
+ * The cells after park-deadline, and the CLOCK line. Where B's state cannot be read, the
+ * wake cells are unsupported and the pair is still calibrated, so park-deadline imports.
+ */
+static void
+wake_cells(void)
+{
+	erx_bench_pair_t pair = { .cpus = { 0, cpus - 1 } };
+
+#if defined(__linux__)
+	handshake_init();
+	wake_same_cpu();
+#else
+	peer_print_unsupported("wake-same-cpu", "same-cpu", WAKE_UNREADABLE);
+#endif
 	peer_print_unsupported("trigger-take", "same-cpu", NO_COUNTERPART);
 	if (cpus == 1) {
 		peer_print_unsupported("wake-cross-cpu", "cross-cpu", ONE_CPU);
 		print_clock(NULL, 0);
 		return;
 	}
+#if defined(__linux__)
 	pair = wake_cross_cpu();
+#else
+	pair.before = calibrate();
+	peer_print_unsupported("wake-cross-cpu", "cross-cpu", WAKE_UNREADABLE);
+	pair.after = calibrate();
+#endif
 	print_clock(&pair, 1);
+}
+
+static void
+wake_run(void)
+{
+	pin_to(0);
+	park_deadline();
+	wake_cells();
 }
 
 /*
@@ -1135,15 +1331,6 @@ share_equal(void)
  * line calibrates no pair, as an xdomain boot's does not.
  */
 
-static int echo_fd = -1;
-
-static void
-echo_thread(uint64_t index)
-{
-	(void)index;
-	echo(echo_fd, echo_fd, trip_bytes);
-}
-
 static void
 xdomain_run(void)
 {
@@ -1160,7 +1347,7 @@ xdomain_run(void)
 
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, ends) != 0)
 		peer_fail("no socket pair");
-	echo_fd = ends[1];
+	echo_in = echo_out = ends[1];
 	thread = thread_start(0, false, echo_thread, 0);
 	trip_out = trip_in = ends[0];
 	fast_cell("local-rtt", "runtime", params, nparams, &op, NULL);

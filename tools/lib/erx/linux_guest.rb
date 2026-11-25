@@ -57,12 +57,14 @@ module Erx
 
     # Builds the guest's initramfs in a directory of its own under build/linux-guest, so
     # no other build replaces what a session boots. Answers the kernel's path, the
-    # initramfs and the subject facts a record keeps.
-    def build(root:, runner:)
+    # initramfs and the subject facts a record keeps. seeded are a seeded fault's flags
+    # (NativeBench::Seed#root_flags), which the program takes as the native bench root does.
+    def build(root:, runner:, seeded: [])
       dependencies = lock(root: root, runner: runner)
       parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       output = Dir.mktmpdir("build-#{Process.pid}-", parent)
-      peer = compile_peer(root: root, usr: dependencies.fetched_tree(MUSL_DEV), output: output, runner: runner)
+      peer = compile_peer(root: root, usr: dependencies.fetched_tree(MUSL_DEV), output: output, runner: runner,
+                          seeded: seeded)
       initrd = File.join(output, 'initramfs.cpio')
       File.binwrite(initrd, initramfs(File.binread(peer)))
       kernel = dependencies.fetched_file(KERNEL)
@@ -70,7 +72,7 @@ module Erx
         subject: { 'kernel' => pin_of(dependencies, KERNEL), 'c_library' => pin_of(dependencies, MUSL_DEV),
                    'command_line' => COMMAND_LINE, 'initramfs_sha256' => Digest::SHA256.file(initrd).hexdigest,
                    'peer_sha256' => Digest::SHA256.file(peer).hexdigest, 'compiler' => compiler_version(runner),
-                   'flags' => peer_flags('MUSL_DEV').join(' ') } }
+                   'flags' => peer_flags('MUSL_DEV', seeded).join(' ') } }
     end
 
     # One boot of the guest for benchmark at cpus CPUs, its serial log in directory.
@@ -89,22 +91,22 @@ module Erx
     end
 
     # The compiler's flags; usr is musl-dev's usr tree.
-    def peer_flags(usr)
+    def peer_flags(usr, seeded)
       ["--target=#{TARGET}", '-std=c17', '-O2', '-pthread', '-mno-outline-atomics', '-nostdinc',
-       '-isystem', File.join(usr, 'include'), *PeerBench.flags]
+       '-isystem', File.join(usr, 'include'), *PeerBench.flags, *seeded]
     end
 
     # erx_peer_bench compiled by ERX_CLANG and linked static by ERX_LLD against the
     # start files and libc.a of musl-dev's usr tree, and erXos's compiler-rt builtins archive, whose
     # binary128 helpers musl's long double printf reaches.
-    def compile_peer(root:, usr:, output:, runner:)
+    def compile_peer(root:, usr:, output:, runner:, seeded:)
       clang = compiler
       lld = ENV.fetch('ERX_LLD') { raise Error, 'linux guest: set ERX_LLD to ld.lld' }
       resource = File.join(File.binread(runner.run([clang, '-print-resource-dir'], name: 'linux-guest-resource-dir',
                                                                                    deadline: 30).fetch('log')).strip, 'include')
       object = File.join(output, 'erx_peer_bench.o')
       peer = File.join(output, 'erx_peer_bench')
-      runner.run([clang, *peer_flags(usr), '-isystem', resource, '-I', root, '-c',
+      runner.run([clang, *peer_flags(usr, seeded), '-isystem', resource, '-I', root, '-c',
                   File.join(root, 'bench/peer/erx_peer_bench.c'), '-o', object], name: 'linux-guest-cc', deadline: 300)
       lib = File.join(usr, 'lib')
       runner.run([lld, '-static', '-o', peer, *%w[crt1.o crti.o].map { |name| File.join(lib, name) }, object,

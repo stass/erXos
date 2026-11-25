@@ -15,12 +15,14 @@ cell = Erx::BenchSuite::LandingCell
 refused = "ERX_EINVAL, and the caller's count of refusals rises by each call (erx_fiasco_test_refused)"
 # What L4Re runs, ipcbench's programs (docs/design-bench.md, "Counterparts"), read through
 # its facts record; Erx::Ipcbench reads their lines. What Linux runs, erx_peer_bench's POSIX
-# counterparts; it has none for root-same-space.
+# counterparts.
 Erx::BenchSuite.declare_benchmark(
   operations: [
     operation.new(name: 'root-same-space', profile: 'fast', result: refused,
                   counterparts: { 'l4re' => 'ipcbench: two threads of one task; a blocking call with an empty message ' \
-                                          'to a responder already waiting in reply-and-wait' }),
+                                          'to a responder already waiting in reply-and-wait',
+                                 'linux' => 'two threads of one process: an 8-byte request and an 8-byte reply over a ' \
+                                            'pair of pipes, each read blocking' }),
     operation.new(name: 'root-cross-space', profile: 'fast', result: refused,
                   counterparts: { 'l4re' => 'ipcclient and ipcserver: a blocking call with an empty message ' \
                                           'between two tasks, the responder waiting in reply-and-wait',

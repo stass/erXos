@@ -1678,8 +1678,9 @@ each operation and prints the same `BENCH` lines, so one reader imports
 all four systems. It reads the system counter directly where the system
 lets user mode read it (unverified on both; recorded as clock `counter`),
 and otherwise `CLOCK_MONOTONIC` (clock `monotonic`). It pins threads with
-`cpuset_setaffinity` on FreeBSD and `sched_setaffinity` on Linux, the one
-place it differs by system.
+`cpuset_setaffinity` on FreeBSD and `sched_setaffinity` on Linux, and its
+`wake` handshake reads the waiting thread's state from Linux's `/proc`;
+those are the places it differs by system.
 
 A run of another system on the board writes its console to a file
 through the host's serial adapter, and `tools/erx bench import NAME --env
@@ -1707,7 +1708,7 @@ The C table:
 | erXos operation | L4Re | FreeBSD and Linux | What differs |
 | --- | --- | --- | --- |
 | `nullcall.kernel` | `syscallbench`: an IPC call to the caller's own thread capability whose thread-control operation returns early | `getppid` | three entry paths, not one null call. erXos's cell is the same act on erXos's Fiasco ([`nullcall`](#3-nullcall-the-decoder-refusal-round-trip)), so those two differ by the fork's patches and compilers; `getppid` is a POSIX call doing its own small work |
-| `nullcall.root-same-space` | `ipcbench`: two threads of one task; a blocking call with an empty message to a responder already waiting in reply-and-wait | two threads of one process on the same CPU: an 8-byte request and an 8-byte reply over a pair of pipes, each read blocking | erXos's round trip carries one word to the root service and adds its receive, decode and refusal in user mode; L4Re's is an empty call to a waiting thread, the best case; a pipe round trip is two writes and two blocking reads. Each row is its own endpoint: no difference of two rows isolates the root service |
+| `nullcall.root-same-space` | `ipcbench`: two threads of one task; a blocking call with an empty message to a responder already waiting in reply-and-wait | two threads of one process: an 8-byte request and an 8-byte reply over a pair of pipes, each read blocking, the echo thread on CPU 0 for `service-cpu` and on the last CPU for `other-cpu`, as the next row's echo process is | erXos's round trip carries one word to the root service and adds its receive, decode and refusal in user mode; L4Re's is an empty call to a waiting thread, the best case; a pipe round trip is two writes and two blocking reads. Each row is its own endpoint: no difference of two rows isolates the root service |
 | `nullcall.root-cross-space` | `ipcclient` and `ipcserver`: the same between two tasks | the same between two processes | the same, with an address-space switch each way |
 | `wake.wake-same-cpu`, `wake.wake-cross-cpu` | none | thread B waits for a sequence word to change in `pthread_cond_timedwait`, its absolute deadline 1 s away on `CLOCK_MONOTONIC`; thread A, on B's CPU or another, takes the mutex, reads B's state in `/proc/self/task/<tid>/stat` until it is `S`, stamps, changes the word, signals, releases and blocks reading a pipe; B stamps its return and writes the pipe | B returning with the word changed is the wake, and `ETIMEDOUT` a lost wake. The blocked state is the kernel's report where erXos's is its park record; FreeBSD's way to see B blocked is settled with the board's package |
 | `wake.park-deadline` | none | `clock_nanosleep` on `CLOCK_MONOTONIC` with `TIMER_ABSTIME` at the phase sweep's deadlines, period 1 ms | the systems' timer resolution |
