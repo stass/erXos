@@ -317,10 +317,8 @@ slot unused. The pool's size is derived, never written down, so no part of the p
 another. The root's table opens with its limit, and a handle past it is `ERX_ELIMIT`, as in any task.
 
 **What takes pairs.** A thread of a task other than the root takes one pair, for its thread and its
-semaphore, and the task's row records the pair's index beside the thread's state, as L4Re's thread
-manager takes a thread's capability and its semaphore's from its slot allocator and keeps both in
-the thread's descriptor (`l4re-core`, `libpthread/src/manager.cc`, and the allocator,
-`l4re/util/include/counting_cap_alloc`; unverified: not read from a pinned source).
+semaphore, and the task's row records the pair's index beside the thread's state, so one free pair
+is everything a new thread needs and a thread's end returns exactly what it took.
 A task other than the root takes two pairs, for its gate and its task object in the first and the
 semaphore its end ups in the second, the fourth slot unused, and its row records both indices. The
 pool's one unit is the pair, so a count of free pairs is also a count of what can be placed: a
@@ -1458,8 +1456,7 @@ executable it enters starts the task's only pair ([Thread creation](#thread-crea
 root's first group instead, as that group's first thread ([Budgets and groups as records](#budgets-and-groups-as-records))
 ([Interrupts and readiness](#interrupts-and-readiness)). The watchdog, like the root service, holds no thread index and
 takes a free slot of the kernel-given UTCB area, with `sigma0` as its pager. `moe`, L4Re's root task, is likewise one server thread for
-memory and faults (upstream; `moe` is not in this tree), and `libpthread` serializes thread and UTCB
-work through one manager thread (`manager.cc:494`). The cost is that the machine's memory, thread
+memory and faults (upstream; `moe` is not in this tree). The cost is that the machine's memory, thread
 and log calls queue on one thread, which Phase 1 accepts and an ERTS boot measures.
 
 ### Locks
@@ -2463,7 +2460,7 @@ slot of the kernel-given UTCB area.
 
 **Claiming an index.** Fiasco writes `free_marker` when finished with a UTCB, in `do_kill`, some time after the
 deletion call returns (`thread.cpp:610-611`, `utcb.h:176-185`). So an index is claimable when **its record is
-free and its marker reads 0**, checked under the thread lock, lowest first, as L4Re checks (`manager.cc:541`).
+free and its marker reads 0**, checked under the thread lock, lowest first.
 Only `erx_thread_start` and the trampoline set a marker, and only Fiasco clears one. No claimable index is
 `ERX_ENOMEM`.
 
@@ -2516,7 +2513,7 @@ has no CPU to complete it on. A deletion the root cannot perform ends the machin
 
 **The trampoline.** `l4_thread_ex_regs` carries no thread pointer (`thread.h:94`), so `ip` is a few lines of
 assembly in the backend's architecture layer and `sp` is the record. It stores the record in the native UTCB's
-first user word, as L4Re's pthread does (`descr.h:211`), writes the marker 1, which index 0 needs because the
+first user word, which the thread itself can always reach, writes the marker 1, which index 0 needs because the
 root cannot reach a task's native UTCB, sets the stack, the thread pointer and the first eight argument registers
 from the starting registers, and jumps to the entry. A program's values, `program_arg`, use all eight: `budget` to `hwcap2` in registers 0 to 6 and `exec`,
 0 in every start a session gives, the loader's included, and the exec record's page, `exec_record_page`, only
@@ -2589,7 +2586,7 @@ returns without a kernel call.
 
 #### Thread exit
 
-As in L4Re's libpthread (`join.c:83-87`, `manager.cc:201-214`), a per-task thread deletes the kernel object, because
+A per-task thread deletes the kernel object, because
 an exiting thread runs on the stack to be freed and musl's lock word must outlast it.
 
 **Exit.** `erx_thread_exit` puts the thread's record on the reaper's list under the thread lock,
