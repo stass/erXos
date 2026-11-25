@@ -30,7 +30,8 @@ module Erx
     STATUS_BYTES = 65_536
     HOST_FLAGS = '-g -O1'
     SANITIZE = '-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer'
-    INIT_COMMAND = "git submodule update --init #{SUBMODULE}".freeze
+    # Clones the submodule, from the main checkout's copy of it in a worktree (init_local).
+    INIT_COMMAND = 'tools/erx setup'.freeze
     # The flags after S in the submodule field of a porcelain v2 entry.
     DRIFT_NOTES = { 'C' => 'is not at the commit the index records', 'M' => 'has changes to tracked files',
                     'U' => 'has untracked files' }.freeze
@@ -50,6 +51,17 @@ module Erx
       return "LVGL: #{SUBMODULE} is already checked out; left as it is" if checked_out?(root)
       Submodule.checkout(root: root, runner: runner, path: SUBMODULE, name: 'lvgl-submodule-init')
       "LVGL: cloned #{SUBMODULE} at the commit its gitlink records"
+    end
+
+    # The same clone from the main checkout's copy of the submodule, with no network
+    # (`tools/erx setup`, for a fresh worktree). The copy is what `tools/erx fetch`
+    # cloned once in the main checkout; without it this refuses and names that command.
+    def init_local(root:, runner:)
+      return "LVGL: #{SUBMODULE} is already checked out; left as it is" if checked_out?(root)
+      store = Submodule.module_store(root: root, path: SUBMODULE)
+      raise Error, "no local copy of #{SUBMODULE} to clone from; run `tools/erx fetch` once in the main checkout" unless store
+      Submodule.checkout(root: root, runner: runner, path: SUBMODULE, name: 'lvgl-submodule-init', url: store)
+      "LVGL: cloned #{SUBMODULE} from #{store}"
     end
 
     # LVGL's tree for the build. A missing checkout is the one refusal. A

@@ -35,9 +35,11 @@ checkout. A new git worktree needs the same preparation as a clone.
 
 * [Host setup](../../README.md#host-setup): the tools, and the `ERX_CLANG`
   and `ERX_LLD` variables every command needs.
-* [Fresh worktree](../../README.md#fresh-worktree): `make setup` fetches
-  nothing itself; it builds from sources `make fetch` verified, or from
-  another checkout's `build/downloads` named by `ERX_SOURCE_CACHE`.
+* [Fresh worktree](../../README.md#fresh-worktree): one command,
+  `ERX_SOURCE_CACHE=/path/to/main/build/downloads make setup`, readies a new
+  worktree. It fetches nothing itself: it builds from sources `make fetch`
+  verified, or from another checkout's `build/downloads`, clones LVGL from the
+  main checkout's copy, and builds the oracles, the runtime and Fiasco.
 * [Fetch, bootstrap and check](../../README.md#fetch-bootstrap-and-check):
   `make fetch`, `make oracle-bootstrap` and `make check`.
 

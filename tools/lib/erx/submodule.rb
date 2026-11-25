@@ -24,10 +24,27 @@ module Erx
     # Clones the submodule at path at the commit the superproject records, with no
     # history when its URL is remote (git ignores --depth for a local path). update
     # names the update mode to force ('checkout'), for a submodule whose .gitmodules
-    # entry says `update = none` so that no recursive clone obtains it.
-    def checkout(root:, runner:, path:, name:, update: nil)
-      git(root: root, runner: runner, path: path, name: name, config: [FILE_TRANSPORT],
+    # entry says `update = none` so that no recursive clone obtains it. url, for this
+    # one command, replaces the URL .gitmodules gives (a clone of the main checkout's
+    # copy, module_store), and git's configuration never records it.
+    def checkout(root:, runner:, path:, name:, update: nil, url: nil)
+      config = [FILE_TRANSPORT, *("submodule.#{path}.url=#{url}" if url)]
+      git(root: root, runner: runner, path: path, name: name, config: config,
           arguments: ['submodule', 'update', '--init', '--depth', '1', *("--#{update}" if update), '--', path])
+    end
+
+    # The git directory that already holds the submodule at path for the checkout at
+    # root, or nil: a clone's own `.git/modules/PATH`, or for a linked worktree the
+    # one its main checkout keeps, which the worktree can clone from with no network.
+    # Read from the files git writes: `.git` as a file names the worktree's git
+    # directory, whose `commondir` names the shared one.
+    def module_store(root:, path:)
+      dot_git = File.join(root, '.git')
+      gitdir = File.file?(dot_git) ? File.expand_path(File.read(dot_git)[/\Agitdir: (.+)$/, 1].to_s, root) : dot_git
+      commondir = File.join(gitdir, 'commondir')
+      common = File.file?(commondir) ? File.expand_path(File.read(commondir).strip, gitdir) : gitdir
+      store = File.join(common, 'modules', path)
+      File.directory?(store) ? store : nil
     end
 
     # Runs git on the checkout at root alone and starts no program its configuration

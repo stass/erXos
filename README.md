@@ -785,8 +785,9 @@ tests that need it skip, saying so.
 
 ## Fresh worktree
 
-A new checkout or git worktree needs its sources, the stock OTP oracle and
-the native runtime built before `make check` can run. One command does it:
+A new checkout or git worktree needs its sources, the stock OTP oracle, LVGL's
+submodule and the kernel and the native runtime built before `make check` or a
+QEMU image build can run. One command does it:
 
 ```sh
 ERX_SOURCE_CACHE=/path/to/other/checkout/build/downloads make setup
@@ -794,14 +795,18 @@ ERX_SOURCE_CACHE=/path/to/other/checkout/build/downloads make setup
 
 `make setup` (`tools/erx setup --jobs N`) runs, in order: every source
 `deps.lock` pins, in its order, except those named below, the web
-client's packages, the JIT oracle, the `emu` oracle,
+client's packages, LVGL's checkout, the JIT oracle, the `emu` oracle,
 `tools/erx build fsimg`, `tools/erx build runtime`,
-`tools/erx build rc-oracle` and the development login key.
+`tools/erx build rc-oracle`, `tools/erx build fiasco` and the development login key.
 `make oracle-bootstrap` (`tools/erx setup --bootstrap`) runs only the
 oracles' and fsimg's steps, with OTP's and fsimg's sources, from the
 cache as `make setup` does. A step whose output is already valid is
 skipped, so a second run does nothing. Each build runs under a deadline
 with its own log in `build/logs/`.
+
+LVGL's checkout is cloned from the copy the main checkout keeps in its own
+`.git/modules`, so it needs no network; if the main
+checkout has no copy, setup stops and names `tools/erx fetch`, to run once there.
 
 It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/downloads`; its archives are copied only after their SHA-256 matches

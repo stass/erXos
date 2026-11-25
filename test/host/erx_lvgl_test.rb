@@ -203,8 +203,7 @@ class LvglSubmoduleTest < Minitest::Test
   def test_a_missing_checkout_names_the_command_that_fetches_it
     Dir.mktmpdir('erx-lvgl-submodule') do |root|
       error = assert_raises(Erx::Error) { Erx::Lvgl.source_tree(root: root, runner: nil) }
-      assert_equal 'LVGL is not checked out at display/lvgl/lvgl; run ' \
-                   '`git submodule update --init display/lvgl/lvgl`', error.message
+      assert_equal 'LVGL is not checked out at display/lvgl/lvgl; run `tools/erx setup`', error.message
     end
   end
 
@@ -246,6 +245,63 @@ class LvglSubmoduleTest < Minitest::Test
       assert_equal ['git', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=always', '-C', root,
                     'submodule', 'update', '--init', '--depth', '1', '--', Erx::Lvgl::SUBMODULE], clone
       assert_empty status.grep(/protocol\.file/)
+    end
+  end
+
+  # A fresh worktree clones LVGL from the copy its main checkout keeps, with that
+  # path as the URL for the one command and no network.
+  def test_init_local_clones_from_the_main_checkouts_copy_for_the_one_command
+    Dir.mktmpdir('erx-lvgl-submodule') do |main|
+      store = File.join(main, '.git/modules', Erx::Lvgl::SUBMODULE)
+      FileUtils.mkdir_p(store)
+      worktree = File.join(main, 'wt')
+      FileUtils.mkdir_p([File.join(main, '.git/worktrees/wt'), worktree])
+      File.write(File.join(main, '.git/worktrees/wt/commondir'), "../..\n")
+      File.write(File.join(worktree, '.git'), "gitdir: #{File.join(main, '.git/worktrees/wt')}\n")
+      runner = RecordingRunner.new(File.join(worktree, '.git'))
+      assert_equal "LVGL: cloned display/lvgl/lvgl from #{store}", Erx::Lvgl.init_local(root: worktree, runner: runner)
+      assert_equal ['git', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=always',
+                    '-c', "submodule.display/lvgl/lvgl.url=#{store}", '-C', worktree,
+                    'submodule', 'update', '--init', '--depth', '1', '--', Erx::Lvgl::SUBMODULE], runner.commands.first
+      assert_equal 1, runner.commands.size
+    end
+  end
+
+  def test_init_local_without_a_copy_refuses_and_names_the_fetch
+    Dir.mktmpdir('erx-lvgl-submodule') do |root|
+      FileUtils.mkdir_p(File.join(root, '.git'))
+      error = assert_raises(Erx::Error) { Erx::Lvgl.init_local(root: root, runner: nil) }
+      assert_match(/no local copy of display\/lvgl\/lvgl .* `tools\/erx fetch` once in the main checkout/, error.message)
+    end
+  end
+
+  # The real thing: a superproject with the submodule, a worktree of it, and the clone
+  # made from the main checkout's copy while the URL .gitmodules names is unreachable.
+  def test_init_local_checks_out_the_gitlink_commit_in_a_real_worktree
+    Dir.mktmpdir('erx-lvgl-submodule') do |directory|
+      git = lambda do |*arguments, chdir:|
+        system({ 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_SYSTEM' => '/dev/null' },
+               'git', '-c', 'protocol.file.allow=always', '-c', 'user.name=t', '-c', 'user.email=t@example.com',
+               '-c', 'init.defaultBranch=main', *arguments, chdir: chdir, out: File::NULL, err: File::NULL) || flunk("git #{arguments.first} failed")
+      end
+      upstream = File.join(directory, 'upstream')
+      FileUtils.mkdir_p(upstream)
+      git.call('init', chdir: upstream)
+      File.write(File.join(upstream, 'lvgl.h'), "pinned\n")
+      git.call('add', 'lvgl.h', chdir: upstream)
+      git.call('commit', '-m', 'pinned', chdir: upstream)
+      main = File.join(directory, 'main')
+      FileUtils.mkdir_p(main)
+      git.call('init', chdir: main)
+      git.call('submodule', 'add', upstream, Erx::Lvgl::SUBMODULE, chdir: main)
+      git.call('commit', '-m', 'super', chdir: main)
+      FileUtils.rm_rf(upstream)
+      worktree = File.join(directory, 'wt')
+      git.call('worktree', 'add', '-b', 'topic', worktree, chdir: main)
+      refute Erx::Lvgl.checked_out?(worktree)
+      runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
+      Erx::Lvgl.init_local(root: worktree, runner: runner)
+      assert_equal "pinned\n", File.read(File.join(worktree, Erx::Lvgl::SUBMODULE, 'lvgl.h'))
     end
   end
 

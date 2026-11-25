@@ -8,15 +8,19 @@ require_relative 'host_os'
 require_relative 'runner'
 require_relative 'dependencies'
 require_relative 'dev_key'
+require_relative 'fiasco'
 require_relative 'fsimg'
+require_relative 'lvgl'
 require_relative 'rc_oracle'
+require_relative 'submodule'
 require_relative 'web_build'
 
 module Erx
   # Prepares a fresh checkout or worktree so `make check` can run: the sources
   # the gates build from, the stock OTP oracles (JIT and emu), fsimg, the
   # native runtime, the command shell's rc oracle, which its corpus test runs,
-  # and the clone's development login key (DevKey), which `tools/erx ssh` logs
+  # LVGL's submodule (from the main checkout's copy, with no network), Fiasco's
+  # build, and the clone's development login key (DevKey), which `tools/erx ssh` logs
   # in with; or only BOOTSTRAP's steps. A step whose output is already present
   # and valid is skipped.
   #
@@ -41,6 +45,8 @@ module Erx
 
     # The web client's packages, installed by the fetch (WebBuild.fetch).
     WEB_MODULES = Step.new(name: 'web-modules', kind: :web_modules, argv: [], deadline: WebBuild::DEADLINE)
+    # LVGL's submodule, cloned from the main checkout's copy (Lvgl.init_local).
+    LVGL = Step.new(name: 'lvgl', kind: :lvgl, argv: [], deadline: Submodule::DEADLINE)
     # The clone's development login key, made by DevKey.ensure as the image build makes it.
     DEV_KEY = Step.new(name: 'dev-key', kind: :dev_key, argv: [], deadline: DevKey::DEADLINE)
 
@@ -55,7 +61,11 @@ module Erx
       Step.new(name: 'runtime', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
                argv: %w[build runtime]),
       Step.new(name: 'rc-oracle', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
-               argv: %w[build rc-oracle])
+               argv: %w[build rc-oracle]),
+      # Fiasco's kernel and bootstrap, which the builds that link against them read
+      # (an image's pack builds it too, but a build that only reads it does not).
+      Step.new(name: 'fiasco', kind: :command, deadline: ORACLE_BUILD_DEADLINE,
+               argv: %w[build fiasco])
     ].freeze
 
     # The steps `make oracle-bootstrap` runs (`tools/erx setup --bootstrap`): both
@@ -74,7 +84,7 @@ module Erx
                        .map { |source| source.fetch('id') }
       builds = COMMAND_STEPS.reject { |step| step.name == 'runtime' && !hosted_runtime }
       fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } +
-        [WEB_MODULES] + builds + [DEV_KEY]
+        [WEB_MODULES, LVGL] + builds + [DEV_KEY]
     end
 
     # present: a hash of step name => true when the step's output is valid.
@@ -160,6 +170,8 @@ module Erx
       when 'rc-oracle' then rc_oracle_valid?
       when 'fsimg' then fsimg_valid?
       when 'web-modules' then WebBuild.fetched?(root: @root)
+      when 'lvgl' then Lvgl.checked_out?(@root)
+      when 'fiasco' then fiasco_built?
       when 'dev-key' then dev_key_valid?
       end
     end
@@ -176,6 +188,12 @@ module Erx
 
     # Built from the pinned fsimg by the current recipe, which every EROFS image
     # needs; a refusal only means the step runs, as for rc_oracle_valid?.
+    # The kernel and the first stage a build reads, left by `build fiasco`.
+    def fiasco_built?
+      fiasco = Fiasco.new(root: @root, runner: @runner)
+      [fiasco.kernel_path, fiasco.image_path].all? { |file| File.file?(file) }
+    end
+
     def fsimg_valid?
       Fsimg.locate(root: @root)
       true
@@ -202,6 +220,8 @@ module Erx
         obtain_source(step.argv.first)
       when :web_modules
         WebBuild.fetch(root: @root, runner: @runner)
+      when :lvgl
+        Terminal.puts(Lvgl.init_local(root: @root, runner: @runner))
       when :dev_key
         DevKey.ensure(directory: DevKey.directory(root: @root, runner: @runner), runner: @runner)
       else
