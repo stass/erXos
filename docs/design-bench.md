@@ -186,11 +186,11 @@ can time: `erx_ipc_call`, `erx_ipc_send`, `erx_ipc_reply`,
 (`liberx/backend/core/refused.c`); `erx_mem_child` makes an eager copy
 (`liberx/backend/fiasco/service_stubs.c`); a doorbell's trigger is the
 holder's own `l4_irq_trigger` and makes no request (`erx_irq_trigger`, the
-same file). Fiasco's timeouts and slices are driven by a periodic 1 ms tick
-in erXos's configuration
+same file). Fiasco runs its timer one-shot in erXos's configuration: each
+timeout and slice end programs the timer, never sooner than 200 us after
+the CPU last handled its timeout queue
 ([design-fiasco.md, Scheduling](design-fiasco.md#scheduling), "The
-quantum"); whether a timed park can end only at a tick is unverified, and
-the `wake` benchmark is what shows it.
+quantum"), and the `wake` benchmark shows what a timed park pays for it.
 
 ## The construction
 
@@ -437,9 +437,10 @@ Two rules hold in every profile, so no benchmark declares them:
   periods and lateness and is not absorbed into the schedule, as
   cyclictest's absolute mode does. A return before its deadline is
   counted as early, which is a wrong answer.
-* **The phase sweep.** A timer that fires only on a periodic tick makes
-  a deadline's lateness depend on where the deadline falls between two
-  ticks, and deadlines a whole period apart would all fall at one phase,
+* **The phase sweep.** A timer whose interrupts keep a rhythm of their
+  own, a periodic tick or a floor counted from the last interrupt, makes
+  a deadline's lateness depend on where the deadline falls in that
+  rhythm, and deadlines a whole period apart would all fall at one phase,
   set by when the run happened to start. Deadline k is therefore the first
   deadline, plus k periods, plus `(7k mod 16) / 16` of a period, which
   visits sixteen phases in turn. Within a run, lateness is reported per
@@ -448,11 +449,13 @@ Two rules hold in every profile, so no benchmark declares them:
   delivery and scheduling cost every period paid, so it is not called
   rounding, and the excess is not called scheduling delay; telling them
   apart needs a stamp of the timer's own firing, which no cell has. A
-  sweep phase is counted from the run's first deadline, not from the
-  tick, so phases are not matched across runs: comparisons use the
-  distribution over all phases. Whether Fiasco's timed waits end only at
-  ticks is unverified; a minimum that varies across the phases by about a
-  tick is the sign of it.
+  sweep phase is counted from the run's first deadline, not from any
+  timer event, so phases are not matched across runs: comparisons use the
+  distribution over all phases. On Fiasco a deadline that falls within
+  200 us of the CPU's last handling of its timeout queue waits for that
+  floor ([design-fiasco.md, Scheduling](design-fiasco.md#scheduling),
+  "The quantum"); a minimum that varies across the phases by up to
+  200 us is the sign of it.
 
 ### A sustained cell
 
@@ -1863,7 +1866,8 @@ that every response edge belongs to one stimulus:
 
 * the stimulus is a rising edge, followed by a falling edge 100 us later,
   and the next rising edge comes at a random interval of 2 to 20 ms, so
-  it is never in step with the 1 ms tick;
+  it is never in step with a timer's rhythm, such as Fiasco's 1 ms RCU
+  interrupt;
 * the responder acts on each rising edge it handles by inverting the
   response pin once, so its k-th response edge answers the k-th
   stimulus;
@@ -1955,9 +1959,10 @@ background of every window. `share-tasks` runs under `task-spinners`,
 
 **What a window shows.** With N threads at one level, each has a share
 of about 1/N, and its longest gap is about N - 1 turns. A turn is the
-slice, 1 ms, ended at the first tick after it runs out
-([design-fiasco.md, Scheduling](design-fiasco.md#scheduling)), so on a
-1 ms tick it lasts up to two ticks. Task A's one thread in `share-tasks`
+slice, 1 ms, ended by a timer interrupt programmed for its end and
+deferred by up to Fiasco's 200 us floor
+([design-fiasco.md, Scheduling](design-fiasco.md#scheduling)), so it
+lasts 1 to 1.2 ms. Task A's one thread in `share-tasks`
 gets about a fifth, and its longest gap is about four turns: Fiasco
 shares a level among threads, whichever task holds them, the limitation
 [design-fiasco.md, Bands](design-fiasco.md#bands) records, measured and
@@ -1967,9 +1972,10 @@ not judged.
 thread starved at its level, and a band that no longer protects the work
 above it. Fiasco gives a thread whose quantum is 0 its default slice
 (`Sched_context::set`, `src/kern/sched_context-fixed_prio.cpp:198-200`
-and `:212-214`), which is `CONFIG_SCHED_DEF_TIME_SLICE` ticks of
-`CONFIG_SCHED_GRANULARITY` microseconds (`src/kern/config.cpp:161-162`),
-by default 10 ticks of 1,000 us (`src/Kconfig:353-367`) under the
+and `:212-214`), which is `CONFIG_SCHED_DEF_TIME_SLICE` times
+`CONFIG_SCHED_GRANULARITY` microseconds in either timer mode
+(`src/kern/config.cpp:161-162`), by default 10 times 1,000 us
+(`src/Kconfig:353-367`) under the
 fixed-priority scheduler, Kconfig's default (`src/Kconfig:327-329`);
 `config/fiasco/kernel.defconfig` sets none of the three, so the default
 is 10 ms. A thread given its task row's slice, which is 0, takes it, and

@@ -709,7 +709,7 @@ and a macOS process has none. The ABI's layouts carry `reported`, but no partial
 | --- | --- | --- | --- |
 | basic | any handle | the topic is `ERX_ENOTSUP`: the handle's entry holds its type and rights, but no object id, which only the kernel has (FD2, FD6) | none |
 | machine | the resource, which is ignored; a task other than the root `ERX_ENOTSUP` | `cpus_online`, the count of `l4_scheduler_info`'s CPU map, clear when that call fails; `uptime`, `liberx`'s clock (`erx_fiasco_clock_ns`, the generic timer's virtual count since the counter started, which QEMU starts at reset and a board's firmware at power-on); `build` and `boot_value`, the build identifier and boot value of bootstrap's handoff, which the program root keeps for the service before starting it (a root that does not keep them, such as a native test guest's, leaves both clear); nothing else, since no machine page is mapped ([The booted slot](#the-booted-slot)): `entropy_quality` stays clear, since `liberx`'s generator, not the kernel, holds the entropy, and keeps no quality of its own | `memory_total` and `memory_free`, the pool's ([Reporting a budget](#reporting-a-budget)) |
-| cpu | as machine; a CPU outside that map `ERX_ERANGE` | nothing: not `idle_time`, since Fiasco, built with periodic ticks and without fine-grained CPU time, charges each tick to the thread it interrupts, so its idle count bounds the idle time neither from below nor from above | none |
+| cpu | as machine; a CPU outside that map `ERX_ERANGE` | `idle_time`, `l4_scheduler_idle_time`'s consumed time of the CPU's idle context (`Scheduler::op_sched_idle`, `src/kern/scheduler.cpp:125-133`), which the fine-grained CPU time that one-shot mode selects (`src/Kconfig:268-281`) charges at each switch, clear when that call fails | none |
 | group | in the root, `ERX_CAP_SELF` or the root's own group's handle; any other group handle the caller holds, a domain's included, any other handle, `ERX_CAP_NULL` included, and any call before the root's group is up, `ERX_ENOTSUP` | `cpuset`, once a set was configured, `parked` and `ready`, read from the root's status page; not `capacity_mcpu`, since the grant's capacity is ignored, nor `used_ns` | none |
 | budget | `ERX_CAP_SELF` in the root, the root's budget, or a budget record's handle in the root; any call from a task `ERX_ENOTSUP`, which the inspector shows as every field `unsupported` | a budget record's `guarantee`, `cap` and `carved`; nothing of the root's budget ([Reporting a budget](#reporting-a-budget)) | `used` |
 | thread | `ERX_CAP_SELF` or a live task's space, any other handle `ERX_ENOTSUP`; `index` counts the task's created and started threads in the order of the service's task table, and one past the last is `ERX_ERANGE` | nothing: no state or wait kind, which only the kernel has | none |
@@ -2354,10 +2354,18 @@ CPU from the others of its level; only an app is hostile, and it shares only the
 place of Fiasco's default of 10 ms (`CONFIG_SCHED_DEF_TIME_SLICE`, `src/Kconfig:361-367`). The quantum is what a
 ready thread waits for each thread ahead of it at its level ([Bands](#bands)), and for each thread that a wake puts
 ahead of it meanwhile, so it sets the step, not the bound, of what the base level's round robin costs a runtime whose
-executor is awake but not running ([Urgency](#urgency)). A slice ends at a timer interrupt, which with a periodic tick comes every
-1 ms (`CONFIG_SCHED_GRANULARITY`, `src/Kconfig:353-359`). erXos's build ticks: `config/fiasco/kernel.defconfig`
-chooses no timer mode, so Kconfig takes its choice's first, periodic (`src/Kconfig:258-265`), and a slice ends at the
-first tick after it runs out. The quantum case measures the turn a thread gets ([Verification](#verification)).
+executor is awake but not running ([Urgency](#urgency)). A slice ends at a timer interrupt programmed for its end:
+`config/fiasco/kernel.defconfig` runs the timer one-shot (`CONFIG_ONE_SHOT`, `src/Kconfig:268-281`), so the start of
+each slice sets a timeout at its end (`Sched_context::Ready_queue::set_current_sched`, `src/kern/sched_context.cpp:91-93`)
+and every timeout earlier than the one programmed reprograms the CPU's timer (`Timeout_q::enqueue`,
+`src/kern/timeout.cpp:131-135`). The timer is never programmed sooner than 200 us after the CPU last handled its
+timeout queue (`Config::One_shot_min_interval_us`, `src/kern/config.cpp:60`; `Timeout_q::program_timer`,
+`src/kern/timeout.cpp:259-267`), which bounds the timer interrupts that any domain's timeouts can cause at 5,000 a
+second per CPU, and defers a slice end or a deadline that falls inside the floor by up to 200 us. A CPU that runs a
+thread also takes a timer interrupt at least every 1 ms for Fiasco's RCU (`Config::Rcu_grace_period`,
+`CONFIG_SCHED_GRANULARITY`, in an MP build, `Config::Need_rcu_tick`, `src/kern/config.cpp:62` and `:80`; `src/kern/timeout.cpp:350-353`); an idle CPU with no RCU work
+pending takes none until its next timeout (tickless idle, which one-shot mode implies, `src/kern/kernel_thread.cpp:319-348`
+and `src/kern/context.cpp:2542-2548`). The quantum case measures the turn a thread gets ([Verification](#verification)).
 
 **Where ERTS puts its schedulers.** Since Fiasco never moves a thread, the adapter places them, as it does under
 erXos's kernel ([design-runtime.md](design-runtime.md#scheduling)): online normal scheduler `i` is pinned with
@@ -2573,7 +2581,8 @@ A deadline is absolute monotonic nanoseconds. The backend reads the architecture
 `erx_time_page` needs; the page's scale gives the same nanosecond for years of counting at QEMU's and the Raspberry Pi's frequencies, and at most one
 above it after that, since `time_table.c` rounds its multiplier up at the largest shift that fits. `erx_fiasco_time_wait_us` takes the remainder, rounds it up to
 microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
-wait is never early, and is late by up to Fiasco's timer granularity plus one part in 512. A deadline already past
+wait is never early, and beyond the woken thread's scheduling is late by up to the 200 us floor on Fiasco's one-shot
+timer ([Scheduling](#scheduling), "The quantum") plus one part in 512. A deadline already past
 returns without a kernel call.
 
 ### Deletion

@@ -213,9 +213,8 @@ is Built.
 
 ### 8.2.3 Refusing, and never inventing
 
-Fiasco has no notion of a CPU share, keeps no idle time worth
-reporting, and gives no object a system-wide id, yet erXos's interface
-asks for all three. The backend has two rules for such cases
+Fiasco has no notion of a CPU share and gives no object a system-wide
+id, yet erXos's interface asks for both. The backend has two rules for such cases
 ([design-fiasco.md, Contract](../design-fiasco.md#contract)).
 
 * A call the backend cannot carry out over Fiasco fails with
@@ -226,8 +225,9 @@ asks for all three. The backend has two rules for such cases
 
 The inspector, erXos's tool for reading the live system as files
 under `/proc` ([chapter 21](21-live-machine.md#2123-proc)),
-shows the second rule. Each CPU's idle time reads unsupported, and so
-does another domain's budget, because the Fiasco backend reports only
+shows the second rule. Each CPU's count of ready threads reads
+unsupported, since Fiasco does not report it, and so does another
+domain's budget, because the Fiasco backend reports only
 the system domain's own. It does not print zero: a zero would look
 like a fact, and a reader would act on it.
 

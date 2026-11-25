@@ -273,11 +273,13 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `ERX_END_OFF`; under `-no-reboot` both ends exit QEMU, so the suite cannot tell
   them apart, and the refusal of a bad `how` has no case.
 * [Low] Fiasco backend, `liberx/backend/fiasco/service.c`, `erx_object_info`'s cpu topic: no CPU reports `idle_time`.
-  Fiasco has `l4_scheduler_idle_time`, but erXos's Fiasco is built with `CONFIG_PERIODIC` and without
-  `FINE_GRAINED_CPUTIME`, so each 1 ms tick is charged to the thread it interrupts and a short run between ticks
-  counts as idle: the count bounds the idle time neither from below nor from above, and reporting it would give a
-  wrong answer as a right one. The inspector shows the field `unsupported`. erXos's kernel, which accounts time at
-  each switch, reports it.
+  [design-fiasco.md](design-fiasco.md#reporting-kernel-objects) reports it from `l4_scheduler_idle_time`, which
+  the one-shot kernel's fine-grained CPU time charges at each switch; until the backend reads it the inspector shows
+  the field `unsupported`, which is true. Settle first, from Fiasco's source, whether the count includes the idle
+  stretch in progress and the interrupts taken while idle, and its unit (unverified); then convert it to
+  nanoseconds, set the bit, add `CONFIG_FINE_GRAINED_CPUTIME` to `FiascoConfig::REQUIRED` (a tick-charged count
+  would be a wrong answer), and change `test/fixtures/object_info_driver.c` and `production_image_test.rb`, which
+  expect a CPU to report nothing.
 * [Low] Fiasco backend, Fiasco's `Ipc_gate_obj::unblock_all`, `fiasco/kernel/src/kern/ipc_gate.cpp:142-166`: the gate dequeues
   a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
   return first and the activation land in what the thread blocks in next. The root's one gate is created bound
@@ -1047,7 +1049,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
-* [Medium] Fiasco, one-shot timer and tickless idle (`config/fiasco/kernel.defconfig`, [design-fiasco.md](design-fiasco.md)): the kernel is built `CONFIG_PERIODIC` with a 1 ms tick (`SCHED_GRANULARITY` 1000) and no tickless idle, so every CPU takes 1000 timer interrupts a second even when idle, and CPU time is charged by whole ticks (the backend reports no idle time for that reason). Fiasco offers one-shot mode on ARM when `SYNC_CLOCK` is on (`kern/arm/Kconfig:14-15`), which selects fine-grained CPU time, and tickless idle. Build with `CONFIG_ONE_SHOT_PARAM` so `-oneshot-timer` picks the mode at boot; measure idle host CPU of a QEMU guest and the QEMU suites in both modes, run it on the Pi 4, then make one-shot with tickless idle the default and report idle time from the fine-grained counts.
 * [Medium] Fiasco, release builds (design-fiasco.md, "Boot handoff", the kernel): a
   release kernel is configured without JDB and the kernel's console input, so a panic reboots
   instead of waiting on the console (`tools/erx build release-kernel`, `FiascoConfig::RELEASE_UNSET`),

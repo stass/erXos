@@ -287,15 +287,13 @@ The backend sets a bit of a report's `reported` mask only for a field
 it has with the attribute's full meaning, and marks a field it counts
 only partly in a second mask
 ([design-fiasco.md, Reporting kernel objects](../design-fiasco.md#reporting-kernel-objects)).
-The inspector turns the two masks into statuses. Two terms in the
-table: Fiasco counts CPU time in periodic timer ticks, each charged
-whole to whatever thread the tick interrupts; and the root's **status
-page** is memory in which the root service's own `liberx` writes its
+The inspector turns the two masks into statuses. One term in the
+table: the root's **status page** is memory in which the root service's own `liberx` writes its
 group's `parked` and `ready` figures as its threads park and wake.
 
 | Attribute | On Fiasco | Why |
 | --- | --- | --- |
-| a CPU's `idle_time` | `unsupported` | a tick-based count bounds idle time neither from below nor from above |
+| a CPU's `idle_time` | `unsupported` | the backend does not read Fiasco's count of the CPU's idle time, which the design reports ([design-fiasco.md, Reporting kernel objects](../design-fiasco.md#reporting-kernel-objects)) |
 | a CPU's `ready_threads` | `unsupported` | Fiasco does not report it |
 | the system domain's group `parked`, `ready` | `ok` | read from the root's status page |
 | another domain's group | every attribute `unsupported` | the group report answers only the root's own group |
