@@ -1169,7 +1169,7 @@ module Erx
       end
       # LVGL is a git submodule, cloned from its recorded URL at its recorded
       # commit; a cache holds only deps.lock's archives, so a fetch from one
-      # leaves the submodule to `git submodule update --init`.
+      # leaves the submodule to `tools/erx setup`.
       require_relative 'lib/erx/lvgl'
       complete = everything && cache.nil?
       Terminal.puts(complete ? Lvgl.init(root: ROOT, runner: runner) : "LVGL: not fetched; run `#{Lvgl::INIT_COMMAND}`")

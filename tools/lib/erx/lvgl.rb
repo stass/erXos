@@ -30,8 +30,11 @@ module Erx
     STATUS_BYTES = 65_536
     HOST_FLAGS = '-g -O1'
     SANITIZE = '-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer'
-    # Clones the submodule, from the main checkout's copy of it in a worktree (init_local).
+    # Clones the submodule from a copy the checkout already holds (init_local): the main
+    # checkout's, in a worktree.
     INIT_COMMAND = 'tools/erx setup'.freeze
+    # What supplies the copy init_local clones from, in a checkout that has none.
+    FETCH_COMMAND = "tools/erx fetch (or git submodule update --init #{SUBMODULE}) in the main checkout".freeze
     # The flags after S in the submodule field of a porcelain v2 entry.
     DRIFT_NOTES = { 'C' => 'is not at the commit the index records', 'M' => 'has changes to tracked files',
                     'U' => 'has untracked files' }.freeze
@@ -55,12 +58,16 @@ module Erx
 
     # The same clone from the main checkout's copy of the submodule, with no network
     # (`tools/erx setup`, for a fresh worktree). The copy is what `tools/erx fetch`
-    # cloned once in the main checkout; without it this refuses and names that command.
+    # cloned once in the main checkout; without it this refuses and names FETCH_COMMAND.
+    # The clone's origin is then set back to the URL .gitmodules gives, so a later
+    # `git submodule update` of a bumped commit fetches upstream, not from the copy.
     def init_local(root:, runner:)
       return "LVGL: #{SUBMODULE} is already checked out; left as it is" if checked_out?(root)
       store = Submodule.module_store(root: root, path: SUBMODULE)
-      raise Error, "no local copy of #{SUBMODULE} to clone from; run `tools/erx fetch` once in the main checkout" unless store
+      raise Error, "no local copy of #{SUBMODULE} to clone from; run #{FETCH_COMMAND}" unless store
       Submodule.checkout(root: root, runner: runner, path: SUBMODULE, name: 'lvgl-submodule-init', url: store)
+      Submodule.git(root: File.join(root, SUBMODULE), runner: runner, path: SUBMODULE, name: 'lvgl-submodule-origin',
+                    arguments: ['remote', 'set-url', 'origin', Submodules::TREE.built_in.fetch('lvgl').url])
       "LVGL: cloned #{SUBMODULE} from #{store}"
     end
 

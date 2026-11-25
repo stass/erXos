@@ -84,7 +84,7 @@ module Erx
                        .map { |source| source.fetch('id') }
       builds = COMMAND_STEPS.reject { |step| step.name == 'runtime' && !hosted_runtime }
       fetched.map { |id| Step.new(name: "source-#{id}", kind: :source, argv: [id], deadline: 300) } +
-        [WEB_MODULES, LVGL] + builds + [DEV_KEY]
+        [WEB_MODULES] + builds + [LVGL, DEV_KEY]
     end
 
     # present: a hash of step name => true when the step's output is valid.
@@ -188,17 +188,17 @@ module Erx
 
     # Built from the pinned fsimg by the current recipe, which every EROFS image
     # needs; a refusal only means the step runs, as for rc_oracle_valid?.
-    # The kernel and the first stage a build reads, left by `build fiasco`.
-    def fiasco_built?
-      fiasco = Fiasco.new(root: @root, runner: @runner)
-      [fiasco.kernel_path, fiasco.image_path].all? { |file| File.file?(file) }
-    end
-
     def fsimg_valid?
       Fsimg.locate(root: @root)
       true
     rescue Error
       false
+    end
+
+    # The kernel and the first stage a build reads, left by `build fiasco`.
+    def fiasco_built?
+      fiasco = Fiasco.new(root: @root, runner: @runner)
+      [fiasco.kernel_path, fiasco.image_path].all? { |file| File.file?(file) }
     end
 
     def source_valid?(id) = @dependencies.fetched?(id)

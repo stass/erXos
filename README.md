@@ -805,8 +805,10 @@ skipped, so a second run does nothing. Each build runs under a deadline
 with its own log in `build/logs/`.
 
 LVGL's checkout is cloned from the copy the main checkout keeps in its own
-`.git/modules`, so it needs no network; if the main
-checkout has no copy, setup stops and names `tools/erx fetch`, to run once there.
+`.git/modules`, so it needs no network, and sets its origin back to the URL
+`.gitmodules` gives; if the main checkout has no copy (a plain clone has none until
+its LVGL is cloned), setup stops and names `tools/erx fetch` or
+`git submodule update --init display/lvgl/lvgl`, to run in the main checkout.
 
 It never downloads. `ERX_SOURCE_CACHE` names another checkout's
 `build/downloads`; its archives are copied only after their SHA-256 matches

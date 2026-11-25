@@ -40,12 +40,17 @@ module Erx
     # directory, whose `commondir` names the shared one.
     def module_store(root:, path:)
       dot_git = File.join(root, '.git')
-      gitdir = File.file?(dot_git) ? File.expand_path(File.read(dot_git)[/\Agitdir: (.+)$/, 1].to_s, root) : dot_git
+      gitdir = File.file?(dot_git) ? File.expand_path(gitdir_line(dot_git), root) : dot_git
       commondir = File.join(gitdir, 'commondir')
       common = File.file?(commondir) ? File.expand_path(File.read(commondir).strip, gitdir) : gitdir
       store = File.join(common, 'modules', path)
       File.directory?(store) ? store : nil
     end
+
+    def gitdir_line(dot_git)
+      File.read(dot_git)[/\Agitdir: (.+?)\r?$/, 1] || raise(Error, "#{dot_git} is a file that names no git directory")
+    end
+    private_class_method :gitdir_line
 
     # Runs git on the checkout at root alone and starts no program its configuration
     # names. config adds `-c` settings for this one command.

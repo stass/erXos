@@ -258,12 +258,16 @@ class LvglSubmoduleTest < Minitest::Test
       FileUtils.mkdir_p([File.join(main, '.git/worktrees/wt'), worktree])
       File.write(File.join(main, '.git/worktrees/wt/commondir'), "../..\n")
       File.write(File.join(worktree, '.git'), "gitdir: #{File.join(main, '.git/worktrees/wt')}\n")
-      runner = RecordingRunner.new(File.join(worktree, '.git'))
+      FileUtils.mkdir_p(File.join(worktree, Erx::Lvgl::SUBMODULE))
+      FileUtils.touch(log = File.join(worktree, Erx::Lvgl::SUBMODULE, '.git'))
+      runner = RecordingRunner.new(log)
       assert_equal "LVGL: cloned display/lvgl/lvgl from #{store}", Erx::Lvgl.init_local(root: worktree, runner: runner)
       assert_equal ['git', '-c', 'core.fsmonitor=false', '-c', 'protocol.file.allow=always',
                     '-c', "submodule.display/lvgl/lvgl.url=#{store}", '-C', worktree,
                     'submodule', 'update', '--init', '--depth', '1', '--', Erx::Lvgl::SUBMODULE], runner.commands.first
-      assert_equal 1, runner.commands.size
+      assert_equal ['git', '-c', 'core.fsmonitor=false', '-C', File.join(worktree, Erx::Lvgl::SUBMODULE),
+                    'remote', 'set-url', 'origin', 'https://github.com/stass/lvgl'], runner.commands.last
+      assert_equal 2, runner.commands.size
     end
   end
 
@@ -271,7 +275,7 @@ class LvglSubmoduleTest < Minitest::Test
     Dir.mktmpdir('erx-lvgl-submodule') do |root|
       FileUtils.mkdir_p(File.join(root, '.git'))
       error = assert_raises(Erx::Error) { Erx::Lvgl.init_local(root: root, runner: nil) }
-      assert_match(/no local copy of display\/lvgl\/lvgl .* `tools\/erx fetch` once in the main checkout/, error.message)
+      assert_match(/no local copy of display\/lvgl\/lvgl .* git submodule update --init display\/lvgl\/lvgl/, error.message)
     end
   end
 
@@ -302,6 +306,8 @@ class LvglSubmoduleTest < Minitest::Test
       runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
       Erx::Lvgl.init_local(root: worktree, runner: runner)
       assert_equal "pinned\n", File.read(File.join(worktree, Erx::Lvgl::SUBMODULE, 'lvgl.h'))
+      origin = IO.popen(['git', '-C', File.join(worktree, Erx::Lvgl::SUBMODULE), 'config', 'remote.origin.url'], &:read).strip
+      assert_equal 'https://github.com/stass/lvgl', origin
     end
   end
 

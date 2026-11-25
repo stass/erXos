@@ -19,10 +19,11 @@ class SetupTest < Minitest::Test
   def test_fresh_tree_runs_every_step_in_order
     assert_equal NAMES, Erx::Setup.plan({}, steps: Erx::Setup.steps(LOCK, hosted_runtime: true)).map(&:name)
     assert_equal NAMES.length - 9, NAMES.take_while { |name| name.start_with?('source-') }.length
-    # The fetches and LVGL's checkout come before the builds; the runtime build packs the
+    # The fetches come before the builds; the runtime build packs the
     # hosted release, whose EROFS image fsimg writes.
-    # The development login key comes last, so a refusal of it leaves every build done.
-    assert_equal %w[web-modules lvgl oracle-jit oracle-emu fsimg runtime rc-oracle fiasco dev-key], NAMES.last(9)
+    # LVGL's checkout and the development login key come last, so a refusal of either leaves
+    # every build done.
+    assert_equal %w[web-modules oracle-jit oracle-emu fsimg runtime rc-oracle fiasco lvgl dev-key], NAMES.last(9)
   end
 
   def test_a_host_without_the_hosted_runtime_leaves_out_only_its_step
