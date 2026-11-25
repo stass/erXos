@@ -40,7 +40,7 @@ module Erx
       unless File.identical?(linker, installed)
         raise Error, "ERX_LLD resolves to #{installed.inspect}, but #{linker.inspect} beside it is not that program"
       end
-      { compiler: compiler, linker: linker }.each { |variable, program| check_make_word(variable, program) }
+      { compiler: compiler, linker: linker }.each { |variable, program| self.class.check_word(variable, program) }
       super(compiler: compiler, linker: linker)
     end
 
@@ -93,6 +93,7 @@ module Erx
       [root, File.realpath(check_word('checkout', root))].uniq.map { |name| check_word('checkout', name) }
     end
 
+    # value, if it is a path make and the shell take as one word (MAKE_WORD).
     def self.check_word(variable, value)
       return value if value.b.match?(MAKE_WORD)
 
@@ -104,9 +105,5 @@ module Erx
     def self.from_environment(environment = ENV)
       new(compiler: environment.fetch('ERX_CLANG', ''), linker: environment.fetch('ERX_LLD', ''))
     end
-
-    private
-
-    def check_make_word(variable, program) = self.class.check_word(variable, program)
   end
 end

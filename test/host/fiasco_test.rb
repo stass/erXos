@@ -388,7 +388,8 @@ class FiascoTest < Minitest::Test
     # the checkout reaches an object or archive and two checkouts build the same bytes.
     map = [@directory, File.realpath(@directory)].uniq.map { |root| "-ffile-prefix-map=#{root}=." }.join(' ')
     assert_includes kernel, "SHARED_FLAGS += #{map}\n"
-    assert_includes kernel, "PREPROCESS_FLAGS += -m #{File.realpath(@directory)}=.\n"
+    maps = [@directory, File.realpath(@directory)].uniq.map { |root| "-m #{root}=." }.join(' ')
+    assert_includes kernel, "PREPROCESS_FLAGS += #{maps}\n"
     refute File.exist?(board), 'a toolchain change discards the board build directories'
     users = File.read(File.join(@directory, 'build/fiasco/source/Makeconf.local'))
     assert_includes users, "CROSS_COMPILE := #{Erx::FiascoToolchain::CROSS_COMPILE}\n"

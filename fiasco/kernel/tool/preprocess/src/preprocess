@@ -34,7 +34,9 @@
 require 5.014;
 use strict;
 use warnings;
-use Getopt::Std;
+# Options start with '-' only, as getopts read them, so a file named +x stays a file.
+use Getopt::Long qw(:config bundling no_ignore_case require_order
+                    prefix_pattern=(--|-) long_prefix_pattern=--);
 
 sub print_expand($);
 sub print_funcdecl($);
@@ -56,7 +58,7 @@ our $opt_i = 0;			# Doing inlines?
 our $opt_v = 0;			# Verboseness?
 our $opt_l = 0;			# Avoid generating #line directives?
 our $opt_L = 0;			# Avoid generatung #line dirs in headers only?
-our $opt_m = '';			# <old>=<new>: file name prefix to replace in #line dirs
+our @opt_m = ();			# <old>=<new>: file name prefixes to replace in #line dirs
 # Support for new style FIASCO config
 our $opt_e = '';                # List of part tags
 our $opt_s = 0;
@@ -71,17 +73,45 @@ our $opt_H = "h";		# Default extenstion for header files
 our $opt_C = "cc";		# Default extention for source files
 our $opt_t = 0;
 
-getopts('e:o:c:p:h:H:C:ivlLm:sdwtW');
+GetOptions('e=s' => \$opt_e, 'o=s' => \$opt_o, 'c=s' => \$opt_c, 'p=s' => \$opt_p,
+           'h=s' => \$opt_h, 'H=s' => \$opt_H, 'C=s' => \$opt_C, 'i' => \$opt_i,
+           'v' => \$opt_v, 'l' => \$opt_l, 'L' => \$opt_L, 'm=s' => \@opt_m,
+           's' => \$opt_s, 'd' => \$opt_d, 'w' => \$opt_w, 't' => \$opt_t,
+           'W' => \$opt_W)
+  or do { usage(); exit 1; };
 
-# The name a #line directive gives file: its prefix -m <old> written as <new>,
-# as a compiler's -ffile-prefix-map does, so the generated files do not depend
-# on where the source tree is.
+# The -m maps as [old, new] pairs, longest <old> first, so where one <old> is
+# a directory inside another the more specific map applies.
+my @line_file_maps =
+  sort { length $b->[0] <=> length $a->[0] }
+  map
+    {
+      my ($old, $new) = split /=/, $_, 2;
+      # A #line directive quotes the name, so neither side may end the quote
+      # or the line.
+      die "preprocess: -m '$_' must be <old>=<new>, <old> non-empty and not "
+        . "ending in '/', and neither with a quote, backslash or control "
+        . "character\n"
+        if !defined $new || $old eq '' || $old =~ m{/\z} || /["\\[:cntrl:]]/;
+      [$old, $new];
+    } @opt_m;
+
+# The name a #line directive gives file: a prefix <old> of an -m map written as
+# its <new>, like a compiler's -ffile-prefix-map, so the generated files do not
+# depend on where the source tree is. Unlike a plain string prefix, <old>
+# matches only the whole file name or a leading run of its directories, never
+# part of a directory's name.
 sub line_file
 {
   my ($file) = @_;
-  my ($old, $new) = split /=/, $main::opt_m, 2;
-  return $file if $main::opt_m eq '' || index($file, $old) != 0;
-  return $new . substr($file, length $old);
+  foreach my $map (@line_file_maps)
+    {
+      my ($old, $new) = @$map;
+      return $new if $file eq $old;
+      return $new . substr($file, length $old)
+        if substr($file, 0, length($old) + 1) eq "$old/";
+    }
+  return $file;
 }
 
 sub usage
@@ -90,7 +120,7 @@ sub usage
 C and C++ preprocessor (c) by Michael Hohmuth
 Usage: preprocess [-dilLstvw] -c <base_name> [-C <source_ext>] 
          [-e <tag_list>] [-h <head_name>] [-H <head_ext>] 
-         [-o <source_base>] [-p <prefix>] <files>
+         [-o <source_base>] [-p <prefix>] [-m <old>=<new>]... <files>
 OPTIONS
   -c <base_name>  Base name for generated include directives, generated 
                   header files, and generated source files.
@@ -105,8 +135,9 @@ OPTIONS
   -i              Do inlines, make inline functions real inline.
   -l              Avoid generating #line directives.
   -L              Avoid generating #line directives in headers only.
-  -m <old>=<new>  Write file names starting with <old> in #line directives
-                  with <new> in its place.
+  -m <old>=<new>  Write a file name that is <old> or starts with <old>/ with
+                  <new> in place of <old> in #line directives. May be given
+                  more than once; the longest matching <old> applies.
   -o <src_base>   Base name for generated source files (defaults to -c, and 
                   overrides -p)
   -p              Prefix for names of output files.

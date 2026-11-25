@@ -1,3 +1,4 @@
+// Modified by erXos: documents -m, which maps a file name prefix in #line directives.
 /*! <!-- -*- html-helper -*- -->
 
 \page preprocess Preprocess - A preprocessor for C and C++ modules
@@ -54,6 +55,7 @@ automatically generates header and implementation files.
 <br><code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</code>[ <code>-e</code> <var>tag_list</var> ]
 <br><code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</code>[ <code>-i</code> ] [ <code>-t</code> ]
   [ <code>-l</code> | <code>-L</code> ] [ <code>-v</code> ] [ <code>-d</code> ]
+<br><code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</code>[ <code>-m</code> <var>old</var>=<var>new</var> ]...
 <br><code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</code><var>sources</var>...
 
 \section DESCRIPTION Description
@@ -320,6 +322,19 @@ to ".cc" and ".h" but can be overridden using <code>-C</code> and
        \ref MAKEFILE \if man EXAMPLE MAKEFILE FRAGMENT \endif
        for a possible way to
        do this.) </dd>
+  <dt><code>-m</code> <var>old</var>=<var>new</var> </dt>
+  <dd>In <code>\#line</code> directives, write a source file name
+       that is <var>old</var>, or that starts with <var>old</var>
+       followed by a slash, with <var>new</var> in place of
+       <var>old</var>, so that generated files do not depend on
+       where the source tree is, like a compiler's
+       <code>-ffile-prefix-map</code>.  <var>old</var> matches only
+       a whole file name or a leading run of its directories, and
+       the longest matching <var>old</var> applies.  The option may be given more than once.
+       <code>preprocess</code> refuses an argument without
+       <code>=</code>, with an empty <var>old</var> or one that ends
+       in a slash, or with a quote, backslash or control character
+       on either side.</dd>
   <dt><code>-v</code> </dt>
   <dd>Be verbose: Print results of <code>preprocess</code>' parser pass.</dd>
   <dt><code>-d</code> </dt>
