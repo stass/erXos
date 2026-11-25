@@ -272,7 +272,7 @@ module Erx
     # An erXos file outside every import tree, written by hand or by one of
     # erXos's generators. The style guide gives it a copyright line and one
     # SPDX declaration in its header, which names every third-party license
-    # the file carries (design.md, "provenance"); the rest of its comments
+    # the file carries (design.md, "Licenses and notices"); the rest of its comments
     # are erXos's prose, which discusses licenses, distribution and copyright
     # as subjects, so no other block is read as a notice to recognise whole.
     # What the declaration cannot understate is still read: a stock GNU grant
