@@ -368,7 +368,9 @@ Eshell V17.1.1 (type help(). for help)
 * The USB domain's mass-storage function serves a Bulk-Only USB stick as a
   medium: it reads the capacity and hands reads, writes and flushes to the
   medium's block transport, and it logs one line when a medium is served
-  and one when it ends. On the Pi 4 a USB stick is served this way. On
+  and one when it ends. On the Pi 4 the function reads a stick's capacity
+  but serves no medium, since the board's manifest names no drive for it
+  (the kernel log says `medium LUN 0 ready: no drive`). On
   QEMU `virt` the `usb` suite serves a `usb-storage` stick beside the
   keyboard, reads its sectors, writes, reads back and flushes them through
   the medium's transport, ejects its medium and unplugs it; host tests
@@ -376,8 +378,9 @@ Eshell V17.1.1 (type help(). for help)
 * On QEMU `virt` a USB stick's FAT volume is read from root's session: the
   media domain gives the stick the drive `disk0`, mounts its first
   partition, and the `usb` suite lists `/media/disk0/s1` and reads its
-  file there with `file:list_dir` and `file:read_file`. It has not run on
-  the Pi 4 yet.
+  file there with `file:list_dir` and `file:read_file`. It cannot run on
+  the Pi 4 yet: the board's manifest has no media domain, service or
+  drive rows ([docs/todo-storage.md](docs/todo-storage.md)).
 
 **Networking**
 
@@ -422,7 +425,11 @@ Eshell V17.1.1 (type help(). for help)
   runs `echo` and `ps`, interrupts a `top` with Ctrl-C, disconnects and
   reconnects to a fresh prompt with no shell left behind, and after
   `service bleuart stop` finds no service until `service bleuart start`
-  brings it back. No Pi 4 run of `bleuart` has been made.
+  brings it back. On the Pi 4 a Mac's `blew`, driven by
+  `tools/ble_board_check.rb`, gets the prompt, runs `echo` and `ps`,
+  interrupts `top` with Ctrl-C and reconnects to a fresh prompt with no
+  shell left behind; after `service bleuart stop` at the console a
+  central gets no shell until `service bleuart start`.
 
 **Display and input**
 
