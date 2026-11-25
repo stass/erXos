@@ -202,13 +202,14 @@ class DomPlannerTest < Minitest::Test
 
   # The Raspberry Pi 4's development manifest, with its Bluetooth domain and the domain's
   # line grant on UART0, on the board's own record: the check admits it, and the library
-  # plans the storage, display, PCIe, network, USB and Bluetooth domains, whose grants fit
-  # the system share's reserve.
+  # plans every configured domain, the storage, display, PCIe, network, USB, media and
+  # Bluetooth domains, whose grants fit the system share's reserve.
   def test_the_library_plans_the_raspberry_pi_s_domains
     pi = Erx::Platform.load(root: ROOT, name: 'raspi4b')
+    source = pi.manifest_source(ROOT)
     context = Erx::Manifest::Context.new(**ManifestContextFixture.arguments(@codec).merge(platform: pi.record))
-    admitted = Erx::Manifest.admit(source: pi.manifest_source(ROOT), codec: @codec, context: context, planner: @planner)
-    assert_equal 6, admitted.report.fetch('child_plan_instances')
+    admitted = Erx::Manifest.admit(source: source, codec: @codec, context: context, planner: @planner)
+    assert_equal ManifestContextFixture.rows(source, 'domain'), admitted.report.fetch('child_plan_instances')
   end
 
   # The network domain cell's manifest (NetworkDomain.manifest), the development manifest
