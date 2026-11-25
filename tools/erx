@@ -116,9 +116,6 @@ module Erx
         boot(command_arguments, **collaborators)
       when 'ssh'
         ssh(command_arguments)
-      when 'passphrase-hash'
-        require_relative 'lib/erx/passphrase_hash'
-        Erx::PassphraseHash.command(command_arguments)
       when 'qemu'
         qemu(command_arguments, **collaborators)
       when 'conformance'

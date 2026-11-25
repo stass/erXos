@@ -462,6 +462,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Planned features
 
+* [Low] login, the parked facet ([design-login.md](design-login.md#risks-and-open-decisions), 1): when the
+  login design resumes, give erx_login the vault's checker as its `checker` and grant the facet to its
+  front ends; until then no manifest grants it and login by passphrase answers `unavailable`.
 * [Medium] SSH, stage 2's source of root's keys ([design-ssh.md](design-ssh.md#roots-login-keys-on-the-medium)):
   stage 1 reads root's home copy, `/root/.ssh/authorized_keys`, imported from `login_keys`, while the design's
   stage 2 facet reads `login_keys` from the record volume. The direction is that 0.2's storage domain serves

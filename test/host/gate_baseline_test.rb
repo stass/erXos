@@ -97,7 +97,7 @@ class GateBaselineTest < Minitest::Test
 
   # The Ruby fuzz drivers of the parsers CLAUDE.md names, each run at least once.
   RUBY_FUZZ_DRIVERS = %w[
-    tools/fuzz/erx_9p.rb tools/fuzz/erx_blk_table.rb tools/fuzz/erx_boot_keys.rb tools/fuzz/erx_boot_passphrase.rb tools/fuzz/erx_draw_codec.rb
+    tools/fuzz/erx_9p.rb tools/fuzz/erx_blk_table.rb tools/fuzz/erx_boot_keys.rb tools/fuzz/erx_draw_codec.rb
     tools/fuzz/erx_erofs.rb tools/fuzz/erx_f2fs.rb tools/fuzz/erx_fat.rb tools/fuzz/erx_fat_read.rb tools/fuzz/erx_grep_re.rb
     tools/fuzz/erx_hostlink_frame.rb tools/fuzz/erx_input_codec.rb tools/fuzz/erx_manifest.rb
     tools/fuzz/erx_memdraw_y.rb tools/fuzz/erx_net_codec.rb tools/fuzz/erx_net_input.rb tools/fuzz/erx_path.rb

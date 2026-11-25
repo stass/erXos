@@ -4,7 +4,7 @@
 -module(erx_domain_sup).
 -moduledoc """
 The domain service's supervisor (docs/design-system.md, "System services").
-It has seven children. The service is one, temporary and significant, so it
+It has six children. The service is one, temporary and significant, so it
 is never restarted: its end, however it comes, kill included, shuts the supervisor
 down, which ends the permanent application and the system domain with it,
 outside an ordered end, as any fault of the system domain does. The
@@ -37,10 +37,6 @@ supervisor has permanent children, so a crash of each in one period restarts
 that child alone (docs/design-system.md, "System services"); a restart beyond
 them is a service that cannot stay up, and ends the supervisor, and so the
 system domain, as the service's end does.
-
-The principal service's one passphrase check, erx_passphrase_check, is a
-permanent child; a restarted one starts with no failures counted, as a reboot
-does (docs/design-login.md, "The passphrase check").
 """.
 -behaviour(supervisor).
 
@@ -74,10 +70,7 @@ init([]) ->
     Login = #{id => erx_login, start => {erx_login, start_link, []},
               restart => permanent, shutdown => 5000, type => worker,
               modules => [erx_login]},
-    Passphrase = #{id => erx_passphrase_check, start => {erx_passphrase_check, start_link, []},
-                   restart => permanent, shutdown => 5000, type => worker,
-                   modules => [erx_passphrase_check]},
-    Children = [Coordinator, Machine, Pci, Login, Service, Dev, Passphrase],
+    Children = [Coordinator, Machine, Pci, Login, Service, Dev],
     Permanent = length([Child || Child <- Children, maps:get(restart, Child, permanent) =:= permanent]),
     {ok, {#{strategy => one_for_one, auto_shutdown => any_significant,
             intensity => Permanent, period => ?PERIOD_S},

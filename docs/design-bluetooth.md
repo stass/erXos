@@ -2377,8 +2377,8 @@ only when its manifest opts in, with the console's row, and no manifest
 erXos ships does: a build check over the shipped release manifests
 fails on one that names a console service ([Decisions](#decisions),
 2). Logins by passphrase need a passphrase checker, which is the
-vault's, or before it the open choice of
-[design-login.md](design-login.md#risks-and-open-decisions), 1.
+vault's; none is built before it
+([design-login.md](design-login.md#risks-and-open-decisions), 1).
 
 **Tests.** Each with the seeded fault that proves it ran:
 

@@ -681,16 +681,15 @@ cover the atoms inside other domains' messages (section 11.5.1).
 Login with a passphrase, into a session of one's own principal, is
 designed and not built. The console opens root's session at boot with
 no login, and SSH logs root in with the development key, or with the
-keys placed on a board's card. Until the vault, a development build
-checks root's passphrase against one salted crypt(3) SHA-256 hash that
-the user writes on the host into a file beside those keys on the card.
-The storage domain reads the line and hands the system domain only a
-fixed record of rounds, salt and hash; the principal service's one
-check derives for every name alike, under the vault's limits of 5
+keys placed on a board's card. The login facet that SSH, the web and
+the phone console are to log in through is built and parked: no
+manifest grants it, and no passphrase checker is built, so its
+passphrase login answers `unavailable` until the vault's checker
+exists. The vault derives for every name alike, under limits of 5
 failures per name and per terminal, each less than a minute after the
 last, and one derivation at a time, so a stranger's name gets the same answer, after the same work,
-as a wrong passphrase, and a release build answers no passphrase at
-all ([design-login.md](../design-login.md#the-passphrase-check)).
+as a wrong passphrase
+([design-login.md](../design-login.md#the-passphrase-check)).
 
 ### 11.9.2 Limits that hold, and limits that are records
 

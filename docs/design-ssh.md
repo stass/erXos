@@ -857,49 +857,6 @@ the file's refusal. The system domain's is `erx_login:medium_keys/1`.
 Each reads through a cursor and has a fuzz target
 ([Verification](#verification)).
 
-### Root's passphrase on the medium
-
-Before the vault, a development build checks root's passphrase against a
-salted hash beside the keys
-([design-login.md](design-login.md#the-passphrase-check), decision 1).
-The construction is the keys': **the line is read at the edge, and the
-system domain receives only a fixed record.**
-
-* **The file** is `passphrase_hash` on the record volume, `ERXOS`,
-  which a user writes on the host with `tools/erx passphrase-hash`, which
-  asks for the passphrase twice without echoing it and prints the line,
-  and copies onto the volume as `authorized_keys` is. No domain writes it
-  ([No domain writes it](#roots-login-keys-on-the-medium)).
-* **The accepted form** is one crypt(3) SHA-256 string, as FreeBSD's
-  `crypt-sha256.c` writes it, read as bytes: `$5$`; optionally
-  `rounds=N$`, with N from 1000 to 100000 in decimal and no leading
-  zero; a salt of 1 to 16 characters of crypt's alphabet
-  (`./0-9A-Za-z`); `$`; and 43 characters of that alphabet, which decode,
-  in `crypt-sha256.c`'s byte order, to the 32-byte hash, with the last
-  character's two spare bits zero, so each hash has one spelling. The
-  line may end in a line feed, with a carriage return before it, and
-  nothing follows. The file is at most 128 bytes. FreeBSD clamps rounds
-  out of range; the reader refuses them, so the cost of a derivation
-  stays within what one check in the system domain may take.
-* **Who reads it.** The `login_keys` reader reads both files, in the
-  same storage domain, through the same window and on the same
-  lifecycle ([When it is there](#roots-login-keys-on-the-medium)), when
-  either file of the tree is first read, and `erx_boot_passphrase:decode/1`
-  reads the line through a cursor and answers the record
-  `erx_passphrase_hash` lays out, `<<Rounds:32, Hash:32/binary,
-  Salt/binary>>`, 37 to 52 bytes. The tree serves it as a second file,
-  `root_passphrase`, of mode 0400. A file that is absent is served
-  empty, and since most media hold none, its absence is not logged. A
-  refused file is served empty, with one log record of the storage
-  domain naming the file and one reason: `longer than 128 bytes`,
-  `not a $5$ SHA-256 crypt string`, the volume's refusals above, or
-  `read failed`, which, as for the keys, answers `eio` and not an empty
-  file. No byte of the file is logged.
-* **What it costs.** Anyone holding the medium can try the hash
-  offline, as anyone holding it can read or replace it; physical access
-  to the medium is root's login before the vault, as for the keys, and
-  the user documentation says so.
-
 ### Sessions, ttys and shells
 
 `erx_tty_line` is the session's process behind its line to the SSH
@@ -1585,7 +1542,7 @@ boots the card and logs in.
 | the console interface's seven messages | a channel and a tty | `abi/services/console.txt` ([design-live.md](design-live.md#paths)) |
 | the credentials facet: `login_keys`, `add_login_key`, `del_login_key` | a session and the principal service | the principal service's service file, citing [Login keys](#login-keys) |
 | `{ssh_host, Name}` key facet | the SSH domain and the vault | [design-system.md](design-system.md#the-vault) |
-| the `login_keys` files service, read-only, of two files, `root` of 51-byte key blobs and `root_passphrase` of root's passphrase record (before the vault) | the storage domain that serves `system`, and the system domain and root's session, whose import of stage 1 reads it | `abi/manifest.txt`'s `login_keys_service` and the system manifest's grant, citing [Root's login keys on the medium](#roots-login-keys-on-the-medium) |
+| the `login_keys` files service, read-only, of one file, `root`, of 51-byte key blobs (before the vault) | the storage domain that serves `system`, and the system domain and root's session, whose import of stage 1 reads it | `abi/manifest.txt`'s `login_keys_service` and the system manifest's grant, citing [Root's login keys on the medium](#roots-login-keys-on-the-medium) |
 | the `ssh_state` files service, read-write, the host key's directory (before the vault) | the storage domain and the SSH domain | `abi/manifest.txt`'s `ssh_state_service` and the system manifest's grant, citing [Host keys](#host-keys) |
 | the `record_volume` window role, configured and not writable | the block driver and the storage domain | `abi/manifest.txt`, citing [design-storage.md](design-storage.md#invariants), PW1 |
 

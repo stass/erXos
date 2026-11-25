@@ -35,9 +35,7 @@
              erx_machine_fs,
              erx_pci_bus_facet,
              erx_pci_facet,
-             erx_passphrase_check,
-             erx_passphrase_limits,
              erx_principal]},
-  {registered, [erx_domain_sup, erx_domain_srv, erx_machine, erx_passphrase_check]},
+  {registered, [erx_domain_sup, erx_domain_srv, erx_machine]},
   {applications, [kernel, stdlib, erx, erx_files]},
   {mod, {erx_domain_app, []}}]}.

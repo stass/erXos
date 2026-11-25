@@ -152,13 +152,7 @@ module FatRecordVolume
   # authorized_keys with its long name's entries in the wrong order.
   def out_of_order = keys.then { |placed| placed.with(entries: placed.entries.values_at(1, 0, 2)) }
 
-  # FreeBSD 14.3.0's crypt-sha256.c test vector of "Hello world!" under saltstring.
-  PASSPHRASE = "$5$saltstring$5B8vYYiY.CVt1RlTTf8KbXBH3hsxY/GNooZaBBGWEc5\n"
-  def passphrase(contents) = file(long: 'passphrase_hash', contents: contents, clusters: [FREE + 12])
-
   CASES = {
-    'passphrase' => volume(files: [keys, passphrase(PASSPHRASE)]),
-    'passphrase_refused' => volume(files: [keys, passphrase("$6$saltstring$abc\n")]),
     'found' => volume(files: [file(long: 'notes.txt', short: 'NOTES   TXT', contents: "x\n", clusters: [FREE]), keys]),
     'upper' => volume(files: [file(long: 'AUTHORIZED_KEYS', contents: KEYS, clusters: [FREE, FREE + 1, FREE + 2])]),
     'slack' => volume(files: [file(long: 'authorized_keys', contents: SLACK + key_line(3), size: SLACK.bytesize,

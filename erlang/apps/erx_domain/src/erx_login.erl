@@ -25,8 +25,8 @@ its state and the counts alone, and every message and reason by its leading
 atom. A passphrase passes from the request into the check and is kept
 nowhere.
 
-No passphrase checker exists yet (docs/design-login.md, "The passphrase
-check", and its open decision 1): with none, a check answers `unavailable`,
+No passphrase checker is built before the vault (docs/design-login.md, "The
+passphrase check", and decision 1): with none, a check answers `unavailable`,
 so no front end logs anyone in by passphrase. `checker` in start_link/1's
 options names one, a module whose check_request/4 sends the check and returns
 its request id. The service has no key login's verifier and reads no
