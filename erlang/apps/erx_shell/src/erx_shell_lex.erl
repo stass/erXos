@@ -146,34 +146,37 @@ position(Source, Offset) ->
 %% Count is the number of lines still to read. A newline that ends the text
 %% ends the tokens whatever Count is, so it may reach 0 there.
 lex(L, Count, Acc) ->
-    case adjacent(L) of
-        {Token, L1} ->
+    case read(L) of
+        {more, {newline, _, Next} = Token, L1}
+          when Count =:= 1, Next < byte_size(L1#lx.bin) ->
+            {more, finish(L1, [{eof, Next, none}, Token | Acc])};
+        {more, {newline, _, _} = Token, L1} ->
+            lex(L1, Count - 1, [Token | Acc]);
+        {more, Token, L1} ->
             lex(L1, Count, [Token | Acc]);
-        none ->
-            L1 = skip_blanks(L#lx{word = false}),
-            case read(L1) of
-                {more, {newline, _, Next} = Token, L2}
-                  when Count =:= 1, Next < byte_size(L2#lx.bin) ->
-                    {more, finish(L2, [{eof, Next, none}, Token | Acc])};
-                {more, {newline, _, _} = Token, L2} ->
-                    lex(L2, Count - 1, [Token | Acc]);
-                {more, Token, L2} ->
-                    lex(L2, Count, [Token | Acc]);
-                {last, Token, L2} ->
-                    {last, finish(L2, [Token | Acc])}
-            end
+        {last, Token, L1} ->
+            {last, finish(L1, [Token | Acc])}
     end.
 
-%% One token, the end, or the fault that stops the reading.
+%% One token, the end, or the fault that stops the reading. Every lookahead
+%% that can reach the end of the text goes through peek/1, which may find
+%% the input unfinished, so all of the reading is inside the one catch;
+%% quoted/1 and body_lines/5 search raw bytes and fault `incomplete` there
+%% themselves.
 read(L) ->
     try
-        case peek(L) of
-            eof ->
-                ok = complete(L),
-                {last, {eof, L#lx.at, none}, L};
-            _ ->
-                {Token, L1} = token(L, L#lx.at),
-                {more, Token, L1}
+        case adjacent(L) of
+            {Token, L1} ->
+                {more, Token, L1};
+            none ->
+                L1 = skip_blanks(L#lx{word = false}),
+                case peek(L1) of
+                    eof ->
+                        {last, {eof, L1#lx.at, none}, L1};
+                    _ ->
+                        {Token, L2} = token(L1, L1#lx.at),
+                        {more, Token, L2}
+                end
         end
     catch
         throw:{?MODULE, At, Fault} -> {last, {error, At, Fault}, L}
@@ -407,10 +410,6 @@ here_document(L, At) ->
 here_tag(L, At, Fd) ->
     {Tag, Quoted, L1} =
         case peek(L) of
-            eof ->
-                %% The text ends with a newline, so only a line continued
-                %% after `<<` reaches its end here: the tag may come next.
-                fault(L#lx.at, incomplete, <<"line continues past the end of the input">>);
             $' ->
                 {Text, After} = quoted(L),
                 {Text, true, After};
@@ -517,10 +516,14 @@ text(Text, Acc) ->
     [binary:copy(Text) | Acc].
 
 %% The end of the source is the end of the input only when nothing waits.
-complete(#lx{docs = [_ | _] = Docs}) ->
-    unterminated((lists:last(Docs))#pending.at);
+%% The text ends with a newline, so a reader is at its end with the line
+%% still open only after a backslash-newline: the line goes on in input
+%% not read yet, and that is the diagnostic even when here documents of the
+%% line wait for bodies the input has not reached.
 complete(#lx{continued = true, at = At}) ->
     fault(At, incomplete, <<"line continues past the end of the input">>);
+complete(#lx{docs = [_ | _] = Docs}) ->
+    unterminated((lists:last(Docs))#pending.at);
 complete(_) ->
     ok.
 
@@ -562,12 +565,17 @@ id_char(C) when C > $\s -> not lists:member(C, "!\"#$%&'()+,-./:;<=>?@[\\]^`{|}~
 id_char(_) -> false.
 
 %% The next byte as rc reads it outside quotes and comments, where a
-%% backslash-newline is a space, and the reader past it.
-peek(#lx{bin = B, at = At}) ->
+%% backslash-newline is a space, and the reader past it. The end of the
+%% text is `eof` only when complete/1 finds nothing left waiting; otherwise
+%% no decision is taken on it, since what the input holds next is unknown,
+%% and the source is incomplete wherever a lookahead reaches the end.
+peek(#lx{bin = B, at = At} = L) ->
     case B of
         <<_:At/binary, $\\, $\n, _/binary>> -> $\s;
         <<_:At/binary, C, _/binary>> -> C;
-        _ -> eof
+        _ ->
+            ok = complete(L),
+            eof
     end.
 
 advance(#lx{bin = B, at = At} = L) ->

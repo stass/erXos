@@ -378,11 +378,6 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   `erx_bt_pair`, `erx_bt_smp`, `erx_bt_ctl`, `erx_bt_att` `_fuzz.erl`), so a module a round reaches that the list
   omits makes `atoms_made` on some seeds only. Replace each list with `erx_fuzz_warm:closure(?MODULE)` and
   compile `test/erlang/erx_fuzz_warm.erl` in its driver, as the eight converted targets do.
-* [High] Command shell, `erx_shell_lex`, `erx_shell_parse`: `erx_shell_parse_fuzz` fails with `more_differs`
-  on 10 of seeds 1..20 (3, 4, 8, 9, 10, 12, 13, 16, 17, 18): a unit parsed as more input may follow answers
-  `unexpected redirection` or `a word must follow` where the same unit parsed as complete answers
-  `malformed redirection`, so the two parses of one unit disagree on the diagnostic. Settle which
-  diagnostic is right for a unit that ends in a redirection, and give both parses one.
 * [Medium] Test media harnesses, `tools/lib/erx/native_console_ring.rb` and `tools/lib/erx/kiosk.rb`:
   both build a test program over musl's libc.a as a medium's `Added` (`program`,
   `Kiosk::Run#front_program`), splice the boot value's checkpoint after the image's identity

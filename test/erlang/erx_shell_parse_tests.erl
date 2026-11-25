@@ -446,6 +446,9 @@ incomplete_test_() ->
              {<<"if(t)\n">>, {2, 1}, <<"a command must follow">>},
              {<<"echo a \\\n">>, {2, 1}, <<"line continues past the end of the input">>},
              {<<"cat <<\\\n">>, {2, 1}, <<"line continues past the end of the input">>},
+             {<<"fn<>\\\n">>, {2, 1}, <<"line continues past the end of the input">>},
+             {<<"cat <<A <<\\\n">>, {2, 1}, <<"line continues past the end of the input">>},
+             {<<"cat <<A \\\n">>, {2, 1}, <<"line continues past the end of the input">>},
              {<<"cat <<EOF\nbody\n">>, {1, 5}, <<"here document is not terminated">>},
              {<<"cat <<EOF">>, {1, 5}, <<"here document is not terminated">>},
              {<<"if(a">>, {1, 5}, <<"expected ')'">>},
@@ -466,6 +469,15 @@ diagnostic_quotes_no_source_test() ->
     ?assertEqual(nomatch, binary:match(erx_shell_parse:format_error(Diagnostic), <<"\e">>)).
 
 %% Units: a source is parsed one of rc's lines at a time.
+
+%% A redirection reads past a continued line to see whether `{` follows, so
+%% while more may follow, a unit whose last line ends continued is undecided.
+a_redirection_continued_at_the_end_is_undecided_test() ->
+    Source = <<"fn<>\\\n{">>,
+    ?assertEqual({error, {syntax, {1, 3}, <<"malformed redirection">>}, <<"{">>},
+                 erx_shell_parse:next(Source, final)),
+    ?assertEqual({incomplete, {2, 1}, <<"line continues past the end of the input">>},
+                 erx_shell_parse:next(Source, more)).
 
 next_yields_one_line_and_the_rest_test() ->
     ?assertEqual({ok, [cmd([<<"a">>]), {background, cmd([<<"b">>])}], <<"c\n">>},
