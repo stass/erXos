@@ -59,3 +59,17 @@ erx_fiasco_time_wait_us(uint64_t now_ns, uint64_t deadline_ns, uint64_t max_us)
 	wait_us = (deadline_ns - now_ns - 1) / TIME_NS_PER_US + 1;
 	return (wait_us < max_us ? wait_us : max_us);
 }
+
+bool
+erx_fiasco_time_down(const erx_fiasco_down_view_t *view, void *context, uint64_t deadline_ns, uint64_t max_us)
+{
+	for (;;) {
+		const uint64_t now_ns = view->clock_ns(context);
+		const uint64_t wait_us = erx_fiasco_time_wait_us(now_ns, deadline_ns, max_us);
+
+		if (view->down(context, wait_us))
+			return (true);
+		if (now_ns >= deadline_ns)
+			return (false);
+	}
+}

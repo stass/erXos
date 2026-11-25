@@ -6,6 +6,7 @@
 #ifndef ERX_FIASCO_TIME_TABLE_H
 #define ERX_FIASCO_TIME_TABLE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -35,10 +36,30 @@ uint64_t	erx_fiasco_time_ns(uint64_t counter, erx_fiasco_time_scale_t scale);
  * deadline: rounded up, so the wait never ends early, and at most max_us, past which
  * the caller waits again. A deadline under a microsecond away, or already passed, is
  * 0: the kernel is asked for nothing, since Fiasco's one-shot floor would stretch
- * such a wait to 200 us, and the caller spins out the rest on the counter. That
+ * such a wait to 200 us, and erx_fiasco_time_down spins out the rest. That
  * remainder is what a kernel timeout leaves, since Fiasco counts a relative timeout
  * from the microsecond its clock reads and may end it up to a microsecond early.
  */
 uint64_t	erx_fiasco_time_wait_us(uint64_t now_ns, uint64_t deadline_ns, uint64_t max_us);
+
+/*
+ * The effects of a timed down: the counter's nanoseconds, and one down of the
+ * semaphore that blocks at most timeout_us, where 0 is a try that does not block.
+ * down returns true when it took the semaphore.
+ */
+typedef struct erx_fiasco_down_view {
+	uint64_t	(*clock_ns)(void *);
+	bool		(*down)(void *, uint64_t timeout_us);
+} erx_fiasco_down_view_t;
+
+/*
+ * Takes the semaphore by deadline_ns: true when taken, false only after the clock
+ * has read the deadline, so never early. Every attempt takes an up already posted,
+ * the last one, made after that read, included. A remainder under a microsecond,
+ * or a deadline already past, is tried without blocking, again until the clock
+ * reads the deadline: for a max_us of at least 1, the spin is bounded by that
+ * microsecond.
+ */
+bool		erx_fiasco_time_down(const erx_fiasco_down_view_t *, void *, uint64_t deadline_ns, uint64_t max_us);
 
 #endif /* ERX_FIASCO_TIME_TABLE_H */

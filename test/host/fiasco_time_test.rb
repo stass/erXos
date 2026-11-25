@@ -10,7 +10,7 @@ require_relative '../fixtures/generated_tree'
 
 # erx-gate: sanitizers
 
-# The time page's scale and the deadline's wait, on the host (docs/design-fiasco.md,
+# The time page's scale, the deadline's wait and the timed down, on the host (docs/design-fiasco.md,
 # "Deadlines"): the driver holds them to exact arithmetic, and each seed below must
 # make it name what it broke. liberx/backend/fiasco/time_table.c is the core.
 class FiascoTimeTest < Minitest::Test
@@ -25,6 +25,10 @@ class FiascoTimeTest < Minitest::Test
     'a wait rounded down' => ['(deadline_ns - now_ns - 1) / TIME_NS_PER_US + 1', '(deadline_ns - now_ns) / TIME_NS_PER_US', 'a wait of'],
     'a sub-microsecond wait asked of the kernel' => ['now_ns >= deadline_ns || deadline_ns - now_ns < TIME_NS_PER_US', 'now_ns >= deadline_ns', 'a wait of'],
     'a wait past the maximum' => ['wait_us < max_us ? wait_us : max_us', 'wait_us + 0 * max_us', 'a long wait'],
+    'a short remainder given up untried' => ["\t\tif (view->down(context, wait_us))\n",
+                                             "\t\tif (wait_us == 0) {\n\t\t\twhile (view->clock_ns(context) < deadline_ns)\n\t\t\t\t;\n\t\t\treturn (false);\n\t\t}\n\t\tif (view->down(context, wait_us))\n",
+                                             'missed an up'],
+    'a down gives up before its deadline' => ["if (now_ns >= deadline_ns)\n\t\t\treturn (false);", "if (wait_us == 0)\n\t\t\treturn (false);", 'gave up early'],
     'a zero frequency divides' => ["if (hz == 0 || hz >> 63 != 0)\n\t\treturn (scale);\n", "if (hz == 0)\n\t\thz = 1;\n", 'time zero']
   }.freeze
 

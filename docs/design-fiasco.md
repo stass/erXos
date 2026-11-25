@@ -2583,10 +2583,12 @@ above it after that, since `time_table.c` rounds its multiplier up at the larges
 microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout.
 Fiasco counts a relative timeout from the microsecond its clock reads, so the kernel's timeout may end up to a microsecond
 before the deadline; a remainder under a microsecond is never asked of the kernel, whose one-shot floor would stretch it to
-200 us, but spun out in user mode on the counter, as is a deadline that close when the wait begins. So a
+200 us, but spun out in user mode in downs that do not block, as is a deadline that close when the wait begins
+(`erx_fiasco_time_down`, in `time_table.c`). So a
 wait is never early, and beyond the woken thread's scheduling is late by up to the 200 us floor on Fiasco's one-shot
 timer ([Scheduling](#scheduling), "The quantum") plus one part in 512. A deadline already past
-returns without a kernel call.
+makes one down that does not block, and every down, the last included, takes an up already posted, so a task that ends
+just before its join's deadline is never reported as still running.
 
 ### Deletion
 

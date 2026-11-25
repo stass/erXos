@@ -86,7 +86,8 @@ const char	*erx_fiasco_reaper_start(void);
 
 /*
  * Blocks on a thread's semaphore until an up or the deadline, returning false at
- * the deadline, never before it. Every other IPC error waits again.
+ * the deadline, never before it, and taking an up already posted even then
+ * (erx_fiasco_time_down). Every other IPC error waits again.
  */
 bool		erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline);
 

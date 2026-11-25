@@ -73,6 +73,8 @@ _Static_assert(L4_UTCB_THREAD_REGS_OFFSET + offsetof(l4_thread_regs_t, user) ==
 static uint32_t thread_claim(void);
 static bool	thread_claim_used(void *, uint32_t);
 static uint64_t thread_claim_marker(void *, uint32_t);
+static uint64_t semaphore_clock_ns(void *);
+static bool	semaphore_down_us(void *, uint64_t);
 static void	reaper_main(uint64_t);
 static void	reaper_reap(erx_fiasco_thread_record_t *);
 static _Noreturn void reaper_refused(const char *);
@@ -319,26 +321,33 @@ erx_yield(void)
 	(void)l4_thread_yield();
 }
 
+static uint64_t
+semaphore_clock_ns(void *context)
+{
+	(void)context;
+	return (erx_fiasco_clock_ns());
+}
+
+/* context is the semaphore's capability; a timeout of 0 is a try that does not block. */
+static bool
+semaphore_down_us(void *context, uint64_t timeout_us)
+{
+	const l4_timeout_t timeout = timeout_us == 0 ? L4_IPC_BOTH_TIMEOUT_0 :
+	    l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(timeout_us));
+
+	return (l4_ipc_error(l4_semaphore_down((l4_cap_idx_t)*(const uint64_t *)context, timeout), l4_utcb()) == 0);
+}
+
 bool
 erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline)
 {
-	l4_timeout_t timeout = L4_IPC_NEVER;
-	uint64_t wait_us;
+	static const erx_fiasco_down_view_t view = { .clock_ns = semaphore_clock_ns, .down = semaphore_down_us };
 
-	for (;;) {
-		if (deadline != ERX_FIASCO_UMTX_FOREVER) {
-			wait_us = erx_fiasco_time_wait_us(erx_fiasco_clock_ns(), deadline, L4_TIMEOUT_US_MAX);
-			if (wait_us == 0) {
-				/* Under a microsecond to go: spun out, never early. */
-				while (erx_fiasco_clock_ns() < deadline)
-					;
-				return (false);
-			}
-			timeout = l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(wait_us));
-		}
-		if (l4_ipc_error(l4_semaphore_down((l4_cap_idx_t)semaphore, timeout), l4_utcb()) == 0)
-			return (true);
-	}
+	if (deadline != ERX_FIASCO_UMTX_FOREVER)
+		return (erx_fiasco_time_down(&view, &semaphore, deadline, L4_TIMEOUT_US_MAX));
+	while (l4_ipc_error(l4_semaphore_down((l4_cap_idx_t)semaphore, L4_IPC_NEVER), l4_utcb()) != 0)
+		;
+	return (true);
 }
 
 #ifdef ERX_FIASCO_TEST_HOOKS

@@ -7,12 +7,15 @@
  * The time page's scale and the wait conversion, on the host. For the counters of
  * real machines the scale must give the exact floor of counter * 10^9 / hz, which is
  * what erx_fiasco_clock_ns computes; a deadline's wait must round up and never end
- * early, and must keep to the kernel's maximum.
+ * early, and must keep to the kernel's maximum. A timed down, against a model
+ * semaphore, must never give up before its deadline and never leave an up posted
+ * by its last attempt.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "liberx/backend/fiasco/time_table.h"
 
@@ -21,6 +24,10 @@
 #define REACH_SECONDS	UINT64_C(157680000)
 #define RANDOM_COUNTERS	2000000u
 #define WAIT_MAX_US	UINT64_C(1000000)
+#define NS_PER_US	UINT64_C(1000)
+#define DOWN_START	UINT64_C(1000000)
+/* Far more attempts than any down below needs: past them it spins forever. */
+#define DOWN_CALLS_MAX	100000u
 
 __extension__ typedef unsigned __int128 wide_t;
 
@@ -127,6 +134,102 @@ check_wait(uint64_t *checked)
 	return (true);
 }
 
+/*
+ * A semaphore and its clock. Each read advances the clock step ns; one up is posted
+ * at up (UINT64_MAX: never); a kernel wait of N us ends at the up or N us less early ns
+ * later, since Fiasco may end a relative timeout up to a microsecond before it.
+ */
+typedef struct down_model {
+	uint64_t	now;
+	uint64_t	step;
+	uint64_t	up;
+	uint64_t	early;
+	uint32_t	calls;
+} down_model_t;
+
+static void
+down_model_count(down_model_t *model)
+{
+	if (++model->calls > DOWN_CALLS_MAX) {
+		puts("time: a down spun forever");
+		exit(1);
+	}
+}
+
+static uint64_t
+down_model_clock_ns(void *context)
+{
+	down_model_t *const model = context;
+
+	down_model_count(model);
+	model->now += model->step;
+	return (model->now);
+}
+
+static bool
+down_model_down(void *context, uint64_t timeout_us)
+{
+	down_model_t *const model = context;
+	const uint64_t end = model->now + timeout_us * NS_PER_US - (timeout_us == 0 ? 0 : model->early);
+
+	down_model_count(model);
+	if (model->up <= end) {
+		if (model->up > model->now)
+			model->now = model->up;
+		return (true);
+	}
+	model->now = end;
+	return (false);
+}
+
+static bool
+down_agrees(uint64_t distance, uint64_t up, uint64_t step, uint64_t early, uint64_t max_us)
+{
+	static const erx_fiasco_down_view_t view = { .clock_ns = down_model_clock_ns, .down = down_model_down };
+	down_model_t model = { .now = DOWN_START, .step = step, .up = up, .early = early, .calls = 0 };
+	const uint64_t deadline = DOWN_START + distance;
+	const bool taken = erx_fiasco_time_down(&view, &model, deadline, max_us);
+
+	if (!taken && model.now < deadline) {
+		printf("time: a down %llu ns from its deadline gave up early\n", (unsigned long long)(deadline - model.now));
+		return (false);
+	}
+	if (!taken && up <= model.now) {
+		printf("time: a down with %llu ns to go missed an up posted at %lld ns\n", (unsigned long long)distance,
+		    (long long)(int64_t)(up - DOWN_START));
+		return (false);
+	}
+	return (true);
+}
+
+/*
+ * Deadlines passed by the first clock read, under, at and over a microsecond away, each with an up before, during or
+ * after it, times relative to the start of the down.
+ */
+static bool
+check_down(uint64_t *checked)
+{
+	static const uint64_t distances[] = { 500, 0, 1, 999, 1000, 1001, 2500, 1000003 };
+	static const uint64_t steps[] = { 1, 7, 400 }, earlies[] = { 0, 999 }, maxima[] = { WAIT_MAX_US, 1000 };
+
+	for (size_t d = 0; d < sizeof(distances) / sizeof(distances[0]); d++) {
+		const uint64_t distance = distances[d];
+		const uint64_t ups[] = { DOWN_START - 1, DOWN_START, DOWN_START + 1, DOWN_START + distance / 2,
+			DOWN_START + distance - (distance != 0), DOWN_START + distance, DOWN_START + distance + 1,
+			DOWN_START + distance + 5000, UINT64_MAX };
+
+		for (size_t u = 0; u < sizeof(ups) / sizeof(ups[0]); u++)
+			for (size_t s = 0; s < sizeof(steps) / sizeof(steps[0]); s++)
+				for (size_t e = 0; e < sizeof(earlies) / sizeof(earlies[0]); e++)
+					for (size_t m = 0; m < sizeof(maxima) / sizeof(maxima[0]); m++) {
+						if (!down_agrees(distance, ups[u], steps[s], earlies[e], maxima[m]))
+							return (false);
+						(*checked)++;
+					}
+	}
+	return (true);
+}
+
 int
 main(void)
 {
@@ -135,7 +238,7 @@ main(void)
 	for (size_t index = 0; index < sizeof(frequencies) / sizeof(frequencies[0]); index++)
 		if (!check_scale(frequencies[index], &state, &checked))
 			return (1);
-	if (!check_edges() || !check_wait(&checked))
+	if (!check_edges() || !check_wait(&checked) || !check_down(&checked))
 		return (1);
 	printf("time: %llu cases\n", (unsigned long long)checked);
 	return (0);
