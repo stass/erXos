@@ -11,6 +11,7 @@ require_relative 'fsimg'
 require_relative 'data_volume'
 require_relative 'pi_medium'
 require_relative 'bl31'
+require_relative 'board_clock'
 require_relative 'board_tree'
 require_relative 'boot_partition_settings'
 require_relative 'build_kind'
@@ -123,6 +124,9 @@ module Erx
     # * init_uart_clock: the PL011s' clock from the record, for UART3, the host link.
     # * core_freq, core_freq_fixed: the header map's core clock, which the I2C and SPI
     #   controllers divide, fixed so the rate their drivers divide holds (core_lines).
+    # * arm_freq, force_turbo: the record's ARM clock, held (BoardClock): no system run on
+    #   the board asks the firmware for a clock, and without force_turbo the firmware's own
+    #   scaling would choose one.
     # * total_mem, gpu_mem: the record's RAM.
     # * framebuffer_depth, framebuffer_ignore_alpha, max_framebuffers: one 32-bit
     #   framebuffer with its alpha channel ignored, so the root finds at most one
@@ -147,7 +151,7 @@ module Erx
         kernel=#{KERNEL}
         kernel_address=0x#{QemuPlan::MACHINES.fetch(platform.name).loads.image.to_s(16)}
         armstub=#{ARMSTUB}
-        #{setting_lines(table, build_kind)}init_uart_clock=#{pl011_clock(platform)}
+        #{arm_clock_lines(platform)}#{setting_lines(table, build_kind)}init_uart_clock=#{pl011_clock(platform)}
         total_mem=#{total_mem_mib(platform)}
         gpu_mem=#{GPU_MEM_MIB}
         framebuffer_depth=32
@@ -181,6 +185,14 @@ module Erx
       end
 
       TOTAL_MEM_MIB
+    end
+
+    # The ARM clock lines for platform's record: arm_freq in MHz, the unit config.txt takes,
+    # held by force_turbo; none for a record that names no clock (BoardClock).
+    def arm_clock_lines(platform)
+      hz = BoardClock.configured_hz(platform.record) or return ''
+
+      "arm_freq=#{hz / 1_000_000}\nforce_turbo=1\n"
     end
 
     # The firmware's own boot log on the console (uart_2ndstage), on a development card only.

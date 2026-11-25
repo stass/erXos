@@ -9,6 +9,7 @@ require_relative 'bench_record'
 require_relative 'bench_session'
 require_relative 'bench_side_by_side'
 require_relative 'bench_suite'
+require_relative 'board_clock'
 require_relative 'board_record'
 require_relative 'board_run'
 require_relative 'board_walk'
@@ -130,10 +131,11 @@ module Erx
     end
 
     # The record of L4Re's board run of benchmark name from its console log and the build
-    # record at subject, written under history; answers [the run directory, the record].
+    # record at subject, written under history, with arm_clock_hz, the ARM clock the board's
+    # cards held (BoardClock); answers [the run directory, the record].
     # revision is the harness's (SourceRevision::Revision). A log in which Fiasco started
     # more than one CPU is refused: ipcbench's threads have a known placement only on one.
-    def import(name, subject:, log:, root:, history:, revision:)
+    def import(name, subject:, log:, root:, history:, revision:, arm_clock_hz:)
       benchmark = BenchSuite.benchmark(name)
       bytes = BoundedFile.read(log, maximum: BenchRecord::LOG_BYTES)
       lines = run_lines(bytes.split(/\r?\n/n))
@@ -147,7 +149,7 @@ module Erx
                                                   details: { 'memory_mib' => BoardRecord::MEMORY_MIB }),
         subject: BenchRecord::Subject.new(revision: revision.commit, dirty: revision.dirty, details: subject_record(subject)),
         run: BenchRecord::Run.new(date: File.mtime(log).utc, started_by: 'manual', load: nil, host_cpus: nil, reused_from: nil,
-                                  details: { 'refused' => answer.fetch(:refused) }),
+                                  details: { BoardClock::KEY => arm_clock_hz, 'refused' => answer.fetch(:refused) }),
         boots: [BenchRecord::Boot.new(position: 1, clock: nil, cells: answer.fetch(:cells), details: {})]
       )
       [BenchRecord.write(record, history: history, erxos_root: root, logs: [{ serial: bytes }]), record]

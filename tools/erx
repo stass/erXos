@@ -1585,7 +1585,7 @@ module Erx
       require_relative 'lib/erx/board_record'
       log = BoundedFile.read(File.join(ran.directory, BoardRun::LOG), maximum: BoardLog.max_bytes(ran.queue))
       made = BoardRecord.recorded(log, queue: ran.queue, walk: ran.walk, readings: { 'before' => ran.before&.text, 'after' => ran.after.text },
-                                       started_by: 'manual')
+                                       started_by: 'manual', arm_clock_hz: BoardClock.board_hz(ROOT))
       BoardRecord.write(made, history: history, root: ROOT).each { |run| Terminal.puts("bench: recorded #{run}") }
     rescue Error, SystemCallError
       import = ['tools/erx', 'bench', 'import', name, '--env', BoardRun::ENVIRONMENT, '--queue', File.join(ran.directory, BoardFiles::QUEUE),
@@ -1641,7 +1641,8 @@ module Erx
 
     # Writes L4Re's board record of benchmark and prints the board's side-by-side table.
     def self.bench_l4re_record(benchmark, subject:, log:, history:, revision:)
-      run, record = L4ReBoard.import(benchmark.name, subject: subject, log: log, root: ROOT, history: history, revision: revision)
+      run, record = L4ReBoard.import(benchmark.name, subject: subject, log: log, root: ROOT, history: history, revision: revision,
+                                     arm_clock_hz: BoardClock.board_hz(ROOT))
       Terminal.puts("bench: recorded #{run}")
       L4ReBoard.table(benchmark, record, history: history).each { |line| Terminal.puts(LineEscape.escape(line)) }
     end
@@ -1669,7 +1670,8 @@ module Erx
 
       name, log = arguments
       BenchSuite.benchmark(name)
-      BoardRecord.import(name, queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history)
+      BoardRecord.import(name, queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history,
+                                     arm_clock_hz: BoardClock.board_hz(ROOT))
                  .each { |run| Terminal.puts("bench: recorded #{run}") }
       0
     end

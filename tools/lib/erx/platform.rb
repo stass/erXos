@@ -20,7 +20,8 @@ module Erx
   # is not a positive number of bytes, or with a site_leaves_out that is not a list of
   # domain names, is refused when it is loaded, before any tool uses it. A board's header
   # map, the record's pins, is checked as the record loads too (PinTable); pins is the
-  # checked map, nil for a board without one.
+  # checked map, nil for a board without one. A board whose cards hold one ARM clock names it
+  # in whole megahertz (arm_clock_hz, BoardClock).
   Platform = Data.define(:name, :record, :pins)
   class Platform
     # The board the QEMU harnesses and `tools/erx` build for when no caller names another:
@@ -61,7 +62,7 @@ module Erx
 
     # Every key a record may hold; a key outside this list, a stale or a misspelled one, is
     # refused, since the reader would otherwise go on without what the key was meant to say.
-    KEYS = %w[console cpuset fiasco_reserve firmware_requests hostlink msi_frame name pins ram_bytes ram_first
+    KEYS = %w[arm_clock_hz console cpuset fiasco_reserve firmware_requests hostlink msi_frame name pins ram_bytes ram_first
               root_withheld site_leaves_out units].freeze
 
     # The record's fields in whole MiB, each checked at construction.
@@ -74,7 +75,11 @@ module Erx
       unknown = record.keys - KEYS
       raise Error, "#{self.class.record_path(name)}: unknown key #{unknown.first.inspect}" unless unknown.empty?
 
-      MIB_FIELDS.each do |field, mib|
+clock = record['arm_clock_hz']
+raise Error, "#{self.class.record_path(name)}: arm_clock_hz must be a positive whole number of megahertz" unless
+  clock.nil? || (clock.is_a?(Integer) && clock.positive? && (clock % 1_000_000).zero?)
+
+MIB_FIELDS.each do |field, mib|
         bytes = record.fetch(field) { raise Error, "#{self.class.record_path(name)}: no #{field}" }
         raise Error, "#{self.class.record_path(name)}: #{field} must be a whole number of MiB in #{mib}" unless
           bytes.is_a?(Integer) && (bytes % (1 << 20)).zero? && mib.cover?(bytes >> 20)

@@ -79,13 +79,15 @@ class L4ReBoardTest < Minitest::Test
     [erxos, history].each { |path| git_init(path) }
     Board.import('nullcall', subject: subject_file, log: log, root: erxos, history: history,
                              revision: Erx::SourceRevision::Revision.new(count: 1, hash: 'c' * 12, commit: 'c' * 40,
-                                                                               dirty: false, committed_at: nil))
+                                                                               dirty: false, committed_at: nil),
+                             arm_clock_hz: 1_500_000_000)
   end
 
   def test_a_log_is_imported_as_a_one_cpu_l4re_record_of_the_board
     run, record = imported(LOG)
     assert_equal ['pi4-4gb-l4re', 'l4re', 1], [record.environment.name, record.environment.system, record.environment.cpus]
     assert_equal 'b' * 64, record.subject.details.fetch('bootstrap_sha256')
+    assert_equal 1_500_000_000, record.run.details.fetch('arm_clock_hz')
     kernel = record.boot.cells.find { |cell| cell.operation == 'kernel' }
     assert_equal ['measured', 123], [kernel.status, kernel.detail.fetch('total') / kernel.detail.fetch('count')]
     assert File.file?(File.join(run, 'run.json'))

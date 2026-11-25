@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'bench_record'
+require_relative 'board_clock'
 require_relative 'bench_suite'
 
 module Erx
@@ -16,10 +17,12 @@ module Erx
   # landing boot's count. The tables give no verdict: setting systems beside each other
   # is never a comparison.
   #
-  # A number is converted to nanoseconds only by its own run's clock group and only for
-  # a clock with a frequency; a cell in cycles stays in cycles whatever another boot's
-  # CLOCK line measured, since a calibration describes only its own boot. A ratio is set
-  # only between two cells of clocks with a frequency.
+  # A number is converted to nanoseconds only by its own run's clocks: a clock with a
+  # frequency by its run's clock group, and a cell in CPU cycles by the ARM clock its run
+  # recorded the board's cards holding (BoardClock), which the row then names; a cell in
+  # cycles from a run with no such clock, as under QEMU, stays in cycles whatever another
+  # boot's CLOCK line measured, since a calibration describes only its own boot. A ratio is
+  # set only between two histograms in nanoseconds.
   module BenchSideBySide
     # One boot of the session: the round it booted in and its record.
     Run = Data.define(:round, :record)
@@ -27,9 +30,10 @@ module Erx
     # frequency) or operations.
     Quantity = Data.define(:amount, :unit)
     # One run's cell in a row: its status and reason, clock and summary form, the
-    # statistics its summary reports, and its median over erXos's run of the same round,
-    # nil unless both are histograms in nanoseconds.
-    Entry = Data.define(:round, :status, :reason, :clock, :form, :values, :ratio)
+    # statistics its summary reports, the ARM clock in hertz its cycles were converted at
+    # (nil when they were not), and its median over erXos's run of the same round, nil
+    # unless both are histograms in nanoseconds.
+    Entry = Data.define(:round, :status, :reason, :clock, :form, :values, :converted_hz, :ratio)
     # One system in a row: what it runs for the operation (nil for erXos, whose cell the
     # row is; 'none' where the system has no counterpart, and then no entries), and its
     # runs' cells.
@@ -89,18 +93,19 @@ module Erx
       end
       return nil unless cell
 
+      arm_hz = BoardClock.recorded_hz(run.record.run) if cell.conditions.clock == 'cycles'
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
-                values: values(cell, boot.clock), ratio: nil)
+                values: values(cell, boot.clock, arm_hz), converted_hz: arm_hz, ratio: nil)
     end
 
     # What a cell's summary reports, each amount in its own run's units: a histogram's
     # statistics, and the mean of a cell that kept its count and total, a mean's or a
-    # batched histogram's.
-    def values(cell, clock)
+    # batched histogram's. arm_hz is the clock a cell in cycles is converted at, or nil.
+    def values(cell, clock, arm_hz)
       summary = cell.summary
       statistics = cell.form == 'mean' ? {} : STATISTICS.to_h { |name| [name, reported(summary[name])] }.compact
-      statistics.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock) }
-                .merge(mean(summary, cell.conditions.clock, clock))
+      statistics.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock, arm_hz) }
+                .merge(mean(summary, cell.conditions.clock, clock, arm_hz))
     end
 
     # A statistic's amount: a percentile is reported as a map holding its value.
@@ -110,19 +115,20 @@ module Erx
     # printed mean may count each operation as more than one (ipcbench's IPC mean is half
     # a round trip), and the record keeps it as printed; a batched histogram's count is
     # its calls, not its samples.
-    def mean(summary, clock_name, clock)
+    def mean(summary, clock_name, clock, arm_hz)
       return {} unless summary.key?('total')
 
       count = summary.fetch('count')
       { 'count' => Quantity.new(amount: count, unit: 'operations'),
-        'mean' => amount(Rational(summary.fetch('total'), count), clock_name, clock) }
+        'mean' => amount(Rational(summary.fetch('total'), count), clock_name, clock, arm_hz) }
     end
 
-    # ticks of clock_name as one run's clock group gives them: nanoseconds for a clock
-    # with a frequency the run recorded, cycles for cycles, ticks otherwise.
-    def amount(ticks, clock_name, clock)
-      frequency = clock&.fetch('frequency_hz', nil)
-      if FREQUENCY_CLOCKS.include?(clock_name) && frequency.is_a?(Integer)
+    # ticks of clock_name as one run gives them: nanoseconds for a clock with a frequency
+    # its clock group recorded, and for cycles at arm_hz, the ARM clock its run recorded;
+    # cycles for cycles without one, ticks otherwise.
+    def amount(ticks, clock_name, clock, arm_hz)
+      frequency = clock_name == 'cycles' ? arm_hz : clock&.fetch('frequency_hz', nil)
+      if (FREQUENCY_CLOCKS.include?(clock_name) || clock_name == 'cycles') && frequency.is_a?(Integer)
         Quantity.new(amount: Rational(ticks * 1_000_000_000, frequency), unit: 'ns')
       else
         Quantity.new(amount: ticks, unit: clock_name == 'cycles' ? 'cycles' : 'ticks')
@@ -166,7 +172,8 @@ module Erx
       status = entry.reason ? "#{entry.status} (#{entry.reason})" : entry.status
       values = entry.values.map { |name, quantity| "#{name} #{quantity_text(quantity)}" }
       ratio = entry.ratio ? ["ratio #{format('%.2f', entry.ratio)}"] : []
-      "#{[status, entry.clock, entry.form].join(', ')}#{values.empty? ? '' : ": #{[*values, *ratio].join(', ')}"}"
+      clock = entry.converted_hz ? "cycles, shown in ns at the #{entry.converted_hz / 1_000_000} MHz ARM clock its config.txt held" : entry.clock
+      "#{[status, clock, entry.form].join(', ')}#{values.empty? ? '' : ": #{[*values, *ratio].join(', ')}"}"
     end
 
     def quantity_text(quantity)

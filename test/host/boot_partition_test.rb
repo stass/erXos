@@ -21,9 +21,9 @@ class BootPartitionTest < Minitest::Test
   # development card; BSC1's, UART3's and SPI0's pins from the header map, none for the
   # console's pins, which enable_uart sets, none for the gpio rows (GPIO 18 and 19, PWM0's,
   # among them), none for UART0's on-board pins to the Bluetooth controller, which the root
-  # sets at boot; and the core clock fixed at the map's 500 MHz.
+  # sets at boot; the core clock fixed at the map's 500 MHz; and the record's ARM clock, held.
   def test_config_txt_comes_from_the_record
-    assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin enable_uart=1
+    assert_equal %w[arm_64bit=1 kernel=kernel8.img kernel_address=0x200000 armstub=bl31.bin arm_freq=1500 force_turbo=1 enable_uart=1
                     enable_jtag_gpio=1 init_uart_clock=48000000 total_mem=1024 gpu_mem=76 framebuffer_depth=32
                     framebuffer_ignore_alpha=1 max_framebuffers=1 disable_overscan=1
                     core_freq=500 core_freq_fixed=1

@@ -129,6 +129,19 @@ class BenchSideBySideTest < Minitest::Test
     refute_match(/\bns\b|\bratio\b/, line)
   end
 
+  # On the board the cards hold one ARM clock, which the run records: L4Re's cycles are
+  # shown in nanoseconds at that clock, the row says so, and a mean still takes no ratio.
+  def test_cycles_of_a_run_that_recorded_its_arm_clock_are_shown_in_ns
+    held = boot('l4re', 1, [mean('same')], clock: nil)
+    held = held.with(record: held.record.with(run: held.record.run.with(details: { 'arm_clock_hz' => 1_500_000_000 })))
+    board = Tables.tables(BENCHMARK, [runs.first, held], systems: %w[erxos l4re], forms: false).first
+    entry = column(board.rows.first, 'l4re').entries.first
+    assert_equal [ns(Rational(4_213_000 * 1000, 10_000 * 1500)), 1_500_000_000, nil],
+                 [entry.values.fetch('mean'), entry.converted_hz, entry.ratio]
+    line = Tables.render([board]).find { |text| text.include?('280.9 ns') }
+    assert_match(/cycles, shown in ns at the 1500 MHz ARM clock its config\.txt held, mean/, line)
+  end
+
   # ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table
   # shows the total over the calls, one round trip, beside erXos's round trips.
   def test_a_mean_is_shown_as_its_total_over_its_count

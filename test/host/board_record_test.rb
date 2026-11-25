@@ -67,7 +67,7 @@ class BoardRecordTest < Minitest::Test
     read = Erx::BoardLog.read(log, queue: queue, asked: Fuzz.board_asked * queue.sets.size, walk: walk)
     Erx::BoardRecord.records(read, sets: queue.sets.map { |set| Erx::BoardRecord.set(set) },
                                    run: Erx::BoardRecord.run(queue: queue, walk: walk, read: read, readings: readings,
-                                                             started_by: 'manual'))
+                                                             started_by: 'manual', arm_clock_hz: 1_500_000_000))
   end
 
   def test_a_walk_of_three_entries_of_one_set_is_one_record_of_three_boots
@@ -113,6 +113,7 @@ class BoardRecordTest < Minitest::Test
     record = recorded(queue([set_directory('wake', kernel: '11' * 32)], [0, 0, 0]), walk: nil,
                                                                                    readings: { 'before' => nil, 'after' => nil }).first.record
     assert_equal [nil, nil, { 'status' => 'booted', 'identity' => nil }], record.run.details.values_at('ending', 'restored', 'returned')
+    assert_equal 1_500_000_000, record.run.details.fetch('arm_clock_hz')
     assert_equal [nil, nil, nil], record.boots.map { |boot| boot.details.fetch('outcome') }
   end
 
@@ -138,11 +139,11 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log([*Fuzz::FIRMWARE_LINES, Fuzz.banner(**Fuzz::FOUND), 'erXos']))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
     end
     assert_match(/names no boot/, error.message)
     other = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
     end
     assert_match(/is a walk of wake/, other.message)
   end
@@ -159,7 +160,7 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log(Fuzz::FIRMWARE_LINES))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
     end
     assert_match(/names no boot/, error.message)
   end
