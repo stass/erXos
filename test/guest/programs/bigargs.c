@@ -113,6 +113,7 @@ probes_ring(const erx_prog_self_t *self)
 	}
 	return (atomic_load_explicit(&self->rings, memory_order_relaxed) != 0 ? 0 : 5);
 }
+
 int
 main(int argc, char **argv, char **envp)
 {
