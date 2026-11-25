@@ -1082,7 +1082,7 @@ the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
 ### The walk
 
 `tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST
---key FILE [--runs N] [--profile full] [--set DIR ...]` runs it:
+--key FILE [--runs N] [--profile landing|full] [--set DIR ...]` runs it:
 
 1. **Before anything is served**, every refusal of
    [Refusals and error results](#refusals-and-error-results) is checked,
@@ -1514,7 +1514,7 @@ commits each was at on that revision's commit date; and ipcbench
 (`github.com/l4re/ipcbench`) at
 `148682322103a984ddf84eb1a28e67a3d50c0b28`, the commit its facts record
 read, its last commit before the commit date of the fork's revision
-`07ea18e1`; a later revision re-checks that ipcbench has no newer commit
+(`fiasco/kernel/ORIGIN.md`); a later revision re-checks that ipcbench has no newer commit
 before its date. Each is a `git` source pinned by its commit and the
 SHA-256 of git's tar of that commit, in L4Re's own lock,
 `bench/l4re/deps.lock`, in `deps.lock`'s form. Only `tools/erx fetch
