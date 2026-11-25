@@ -2539,7 +2539,55 @@ reached over the network. The tool chain is Genode's pre-compiled one, published
 for Debian 12.10 and Ubuntu 24.04 with its SHA-256 and installed at
 `/usr/local/genode/tool/<version>` with the prefix `genode-aarch64-`
 (References), fetched by the fetch step and copied into the container,
-never fetched by the build. `erx_peer_bench` is built as a Genode
+never fetched by the build.
+
+**Third-party sources.** Genode's tools learn what a build needs, and
+the build never downloads it: the archives of Genode's ports, and the
+tools the image lacks, are pinned in Genode's lock and copied into the
+container. A black-box probe of Genode's own tools, run offline in that
+container (`tool/create_builddir`, `tool/ports/prepare_port`,
+`tool/depot/create`, `tool/depot/download` and builds of `lib/ld` and
+`lib/libc` for `KERNEL=hw BOARD=virt_qemu_arm_v8a`, as a non-root user in a
+tree it unpacked itself), shows how:
+
+* A build that needs an unprepared port stops with `Error: Ports not
+  prepared or outdated:` and the port's name, and so does
+  `tool/depot/create` for a binary archive built from such a port; the
+  error names no address.
+* `prepare_port` prints the address of each archive it downloads, one
+  at a time (`libc  download http://ftp-archive.freebsd.org/...`), runs
+  `wget --quiet --no-check-certificate URL -O FILE` in the port's
+  directory `contrib/<port>-<fingerprint>.incomplete`, checks the file
+  against a hash it does not print (`Error: Hash sum check for libc
+  failed`), and stops at the first archive that fails. It uses an
+  archive already in that directory under the name it asks for, with
+  no network, and then checks, extracts and patches it as usual.
+* `tool/depot/create` builds the binary archives `posix` needs (and
+  their API and source archives) from the tree and its prepared ports,
+  so the guest needs no archive from Genode's depot server, whose
+  address `tool/depot/download` prints
+  (`https://depot.genode.org/<user>/<kind>/<name>/<version>.tar.xz`)
+  and whose archives are signed rather than hashed.
+
+So each port's archive is pinned in `bench/genode/deps.lock` as
+`genode-port-<port>`, under the file name `prepare_port` asks for, at
+the archive's HTTPS address and a SHA-256 its publisher states where
+one does (FreeBSD's release `MANIFEST` for `libc`'s `src.txz`); a port
+has one archive. Genode's tree is copied in owned by root, except
+`contrib/` and `depot/`, which are the build's own, empty and writable
+by the build user. The build's script, erXos's and run as that user,
+runs `prepare_port` for each pinned port once offline, takes the
+fingerprint from the one directory `contrib/<port>-<fingerprint>.incomplete`
+that run created, refusing any name whose fingerprint is not 40
+hexadecimal digits, places the archive there under its file name and
+runs `prepare_port` again; Genode's own hash check then confirms the pin
+inside the container. The tools the image lacks
+are Debian bookworm amd64 packages pinned as `genode-tool-<name>` by
+their `snapshot.debian.org` URL and SHA-256, unpacked as L4Re's are:
+flex and its library `libfl2`, which the tool chain's `ar` loads,
+bison, and the interpreters of Genode's run tool and its ABI check
+(`tool/check_abi`), which do not start in the image ("required file not
+found") and which are unverified. `erx_peer_bench` is built as a Genode
 component from a target description of erXos's (`bench/genode/`), with
 Genode's C library, a VFS that gives the program `/tmp` as a file
 system in memory, and the program's `posix_spawn` where Genode's C
@@ -2690,36 +2738,6 @@ which shows the row went through the session's Erlang handler.
   first, Fiasco.OC only where Genode's documentation at the pin names
   64-bit ARM support, and the board once Genode's documentation names
   the Raspberry Pi 4.
-* **Genode's third-party sources.** Genode's documentation, read at
-  Foundations 26.05 while the pin is 26.08, names two ways third-party
-  code reaches a build, each a tool the user runs, never the build
-  itself: `tool/ports/prepare_port` downloads the archives a port
-  description names into `contrib/<port>-<fingerprint>`, where a
-  build that uses the port looks for it and stops with an error when
-  it is missing, and a microkernel's build needs its port prepared
-  first (NOVA is the documented example); and `tool/depot/download`
-  fetches signed archives into the depot, `libc`'s source archive
-  carrying that library's source, from the web server a file of the
-  tree names ("Integration of 3rd-party software", "Build system",
-  "Package management", "A simple system scenario", References).
-  Which ports and archives `posix` on `base-hw` needs, and whether
-  seL4 and Fiasco.OC are ports, is unverified. Both tools download
-  from addresses that live in Genode's port and recipe files, which
-  no agent reads, and no erXos lock pins them, so neither fits the
-  offline container as written. The open question is how the
-  addresses are learned: whether a missing port's error, or Genode's
-  depot tools run offline as a black-box probe, prints each archive's
-  address is unverified. Recommendation: probe that first; if it
-  does, pin each port archive and each depot archive by URL and
-  SHA-256 in `bench/genode/deps.lock`, which then pins more than the
-  release and the tool chain (`GenodeFetch::SOURCES` grows with it),
-  and copy them into the container, port archives under the
-  fingerprint the error names and depot archives into the depot, so
-  the build stays offline and every byte it uses is pinned. If it
-  does not, the alternative is one networked container that runs
-  `prepare_port` and the depot download and whose exported `contrib/`
-  and depot are pinned by their SHA-256, which puts a
-  network-enabled run of Genode's scripts on the host.
 
 ## The first five benchmarks
 

@@ -21,6 +21,46 @@
       "filename": "genode-toolchain-25.05-debian-12.10.tar.xz",
       "license": "unverified; GNU tools (GCC, binutils), copyleft",
       "status": "permanent"
+    },
+    {
+      "id": "genode-port-libc",
+      "kind": "file",
+      "version": "12.0-RELEASE",
+      "url": "https://archive.freebsd.org/old-releases/amd64/12.0-RELEASE/src.txz",
+      "sha256": "0da393ac2174168a71c1c527d1453e07372295187d05c288250800cb152a889b",
+      "filename": "src.txz",
+      "license": "BSD-2-Clause and others, FreeBSD's source tree; the libc port's archive, used only in the container",
+      "status": "permanent"
+    },
+    {
+      "id": "genode-tool-bison",
+      "kind": "file",
+      "version": "2:3.8.2+dfsg-1+b1",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/b/bison/bison_3.8.2+dfsg-1+b1_amd64.deb",
+      "sha256": "a414afd7519c53bfa33415ba5b951bc8b4906877004c49723ffda50a6033c3e8",
+      "filename": "bison_amd64.deb",
+      "license": "GPL-3.0-or-later, per the package's copyright file; a build tool run only in the container",
+      "status": "permanent"
+    },
+    {
+      "id": "genode-tool-flex",
+      "kind": "file",
+      "version": "2.6.4-8.2",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/f/flex/flex_2.6.4-8.2_amd64.deb",
+      "sha256": "da3fd55dbb6aff4f7b3187580813e0ef707d0c596402e37c8fd144df60003636",
+      "filename": "flex_amd64.deb",
+      "license": "FLEX (BSD-style), per the package's copyright file; a build tool run only in the container",
+      "status": "permanent"
+    },
+    {
+      "id": "genode-tool-libfl2",
+      "kind": "file",
+      "version": "2.6.4-8.2",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/f/flex/libfl2_2.6.4-8.2_amd64.deb",
+      "sha256": "bd878478de2e95bbac86c15658b9fde713233999e0bcf7f1e6771df6ff4dcf7a",
+      "filename": "libfl2_amd64.deb",
+      "license": "FLEX (BSD-style), per the package's copyright file; flex's library, which the tool chain's ar loads, run only in the container",
+      "status": "permanent"
     }
   ]
 }

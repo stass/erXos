@@ -477,6 +477,15 @@ design does not have, to be deleted so no side-by-side table can show it under s
 * [Low] Side locks' exact-source rules, `SideLock` (`tools/lib/erx/side_lock.rb`): `L4ReFetch.lock` and
   `GenodeFetch.lock` compare only the sources of the running host, so a source pinned for another host
   (`host:`) passes their refusal unseen; nothing is fetched for it. Refuse any host-bound entry in a side lock.
+* [Medium] Genode's guest, its container build (`bench/genode/deps.lock`, docs/design-bench.md "Genode's
+  guest"): not built. The offline probe prepared `libc`'s port from its pinned archive and built `lib/ld` for
+  `base-hw` on `virt_qemu_arm_v8a`; still to do: pin the interpreters of Genode's run tool and
+  `tool/check_abi` (neither starts in the image: "required file not found") as `genode-tool-*`, build `libc`
+  with the real flex, list the further ports `posix` needs from `prepare_port`'s errors, and write the build.
+  A port with more than one archive does not fit `genode-port-<port>`; the first one changes the id form.
+* [Low] Large pinned files, `Dependencies` fetch deadline (`tools/lib/erx/dependencies.rb`): `fetch --genode`
+  downloaded FreeBSD's 160 MB `src.txz` in about 170 s of its 200 s deadline, so a slower link fails the fetch.
+  Scale the deadline with the file's size, or give a pin its own.
 * [Low] Oracle image fetch, `Dependencies#fetch_image` (`tools/lib/erx/dependencies.rb`): `make fetch` pulls
   every OCI image `deps.lock` pins, so a host pulls the oracle toolchain of each platform although its engine
   runs only its own. Fetch only the image whose platform is the local engine's architecture

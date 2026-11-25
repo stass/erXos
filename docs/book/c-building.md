@@ -129,9 +129,9 @@ pinned in locks of their own, never in the tree: the sources of L4Re
 it builds in a container in `bench/l4re/deps.lock`, which only
 `tools/erx fetch --l4re` obtains, and Linux's stock kernel and the C
 library its benchmark program links in `bench/linux/deps.lock`, which
-only `tools/erx fetch --linux` obtains, and Genode's release and tool
-chain in `bench/genode/deps.lock`, which only `tools/erx fetch --genode`
-obtains.
+only `tools/erx fetch --linux` obtains, and Genode's release, its tool
+chain, its ports' archives and the build tools its image lacks in
+`bench/genode/deps.lock`, which only `tools/erx fetch --genode` obtains.
 
 Why one fetch step and no other network access? A build that fetches
 in the middle can be steered by whoever answers the request, and a
