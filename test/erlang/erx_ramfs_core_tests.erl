@@ -390,8 +390,9 @@ read_returns_holes_as_zeros_and_stops_at_the_size_test() ->
     ?assertEqual(<<0:(4 * 8), "end">>, read(Handle, 2 * ?CHUNK - 4, 100, Tree2)),
     ?assertEqual(<<>>, read(Handle, 2 * ?CHUNK + 3, 10, Tree2)),
     ?assertEqual(<<>>, read(Handle, ?MAX_SIZE, 10, Tree2)),
-    ?assertEqual(65536, byte_size(read(Handle, 0, 1 bsl 40,
-                                       write(Handle, 70000, <<1>>, Tree2)))).
+    %% Chunks 0 and 1 are holes read whole; the read stops at its 64 KiB cap.
+    ?assertEqual(<<0:(2 * ?CHUNK * 8), "end", 0:((65536 - 2 * ?CHUNK - 3) * 8)>>,
+                 read(Handle, 0, 1 bsl 40, write(Handle, 70000, <<1>>, Tree2))).
 
 read_of_one_whole_chunk_returns_the_stored_chunk_test() ->
     Chunk = binary:copy(<<5>>, ?CHUNK),

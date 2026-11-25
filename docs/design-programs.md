@@ -4119,7 +4119,13 @@ description's message turns at an estimated 4 to 10 us together, and the
 executor's wake; a read of 64 KiB
 is about 50 us, of which 33 us are its five copies at an estimated 10 GB/s
 each ([design-files.md](design-files.md#performance)), so a sequential
-read moves about 1.3 GB/s at best. The same read costs an Erlang process
+read moves about 1.3 GB/s at best. `tools/erx bench posix`, reading a
+file in `/tmp`, which the session's `erx_ramfs` tree serves
+([design-tmp.md](design-tmp.md)), measured medians of 13.1 us for a
+read of 4 KiB, 20.0 us for one of 64 KiB and 5.2 ms for a sequential
+read of 16 MiB, about 3.2 GB/s, and 47 us for an `open` (one boot, one
+CPU, HVF on an Apple M3 Max at a one-minute load of 3, QEMU 11.1.3,
+Homebrew clang 23.1.3). The same read costs an Erlang process
 of the session one round trip, 3 to 10 us, and three copies. The handler's
 hop is the price of decision B, and experiment E-P2 below measures whether
 file-heavy programs pay it visibly.

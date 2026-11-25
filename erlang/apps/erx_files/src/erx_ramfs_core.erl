@@ -385,10 +385,8 @@ written(Ino, #node{data = {file, Chunks}} = N, At, Data, Stamp, Now, Tree) ->
     maybe
         ok ?= fits(Charge, Tree),
         Chunks1 = lists:foldl(
-                    fun(I, Acc) ->
-                            Old = maps:get(I, Chunks, ?ZERO_CHUNK),
-                            Acc#{I => spliced(Old, I, At, Bytes)}
-                    end, Chunks, Touched),
+                    fun(I, Acc) -> Acc#{I => spliced(Chunks, I, At, Bytes)} end,
+                    Chunks, Touched),
         N1 = N#node{data = {file, Chunks1}, size = max(N#node.size, End),
                     mtime = Now, ctime = Now, version = Stamp},
         {done, {ok, byte_size(Bytes), At},
@@ -1099,6 +1097,15 @@ zero_tail(Chunks, Size) ->
             Chunks
     end.
 
+%% Chunk I as stored, or zeros for a hole. The zeros are built only for a
+%% hole and only when its bytes are read: as maps:get/3's default they would
+%% be built, all 4 KiB, for every chunk a read or a write touches.
+chunk(I, Chunks) ->
+    case Chunks of
+        #{I := Chunk} -> Chunk;
+        #{} -> ?ZERO_CHUNK
+    end.
+
 %% Chunk I rebuilt whole: the old bytes, or zeros, with Bytes, written at
 %% At, copied over their part of it.
 %%
@@ -1109,7 +1116,7 @@ zero_tail(Chunks, Size) ->
 %% binary of a list as it is, so that case copies it. Any other write keeps
 %% old bytes before or after its own, so its list joins at least two
 %% non-empty parts and the result is new.
-spliced(Old, I, At, Bytes) ->
+spliced(Chunks, I, At, Bytes) ->
     Base = I * ?CHUNK_BYTES,
     Lo = max(At, Base) - Base,
     Hi = min(At + byte_size(Bytes), Base + ?CHUNK_BYTES) - Base,
@@ -1118,6 +1125,7 @@ spliced(Old, I, At, Bytes) ->
         {0, ?CHUNK_BYTES} ->
             binary:copy(New);
         {_, _} ->
+            Old = chunk(I, Chunks),
             iolist_to_binary([binary_part(Old, 0, Lo), New,
                               binary_part(Old, Hi, ?CHUNK_BYTES - Hi)])
     end.
@@ -1136,7 +1144,7 @@ bytes(#node{data = {file, Chunks}}, From, To) ->
            Base = I * ?CHUNK_BYTES,
            Lo = max(From, Base) - Base,
            Hi = min(To, Base + ?CHUNK_BYTES) - Base,
-           binary_part(maps:get(I, Chunks, ?ZERO_CHUNK), Lo, Hi - Lo)
+           binary_part(chunk(I, Chunks), Lo, Hi - Lo)
        end || I <- lists:seq(From div ?CHUNK_BYTES, (To - 1) div ?CHUNK_BYTES)]).
 
 %% ---------------------------------------------------------------------------
