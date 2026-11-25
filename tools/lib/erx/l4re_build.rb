@@ -29,7 +29,6 @@ module Erx
     IMAGE_ID = 'oracle-toolchain-arm64'
     PLATFORM = 'linux/arm64'
     SCRIPT = 'bench/l4re/build.sh'
-    L4RE_DEFCONFIG = 'bench/l4re/l4re.defconfig'
     KERNEL_DEFCONFIG = 'config/fiasco/kernel.defconfig'
     OUTPUT = 'build/l4re'
     # Where each tree sits in the container: the manifest's layout under /tmp, so mk is
@@ -130,6 +129,7 @@ module Erx
     # and the build record in build/l4re. Returns bootstrap.elf's path.
     def build(root:, runner:, context:, jobs:)
       raise Error, 'L4Re build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
+      raise Error, 'a Docker context name is letters, digits and _.+-' unless /\A[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}\z/.match?(context)
 
       fetched = L4ReFetch.lock(root: root, runner: runner)
       image = Dependencies.new(root: root, runner: runner).image_for(IMAGE_ID).fetch('reference')
@@ -152,12 +152,11 @@ module Erx
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, defconfig: defconfig))
     end
 
-    # The container's /tmp/inputs: the script, both defconfigs and the tool packages.
+    # The container's /tmp/inputs: the script, Fiasco's defconfig and the tool packages.
     def stage_inputs(root:, fetched:, directory:)
       inputs = File.join(directory, 'inputs')
       FileUtils.mkdir_p(File.join(inputs, 'packages'))
       FileUtils.copy_file(File.join(root, SCRIPT), File.join(inputs, 'build.sh'))
-      FileUtils.copy_file(File.join(root, L4RE_DEFCONFIG), File.join(inputs, 'l4re.defconfig'))
       File.write(File.join(inputs, 'kernel.defconfig'), kernel_defconfig(File.read(File.join(root, KERNEL_DEFCONFIG))))
       L4ReFetch.packages(fetched).each { |package| FileUtils.copy_file(package, File.join(inputs, 'packages', File.basename(package))) }
       inputs

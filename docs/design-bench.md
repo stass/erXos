@@ -1455,7 +1455,7 @@ SHA-256 of git's tar of that commit, in L4Re's own lock,
 --l4re` reads it, as only `--example` fetches an example: a default
 fetch does not clone L4Re, and a `--cache` fetch does not need it. That
 fetch publishes each tree under `build/l4re-sources`, a root of its own
-(`tools/lib/erx/l4re_fetch.rb`), and the container build mounts each at
+(`tools/lib/erx/l4re_fetch.rb`), and the container build copies each in at
 the path L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
 `l4` for `mk`, `l4/pkg/<name>` for packages, `fiasco` for the kernel,
 and `l4/pkg/ipcbench` for ipcbench. Which of the manifest's packages
@@ -1491,15 +1491,26 @@ and as a black box, for `arm64`, with `PT=arm_virt`, the target
 Its makefiles, scripts and the helper programs it builds are code fetched
 from elsewhere, so they run only inside the oracle's container
 ([Container boundary](design-host-oracle.md#container-boundary)): no
-network, no capabilities, the fetched sources mounted read-only, the
-build in the container's own volume, and `bootstrap.elf` and
-`globalconfig.out` copied out by the exporter. That is what keeps the
-build offline and off the host; nothing of L4Re runs on macOS. The
-compiler is the image's gcc for AArch64 Linux; that L4Re builds with it
-without a cross prefix, and that the image has every host program the
-build needs (GNU make, Perl for Fiasco's preprocessor), is unverified, and
-a missing program comes from a pinned image, never from a fetch during
-the build. erXos's fork is built by clang, so the two kernels come from
+network, no capabilities, a non-root user. `tools/erx build l4re`
+(`tools/lib/erx/l4re_build.rb`) creates the container from the pinned
+arm64 toolchain image and copies the fetched trees, the tool packages
+and its script (`bench/l4re/build.sh`) into it before it starts, rather
+than mounting them: the copies belong to root, so the build cannot write
+its sources, and a copy needs no path the engine's host shares with this
+one, so the engine may run on another host behind a local UNIX socket.
+The build runs in the container's own filesystem, and `bootstrap.elf`,
+`globalconfig.out`, L4Re's resolved `.kconfig` and the compiler's
+version line are copied out and read only as regular files within a
+bound. That is what keeps the build offline and off the host; nothing of
+L4Re runs on macOS. On an x86-64 engine the arm64 image runs under the
+engine's user-mode emulation, which is slower and is a property of that
+engine, not of the build. The compiler is the image's gcc for AArch64
+Linux, without a cross prefix. The image has GNU make, Perl and m4 but
+not flex and bison, which the kconfig of both Fiasco and L4Re builds;
+they come from Debian bookworm arm64 packages pinned in L4Re's lock by
+their `snapshot.debian.org` URL and SHA-256, fetched by `fetch --l4re`,
+and unpacked by the build, as its non-root user, into a tools directory
+on its `PATH`, never installed and never fetched during the build. erXos's fork is built by clang, so the two kernels come from
 different compilers, which both subjects record. The kernel is
 configured from erXos's `config/fiasco/kernel.defconfig`, so the two
 kernels differ by the fork's patches and their compilers: the comparison

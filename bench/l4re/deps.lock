@@ -97,6 +97,26 @@
       "filename": "bison_arm64.deb",
       "license": "GPL-3.0-or-later, per the package's copyright file; a build tool run only in the container",
       "status": "permanent"
+    },
+    {
+      "id": "l4re-tool-gawk",
+      "kind": "file",
+      "version": "1:5.2.1-2",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/g/gawk/gawk_5.2.1-2_arm64.deb",
+      "sha256": "38f1cfc73847954dd2a0a94e414472a0d6ea0d1bb0c399d1f6e1948e15ff5880",
+      "filename": "gawk_arm64.deb",
+      "license": "GPL-3.0-or-later, per the package's copyright file; a build tool run only in the container",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-tool-libsigsegv2",
+      "kind": "file",
+      "version": "2.14-1",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/libs/libsigsegv/libsigsegv2_2.14-1_arm64.deb",
+      "sha256": "455bace82a319cda15e6b1f1bdc0c1ae6e0749bff9a93e09055bc3fd168a2df5",
+      "filename": "libsigsegv2_arm64.deb",
+      "license": "GPL-2.0-or-later, per the package's copyright file; gawk's library, run only in the container",
+      "status": "permanent"
     }
   ]
 }

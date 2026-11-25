@@ -826,7 +826,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--set DIR]... | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--set DIR]... | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -959,16 +959,19 @@ module Erx
     def self.build(input_arguments)
       arguments = input_arguments.dup
       component = arguments.shift
-      unless %w[fiasco release-kernel runtime jit-runtime rc-oracle glyphs fsimg herd7 lvgl openssl web].include?(component)
+      unless %w[fiasco release-kernel runtime jit-runtime rc-oracle glyphs fsimg herd7 lvgl openssl web l4re].include?(component)
         raise OptionParser::InvalidArgument,
-              'build accepts fiasco, release-kernel, runtime, jit-runtime, rc-oracle, glyphs, fsimg, herd7, lvgl, openssl or web'
+              'build accepts fiasco, release-kernel, runtime, jit-runtime, rc-oracle, glyphs, fsimg, herd7, lvgl, openssl, web or l4re'
       end
       jobs = 4
+      docker_context = nil
       parser = OptionParser.new do |options|
         options.on('--jobs N', Integer, 'Parallel inherited build jobs') { |value| jobs = value }
+        options.on('--docker-context NAME', "Docker context of L4Re's container build (build l4re only)") { |value| docker_context = value }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
+      raise OptionParser::InvalidArgument, 'build l4re needs --docker-context NAME' if (component == 'l4re') != !docker_context.nil?
       path = case component
              when 'runtime' then build_runtime(jobs)
              when 'jit-runtime' then build_jit_runtime(jobs)
@@ -980,10 +983,19 @@ module Erx
              when 'openssl' then build_openssl(jobs)
              when 'release-kernel' then Fiasco.new(root: ROOT).build_release_kernel(jobs: jobs)
              when 'web' then WebBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')))
+             when 'l4re' then build_l4re(jobs, docker_context)
              else Fiasco.new(root: ROOT).build(jobs: jobs)
              end
       Terminal.puts("built #{path}")
       0
+    end
+
+    # L4Re's guest (L4ReBuild): built in the oracle's arm64 image on the Docker context,
+    # leaving bootstrap.elf and its build record in build/l4re.
+    def self.build_l4re(jobs, context)
+      require_relative 'lib/erx/l4re_build'
+      L4ReBuild.build(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs')),
+                      context: context, jobs: jobs)
     end
 
     # The development boot image in QEMU with its serial line on this terminal,
