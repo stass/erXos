@@ -138,7 +138,7 @@ limits session
   grant @share.session
   spaces @share.session
   lane 65536
-  connections 6
+  connections 8
   crash 0
   flags spaces
   runtime_limits @runtime_limits.session
@@ -231,8 +231,8 @@ facet storage_ctl
 # domain takes two connections, root's session and one more while a session is replaced,
 # and four more, one for each app of QEMU virt's apps row, whose template the build
 # grants packages,
-# and root's session six: data, net, the display, and one more for each while its
-# server is replaced; a domain's system connection counts against no quota (life_connections,
+# and root's session eight: data, net, the display and, on QEMU virt, media, and one
+# more for each while its server is replaced (the Raspberry Pi 4 uses six of them); a domain's system connection counts against no quota (life_connections,
 # liberx/system/dom_life.c). The network domain takes two, as the storage domain does for sessions,
 # and four more, one for each app of QEMU virt's apps row, whose template the build
 # grants net; the display domain takes one for root's session, which display_root

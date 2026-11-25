@@ -511,7 +511,9 @@ is refused by that name, and the volume is then mounted: FAT behind
 the FAT server, EROFS behind the same decoder the system uses, and, in
 development builds only, littlefs behind its owner and a sub-space of
 its own for littlefs's C. Sessions that hold the
-`media` facet see the drives at `/media/disk0/s1` and so on, beside
+`media` facet, which each board's manifest grants root's session
+alone, see the
+drives at `/media/disk0/s1` and so on, beside
 each drive's `status`, which names every volume's format, label and
 mount, and its `ctl`, to which `eject` is written before a stick is
 pulled. A session puts a volume wherever it likes in its own

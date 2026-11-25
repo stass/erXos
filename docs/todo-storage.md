@@ -84,13 +84,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      service; the shell's `mount` and `umount` forms ([todo-shell.md](todo-shell.md)). The media
      domain's durability facet to the system domain in the facet table, which `check_drive_domains`'
      list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
-     here too. QEMU virt's development manifest names its media domain, the service `media` and the
-     drive `disk0` on the xhci row, so its USB domain serves a stick as `disk0`; the domain runs
-     nothing yet. The quotas count no system connection (`life_connections` in
-     `liberx/system/dom_life.c`), so at rest the media domain's `connections` of 1 and the USB
-     domain's of 2 hold the one drive connection between them beside the display's `usb_input`;
-     a peer's restart, while its old row is still closing, needs one more on each, 2 and 3, which
-     the manifest's rows for other configured peers do not reckon either.
+     here too. QEMU virt's development manifest names its media domain, the service `media`, root's
+     session's `media` facet (rights `rw`) and the drive `disk0` on the xhci row, so its USB domain
+     serves a stick as `disk0`; the domain provides no `media` yet, so a walk of `/media` answers
+     `eio`. Security: the `nofollow` mark lands in `erx_ns` before `erx_media_app` provides
+     `media`, or root's rw session follows a stick's links (a link to `/root/.ssh/authorized_keys`
+     makes a copy onto the stick write root's keys). The quotas count no system connection
+     (`life_connections` in `liberx/system/dom_life.c`), so at rest the media domain's
+     `connections` of 3 hold the drive connection and root's session's `media` with its
+     replacement's, and the USB domain's of 2 hold the drive connection beside the display's
+     `usb_input`; a peer's restart, while its old row is still closing, needs one more on the USB
+     domain, 3, which the manifest's rows for other configured peers do not reckon either.
   5. The FAT server, `erx_fat`, over a FAT16 or FAT32 volume. Its read path is built (mount,
      directories, lookups and reads, with `erx_fat`'s fuzz target); what remains: its batches, dirty
      flag and finish; lookups through the generated simple-uppercase case table of

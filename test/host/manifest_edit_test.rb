@@ -167,16 +167,17 @@ class ManifestEditTest < Minitest::Test
   end
 
   # A domain's windows go with it, as its units do: the media domain's drive window
-  # disk0 leaves with the domain, and nothing else that names no record taken out.
-  # The window is the drive grant that joins the media domain to the USB domain, whose
-  # xhci unit the drive lies on, so its connection comes back to the USB domain's limits
-  # and to max_connections beside the media domain's system connection.
+  # disk0 leaves with the domain, as root's session's facet of its service media does,
+  # and nothing else that names no record taken out. The window is the drive grant that
+  # joins the media domain to the USB domain, whose xhci unit the drive lies on, so its
+  # connection comes back to the USB domain's limits and to max_connections beside the
+  # media domain's system connection and root's two, its session's and its replacement's.
   def test_without_domain_takes_the_windows_it_holds
     gone = Edit.without_domain(SOURCE, 'media', units: VIRT.record.fetch('units'))
     taken = records(SOURCE).keys - records(gone).keys
-    assert_equal [%w[domain media], %w[limits media], %w[runtime_limits media], %w[service media], %w[share media],
+    assert_equal [%w[domain media], %w[facet media], %w[limits media], %w[runtime_limits media], %w[service media], %w[share media],
                   %w[window disk0]], taken.sort
-    { %w[machine max_connections] => -2, ['limits usb', 'connections'] => -1 }.each do |(record, field), change|
+    { %w[machine max_connections] => -4, ['limits usb', 'connections'] => -1 }.each do |(record, field), change|
       assert_equal value(SOURCE, record, field) + change, value(gone, record, field), "#{record} #{field}"
     end
   end

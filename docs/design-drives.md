@@ -358,7 +358,11 @@ updating or loading code from a drive.
   argument forms of the shell's `mount` and `umount`; and the modules of
   `erx_media`.
 * **DR-R8.** A session reaches `/media` only through a `media` facet
-  the manifest grants it, and the tree it serves holds every drive. The
+  the manifest grants it, and the tree it serves holds every drive; a
+  board manifest with a media domain grants one `media` facet, rights
+  `rw`, to the system principal's session template, so root's session
+  reads and changes its drives and no other session of that manifest
+  sees them. The
   media domain holds the drives because each drive's window row names
   it, and no other row grants `drive`
   ([How the grant reaches the media domain](#how-the-grant-reaches-the-media-domain)).

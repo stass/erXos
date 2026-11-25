@@ -166,7 +166,8 @@ module ManifestContextFixture
   # PCIe domain's pci_bus facet, the display unit, which only a display domain holds (docs/design-fiasco.md, "Device
   # records"), so a manifest without one places none, the ECAM bridge's unit, which only the PCIe domain holds, and the
   # USB domain's xhci unit, its pci facet and its input tree, usb_input, with the display's facet of it, and the
-  # media domain's service media and the drive window it holds.
+  # media domain's service media and the drive window it holds (root's session's facet of
+  # media is among SESSION_FACETS).
   DOMAIN_ROWS = [/^runtime_limits storage\n(?:  .*\n)*/, /^limits storage\n(?:  .*\n)*/, /^domain storage\n(?:  .*\n)*/,
                  /^service storage_ctl\n(?:  .*\n)*/, /^facet storage_ctl\n(?:  .*\n)*/,
                  /^service data\n(?:  .*\n)*/, /^service home\n(?:  .*\n)*/, /^facet data\n(?:  .*\n)*/, /^service packages\n(?:  .*\n)*/,
@@ -187,11 +188,11 @@ module ManifestContextFixture
                  /^runtime_limits media\n(?:  .*\n)*/, /^limits media\n(?:  .*\n)*/, /^domain media\n(?:  .*\n)*/,
                  /^service media\n(?:  .*\n)*/, /^window \w+\n  holder @domain\.media\n(?:  .*\n)*/].freeze
   # Root's session template's facets, of data, net, inspect, start, machine, the clock,
-  # login_keys and install, which a sessionless source (ProductionImage.without_sessions) does not hold.
+  # login_keys, install and media, which a sessionless source (ProductionImage.without_sessions) does not hold.
   SESSION_FACETS = [/^facet data_session\n(?:  .*\n)*/, /^facet net\n(?:  .*\n)*/, /^facet inspect\n(?:  .*\n)*/,
                     /^facet start\n(?:  .*\n)*/, /^facet machine\n(?:  .*\n)*/,
                     /^facet root_clock\n(?:  .*\n)*/, /^facet login_keys_session\n(?:  .*\n)*/,
-                    /^facet display_root\n(?:  .*\n)*/, /^facet install\n(?:  .*\n)*/].freeze
+                    /^facet display_root\n(?:  .*\n)*/, /^facet install\n(?:  .*\n)*/, /^facet media\n(?:  .*\n)*/].freeze
   # A service the system domain serves (inspect, start, machine, clock and install, to session templates
   # alone; log and code_objects, which no facet row grants), by its server line, so a new
   # one goes with the rest.
