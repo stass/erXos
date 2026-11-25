@@ -123,9 +123,12 @@ game that is never part of the system, is a submodule marked
 `update = none`, and only
 `tools/erx fetch --example doom` obtains it, with Freedoom's data file
 checked against its own hash.
-The sources of L4Re that the benchmark comparison builds in a
-container, never in the tree, are pinned in a lock of their own,
-`bench/l4re/deps.lock`, and only `tools/erx fetch --l4re` obtains them.
+The other systems the benchmark comparison sets beside erXos are
+pinned in locks of their own, never in the tree: the sources of L4Re
+it builds in a container in `bench/l4re/deps.lock`, which only
+`tools/erx fetch --l4re` obtains, and Linux's stock kernel and the C
+library its benchmark program links in `bench/linux/deps.lock`, which
+only `tools/erx fetch --linux` obtains.
 
 Why one fetch step and no other network access? A build that fetches
 in the middle can be steered by whoever answers the request, and a

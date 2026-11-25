@@ -14,7 +14,8 @@ operation = Erx::BenchSuite::Operation
 cell = Erx::BenchSuite::LandingCell
 refused = "ERX_EINVAL, and the caller's count of refusals rises by each call (erx_fiasco_test_refused)"
 # What L4Re runs, ipcbench's programs (docs/design-bench.md, "Counterparts"), read through
-# its facts record; Erx::Ipcbench reads their lines.
+# its facts record; Erx::Ipcbench reads their lines. What Linux runs, erx_peer_bench's POSIX
+# counterparts; it has none for root-same-space.
 Erx::BenchSuite.declare_benchmark(
   operations: [
     operation.new(name: 'root-same-space', profile: 'fast', result: refused,
@@ -22,11 +23,14 @@ Erx::BenchSuite.declare_benchmark(
                                           'to a responder already waiting in reply-and-wait' }),
     operation.new(name: 'root-cross-space', profile: 'fast', result: refused,
                   counterparts: { 'l4re' => 'ipcclient and ipcserver: a blocking call with an empty message ' \
-                                          'between two tasks, the responder waiting in reply-and-wait' }),
+                                          'between two tasks, the responder waiting in reply-and-wait',
+                                 'linux' => 'two processes: an 8-byte request and an 8-byte reply over a pair of ' \
+                                            'pipes, each read blocking' }),
     operation.new(name: 'kernel', profile: 'fast',
                   result: "an IPC call to the empty slot 0 answers Fiasco's L4_IPC_ENOT_EXISTENT",
                   counterparts: { 'l4re' => "syscallbench: an IPC call to the caller's own thread capability " \
-                                          'whose thread-control operation returns early' })
+                                          'whose thread-control operation returns early',
+                                 'linux' => 'getppid' })
   ],
   landing: {
     'native' => [

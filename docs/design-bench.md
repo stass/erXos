@@ -1322,8 +1322,13 @@ alone; QEMU's `virt` has no pins to time.
 **Kernel.** Alpine Linux 3.24.4's `virt` kernel, `vmlinuz-virt` from the
 release's netboot directory
 (`https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/netboot-3.24.4/`),
-pinned in `deps.lock` with its configuration file beside it, both
-fetched by the fetch step and read as data. It is the distribution's
+pinned with its configuration file beside it in Linux's own lock,
+`bench/linux/deps.lock`, in `deps.lock`'s form, and read as data. Only
+`tools/erx fetch --linux` reads that lock, as only `--l4re` reads
+L4Re's: a default fetch does not download Linux, and a `--cache` fetch
+does not need it. It publishes each pin under `build/linux-sources`, a
+root of its own (`tools/lib/erx/side_lock.rb`, which both locks share),
+so no id it names can replace a source of erXos's lock. It is the distribution's
 stock kernel for virtual machines, built by the distribution, unmodified,
 and booted with its own defaults: no option that changes mitigations or
 preemption. Alpine was chosen because its releases are files at
@@ -1334,19 +1339,17 @@ offline without a disk image. Its configuration
 `PREEMPT_NONE` by default with `PREEMPT_DYNAMIC`, 4 KiB pages, an
 initramfs with gzip support, PSCI, and `EFI_ZBOOT`. The kernel file is
 an EFI zboot image: its first bytes are `MZ`, `zimg` and the compression
-name `gzip`. Whether QEMU's `-kernel` loads such an image directly is
-unverified. If it does not, the boot step inflates its payload before
-the boot, the payload's offset and size read from the zboot header and
-the result checked against the `decoded_sha256` and `decoded_bytes` the
-pin records, as `deps.lock`'s file sources allow for what a file encodes.
+name `gzip`. QEMU's `-kernel` loads such an image as it is (QEMU 11.1.3
+under HVF, the first boot), so the boot step inflates nothing.
 
 **User mode.** No distribution user mode at all: the initramfs holds
-`erx_peer_bench` as `/init`, and the directories `/dev` and `/dev/shm`
-with `/dev/console` as a character device. A Ruby writer of the `newc`
-format makes it, so the host needs no `mknod` and no `cpio`. The kernel
-runs `/init` as process 1 (unverified, settled by the first boot), so
-nothing else runs in user mode, as nothing else runs beside erXos's bench
-root and its test tasks. The initramfs's root file system is in memory,
+`erx_peer_bench` as `/init`, the directories `/dev` and `/dev/shm`
+with `/dev/console` as a character device, and `/proc`, the directory
+it mounts `/proc` on. A Ruby writer of the `newc` format
+(`tools/lib/erx/newc_archive.rb`) makes it, so the host needs no `mknod`
+and no `cpio`. The kernel runs `/init` as process 1, so nothing else
+runs in user mode, as nothing else runs beside erXos's bench root and
+its test tasks. The initramfs's root file system is in memory,
 so `shm_open` under `/dev/shm` needs no mount (unverified). When
 `erx_peer_bench` is process 1 it mounts `/proc`, which the `wake`
 handshake reads, and ends by powering the machine off with `reboot(2)`,
@@ -1355,10 +1358,12 @@ only differences by system.
 
 **Build.** `erx_peer_bench` is compiled on the host by erXos's own clang
 (`ERX_CLANG`) and linked by `ld.lld` for `aarch64-linux-musl`, static,
-against the headers and `libc.a` of Alpine 3.24.4's `musl-dev` package,
-pinned in `deps.lock` and unpacked in its own directory under the build
-tree. Whether the link needs a compiler helper, which erXos's compiler-rt
-builtins archive would supply, is unverified. The profile sizes reach it
+against the headers, start files and `libc.a` of Alpine 3.24.4's
+`musl-dev` package, pinned in Linux's lock as a `tar` source whose
+members are those five paths under `usr`, so the fetch step's one
+unpacker verifies, bounds and extracts only them. The link needs
+compiler helpers: musl's `long double` `printf` reaches the binary128
+arithmetic, which erXos's compiler-rt builtins archive supplies. The profile sizes reach it
 as they reach the erXos guest it is set beside, so a cell's profile is
 equal on both sides. One static binary runs on any AArch64 Linux, so the
 board's Linux row can carry the same file ([open decision](#open-decisions-of-the-comparison)).
@@ -1367,13 +1372,26 @@ input files to erXos's clang and `ld.lld`, and the kernel runs only
 inside QEMU, whose guest has no network device.
 
 **Boot.** `QemuPlan.argv` with `-kernel` the kernel, `-initrd` the
-initramfs, and `-append "console=ttyAMA0 panic=-1"`, without the host
-link. The serial log is read as erXos's is (`NativeBench.guest_lines`).
+initramfs, and `-append "console=ttyAMA0 panic=-1 -- NAME"`, without the
+host link: the kernel hands what follows `--` to `/init` as its
+arguments, so the benchmark's name reaches `erx_peer_bench` as its one
+argument. The generic timer's counter is readable from user mode, and
+the `CLOCK` line reads it at 24 MHz under HVF, so Linux's cells are on
+the `counter` clock as erXos's are. The serial log is read as erXos's is (`NativeBench.guest_lines`).
 The kernel's own messages share the console; one that lands inside a
 `BENCH` line makes that line `rejected`, which is visible and fails safe.
 `panic=-1` makes a crash of process 1 end the boot at once instead of at
 the deadline (both parameters' behaviour is unverified, from no source
 read).
+
+**In a session.** Linux's guest (`LinuxGuest::Guest`,
+`tools/lib/erx/linux_guest.rb`) builds the initramfs once per session and
+boots in one CPU and in the landing boot's count. `erx_peer_bench` is
+built with the landing profiles, so the guest refuses `--profile full`,
+and it refuses a session while its lock is not fetched, naming the
+fetch. The program prints a line for every cell of the boot, a
+counterpart's timing or `unsupported` with its reason, so its record
+keeps each one.
 
 ### Linux's Erlang guest
 
