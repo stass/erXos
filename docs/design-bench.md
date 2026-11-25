@@ -1514,7 +1514,7 @@ commits each was at on that revision's commit date; and ipcbench
 (`github.com/l4re/ipcbench`) at
 `148682322103a984ddf84eb1a28e67a3d50c0b28`, the commit its facts record
 read, its last commit before the commit date of the fork's revision
-`50bbe8a9`; a later revision re-checks that ipcbench has no newer commit
+`07ea18e1`; a later revision re-checks that ipcbench has no newer commit
 before its date. Each is a `git` source pinned by its commit and the
 SHA-256 of git's tar of that commit, in L4Re's own lock,
 `bench/l4re/deps.lock`, in `deps.lock`'s form. Only `tools/erx fetch
@@ -2627,9 +2627,12 @@ read as data; nothing fetched was run. A URL that moves (a `latest` list, a page
 | L4Re, "Cross-Compiling", `https://l4re.org/_sources/detailed_introduction/buildsystem/cross_compiling.rst` | `l4re/detailed_introduction_buildsystem_cross_compiling.html` | `86235cc92b75c169391aa43bc3e7f4cdc053f3d5af6a3cd1f22f213ec370c116` |
 | L4Re, "Using Clang", `https://l4re.org/_sources/detailed_introduction/buildsystem/clang.rst` | `l4re/clang.rst` | `9b5e1c5bb82ad84de14eb87590bc4c70cd177e346109f2599ca4b5ae4fadc9c8` |
 | L4Re's manifest, `https://raw.githubusercontent.com/L4Re/manifest/main/default.xml`, MIT | `l4re/default.xml` | `3a932eb2471f0fa47c65d39ab370156e24124ec6194e441e7ca88c73c7ecb571` |
+| L4Re's manifest at `5ff21e46799a4f333fb5ebc5a44d89c76474101b` ("Add tegra-soc-driver"), its last commit at or before Fiasco `07ea18e1`'s commit date, its `default.xml` read from a bare clone of `https://github.com/L4Re/manifest.git`; the same file as the row above | not kept | `3a932eb2471f0fa47c65d39ab370156e24124ec6194e441e7ca88c73c7ecb571` |
+| L4Re's repositories' commits at or before Fiasco `07ea18e1`'s commit date on each default branch, from bare blobless clones of each (`mk`, `l4re-core`, `bootstrap`, `libfdt`, `drivers-frst`, `fiasco`); commit metadata only, no source read; each archive's SHA-256 is git's tar of the commit, in `bench/l4re/deps.lock` | not kept | `mk` `deaeb51e`, `l4re-core` `885283ad`, `bootstrap` `a578475b`, `libfdt` `5756062b`, `drivers-frst` `0b0d7e1c`, `fiasco` `07ea18e1` |
 | L4Re's snapshot directory, `https://l4re.org/download/snapshots/` | `l4re/snapshots.html` | `50633d11cc0a0e7ffb6238826bebaa59abd0370d923504fe2d516920af63f536` |
 | ipcbench's file list and last commit before 2026-10-15, GitHub's API for `l4re/ipcbench`; file names only, no source read | `ipcbench/tree.json`, `ipcbench/commits.json` | `a9bae27369188ab20035825e02fa7604c35e346ba31bb8d7dc800fa91ee8c4aa`, `e7a7c99d7d13db7b11820ef1a839952a09b196dfd99df5e0fdb6cdbcaf27fe3c` |
-| Fiasco `50bbe8a9`'s commit date, GitHub's API for `kernkonzept/fiasco`; the same date is in the commit object itself, which the fetch step's pinned `git` source of upstream Fiasco holds and its build record keeps | not kept | `2026-10-14T14:13:14Z`, "arm64/cpu_virt: Do not leak SVE registers between contexts" |
+| ipcbench's commits up to Fiasco `07ea18e1`'s commit date, a bare blobless clone of `https://github.com/l4re/ipcbench.git`; commit metadata only, no source read | not kept | last commit `148682322103a984ddf84eb1a28e67a3d50c0b28`, `2026-09-08T09:00:00Z`; no newer commit on its default branch |
+| Fiasco `07ea18e1`'s commit date, a bare blobless clone of `https://github.com/L4Re/fiasco.git`; the date is in the commit object itself, which the fetch step's pinned `git` source of upstream Fiasco holds and its build record keeps | not kept | committed `2026-11-18T13:33:24+01:00` (`2026-11-18T12:33:24Z`), "arm/32: remove old L4Linux hack" |
 | Alpine Linux 3.24, the community repository's aarch64 package index, `https://dl-cdn.alpinelinux.org/alpine/v3.24/community/aarch64/APKINDEX.tar.gz`, fetched on 2026-11-24 into `~/erxos-scratch/src-benchvm-otp/`; its `erlang27` is 27.3.4.19-r0 and `erlang28` 28.5.0.8-r0, and it has no OTP 29 | `APKINDEX-community-aarch64.tar.gz`, and its `APKINDEX` | `5ec81c2e76ccd4ad5dfdc086097be0076340799cd406427b4b04ae350f141c71`, `444363bc845796ad75f3409962a011c8d276243682d6276ea207c658408e4a42` |
 
 ipcbench's source, `https://github.com/l4re/ipcbench` at `148682322103a984ddf84eb1a28e67a3d50c0b28` ("Add missing headers when using musl"), was read only by the separate agent that wrote its facts record, `~/erxos-scratch/reports/ipcbench-facts.md` (SHA-256 `84ba07081538052073641078c6e3c04dac4c0165cfd982e1a4a3c6963718f784`), which lists the SHA-256 of each of the fifteen files it read; this document and the importer rely on that record alone.
