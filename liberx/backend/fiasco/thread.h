@@ -105,7 +105,7 @@ uint64_t	erx_fiasco_thread_native_slot(uint32_t);
 uint64_t	erx_fiasco_thread_semaphore_cap(uint32_t);
 uint64_t	erx_fiasco_thread_cap(uint32_t);
 
-/* The first thread's kernel-given UTCB: its page holds the service's and the watchdog's too. */
+/* The first thread's kernel-given UTCB: its area holds the service's and the watchdog's too. */
 void		*erx_fiasco_thread_first_utcb(void);
 
 /* The trampoline's entry, and the thread pointer as the caller's thread holds it. */

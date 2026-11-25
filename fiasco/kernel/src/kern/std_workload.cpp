@@ -1,3 +1,4 @@
+// Modified by erXos: the boot threads' UTCB area is 16 KiB, so its kernel alias is congruent with its user address.
 IMPLEMENTATION:
 
 #include "assert_opt.h"
@@ -20,6 +21,14 @@ static constexpr Cap_index C_task    = Cap_index(Initial_kobjects::Task);
 static constexpr Cap_index C_thread  = Cap_index(Initial_kobjects::Thread);
 static constexpr Cap_index C_factory = Cap_index(Initial_kobjects::Factory);
 static constexpr Cap_index C_pager   = Cap_index(Initial_kobjects::Pager);
+
+// The boot threads' UTCB area is 16 KiB, not one page (docs/design-fiasco.md,
+// "A congruent boot UTCB area"). The buddy allocator aligns its kernel alias to
+// 16 KiB, as the user address is aligned, so the two agree in bits 12 and 13. A
+// one-page area's kernel alias differs from the user address in bit 12 or 13 in
+// three of four placements, and on Apple silicon under HVF every kernel call from
+// a thread on such an area is then measurably slower.
+static constexpr unsigned Boot_utcb_area_shift = 14;
 
 static
 Task *
@@ -92,7 +101,7 @@ create_user_thread(Task *task, Thread_ptr const &pager, Address ip,
   check(map_obj_initially(thread, task, task, C_thread, reap_list));
 
   // Task just newly created, no need for locking or remote TLB flush.
-  L4_fpage utcb_fp = L4_fpage::mem(Kernel_thread::utcb_addr(), Config::PAGE_SHIFT);
+  L4_fpage utcb_fp = L4_fpage::mem(Kernel_thread::utcb_addr(), Boot_utcb_area_shift);
   check(task->alloc_ku_mem(&utcb_fp, false) >= 0);
 
   check (thread->control(pager, Thread_ptr(Thread_ptr::Null)) == 0);

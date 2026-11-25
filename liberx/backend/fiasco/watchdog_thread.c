@@ -28,7 +28,7 @@
 /* The thread ticks about once a second, as the kernel's timer does, whatever the period: the
  * board's watchdog, reloaded at each tick, fires ERX_PM_WDT_TIMEOUT_S after the last. */
 #define WATCHDOG_TICK_US	UINT64_C(1000000)
-/* The kernel-given UTCB page: the first thread has its first slot, the service its second. */
+/* The kernel-given UTCB area: the first thread has its first slot, the service its second. */
 #define WATCHDOG_UTCB_SLOT	2u
 
 static void watchdog_main(void);

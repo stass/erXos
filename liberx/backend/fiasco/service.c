@@ -218,7 +218,7 @@ service_failed(l4_msgtag_t tag)
 
 /*
  * The service keeps sigma0 as its pager, so its own fault never reaches itself,
- * and takes the free slot of the kernel-given UTCB page: it holds no thread index.
+ * and takes the free slot of the kernel-given UTCB area: it holds no thread index.
  */
 static const char *
 service_start(void)

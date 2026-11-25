@@ -1457,7 +1457,7 @@ image's backend: the loader `erx_exec` does its work before backend initialisati
 executable it enters starts the task's only pair ([Thread creation](#thread-creation), "An exec's entry"). The root's dispatcher starts with the
 root's first group instead, as that group's first thread ([Budgets and groups as records](#budgets-and-groups-as-records))
 ([Interrupts and readiness](#interrupts-and-readiness)). The watchdog, like the root service, holds no thread index and
-takes a free slot of the kernel-given UTCB page, with `sigma0` as its pager. `moe`, L4Re's root task, is likewise one server thread for
+takes a free slot of the kernel-given UTCB area, with `sigma0` as its pager. `moe`, L4Re's root task, is likewise one server thread for
 memory and faults (upstream; `moe` is not in this tree), and `libpthread` serializes thread and UTCB
 work through one manager thread (`manager.cc:494`). The cost is that the machine's memory, thread
 and log calls queue on one thread, which Phase 1 accepts and an ERTS boot measures.
@@ -1632,7 +1632,7 @@ code only`, the build identifier, the index hash, then `erx: boot value <unknown
 kernel greets as erXos (`kip.cpp`) and starts `sigma0` and then the root (`std_workload.cpp`), with
 capabilities at `L4_BASE_TASK_CAP`, `L4_BASE_FACTORY_CAP`, `L4_BASE_THREAD_CAP`, `L4_BASE_PAGER_CAP`
 (a gate to `sigma0`), `L4_BASE_LOG_CAP`, `L4_BASE_ICU_CAP` (also the platform control object) and
-`L4_BASE_SCHEDULER_CAP`; a stack pointer of 0; one page of UTCB slots (`std_workload.cpp:95`);
+`L4_BASE_SCHEDULER_CAP`; a stack pointer of 0; a 16 KiB area of UTCB slots (`std_workload.cpp:104`);
 Fiasco's default priority, on the boot CPU.
 
 **The root's first steps, in order.** Only the first thread exists until step 7, so it runs the
@@ -2459,7 +2459,7 @@ The same indices own 128 native UTCB slots of 1 KiB, the most one Fiasco area ho
 Fiasco (`task.cpp:253`). `l4_factory_create_task`'s `utcb_area` makes them for a task, and one
 `l4_task_add_ku_mem` for the root, whose first thread keeps its kernel-given slot as index 0. The root's service
 thread holds no index: it runs before the table's area exists and is no client of it, so it takes the next free
-slot of the kernel-given UTCB page.
+slot of the kernel-given UTCB area.
 
 **Claiming an index.** Fiasco writes `free_marker` when finished with a UTCB, in `do_kill`, some time after the
 deletion call returns (`thread.cpp:610-611`, `utcb.h:176-185`). So an index is claimable when **its record is
@@ -4174,6 +4174,15 @@ no test can drive the change:
   its seeded case puts the option back with the `select` from `BENCHMARKING` that set it whatever the
   defconfig said, which the check must catch. The switch itself has the *FP state* case of
   [The release's cases](#the-releases-cases).
+* **A congruent boot UTCB area.** The kernel gives `sigma0` and the root a 16 KiB UTCB area 64 KiB
+  below the top of user memory where upstream gives one page (`std_workload.cpp`). The buddy allocator
+  aligns its kernel alias to its size, so the kernel's and the thread's addresses of a UTCB agree
+  in bits 12 and 13, which a one-page area's alias matches in only one placement in four. On Apple silicon under HVF a
+  mismatch makes every kernel call of a thread on that area slower, by about half of a null call
+  (the likely cause, unverified, is a data cache indexed by those bits), and the root's first
+  thread, its service thread and its watchdog all sit there. The areas `liberx` adds are 128 KiB and size-aligned, so every UTCB
+  is congruent. Under HVF, `native_threads`' `first_thread_null_call` case holds the first thread's
+  null call within a quarter of a factory-made thread's on the same CPU.
 * **Branch-predictor hardening at entry, carried only if it costs nothing measurable.** The patch calls the
   firmware's workaround (`SMCCC_ARCH_WORKAROUND_1` against branch-target injection, `SMCCC_ARCH_WORKAROUND_3`
   against branch-history injection) at every entry from user mode and at every switch between address spaces, on the

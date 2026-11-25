@@ -19,7 +19,8 @@ module Erx
     MEMORY_MIB = 512
     SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, 'test/guest/native_threads/guest.c'].freeze
     CASES = %w[
-      tls_and_arg double_start_refused bad_handle_refused wire_refusals umtx_word_differs umtx_past_deadline
+      tls_and_arg first_thread_null_call double_start_refused bad_handle_refused wire_refusals umtx_word_differs
+      umtx_past_deadline
       umtx_timeout_not_early umtx_wake_in_order umtx_ping_pong umtx_timeout_races_wake umtx_no_stale_wake memory_from_threads
       failed_start unstarted_deleted affinity_each_cpu affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake umtx_no_stale_wake_after many_threads indices_run_out

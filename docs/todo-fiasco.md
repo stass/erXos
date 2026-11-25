@@ -387,7 +387,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   residual of the Fiasco backend, not fixed.
 * [Low] Fiasco backend, `liberx/backend/fiasco/service.c`, `service_thread_reap`: only the reaper should send this
   request, and nothing checks the caller; `watchdog_thread.c` and `service.c` also share the convention of fixed
-  helper slots in the kernel-given UTCB page, which one small enum could own.
+  helper slots in the kernel-given UTCB area, which one small enum could own.
 * [Medium] Fiasco backend, `liberx/backend/fiasco/thread.c`, `erx_fiasco_semaphore_down`: the
   wait, which the umtx and park effects share, retries every IPC error, including permanent
   ones such as a deleted semaphore, so such a thread spins in the kernel forever rather

@@ -53,6 +53,8 @@
 #define QUEUE_SETTLE_NS	(UINT64_C(50) * NS_PER_MS)
 #define TLS_VALUE	UINT64_C(0x5a5a00001234beef)
 #define ARG_VALUE	UINT64_C(0x1122334455667788)
+#define NULL_CALLS	2000u
+#define NULL_ROUNDS	9u
 
 void erx_fiasco_root_main(void);
 
@@ -210,6 +212,64 @@ case_tls_and_arg(void)
 	stack = stacks[stacks_used - 1];
 	return (seen_tls == TLS_VALUE && seen_arg == ARG_VALUE &&
 	    seen_stack >= (uint64_t)(uintptr_t)stack && seen_stack < (uint64_t)(uintptr_t)(stack + STACK_BYTES));
+}
+
+static uint64_t first_ticks, factory_ticks;
+
+/* The median over NULL_ROUNDS of the counter ticks NULL_CALLS null calls take on this thread. */
+static uint64_t
+null_call_median(void)
+{
+	uint64_t ticks[NULL_ROUNDS];
+
+	for (uint32_t round = 0; round < NULL_ROUNDS; round++) {
+		const uint64_t start = erx_fiasco_counter();
+
+		for (uint32_t call = 0; call < NULL_CALLS; call++)
+			(void)erx_fiasco_test_empty_slot_call();
+		ticks[round] = erx_fiasco_counter() - start;
+	}
+	/* Insertion sort, for the median. */
+	for (uint32_t at = 1; at < NULL_ROUNDS; at++)
+		for (uint32_t back = at; back > 0 && ticks[back - 1] > ticks[back]; back--) {
+			const uint64_t swap = ticks[back];
+
+			ticks[back] = ticks[back - 1];
+			ticks[back - 1] = swap;
+		}
+	return (ticks[NULL_ROUNDS / 2]);
+}
+
+static void
+null_call_helper(uint64_t arg)
+{
+	(void)arg;
+	factory_ticks = null_call_median();
+	bump_done();
+	park();
+}
+
+/*
+ * The root's first thread, which the kernel made at boot, pays for a null call what
+ * a thread the factory made pays on the same CPU, within a quarter, under HVF
+ * (docs/design-fiasco.md, "A congruent boot UTCB area").
+ */
+static bool
+case_first_thread_null_call(void)
+{
+	uint64_t thread;
+
+	atomic_store(&done, 0);
+	first_ticks = null_call_median();
+	if (create(null_call_helper, 0, 0, &thread) != ERX_OK || erx_thread_set_affinity(thread, 1) != ERX_OK ||
+	    erx_thread_start(thread) != ERX_OK || !wait_for(&done, 1))
+		return (false);
+	say("erx: threads: null call ticks first ");
+	say_number(first_ticks);
+	say(" factory ");
+	say_number(factory_ticks);
+	say("\n");
+	return (first_ticks * 4 <= factory_ticks * 5);
 }
 
 static void
@@ -1036,6 +1096,7 @@ erx_fiasco_root_main(void)
 	say_number(cpu_count);
 	say("\n");
 	report("tls_and_arg", case_tls_and_arg());
+	report("first_thread_null_call", case_first_thread_null_call());
 	report("double_start_refused", case_double_start_refused());
 	report("bad_handle_refused", case_bad_handle_refused());
 	report("wire_refusals", case_wire_refusals());
