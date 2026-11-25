@@ -62,8 +62,12 @@ module Erx
     # They receive only a log path and must never print its untrusted contents.
     # output_limit is for read-only tools: the child file-size limit also caps
     # any other regular file they write, and disables their core dumps.
-    # The command reads standard input from stdin, a path, or from the null
-    # device, and writes standard output to stdout, a path it creates owner-only
+    # The command reads standard input from stdin, a path or a writer, or from
+    # the null device. A writer is a callable that receives the write end of a
+    # pipe to the command, on a thread of its own; the pipe closes when the writer
+    # returns or the command ends, and a command that stops reading is no failure,
+    # as in a shell pipeline. A writer that fails raises Error once the command is
+    # cleaned up. The command writes standard output to stdout, a path it creates owner-only
     # or truncates, or to the log with its standard error. The command
     # inherits this process's environment with env applied, or with clear_env
     # only env, which must then name PATH for the command to be found.
@@ -73,28 +77,34 @@ module Erx
       unless output_limit.nil? || (output_limit.is_a?(Integer) && output_limit.between?(1, 1 << 40))
         raise Error, 'output limit must be a positive byte count at most 1 TiB'
       end
-      [stdin, stdout].compact.each do |path|
-        raise Error, 'a command\'s standard input or output is a path' unless path.is_a?(String) && !path.empty? && !path.include?("\0")
-      end
+      raise Error, 'a command\'s standard input is a path or a writer' unless stdin.nil? || stdin.respond_to?(:call) || path?(stdin)
+      raise Error, 'a command\'s standard output is a path' unless stdout.nil? || path?(stdout)
       file_limit = [output_limit, *Process.getrlimit(Process::RLIMIT_FSIZE)].min if output_limit
       record = reserve_record(name, argv: argv, deadline: deadline)
       record['output_limit_bytes'] = file_limit if output_limit
       started = monotonic
       pid = nil
       status = nil
+      feed = nil
+      reader = nil
+      sink = nil
+      feed_error = nil
       next_progress = started + PROGRESS_SECONDS
       poll = FIRST_POLL_SECONDS
 
       begin
         File.open(record.fetch('log'), 'wb') do |log|
           output = stdout ? [stdout, File::WRONLY | File::CREAT | File::TRUNC, 0o600] : log
-          spawn_options = { chdir: chdir, in: stdin || File::NULL, out: output, err: log,
+          reader, sink = IO.pipe if stdin.respond_to?(:call)
+          spawn_options = { chdir: chdir, in: reader || stdin || File::NULL, out: output, err: log,
                             pgroup: true, close_others: true, unsetenv_others: clear_env }
           if output_limit
             spawn_options.merge!(rlimit_fsize: [file_limit, file_limit], rlimit_core: [0, 0])
           end
           pid = Process.spawn(env, @timeout_program, '-k', '10',
                               deadline.to_s, *argv, **spawn_options)
+          reader&.close
+          feed = start_feed(stdin, sink) if sink
           record['pid'] = pid
           save(record)
           loop do
@@ -125,6 +135,7 @@ module Erx
         raise Error, "missing tool or working directory: #{error.message}"
       ensure
         original_error = $!
+        feed_error = stop_feed(feed, reader, sink)
         begin
           record['state'] = 'cancelled' if record['state'] == 'running'
           ProcessGroup.terminate(pid) if pid
@@ -139,12 +150,42 @@ module Erx
         end
       end
 
+      raise Error, "standard input writer failed: #{feed_error.message}" if feed_error
       raise CommandError, record unless record['state'] == 'succeeded'
 
       record
     end
 
     private
+
+    def path?(value)
+      value.is_a?(String) && !value.empty? && !value.include?("\0")
+    end
+
+    # The writer runs on its own thread, so a writer that waits (a typed session
+    # with pauses) leaves the deadline and the child's end to the caller's loop.
+    def start_feed(writer, sink)
+      Thread.new do
+        Thread.current.report_on_exception = false
+        writer.call(sink)
+      rescue Errno::EPIPE
+        nil
+      ensure
+        sink.close unless sink.closed?
+      end
+    end
+
+    # Ends the writer and returns the error it died of, or nil. Run on the way
+    # out whatever happened, so no writer outlives its command or holds a pipe.
+    def stop_feed(feed, *pipes)
+      feed&.kill
+      feed&.join
+      nil
+    rescue StandardError => error
+      error
+    ensure
+      pipes.each { |pipe| pipe.close if pipe && !pipe.closed? }
+    end
 
     def locate(program)
       return program if program.include?('/')

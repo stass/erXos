@@ -149,6 +149,55 @@ class RunnerTest < Minitest::Test
     assert_match(/missing tool/, error.message)
   end
 
+# A writer feeds the command through a pipe, here with a pause between lines.
+def test_a_writer_feeds_the_commands_standard_input
+  writer = lambda do |pipe|
+    pipe.write("one\n")
+    sleep 0.1
+    pipe.write("two\n")
+  end
+  result = ruby("print STDIN.read.upcase", stdin: writer)
+  assert_equal "ONE\nTWO\n", File.read(result.fetch("log"))
+end
+
+# The command ends while the writer still waits: the writer is stopped and the
+# run neither hangs nor fails.
+def test_a_writer_still_waiting_when_the_command_ends_is_stopped
+  reached = false
+  writer = lambda do |pipe|
+    pipe.write("go\n")
+    sleep 30
+    reached = true
+  end
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  result = ruby("STDIN.gets; exit 0", stdin: writer)
+  assert_equal "succeeded", result.fetch("state")
+  assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 3
+  refute reached
+end
+
+# A command that stops reading is a broken pipe for the writer, not a failure.
+def test_a_command_that_stops_reading_is_no_writer_failure
+  writer = ->(pipe) { loop { pipe.write("x" * 4096) } }
+  result = ruby("exit 0", stdin: writer)
+  assert_equal "succeeded", result.fetch("state")
+end
+
+# An OS error in the writer is the tool failing, not the command: a typed
+# Erx::Error that is no CommandError, with the command cleaned up.
+def test_a_writer_that_fails_raises_a_tool_error_not_a_command_error
+  writer = ->(_pipe) { raise Errno::EIO }
+  error = assert_raises(Erx::Error) { ruby("STDIN.read", stdin: writer) }
+  refute_kind_of Erx::CommandError, error
+  assert_match(/standard input writer failed/, error.message)
+  report = JSON.parse(File.read(Dir.glob(File.join(@directory, "*.json")).fetch(0)))
+  refute_equal "running", report.fetch("state")
+end
+
+def test_standard_input_is_a_path_or_a_writer
+  assert_raises(Erx::Error) { ruby("exit", stdin: 5) }
+end
+
   def test_invalid_deadline_and_name
     assert_raises(Erx::Error) { ruby('exit', deadline: 0) }
     assert_raises(Erx::Error) { ruby('exit', name: '../escape') }
