@@ -1116,6 +1116,11 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `Fiasco#kernel_settings` and `#user_settings` miss) or a timestamp in an
   archive would pass. Give it a gate that builds in two checkouts, or make
   `check-reproducible` rebuild the kernel at another path.
+* [Low] Fiasco builds, the build memo of `tools/erx build fiasco`: a change to
+  `config/provenance/fiasco-generation.json` alone does not rerun the audit, so
+  `build/fiasco/provenance.json` keeps the old profile's report and the next pack
+  refuses with "Fiasco build record is stale or incomplete" until the record is
+  deleted and the build rerun. Make the profile an input of the memo.
 * [Medium] build gates, the published media and the Doom example
   (`ProductionImage::MediumKind.published`): only `tools/erx pack
   --published` (`make pack`) builds the published QEMU medium and the Pi 4
