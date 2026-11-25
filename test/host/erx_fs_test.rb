@@ -64,6 +64,10 @@ class ErxFsTest < Minitest::Test
               from: "walk_start(?ERX_P9_NOFID, #grant{root = Root}) ->\n    {ok, [Root]};",
               to: "walk_start(?ERX_P9_NOFID, #grant{root = _}) ->\n    {ok, [{1, {16#80, 0, 1}, root}]};",
               caught_by: 'nofid_walk_stays_within_the_grants_root_test'),
+    Fault.new(name: 'a walk from NOFID looks for a fid and finds none', file: GRANT,
+              from: "walk_start(?ERX_P9_NOFID, #grant{root = Root}) ->\n    {ok, [Root]};",
+              to: "walk_start(?ERX_P9_NOFID, #grant{root = _}) ->\n    {error, ebadf};",
+              caught_by: 'nofid_walk_starts_at_the_grants_root_test'),
     Fault.new(name: 'a start that skips its check of root', file: GRANT,
               from: "    case erx_9p_grammar:is_name(Tree) andalso erx_9p_grammar:is_qid(Qid)\n" \
                     "        andalso Type band ?ERX_P9_QTDIR =/= 0 of",
@@ -120,8 +124,9 @@ class ErxFsTest < Minitest::Test
               to: '    case export(own, maps:get(exports, Options, erx_dist)) of',
               caught_by: 'the_export_comes_before_the_start_returns_test'),
     Fault.new(name: 'a refused export leaves the grant serving', file: SERVER,
-              from: "            proc_lib:init_ack(Parent, Refused)\n",
-              to: "            proc_lib:init_ack(Parent, element(1, {{ok, self()}, Refused})),\n" \
+              from: "        {error, _} = Refused ->\n            proc_lib:init_ack(Parent, Refused)\n",
+              to: "        {error, _} = Refused ->\n" \
+                  "            proc_lib:init_ack(Parent, element(1, {{ok, self()}, Refused})),\n" \
                   "            loop(Grant, ConnectionMonitor)\n",
               caught_by: 'a_refused_export_leaves_no_grant_test'),
     Fault.new(name: 'a grant outlives its connection', file: SERVER,
@@ -197,10 +202,10 @@ class ErxFsTest < Minitest::Test
               to: '{ok, Entries} -> element(2, {fun fit_listing/2, {ok, Entries}});',
               caught_by: 'readdir_over_an_open_directory_test'),
     Fault.new(name: 'a walk starts from an opened fid', file: GRANT,
-              from: "        \#{Fid := #fid{open = {open, _, _}}} ->\n            {{error, einval}, Grant};\n" \
-                    '        #{Fid := #fid{path = Path}} ->',
-              to: "        \#{Fid := #fid{open = {open, _, _}}} when Fid < 0 ->\n            {{error, einval}, Grant};\n" \
-                  '        #{Fid := #fid{path = Path}} ->',
+              from: "        \#{Fid := #fid{open = {open, _, _}}} -> {error, einval};\n" \
+                    '        #{Fid := #fid{path = Path}} -> {ok, Path};',
+              to: "        \#{Fid := #fid{open = {open, _, _}}} when Fid < 0 -> {error, einval};\n" \
+                  '        #{Fid := #fid{path = Path}} -> {ok, Path};',
               caught_by: 'readdir_over_an_open_directory_test'),
     Fault.new(name: 'remove takes whatever its name names now', file: GRANT,
               from: 'change(unlink, [Dir, Name, {node, Node}], Grant)',
