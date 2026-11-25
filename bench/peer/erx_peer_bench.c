@@ -31,7 +31,8 @@
  * Every interval is ticks of one clock: the architecture's system counter where user mode
  * may read it, clock "counter", and otherwise CLOCK_MONOTONIC in nanoseconds, clock
  * "monotonic"; on erXos the counter as erx_fiasco_counter reads it. Threads are pinned with
- * sched_setaffinity on Linux and erXos and cpuset_setaffinity on FreeBSD; that and the
+ * sched_setaffinity on Linux and erXos and pthread_setaffinity_np on FreeBSD, the one
+ * placement call Genode's C library, built from FreeBSD's, also has; that and the
  * wake handshake, which reads B's state from Linux's /proc, are where the file differs by
  * system. The main thread of a native-set or posix
  * benchmark runs on CPU 0, the service's CPU, and the pair its CLOCK line calibrates is
@@ -51,6 +52,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#if defined(__FreeBSD__) && !defined(ERX_PEER_ERXOS)
+#include <pthread_np.h>
+#endif
 #include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -324,7 +328,7 @@ pin_to(unsigned cpu)
 
 	CPU_ZERO(&set);
 	CPU_SET(cpu, &set);
-	if (cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_TID, -1, sizeof(set), &set) != 0)
+	if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) != 0)
 		peer_fail("a thread could not be pinned");
 #endif
 }
