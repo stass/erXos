@@ -94,7 +94,7 @@
     "fiasco/kernel/tool/kconfig/scripts/subarch.include": "e4934004173824330f2f08311607c1d9a5b5b586f236a839a8fdb5b13add32be",
     "fiasco/kernel/tool/migrate_kconfig": "1f833d49e399920735550983d17530f47518de08eaf48bf6e64a3cbe98a74804",
     "fiasco/kernel/tool/preprocess/COPYING": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70",
-    "fiasco/kernel/tool/preprocess/src/preprocess": "65887eca21e6743232e9e692895e7124cecfea838eee8046d3d7e973d91685dc",
+    "fiasco/kernel/tool/preprocess/src/preprocess": "bffa43610146f4394bc47d611e9f069d32714ccaf71cb1b658e2335c91134b8b",
     "fiasco/l4re-core/ldscripts/Makefile": "459d4516fd6b980b9506b33a1c986ed8cdfb29a9a9daa3ec2f0b75f5c1740c44",
     "fiasco/l4re-core/libc-headers/Makefile": "8a63f5fbf30f390721fe158e84b1fa720904306bc91e94c97e0f7cb215be5f71",
     "fiasco/l4re-core/libc/musl/contrib/musl/arch/aarch64/bits/alltypes.h.in": "77699f51c0cec751e2e3aff743659184d0f2b10176925d1a050b3b8be457b08c",
