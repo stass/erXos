@@ -36,6 +36,11 @@ request_round(Term) ->
             Term = build(Term),
             {ok, Alias, _, Term} = ?G:decode_request_frame({erx_9p, Alias, self(), Term});
         {error, einval} ->
+            %% writes/1 and decode_reply/2 never raise, and no reply but an error is taken
+            %% to a request the grammar refuses.
+            true = is_boolean(?G:writes(Term)),
+            {ok, {error, einval}} = ?G:decode_reply(Term, {error, einval}),
+            {error, eio} = ?G:decode_reply(Term, ok),
             refused = build(Term),
             {error, Alias, einval} = ?G:decode_request_frame({erx_9p, Alias, self(), Term});
         Other ->

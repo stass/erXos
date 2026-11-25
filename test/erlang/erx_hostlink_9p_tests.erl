@@ -172,6 +172,19 @@ walk_renames_fids_and_a_failed_walk_frees_its_new_fid_test() ->
     {_, _, Effects2} = host(4, {lopen, 2, ?RDONLY}, 103, Bridge2),
     ?assertEqual({4, {error, ebadf}}, answer(Effects2)).
 
+%% At the edge NOFID names no fid: the bridge's table never holds it, so a host's walk
+%% from NOFID, renamed through the codec's fids/1 like any walk, finds no fid of the
+%% bridge's and is refused ebadf, sending nothing to a grant and making no fid.
+a_hosts_walk_from_nofid_is_ebadf_test() ->
+    {Bridge, _, _} = attached(),
+    lists:foreach(fun({Tag, Walk}) ->
+                          {Bridge1, none, Effects} = host(Tag, Walk, 102, Bridge),
+                          ?assertEqual([], sent(Effects)),
+                          ?assertEqual({Tag, {error, ebadf}}, answer(Effects)),
+                          ?assertMatch(#{fids := 1, requests := 0}, erx_hostlink_9p:info(Bridge1))
+                  end, [{3, {walk, ?NOFID, 2, []}}, {4, {walk, ?NOFID, 2, [<<"x">>]}},
+                        {5, {walk, ?NOFID, 1, []}}]).
+
 walk_in_place_keeps_its_grant_fid_test() ->
     {Bridge, A, _} = attached(),
     {Bridge1, Alias, Effects} = host(3, {walk, 1, 1, [<<"x">>]}, 102, Bridge),

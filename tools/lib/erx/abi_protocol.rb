@@ -50,10 +50,14 @@ module Erx
       # The kind by which a request names a node. Each request field of this kind
       # ends in one of FID_ATTRIBUTES, what its fid names: "directory" a directory,
       # "node" any node, "new" a fid the request makes name a node (walk's may be
-      # its own fid). No other field takes an attribute, so an operation cannot
-      # leave a directory fid unchecked by omission.
+      # its own fid), "start" a fid that may name any node or be the one value the
+      # kind excepts, NOFID, the grant's root (a walk's source). No other field
+      # takes an attribute, so an operation cannot leave a directory fid unchecked
+      # by omission.
       FID_KIND = 'fid'
-      FID_ATTRIBUTES = %w[directory node new].freeze
+      FID_ATTRIBUTES = %w[directory node new start].freeze
+      # The one role whose field also admits the value its kind excepts.
+      START = 'start'
       MAX_ERRORS = 64
       # An error reply is a reply of no operation, and the codec carries a reply as
       # {reply, Operation, Reply}, so neither word may name an operation.
@@ -410,7 +414,7 @@ module Erx
           in ['request', 2..3]
             field_name, kind = field(rest.take(2), child, kinds)
             attribute = fid_attribute(rest, child)
-            request << [field_name, kind].freeze
+            request << [field_name, checked_kind(kind, attribute, kinds)].freeze
             directories << field_name if attribute == 'directory'
             fids << [field_name, attribute].freeze if attribute
           in ['reply', 2] then reply << field(rest, child, kinds)
@@ -455,13 +459,21 @@ module Erx
         name, kind_name, attribute = words
         case [kind_name == FID_KIND, attribute]
         in [true, nil]
-          line.fail!("field #{name} of kind #{FID_KIND} states what it names: directory, node or new")
+          line.fail!("field #{name} of kind #{FID_KIND} states what it names: directory, node, new or start")
         in [false, nil] then nil
         in [_, String] unless FID_ATTRIBUTES.include?(attribute)
           line.fail!("unknown field attribute #{attribute}")
         in [false, String] then line.fail!("only a field of kind #{FID_KIND} takes an attribute, not #{kind_name}")
         in [true, String] then attribute
         end
+      end
+
+      # The kind a request field is checked as. A fid of role start is checked as
+      # its kind's base, so it admits NOFID, which the kind excepts; it stays a fid
+      # of the operation's fids, which the codec's fids/1 and map_fids/2 read, so a
+      # bridge renames it from its table as it renames every other fid.
+      def checked_kind(kind, attribute, kinds)
+        attribute == START ? kinds.fetch(FID_KIND).fetch(:base) : kind
       end
 
       def check(words, line, request, reply, kinds)

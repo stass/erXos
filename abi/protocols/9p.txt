@@ -16,7 +16,9 @@
 #   and below it; "." is not used in the protocol, as walk(5) says. A
 #   readdir entry may be "." or "..". An extended attribute's name may be
 #   empty, which xattrwalk uses for the list of names.
-# * A fid is any u32 but NOFID, which 9P reserves; Afid may be NOFID.
+# * A fid is any u32 but NOFID, which 9P reserves; Afid may be NOFID, and so
+#   may a walk's source, which inside the machine starts the walk at the
+#   grant's root (docs/design-files.md, "Version and attach").
 # * readdir's Count has read's bound, p9_io_max.
 # * unlinkat's Flags are 0 or AT_REMOVEDIR, the table's own values.
 # * Every map carries all of 9P2000.L's fields of its message, as the wire
@@ -55,7 +57,10 @@
 # directory, which the generated directory_fids/1 lists, so erx_fs answers
 # enotdir before any callback when it names a file or a link; "node", a fid
 # that may name any node; "new", a fid the request makes name a node
-# (attach's fid, walk's and xattrwalk's new_fid; walk's may be its own fid).
+# (attach's fid, walk's and xattrwalk's new_fid; walk's may be its own fid);
+# "start", a fid that may name any node or be NOFID, the grant's root, the
+# one role whose field also admits NOFID (walk's fid). The generated codec's
+# fids/1 lists each fid with its attribute and map_fids/2 renames each.
 
 limit p9_nofid u32 0xffffffff
 limit p9_notag u16 0xffff
@@ -367,7 +372,7 @@ protocol erx_9p
   operation flush 108
     request old_tag alias
   operation walk 110
-    request fid fid node
+    request fid fid start
     request new_fid fid new
     request names walk_names
     reply qids qids

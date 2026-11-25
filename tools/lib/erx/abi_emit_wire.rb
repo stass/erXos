@@ -85,9 +85,10 @@ module Erx
           %% of the table decodes as eio (docs/design-files.md#errors).
           %%
           %% fids(Request) lists a request's fids, each with what the table says it names
-          %% (directory, node, or new for a fid the request makes), and map_fids(Fun, Request)
-          %% replaces each with Fun(Fid), so a bridge renames an edge's fids to its own from
-          %% the table rather than from a list of its own.
+          %% (directory, node, new for a fid the request makes, or start for a walk's source,
+          %% which may be NOFID), and map_fids(Fun, Request) replaces each with Fun(Fid), so a
+          %% bridge renames an edge's fids to its own from the table rather than from a list
+          %% of its own, and decides from its own table what a start of NOFID becomes.
 
           -module(#{name}).
 
@@ -239,7 +240,8 @@ module Erx
           "map_fids(#{fids.empty? ? "_Fun" : "Fun"}, #{pattern(operation.fetch(:name), names)}) ->\n    #{pattern(operation.fetch(:name), mapped)}"
         end
         "%% The fids of a request term, in request order, each with what it names.\n" \
-          "-spec fids(tuple()) -> [{directory | node | new, non_neg_integer()}].\n" + listing.join(";\n") + ".\n\n" \
+          "-spec fids(tuple()) -> [{#{Protocols::FID_ATTRIBUTES.join(' | ')}, non_neg_integer()}].\n" +
+          listing.join(";\n") + ".\n\n" \
           "%% A request term with each of its fids replaced by Fun(Fid).\n" \
           "-spec map_fids(fun((non_neg_integer()) -> non_neg_integer()), tuple()) -> tuple().\n" +
           mapping.join(";\n") + '.'

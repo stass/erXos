@@ -121,17 +121,20 @@ module Erx
           decode_request_frame(_) ->
               error.
 
-          %% {ok, Reply} for a reply of Request's operation that its checks hold to Request,
-          %% {error, eio} for any other term. Request is the caller's own and must be valid.
-          -spec decode_reply(tuple(), term()) -> {ok, term()} | {error, eio}.
+          %% {ok, Reply} for an error reply of the table whatever Request is, since it states
+          %% only the server's refusal, and for a reply of Request's operation that its checks
+          %% hold to Request when the grammar accepts Request; {error, eio} for every other
+          %% pair, so no reply is taken on the bounds of a request the grammar refuses. It
+          %% never raises: a client sends its requests unchecked and the server refuses a
+          %% malformed one with an error reply, which reaches the caller as it is.
+          -spec decode_reply(term(), term()) -> {ok, term()} | {error, eio}.
           decode_reply(Request, Reply) ->
-              case valid_request(Request) of
-                  false -> erlang:error(badarg, [Request, Reply]);
-                  true ->
-                      case reply_shape(element(1, Request), Reply) andalso held_to(Request, Reply) of
-                          true -> {ok, Reply};
-                          false -> {error, eio}
-                      end
+              Taken = reply_shape(error, Reply) orelse
+                          (valid_request(Request) andalso reply_shape(element(1, Request), Reply)
+                           andalso held_to(Request, Reply)),
+              case Taken of
+                  true -> {ok, Reply};
+                  false -> {error, eio}
               end.
         ERLANG
       end
@@ -184,24 +187,30 @@ module Erx
           "%% operation without checks hold.\n" + (clauses + ["held_to(_, _) ->\n    true."]).join(";\n")
       end
 
+      # A clause for each operation and one for every other term, so writes/1 is total:
+      # a marked field is tested for its kind before its rule reads it.
       def writes
         clauses = @operations.map do |operation|
           fields = operation.fetch(:request)
           rule = operation.fetch(:writes)
           field = rule && rule[:field]
           names = fields.map { |item, _| item == field ? variable(item) : '_' }
+          marked = field && "#{check(fields.to_h.fetch(field))}(#{variable(field)}) andalso "
           body = case rule
                  in nil then 'false'
                  in { rule: 'always' } then 'true'
                  in { rule: 'any', masks: }
-                   masks.map { |mask| "#{variable(field)} band #{literal(mask)} =/= 0" }.join(' orelse ')
-                 in { rule: 'equal', value: } then "#{variable(field)} =:= #{literal(value)}"
+                   "#{marked}(#{masks.map { |mask| "#{variable(field)} band #{literal(mask)} =/= 0" }.join(' orelse ')})"
+                 in { rule: 'equal', value: } then "#{marked}#{variable(field)} =:= #{literal(value)}"
                  end
           "writes(#{pattern(operation.fetch(:name), names)}) ->\n    #{body}"
         end
-        "%% Whether a read-only grant refuses Request before any callback (F5). Request must\n" \
-          "%% have passed decode_request/1.\n" \
-          "-spec writes(tuple()) -> boolean().\n" + clauses.join(";\n") + '.'
+        "%% Whether a read-only grant refuses Request before any callback (F5): true for a\n" \
+          "%% request of an operation the table marks as writing whose marked field, where its\n" \
+          "%% rule reads one, is of the field's kind and matches the rule; false for every\n" \
+          "%% other term, a malformed request included, which the funnel refuses einval before\n" \
+          "%% any rights check. It never raises.\n" \
+          "-spec writes(term()) -> boolean().\n" + (clauses + ["writes(_) ->\n    false"]).join(";\n") + '.'
       end
 
       # A clause for each operation and none for any other term, so an operation the

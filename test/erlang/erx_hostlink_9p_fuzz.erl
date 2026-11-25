@@ -182,7 +182,8 @@ request(Host) ->
     Version = fun() -> {version, pick([4095, 4096, 8192, 65560]), pick([<<"9P2000.L">>, <<"9P2000">>])} end,
     %% Requests that make fids come three times as often, so the fid table fills.
     Attach = fun() -> {attach, Fid(), pick([?NOFID, 3]), <<"u">>, pick([<<"a">>, <<"b">>, <<"c">>]), 0} end,
-    Walk = fun() -> {walk, Fid(), Fid(), [Name() || _ <- lists:seq(1, rand:uniform(4) - 1)]} end,
+    %% A walk may start at NOFID, which names no fid of the bridge's.
+    Walk = fun() -> {walk, pick([Fid(), Fid(), ?NOFID]), Fid(), [Name() || _ <- lists:seq(1, rand:uniform(4) - 1)]} end,
     Requests = [Attach, Attach, Attach, Walk, Walk, Walk,
           fun() -> {auth, Fid(), <<"u">>, <<"a">>, 0} end,
           fun() -> {lopen, Fid(), pick([0, 1, 2])} end,

@@ -68,7 +68,7 @@ class Erx9pGrammarTest < Minitest::Test
   # at the end of the table, after the kinds they name.
   def test_malformed_fid_fields_are_refused
     {
-      "  operation odd 200\n    request fid fid" => /field fid of kind fid states what it names: directory, node or new/,
+      "  operation odd 200\n    request fid fid" => /field fid of kind fid states what it names: directory, node, new or start/,
       "  operation odd 200\n    request fid fid dir" => /unknown field attribute dir/,
       "  operation odd 200\n    request fid fid node directory" => /a field has at most one attribute/,
       "  operation odd 200\n    request fid fid node\n    reply other fid node new" => /a field has at most one attribute/,

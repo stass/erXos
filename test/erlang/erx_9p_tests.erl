@@ -48,6 +48,28 @@ walk_test() ->
     vector(3, {walk, 4, 4, []}, <<17, 0, 0, 0, 110, 3, 0, 4, 0, 0, 0, 4, 0, 0, 0, 0, 0>>),
     vector(3, {reply, walk, {ok, []}}, <<9, 0, 0, 0, 111, 3, 0, 0, 0>>).
 
+%% A walk from NOFID, the grant's root: its source is a fid of role start, which alone
+%% admits NOFID, so it round-trips; a NewFid of NOFID is still refused both ways.
+walk_from_nofid_test() ->
+    vector(4, {walk, ?NOFID, 5, [<<"a">>]},
+           <<20, 0, 0, 0, 110, 4, 0, 16#ff, 16#ff, 16#ff, 16#ff, 5, 0, 0, 0, 1, 0, 1, 0, "a">>),
+    ?assertError(badarg, ?C:encode(4, {walk, ?NOFID, ?NOFID, []})),
+    ?assertEqual({error, {malformed, 4}},
+                 ?C:decode(<<17, 0, 0, 0, 110, 4, 0, 1, 0, 0, 0, 16#ff, 16#ff, 16#ff, 16#ff, 0, 0>>, ?MSIZE)).
+
+%% fids/1 lists every fid field with its role, a walk's source as start, NOFID
+%% included, and map_fids/2 renames each of them and nothing else.
+fids_and_map_fids_test() ->
+    ?assertEqual([{start, ?NOFID}, {new, 2}], ?C:fids({walk, ?NOFID, 2, [<<"a">>]})),
+    ?assertEqual([{start, 1}, {new, 2}], ?C:fids({walk, 1, 2, []})),
+    ?assertEqual([{node, 1}, {new, 2}], ?C:fids({xattrwalk, 1, 2, <<>>})),
+    ?assertEqual([{new, 1}], ?C:fids({attach, 1, ?NOFID, <<"u">>, <<"a">>, 0})),
+    ?assertEqual([{directory, 1}, {directory, 2}], ?C:fids({renameat, 1, <<"a">>, 2, <<"b">>})),
+    Rename = fun(Fid) -> Fid + 100 end,
+    ?assertEqual({walk, ?NOFID + 100, 102, [<<"a">>]}, ?C:map_fids(Rename, {walk, ?NOFID, 2, [<<"a">>]})),
+    ?assertEqual({attach, 101, ?NOFID, <<"u">>, <<"a">>, 0},
+                 ?C:map_fids(Rename, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0})).
+
 lopen_test() ->
     vector(5, {lopen, 1, 16#8002}, <<15, 0, 0, 0, 12, 5, 0, 1, 0, 0, 0, 2, 16#80, 0, 0>>),
     Reply = <<24, 0, 0, 0, 13, 5, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0,

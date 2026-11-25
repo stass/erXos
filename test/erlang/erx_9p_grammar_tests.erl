@@ -68,6 +68,21 @@ fid_bounds_test() ->
     bad({attach, ?NOFID, ?NOFID, <<>>, <<>>, 0}),
     bad(walk_with_new_fid(?NOFID)).
 
+%% A walk's source has the role start, the one fid field that also admits NOFID, the
+%% grant's root; its NewFid and every other fid field still refuse it.
+a_walk_alone_starts_at_nofid_test() ->
+    ok({walk, ?NOFID, 2, []}),
+    ok({walk, ?NOFID, 2, [<<"a">>, <<"..">>]}),
+    bad({walk, ?NOFID, ?NOFID, []}),
+    bad({walk, ?NOFID + 1, 2, []}),
+    bad({walk, -1, 2, []}),
+    bad({xattrwalk, ?NOFID, 2, <<>>}),
+    bad({xattrwalk, 1, ?NOFID, <<>>}),
+    bad({lopen, ?NOFID, 0}),
+    bad({readdir, ?NOFID, 0, 1}),
+    bad({renameat, 1, <<"a">>, ?NOFID, <<"b">>}),
+    ?assertEqual([], ?G:directory_fids({walk, ?NOFID, 2, []})).
+
 walk_with_new_fid(NewFid) -> {walk, 1, NewFid, []}.
 
 integer_bounds_test() ->
@@ -289,9 +304,33 @@ getattr_reply_test() ->
     reply_bad(Request, {ok, Attr#{mode := ?U32 + 1}}),
     reply_bad(Request, {ok, maps:remove(gen, Attr)}).
 
-decode_reply_needs_a_valid_request_test() ->
-    ?assertError(badarg, ?G:decode_reply({clunk, ?NOFID}, ok)),
-    ?assertError(badarg, ?G:decode_reply(nonsense, ok)).
+%% decode_reply/2 never raises: an error reply of the table is taken whatever the request,
+%% since it states only the server's refusal; any other reply is taken only to a request
+%% the grammar accepts, so no reply is held to the bounds of a request it refuses.
+decode_reply_takes_errors_to_any_request_and_nothing_else_to_a_refused_one_test() ->
+    Oversized = {read, 1, 0, 16#10001},
+    MalformedLopen = {lopen, 1, -1},
+    lists:foreach(fun(Request) ->
+                          reply_ok(Request, {error, einval}),
+                          reply_ok(Request, {error, ebadf}),
+                          reply_bad(Request, {error, etimedout}),
+                          reply_bad(Request, {ok, <<>>}),
+                          reply_bad(Request, {ok, ?QID, 0}),
+                          reply_bad(Request, ok)
+                  end, [Oversized, MalformedLopen, {clunk, ?NOFID}, {walk, 1, ?NOFID, []},
+                        nonsense, {frobnicate, 1}, 42]),
+    %% The same reply to a request the grammar accepts is held to it as ever.
+    reply_ok({read, 1, 0, 16#10000}, {ok, <<>>}),
+    reply_ok({lopen, 1, 0}, {ok, ?QID, 0}).
+
+%% A malformed request reaches its sender as the server's einval: the funnel refuses the
+%% frame, and decode_reply/2 hands that refusal back unchanged.
+a_malformed_request_is_the_servers_einval_test() ->
+    Alias = make_ref(),
+    lists:foreach(fun(Request) ->
+                          {error, Alias, Refusal} = ?G:decode_request_frame({erx_9p, Alias, self(), Request}),
+                          ?assertEqual({ok, {error, einval}}, ?G:decode_reply(Request, {error, Refusal}))
+                  end, [{read, 1, 0, 16#10001}, {lopen, 1, flags}]).
 
 frame_test() ->
     Alias = make_ref(),
@@ -325,6 +364,19 @@ writes_test() ->
                    {statfs, 1}, {readlink, 1}, {fsync, 1, 0}, {flush, make_ref()},
                    {version, 8192, <<>>}, {xattrwalk, 1, 2, <<>>},
                    {getlock, 1, 1, 0, 0, 1, <<>>}]).
+
+%% writes/1 is total: false for a term of no operation, for an operation's name at the
+%% wrong arity, and for a write-marked operation whose marked field is not an integer of
+%% its kind, since the funnel refuses each of those einval before any rights check.
+writes_is_false_for_any_malformed_term_test() ->
+    lists:foreach(fun(Term) -> ?assertNot(?G:writes(Term)) end,
+                  [nonsense, 42, {}, #{}, [write, 1, 0, <<>>], {frobnicate, 1}, {write, 1},
+                   {write, 1, 0, <<>>, extra}, {lopen, 1}, {lopen, 1, flags}, {lopen, 1, -1},
+                   {lopen, 1, 1.0}, {lopen, 1, ?U32 + 1}, {lock, 1, write, 0, 0, 0, 1, <<>>},
+                   {lock, 1, -1, 0, 0, 0, 1, <<>>}]),
+    %% A rule that reads no field marks its operation whatever the other fields hold;
+    %% the funnel refuses such a request before the rights check.
+    ?assert(?G:writes({remove, nonsense})).
 
 directory_fids_test() ->
     Directories = fun(Request) -> ok(Request), ?G:directory_fids(Request) end,
