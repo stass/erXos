@@ -4356,8 +4356,11 @@ records every part left out as an exclusion row with its reason: among them Fias
 tests (`src/test`), the coverage debugger module, which only `CONFIG_COV` builds and erXos does not set,
 the UART checksum stream with its option and the unit-test and code-rule options, bootstrap's MIPS linker
 script and start code and its R-Car R52 platform, `mk`'s test plug-ins, and libstdc++ with `cxx`'s
-start library. `l4re-core` keeps `sigma0`, the libraries and linker scripts it and `bootstrap`
-build from, and four package directories (`compiler-rt`, `compiler-rt-crt`, `compiler-rt-pure`, `crtn`) that compile nothing
+start library. `l4re-core` keeps `sigma0` and, of the libraries and linker scripts it and `bootstrap`
+build from, only what those builds compile, include, install or generate from: the arm64 sources and
+headers and the part of musl the minimal libc builds, beside every license file and every build file
+of a directory the build enters. It keeps every generic header of `l4sys/include` and all of its `ARCH-arm64`,
+because that is the system-call API `liberx`'s Fiasco backend is written against. It also keeps four package directories (`compiler-rt`, `compiler-rt-crt`, `compiler-rt-pure`, `crtn`) that compile nothing
 but that kept `Control` files require. The GPL files left are `jdb_object.cpp` and the
 configuration tool of the kernel and `mk` (`tool/kconfig`, GPL-2.0), which runs on the host while
 a build is configured and is compiled into no executable a boot image carries.

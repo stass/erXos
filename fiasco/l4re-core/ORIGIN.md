@@ -15,7 +15,79 @@ Third-party notices remain in their original files.
   "archive_sha256": "6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f",
   "exclusions": [
     {
+      "path": "compiler-rt-crt/README.md",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "compiler-rt-pure/README.md",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "compiler-rt/README.md",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "crtn/lib",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/base/src/dso_handle.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "cxx/lib/start",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/supc++-support",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/tl/include/basic_vector.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/tl/include/bits/smart_ptr_list.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/util/include/atomic.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/util/include/lock_guard.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "cxx/lib/util/include/string.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re/include/elf_aux.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re/include/event_enums.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re/include/l4aux.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re/include/video/goos-sys.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4re_c/doc",
       "reason": "not used by any erXos build"
     },
     {
@@ -399,6 +471,130 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
+      "path": "l4sys/README",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/include/ARCH-amd64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/include/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/include/ARCH-mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/include/ARCH-riscv",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/include/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/lib/src/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4sys/lib/src/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/README",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-amd64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-arm64/bitops_arch.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-riscv",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/assert.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/bitops.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/elf.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/lock.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/mb_info.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/include/splitlog2.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/lib/src/ARCH-amd64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/lib/src/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "l4util/lib/src/keymap_de.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "ldscripts/ARCH-amd64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "ldscripts/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "ldscripts/ARCH-mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "ldscripts/ARCH-riscv",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "ldscripts/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "ldso/Control",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -567,6 +763,1814 @@ Third-party notices remain in their original files.
       "reason": "not used by any erXos build"
     },
     {
+      "path": "libc/musl/contrib/musl/INSTALL",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/README",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/WHATSNEW",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/aarch64/bits/hwcap.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/aarch64/bits/syscall.h.in",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/aarch64/bits/user.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/aarch64/kstat.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/aarch64/pthread_arch.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/fcntl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/fenv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/hwcap.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/io.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/kd.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/mman.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/msg.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/ptrace.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/reg.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/soundcard.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/bits/vt.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/generic/fp_arch.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/loongarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/microblaze",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/or1k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/arch/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/compat",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/configure",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/Scrt1.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/crti.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/crtn.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/microblaze",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/or1k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/crt/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/dist",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/dynamic.list",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/aio.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/ar.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/arpa/ftp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/arpa/nameser.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/arpa/nameser_compat.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/arpa/telnet.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/arpa/tftp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/cpio.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/crypt.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/fmtmsg.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/ftw.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/iconv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/iso646.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/lastlog.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/libintl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/mntent.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/monetary.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/mqueue.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/net/ethernet.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/net/if_arp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/net/route.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/netinet/igmp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/netpacket",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/resolv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/scsi",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/search.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/semaphore.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/stdalign.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/stdbool.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/stdc-predef.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/stdnoreturn.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/stropts.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/acct.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/auxv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/cachectl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/dir.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/epoll.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/errno.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/eventfd.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/fanotify.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/fcntl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/fsuid.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/inotify.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/io.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/kd.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/klog.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/membarrier.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/msg.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/mtio.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/personality.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/procfs.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/ptrace.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/quota.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/random.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/reboot.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/reg.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/sendfile.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/signal.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/signalfd.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/soundcard.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/stropts.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/swap.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/sysinfo.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/syslog.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/termios.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/timerfd.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/timex.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/user.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/vt.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/sys/xattr.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/syscall.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/tgmath.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/threads.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/ulimit.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/utmp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/utmpx.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/values.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/include/wordexp.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/ldso/dynlink.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/aio",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/complex",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/conf",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/crypt",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/dirent",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/env/__init_tls.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/env/__reset_tls.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/env/secure_getenv.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/errno/__errno_location.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/_Exit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/abort.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/abort_lock.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/at_quick_exit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/exit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/exit/quick_exit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fcntl",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/fenv.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/loongarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/fenv/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/arpa",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/crypt.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/resolv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/sys/auxv.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/sys/membarrier.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/sys/sysinfo.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/include/sys/time.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/aio_impl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/complex_impl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/emulate_wait4.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/fdpic_crt.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/futex.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/ksigaction.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/procfdname.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/pthread_impl_musl.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/internal/vdso.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ipc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/__dlsym.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/aarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dladdr.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dlclose.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dlerror.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dlinfo.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dlopen.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/dlsym.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/loongarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/microblaze",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/or1k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/tlsdesc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/ldso/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/cuserid.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/daemon.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/euidaccess.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/ftw.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/futimes.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/getdtablesize.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/getloadavg.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/getpass.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/getusershell.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/isastream.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/lutimes.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/ulimit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/utmpx.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/legacy/valloc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/linux",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/big5.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/bind_textdomain_codeset.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/catclose.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/catgets.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/catopen.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/codepages.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/dcngettext.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/duplocale.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/gb18030.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/hkscs.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/iconv.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/iconv_close.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/jis0208.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/ksc.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/legacychars.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/pleval.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/pleval.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/revjis.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/strfmon.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/strtod_l.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/textdomain.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/locale/uselocale.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/malloc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/ceil.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/ceilf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fabs.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fabsf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/floor.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/floorf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fma.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fmaf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fmax.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fmaxf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fmin.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/fminf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/llrint.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/llrintf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/llround.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/llroundf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/lrint.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/lrintf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/lround.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/lroundf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/nearbyint.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/nearbyintf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/rint.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/rintf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/round.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/roundf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/sqrt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/sqrtf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/trunc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/truncf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/math/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/a64l.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/ffsl.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/ffsll.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/fmtmsg.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/forkpty.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/get_current_dir_name.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getauxval.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getdomainname.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getentropy.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/gethostid.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getpriority.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getresgid.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getresuid.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getrlimit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getrusage.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/getsubopt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/initgroups.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/ioctl.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/issetugid.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/lockf.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/login_tty.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/mntent.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/nftw.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/openpty.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/ptsname.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/pty.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/setdomainname.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/setpriority.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/setrlimit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/syscall.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/syslog.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/uname.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/misc/wordexp.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/madvise.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/mincore.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/mlock.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/mlockall.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/mprotect.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/mremap.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/msync.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/munlock.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/munlockall.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/posix_madvise.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mman/shm_open.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/mq",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/network",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/passwd",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/prng/lcong48.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/prng/mrand48.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/process",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/regex",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/sched",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/search",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/select",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/longjmp.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/loongarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/microblaze",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/or1k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/setjmp.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/setjmp/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/aarch64/restore.s",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/block.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/getitimer.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/kill.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/killpg.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/loongarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/m68k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/microblaze",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/mips64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/mipsn32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/or1k",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/powerpc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/powerpc64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/psiginfo.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/raise.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/restore.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/riscv32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/riscv64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/s390x",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/setitimer.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigaction.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigaltstack.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sighold.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigignore.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/siginterrupt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/signal.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigpause.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigpending.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigprocmask.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigqueue.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigrelse.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigrtmax.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigrtmin.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigset.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigsetjmp.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigsetjmp_tail.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigsuspend.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigtimedwait.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigwait.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/sigwaitinfo.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/x32",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/signal/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stat",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/__lockfile.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/__stdio_close.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/__stdio_exit.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/__stdout_write.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/fclose.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/fgetwc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/fgetws.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/flockfile.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/fputwc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/fputws.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/ftrylockfile.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/funlockfile.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/ofl.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/pclose.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/popen.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/rename.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/tmpnam.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdio/ungetwc.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdlib/atof.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdlib/ecvt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdlib/fcvt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/stdlib/gcvt.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/string/aarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/string/arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/string/i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/string/x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/temp",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/termios",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/thread",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/time",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/src/unistd",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/add-cfi.common.awk",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/add-cfi.i386.awk",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/add-cfi.x86_64.awk",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/install.sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/ld.musl-clang.in",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/musl-clang.in",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/musl-gcc.specs.sh",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/contrib/musl/tools/version.sh",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "libc/musl/libc/ARCH-aarch64",
       "reason": "not used by any erXos build"
     },
@@ -607,11 +2611,11 @@ Third-party notices remain in their original files.
       "reason": "not used by any erXos build"
     },
     {
-      "path": "libc/musl/libc/ARCH-mips/impl-libc-api-arch.c",
+      "path": "libc/musl/libc/ARCH-mips",
       "reason": "not used by any erXos build"
     },
     {
-      "path": "libc/musl/libc/ARCH-riscv/impl-libc-api-arch.c",
+      "path": "libc/musl/libc/ARCH-riscv",
       "reason": "not used by any erXos build"
     },
     {
@@ -21371,7 +23375,47 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
+      "path": "libc_backends/lib/fs_noop",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/initcwd",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/l4re",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/l4re_file",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/math",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/misc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/mount",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/sem_noop",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "libc_backends/lib/sig",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/socket_noop",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc_backends/lib/static_heap",
       "reason": "not used by any erXos build"
     },
     {
@@ -31587,6 +33631,10 @@ Third-party notices remain in their original files.
       "reason": "not used by any erXos build"
     },
     {
+      "path": "libsigma0/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "libstdc++-headers",
       "reason": "not used by any erXos build"
     },
@@ -32761,6 +34809,34 @@ Third-party notices remain in their original files.
     {
       "path": "prj-config/aliases.d/10-stdlibs",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
+    },
+    {
+      "path": "sigma0/doc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ARCH-amd64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ARCH-mips",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ARCH-riscv",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ARCH-x86",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "sigma0/server/src/ioports_x86.cc",
+      "reason": "not used by any erXos build"
     }
   ],
   "removed": [
@@ -32818,14 +34894,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "compiler-rt-crt/README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt-crt",
-      "reviewed": true,
-      "sha256": "117a0ed3c68e098cec95cb8f1a3e2be675bf0570b0c6968a403c55cc7d9a8767",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "compiler-rt-crt/prj-config/aliases.d/05-compiler-rt": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt-crt",
@@ -32847,14 +34915,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt-pure",
       "reviewed": true,
       "sha256": "a7aed162b937dc80674ef748820f5ac887bf0d7ca418f73929d7e27dc23bbf36",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "compiler-rt-pure/README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt-pure",
-      "reviewed": true,
-      "sha256": "80f97b8d55eaa0ddcbd6d297af9a84322c271c9bdee15c9d4764e8db828cd742",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -32887,14 +34947,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt",
       "reviewed": true,
       "sha256": "a7aed162b937dc80674ef748820f5ac887bf0d7ca418f73929d7e27dc23bbf36",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "compiler-rt/README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for compiler-rt",
-      "reviewed": true,
-      "sha256": "a7ca7791c0de3ea4e7f403e7f3ce2eeee3526c28db7c80f7a4aefe62643d9844",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -32940,14 +34992,6 @@ Third-party notices remain in their original files.
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
-    "crtn/lib/src/ARCH-riscv/crt0_x.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for crtn",
-      "reviewed": true,
-      "sha256": "bdfeed96451e45d30cafc8cde4cbe1778cf3218e4c085a91988b36deb6044921",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "cxx/Control": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
@@ -32961,22 +35005,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
       "reviewed": true,
       "sha256": "acc3e376df2b670786f9eeca7dbd5777b529fde627f85729e44ec8e8c94f5b9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "cxx/doc/cxx.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "bc31faa6301ed98c97c44ca1572bca4318beda560e1661bb49fe25f31cdf48a2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "cxx/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "2907762187161627497e87f9d0c1cc673cde31a44e9dc4520e41a73f0eab62e4",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -33055,16 +35083,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
       "reviewed": true,
       "sha256": "9118dda4f07a1ca062c07ef338b6a953f6014b89752855b2cc14b31b4e1c1c7a",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "cxx/lib/base/src/dso_handle.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "ed37ab529937871addcf463f6efb21ef344b25208db73a44e24c02960c154de8",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -33214,42 +35232,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "cxx/lib/supc++-support/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "bf4a7d943ae63333d822b0efa9251952e6b6a9d7334489e246555204f8916678",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "cxx/lib/supc++-support/src/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "c293316d70b1ad4292157d3d7899289a56ffa5a3c476d41c0f2fbeece2d56df0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "cxx/lib/supc++-support/src/abort.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "b6b596f656e05c962e2459c000730bd5483f2df300c6754b2bc348bdc782b26f",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "cxx/lib/supc++-support/src/memset.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "fa1d47ad3e5b4f26357320b5fbb11768d56e59e671d0cac1f6ce28e3b0eedc93",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "cxx/lib/tl/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
@@ -33301,16 +35283,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
       "reviewed": true,
       "sha256": "18fda59d2bd25ca1a1a3e7ba75f6f84471dc95737e5ae374bd69c20de4d4d0e1",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "cxx/lib/tl/include/basic_vector.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "2a7ae28dae594a51d64f9c6a7462861b3c704718250ab741782aeb1bcdd777e3",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -33375,14 +35347,6 @@ Third-party notices remain in their original files.
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
-    },
-    "cxx/lib/tl/include/bits/smart_ptr_list.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "fc242d6c1ee514166a1604386780fdfe5a6803f032728041e8e2d6073fb30057",
-      "kind": "file",
-      "non_ascii_lines": []
     },
     "cxx/lib/tl/include/bits/type_traits.h": {
       "license": "MIT",
@@ -33666,39 +35630,11 @@ Third-party notices remain in their original files.
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
-    "cxx/lib/util/include/atomic.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "076fb6ace7358a5ddbcbe00db5adc57b8b773ef77848321f6b7ee4aef8fe3dfb",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "cxx/lib/util/include/l4types.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for cxx",
       "reviewed": true,
       "sha256": "a02042984260a4466d7d8f3a04d440fcf8b14b8206868aa2a2f21f061d6e3822",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "cxx/lib/util/include/lock_guard.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "694246a40883dfbf7acf20a5cdf77aeb1a7565885e78967144a26e4777cd7092",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "cxx/lib/util/include/string.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for cxx",
-      "reviewed": true,
-      "sha256": "f42c30c186fb677211f7d04098af0643a2c08887487d4cabe851b9d4f0c95bc3",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -33798,22 +35734,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4re/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "c042f1b86b37a5089672467243b380c3bb4dceef1683f994a81fc7cc42751bae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4re/doc/l4re.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "2006ad06d25695b1f9ec4bae7b9e069724c2bf7bfe4da3b0f3af416d76867286",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "l4re/include/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4re",
@@ -33899,16 +35819,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4re/include/elf_aux.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "6e93393c5eb33927264ac166aa10234c60b170d47871c3472f32a00774704b34",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "l4re/include/env": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4re",
@@ -33959,14 +35869,6 @@ Third-party notices remain in their original files.
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
-    },
-    "l4re/include/event_enums.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "c39a97b35fe4ed92f382e3b2af67b94be9c43c498167475456e4d888f8933684",
-      "kind": "file",
-      "non_ascii_lines": []
     },
     "l4re/include/impl/dataspace_impl.h": {
       "license": "MIT",
@@ -34024,17 +35926,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4re/include/l4aux.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "95a5f5f47a98c2df7238c3b925515d0162c849784a315a673a9676ee4a651de2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "2ddf6295c943ed56741aa4a4e323b95e660cfd634a87a4dbd5faf63288daeba1",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
     "l4re/include/log": {
@@ -34154,17 +36045,6 @@ Third-party notices remain in their original files.
       "sha256": "2e6e57d305fabfef93388dd50c529b2c72957bf7bce0916b7898a2a516785168",
       "kind": "file",
       "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4re/include/video/goos-sys.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re",
-      "reviewed": true,
-      "sha256": "09e83f0d94efc169cc0263533908679ac6bd3ee0fe8c159f2b809fb193e3b574",
-      "kind": "file",
-      "non_ascii_lines": [
-        "2ddf6295c943ed56741aa4a4e323b95e660cfd634a87a4dbd5faf63288daeba1",
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
@@ -34599,22 +36479,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4re_c/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re_c",
-      "reviewed": true,
-      "sha256": "fced23306001a8996d06c31766dca876f1f3279a35b73405be98a4b61a6966ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4re_c/doc/l4re_c.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4re_c",
-      "reviewed": true,
-      "sha256": "d797d8b2a2cd52d3fb2b550a3b9e9c10ffb13742a88313bea5770738faf198a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "l4re_c/include/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4re_c",
@@ -35007,378 +36871,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4sys/README": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "c16738febc56790bc4855652d00b2cc2cbc9f87bbcab8998c68bb254e4820b12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/doc/factory.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "89fbc02a604df8a8c3311a18bcc5dc0dc105d21922dcffcc3e37ad34216e8839",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "7113d9eede41a4e6c73b90f4091c335ef28488150c1655edbd8f6cee54f9ab31",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/doc/kernel-objects.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "bcd46f97f0bd9817e941829e9b235e3f0120e31666c3664964660df197e0ac11",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/doc/l4sys-l4f-groups.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "f669d78821c6e081c213e23338c3c8f5952de2dc225863ba8bd38eb53f019ce2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-amd64/__kip-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "9fccd02a7a581e7b8c2187634c832233de2c2b997708ff568b054a24fcb12b45",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/__vcpu-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "51faa67073fd0a06d7bcf6480eea937b7bf39cb8e92d500a07540a8ade571c0a",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/cache.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "037ab253cd874995f3e1cf36609daf0ab6e76af2c5a3ea82b28de6295cad47dd",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/consts.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "49d79202a704f51edbd24ce8cfe72e946b4cca40e09691ee424e3e4a777444e6",
-      "kind": "file",
-      "non_ascii_lines": [
-        "afdd22efc2983ea207717b68c551b76437eb4ca9b9aa9d870b86d010a5d43963",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "0ce52eeb6552e1472e13001dc29dcee6971f490202e879bd0aa2a809812e54d8",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/kip.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/l4int.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "1e732e41d2fc82edf5fcb520eab173df710ffbc87ef996439c3ce59d880219a6",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/pf_trampoline.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "1c26fe4e1a836e325262b4e8ae7f7049450b53c8200fb498cab9da88bb61ed5c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-amd64/arch/platform_control.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/task.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/arch/utcb.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "24a26e64ee5d15f9a81f053c40aee883e1023bf9429c887661b6cc9a268d12af",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/ktrace_events.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "a5a43ed8eb3c1fe9af33ce2ece545d599767f36927dbead4e8087fb47ed5482f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-amd64/linkage.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "ae7a3b995ece1371c3e097c569238420b6b937c9d3d6013739aba8eb0fb82f2d",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/segment.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "77894c6c348b107b025e0590c0c9f3e74ed66ba3c0107010375153b9cd063d9d",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-amd64/vm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "f9d4848e2ed50050f110962e19957c731e3c002e9656ba6649a0c1a06ba4e163",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/__kip-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "0f2d32571c9eeceef8fb6c147aae0c81827c6a7cdb205032b6c1be3a381e9c6e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/__vcpu-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "17d512c1660491615af7ef92b2306a2b20863b2b04ad0d239e68967006358b71",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/cache.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "0c5de77671cc9a4d40c66a5fa266094e47141b165fa597614664d420d10637c0",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/consts.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "27f2c898e81e9987238a58d90234df465f2ad7715c37e6c9cece2399b9c388d5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "2ddf6295c943ed56741aa4a4e323b95e660cfd634a87a4dbd5faf63288daeba1",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "038036b967c0de37e98b891b677f64799cd52bebb6e89a27da6e52972aec65c4",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/kip.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/l4int.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "50f6b8373b11e004935156c57565e7b7c0a6657ce0c1947f1360facabb16f4a2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/pf_trampoline.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "d03a27fc97f5e48ff63497987bf3b8e849333f54a180225816795b7c881580a9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-arm/arch/platform_control.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "3ae778f1b15dd116cde150ea5afe3a0e3764a0a165d4dd68439b3b50836e6b72",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/task.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "125197383990f38731d483ddd264c205345f8e5c5c971d80bd314f845886fe38",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-arm/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "ffa2f377199b4b718dc09e712d9b63b1df35e00c367e72991342dde45690c190",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/arch/utcb.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "2260443eef4e5acd4374ee8cfd7fbc35412fabe10d01cca463d1a7b6312f5644",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/atomic.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "463142a44413fe26dbf4f04355f4ba4b1c1e32f7fff25b6dc62c7e477a79419f",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/ktrace_events.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "85df56e0d1324113d02464d1cabde541a3c62001a0a5623f62719ab3a59946f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-arm/linkage.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "023e75ab3ef6804126d9e1e26e740a92b7d016ee33349d3473437d7b138c5be3",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/mem_op.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "cdd4e9ee0316cbbd3e1f730dd97b816a0b40e4cd7a416b459eb74f413a547851",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/syscall_defs.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "3f4cd5615d0184a5c9ef204e14d525e1aa72a54a151beda834a4264c631aa48b",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-arm/vm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "24bdfd90d48c2b239f29b62c8674f92d1df1b33ed6320b32f658dbd18a341704",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "l4sys/include/ARCH-arm64/__kip-arch.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
@@ -35519,437 +37011,6 @@ Third-party notices remain in their original files.
       "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
       "kind": "file",
       "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/__kip-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "9fccd02a7a581e7b8c2187634c832233de2c2b997708ff568b054a24fcb12b45",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/__vcpu-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "272eae0495456ecfb7fbdeeae155bda63a1e4425f8aa2b8589f387f6d56ea8cf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/arch/cache.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5d6d2e84b6d288149d824dfc6f71ecaa4817871dfca33403594b4d3bfa608c5d",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/consts.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "e2cb0ee0aaf352548609c0f02726850ca3624cb5cd33c3132474b918f8afc1c2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "001ff45540585ad859d55cd5963cecadbec069081ffdd63b6fab632baf9081d2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/kip.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/l4int.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6f54b605dfd60ed60d5a133ee4e696d8af3ec06fa2b13d9fd28afa43f01a14f5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/pf_trampoline.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "69b4607a52ae057fdab8f70986dc6f41331340c4648d3f285de2c8c754c90697",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/arch/platform_control.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/task.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/arch/utcb.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "c4574c2a92ef678924a49f651811020fc46af201288f33332f3c0b483e000781",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/ktrace_events.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "ad6a74726accb995b9db15cdc5a81372bb58f04e86977a281452185622ce241d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/linkage.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "40473e1fad530b930892a1ff001e6f23a1898369b4841b4102e5e44e3c242181",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-mips/thread_mips.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "4d5b17a5f61258abda1e4dfb15615e737a7a83b281abfe36a6524df0083f552b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-mips/vm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "8cd4e048e03ba569419e19319d127f1e25d729547d467f90ea16e37d9bb79f78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/__kip-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "b7d59ce3f6e43d79c959569840315f2142417f701736a07e92d01a8bf75299d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/__vcpu-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "f7e6da32b546ed15906597e9668b7a43288526a0e953ef28563234c9a3a30847",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/cache.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "39148e25b74c80aa4fac5ba7b92ee2b6b075bf3c81411a574769194086b72ae7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/consts.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5b5289e74b9566e6d8c4a59b4c70361687598c32deff6360387b6466847c6cd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "d3c6eb5dd72a810845251f8afeb0295d4c8ef64801d376c7b187f69ea439b2cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/kip.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "c141c1fd96508aa44c49624036f4b48563c4a4d56bf4a9452e7804fec89115c1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/l4int.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5a9d621c66cec8c4e13a68abaa418d955c170c5456e70489b0b9dfa58d4d36ad",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/pf_trampoline.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "43321700f2c7489b4d27baf8cdc8b4642123425aa78976f501e6c37037c755d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/arch/platform_control.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-riscv/arch/task.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-riscv/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-riscv/arch/utcb.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "864fddf90ea02192aee0ccf125384ab08cbd491e40f55663dbfae66534627c88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/ktrace_events.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "9ef0a23d20973a085026b5f52515742bee6f2a12003d2f3c175304e6350d03db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/linkage.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6f03bd0c94bcd602c8dcd423c96353584ea7d897a3a5e4f76a547c0fd734e944",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-riscv/vm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "ee32b5b03134f96553f9d6a746e2d91a1ec3e374ed6836be7ff0c5a1227d9b1e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-x86/__kip-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "9fccd02a7a581e7b8c2187634c832233de2c2b997708ff568b054a24fcb12b45",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/__vcpu-arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "b63395c40288cc5ec98887e62b3e6d181e45039cffcaccb5938a5e083a2a7991",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/cache.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5ac5a248a7f5e32f9de9d006838e021da12bbdb62ab8b885049d86717e83ea9e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/consts.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "13fd72f03e8bd62c945b5eb135d4b2861ac26551374443d785da2b35aa56a6c0",
-      "kind": "file",
-      "non_ascii_lines": [
-        "afdd22efc2983ea207717b68c551b76437eb4ca9b9aa9d870b86d010a5d43963",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5bc0dd6427af61ca246d08b097e8f8231406ced6abb56ee995b072d61d57e1ff",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/kip.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/l4int.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "b990a5757194e5b244e9628557c22b9af69ca0010d68b47d7e6a28c57bd43c49",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/pf_trampoline.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "fbc46d2a75b28494df5f436d1516618627b3d807a538b0a40cc52835b8016add",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-x86/arch/platform_control.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/task.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "6943c636a26c4823490a3f3168bafac99aaf28ec2753f25722341f7d3e328910",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/arch/utcb.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "29e67e69f5009b99eeeb230e5d56d733abd48a5f0e3f3b0f4e2b565e48b17eec",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/ktrace_events.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "7db5d4ae97edca49aeb404557af421bc9b77e9177113d547b9a97a373da2fece",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4sys/include/ARCH-x86/linkage.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "5b0bbe15e6d954d5a76f61128374233a02c66db5eea162249877e08f189e413e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/segment.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "c00f446239b434de3cc3a8a79e26f9c2f50efe50d364bb6ea3fb2703e26f5884",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/include/ARCH-x86/vm.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "a73452dea80b182fa4ee2e7ee5a11ccd24e957d520296cdd0671e8f7266141d2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
     },
     "l4sys/include/Makefile": {
       "license": "MIT",
@@ -36809,24 +37870,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4sys/lib/src/ARCH-arm/atomic_ops_s.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "423a9f407e75348d3e65e464a8b024fb5346e2ec3154e1e8dad4aa2fca34097d",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/lib/src/ARCH-arm/syscall.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "e061b10ef668598abee8eabca3726e60d246f4fbd9ee9936747552684be7ddc0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "l4sys/lib/src/ARCH-arm64/syscall.S": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
@@ -36834,26 +37877,6 @@ Third-party notices remain in their original files.
       "sha256": "491564484c602bf0d7b2d348472a6a1f0eb00b3e5a14f72db33f0bd1e6d5ab2e",
       "kind": "file",
       "non_ascii_lines": []
-    },
-    "l4sys/lib/src/ARCH-x86/syscalls_direct.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "c561c6cf1c462a2027788f30bc7f75f3815c8dfd0b109654e317861075457a13",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4sys/lib/src/ARCH-x86/utcb-l4x.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4sys",
-      "reviewed": true,
-      "sha256": "0d3a80361a7a080208e0b487bab1a63567a83fc89d669dde7c93cb9ee8b5f65e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
     },
     "l4sys/lib/src/Makefile": {
       "license": "MIT",
@@ -36915,183 +37938,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "l4util/README": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "4137dc9c46e46b82eb66f7104040f8c3c74c913f3fc060593fc6e125f1d29f8f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "db127482b1d35bef1e647017d5c05a67bfec451286a04cd8d06f4b0d147d9d19",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-amd64/arch/l4_macros.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "bd44222a052782aa7ffc4246b2cd22fa8c1d6db50b6108d77dd12a74cb862fa4",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "b0535bc9bc97f811d410c86e185a1a461e82ac6890dbdcb6539eae6f0acbc3c9",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "6b90bd893ef9548c93eee8b50b0df09e63587cb3f7bf91d7af3ef64f896a4be6",
-      "kind": "file",
-      "non_ascii_lines": [
-        "04550ff68c99ddc711f0e78a547c3d0cfa86fcb741a75ad27d6ef937dde47431"
-      ]
-    },
-    "l4util/include/ARCH-amd64/cpu.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "6537584edbed6f1a5e3af2fc6854b9228a175003b69001492e7d3f46343c4f6c",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/irq.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "08cd0d62b09a1ecafeba8fe8fb40cf15819810384a290b008e117fe741c9ba10",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/mbi_argv.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "209b1a2d92c69fffb5e2d4787899a4d616357d41a63efc8cee867af6cc2fb905",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/perform.h": {
-      "license": "BSD-4-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "fa26bc729045239424455479bf5cea4c51e0200555e5fed8772a4b95f1dac518",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/port_io.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "bd3685514385c004747f9adc0bb09bff0f94b9c4e29aa7a23bde5c18372c30f5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-amd64/rdtsc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "dcf69657b55b15d9d496738945bd8802837a3069646a48f561ac3553162fe450",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b",
-        "a977841d652e392fef6ac95af84778b9444fd6dac51c553df8b1b7bb9c00d491"
-      ]
-    },
-    "l4util/include/ARCH-amd64/spin.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "b787aeab61e6c0b2a2f337006df590793a040123543c922ddc5448b9a3704af5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-arm/arch/l4_macros.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "6cb9d7642481b82ba6a7f5a1bfe7a1ba5b22cf100ad8b4b7c9427cb459b4b4a8",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-arm/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "71a612b9e3ff7a87f6f1d144f0400f3fb6cfe0965ceb5fbc0aa60d3091079b55",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4util/include/ARCH-arm/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "620280c4f02a5578568107d2a76390c52aa155654ccd4017cc14625c2a7bf5dd",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-arm/cpu.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "b904603ced1b5eb524b706a321ba0e4896a71eb9850821792e9c6191a5854a40",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-arm/irq.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "8728c6fa7b843606ab28d629da21c163f83ffb14df5080c24c31db6d68618ff2",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-arm/mbi_argv.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "c066aed8c9e118101be2294c97d18ca13aaa42f17290bf66210d2c6729249346",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "l4util/include/ARCH-arm64/arch/l4_macros.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4util",
@@ -37112,188 +37958,6 @@ Third-party notices remain in their original files.
         "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
       ]
     },
-    "l4util/include/ARCH-arm64/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "620280c4f02a5578568107d2a76390c52aa155654ccd4017cc14625c2a7bf5dd",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-mips/arch/l4_macros.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "bae2b7e0b0328b33609448c68ab3c40725e5cd894d1096e55e79f5cc82c825dc",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-mips/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "f797b636bf120399980285ca84a45782b0b5a255275763336df4de53fb05068e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-mips/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "67c2b638be8d17e3ceed3242946eed16e5347db43fd6b9157ff18be339c42646",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-mips/cpu.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "6dbeab2619b5a3f9ee5f39e28007c0dea02b63f6a72fded28750b88eaca12985",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-riscv/arch/l4_macros.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "1939621a39792cca81d2f91f14cf8e24beae9f9bf9117dd04f2ca9dca666b42e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-riscv/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "7e83f2ec514e63043df891776aca3e1a968319d02741ed0a78db451c6c11fc1b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-riscv/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "763c4b536e9ee0885dc181454b676c210ccdac635a68eacabc668c7924091eb3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-riscv/cpu.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "d67633bd98189f5466b0186a43ce03cb0073ca58482ea12b507ae21c55bda26c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/include/ARCH-x86/arch/l4_macros.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "7d0e3751cd5d7401899f740aaf59312eefd07d6ab318c94ecd869ebc9a780ff5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/arch/thread.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "d66ea16f7cb8cfdd3dabe281ea58a74dc0b88b1f7cc9231d256fac90629aea05",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "l4util/include/ARCH-x86/bitops_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "6b07408f069a1889bc49d95961bfa73a2fc1be77c612ab772ba5a38a3d1250e5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "04550ff68c99ddc711f0e78a547c3d0cfa86fcb741a75ad27d6ef937dde47431"
-      ]
-    },
-    "l4util/include/ARCH-x86/cpu.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "32fc81ee111e63cc83732c8cd3e0442dba5dc6938222429078fc0c72bf3d3ada",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/irq.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "48597d93d8278df0a0dfa970a17d0de7bc233b84f48054d040e75f64a0918205",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/mbi_argv.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "87c0a7ae6c3ebe5aa199b72c10c7b7703504ecde0104bac851f858b64ecba212",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/perform.h": {
-      "license": "BSD-4-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "ecd8e131dc9f1a0c109af3df42b4df6233772f4c15475a5e1a9dae0a702faa06",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/port_io.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "bd3685514385c004747f9adc0bb09bff0f94b9c4e29aa7a23bde5c18372c30f5",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/ARCH-x86/rdtsc.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "f78b9529c7603e9aa7e0f698c5287513205c4924918ff47dd5dff93bb083c994",
-      "kind": "file",
-      "non_ascii_lines": [
-        "759c36c1a5f7d930490d4591915348f0841f1da608687a9ccaed195fc62b1ef1",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b",
-        "a977841d652e392fef6ac95af84778b9444fd6dac51c553df8b1b7bb9c00d491"
-      ]
-    },
-    "l4util/include/ARCH-x86/spin.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "f7f9cf87fad91bf2002a9b6d881f6a93ab356934db61d7e54cd2b6cd0e80fe50",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "l4util/include/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4util",
@@ -37301,16 +37965,6 @@ Third-party notices remain in their original files.
       "sha256": "e8d7e36d232ba96c6c4c27ac29e44e9a3ac4e43af5a63e38bcc215f0b90b909a",
       "kind": "file",
       "non_ascii_lines": []
-    },
-    "l4util/include/assert.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "f51e0b1f419bf565325d906393f7709672b5d2eb2e5f705ce39203398094f9a6",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
     },
     "l4util/include/atomic.h": {
       "license": "MIT",
@@ -37337,26 +37991,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for l4util",
       "reviewed": true,
       "sha256": "89b3e6f83427cf773866a020c3e267eaeb93058c2a1a62ba49c563e4007b4c6f",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/bitops.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "434d3be1a89847a408fd48dc3bf4c5022dc7c2c4df0d5062712c4e795f13ec12",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/elf.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "943fb83b7b05c79c09d9997e8a5140a21c621cafd44aeb31076c263ab146ba90",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -37430,26 +38064,6 @@ Third-party notices remain in their original files.
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
-    "l4util/include/lock.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "00beda483d4d2069df9270b75fd5c22beb932b64fa0ed88afa6a9f3670bec985",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/mb_info.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "2e651c5428766bc3e74b4b37af16cb986a4176d1abb31b0bce668f2ed630b546",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "l4util/include/parse_cmd.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for l4util",
@@ -37473,16 +38087,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for l4util",
       "reviewed": true,
       "sha256": "08fc12162f9bc428fcea169e715a53190b4fed5559e75fe73dc6e2dacb8ecabf",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/include/splitlog2.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "a4742c37ddd77cec57d27c0dfa9bead1af8dbde21562c392f1cb979584531cc7",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -37516,94 +38120,6 @@ Third-party notices remain in their original files.
       "sha256": "8da13adb3354957990c814a32c80a5531213d781f3128624304ae1e1e6f9a24b",
       "kind": "file",
       "non_ascii_lines": []
-    },
-    "l4util/lib/src/ARCH-amd64/backtrace.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "091df8f088fb1ea985357da6fa75a71849850e6148d753e5d7a2072a608cd562",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-amd64/perform.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "e0e692d4438c8d265ad1ff373fb5038a57972a067be15c4ee48507b7744dbc3c",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-amd64/pmc_events.in": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "3aa94af78d912f358207ad72e94b4215da02c6cdf7104720d0d46927bb8cb746",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/lib/src/ARCH-amd64/spin.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "f39bffbbe54c51a17775a165f7495093cc1359fa7c60b67a2f378f0dbf07efc4",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-x86/backtrace.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "924bf4cf412c9004a974c5b6a9898db8bedd3896fd4b5df23e02196570dfac8b",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-x86/perform.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "ea668b2004fda5d973096ff0cad7d89026dbb8041a2a87f61b850d2e47f9de05",
-      "kind": "file",
-      "non_ascii_lines": [
-        "005afc21294d134dabb68b146bfdeac823a911747325622d2f2d137c5b270ce7",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-x86/pmc_events.in": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "3aa94af78d912f358207ad72e94b4215da02c6cdf7104720d0d46927bb8cb746",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "l4util/lib/src/ARCH-x86/rdtsc.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "4ed8cd3bcd0859eb6c53ebe20f27b541a85b8282d50d5d26e735697dc6d5058f",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/ARCH-x86/spin.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "ea246c3e468d5639d77a4f900457d4b3a4aa9b8a82182560a4b8c3eeb4e82f8a",
-      "kind": "file",
-      "non_ascii_lines": [
-        "f52e0dfe6c12e0608ddfd11d7bc154b25428c4096dfa4c5ba9c22f270265910e",
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
     },
     "l4util/lib/src/Makefile": {
       "license": "MIT",
@@ -37649,22 +38165,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "l4util/lib/src/keymap_de.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for l4util",
-      "reviewed": true,
-      "sha256": "d354c55d10d42e455f7af832fb7df91068eb07bed477c989082c87200c6ad128",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b",
-        "76b7f2cc174391dae336e70abfa052a9c60d284e2df08b25d19921c95d0cb247",
-        "5f2b8cf0a8bf8ad6ea9f43623b4d01f1a3d8a65f0b451a253f8f40ec70dd0a41",
-        "d1a41c55d6a06ef8875d0e30690291bb4c94fc26a0486ffe9d674ed093db4d0b",
-        "ba8aa845f4440fc3785d14d9d42653b48c27aabbf393bdbd7fb076b9f4b45ffc",
-        "f4c05497955bc09a88f7829e7e2c892eec6bcea2691022e6d02f0bd852516881",
-        "378a0c7e2a75083a4192070776b653203cb6d1bb506230eaae63189933f060a7"
       ]
     },
     "l4util/lib/src/keymap_en.h": {
@@ -37760,78 +38260,6 @@ Third-party notices remain in their original files.
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
-    "ldscripts/ARCH-amd64/main_dyn.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b8d48fbbb7c3844d3736b1c6e71573900da080fd1416edf072f9fa40d47ea432",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-amd64/main_pie.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "6313fb1f102774c0b4e4e5cc359596628cbe6539a67d709c3f960bbc70d42f2b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-amd64/main_rel.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "92d395bd7e233a1b6553e8852f0bc73f2e4a28e5ba71b7a73f9dc8e05def7b99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-amd64/main_stat.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "1dec148dc69bec6297972ebb8c7a2eef5a49f4b075a0506f438b348bed38b72d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-arm/bits/arm_asm.h": {
-      "license": "FSFAP",
-      "evidence": "reviewed LICENSE.spdx package declaration for ldscripts",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-arm/main_dyn.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "5deabac58266a31056b7f670e54c5fe9b8739b5977d4430ea050a491cc56c94f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-arm/main_pie.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "d37c966a1e81a19a0bff896bb891ed7ec59a44a8deff3c0a8dc7481ee0feafc6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-arm/main_rel.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b5a50f1ffdb9bed63677dd03be216a5fc5e621d06c7d091682ce75ab11b746a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-arm/main_stat.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "313fd5e1c1f2e66afd6638554480e645dc70033c75d6e8f9f5dd6da99bb2cebe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "ldscripts/ARCH-arm64/main_dyn.ld": {
       "license": "LicenseRef-unrecognized-notice",
       "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
@@ -37861,78 +38289,6 @@ Third-party notices remain in their original files.
       "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
       "reviewed": false,
       "sha256": "9b123605fb1414fb591e37a8920acc9a75dcd5332a6321b4100fe298dc3e4f60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-mips/main_dyn.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "ce48299cef897aa203ac1064bbc6a2241172da5b83d26565a92902a211448d9f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-mips/main_rel.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "2c2e3d8956c440ca58bf933f2e7df6d0fa1b5c44bad651e1fcc71fbb00529c5b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-mips/main_stat.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "303d5557d8d105ae6b0615322b0727dd7d1cbafdf8e4dc629b92c12e6a8bcf1c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-riscv/main_dyn.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "84f24f9a1e0caba008624f94eadffa5a4601d3b45ff377e7f819c120cac9e6f3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-riscv/main_rel.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "e8b22664b159190c08338958568fe34faeea202cd036a9b7c905be93edcd364f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-riscv/main_stat.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "b86dd4e916c85fd3fbcb79a463ce86c465d876dc208f67b806d706b28e334c78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-x86/main_dyn.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "746e90f599df7f6ae56155e179e60cc489c23167cd4233835402b216209ec656",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-x86/main_rel.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "479af1a47536bb6d2dc3a3744c4f0d1437f1f0e0d7202a67e6a223f7f02a8f93",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "ldscripts/ARCH-x86/main_stat.ld": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "5de7facadcb1ff2f03877809ca8b4f2b688c330af41c0945af6fe3e654a1f8f1",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -38100,14 +38456,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/INSTALL": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7b0686ac4289e2be69023299dbc0734de2a5ba75b805f2cf06d22acbdd62fff3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/Makefile": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38116,27 +38464,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/README": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "99be6432b41de50d702dbee423149c8abcd52d06e29dc1715013c25865a2eda8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/VERSION": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "fe2b7c237b5a6e42818aa3e4f7fc5820f49c32289c32c96260ef89a8c8f6d3d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/WHATSNEW": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "9f9f1b45a27f0fed463e151f26784ab1fdeaddb4ca3d3b5bc7fe2dd36d538182",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -38180,14 +38512,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/aarch64/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7be3c72e8d6440e46582b6ca73415bcca44fb60188ee3b10f18fcdedfdc1a66c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/aarch64/bits/mman.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38212,22 +38536,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/aarch64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7b20fe57bf92c6b3cf800d4f83998419e92e19a88ead2d57c89c5725e0cfb816",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/aarch64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32a1db0929d11fec9fd800b8ce0715c7bd04955b3c5ec3212bdda0b21877a2db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/aarch64/crt_arch.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38241,22 +38549,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "4a2018637e5cf7dad14b85245589bbe11d7b37c75de49bfdc22c8c4a3217019b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/aarch64/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "be6e67c66f879ec8365f40305fe770c2e79bf5580b10981a4426715ae2aac9b4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/aarch64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a0498082a488e9095eff244c0c29e7fbbb009a9d3113e79f76e7b9c7c6e577f7",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -38276,190 +38568,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/arm/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d11f13d3158de74b3ede76bca36b1c0d0980c1e7b0ad40ae7dfd2f501cd8929",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e12cd16cc435054ce5659be74161ad2ad1b843a799abf8f07f378f087f61f424",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61ef448ccdc6b93b0f95530fe2d11406e3b7982afc2a570bdb94e674165a9829",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef1bbac411f83e85bbb36d7f2928d8e8d1be1000913f8d8a542c68b8e7450853",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1db198a8579c493cdee52e7ed82006b79b79f779f8eabf8cb2b9335a77bb76ad",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/ioctl_fix.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48e9008ab6e7c16acf356175877ea4aacc1d75b5b0482b47490ee14c62548bda",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "891ae65f491c6bd3d0f3b4385a20f5edf2966195938a6b42d2aca48dc46fba3f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3197ba1db9332d14c45339507efea1a5bff9353e607ef079ff10239e1d8171c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "112f0f8cf2e66ce167cef3a00f797a219cba946995b3d44cf4683f45af872114",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7e36c03ba27b497a278d97a2c4c85834ae1e9b4922392f4dc1911c8e320add39",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ddd398b475596f2a5e68fcdbbc6167c2bb0468ef489d42e9a82e6a40bb81fbaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efa3b140a8393cc7adbaabf8517a133ad510c9f6b94462353fdaa7c82816e3f2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28d1864a6b40b96507169994c897b5cfd959efee67a1d24e65a76a7fe8b97c83",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d1eada7e062170a942289d67f3026b04426aab668fd5efb4de5173e1ae38c58f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ec92d39052bb822d4b1339877b4b1b5335edeaaa5374a547849cd741a89bf12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "752bee19099570afdb08baeb751adb85004f93b3766097bea1e98e42c97dc371",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2bc1acdba532cedde1237378b0795e31cedbf3bbffec243a22f2e81eb927b70a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/arm/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "21bf5204b6b97bb5d03aace56d3d46a69cc0c40226a4482925d43b0a0ee3c4dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/generic/bits/dirent.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38473,38 +38581,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "1760adb5572357ae1fa93625bd501e975c1ba03fdb3f97fc4fce46398772ae7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3526dbb894665ab3b155a60d730c8527edce4fa597b3d5e51364a345d0cbdaeb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d92477205f3f6bf3e8076194417f39ec2aa3080cba089bb22042c2440660f500",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/io.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -38540,14 +38616,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/generic/bits/kd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "59be3e83a6f50b751687a23cc0ac0e6bc3c20426906cbe2f301fda86ea2e61e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/generic/bits/limits.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38564,39 +38632,7 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/generic/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8c4f9b4c9761c601a16f8c5c7586204ae4d2431a8cc60ce736adaf06ec35891e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/generic/bits/poll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/bits/reg.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
@@ -38636,14 +38672,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/generic/bits/soundcard.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e52f4a87168f60c2860afe01fa7cc3f235bd6f3c9be2e997597672332fb0e56e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/arch/generic/bits/stat.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -38676,3470 +38704,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/arch/generic/bits/vt.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "59da9715f2ef97be98dc151d0c990b5b29885d72b21fce3b0e8182ac06f17c6a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/generic/fp_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cc00b5d98b04209de8673a5c5244d7fac3f89d10f381394422abd8716f4a03fb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8f378ba38d89638201a62821cecdf5cd13e982129b58f22ded140f81faf7f4a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "99b39d94b60248c44422540b8ee4cbb852fe407f20fff7bb390912424e111e83",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "69cc447f65ab1327ab0a277148bf44db94b389e3daeb121544270841959dede9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/io.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "980f6fede4761e20b269323f368305d7879a81324eba0a4a4ad446e344a48c5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cf68647701c5ccf850d6f092f1dbd1460c2b25931699b423cd3b6a98081885f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48869831c0f6fdad38f1e91b8a19349ce9fa0380b196fcf384bb9bbff44b8d33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "df5d1e7d83a5a7831eee1fea369332086cd1993bd5ba29d2eb5dd717fcb3e8d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c167a4b8cbc299bfc3576821d1d1a1984d9e4fd7384c3c73a83a545f512054f3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e4c4aa30296ad014cfd263469a8bb51f09b5be63b21fc8a30784b09719b89c3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0db48c3d16df7d3a772667207657e4463335b0eaa6a197b98f76a995047754f7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aaaafc2696ab9befeabb073011546f962f7040e67d95c6bc200b9eb347fd36ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ddd398b475596f2a5e68fcdbbc6167c2bb0468ef489d42e9a82e6a40bb81fbaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ca07aaf8e249ae47d65bcb41999035fc3d0543b8304649ddff5fef7e490a315a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2e4a3c9aa70b1d45e99f9df3b74378136c69b9ec5f737e8a0502b1f4752141c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dd5fc7e89f51d70b424d56e815f221e236e3269a9c3a01ce8b99fdce4f876af8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ec92d39052bb822d4b1339877b4b1b5335edeaaa5374a547849cd741a89bf12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4100b8e48b5c08e94c72d5b14542620732703b3a7591f11998d79ab0b2fa03ac",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f1bfe007f0f60b60f377b6b1ca3099e87cfdb8fddeafcbd4696a2aadfefc55a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/i386/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8dcc0bf000cc86728657e5c038081066e2eec298147a520548cd540b571d72a3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa9d63dc83cdf2a907bbabbb4dcbedcdffa2826c3d3ecc809e3bd76dd5e87951",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b31620dcab18adbf8e715cfc63326698f93e76cb49710e169dd459f267b5277f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2b4e56586c0f2378efbcf292f769756e3929ff734c47158c8e041b31f5f9e69",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0e7f9732c198c36c6af4f4836c8a9079a8955f514fb7a39046f4881fe7eefb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c02ad8d1a0813c0261584394568d7b34a20938307715d1c227528462217926fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3a7ae3531bd38ec3c2f9952312c285ac6ec40da7e546f8a020fdda1706332df6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7facea73c7a7d8ab5738a30c1b361f6ba9f2c4897e5ca01ef467e1f6a3a31a84",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e928dbb7831f1282ce38318e41d835a86dbad7583ad009997ae85f1b0d4ed48",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6804a5a8c41d965b375c5e44de93c182450f5af52857fb589a1f685394d76ec3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "93b27bd69a02a4b7a4ac4861bc2e2e673ce9ac50cafe4bde2c3f749f5f7b18d9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "19b400f5f184aed1c9f254d16280cbcc7ce225d7447e3c21df22642a84ad0201",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f1c63defc4a2e6f7eba695620a80d5f7ee40d0b46878f204c08ecd5b5f5491ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/loongarch64/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3b318efc85c9db3e2309a927ee044ea58881e7ec1f8da4363d2599dd144fdeb5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "195ba9de032d04c48cd4f8e03667e734bee7c6c464b0e95dacd8d379d6f31237",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "135408279c1af65c5694f2b3dc3c2a9fec43de618007436fdab561cc56c01bd0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84d3ee1551ec37db2d8e84e2c4a57f3886e91d65119b3593662ad97a8d5508ba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "59e5b86571e34b2984a53b7e97400a7eef1bb9363b0abbcc573ecadefbcd4956",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3cb384d2afb4b7bb5bad419d0368553357bd073c3fc12f717c4f77251ed4611c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/poll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e764da4429b5758f22eede1a5d649588d6383750e846c7db5bb60ded0ae9be6e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b6ddacda5a0a53d309686c9eb846bdcba5a37b2d45484fe991630968923cd597",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf4d0e33f4859a4b612c95c8ae0dbd234ae2fa77236ecaa68f221d0570e763dc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "135001bd580eef5a2a2111723f9e1e0e19acd5f310f3488dc8529973a4c3ec76",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "632cc8bf7eaad963397c3e00eb691744438ca2ccdd4feab8f2d20d5cc0541542",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4e6d087dd8b23e5010fdafe0d4d3eb70b80970b2220c5b573d868cdebcbd83ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "107280677fb750543e01b2c58d262de5e24cfd92687208f82d9a632e0130cac7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cb5278898ab48316165ff633b28e4b895fba787ad6ddf9315a9f962e9f09df0e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4191e50249041cde8e21a8ba26c04f23a60c8001eabd167b304781865e4fb476",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c4bac8e4c9e13cb8e78c72e55d95b4b31489f9f8cfe25fdf9bab780892ddb59b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e8f8646f39d0c9870ff7cf7cfe462d5e40fcc45b3b175d70b00cb082a670dd46",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b2a4b27762fa890708470722959f3bd9b2726bb8fce9134cbbeedf2d7f6e28c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aec6c9b401e1cfd0650c10f916e1fd328494bf95c235b7f45326a790e45c0543",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/m68k/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c6765f973b28de6b228bff2cc4c564b5be92e398061e07987ca822d511ad0e6c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "27aca57f096e2fe7dffb9a6067a58656c8ee5c269b6cbde0ba83f9a3e1cc0286",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a29e4d04b9f22ff05bb46f75c317f8a93af1efb87ca987ae3d44e32f77679747",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3197ba1db9332d14c45339507efea1a5bff9353e607ef079ff10239e1d8171c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4f640fb7c99b9ae23a131e9b351e138e95848dd3d2d1f02077c7fa3cc1c5253",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "94784fb33fedca3f08d6667bd807cffe9aa0229ae0adaa543b4aed771b8105df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11c5eb101c6e1f03727b36dc9404fb9aa03dcb644f2cf317293efcb0b4de25d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d5c652aaa5017fc0ae11d45d6c071b0de2f35372bebfd32976f6645802d867b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4bdd09e13282bec714b4e610ef189c5930d626cfc41ad57f42a351dc4fd6b92a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9aaa1aeb099d0140e0520ed808462f9e0778dc7f21a8d3fd5b88fc0e305f1b25",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "baa927548f6575a4ce17f51d191b640f6b1570a75ca50450db3506cecd842349",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1bb9200ecdae4d3054ff423aa2f39e56570f2849e6dbf61ad16ea218c57cc5b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b6a12ad4da359d9bd552fdd635672cd5bc8be12fd888327c8c6a3769729e3949",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/microblaze/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "620bf2c4a44b0a36c61e2a58d932905da6042412cff0897ce0d1ecebcbff55f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "64dde0be677c9fc0a58cef9c721d980ec5c110296817a6b7350b2404e9f7fcc7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3cb3480e311314a4b9bb60382e245c3ada9dd4de8f368bf1127f102ad9971af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8bfc6e94af0fc24c77a15462165f1c056c0331c19099957465df6d3a8dd69040",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "79630b1746fc6a9a93b40f47c06f223cf7c2417a0e650f198e609669bd859e00",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b5565dd4ab23b8923f0c0ebeef36cae9ad6593b6812446c599dbefa3c932d398",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "640d0116a36d5911b568c71a5d0a692c1c30213147bf273c308e2787a923bfcc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7125a8b247c7f74c1770d9087341096218f66cd5d30081deb204b4194c6d787b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c4a812047c647e16bea6f619d7d232e7e4cdac1e89d859af27dac4de97e8c60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "07846f952baf0293cb7b1bad71cd1311fdd0d1ced0f6a3eff34336589f5acd97",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/poll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bec9beb8b894c3f4b279997a68ff06a94edc01ff2e8b738f37fe25800700c9f4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cb48afb01d665076529ad32d3812b169bc5cd5e05af77c9a7ec81c0dd9022f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fe984a8f269eaedb4a1defa79effe7445280f0d753f14969643bdcf432b48660",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/resource.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "555843f3222730a32f78147e370a9d1ca5cd03b406806d72765efe58d4c39757",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8cbc6960bae6490f596aecc939c2baecc85a21ac4583d5ee1e1a9192829d783",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ded55f76102566d9e4dc70f469a80302e727f1397cb619a3ea80baf3eebbfa4a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f009e7815c80be737e365e067c6779650ad3cda77d99e3f6bc52be895f8757eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d9379e918eb16d0e59c20ad90d1e018303e50894623c87b8f838d20118307d18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e3dd20c79191f0d1796a97afd3ee0dd95f1c43213033cc11984d9a4ae1fbd1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb448ade27078ba6c423c6e17834a4e76d894a582b11c6e84b4967f119b2741e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/statfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "866b5db8fddcf67dd0e8bad4900c9430fb0ad6177fef39be45fa98e3c8f7ec4d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b7be028c3eb942433a711d6d9d86bbbdebe14c5c09da82bdeaedcd073ff79687",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3b65d6a34f5ff924306055a12cb9b6d3e8132c369b156853d07498228354a82e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b3ff8b12bc5a249516e885803a3b23800a1602ab4e5191dc8e824ffc7f0fc501",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f081208a13f9c0e92f82309ba4ea5d677b06116909d49e811c06722297fface",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "561801f9f0a2259159420f336921ba4725320e5b47f434f93f8dbd7e7d1f9402",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "75359af35d76a48404dbbc148ce0a21991f6c82b8062c62245a53c848e2f1a36",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0831c1ed6ff09b7d3ceb648ebcf40d3dc1bfa101877d1b14e1ec807cd4d6a45",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "81258de42dc35fb3318064045c387e88a90c955821b51a15af34ef25c9a85e13",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cff95af28c2c840344dd779c01ed2c68e7cdbadac544aaff9c4287bab257111",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f7e6fca691e0f3376f3bb9f440f7e56433646c5ac958521b7c1924214702e1d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9791a7af25e82090c3235c3a6d11b3ec9cb7d0b0e85f1fc6f83c944bc4c7ded",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8bfc6e94af0fc24c77a15462165f1c056c0331c19099957465df6d3a8dd69040",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0120822db091ca064fc893a137fe9c8074fed4ee8e3daec7e959965fb71a3b8d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28d738303d9245bd29152519827faf1b62acbe650d79a283c02f8def48791a43",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0e7f9732c198c36c6af4f4836c8a9079a8955f514fb7a39046f4881fe7eefb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fddaed7bb17e97de6d82e09ccac8cfd9d79cf58400cd73b29cdeac3b2c8638fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ee3034aca683cf201d707a609c11a3e029e93111d413e5cede3dd3f35691de7a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da7144992d6a2d519c0882f507f277749f407f7b608ce6ae8f7035e36621a95a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c4a812047c647e16bea6f619d7d232e7e4cdac1e89d859af27dac4de97e8c60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/poll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bec9beb8b894c3f4b279997a68ff06a94edc01ff2e8b738f37fe25800700c9f4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cb48afb01d665076529ad32d3812b169bc5cd5e05af77c9a7ec81c0dd9022f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cdc85ab6cae5a42c6b0f94b33d6bce5f7554aae8a47d398021551d50f5b99d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/resource.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "555843f3222730a32f78147e370a9d1ca5cd03b406806d72765efe58d4c39757",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e0bfcbdd9e8677fa80cc05ef59edd7e2c85b2b5e0fb3d32a0e4bc32c1c5a839",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e79f7be0bf00a05bfc90a0a41696c469471081be6e00aabd89726d6f6384b79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cf0d72b9e44a62a70b7d53a6cd2edb01e998e5b10bba7527c5c3c013bddcb61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ebe1303dc6c6d9b774e33916826793ddad9197408c4d83a5c1b888dbe2b6dd1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/statfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "866b5db8fddcf67dd0e8bad4900c9430fb0ad6177fef39be45fa98e3c8f7ec4d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6fdf8dbe97ac3b0de5d06ccbb043f6ffd327d7cb3b30f20e467fa4fbea593cda",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3b65d6a34f5ff924306055a12cb9b6d3e8132c369b156853d07498228354a82e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e295cc3773119360b55479b2542b3709354f75a261cdbcc4ace31328e00928a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "550f9581c4b2c25198d6f62f9f137cc6d1beb6725467e1f582ba65fc89384d56",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4a67f48e88f80cf38d6027e5efcf73ec63c2e60a7632a888be73b30efcf33ef8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c1b595966f3f29d1c3436cae1f1d19adc56b01589302230a951d2157b483a681",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1f5020f1e8d50ca12cbb84d9e1ed8fce8c31b56ca7963c9611e8177cbd8bdeb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "002bb8fc0c2c6cb22bfa33911aa8a6db67fde69cf29313ae338f7cd4e4c81840",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mips64/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "12b09d3173820324ef5c4d0807aff7d9304cec82db8885dbf97aea60cc215ef0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c5c581d4e1b768571df65eb41c8900bb06736739f7aeb700e174454c2c0e965",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3cb3480e311314a4b9bb60382e245c3ada9dd4de8f368bf1127f102ad9971af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8bfc6e94af0fc24c77a15462165f1c056c0331c19099957465df6d3a8dd69040",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "79630b1746fc6a9a93b40f47c06f223cf7c2417a0e650f198e609669bd859e00",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b5565dd4ab23b8923f0c0ebeef36cae9ad6593b6812446c599dbefa3c932d398",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0e7f9732c198c36c6af4f4836c8a9079a8955f514fb7a39046f4881fe7eefb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fddaed7bb17e97de6d82e09ccac8cfd9d79cf58400cd73b29cdeac3b2c8638fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7125a8b247c7f74c1770d9087341096218f66cd5d30081deb204b4194c6d787b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c4a812047c647e16bea6f619d7d232e7e4cdac1e89d859af27dac4de97e8c60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "07846f952baf0293cb7b1bad71cd1311fdd0d1ced0f6a3eff34336589f5acd97",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/poll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bec9beb8b894c3f4b279997a68ff06a94edc01ff2e8b738f37fe25800700c9f4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cb48afb01d665076529ad32d3812b169bc5cd5e05af77c9a7ec81c0dd9022f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cdc85ab6cae5a42c6b0f94b33d6bce5f7554aae8a47d398021551d50f5b99d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/resource.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "555843f3222730a32f78147e370a9d1ca5cd03b406806d72765efe58d4c39757",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8cbc6960bae6490f596aecc939c2baecc85a21ac4583d5ee1e1a9192829d783",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e0bfcbdd9e8677fa80cc05ef59edd7e2c85b2b5e0fb3d32a0e4bc32c1c5a839",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f009e7815c80be737e365e067c6779650ad3cda77d99e3f6bc52be895f8757eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e79f7be0bf00a05bfc90a0a41696c469471081be6e00aabd89726d6f6384b79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e3dd20c79191f0d1796a97afd3ee0dd95f1c43213033cc11984d9a4ae1fbd1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e575b0827d80f4536f5dab27232019c442f574da962db2b62409d3dec23fec4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/statfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "866b5db8fddcf67dd0e8bad4900c9430fb0ad6177fef39be45fa98e3c8f7ec4d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3940520f364381cd5d0486533440a057775ea8235eafe585c4fdf971818133a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3b65d6a34f5ff924306055a12cb9b6d3e8132c369b156853d07498228354a82e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e295cc3773119360b55479b2542b3709354f75a261cdbcc4ace31328e00928a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a48573ad41099321404a8981a391586db95c4c083a9179c0276f6d56f2ed562",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "561801f9f0a2259159420f336921ba4725320e5b47f434f93f8dbd7e7d1f9402",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "60d4a686de4439f57eb3d4ae3ad0358642d2576771fa4ef9df83acdfff5c4e8f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1f5020f1e8d50ca12cbb84d9e1ed8fce8c31b56ca7963c9611e8177cbd8bdeb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e4f017d273b98899695a220c05f8d541c50456f3ebed6b38059b95b858258b59",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/mipsn32/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b8f393f588a763d4126e677bffd0b2789006137d3933911dac6e2dff3edb50c5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d8478bbd41d287b2b76e3a744f385bc34c815fdec2adfbce41451a647a997f5f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac48fa83436094c4411345a34ba4f0bf7a62e0c1cfd53a1698bcec28dc0e123d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e4e9ac7351b7ceefc7bb77fcbac7c768b4235484bbb267830780cd77be0715cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "135001bd580eef5a2a2111723f9e1e0e19acd5f310f3488dc8529973a4c3ec76",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d691bd8abbec8e624d296778ed6f462ff32a6d5c289a37e5c63e369258ea389",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b9e6ba44a676e6a4e7c2bde2d86a5f3b2830ed8c4a0c54a578666239590683c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "76f7aaa3c9ffdda544f02b70ab5f159ff585f530c03a63541feea674fdeb4c18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2caf10450662198aefe8e0a52989967f3eba4561a257354de0f05ff153b36434",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2b5486125c0270dd5a6329be5705c8a4ec20d3f9cec49d098b553eb9d5a08d2c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "baa927548f6575a4ce17f51d191b640f6b1570a75ca50450db3506cecd842349",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3a87bf4f9dd54f5e92159c1e5f505c837440f523d7bc22e27084b84b7c8a0bfe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac21017ae3b1c7a0eb4902f4c062a7e0dbb356c3969e5431c058944f9f14cdd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/or1k/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1f5c442209e6d469b614fb828a1e0eab525321ab39f93e7b0d76816c3ba0b565",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68caff47ee83951fd1375c090ecb1bbf4aa31b35708c7acbefd2a451e72a6508",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a1fa51128e3dc79fb723fb60de4754c4885685ee81fb33e92bad556ce4d54dc3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c38fe2c4264d4cfdd597ee8f64afe25476959d936d5a4fa06d82dff478426352",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e4a7466959f3a81f2ae4f3f70a90d50a0e7a85d9f31db375af88a27fe7024d1e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "56f9bda143cca6e34999897b73cb2c3c3e857c7ce5b4a68fc8b656e6a941693c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d26066a940089207cbe32afdc4ee2514e3cae7d4f9bc14d033c6b308f5aa2ca1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e75391c0406fb4988b597779e6a47dcdd125f075e8f2cfb12fd7719892cdb0a9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63c1c9cf9979359e4db0dd24c9cd58886e3513dfca0c997f61baab549fcda07b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "544c45d96989c2f8aceac53f557c6b002b67c9709a02b823a7779c09da6c9681",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b275e73429937689c40513c4a05afdb8ba2e50e2f5ca3285dcb323682895a2b0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f98508005f93563158f3f257bc1d13a19ddacf2a4a3e336dbc5bacfabb18936e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0bcc27e904d2273abc4a2e70d2c4cd44b98f34523a89150bb6645792b0f9875b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f6486c016a667a4b7986b6f7a0682385b373ea4bcfe4d1743f8aa9dc9cb74bd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f788f58e3f55d929f3bc666fc052f876146b2f89981ec17876ad11b988ad8416",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d42ca1792f9d35ce7ace6167b7a43820dff7a0f52bb075822bb8c6d77bfbbe6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "992c3e16060b5723279a283ffa8611890e92fc4cf031e8eecaf1de8c657a0259",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7c06e8da65e143e1484b511aa8fad42fdb5b3fb4614c851f3cd8a5863b788ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "db3e9eea4493056d7a96f3958dda826650f1c17b1da2270a01fa9def294b39b7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9b337ef5f1887d0704d17465c413e7e1f62c924831da1fa6a73aa08faf7b2e2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2263c09988af93a6b5211ab7096c32f874f6a999513fb678f93c895e6e559a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a844b76c4cdb440045a5b1afb1da29477d4dea3d29ff46037bc418dec37aaeec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a387bf9b514dfd8aa517e44a395169e559e0a5339d3113c6e56bad441baad41d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "398cfa2e21e1b5a5163c950f2b82a83a26f6ecb0af3ab75c3b04b1177763cee1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c151f6d2d6c61051fb7808f674c4b26d1149c05a315ff234e81d1a49f5ea167",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ee37e1c4dfac668c77d11333db90ca8398238da742195ac979d7d55cf1ede85e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d959e817c4e0797cabbd349f4a0ba221b30acfff8bcbf3dec20939208aa0d139",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3c822227452577dfd6799caf6d9b3314805711a1a721e1738ec6bb9ee66c051",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c38fe2c4264d4cfdd597ee8f64afe25476959d936d5a4fa06d82dff478426352",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "74243c7163c602a5235d37ccff0e11d852f750f12f53367df03a5e5f658e5d27",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2d6ad208871bac638c94605072438aac7a90d49dd7b2d2c0dc989eff0f33b481",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d26066a940089207cbe32afdc4ee2514e3cae7d4f9bc14d033c6b308f5aa2ca1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d20077b733365b6ccd952a98078f7f9f029f94a9dc79d5079594d1850fec1338",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63c1c9cf9979359e4db0dd24c9cd58886e3513dfca0c997f61baab549fcda07b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "544c45d96989c2f8aceac53f557c6b002b67c9709a02b823a7779c09da6c9681",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f98508005f93563158f3f257bc1d13a19ddacf2a4a3e336dbc5bacfabb18936e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c2ee99c96ea8dd6cfaf5c89a4a78069a48f32f2a147a5f3ee6b8cd2738ba6017",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d5cb541f2f64f2cbd11b5907b0fac4dfb259ef5d59f30dfe786c0bf453eff88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c6c1d7325c1b0a135871824eec1d311acee9d0f2b4dfc1dd2f6c5704cc70126e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cd8145c5265023ddafdda816961ba186d119fcbf34889111359fc3449b98c72f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "78e7e415aed0f4570f62c5f7c16f6b2a9497cba9d2450ca37dcf0acf19d78a11",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0c53cc805ccb615da66d1ac458c6b67fc4019830999f0888d8590e5d76ae6b4d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9b337ef5f1887d0704d17465c413e7e1f62c924831da1fa6a73aa08faf7b2e2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c4ad3c491b2fddb8767211d10da2287d2a084659a81ff13b671de4d5583ccab0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "367c90c83052df07be945dd114dcb8e2b244967413bf4aeab1bba281ca5f2fec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a95e634bb3d12fb3c0790ec213f8d3a8b1ea50ec5a19d21152416ad11a1010e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7e6a7bee9d32b661e12dcebc6a81291cbb1f4e9202fdadd57dcf29ca536c7a53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "33e3cf0d0c301f183bdc8794b1ac3a09fca4a49aff66bd2fc7383289539f90cb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/powerpc64/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "267d10ff0b2248442015c61998ab6153da326cbcf629308e8028106d02b6a47a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "980cd360a91606ec751d7db67d19a474d3c2317ae80c99eeae728c18ee6b5302",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "145a25df6f2100b0d7e5685858a3233265711f277cfdfb6d9b3c47061a8e0a81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f978efd742503ed8c3db431827a95ef8e47308f5f745fa4a6c75b62cbd3a3331",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0e7f9732c198c36c6af4f4836c8a9079a8955f514fb7a39046f4881fe7eefb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3197ba1db9332d14c45339507efea1a5bff9353e607ef079ff10239e1d8171c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ba4d9ba04db86677e760db45022e23a14244a804a5e28c9d4a5cf8199561e280",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84f578a5e44d0de09ed1f526407b4ea99680e22d0264d0687f02725d08d52b82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2575352b7991c33cf72341353ddf4f55761c68eb3d46a7963aa6f4a2c70805f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fe7b8310adf4e69268591dbd8dd260b6f7dae8a027f2609b2300305bc460b863",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a90cab50583cb1067d40f60c03574c12f1636364da35747cfc17ca46ab9d008",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d998789c799cc499debe0d4b04ab38e8ec3df91bac8fe11eceaa303e18cbe7a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a20b2bc858282dd6b0c4f381483bf6fe0b0577be394503c893d15a5f4d447418",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61c4634514603e57d56009b6892a3de8b4f7cf007fc2bb09ac8fa85382254a3a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv32/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d8c79cf9dd6c28b22dcb44d096f43f32993c9139ac59c0a9bd99fd8607ccaadc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "801fea442f77a513bfd9bbd4e97f2de351119db3a089c541978d9b96b0c5d37f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42579e79043e59c14997350a49ef22d5edd41cf39ef21bb405c72297b5a0268d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f978efd742503ed8c3db431827a95ef8e47308f5f745fa4a6c75b62cbd3a3331",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0e7f9732c198c36c6af4f4836c8a9079a8955f514fb7a39046f4881fe7eefb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5f883846898fd0379844bc6db9082a7888fa8ab36c81c46b5b40fabf348961f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b62ee8535e28366fbe421a0902eaf331fc44bb2c8a31d17e8ef46c6ad0239b81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "60d25e2a66b17577b2f436f6db603ac70ab3d9623f7be2aa1b4ed24043cd3ffd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a90cab50583cb1067d40f60c03574c12f1636364da35747cfc17ca46ab9d008",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d998789c799cc499debe0d4b04ab38e8ec3df91bac8fe11eceaa303e18cbe7a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "be6e67c66f879ec8365f40305fe770c2e79bf5580b10981a4426715ae2aac9b4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a20b2bc858282dd6b0c4f381483bf6fe0b0577be394503c893d15a5f4d447418",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11a04ba4466e3e7af8b1ef381d80eceb0ec6f1d6bf06637cdc72af616b9b494e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/riscv64/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aee79388b17a87c75c99491d937967fae8fbbd8bcea081503be86118e27562a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7266d366e7626e5ae31941a4200fd919e9b168309aad244290991bdf369c7fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0fb609b69f89c464df750dd0b57e25278ef1b9baa59c1063bfb61aa1020691ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e7bcc6d6cc70e87197811e81460afcffd896de2a31c9aab93db8b9e2a06428cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d4522b0e4b80959408eb8faf686892ae25b6cc17ea407a246759e83fc8fe18e8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "948ad75e9afe991a97b1ebde7d38c77e1b6d53828759610500e4f884577c3bfd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "153430fd91ee789e5d2d008d9077a55cc6dcf9b3ec5c1004924035d78f34c176",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/ioctl_fix.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48e9008ab6e7c16acf356175877ea4aacc1d75b5b0482b47490ee14c62548bda",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cf68647701c5ccf850d6f092f1dbd1460c2b25931699b423cd3b6a98081885f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/link.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9255cb063783a12d3b37f6ac636dc6bc582f768e6793315d9a9ec11260c89531",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4b340d40c15886d6601470de976033327f8ae60eb0ba3d16180e670b39bd52b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4f640fb7c99b9ae23a131e9b351e138e95848dd3d2d1f02077c7fa3cc1c5253",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c30471467517850ba651d6dd10aa46a040200166c1b6cb666ff89f86ba67d952",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "667867b840b421d15093847320ed5e1cc3d67966d4b4b712b1c5c8053297b2d6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/statfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4fe416ea851982eeab8b453171a09d5b4aa0e25a6a85e74410325a03d059b978",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf69187953d55ca70e396705f5453050ce42fabf9d21ef48c803cd392d0148e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6021813ab5fcdd7240632cedbf157dfba683b9b611f2e1ccb04b63e83cb64be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "33e1710a590811d2adf96fa900b65e4ea96574032ce57874e58f344e45253316",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d00c8533f8fcc293ef6fbd9162e7da5a2b79add3af145a196c7ac85d94b3654",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e9dfb522eaa230f660fbbce6513fe202d4ed0661a7b8c4d9da24d04605c79d8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "97f0a35801bf67334e6fabb607f38f8fa20adfb182f86f25aa7db63e3f959f96",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/s390x/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "02312cad4045e2b962c5e82f598d9ff0f4ac257c1910835e7d863383a83ddad4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/arch.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3706774179e73134264d57a86232fcfd3413389007ef9b7cbe9c5cd31216373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aec76b87948601de6d212caaeac74bbfbecd1f168ee6c4758809e7bd91b871d1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e733c9efe80fb575fe7be471beb36d79ee00441c0b8dfa749d4fdebfb4795b2f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e5ee1234c28c5a8ba6b00e5565ebe401edcdb3d20e7f2797e490e54f32e27175",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbde7e32f07c8601516ad291b61a26264c77069c93026ab927eb91771964cfd7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/hwcap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e1485251f36987f5a77fbc4cad94b3c4676a7dc47b857db68ea33e6b3befc218",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6de9bad6625b032b7384923fdac6b24267ff4a3df08c6903011be9174aa8d62e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/ipcstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6595d5feb360d325da39fb18aa73bad3fbfe4eba529aa3e115f7eacc2a840f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cf68647701c5ccf850d6f092f1dbd1460c2b25931699b423cd3b6a98081885f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b08f01caae20aa29654181a2b83539b2bbbaa5c69d53903fcaa176691cbad0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6700ab94b72bcb49b7a35a39b36d35a7e3a6e58580c500d82283dcc0a43390e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3197ba1db9332d14c45339507efea1a5bff9353e607ef079ff10239e1d8171c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "111a8641f3b8c7c0208c18fcdd1b74584c7f67cb65228fdc405a140ca823431d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0d593507d39f76fb9c0094f6fc053fef9d5768560f6e26d15ebe7a42e9047e1c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d75b99dfa6e0e932d3a047bd42c9b96c96c0da26240d0f8a0740466fc991153",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ddd398b475596f2a5e68fcdbbc6167c2bb0468ef489d42e9a82e6a40bb81fbaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5fc7a45ad013c74d1849a3935de0ea0febc69d4ff6328c1b4861dc66bbd50dcb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c8deb6c9f6a32e4bc08aec78b53d743a93b954accc907f45d1c138bef2ea526",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5f213fa47ac056db6daea21b08bf1cb44a5b8f63ecd71f6402f218a502a40d79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48875838ee95ba9ca4d8298c947b6e168ad9a4f84a1030886fad7e774cda1b23",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ec92d39052bb822d4b1339877b4b1b5335edeaaa5374a547849cd741a89bf12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6c761920f9642dde50f2ade1db953419c2b052631069ecd1c502d494b10edee3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "77b841cb8261f800bafcfa28ea3774597639ceec65cce6775aa5c944320b36dc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/sh/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "568301e13df59c525851996438eb52e55dc68fc8c0ea28bf0c303b681439735a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f6db976cf25e5f6e28182169c623903420f9a3b39b6da5b83101a01b2c7d0230",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7b0c6c383819ff5aad348ed8131f825199e8c45112322fbdf5edadb2c236de2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac6636322cbc3ed8f7a92daab02bb49286d8189125a1c08f496721e3710193eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "406af96f4d9e50a1191873aa00f3d4c4918065cc791492fad93bdc45640dde79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de4738aaf93195145476108f536039c28dc572aa34ccf3ce099142266f9007df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/io.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "980f6fede4761e20b269323f368305d7879a81324eba0a4a4ad446e344a48c5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/ioctl_fix.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "27ae9669913d348ba770988935f48d5b946cf99ab69c2df7bf55d29a63574423",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1e28622be1c66746d8583631285e2f54531306492b8cb44e00475140559e0c32",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cf68647701c5ccf850d6f092f1dbd1460c2b25931699b423cd3b6a98081885f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48869831c0f6fdad38f1e91b8a19349ce9fa0380b196fcf384bb9bbff44b8d33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bdbf9c4602883b17aec0327e161a1a4d36f2df64789c85e48ce330780dfdecd9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4c6ba3d3f4c468fe975592d3468d41695437fb7cc7a6957af6ef88578c11513",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "264f7fa96d77808c80c34e8d2527c1f2f41e5f35d358fceafd6c525f65839420",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "55a33a75477620d54fe90ff5bf9047496b1af37a5cac8c941a6c27e507c28cb8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d5436951a85ff2798da0c2bd9fe86e6058d30c64bf0f40f9d71af2c5878083bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/shm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4840ce407ade966ee34779cef2e60837f61bd0b58b2537d164cbbcac11fde691",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d5e7714ba44f31f2a52c331e254aa19553d21d3367bb16815559eb22b58e1b7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/socket.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9c4926eee0f24b08dc72a616fede3cf914715650f8ca048dc6a1afb78cb8de51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9a5a8a09b887e3037c7d2562716a86c2cd7b06d4c178730f701447e4e83071bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/statfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "14b834e5deab3ef04219d041e975e2c63c410d1cf1200e26b4d7c8329dc6ea2b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6b19b8c098082ee10311cbd33e4a772e932c6998ec473adee34ffd96026940f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d61030d091d6e283b5499f0d2a6af29eaa62575ef8f6e7a546c15e1a8353e2c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3dceeb0644f95a5003201705ac78ba869b595c729d868d56f4fd84824a857a7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42e3904f80c1a6b56b0df08a09428ebc30115e7b5916ee401d1cee08c0cacbbb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f665c811e90d690a66a933661f3ec4d1947519adebb774dfe3f0c0e0fa900960",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b10ce71d506b4fd06a0521907670cd787f9136d628016583d335a43d61218ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "432af2ac568cadb1f6d43b811e1c8b3fef4525bde11397486e2c31a828f7cea4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x32/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cfdc5cec5fa4c847b34f94fea44fd247b518c626aceb6e08b00caab4168f22ea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/atomic_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61825911e6ff432180829f3fa51abbcd41618b05fdc746006901c69f2df41306",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/alltypes.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3178d6112df2fac8d2ad0331ea956a9161ca38780f1e01569a97a4d76a40071e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/fenv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "406af96f4d9e50a1191873aa00f3d4c4918065cc791492fad93bdc45640dde79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/float.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de4738aaf93195145476108f536039c28dc572aa34ccf3ce099142266f9007df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/io.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "980f6fede4761e20b269323f368305d7879a81324eba0a4a4ad446e344a48c5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/limits.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cf68647701c5ccf850d6f092f1dbd1460c2b25931699b423cd3b6a98081885f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/mman.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48869831c0f6fdad38f1e91b8a19349ce9fa0380b196fcf384bb9bbff44b8d33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4c6ba3d3f4c468fe975592d3468d41695437fb7cc7a6957af6ef88578c11513",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "264f7fa96d77808c80c34e8d2527c1f2f41e5f35d358fceafd6c525f65839420",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/sem.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "06fb35f5f6ea72aa944795600d8bdf05a59b501f13964cef6f925f52e602c5a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/setjmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6a786d963fa17e3f14986b63860c07d3872061f4e964c3d899214888a1f70df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1098e67c7d7825201f016ff846cb33b32daa7498d282a04d22c559d6ea22d098",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/stat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8cc7bb3263e979b7fc3bacd39a9ce5fcb33d07806944f05b1be977d97780e462",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/syscall.h.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c29e9cb15ff393eda50c320a6d96bb1132191251f8e079148a0646165bb8cabd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/bits/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d61030d091d6e283b5499f0d2a6af29eaa62575ef8f6e7a546c15e1a8353e2c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/crt_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3dceeb0644f95a5003201705ac78ba869b595c729d868d56f4fd84824a857a7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42e3904f80c1a6b56b0df08a09428ebc30115e7b5916ee401d1cee08c0cacbbb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/kstat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c1fca63f2aeb85bfa2343d42e73a80c8ce42c84f4dbfacaed43864da5f2bb85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/pthread_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab543ac8565c4fdde08e88a6fb8f7e60c5724dd32ede100eef75add2ce46ea2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/reloc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6ed9364cb135d9dd13f626691b713f73e6bb3d114121aff99dd26f389381925b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/arch/x86_64/syscall_arch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11982f6196c27975d0ab0c55e0810eaf8ff7abcf4d4166fc06917b30d025f306",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/__xstat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bf72a1c4b149dfef04211c4236ed97698b9be17964226d5665cdc2425e59b148",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/adjtime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d9647f8a026ecb24572411cda68d3c6904f323c0532c44839cd589cf7b5decda",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/adjtimex_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c41a727cd13c83124befc25b19016a863f0d02a2eace4b6013850a6b60c0220",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/aio_suspend_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0176c2b573ce053d835f79bd2e5c7620c27529573e98090ffbb41b8a81eae3eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/clock_adjtime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "328bf604d1ff25d8e5a3305d815c6a5944ed018a28a5962fd87fc9cafbca0fee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/clock_getres_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a936338a118d7bca8fc5e7f7dbcd4ea1592531848c0ee645782663816f9f341",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/clock_gettime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da16d06876ad967cdc0eef5142c7dc9cf6626b4c18636b1ffb66f9bec4043157",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/clock_nanosleep_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e615c3e152cc535d2193c6488817cb8a7f9b340d048e09269f63596361fcba70",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/clock_settime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0db58067cb2a311c339ce89e646135e54f2a6d78d3d3c60790717d379ced3d12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/cnd_timedwait_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "763a13bf63a01215e020767a253af42af78e9280edf71f66f9ee9ed2f146ce71",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/ctime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "115a757ced23097ab47de4ce3bf5bbd351f538093d7ff04da29832f1983a42ad",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/ctime32_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90e62153463f41284765f46378807ed2b5bf4bf87b5425664358ede7c0c0f8e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/difftime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f9a50df1abccf3c127fdf6eecbe5c55b6f518b217db212c5c21530d1f1cac707",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/fstat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cdeb63d91c7f9f37ffa38b73d5080e2b96d7456c95614b2715205f1bfe38bcd3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/fstatat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fa2941f6cb50cc3d55edefd236f97d58fc515c846b953a66f62097b537899164",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/ftime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa57d729f81fc03b3de2f584c2b65fc1c2da43275b3ce2b1145c9b6b7664daf1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/futimens_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d7901cbb48190e024832d0d0a4f135faf92d1f5203fe001f23cd006109ffe95",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/futimes_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a9dc6b817d9df5ff943e902c2d38168dc9f910e86d34eef9e6f601f0d390e2e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/futimesat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dfc9960c0ff8e94ac016bd17995d271744ded03febead2d949f86c3ac1c0dacf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/getitimer_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bb2b5fffb3dc23f5f1c42db49ff7c0273fed751b9640f0c1ac82a654c85b0ef9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/getrusage_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5d7a72bab91caa991d56e749a39e15b54ca77669e9de3aa1c793776bd717515e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/gettimeofday_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c335ce504bdb9e475319210809f616bfc30c579c12f63aea9ec686300069e22",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/gmtime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "412c19b6f0fb97d683863a1aac24bf371cff5fe711ea955b2cd1ad6e5364b6ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/gmtime32_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e45a339588f139c58de006460e914356e51b8cc95dc8cf24ba5cfc448a2582e3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/localtime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "197c88b7871ad11a3ce5dd608eb44cc4b1e1ac72155357f75958086270d6abc5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/localtime32_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fe9ab0535b23f291e3d56cf80a57a4d92f7e6c8f3d3b440ad678cd08b5cce19a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/lstat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b3798bcada47cb9052324c89585d73045454a39622cde3bf98b26573b20b0ae3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/lutimes_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d09efca021585ac9dd5bb029b7c6489ffcbbd2a2f3d4d621b4afef31e74c6494",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/mktime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6752e10f569dbc576242fec4d12ae8d2a5edd52d848a23fc0d741f631804f4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/mq_timedreceive_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6f7da5e44eed6b8f79da57292e2ab9b2587100394a75828374c60e13917c5fb1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/mq_timedsend_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3a45f9df704835ed4a4559c7fb5d54f87265bc58f3af2c03d2bac4791c11b49",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/mtx_timedlock_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "47d7fdf57c34233afa69aa52b375881ac9a16b64e137b74318c0b8ed176d8b89",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/nanosleep_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ba29427372b487af1c5e8a7089bf07f52035d6307408121d986415f016e36b55",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/ppoll_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a83e6460e95d33bb52188ba1440b07be71f95caeae6a5124f7f6ef5cac77e1e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pselect_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7097f44996a57c27bacee95c10d004ba5a4e09a9a6ced5e375ce729e698a9147",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pthread_cond_timedwait_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e7eb4fdfaa50e5341c2e4053d6911540dad56d73e5de35ec77fc4b50d9ccbc3b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pthread_mutex_timedlock_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "40ce5d2771ef9ea7df84323b6ce68842b460db6fbba91f15c727759c5f15880f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pthread_rwlock_timedrdlock_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "69886a742c94c5a65e0fd9eed3b276621c666036b1590e37ca788ff66dec8b91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pthread_rwlock_timedwrlock_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a982572a8d25e2aef6c106b9d121eb75d9ce55910117348918a6256dde790376",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/pthread_timedjoin_np_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e50ed49d6424b44e26aebf5768b055dbc9b1bb9685adbf8c7af6fa1f04fb2a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/recvmmsg_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cce6e472ce6e7fa68d8861e2d0182541c4e47409171ba2f847efeca7c8de04e2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/sched_rr_get_interval_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbef9dcc61abb94ff51e3cb4871ff5f1780f0ddcfddbc5e21e25d45e9b0d7a31",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/select_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fdfbd432d147beedbfdb26ad10107ea4945964cb99641153be3d6f44ec3ffd08",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/sem_timedwait_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f747ce6f7302160a0cf2e041c1e7c118af8a11d7d8ab2b5baf7cc8a4b156cff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/semtimedop_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ece982ad8b1cead366e777df08e2ac014f729ab4915f4c16c9c628d928839c7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/setitimer_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90063da0c0f0cc761a65ee1b72d29826ec1364b79430d32109a26bd8c5cc1ed6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/settimeofday_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "83255028634bec38988a6c7c394048f191bc11a9fa6a6df4d0315984b162cc56",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/sigtimedwait_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "122de363424827c0b382afcc70b59d38802887e5f8363ec9a1a68f89f0464e02",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/stat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b37f071c7d5cc81c7528c5e3360fbcdfa0a5003007cab0070dfce91d9cd6f29f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/stime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c77368b11f9459891d686d4752d07194b7de04abd5f8c8d71ec3517e4cec923e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/thrd_sleep_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "db9f4abf7ae13319676beb41e7c0202229474e182341d36fca67198b22ab58d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8650b08c55a12d2a251f117e3b2e6e1cab866f24f294a4a1f2b1710f443854d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/time32.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5313ada45085bc06420685b0781194c9dccba4e02a3d70a4035cab1f6f8d14c1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/time32gm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2008e123d376ab38c80afa08e0f5c8dc3fd72e666e15a415e0cecb50b1a39152",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/timer_gettime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b75b8830afd6e55110e9d08b343cab46a6268e186fd1e31e13e068eeab538ba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/timer_settime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6037e6c2235866b6365d238f933501ec6ca0e27a0d43e31b72b7dc8696a1ed8f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/timerfd_gettime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1eed5c5847046cb34ff1b117de91d31b877f82be511341c0598a24ce47993a8a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/timerfd_settime32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "95d6052acb26f693e709fe4c994345ee37d3fee511b3ccbaac89918651f5707e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/timespec_get_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8148f80ae74fc6511114878a05f460ca8b8ff01188c37f35b0da047993350c78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/utime_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d7f1a461c2181566a722021f746eaeac0d4b3f85e524ad9ece10000c604f861e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/utimensat_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7372333f17541988f17aacaccb16e58f1a07642a35657a8ec4cb9985e6a1e99c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/utimes_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e2d68dcc570adb2eaa190d5a461f06f18bc8f8af563d0a6554a86bf1b2c1284",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/wait3_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6954606e7ff5e3cd3516506ca694fbad941fb0517c632dd677209f3994810e6b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/compat/time32/wait4_time32.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b18f3508d1b99cf9ace37b5d39f1eea089426e01c7e61429a7f3a23218b627c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/configure": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa6574f8049f80f3b0a464bc20ab377a57bc0d3464478ac7ccb500f10002cd78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/Scrt1.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3927b1f5417e5a513a404dc30d218616f0a3f6dc5631a7017417e67fddb44bcd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/crt/aarch64/crti.s": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -42156,22 +38720,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/crt/arm/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "02664ecdfdf065b55720401a47287f5c9e41b8553db04c17f3d5850e3ca35737",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/arm/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ffe964f048b6c7008d3e92f252dda2343636fcfd0636ffae3ba603e2ddf654bb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/crt/crt1.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -42180,243 +38728,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/crt/crti.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/crtn.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/i386/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bff350e32aa617bb4695b2f97abba2dd417a1239d106af646fb68dce81b3b1fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/i386/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c46f98626364ff7e48ad7dcbb1f329d65f5e199b4b090356692317bba391b530",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/microblaze/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f65622d29d5223c4cc22ba2ba3c451a7bb6ff3cd7f45d83fa7e3495f0da7a8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/microblaze/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b1dfffdbfed2aef2590ad4b664fda6762a82309c00df98be1911ef8d744d5ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mips/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "886837c0ce0f412fd50d38a9ca5fe73643a68567c7ebc871c3680be65a02a886",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mips/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5042c104a19d872500a50ffa14ff6a57b0f49d6b44c45b144a6c1684c3902e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mips64/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cefd8b66e4ded1f91ff8fd271b205208af6d0e5a687300ed97d41cac7c26ef18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mips64/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f87628e29b0152fed82e8ca5efe0af5fa6d084bc380d40ad44d8d66858af6eb7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mipsn32/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0204eecf381104944de07f7f50cd3f649dd0a5f786fd4a7edb65710ce2314195",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/mipsn32/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6a7f15efe865a935f7cc0be35a5874aea0b722b3c60ff77135cfdf6362628910",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/or1k/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "028509131cf6faf5794adb5f212c93464d8591c339a6e35c9eb006081a17999f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/or1k/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff5a78a4822e82ff1ff82a0f838049aaaadaf05f82118a97205d4ecfb82f60fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/powerpc/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c17ae5a77d6e523c9dea1cf20b1ec9118759cd4f29cf11388f896a3c5776528c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/powerpc/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0fb3c726f59522d31267457089b61179ae6fd10d453170d0a12ab259cb2898b6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/powerpc64/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf022f6ab9f09af473d27716c62525248c6b302872a275a255d30c9b55065af8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/powerpc64/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f91149f0d5c41a6fbfb0fc52a68d0f0af9ed9fd516b8d60ed970066778511887",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/crt/rcrt1.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "7540730b9b5bb77a7a054ece8312c4316754460c01ebf2e9d3a238d501deee9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/s390x/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "47d425b1a9316427cbec34877ff25527913bcb0bc1d5a9da339665dd2fa7505f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/s390x/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2b53deacce93043060b471b43b7163cdf7a4dcc7d1a320d369f3931000c5e10d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/sh/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a9be204646ce6eaa1dea9a74139326f14b1b9c23de10f3e21402344fbda62172",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/sh/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32f62f01776e010615ba1b7ef473237561684fe9ac61dc61657b542185af08a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/x32/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6adaa8a049cf1c5a743161832cabc36256e6ffd8f6a74dcd46a28b1568f42414",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/x32/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0dfa9ac7ac5ebb5f2d3e81da34e72520ec4358f1d5c43d6d730c2d420b5f4f60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/x86_64/crti.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6adaa8a049cf1c5a743161832cabc36256e6ffd8f6a74dcd46a28b1568f42414",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/crt/x86_64/crtn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0dfa9ac7ac5ebb5f2d3e81da34e72520ec4358f1d5c43d6d730c2d420b5f4f60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/dist/config.mak": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e06fea08cd7b3d635b75fb042d24123ba90fc3adb0562d69ed4845a56b09d46",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/dynamic.list": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "264ae3bf630a7f6d894a51f91f9acae45b89a5f639537353d03af1a04e9da0f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/aio.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "75f5907a253874f7f8f077233477dab380b7a7850da242247b5e98f0c3ab5e98",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42436,59 +38752,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/ar.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a32ed9d5a0e19c2d40781a05e4a0ef094d24b69a5752dc3849b92e4502481bd4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/arpa/ftp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6424bd423562f20ff9c9fc4fe36b2e5aacf971149d73dbcf6ae3cb5bd51aa770",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/arpa/inet.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "8356bc3cbbdfd5671d010fdc45286c5cf40fe113ca4a2d584ad7497fc42cc29f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/arpa/nameser.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0829694b0e7506674be6ceccb2b5ed4b388499796adeefb884f075a45fbcf51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/arpa/nameser_compat.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "51483cd3492d6448a32ca98d66420c2210f67779849e32762641115f61a0a235",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/arpa/telnet.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4dc41f35778e57506923be0ab1bc15716b96e47e19ee2757753696ec640b7d00",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/arpa/tftp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b596df5660906a555b12f450388d09cfafd3589db738100b806eae9437409ff5",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42513,22 +38781,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "e61f0bbc2604f5316ce34ff3906f10b0e3212901d2059b1bb267f05c7193baa3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/cpio.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fd1fdd0848156a84d2af916be5069cc688117b38f4d44012e19f02bd14b6a8a9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/crypt.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "26565e8fc37e6cff0f870dd5e7a1bc2035a494470b35d05114b0404673990bed",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42620,27 +38872,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/fmtmsg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0f7f7ee214fa88a63c23ce123520ed3ef34339d9c32128d4d937a19bb2431cd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/fnmatch.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "31f19cc2974807ef2c516816a8188e4fbd99e35b85df9514c13276594bc30107",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/ftw.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1a1cae62ae50cb0d21b899b931ace769d129d1af0ad8787c60a076801e2677b8",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42668,14 +38904,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/iconv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c9edd7c6ed3d036f11ec2a24f46a203c0657e5d7eea8b8cc8cd22ab705c873e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/ifaddrs.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -42692,14 +38920,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/iso646.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2f3fe42ea3e1f7b236a5b37bf8c3e9a870094b81b264ad1df32845546662c08",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/langinfo.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -42708,27 +38928,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/lastlog.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3c33c9e2fee950cd8545f69d5a8db1f529934b31f940a43ef9c7aadc40e4b2c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/libgen.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "8dc8c0b1ed63e0d411b2a8742aa7aa7ed9612c2e9b8c125f17bfc4a5a6f21aa9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/libintl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fc92ac87ad9726228173fbd47c162187c6e35ffc56696209a2d6d39df3bca350",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42780,59 +38984,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/mntent.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da0f41bd65ee34c3c909de7c94792b30e67f558a29b64599738ecadb6c6a1fcc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/monetary.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c02befe1f9197f86e2f1128d1f31c369289cb4917b2c80b5aa87b387c76aef8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/mqueue.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d5e0b50599f2a0fffe6cc4dab5cc6aad566b55bf27c359c59bcb5e77bb09fa89",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/net/ethernet.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed7310b44ab44d283421a9338a7f8c17775f09694d42c0be89f6536667c51f06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/net/if.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "728025efbd38d94330cb5cfa4efbb8ad067f6c7dd27aabc557d08d95d9597974",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/net/if_arp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "74c50186936542bbe8c7c284734e52d9b397acafdeaba8bbbcec8b8ac30c7509",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/net/route.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ccf63326088a850307eff9a2042bc3f966158d4b119ac1e4fa623af273655c79",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42865,14 +39021,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "9735936ae7fb1903e08de9bfa4b78f8666b4b5d03d2666bfa96aa173e822f1a3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/netinet/igmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d92f1cff8afeb617afb7cdb041b66121f31a7c1df174658c63bb4a9ad1140d09",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -42929,14 +39077,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "e74ef0f1c45e82c480d32bc6d68f9fc8fc7abd2ac60fd1154ceec300275a4384",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/netpacket/packet.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d628a33d18e4ff51a05f8d86b33335bebf4b384f9e81abd0da1b641e9b6738d",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43005,59 +39145,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/resolv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "adcdb3600df635f2b6fee42987e33f3ca7a8a1e142d2f2b5d83be6fb585e8453",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sched.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "1c651d25f4849bc4ecfcae323c1072e9c00bee7679ef1da16723480497b41271",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/scsi/scsi.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "daa7847fca1fc34b6d5848f8dcd5323acb9df21451dcbf66f97eb62511261b93",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/scsi/scsi_ioctl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "359bfaa3dd01efaee782deae0f2e0f123d47c35bb6899bc46bad267f2801d732",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/scsi/sg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "affb61e1e89c8b32f962141d050268040648eae02d9e546b2fb5d039d57e951f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/search.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fd1e900bedd1b91d98772ead5624a0f1f23efa70fc8272b1dac1d47e9ba2617e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/semaphore.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a20ec2a1fe37542982221a145a81c25bd4d245e3bdb6d77c20e8a72a23bda452",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43093,35 +39185,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/stdalign.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b6e1996ed659653b17b0ea93c9b646fce5d3799297add9a1587c5b1c80a9566",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/stdarg.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "20b903cf4ddd7e0244e0bee6e615e24e1921bab2f0986957fe4f7869c608890a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/stdbool.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cd1f701b5e927e4e39bcc69f4b7e437a98c8821168e69171c626502a6fc13d9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/stdc-predef.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "92e5ff5d4e37556d9eaab2a0e6069650a7e56bacf7f43f093b0bef69b0776bb5",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43165,14 +39233,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/stdnoreturn.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f5a2d37ef43395cd433e95b238a27f9be5bf20355ffaea66afe7df90fab04f50",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/string.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43189,115 +39249,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/stropts.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b02f372fc4c5c0399181013b7b949475df3dafbd33787f7fcc6898a9ce43336",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/acct.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "171396226021c35eaf3436afc069b460a0216dcb4c032c3544d32b3c9716b7d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/auxv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6bb5575bb4a8544e355b5b123a6db4b9f6ff5531bcdc838f3cf01e45e65e96a3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/cachectl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6a1567f2b1b61f8a3bcd858269e769342968eb0b8bb95cb817c14ffef5963a66",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/dir.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2a97ee58b0ab37afbe5a7166c8b478a8e00e0b7fd9349144ffcbe38174aba5cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/epoll.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd1bd93e96a8a0d0ccdd0392118770028609e9f95ec4d0e9f733dc2d9becf581",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/errno.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "832219916d414a0571f91b56e3628904db9284010b05f49501ddd139d0e1d66c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/eventfd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd12447de1421dff8465d0ee9287562179e39b6c9e3445a7acc261641195ee59",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/fanotify.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d0f079b694a3621a90025ed29fdf211566fb6f6064f19ed6fa523600851e9609",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/fcntl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6f3708b141d1886107e6fd6a85f00015c0a63f29b7c985f0e1026c9f3a74ad4b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/file.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "f4a67f7000a8519b9ec76f781db389242ae2e03a3f3fe2abe38e55753d0c1fe2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/fsuid.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0a642cde1a9b0f8c21dfeed86ceac1a19546b31670d708e7a18abac00c7f855f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/inotify.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f6af7ff2154c7036457624525369affff95719e125c46e32eb910ead860a1fc4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/io.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7b614d47423cb114a378aeb35eaeb25884de6c0871648036ce65a14bdc9bd4a1",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43317,30 +39273,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/kd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "004dcf98bb72c0214c802dab96976774d6d115b4478609b3f8cde4cea09e39ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/klog.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53fe42935799f4ccb9a141f08dac71e6f9221e3de0d5703c8870997e94b45fb1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/membarrier.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6372eb814b5d9e062b18e32c98c9333819cae8a28f464b2f17bb39f06f0a97f0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/mman.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43357,35 +39289,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/msg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "44b328261a10b08c61d223b3f090b5146444e3c6995aa2224d481f207a7cde44",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/mtio.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "072a8fc2ccd780ece06c76b18cacb928aa9417b06575c1d753e4290409f56b13",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/param.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "a7c797bfda03ae10b92535ad8ba628faab5947f61fb45fcb2a166d6cdb9f987e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/personality.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de0bd27a0bd2cce8f880d38884eac0174b562cca715737c98af839c87020f953",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43402,54 +39310,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "957b4bcfd2919686e385ef13f45ae132b7cdd41ade7a6e1fa40adc937f0248b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/procfs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dfc3b303106056ec39e3d9dfa6dd931777ac7108dfc6a032efc2e3163a36d2bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/ptrace.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "92f7481f257a805432e082de8fa6ec1178cbd1867d73f352cb021ad454fa0f39",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/quota.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d22a39574b82ca24f56dced381f276d5d2dd0574b98a419f3a0007caffe8d42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/random.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d86b275a5b27a69ae29d69508a19e934d82aa85c6441d3ac1d809cee2a233ef9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/reboot.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e8c3200ec7f113cb32a8ccb82f9b1c03a7bc337170523025a00843f245352819",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/reg.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2a2a8e7bfe14b06646067f381f97aa65bfda62ccd3021e4f4145504c0d4eafea",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43477,14 +39337,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/sendfile.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "394011937a3c8c22d93be793b4e44fe922ad4911cf0c6f07679b6de4f55b0ea8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/shm.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43493,35 +39345,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/signal.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3bfebd107e526b68211eb95501397458ca1b9c740847e50c3700c1731020af0f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/signalfd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e28b65b3a5dabe0f41bec490fd139f35e3e7323f9c5260d20fc22e9f8d648308",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/socket.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "459c625e986835239af7a495bc1499cbb27c86d1bad40299543ab2f31a37f4f6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/soundcard.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "905c551bef504720ebc8c05b19630fca6e9aa18eac6121e1f472a595e10c08a9",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43549,22 +39377,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/stropts.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6c8c3877ad2a4f0ff17b62742f70533f7fc7e85b2935d851eaff3144c1dab14e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/swap.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d1f91b539dbfb9e17b7e3a680415fb78c6aa2457a6f2988bf8d366663cca0723",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/syscall.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43573,35 +39385,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/sysinfo.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "125d59e5ffc9063bc98506ad7eab31ca375618f990414bc2c3c438c68b75928a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/syslog.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0371ac60bc185fd52145764c21cde79d6b541adf870f4a8e801e3072db95b508",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/sysmacros.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "5fda7d3b3af6553c9499ffb428c42e5d0da1e4e8627bd3c2211f4aaa7525a37e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/termios.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bf4eeb215f6684b451b00237d7cbfa608ed053a7f786e24f8a98a463abbdfaac",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43621,27 +39409,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/timerfd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3205b9798f97855226f81c2f32b178c4d9152b02c821de28071b721e3bee7285",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/times.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "04376924e0732ed03553dd5be1131cd065533ecdbd41e2af937e1eccede54145",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/timex.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8af38c5c3a89ab2908f9cb72a086ebbd8f731d47c4c324727769bbaa2d0d32c6",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43685,14 +39457,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/user.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1752da8dcdc4f1030dc4f9952e7febe349c666d6e1304fafbaffa5f3a32e7b71",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/utsname.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43709,35 +39473,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/sys/vt.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1472e3923cf0ef0fcd2b9bf9bd801a1ba9fa113d4d5271e3471cedc849f14c92",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/sys/wait.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "303af9f9e2f0780be45efaa35eb08f849d39ab81d653a0971c7b82a6937141a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/sys/xattr.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f1e3d3b75fe34805cc1d95566dc10630947c16cd5239413a80fa9f54ab78de5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/syscall.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b7bd8aa55ec85e943bb746706a569f5a455594c4e493bbbe8cf32149545de9e4",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43773,22 +39513,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/tgmath.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c4b6a2e99f4e72a6ebad763ac452c60fede23e99f27106ab3b03edf24b60769",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/threads.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "60afa846487b92c6db21e9fa8c10d7a467cf26661e812bcc336d9489b15d8ea4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/time.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43813,14 +39537,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/ulimit.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a61e61d1ed7a81a26d0890a2148c0cd68d122d25dfe661e4821eb413a0e0fc6b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/include/unistd.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -43834,30 +39550,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "63a540fe2511b0e0e2b6a38fdc3bef0a3b82f333264133e18a8b59353ef176ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/utmp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4efac28368f7a32374de846c266e2444c864ae548746aa581f50db1f56f9ea8a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/utmpx.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "20f84b9fad1c60fbbd81eda0088ceae7acf014d3e9d29c067d5b9209c05e59df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/include/values.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c5f56c3e180acfe7008a7369700bde9ecc3b85d5d457fbf94efa1a0df1ba3d8",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -43885,709 +39577,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/include/wordexp.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f72323c01c310d9a7aabb4ea62e6a20d3f2be8a390173796c100dd85e2915855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/ldso/dlstart.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "bff36e0a9b0a4d58ee8d4fd82be575dacd3380c58d1bcccccb77cf0c7814c141",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/ldso/dynlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7b994c9b6557e7f938106d01edf18a66c850a9ecf4e17a075df849ccdd3b30fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/aio/aio.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a094ee091f0afc34789be384d450e8c5960d14d651ee924f6e08542554202ca4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/aio/aio_suspend.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e066c114a861cb2816b9e9661d1a52127b80a1dd7c996938bca3613802eb7c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/aio/lio_listio.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "782cff6af764b518c4de1652809c91a698c015a9248bb5cca50fa90e2cc58abd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/__cexp.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "ffcf569466b0ac3defff943c989b6b181c7c41dc4f9538c32944459a5272203b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/__cexpf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "3cedd5c25cc80d78713bd44c53c7f3170dad26fde14ea5eb3b0028bfede24517",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a38b33d24ffbcf028ef523648e0899ebb65f3031dadcdb1a0d7577c7b5186e26",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7e193826d498b2e2dd637cc3bd3078bc8095994dc2ac52e6df6f02296a60254c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cabsl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "660186119204e778801a49545fc83413fee87c29f510ef9fe5aa48767f300b7c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cacos.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fcb046caddea093996fd0e8cf5a9ce5e4f767ebce00dd1d8a52c2c3f466a3e86",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cacosf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e8b49a8b55858582fecfd1dffc5d2ecfaa5f5f4edc8f788f6dbd1cdd4aff0d1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cacosh.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6481e5f921c1f6f476af8b8dadcdbfa85f8d499942c2c7ce41efa9f09aed2ea6",
-      "kind": "file",
-      "non_ascii_lines": [
-        "8289076966e10dde8bce722e2e837e0619557e63b2609f0260fea9817edb77ac"
-      ]
-    },
-    "libc/musl/contrib/musl/src/complex/cacoshf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e24bcecec775567bc94272d2d714cb7d2fa17b0101db9eec72c56d60925ffb66",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cacoshl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "416d0c10545400d923f7896d48f311b9dca240981c789068df5bf8f9ea4f41d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cacosl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3672638e4f2d99434367a15123149cead69cb36b32345c037833438355d13a4a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/carg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8033c3145d2032cb0f4e1da1ced705f2925ed104e5930b86adf96b5ff34b64d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cargf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "497bd73f2f9486046e0830719ea0130ed32698afd0b717bc880b94f82611638f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cargl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1c8ab281f47ca4eba88133b204a558c9e7d9d59e7d84240042d058e40427010c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2e04a7209c37e5a555290ec6713d0a312fd33996a5f7a9c23b3fb7bddb1a4503",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casinf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e3e15d826eda1fef3dcd02a61cb75b4a389f197deeac8e0c558f9e28f1de3c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casinh.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "791dacdbba5b8c071178bae61ba0c3c664476c56b036a2e2988f912649121c7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casinhf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "78c79d2be9e74cce0f25a7e018c2c85dfbbbb266192344948ecb0b65f440d8b4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casinhl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "56e0cac12746f6372775e2f79dd69ef8aa5ee91b124d415c4d6a9591dfeeb49b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/casinl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e1f1df8337d2785bffeaeea281f8f0cdc1a5380070b357bb313c93991f127a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catan.c": {
-      "license": "ISC",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "b83556e819c8fe98e9396662b60d91377f063f7f6825a38a807303e1aa5065ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catanf.c": {
-      "license": "ISC",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "cda26231faad4c6abcd09006255abba34bf5d1093e92b8f1bbf62f1c82af033d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catanh.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ee35815141c85bd3b28c65bffbe38176966002a088acac494934f517c9e283b0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catanhf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0613b7ddfcedc9f14c470e40aae1d57ff1ececa1d4767bbe6eeedf9b50a96beb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catanhl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "656c6bf26f2c864a3c452cd5bb9a8aeacf98540bb3f1c34833d0998976c702b1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/catanl.c": {
-      "license": "ISC",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "b7b08a341a00ecb3e5169f648c95f30efc910a7ad0f3fc180c4345d2dd920d7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccos.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cb0e3cf6387fedaf96ed4b9bb364ce34b5f97722440d08f75549e04b4edcca2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccosf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "719542cfe042b36cdd9a35934b76c0c5360b06e2015ccf7aaf4ce233906b2c54",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccosh.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "9997abb272468781bc9b6b61a1550e95d1f956df109e0a646d578a3dc2c3aef9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccoshf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "6ebf4355682268356685ba79621a47f2f955ca910bf13ca6ed32bb52e893574f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccoshl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ea721dbeaacc27dcf712ef59dcc41008046a6aaeb17d45d4290b947a393d7d37",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ccosl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b9282162e4b46c5ab70f2f48b4580922c95e6bfe8f289157a20be7bfd3ecd761",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cexp.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "30943458b19d417812e326d8a61a2413ebce139c826c997ad6598dcddb6e673d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cexpf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "7de06c6bebd823987c5eefe19821b8a473332ec724d6cc0a6a27955a33ba3734",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cexpl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "33d80da45c1620cc545192039e77dc24b8c5e9b3529b26dc3370025dd6fc9364",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cimag.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2eb49489802bda5bc25d4c5b9560dc587ed5a2e78731e094dd1d99cc37c3f36",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cimagf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e7765c7dabe6ab96df44aa9bdeef862428fe6e6b184eff01f69c65d0bb783387",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cimagl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "06747629c57b54fb9fc7724dfda37429393b461a7c5a5680324ff3aa810e053a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/clog.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31d39749e4a35bfcd155727be82f093b0d82cb150f6036921a6c336ce5213389",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/clogf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "26e345b2ab6a02a239c82119d3c45d4dc8d272cc0dcd8dcc0c81f5bccd298e2a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/clogl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3dc4312e175401657800add8a4394b95d5cf252244e586edbf79cf0128328cb0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/conj.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ba7c2b01e379fb6a66a22291a7f02001875b029f825b9ddd299df9cea83b7be5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/conjf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e09652efad147c4d319d984fa146983d6d7cadbb8736bb9e1b185ab2c712df9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/conjl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3555f8d0aa4f00905ea04a40afc89108b7e6def0b9e51a63eb17b3949b966b6c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cpow.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "806e7dbb2cae7f15d3d8d7a9d658b14accda94e1f290f1e7477b719ebac96b27",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cpowf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f65e0517cb70879c5bff0b6dfaa676e3fca52d55a5765eb9cfa47b8ea006129",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cpowl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22514fd3419dddde145eb7b0d198427403c93cf2233e5d7b27395f21b2e0b6ba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cproj.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "89255e9127bcc359b6946f9a58696c563872ff075a19efc2b59737d8a6c1a132",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cprojf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b05d33fdd46901f0370271f031c28a6046c3defb3f5cc63efd6a8227207c9b21",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/cprojl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b57fa641286cc0734646e43f17e3afe3e633df17a3e983e1566b59f0312e143c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/creal.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "65e27c3cd33fdbecffff88565d99d104601dcbb37300144f8c2dca755e9c026f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/crealf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d8fa302a9a2a71ef2588b9b83cbb4201fcb8fc15f304a265fc9268d6ffcb258",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/creall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2d759da51b035e2fbc37c49bfee04973025ffcaeb8056a0eb32f34921276ddc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "179640769b92bbb1975bff452eea3259513a14d0640dacd9734ac62017748002",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csinf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "490a4fda5123edeecb6baed7eadeaabcdbed62012737e5628e24560883fa94f7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csinh.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "ed236ed0232c73d39a372a6799ba63b2eaeccc5f03aca0045fcb1504bb489489",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csinhf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "4ed3be03188b48d701d8edaa88b0e282cb2ec88b8af1c2f0e2a3f76fba60a773",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csinhl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "501fd7e0313f58de43a0bc0d57e90a0c38fb9c2d0be64cf4b75513fa429cf5da",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csinl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8413c00a45e0ac9312c2f3771c98eacd2253fa206ca0d5e8b8de7e487f547fae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csqrt.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "4f6cfa6aec61754c1ee2ea683ec00e7837eaa1993edafbc516c6c4978e3567b4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csqrtf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "8dd69a3ec2052cf54f38e61156b057c2ff74d00da9db64da63f646e30a36e8e3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/csqrtl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7dfdf3fa8ac3497d470ec1dbaf897437e75e5ec40162a15cb319ab318cf7f267",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctan.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e07dae94234591effaa0c5601da4c13999418fec12bf01c0f2fa20bbf0785fa1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctanf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7504acfe45feeb50a1d9263c8891b80d024b536f59530c43ba137fbc5c459528",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctanh.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "7daa31e0831e9805934bd0e6a33816daf16c0bf1076babeb9799fe6e185ac045",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctanhf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "1ebb7bddc872c96bf3e7c8d1a529c14f28db4cf75cc8237fdb1ad62764b405bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctanhl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "570fc5ffdcc132efd24373704d7a434d561fccf95075837c86654bfb31355b8e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/complex/ctanl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2cda6502b21ec15bd77e6c1345e0770f5fbe55cb952940ca868c86497f3290cc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/conf/confstr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1c0c27db0ff6b013b16691eb2ef74453bb974b516ce3e83e91b1d1a81bd8cdfe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/conf/fpathconf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "301cf7c0ecd13a12fd090ee8f6fa6de90af2c1bcea85df2e387a48b7d7baf4f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/conf/legacy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec68f7279132927bac1a3fb57e21fd5d6b093f7045ac7a01d1e38657d4b95f25",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/conf/pathconf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ede2994972d93f1951dbddf4194d6764f9e4f1c5ac9bfa56dbdd4f8d64455848",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/conf/sysconf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "803fa64a3da9fac2377d96929d964e9e39c825fbd382c101885ea96693db61ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9b69ea0289cdb04779b017d99f80eabc89c162f3cf433fddf88c985765ba0cc6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_blowfish.c": {
-      "license": "LicenseRef-musl-Solar-Designer",
-      "evidence": "reviewed musl 1.2.5 grant: reviewed grant of src/crypt/crypt_blowfish.c, which no notice form Attribution reads states; full notice retained",
-      "reviewed": true,
-      "sha256": "0f9054739e295e3e981e7aa29c8f287a190aef065b84a82a4c6817120d5da05d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_des.c": {
-      "license": "BSD-3-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "546b4ee35446fb2a551d7414779395789f81d53aefbabd8914375686af5d228e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_des.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8ab0f562557b5dc61268e70a23f0872e18512340453549ef9c20d60dda81840c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_md5.c": {
-      "license": "LicenseRef-musl-public-domain AND BSD-2-Clause",
-      "evidence": "reviewed musl 1.2.5 grant: reviewed grant of src/crypt/crypt_md5.c, which no notice form Attribution reads states; full notice retained",
-      "reviewed": true,
-      "sha256": "85d1d364c100fc982e99adb0d176e1d4475d175fc5c12bba696cda9c62d62c6b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22c953e917c28f59608493913f3f132dc9343baff228ff198dbee197e39ad143",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_sha256.c": {
-      "license": "LicenseRef-musl-public-domain",
-      "evidence": "reviewed musl 1.2.5 grant: reviewed grant of src/crypt/crypt_sha256.c, which no notice form Attribution reads states; full notice retained",
-      "reviewed": true,
-      "sha256": "26f3ae83a89a52640f3979df81eb50a431e75c83d5c18f1487325a39ee84fb73",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/crypt_sha512.c": {
-      "license": "LicenseRef-musl-public-domain",
-      "evidence": "reviewed musl 1.2.5 grant: reviewed grant of src/crypt/crypt_sha512.c, which no notice form Attribution reads states; full notice retained",
-      "reviewed": true,
-      "sha256": "7148156d195d9bef7eb57a1b2108439679a02372d0fac418004722513bd7b95c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/crypt/encrypt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a96361b2c1557fb554c31865397ef259effe950552aac77014aa7ce0c40c6ce7",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -44927,118 +39921,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/dirent/__dirent.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "233a7b7722dcbd1edf089f006c125e5b0a37bfff7086ab357707be609c90e6c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/alphasort.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cd85d345137a9f313947db9030137efeab71fe97a0ef8850511566655190beb3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/closedir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6aa80e09176c48e3f1097ca385cc3092a82b10be020ff40e874d707c3f167184",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/dirfd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a2f2895d724ada2c6bd3c27cefff3b11a220f83b97fecdb5fad11f094a71198",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/fdopendir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "69ba74ce4ae269d0bb545a21be68328254b42e780f9563f138784cafb2d23201",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/opendir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da4ad78781da4d61461adf6b8915188842b234c7af586418cb460a1da8918a81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/posix_getdents.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb09b43d2530089940920a17a87e57c62ff8a355f1e262cfa16417b69a297a74",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/readdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7df567ac7de5f7dd061b82db6a9ed3673eac7cccd9ec5f5d06e346f8dd253831",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/readdir_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb1e327f1ea15fc584ce7447fcf682baf33b98b450f2e58889de1eb756c2383d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/rewinddir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "60986885407275263940c88f158d2288e44c4a6bb9e50cc02aa4d4cbf7215fea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/scandir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c1ce76cbe00ba6717e6a00212105c050d487118b01c6c520e615f739c1ad0af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/seekdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6bdc200fb6044299e4dc545bd06ca59b9e30010da6105caa5d09817db19ad104",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/telldir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e882bc5497c1333505355bc74185af5a372ead0627f6286bd5482e72c814ab3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/dirent/versionsort.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "04e9674fb1ae7cf109d05429a2bed46bc44fe250a16731f5720b20cdf3ea32f8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/env/__environ.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45047,27 +39929,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/env/__init_tls.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "10ec441c9843a26f82a835c0337bc5bcfa3a588d42d5537e938109d035b10d6f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/env/__libc_start_main.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "2750ee7dd62ad24b7f1fc87e28a5ed9b547bb96be55bd127782fb3de763eb14a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/env/__reset_tls.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90caeedf95fc4da5730d7f11901b9e1af14fd02d54edaaf4eeba2e0e08baf072",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45103,14 +39969,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/env/secure_getenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "831fde293645c312ed482d6fe28efbddbe42d63d83772cebbe6ed1e6ba0d4abe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/env/setenv.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45124,14 +39982,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "47d9ee56e37ea1b678e965eab3892c1172566fec791de980e2aad7096a62bc57",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/errno/__errno_location.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8ad0eaf7dc502eabbd68a6e1fb4303293f92d656b6ef9950278fb5d267ff4b60",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45151,38 +40001,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/exit/_Exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "624597e4f70b5dd19e4a1458e6e2e6314c07ed016ac93e065c1d3de70d06fc6e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/exit/abort.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "741708119483358228e1ab704b5cac0bcad5226c3b85b72936757ec5cd21b957",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/exit/abort_lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "09ccc9ee65b94765b5ee2966899c2ee13ca7fc461e347adedd297dc2ba4e7d1e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/exit/arm/__aeabi_atexit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8a9963687d4dd7bdf0bd22d9881f9706e07f41cebe40fefc030e0411a483b6a2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/exit/assert.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45191,83 +40009,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/exit/at_quick_exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "356b6c22e418ae2b754a1eaeafce9261bcf2a880453ef0177107d159cedf1149",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/exit/atexit.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "f167dd89572bdaa2480dc177e936e1e519e56916485e683ba075490c6fa25600",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/exit/exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed54f80ada4b1cc8b3205a3b3714ce9d292f7575b56cca5de01a126439c05198",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/exit/quick_exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7be925e9ab251bc5d2d7c8843660f9d168c5d0ec9e77f9e81536f0638966f521",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/creat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3ebe9ebcbe19eabf56b1df17a11d3cd33e2d284763d0aa9b6621ef874f49fe75",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/fcntl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6dbdeac47ffce25607ce4b1ea6dcb6205ba7e03489ffc10e3ba5946a9c655cf7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/open.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ada3215946a79da13834950cdacab667c0bffdbb6bd7fbbb348bd0bf82fe2c88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/openat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "95b55f682229c3f360d55179470944425d1527a127b7695cd10af17d34000568",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/posix_fadvise.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "363843e99787cdeb79f553c882064c7328355f5905cf044345ac64b8cfb44352",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fcntl/posix_fallocate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3ca192c6d55d36d1c5ff5bbead4032a37a53dc322b391e6f34e2e12c48e9dcf9",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45287,22 +40033,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/fenv/arm/fenv-hf.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "77d9bd415abc4d7162e50abd7df7a0e99a3092f6d87bb468966c48c670d12650",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/arm/fenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff4d66ccd74b98795ca24f127430dc9e676786e4191663abe6b015aaa98ab795",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/fenv/fegetexceptflag.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45316,14 +40046,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "0da7883c73cca264df92d3bf8992754f8fa67828ba1be7d6fc197a020ebea692",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/fenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6994f1dc4cb270072277d61fd3f7836f3df3455c873727a33e59713e0c058d93",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45348,190 +40070,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "b51dc0cc2a9161109667a65f41e132198199327b54988fe9c65172c60d39b296",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/i386/fenv.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "85a9c372009c6a3502a45f64c3fc8caf139afd1a8cc549b72e8d817ea77e98f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/loongarch64/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8a2c2b2f5a796fcedc09fd7d72c0e846a1833dece89889e206d939bd45bbe5c1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/m68k/fenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "376ec050963793a649c67e60d2c0db5b664f45fc1f858441df98b6c834b5bc1b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mips/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90399c925830f257059544a7aa4fab6a8ee68316938902afd776c9f7a2b81c5a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mips/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6ff3075232f84b6353afbd951e22b324556e3c74f3cc8e599cdc1ee4f762450",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mips64/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90399c925830f257059544a7aa4fab6a8ee68316938902afd776c9f7a2b81c5a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mips64/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0607eb940247059d39d1311331c453f0755e73ee21d1505b5d097a634eb66a18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mipsn32/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90399c925830f257059544a7aa4fab6a8ee68316938902afd776c9f7a2b81c5a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/mipsn32/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ce8579f454789356bff55da3010d244fd2dc141eaef059b2615b071c7f1b8ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/powerpc/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ebe5a20978b1d4ba22a2a887e446901fb747793c071ef13ef7b3cb5d7e2bf521",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/powerpc/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6639d8f160bac556fe3191278ec588264e1ad3914876e596c48e5933bf64c806",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/powerpc64/fenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8eab2701200f43b52e43191d7b46a74343af30f00dcc1da3f2e361085dc0ef1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/riscv32/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "580a7f02d31d5d308c1fb07b2e1aca669e5ba4420212305dca3e8ec65dcd0e7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/riscv32/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de937b58273fc7752986c222000d7f86fd65a34381d481e379f64077a86b7c09",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/riscv64/fenv-sf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "580a7f02d31d5d308c1fb07b2e1aca669e5ba4420212305dca3e8ec65dcd0e7f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/riscv64/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de937b58273fc7752986c222000d7f86fd65a34381d481e379f64077a86b7c09",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/s390x/fenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d11d60571bbf393b361a10db767d448392bc5d022ab3c9304abcbe52733690b6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/sh/fenv-nofpu.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ba93b6eedd7bdc2f39d0fcae02942b2faa2b76d90812523c2949946c4348f30",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/sh/fenv.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed9eced8c93dd59372231292982dd588ff71a150a2014d6f8e4759011f50790a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/x32/fenv.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f6e6bc45df3e9432b3a8f2a6c2fc91485fc3deab839d48331b620c2362c692d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/fenv/x86_64/fenv.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9a1a2872f39987016e922e8a88e80c737a2f8a5a5e68503aff0edce17db7b283",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/include/arpa/inet.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f19b3af6cbc4f1804647bdbbb7c828ed67aa7deec10ccfb122a57cdc6d27962",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/include/crypt.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d34876da8f9bcf8541b56c6c5b127c2c7c5f4945a0ac7913709c28eb6c72d17",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45567,14 +40105,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/include/resolv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7393c8a90b6e0d6d5522cd47678d50802e5acfd661deccfeff09c888ccb17c91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/include/signal.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45607,22 +40137,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/include/sys/auxv.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef2689f7643ebb2d4e1715c305bfec51551ec68cf125f81a78ba614873995e5c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/include/sys/membarrier.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "89b4365c55795dd85308771c09f9c51990e914b0eaa0a33ee3478b2e17045ea4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/include/sys/mman.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45636,22 +40150,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "5264ef5a3fc74563511f464a3e58595ddffe0a4ad46284034b22fec84b9cd178",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/include/sys/sysinfo.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "992032ee9b812c5e5d1da22d07f451a4d919c7a9239a37e229b8172d69438032",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/include/sys/time.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c683cc3e016e03664d44d62ca3a355dc52d8659edca41eb3f70af50d7d8ac83b",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45679,27 +40177,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/internal/aio_impl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d89b582d5f2e49890b4830f942555b6a513b1c5125613f9e9f121db267185b16",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/internal/atomic.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "7564773807b69ceeb5542882ab20e92253ded8289d8944eafe7208903aaa2e18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/complex_impl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c5e626cfe7fc14554ff71dcd542a66be59340ea1ad66c4e8015707a3009c80ac",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45716,22 +40198,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "5fff39006dfff489f9bb5747b72cfa81654a69fe6fab91fe132b55b07a777690",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/emulate_wait4.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0a23c9821ea56e0d45767a8ea7495e7010bfa035ab4e46247bfae7371267af33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/fdpic_crt.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "271a3c4d34f9afcd2f47c4bf2f8dbd80d79429b1f18f799e991cbabbba3a13d8",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45759,22 +40225,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/internal/futex.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d61eaf8e17b481214fd24f0dc93b67abfded7e7e2774fb1d84d1757666a399db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/i386/defsysinfo.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6642c45dc31fd700680fd60271050e70a906c7c566730021f34d21ed81e07ce2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/internal/intscan.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -45788,14 +40238,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "0fda860250bd54a01384bb693be886e5f64fe01316d2be8e21b4db72244220f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/ksigaction.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e1b61f93586a56191b20ed80ad7430ed927c9a1185a8edece0e64119f06fc4d1",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45839,35 +40281,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/internal/procfdname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "87152d06fc7821873c5be9584dfa2180eba472ca195e1a77519825969688fc78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/internal/pthread_impl.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "e1bb3ac1f54c29c5dd28a79d7250d7deb625c66f26e37fb435c56b56b7631727",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/pthread_impl_musl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "253a8552fd0a2130c96df2e3d7ccd741486e3caa0ff33ee7ff2cec9e6f199890",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/internal/sh/__shcall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "51981d897fc916c2ffb04571e928233ec04b3c0fb1fbf0c27edf4e2885b80b8f",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -45911,187 +40329,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/internal/vdso.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1ff322ac4f6854aa55519530f1a0ce760781f5aceb30a3162d03805a870ac8a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/internal/version.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "0d82bdc039649401f79301a2d8f5fc034f73ae552049b158ebb8321e057fbf97",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/ftok.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f4c3c3e96a658c666baf327eac1d462127222f6388c323af76c10bf35cf0d81c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/ipc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8943010001224a65b57bd890fa886b854ba501d48e94188dfadb10410f5eeea1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/msgctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9f49d9ea68a27cb12a6acc3794c7e380d656e7554565a840ae59d77696326da4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/msgget.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "58e72bab6ba4f027edad7d1e17477cec32ef412b8809b1b9eec79d32063383df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/msgrcv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b221657176b6538e3cfd9d75095bb5fb36b5184eaef3906279060f520cfe9c8d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/msgsnd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d767f6d193fd051e534aa211e6c75b3db7d6c9468da9abae4e5992a67ea8c0f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/semctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "73a4457fafd84ec52fafcdaf8c260853692ca0db64bef7efa8bd3a31c2beeb3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/semget.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c198f908878a19ad63628accd01a515722a3c9a343e4491f6e4fe42cced3314e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/semop.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0441fd7b26ea3494f97793cee3fdc8755d774773f0a3f5b8d68a661954cbb6c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/semtimedop.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3d5012fabc10cd8bcaa08bd3c88bf1ee85ca50e0348b3f5279fad857cb9f07bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/shmat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61cb0b0cd7fd1f13f807019a78f9e766d263c3af60c3cd149ccf203aa42575c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/shmctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c119e351d865305ee7ad732d4355ea725e2243b15bb9c30a75e269b8c6fde644",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/shmdt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "276d33ac6e9f3dfe2c7146c2d5133db2d2cd2082232c32c3b087c7d45a2c064c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ipc/shmget.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "87ace19713dd01f5fe8dd62415495f86f23bdd4b129fa6af230e3fd0fbb8d63e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/__dlsym.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "95ef9a37da276c4bcc467fd4e784dd3dbe1ccd012cba2a080e3a81fbdc221629",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/aarch64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5fdb45a7b903aaf3427fd024b2c31e12b3cf8b6a453ac8ab0b483f7758c8bb3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/aarch64/tlsdesc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "678e237884796f4d76b0ebd51b3df64616cf58231e83e66a8592fd2e9b125d35",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/arm/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c5bb496f04086092495e06cc26dcba444f3ff6ff5427395a44897dc3aeab1f2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/arm/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/arm/find_exidx.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "426e5cba5d908d673ee1acf7f7c50b787fa5e6ce553885c5c89b67bde4ddf979",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/arm/tlsdesc.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1283b43b5f169bc0d967f1181af0a93af30064c932d54460dc38a5aeed29c944",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -46103,302 +40345,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/ldso/dladdr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f4f4ca861c87963620919e4f4304ea7e47770a9ebe5e7aa4d8d323a44044581",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/dlclose.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ca552b58bc685a2a08784dc7cf33aa53fe682bcc57e3c6e065acb372c934ed94",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/dlerror.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f998e616f0c00b87e18e10565fad78929f6c56c311bde9579fca8dbad44ad7e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/dlinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "be3c001be003d1ed9cd7bcfab81ce6edffae1792672ab0580e2403a72ae7a1a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/dlopen.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "71d2136173da73e3853c51cc477194befc7bc6072e2e227f4b8ec9c86d50217c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/dlsym.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1646f1e313caf41c444edb3e2716135970852f769c6cbecc3c6c9d4eb126676a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/i386/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac9f187d68173d20682634d5a08fbf59882a247824e65450f3e8b54f6e620bf6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/i386/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/i386/tlsdesc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb6b1a303006bd308aff10a342682c23a5213adc0766324ef0c8a9ee9ff96740",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/loongarch64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1fbd6e443a8d3b5eb47482ce285a43acf218eddeb0f0c633340e152e3cb07fa3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/loongarch64/tlsdesc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9c4a3f4dad9bc46a7e45194ae55bd5d4e2ef8a2afd2a1c6c74d3a1bd4eea34e3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/m68k/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fdbb1c5aecf3abb3e762aff7f51350424fd7728a6a241b50eb386046762270e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/m68k/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/microblaze/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0403e6384466e5fba7d8a1e0b558894d21b65cf7583546a7318f7d0089317132",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/microblaze/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/mips/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "21a33a556765a785e6e45136bb8c2a95013fcab00bc4d1efe88f4431c7189133",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/mips/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/mips64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "55c1992caa0d855e4e02b0ae6e52b11d2004538f8fff252077f77a1cc6615b6c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/mipsn32/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8c35717198e57b5b43ddc507712d1cf44bc297c0a34cbfdded2799b17fd540d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/mipsn32/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/or1k/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "26641bc075a70cc79b56cbead16814e75cf477f698431cdd092caebe5272586c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/or1k/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/powerpc/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "23beabaa6b46feb17ecb3b799b9bf7d18736a726aa8765cf48e24afb29d2ff07",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/powerpc/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/powerpc64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "75751dcf44e893749d7f83fddf61056c486eaf5140df952e12ca0a2d03392874",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/riscv32/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d347972c55d39c8a9cdc06ddab362aa83fd5296243744fd3c1408046a1fd9ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/riscv64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d347972c55d39c8a9cdc06ddab362aa83fd5296243744fd3c1408046a1fd9ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/riscv64/tlsdesc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8da0d74b06865215ed0c03b00827e82c914117b9206f9b52ff8b4cab0ce7f8a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/s390x/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1f14498af51e9d3e4e49e026c718871f8f550aab1b1261996d18182642eea9c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/sh/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4b05c88a70cffa66f690dc121d124f9b35d30e5ceacde745b7ebf06f1b065d12",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/sh/dlsym_time64.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab051f3d0aa8d8a92f2db46f57c676e7283cb7f24c6c5028c5df42c4c533b5e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/tlsdesc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bed393a866bae6a6f8135a588d57dc8dea2eee4374bd2a84de411b25295faca3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/x32/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f050e596ad943db660f9c06e20caf7b0dda21b138f9e7c437c9f2086e3102484",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/x86_64/dlsym.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f050e596ad943db660f9c06e20caf7b0dda21b138f9e7c437c9f2086e3102484",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/ldso/x86_64/tlsdesc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "812f3232bbff1106905aa091738babce2063bf113a7858e59df27d9be0f42fd5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/cuserid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2b535e75996253ab9eb43d77690fb7487538b0c5516722c43a4fd688f365ff40",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/daemon.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "732174e4ffdd70c07a57f41d39d3b71a8bdd405436d14e27bcff8b5c184a4f85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/legacy/err.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -46407,651 +40353,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/legacy/euidaccess.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "536b382002dc32c97d0cd26789edb9c4634eb6003fe7c5b93606954ffdd7eeea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/ftw.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce453d2f4639d896f76ebd64fdf011cc7d84695fec8471466972b94f6e104a4d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/futimes.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c27f8b78c54181eb93e3489fc86d989a187109a508d1034b901b018ac6dd218",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/getdtablesize.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c349f99a17482af1284ef1a899a0039396263a54334f8b64cd75d87f447aa51f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/getloadavg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cc57f1c9f14afd131100f267914996532eb0aa1832a1100634d4e2223fe739fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/legacy/getpagesize.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "afc641eacb6080ffca8c953d9a0ded5be0f7b7b6f9eae3972d2a182d2ec8a6ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/getpass.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "203e1fbff5aa9fb4d930ee05c99fea51f6d4f52502e6a868b9212f09bbf0936c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/getusershell.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cc9db6faa24725cfc696c9b2cf1d46ca3f936435af6bdc03bc743cce7371d8fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/isastream.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e44d8bff7a9b0c5c0c3586c13813b24abd41006e58bdeca5fcbe0813dcc21b3d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/lutimes.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "526d24cd4f5a29dee04ccf575ff4f77e54a0493411c22e6cccbb1424140363ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/ulimit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6b9224afbf7ee89fcf51361a133f2bb8bc74fa1fd803e7771296f2777b3da0d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/utmpx.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3138ac427b05fc86177bf80e5e62a3b84b5d1e14daba1e6b935edc3b9839ce56",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/legacy/valloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63e11ddeb6e7b1098154fb9f18241d28c0e367047bd7a5862a18ce2ca95f52e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/adjtime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "80030833e02173c6d83c69108039d487e867b5f3300c5ca6df88241733543e65",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/adjtimex.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "337139a6ed82ae31e972a4771f812c21f96dc1c3450a6be6e0cdd1ccee7f9172",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/arch_prctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f0721508f1a8d4dc40adf6d18c83f68416086d4393c27aece7506d924171d577",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/brk.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3c2529f798e371e00e9e6efac8333d4900ea72c218fc04db1c2f9ce655cda8ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/cache.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a84d8ff2b27a0075e1855245c8550da8e00c3069bc030c5537d2ef6ce4a64bd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/cap.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eaa0dc469a7b1e203f213dfb1ec5116e69b52911f23fd226e96c4c839e138c53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/chroot.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "569fef21ae76230db020a1c9865ff02b841584221ddd18011642c2d4f6e5582a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/clock_adjtime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c6bdacfab91453fabdb13a63c0819b27d6df9b9883c297423a4ce84948a0281f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/clone.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "280c3ab82dbe46355dbff3edb823d9a506b5cec466d8be09cebaa5692cb610d1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/copy_file_range.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "024da64e5c4c4e8ea56c82b752307ace1f534b02117be56a43a8d128f53afb55",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/epoll.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8ac54a26ee8d2eb22b623fdb4cd0fcfad075391a85877bf6f95352f4b31d5e4c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/eventfd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2b32c23d5d45c383f801ff803a58bab8f1848bb7976aad63be78b5fde94aef4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/fallocate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f7cd47c7c8e95bf92d52c77bf8c33dfea74eb57482926a75e6502aef02e2f906",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/fanotify.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "30eb8677a94bfcf54ad06b64469c60705fe631cbb17551a142a238391fb43efd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/flock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b7f62ab3aaaa2e48063cc2cc7c295dac1fbb3054f4343b1e805b87ac0794a74",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/getdents.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2d1214b9744a52117371875b460f1d5c4a93f21284c95f625ba5a45a32301797",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/getrandom.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0505355dcc2612bef8ced50ee78597b76583bcb380e5bc0198a3e35feebd6778",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/gettid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c61e9079fd3cfb5f63cb1f4b0bbc93834c55afb2824a5d74ecbd00c9a881beb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/inotify.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3c7215c716cdee2c30d3ab1ae1aafbc6e77e470dd9d3bc1ec4a59b1a5631da64",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/ioperm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "76ad96a6b42be4c8fac0b77c267086b6135bb1a7429fb9c41101f725c02d2133",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/iopl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e99819655a373c403d41b9c3ce5b9af3d764aab0d92529813667841b15f2063",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/klogctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "317ad670411882284ef8ef9b9b81fe179a0e1299240c6bb3411ae9668368159a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/membarrier.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d795babf26356a2dde16ab0769932e6697e8ce30965a6e646c240e3871111caa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/memfd_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed60b75130d9d40248d8d821d032a52d1fb1acb9e3697209224cd5c038e725aa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/mlock2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "916754ffa099f2366973afd97c5e93b4fa7ba4dbd461c0a38b6286413d8f3f37",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/module.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cd63d3a5646cf69bf88e22d1303df277c8dd38a64f864af607e5b4f1ee15de02",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/mount.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb77e1dfb4e4dbcbd72f85f0a560db7394a880664ddba451e17c9865a536644d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/name_to_handle_at.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8f16afd94b60718069f86ac0b8fe05d1ae0da1a542c773ad68b5370d429af092",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/open_by_handle_at.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ceb88317e0dcd95fa722f791a5578d23de348bbc1a01d31785027b6d80e26ff0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/personality.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "13f480ef0398a4e5d0b909c118b6c98532298d87fedef21953e24b3b4220a127",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/pivot_root.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0b9f4e2eccd0319dc98aba2abf1fa65b5f6c9e3754b2fd97022badef39b5c3d3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/prctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d1de5a2130df12754e5bc01f65bb6528747bbad54fe9bf4a4cf7663c139c4112",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/preadv2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d67e2bc15f4ee06c56c9aea6ccd5acffff1e63606539dd95afba36919161044",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/prlimit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "567060fc5488ecd249a1139608b145f9141ea0cbf2942d71bdfa2ad7bf000a1d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/process_vm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1728fd0c403c0d840f3a428b73d032090bcd2471b6cac6b9155175840dff2a4e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/ptrace.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5d1a4d8057c69287a43d228ebe1a74baf8a7d1f0e33804e0139dbcba07b2416e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/pwritev2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b667320758929c381e056c4c75fdd54290e5db9c7b6f5a1e7c5a3782d83742c5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/quotactl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b77af2146942017039fd647c12c4568925dec979ab80a7be56fe381f05f8a0e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/readahead.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4fdb6a53c6a0f4d4ee3198746b7718894c40f89864a5c3a2fe7e4f3f02215645",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/reboot.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d60ddf69079a66a6d94fdfbf7a6770eebaffc29a78986ad753b7047940365447",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/remap_file_pages.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4158b5c801bcf7ddae384ffb02c71c8d74a03bd98d4d3503d5f706d4a95be645",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/renameat2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "45cadc035ac946496135d505efa5e6124bff987ebc0f267dd9c7b63c172209ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/sbrk.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "16eb44c1a16f5b49608a5f1abce9746b1b471acaf248e0c415b0086fb6fc36c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/sendfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f192d62c02f164f0bd3787a6e2f0159c346e91612c9cd5b3258e99d979e9e55f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/setfsgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c3892df352916197d28d590d224a039e81743d1e254adc4a3a7d1ec539b2c4c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/setfsuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0669eab1946e28714a8683965469f23974f93b90ee9ce583dbe2ebae1bef4779",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/setgroups.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa1c7cb963c15c41b9be5c48c09a1000e090bce4d74e6b8b6362ab14de45bc19",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/sethostname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d3727827f0bc9dbecc922c36cc5fa22f56d6b0e81d0e2d74960a023ae90dfecc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/setns.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c62b1b44bc41efde7ba715542767fc1e5fdfe8395e7e38042a0dd7fd692cec9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/settimeofday.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5778960ad2a4f6d7d2a6e5b55178ea453163a07c0ebc3b4c03a031ae23442949",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/signalfd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f6e6bb9e564b3c3da11019c037665496370ac8ae294660b0ff618b74cdf9f324",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/splice.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2e86954b0183f2c082c35aeef3d66a1d8d02899fd523f257f81e28203d1b7d1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/statx.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0d590dd387046a684bf4d69fd8a370891ade9c3e450348602f54531eaeb3e97e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/stime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "821fb1dbc09f23e7d35f9e0bb52bdc743ce9f43bde6517a5dc5aa4145e496060",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/swap.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d567b6b5647691e2591934db11e9dda2ea9b4b0afd1887992720cfee7bc0711f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/sync_file_range.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb711271207b8f6eabd21c64f31cd3f73187fd5489089beff2a1152d3fafd42d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/syncfs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2743344b3f801b410f1993a328c1700fd20f924dba3f91f311dcad49f9e1f903",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/sysinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e36c54932028ecefa9102fe6526c04234239ea114a10973c2e2743c9114516f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/tee.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "374b9e817c7e36adf944b899dfa7268dae34697997d4571d5bf0e774327bfddc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/timerfd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c8fdc4078bb030fd0138e160478a007d56f8e9152f599401946d3820cb37dc7c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/unshare.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f50984a283bae73ebd9e653d97b2234fe804054d28b779bc213d6287059b4daf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/utimes.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b699e63621bfed8b7c143d59dd52b98b22d5e884514badede8754d550407b69e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/vhangup.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7bd24a42645f1c44669029354a8d94f6871cd839186d7b2a783c3a0ce9f111cb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/vmsplice.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a976dfd9466e1ede74f18374a0ec48b2cbe8ebbbb48680f7a86e327b1256ba17",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/wait3.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e7be13beaa35aeeec51133e745d97bdf89b34dc9a5475de83ec0c0587beafd8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/wait4.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "24361ea58e4b352f4c1068167f9497ad4f8f5a0a58828ddb6a5746dc0c96d5d3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/x32/sysinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6fb22a002053316c9c129ce05d14f654df23ef5735292e77f942d99046d286a8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/linux/xattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6f898345b3e1bcc56ed2584277f29b017be5752e4da4b1bdf35f2d3df78f9256",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -47071,75 +40377,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/locale/big5.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ebc98f5b5c1204f8b1bf2ce7cd70217d556977ba66434880433189fc26072e9a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/bind_textdomain_codeset.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e7b021161b226505bf38f47f4ce8e8fe84c7a7ffe5efe78526b3d269313f8ddd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/locale/c_locale.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "9c01611db90c818a79012dac13d3334c122ad42f8c42064b94064e4f6b3d3276",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/catclose.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bbc773fa5e9358b745076aee880a8ffe73903b2c2b32fb6abd8d910dfa08eaf9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/catgets.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a4ebacf55a593cab15e2a23f5d191803a01d171993410633c57d94ec10893466",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/catopen.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a11e8104f9ab22615cea8052de64ee585cec8ccf52c88ddc1a21324f2e77898",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/codepages.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f70b872305b58fa74fff1a95769b15d4806ccb83171b7a7c5545b58f31d781b1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/dcngettext.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d08c74d930c2b8d5e620aa0dc05eca7c65453be4487c346879b5bf18a009e63",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/duplocale.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a78ca815ae5de1f1577d7bf0ece60fe3f50f68957ecc80fe73232abb387a6b5",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -47151,67 +40393,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/locale/gb18030.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5483eb15124a1eda15b61599ad0337703901ec405e470ace9432b551a0e6b78d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/hkscs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eecda093db9247302fb5f35a4af4be83344a34a6ded9192ebed950fab919c8ce",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/iconv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "84bdddca954b137f0bd4ae2e81f26fcfe0e174eb23193cd4e5543a1b31526ee9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/iconv_close.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8aad2c604ac698d1a26ff2c60859c25ef0d3addef2413d70174bfa47d549487b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/jis0208.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "108d33c3fab7a4f483b0c5de13a8c568c9cbb6e070aae0c03422cc3ba5732918",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/ksc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bcbf1997fadda19c93ee86e68da2b19b08e5208640bebf6f267d8a3f595fc6d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/locale/langinfo.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "e6ec8692b91ebb6dc49a00a36b51f6c9c26eaca82e6d21c937ad616a7db84946",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/legacychars.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68abfad867f517a18804b15bd5bfe8fd03c8401b6f5727a7248a0e78d86c8fbe",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -47239,30 +40425,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/locale/pleval.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6cc5ed2cf8bf0c67e5ad7188e057f7115dc120f26a2fb6d41fe4211b550e2258",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/pleval.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "269b0f56b7cd606110ee7314e063756dd548dceb4567b4f961b9ccdbceed0351",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/revjis.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "223a2df26987ad079f01bc70389ab2dd50c660935a03379585f813f19a0bc9e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/locale/setlocale.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -47279,43 +40441,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/locale/strfmon.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "394f52a2eaafe8bfbf9f5f7333d5fa04064df26821cc3f8dfac7c1fc0e48a169",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/strtod_l.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6ae181b5012b78ac483d14f132c6be5d55258c50c278354babb90a8b7d4ec1c3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/locale/strxfrm.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "6ef828cfecd93527eec6cb476abfb69d7b8b7b149b157f9cb42d0d9a9db2db85",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/textdomain.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7e3badae72579fb79d92833c5c5ed03ff2590fbd467f227c269287aceec4fbde",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/locale/uselocale.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c41758082587d1a5a5bba741ccf0ca953223d151dc2c76dd7316184c0bc4ad9a",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -47332,174 +40462,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "fc301b8c011b09d9fe6a51260a7fe395d4242477c0b8264a5f3650c609e29dc0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/calloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "df5ae020c1babce30975f16831eeafed47bc2e9e3e5a60799bf31f1054c18b1d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/free.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c236260612a87f37a444fb91beac28ef742149e94dc657940b03187db226ff69",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/libc_calloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "54ca0dc7147ccd8af4a16083aa975af1e28ab5062fdbb8c721176c522d4bc566",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/lite_malloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "59f61a0b3fad1a7f5356c6b0557563dcb20ef042cf247639054b59ec45e64e30",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/aligned_alloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8a1c955672db354c52fe3d743725d3a1dffd4d758ec792ff7a38c35fb9762348",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/donate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c4c7137621a51c70b92350c641797aa99ff1cca36f4da5d2f7fba263c1f002fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/free.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c8c06d9847b3cfce57fd1067e8c886370bdfb81c0d198573871721b20a7e817b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/glue.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd131e6c25982a48b1bb10fd06f718a7be706b4581fbd4db1a03131439e880bd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/malloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2763c95b90c42741498a735f84b2af190d3cdee70a45e5db0c382d9f811978db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/malloc_usable_size.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "03ae4274f35aa0fb93771414ddf3f55b64f82a96484b8fbf4194c57f3b192c63",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/meta.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42865d840d0724b6925d79dc5bc5a8595a67b19466cfd16dff903586211d0fe7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/mallocng/realloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "16738fd26351bb8acad74a02bd96decabe15cb05360d65c1b9390d370abbac65",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/memalign.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fcf8b42dad1e37190d670307db5da093a79d857216bf40d3fdc2c2df2ea13f6f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/oldmalloc/aligned_alloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f1770d6eca835d0a66b745e177eabdcf70d946f2db0aa720a6ebfcb7bdffe2a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/oldmalloc/malloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ad3997af84eacba8b1c232ce5e7d6fdd82a664e2bf521b5dc945817d38d699b7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/oldmalloc/malloc_impl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "25b3e46771219bd5e53e13eccaa4c09ec1e1ff1a79d5c635d1f8c78642ce8721",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/oldmalloc/malloc_usable_size.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "87ee2b69f5cdbc7e2d6c010db0d2ac5ba407d800ba01459761c835f76a54de1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/posix_memalign.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e3faebd5d1c7e4931d55ea5ba3206efa604e8f9b1c6f5ad8fe00d7406a2e566",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/realloc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a633ebe5dfe39273c7b160363be6a34636e8fe02818403c0b2fab80a9f5e9366",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/reallocarray.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6d677fb7387bfc58ad6b10c6a91d26fc82f43f6caa0896fc46d04ce3f2ef73e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/malloc/replaced.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e4c5e946902653fe931b7869bba9ea4cd196928a6c5ab8e3e00f259351f01fc5",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -48071,54 +41033,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/arm/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1d5a5ba6c9348a4f59f31a90ea0119c4bff38ef1d23f6071aac1ad68cdea1f4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/arm/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1764dd8cdae8b40ea67d19f87a1e26749d85aa05e8a8e39021e1a69d40a1f46",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/arm/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1532b6839cb419f91435f9e82bfd2cc999617811ba3f5d0737b000c5aca9078a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/arm/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3c97426cda9c9d32b7c7a4c8bfc78c33917fa8b6c5a31011ddbc9d7432764bea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/arm/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8245d0b5d879962b07eba5a38dc097187f940294fa9e6bd630ae78e127d63f8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/arm/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8dcb3501687b143f3394bfacf6c32fc7c4ffeb2694faa53a09b182678ce3c2fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/asin.c": {
       "license": "SunPro",
       "evidence": "file notice",
@@ -48260,22 +41174,6 @@ Third-party notices remain in their original files.
       "evidence": "file notice",
       "reviewed": false,
       "sha256": "ee82c17b1a24681dfd7de0161088b45ecbd2d0346ddeda9d4594b48e4da0d3e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/ceil.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f616b50efc61eb35f946308b222f5f83ca707b4efaf7ea175969a5b62d2d6637",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/ceilf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "691d3a8e183ebe5f09a68120766877872e10f9267fe6e2bba0341b93d2863cc8",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -48511,22 +41409,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "99880a7802d67077fa54a2bbb5d3388cf42b00c96d3e2b1c16d63f2918157754",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8fea1977b6b8913e7db76d8576f95f30fceb35e47122af299fb49dd452cf74c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/fabsl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -48575,43 +41457,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/floor.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b9ccb9363719a84be218d60c56717f4fb0234e170c305e36ce21c30e1f42f8e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/floorf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "55a62f12a4bcd151ca3a82e9ec98b1744c15017f1b6cdea56b33220ffdb166f3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/floorl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "2e8587117da3b71b111e899b9a9372926e1656d06a228b027d0cb733cd445c20",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3e328da492e4818f83737bab2b8b7d8cf281c4ce3730773c99ab8c7efc41dc7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fmaf.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "e5baf54228b74b036da629902d811f9f57de26133a03ce290879b5ec6de04433",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -48623,43 +41473,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/fmax.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "70d8ee2a5c78bf10a45a5e39ab346a9527867cfc16246d162e07c39d29e77c1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fmaxf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a65b1d245de6d52925a24d11dd09b47cc5ccfa4a4bcd7958f05a27ed91e04f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/fmaxl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "9c2d49e72f416c416827e3ac6cd68d95995add2cfb96c34c815f3f9dd9951d59",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fmin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8f174565b041802c3ee1b141caf2c7240b4ed5f45e920caec11c1585682199a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/fminf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3dbde7d5e5ebe1a91c9f45eebb2ff8dfebc3a381db2630fbab0f1f4b06369821",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -48740,590 +41558,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "a6a4b8ee90aec01a225f4a135f506faa96ae4a50c2b16ef8d7a7f2216903abcb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/__invtrigl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/acos.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "87c4372bb01d271ecf3dd9055dd2f3e9697b0a50efb14761c68f474feae9dbdd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/acosf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e385004e5fb6700a2978287f52ef7606390c02ffffe712f81fb74c4daaf30d2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/acosl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0cca7bb4e63a468b6605d74528d352dc3e0f521c2fbeabac206a754aa68acd19",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/asin.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "209910f217e7bcff3eab817c881bacc173d7c590d8f1d5a4d52c7c619e556679",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/asinf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bff68d71d277d451b4ced4d4edac49e932974fe9ccf33448d03af50611deac18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/asinl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "97773e782d302d885e40e5cef4a359ed0cab0185cc139d44c275a142fadba0c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atan.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "74264a0941ab910690758e24153e74252098990a9d9af6fe0574b44f4e26b599",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atan2.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bea8e5131aa51584b74e651681ebb644ce95888ffe5bc3e82c843b76ab5dca00",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atan2f.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "046c85a9cf68ff6aabc7f08c91986a96bb4ec6c414399cf46f35b398e719898e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atan2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6a68a47032aeaddbc123aff86483d8f589bf446d28b024921711c8213e98fdcf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atanf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e474bddfb0d1e22ad6ec6fbe00647b339f799df4201be4e5cfefadbc9aece539",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/atanl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4e27a9613407aabdd1f916d0593cf7f35c7135439adafc6e18ecf638d2ac18c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ceil.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ceilf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ceill.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/exp2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f9400e4b6a6ef6fada28a905a72f91b11dbd900c420063e0ea8e00b9b4c9164b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/exp_ld.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "25787fa7620d866768df9eb1eedef06cd706a11609fbe3ac602a28a8f1208275",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/expl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "18731ddc8f5743e5137f4d600beb8f55314226067fe192c5a2ca72bce77b3f53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/expm1l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f9400e4b6a6ef6fada28a905a72f91b11dbd900c420063e0ea8e00b9b4c9164b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "13390d4b6bd787d8a36b9a995e2f208ee413ae66dfe3120eeb0295d28c1e7201",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "999259fc577d6f2ebf6889ab02c1eafc921da5adf0b9aa6fa795905d75e9e537",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fabsl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e7952c531008b7a4f26b68eb51557a89f3d107ec1aba88e3e328915ad507745",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/floor.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f649bcaa80756a8c271d9f380ce0e209a8036b1054a655fdb6b356931c43317",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/floorf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/floorl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fmod.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f1ab2be2ccb9f25914def9b0083ed6f210f4e664a60ff368e3aba0d622f93ffe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fmodf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6ad532e2b64b01b04f3f7c29f295a4656c42d043627bea83fe7882b2c2336ccf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/fmodl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e833e85a537369f5bfd718052bd3b37fed1fb7c74cba05e21b51a3893ae8b9d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/hypot.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd007ea8e1c691166d7a18f1022183d4e61fac8d0d3e0866d05d06e04efe03e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/hypotf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ae2138bf60b4257bb82f57dd59e48a9404eac37a8f19b8280c405430d6181b8b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ldexp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9364f9eb3bc57d3775cf902f2d59586feafda05e11b17b663648bbe6397fff93",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ldexpf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "391cc41c42cf755c5858b1dda419f5c3dd885ed1dc61b95c0489e887f17138d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/ldexpl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5a1f32c630102fe899be39c83ca1e249d1f504491bb771cbba5155b7e3fa036",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/llrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5409c6f1869b736ea3b753b368909291f3a33501c599d3a80c3aeb9da7465aa4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/llrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "05a438e0aca8170c67b53bca5d3cdd4038df56162adc10433713b5404111cd80",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/llrintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab5e428a84aa3a5076faaf8737222113e6eff2abea41ff965bdeb83d8d7cbdd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9b6ea8d27e2cd1334fbc110c245b0439797978d126e43171a1307f093a0d2be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log10.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bcfc9f537bbb6724369b1f3de34d92fc3b5aaa60f03f5d37a8933947ed27c606",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log10f.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d3a6a6b5d74cab949379d8a7fe6744de91d0c93abe71255202bae97bf7455171",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log10l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e9809d47d57702a56147919ecafa9da5876508afbc1e32d3ffcfa3932970e50",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log1p.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e0327f7cd824c2d70b4fee0aed174108c9bd1aea4ee2abd61ef9f118b51adc1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log1pf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9735d19f00e25be6082942996caea69012327013d7dd9c63047b068840703634",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log1pl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "81311138ff80dc19f1198a8084dcf7e192e2a8fc69e0178fa610a1aaf4878b29",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log2.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de96551ecd6d2f4cf77100eb0e90eab4a09aef6e969b2e22a13152934090c803",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log2f.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b835a5bb40ee4f4b1c3fa64142ea26df2257a16e6ac798d457ff82c902a7d86f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/log2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3d8e2dea0c9def4c441ec923e2bb1d7746a5ae60c14876eb72d214ce4282eaa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/logf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "970858efaa8057c0b953ecf66d4c5d6e29fbc8e5d10bb2042780631809e46aff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/logl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "56f88543416da1a3481efed987470e6a3ffb316f2cce3e172a2af919ebc25273",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/lrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "89f7ef57ae6cf5adf3d476acc89a596abfd6ea0b17f816854e38862d6afd839b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/lrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5c30364a077477cfa4b8e99c42133fb0ec4317e4a91db80398e21ba1776b2988",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/lrintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d6843e8307cc80445c156365d7d59cd488ad3bb0db3ddef224d27f4b50761e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remainder.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff13bb1a56693660ffc9a23c8619938ec05a822953cfc21a128d5c9479562885",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remainderf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efed4887d21c2c8d531743619f145c11594a323525a2b75c2c9348940184bb95",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remainderl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e83d52815283e76420618c55c9011988a0da23187ee9be1a67f4776786351a8c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remquo.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3af760cd428ecb6c5483f00bc8d7a1d7477edba41e1b5d716c2b61a7c9542a2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remquof.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "23bb59fef6ccfb081d8b9c27748e9051a118aafc2687777888006e5af5388e66",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/remquol.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "23bb59fef6ccfb081d8b9c27748e9051a118aafc2687777888006e5af5388e66",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/rint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c2dfbf235e0b0d72af4d25908142ff80b8017d096dbab43144751f0c5426e58",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/rintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "620ebe93453825d222f0ad80e452b868f9d1cbf8a89d9155a463ff9f0764ff73",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/rintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "17a0b056f800f22dd9b66c841f3af4a2002d72bfb77bb5fd3d723eef4b813713",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalbln.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9364f9eb3bc57d3775cf902f2d59586feafda05e11b17b663648bbe6397fff93",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalblnf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "391cc41c42cf755c5858b1dda419f5c3dd885ed1dc61b95c0489e887f17138d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalblnl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5a1f32c630102fe899be39c83ca1e249d1f504491bb771cbba5155b7e3fa036",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalbn.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "798243c2b77e30d6c7009e97fa8b8c8f1a43328be5b949951965457064789262",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalbnf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b16b0196f68ced6f8e27316842ea4f3d20be97dfed21080c7d4f40fbd35fb80d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/scalbnl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e17388778d38f6e22da95bd7e842f36f53813ee5dcbb86898704124c1902e745",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f7efe7567feb6eda675502e6e403f7e14eb9d8f3dbbad0a54b7dd20600a9fd3b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5d5b5e96b8421ff5a1915399f57717c25a10890ee52886629765b0f6fe19da5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/sqrtl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "346dd2ad32d7a3f6635ffd1831cd535d9e4c671e4ba19c73f91e6610b45953e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/trunc.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/truncf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/i386/truncl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d81a1ffed73f93239cbe397ba5bc360db85c55c5dd14dcd675a85e8877a009e0",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -49463,43 +41697,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/llrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "16839c5a71ccb7f030d4d4663a1a75f5ca28ae307d85d1955e31f916cdd121f4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/llrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3085e54d25c37171a029fcb0cab475891dfd19bd44bdf51cb4efaa9607276cc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/llrintl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "05224713c222af3a5ad8d9f86db2ede48a5c2c681f592bdc4b94bfdfacd6aae1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/llround.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5389849134e22dce7f210ba4c7508b48a651c6ed05a63bd9e38dacdb51712b3c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/llroundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d15d1aab1706d818b026f5530769a123f725e71977ab827e8647b13613d2f10",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -49695,22 +41897,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/lrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef099c61a442a79c5e7afc11ddc6915e31022a1b8c1c44d74dd03184f068d02b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/lrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d6673476094b190bd80f92bf89d3c6254beaf1c33fc7f7245059bcdcd7f4c6c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/lrintl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -49719,67 +41905,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/lround.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "72b8f2b833b8d4bc5ba24c7321b18b4307c0d333555646c8d6af637631efb2e8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/lroundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "585d7cc9e92ddd8f622e687ccbfd1865757981620e25391e0a181c1ad8a2f0d9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/lroundl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "0807bd458c378f5e25e1792613140015faec3f3eb97961f09fe604f401b80ce4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/m68k/sqrtl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31bec8fb18448476d479bfcdb6e893c282b1483e57dc3ece9d7aadafd941e4b2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/mips/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8694208aeeee5d6f4bb775ad60419b79dee23c2e8bbededaf01f5f1ef1053079",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/mips/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cc6a66e5e25af688b464e5e1b77d8b84d584d809948b7ad6c377c1a3f69e7c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/mips/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6db736a67ce6460172008db5a69781349636fe2d05f1f1af45399af3a2f00f8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/mips/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eae89214b53d39c3d35737f297108fc8c000a0fcbd38fcd39e94852c3dc3f781",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -49828,22 +41958,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "df925bb856129f442c4b72a59dfbe06939790b67a3304955e924c43a3558c5a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/nearbyint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0d0e0f810ad45a94feda189045f73ecc9097c20a56165ab56d3e40459c13f8ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/nearbyintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "07b89a812cbd246f9b08d6ac0545cd7c54284cf051583e60cc4b88212c049001",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -49927,230 +42041,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/powerpc/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0c0d8038542060257b29e164f072a87f5238eae2e7480bf01675e35e4afbaa42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "662646ec1dc2b1410c7d74f167748ccba843359faadf624c7351931f29d67936",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "494d11cdd130a1b25987154a6f7166d5fbad027f4d389957788c8bc5241bba01",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f6fc2bbb17fd565427ae56dccc60f07d3597e5e079da99029be4cba7890f416",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9090522c9b83a9628da9785014930c80737f2c7410213fd9ebc0b951aab90fcd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bfecb8cb0265aacf64668293a39aefd39cce838adbd02be61535de1445f20c8d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/ceil.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "256a064a3778f908bdc77dac15b942b96e3fc80beff446b7a0a3d76a4dc52769",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/ceilf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d3d056129317447c71691a7098c30fa08bc110fae64db2d0bb3b95b3e6fa2cc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8349bd0dcc048dc9b5454bc5675557254d61d74d1fbfde55cc5da24e8f174a99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e8eb50845baa074a46e5ca08629d6044a3f594e7390d342c2f1dd1080255675f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/floor.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3a0ce38dc6c2013326103dd4c9bb6db27c1e2397b61fb121623f20ceac7366e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/floorf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4ffac124e2acdb97e962f16b6801b44ea52a4a3dee3b1e51dcb4fedad192c36a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "996c0f815b81c17dfa06fae49b976890e07f42286cb152ef39e96367128f5b7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f0874d89760f5f413e8ec8026a57e5ff03927ed0c027919119e0de367e966023",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fmax.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "157a823f37feff7f6431826ed2f4c9666059bf29dc5ca197a2a321c0f68d1716",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fmaxf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28bfc25f9b3ff91dc28ad2e5a9faa20f5c2019dd78ece27cdf38465c8d76696f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fmin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7f826dcd96c904a20761d9f989f18a298a7fc374420bfd70d5c43ab353b1cc9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/fminf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "90c6036722ca7383f776a76b7523ac87d4af616c6107addc52a013b43158e373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/lrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "702a6f5c5b2210a0fcca12c4aef3b22cdd4150b2d8305d9ce37ec38f0bfd186f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/lrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d0320ea75b59cba2098b90e58f6b12d80310f8082d082b6fad67ef61779d52ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/lround.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da89bb8fdb43055b5035c8930b9b2ffbf068d820e3fe6910e93ae7ad3cbdb327",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/lroundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5261d2e0793cfbc3c69f49999d5780f07d3dddc4d263b6f6016d41c479c74786",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/round.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0c37edb451a9fb39d7f45db82805aea9c244394f4cc71a4ebbf9c9b349f7c737",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/roundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4887c8ff3a1d899e4942e37e2188ae97d96f262192bcae64bb7cbdd3aad6abb1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "37439d247e47b620785576bf0bf88aff036737147d7a3598db8a360438cdc29c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e77e170b85ff7ad0bf76d75f7859db2ddd0a416eb7c4dd7adf2ba5c3bbf91ef8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/trunc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3154e6e5ba9955c5ddf2e05c89b491afb51a60af164b259acd2fe349097f8fed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/powerpc64/truncf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1226920ec984d351b64975d959ee0c42e7a803e1e54ca581f5c513999ba059e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/powf.c": {
       "license": "MIT",
       "evidence": "file SPDX",
@@ -50231,22 +42121,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/rint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6f393f377e693f6887c0f6495eba476abc45d2f4127fc93366fc02f1f49e2fef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/rintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9adef215d38823468cd77d7d5a9b305041d7020196ce65caba35f05ba2dd6f34",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/rintl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -50255,427 +42129,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/riscv32/copysign.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00f305c6b1fe07fd04b72810a6dfa820b3648ed37f3d81a6a491c927939ccd1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/copysignf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ebf08ab7e7c9bca389e54402c5fb851575824f002a3265b4a5d439e02058847",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9933a6fb884a131e5d1355591c8a20ef7483a25a4d57174581624f9c68faf0d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4859cfaa87e541bd62262b5d6ba1b621afc63712dc91048053e14d5f98e0524d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7713e8d54e62834bcb9169a017fc5de285b11e36de63ad4c2d1834225be5222",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c581166babf8ac2cd79ba38a16968ff3ff60cf3305bf74d720d3a07a94959a06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fmax.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3e0ef871dc5c20553573e1619f2c5a84537fb1588f6138f15f3e44e07e5a3a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fmaxf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f9b05da0b8f923f7cd032c7adb5dc5df4624c05594ee370fe3be644c6d309bd8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fmin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d4ccc56773f3bd203c6f8a53c41bb75187bc58d20fb7d9d72aa7a02feea71b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/fminf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e6a8c4ae8de6eb4c1c3776e88ccf43f7c1c7228699da835056466b19278525e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "748190a18bce4dfc532c3f1f462183b5afbcd77cdc9af02165bd7b0d7d7ccdf7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv32/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "416c612ad1fac0d72702b4264c8030ac163ddfa247c45c31b0c741afef2c27a2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/copysign.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00f305c6b1fe07fd04b72810a6dfa820b3648ed37f3d81a6a491c927939ccd1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/copysignf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ebf08ab7e7c9bca389e54402c5fb851575824f002a3265b4a5d439e02058847",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9933a6fb884a131e5d1355591c8a20ef7483a25a4d57174581624f9c68faf0d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4859cfaa87e541bd62262b5d6ba1b621afc63712dc91048053e14d5f98e0524d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7713e8d54e62834bcb9169a017fc5de285b11e36de63ad4c2d1834225be5222",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c581166babf8ac2cd79ba38a16968ff3ff60cf3305bf74d720d3a07a94959a06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fmax.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3e0ef871dc5c20553573e1619f2c5a84537fb1588f6138f15f3e44e07e5a3a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fmaxf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f9b05da0b8f923f7cd032c7adb5dc5df4624c05594ee370fe3be644c6d309bd8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fmin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d4ccc56773f3bd203c6f8a53c41bb75187bc58d20fb7d9d72aa7a02feea71b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/fminf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e6a8c4ae8de6eb4c1c3776e88ccf43f7c1c7228699da835056466b19278525e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "748190a18bce4dfc532c3f1f462183b5afbcd77cdc9af02165bd7b0d7d7ccdf7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/riscv64/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "416c612ad1fac0d72702b4264c8030ac163ddfa247c45c31b0c741afef2c27a2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/round.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2349e599e99052603794087193725d28180b5d3466d43d6e6e1b254627bf37ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/roundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f8cc14771a866a06184a3d9d654f63de9a077316a4905aae19884cc9b292d2e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/roundl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "ce7ed66ff0df4f6254103bb56486ddc14f701e5582148f882ee071d15de96f5c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/ceil.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "031cf982ca2470f91b28f7e607c33cc8ddbd88b4199ac0802447ef801bb3bcb2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/ceilf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "73ee4f6a4999801210d9fae29bd76491573bf021aa97c9523e76f108b50d1ae6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/ceill.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "86fde832f06d77ff51643ddd85fe558638a4952d838f88f7b801c35b109518a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ca6de21beda794adc5b66214bd36920175576a6405cf58f9b7132e2760ec2843",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efecfa297080c908d2ea0ddeb8fb972e93560d261681843ea88bedcacb376f34",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/fabsl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c62201190d05e280c3f04d70f9c23a81e7cb363083435febfe0c77494c9c19e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/floor.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "43d99d010bca275a0ce05475888dd40c0a8a58fb81670c67c98f606ba931a648",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/floorf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c5f978475a10b6e4fca7ba04e27ee6d9debea125ecd413bd3eb7b51fef961d0f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/floorl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2298ee244e9f106c4fed11cb3ac47fbd04a7d8eb8bfc0fa1cb7a2c482550a02",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a636da31e4cae68cf08096066c1156ad259ab6d6fc16cc4dbf9feb471e21183e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6e998ef9f81e890a7258608347653dad6834b8decd6ff0f8ad736565fc746823",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/nearbyint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28dcd8815a962528de6767229f4d79f80f038bd20286c0a25a12898d46de8a6d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/nearbyintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b42c7c6bf8c632eaf498cd6093af13ad376427d6260e87fbda9c48f9af845c9a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/nearbyintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ed4e8120fe35697f1917c384ed5fedaae23274dfd6a1dd9b43b518072bc9607",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/rint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb607207b2450ac713cfd35036db6d1c99407f36ce3091e8f7f090aecc4247ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/rintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2be2aaa24c71c7b20e027fe5077b4d90872137bd915a5a9eaafaa2466c59b05",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/rintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f732e7f5e8e4d9dfc46cd29ddb38444697c7e9c18040514fac98a185410529a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/round.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2c4a756963e8b3889c115f8708743407de6bf69503773d17861a8b16a6fc800",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/roundf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "52743098a605d7f8876f151ca4806a08e18fff355752bae6948e232181ddcdc2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/roundl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4efebe65a1b108db4bebfb68091e02929d6cdc3a298655d733f2521168ef92b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "34c050aad349383d20ba45730d2625c2c91b8d5e86b241caa94cf6cfcd03b70a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b53c1d50c4fc891fc14611f70d91535c96430be79d2e6c2a73b80c8622e72875",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/sqrtl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "352bdea98e592a4b1c2c7c762c01dc2bd6302cb76c12095c6dbaae94094a8401",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/trunc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "74677c3b94ee14b933b2fb3e770b18e644cf1bea032960747ec683950734ebdc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/truncf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cb6f050aa50c208b0d821f2ded8ff02fa049d893ec1e9a81361445da1e5910ab",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/s390x/truncl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f855d50661b565dcb4b146a0a393e1259c86b0421fe2b4db2930c548f70b8957",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -50839,14 +42297,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "688908f94c3edf7a439cb64094034a596a1fbff08445b9158a22874cb52ead4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/sqrt_data.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -50860,14 +42310,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "5fa47a8b8c1afbee4dcd10f71d2f6c433a24f9aa5ce7a90924cd1db236cbc03c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd7c19c2c4efdbd1259f04a919c88f7119d9402cdd41584c7b0f854acb203b42",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -50951,555 +42393,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/math/trunc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f2941542db65a5c3a8a6fa952b978a5ff757f8b14ffdaef8ad28e0cafead644",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/truncf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dd67c4d71894da6c93bc41ec6a141de45124d3d3f4d012bc95aac4fc792abccb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/math/truncl.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "e58a1a25cb4a1446bf087f681fd191cbf2ed6a69297b099e2a5d99691966ac80",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/__invtrigl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/acosl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63db066ac7407adc071b079d747a5db8c92a51bdb874125af26b3eb1b125dba2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/asinl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f80ce3969b28a03b6ea3a065c0da9b5deef71f6298506da425ae92eab627b7c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/atan2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3dcb55b66761fb8b683d2e84dd61843940e02d16fa431b45fa090389f4ef2f19",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/atanl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf981bff312327114d23e58632ab521bf49454053a63612e83ec751b67f2cb9a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/ceill.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68788d3d8e61c93ffb89ccecf8a462c30ac3de27cf1319037105a30a8ab96f61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/exp2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "93e3f3b3572b9328249e6873f0a617306404cbc1fdfe07e3fbdafa0f2231a5c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/expl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2daafd658072dd96d00057e0eb34b8127bc48d5a43d681debfcd1a6545c5b33d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/expm1l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a463efa053072a40be7b7f7b1c8111f6162c24c1e03699889e227783fd688f42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fabs.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4aa1e0714c3660d4c1707242148663b50662c9e9769c6b2c205ae34903439ecf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fabsf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f472faff581fc0055d18d6b7e427ce4424d2ca4236dc20cc564d8295fe240fa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fabsl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6df2fc32e75b9490000e746c6406923f5f6d276df38c8f0b40e68ea3b8fc932c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/floorl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9216f10356a05c486a3a6daba497da401c71bd29f69364cf4cb0676fc6410ac1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "29f3f32709ce63bea229cc49e0823b8cb0deb63a222eb18710bde9595f9fa70f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c4c24f41adad86c3ebce57d63c30df8fa5efd2cddf5eaee90f6baf7a4039f7dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/fmodl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0a76f69dedf28f9cdd66c0712f07aa9d164426c2d0665914058cd71c7e0af2df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/llrint.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cbdeee9b3f5f17aa478f8ff231a760fb567e37ea79b12e23a5a963e801374eff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/llrintf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "75d2d7a58bf05b80a3302e21f124fbc9bb4b3fa23c3dbe1ba37bcbfcc5028cc9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/llrintl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a301b9426da2371683d0faf51cecf3400c22c2168b1dd9d5d23a6ce1239ed5d8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/log10l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "49fd73a0b44a7f0d794d701177780733aaf4b788d51b83afc40295cd18e59d23",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/log1pl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa3fa3d49f184a930281cdc3e8b9d35982383b3a78a15cf044b7728c1f1027c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/log2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bacbd1284e52e9a66284ab7271599966b7fb738a5bbd7712d67c04408199ed39",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/logl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d16bbf7bc6b84cdd18d1ea7dc3409da414701d18eb36024989bb3ff467b2c00e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/lrint.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed60d1af9305a8f8c28fdb5bf929370dac7e63cd843c647e722f847c1df6a0cc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/lrintf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b2cdd49e7122a4c6ecdede6591f29527839791f49a87d8c5e2f8eac2e3b57074",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/lrintl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d75579caa7bf039c80bc50c8af2cdc9cfc1265c97c73c7cbc7b32514e977cc80",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/remainderl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "49803432c3cf7d600b13dead28a1af7cb0f8a0ec5873a5b9d010a0a90bfbe42f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/rintl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d325da248d3e74bcc28696e985bdce6796e2760c382e0ce22acb08440943d7eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/sqrt.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f65dff7e35c244c4f22e5e3cfb796bd178e4c0d046dfdb2e78b550c8fbfdc158",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/sqrtf.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "12aff65bfde2307553e72fe25ec5c5ef702fd6abd8fb07079f622278cd62bed6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/sqrtl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6a31f222cd033d72edd49cd25eb8e989f2ae1d1efa870d37c980fb5f88f158c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x32/truncl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68788d3d8e61c93ffb89ccecf8a462c30ac3de27cf1319037105a30a8ab96f61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/__invtrigl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/acosl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5939312883874af957eeca12cf93b086e443db0cbc888d5b0e480d572a66dbc7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/asinl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d38d56281dde6ebfb5c3585b9919cc27b002b355d9255b6981e7e8c71b7ede15",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/atan2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d369429a0a11e07072b6048b099da0511755e272a8af4f24dc08df2b544fc2e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/atanl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8298348eec828247421885f5be9fabd0b558316e006b9555ba354b730932a02c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/ceill.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68788d3d8e61c93ffb89ccecf8a462c30ac3de27cf1319037105a30a8ab96f61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/exp2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b658ccf6a0d61442d13bbf687a28c84a9f724790864ba3c6b670d9870d420e07",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/expl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ef3d9ddf89a06262bf61026e4788e7849c3ae339cbb42738b854d7b22997c4c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/expm1l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a463efa053072a40be7b7f7b1c8111f6162c24c1e03699889e227783fd688f42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fabs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22405ae75afb4313452dbb7ba2a83e58ebb1e8de820b1a0e8b3e6772fc7e7cad",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fabsf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dfcb0d221b645ad4c16fb78a5e5e4727ed14bd59aa647ba2984fbe7e76988dfd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fabsl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e7952c531008b7a4f26b68eb51557a89f3d107ec1aba88e3e328915ad507745",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/floorl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7becffe9735d5a9f0098f4ad6350717dfce1397cc0dfa00c5df538a6bd2c1850",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fma.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "29f3f32709ce63bea229cc49e0823b8cb0deb63a222eb18710bde9595f9fa70f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fmaf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c4c24f41adad86c3ebce57d63c30df8fa5efd2cddf5eaee90f6baf7a4039f7dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/fmodl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e833e85a537369f5bfd718052bd3b37fed1fb7c74cba05e21b51a3893ae8b9d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/llrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "34d9892bd659cbdf9db64d81842df51e98f0153a283d4fe9577f8c95ac113675",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/llrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d6ea3ce5bcd567ffebefa1299019ed9422802fcf6401fcb0a01ef2e7d521dab",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/llrintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ab5e428a84aa3a5076faaf8737222113e6eff2abea41ff965bdeb83d8d7cbdd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/log10l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b60d92352b0511490545af1798aa09702eb37a159f9a7bce6da11c5099fd6a75",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/log1pl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "459a90c316cf83eb78767b83acddf62173b2a02c00744655c1c57bd7c39cda79",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/log2l.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d483c9197bbf46eb23126412d9154bf97834eff257528c651d92a46c903bbbae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/logl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53530c16f9f2d05436fe89c5736e55234c770340541c6f5ddd1a0d243e5a8b9d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/lrint.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e5935a1ebc2995b148d380f10a00abec0c1134be03d12551210e1d25fc0fa95",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/lrintf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61b47983e70a4f7f8a0489080fbdf674e8fdcbdb71c968ec21d519792dd03621",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/lrintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5deb5d2bc7e7029852612b63eedca46325ba754d625c5c66ef696a4daeff5781",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/remainderl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e83d52815283e76420618c55c9011988a0da23187ee9be1a67f4776786351a8c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/remquol.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1698154f815eea19d250359ac799ec84057c71b6a08e20cb02ccc20fb5159f2d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/rintl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "17a0b056f800f22dd9b66c841f3af4a2002d72bfb77bb5fd3d723eef4b813713",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/sqrt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9f1c582b8190d858b69406f231dca9d441a987a5c5822ee0bd47e6d4089480b4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/sqrtf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1384cb4a4aa0b1ddb9565c458f1dd87a605bd46f88d2e0f920be5517d8b57e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/sqrtl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "346dd2ad32d7a3f6635ffd1831cd535d9e4c671e4ba19c73f91e6610b45953e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/math/x86_64/truncl.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68788d3d8e61c93ffb89ccecf8a462c30ac3de27cf1319037105a30a8ab96f61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/a64l.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f9cbca307c727d42181f9daa4206cf45f54f5ed7f82b712b00ec14c3dff2bb3",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -51527,78 +42425,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/misc/ffsl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b77bcc0a766b2b9a8337121ed2720bbcfee51b30ba968f381e0e66da3df0c55c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/ffsll.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e98307be86613d043cf0d9992d79e22f496cab1811ff417cb1f6a6baeab3e165",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/fmtmsg.c": {
-      "license": "LicenseRef-musl-public-domain",
-      "evidence": "reviewed musl 1.2.5 grant: reviewed grant of src/misc/fmtmsg.c, which no notice form Attribution reads states; full notice retained",
-      "reviewed": true,
-      "sha256": "27354c57b1827561585a73dbe9f2d7f97cd73563d4043cf2907912c8faaebb6e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/forkpty.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "70f77bb015cfde7dcf8bbe68062527dc1a904357d698577a30061676ab60fa17",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/get_current_dir_name.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2091ea255a8ce85605b5b1bfb75ea8826fa2095850b3575f19d0c0c79857b20e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getauxval.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8602d75dfc06775f0597c8f4285278c76c36e6865018d7ce5fb908e1939e2604",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getdomainname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f629e42eeef4d0da814da8e38bb63c5abd8036d5567f23f86e950265d7f5247",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getentropy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "43214a07a2561d82284489f2b030bf1d9578c6a1376cdc85a2f0159c8a6ea4f2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/gethostid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7636d6e06abccbbbbe715de8a643370b379a8a19559f7e37d824b64e94b539a2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/misc/getopt.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -51615,227 +42441,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/misc/getpriority.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c96b600a345b85a9ce0fefca064e358876c8a69f13be08fa27816fe2b393a9b3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getresgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2575d945ee97d4aaf64cb235440d9f32d3220e4534746356de004cb0f9124f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getresuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00af69821f4682f1da793fd0e3ece25291b3ac170a19fbaebcdf46e755c994ac",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getrlimit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "99e91e5ec0a39257e5e81236e6d526d4b8c87eac46fac08797c49bac001ccc88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getrusage.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c5edcb8482a44598d42e8f4366f0a971c2f012d5726595055084dd5b9b689d27",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/getsubopt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ea65614e3e6d325c768c243e152672e2c30461634dce75523adeb0fc1ee4869e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/initgroups.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "341ec58b8887dda4dcf26736905bc6d2c22f264e6fcc05a84d922fc1ae357ac3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/ioctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da7e3d443f3a3117faa22a50201a34e6fe21cda153b1770f2e0f2349603c5f88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/issetugid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7c3ec91e0cef55856c53abbba53c1f3bdd452f32cd2151b09c68b9bd72695d99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/lockf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "649ed6fa9fe6e17bc540e3a52da2a07284c801b5aba097368f7494496d13bb0f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/login_tty.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c1e89cfb7ae4f4a2740a87b7001d45b21825d9eb99b4af03db8278990fdac85a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/mntent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d6a40fe8879ba2711ba7eb11e84067f52f3f3047eca784e112e5a042f515acc9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/nftw.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0958e69995ed09a4f5045d6614e8b8b159aafb77974c5d7ea31192b5e874bc64",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/openpty.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31d2740a5fb8e5239ad345a971f4b9dd12e041d89faee537d49e518bc650c4b2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/ptsname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8451840b16f9a51a9994d346b9dbb9f9b0d4c868a8ffb3b7a45d81e2df92a404",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/pty.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "096e58b64eaea78a5a4d4eca9e3dff2a21f5a15165d09847ff54134205010e0f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/misc/realpath.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "722f14030bf9e172b87becff580cc8e31a4f5b2dc568beb64f7ac47edec6650e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/setdomainname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "89f2975ca74d1f757e4d2e4b09366c42f219b3ccfc42fe628779dee7df5a1180",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/setpriority.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "06728d9a7e2ca18de710743739bd784ccbd795f34ad77a5eb35956553958d703",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/setrlimit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c5b386562673ebc5530f3ef75572099246c311bde9adaa19f811f2712aee44d3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/syscall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f886b08872fdd682257573c1808826553a76d7da57a9df0446a41082a4dcd970",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/syslog.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d64573fb6a14034ed12db915f580d23f790b2e7ebddf17beb160a896b4c8a54",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/uname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6847951267ce12c2a873fa5d8ee00d7fe54f5c76d67ae20bd4ec285fc7baf0b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/misc/wordexp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "018c97c999cb60966a0376b71f2c8c187179ef31cf5ddde47b959e8f440e08f8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/madvise.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e359f8dbb171e144e6241c26533225bf66113224f1d5e66f1972fb0d81be2ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/mincore.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "670bf685ea1f30b761068f0f13ff58640a0dc62fa06c2cd8bf54646c6a25fed2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/mlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "510b947b840e54874d576d81840e132ff11ad61a561dbafc95023c6b4bdaa85f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/mlockall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "788de06f595452510117597f4901f14bbb98b18e0baad6cf897967c2cca0ec59",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -51847,163 +42457,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/mman/mprotect.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6086bef900c10b86151f427c007329a6ca843dbd466f19fab432a13dfc4c1b58",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/mremap.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efdc69408cbf46c000089e482ad31be1ac65a95b3ecebb4a891d425b5712ae23",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/msync.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce22459466fcb37ab50c9e35dcf1598261c3272eb3b4fec5487ab45e866c4b9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/munlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6fc6b46bef4d33bacc342057ae3b63cdf9ac9d6e48d720d896f3d22ebba16d1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/munlockall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce70701d84af13aa5944a86d0192eab4a2cb666241500205f76d2151189865ea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/mman/munmap.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "a5aaf66e9bd5444866791fa0175c85a7357719812495a67f20802a12a7880018",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/posix_madvise.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "79bcb11b3eb6d7b487d3ee8653bf6aadf08af90e09c9c854ea81898e36837a5b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mman/shm_open.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d2f59b83bcecd69fb268d79d846b4280add30ce9f88120fffc3dd17ab983cc7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_close.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0b489e518cefceff0b6335be2b3eaa1dbe0d58383fb48683b6ddb59491c19ba7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_getattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eb9324b14a27c157a82405a61ceb000d1e9c85ded89a38b545c804290c97e9a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_notify.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "da89e5c381dc11f551ecdc4f576ea6d6f21051cabca3c12d218a974046f48457",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_open.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9ecaffed8953f0d7348aa6d46d35a63398835725d4daa85ed64b9be286493d20",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_receive.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9f7d884e564a9c07ddb5a208d6e45c5fba69f742f26fc3ba89690c369f8340ce",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_send.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a9cc175749964b5319665327cbfd646d414ba1361fc59ae6ec6971e978fdfea4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_setattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cd3c1a92bf08a189d252e7e58b32f678868b4f12d3358fc9bc1423b72ef8d5b1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_timedreceive.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "59739dfde3894673007f087fb02b54dc3f0f0379f3e74cdbd67dc224b670a485",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_timedsend.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b93ffe26a74a277f3ef9f5e5885c13de1fa924ff9ef5f121e88884ef1a015ea2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/mq_unlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2bffe8cf62c17271912726a709f05333188188faeabfdec9271e8ca126f488b8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/x32/mq_open.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3cbf5a1c71c751c7c27a71c6e3d77ea824c841a8170e2baf56dc9e1f43c80c3d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/mq/x32/mq_setattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3c192977177406f570ab435c45acd08b38f66728de44d0a7e17b0bb8158a8af",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -52175,814 +42633,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/network/accept.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2b49e81322abde38c7ac13b1235e46a610f6fab1912f33aa33cdea833a852fed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/accept4.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "455c6d1d0f843da340de15a7ce24b0d9fbf0dff4e7de001f597c7c690fe7dc3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/bind.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "957d135b9d9f22db1275aa0d88b913a26cb006bb7120cbfb28d8f0d2de864f28",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/connect.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "992e26a686ba0c72068aec62981e275d83455eec876e9e1b612db0bd93923a10",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/dn_comp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3e0cb70d9963eca64c39881ca8cf2b31bda56f524cca984c52495329f237965",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/dn_expand.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "65f33dceff184f13aa3f9a6d5617d1ef5c33ae144c8b0940c9a4265a51bac463",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/dn_skipname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "76080e686cf1ffb7a2247bcf3f85457bf51c9a31ad9a5673e9f5c128db477a1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/dns_parse.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "96f686c4f906d1a69d660797c35d1f2e80089c417c15ed655b0401ec33c10c31",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/ent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9141212c2ea15e58dd5628c75e19cb4ccf120a8ad7223cf29285535d432b5210",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/ether.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31d1549189d1b1aebd88565ff9e7683e6074c4d6960f4a78f261d8e2ef0d0384",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/freeaddrinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f64b3a80e86155b879a3aa3a053c1b015261b4dd86dab7592dd59d8b4ea9df03",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gai_strerror.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6fe5731763217684cb44a48f246f68d7c83590ae85cd8b7b1165c35a43963d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getaddrinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9f421f973abe33d86df031722c9411c8cd93d3984e2459dc2b69186cc2223bba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyaddr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "94565ab5c55cebb6cdbd30673289d7522e3c61838fd9c47d1aa25aa67fdecbb2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyaddr_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce66581caf6e8ed8e081491531cf39c0fb511baef7bfec5119e15e8df306f079",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8faa9a6c78dc807a3e5c86aba1e53489bee59a4409a9016fb21bcb7422d4e7cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyname2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "10e782b44712c014a696f33b28fe95ede340a964e652e41dbf90e6089396cb06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyname2_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b72d5fdb7839b5fc571217ba0fafadd3de0ab4e6707e29be829a8a086fe33977",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/gethostbyname_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "78734e65d81ed56b8f371ff9aa951d4e446fefc90bc673fbfcb8855be4bb69d1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getifaddrs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d69be9311220e95a26848c8f1b95b50de137716649b5b4099d37d13178dd76f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getnameinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9732e0c95b6e865878c8778ae317b8ca439cddb040adb7dc563b7091b11dc69",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getpeername.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "db4f44a981b56897edf4e9e31b6c5f214ca8f33a87c14d0de3c0e282029741ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getservbyname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "be0eac6559c72195e05ae736c50c44c4c7ce7834bd15c3cc1d40485a48b34b89",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getservbyname_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8ca85d0815a18c5afc704a0168cd90573b0f6152b0713348ad2c20fe0ebbe1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getservbyport.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0faa4baba0b8273f1c6206a410b9b3707db52ffd21abd9802936bd43b38c12cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getservbyport_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22374d6cd75aaceda2bc8cdf3928932ea71a346cbe790ffe087063183454b6a9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getsockname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1c4ad3381053331aa1b4c008208f328651f94fe0fa970ffa79d7d48e269ab84f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/getsockopt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "35cd59aefe6ebdf00e9a33b44d95e2b747796c1bea7d7d6ff689db8dce164b47",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/h_errno.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb97cb19fa3e8647b951640bb953e7aeb9c568c31f9c1876277013ae38d7862e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/herror.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "18913f28a9d5da6e6efff226dc0eae948f89272359588093486f09a8b03d556d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/hstrerror.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9c64154bd39c74e8bffc095474d22312be695ff825073540b45cf41e8c866355",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/htonl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9a86ae2f1b88f76831d02da672f686a349ff9cde2d62ad4c20774a8823e1f76f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/htons.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3fbbb56bad58de916d95dacf94ff875cdba2961a95d1aa99128820c351b3c530",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/if_freenameindex.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "98a9d3413f2b7312f0ab5170ad4ad982db03ccc6f2c5e3269ce76fd098793bf1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/if_indextoname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff0e1d6117d63147f94d48e3b5ae58b4cc5d27734e6c47aa8874df98c9e644f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/if_nameindex.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "def37c8439d2e5563e01f0840f6948046f9546797472fdc89fca9ea6d3e0e875",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/if_nametoindex.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f8327f51124d255a506b8644a7dab8430a6f040b8b25619f2376d054f7f30f6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/in6addr_any.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "115cda902dca8c9717007dbf8559ffe3d23d2c3225823997208c8487bee6a621",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/in6addr_loopback.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5b956b3ae18f74c83c72e8f10e95e5cd707baddfc0c81a57997d671e8e533828",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_addr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2cd5075c6fbbc834e90bcfb7cce9d7bf1654636603197e6bf304c40e5e8eb59",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_aton.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b2c4bb22f74da864412a12b8c6c702d62a5789255f698aba18146cb9233a75ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_legacy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dfc502cdaeb31aa03bbc4c77830c6d5526bc3d0451f9a4bdac7989488042c7d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_ntoa.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4e4e6038c9177a05568f08d35160ff45808319b2814c9fff320903f3b4826016",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_ntop.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3e5ebbbb8f4bbd2e113c3eb23d6cbb1c5b7f0d9036c1aa5d182322cc9a5b68f7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/inet_pton.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32a7094a7dc9eea10d067f5fcafbcf2651b86c459ff89cd3cd3f7b7f16e58bbe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/listen.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d6d98f5ce91c6d6c4d34edb6394ae70d297e493087ac34fd4a82d990209ba7d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/lookup.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42ea7f108582883004d6a59bd21a784ffd6c56e8d7be6f18c290d91dd56b9f26",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/lookup_ipliteral.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1e18387d86995bb2e0e6f56f6fe22460db0c2c5be76f6bea95bc2aec3507d193",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/lookup_name.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48da15680a3a6ed3d1e2b112eb66c6b14be61acfd54f4c7d5471f3c5280fb172",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/lookup_serv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "012d0861a067b8736a0162a2882b265ae6e411b7fee89adeb9bd5b9df264264e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/netlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3bc73e935dd4b14c0a2053dfcba03717fa83c9429bb218150e4da79056c4a680",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/netlink.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed0daabbdfd03a0fd76faf6b7399e20b0bb18593bcd00f1ac1a0c577e8531de5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/netname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "912f59a79bacc08fb10800c9ef7d2f2674409232de03e9b270ebed8c63d4649f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/ns_parse.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1902806ee66d1a096102f9c44031d3c976e8c2c2022f02b6396c65e3c9752f01",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/ntohl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "065f939c41333d967ed11b9e7511065a526bbaba2a64cbe957c85e8d4e1a392d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/ntohs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5aae3832b9ebc0325243b49bed2b9ddc5aba3f901d2a5fbdc844e7cdf5fb79fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/proto.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d287362c52aa12bc5af4c45d89f125f552fef6d9ff8579ab9ba6d2cc9389fb9b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/recv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0c1b5f7c695ffae81034b25d3157d24e9a70f7f4f38244838daa321717c0d80f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/recvfrom.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bf2dae45a2d00bd7ced5c5ecf98a83f06819a97f4177dcf526f3e1d86ff2fe2a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/recvmmsg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "af977f62b733bf94f55f1275c3163db2cd63bf085f0ab495efdb65284aaeb275",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/recvmsg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e7ac58c94be6f875c1d302957327bdcc2aeaeebfdd3d08ddffef6236be19bd4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "72d6af142b48fff9ce4efe5fec730ccf5cdf308c4b41dde66696ae21fece12fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_mkquery.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "182f2b4c11c04ab11e3783fce2d2b371b7b545c9c033f38601fdfe621c02c7cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_msend.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "35f8f8959dddd5c84406653c73bdae6cf33f136eef1c074fb6163a66c74197b1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_query.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "57776b77344ccd2a991e4b6fcb20bafb159889a8ca93151521f7296a22ce9c48",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_querydomain.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "45058836fb4dd7680c61dcf100cca0d8dbed75b0a54cfcc28157c8059504ba3a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_send.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4cf538c7f3b0f0cafb2361d4c453c421d3cceb1ca80b896383cf801050c57f9f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/res_state.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c02d0851abea624ba8468bd793f8352563638624ba5d3a9a68525b0b7a908b43",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/resolvconf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0bed0bcab66b3e47a0190565d8fbf1211da125777749210c3e0155452655469",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/send.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "01a71f9d9b88206ba97f17ebff6e486d0f8865ab9c2a9814239573dee1fe2053",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/sendmmsg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "62e2ef4287895bf9474c6a23e2fbc40605d34616bd9e915f40c02f0406c51503",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/sendmsg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ca63a4b163d41d6111c67fc5894046361d9e59f1da16cdff147f1e6ea24e62e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/sendto.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b17763ed2450e9bdb101bc28e381ee670d74e65f3e134a1a8a22a0b0eadc79b6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/serv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0997dfc22fc73e99d306ca35dce5945aa5306c1875948fd22f6e62f31503010a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/setsockopt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "616263cb4618cd322d368213cc09347a25280b4d51f52ec90aaefc7b0787cb76",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/shutdown.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "35f99ab6bedff1875c2c136896d72643aeb30860584c4c79d8d4705d1086c162",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/sockatmark.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d897cbb9d30ae426ed3e8591733ecd5a889d6e815c9a21d1c5f1c213896f64c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/socket.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00e47104cc064ac8321d817f0cdf3eb4a30ed83831fef8a9da6d6cd869792312",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/network/socketpair.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3205c2934f631ad7b1ac79a9367db62d33eca767c5641eebfd7cb2c646c58f84",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/fgetgrent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1e4746af2b2f3ff62416b6c5f6349716f3159ca15270d31f933b86b42a7f3ac6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/fgetpwent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "363e93cd98ce91045d26642b99097f4ecd57117bada618610c4922f187f0524c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/fgetspent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e81db6aebfa337e30d478d10a933044d7960a1fd8b8e952a6d250d33b8b504a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getgr_a.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "03d7c5a2f2454d0ccf69012e4c9335daec18e71be130efd19e619358846c39d9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getgr_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "26101207c64131d145da71552385f73e459bdb6ba4e7ebcc19940d39a2ab1456",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getgrent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9a6224b69411057be4c9cb1801a9bf00f22a69c2c870650d04fb2380e1e52f01",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getgrent_a.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1bef36dae5c8c3ad4d82d65a872c13f6b252fa74d44dcffccf20c6230c851a81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getgrouplist.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "025350ea7e5220af59dac08457a876743566949081bbc503401ecb24641cca91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getpw_a.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "197786fd9aac474f6087faf1e3a00f0b74071753bdb5c5326475cd97c8ed3bb5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getpw_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22081d552363bc7c968f3b41ab0e42d8a46d8351b2430086b234f8fbab33a416",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getpwent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff29309c05bedd13414b9f2eaf8cdb7950d9bbeebee5e3f305dd0c7d96c015ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getpwent_a.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d78ca765d20a948870b8e29872f0f128fe6ece44a4a52bda6f0f0a2b93c71286",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getspent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ff51e025d46e18d362ff37ba68c5025cd18437d4f08e499db2b8e48af3e01f99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getspnam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dbc13dbbd8fcc7698801cb82845adc1196e5aaa280356fccf5678a7f4fed1466",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/getspnam_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f40349a00c75b2d2a8075fdc6a80e54daa9ddc9b162b89cd358a5bc93bd5d884",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/lckpwdf.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "744d2f5a8b33aabec44f36b31f58ab3b5d845c10b88ede2fa86fce397b06a7a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/nscd.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "563a16603cbe1c2277f844e14b1d15af07862681b0171f7cf1e1848ef77731f3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/nscd_query.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dd4f1affe651bfee17cc8e962a22a861c37729e39b34f8871d0bdcfc3ac88576",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/putgrent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a966ca5ef4db17734978328abb0ad048232737d8b89c0a0a1e17096360d8a14a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/putpwent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "45dcbc96283396f3ac7a27fe3f200c1686b1065b009537dc804b99272bf671ed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/putspent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "39cbd6f3f9a82830a7c7772ca1760ab31a92f3d354450d2e332857e22988531b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/passwd/pwf.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61df7ac8807db4a8f838ca67f96072cc0c62d2be3a114ee06fea77bdc94a523a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/prng/__rand48_step.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -53007,27 +42657,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/prng/lcong48.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "341575a33c1e29e53019acccf9a3007effe611d12c794a34cf0ca444869e111a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/prng/lrand48.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "6202df382cf2eb7dc754df6253acbf2289dc9c83defd36cb1c3d9626d7abeec6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/prng/mrand48.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3bc15038791113ab381e10280aec7fabd4e06487c0f3342b746b5a0bc6fe7e6d",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -53079,590 +42713,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/process/_Fork.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3821faa03c1718620f1f4804133aa7473065c2f34f9cb49708b7930787e0e9e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/aarch64/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "438852373a68b4e07c3080702a9521ae49390f4a6ed81e08de18e8919c34be0f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/arm/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "270768e1cdd6124b3f126615a5d8f494179b75162311b2976eac811f969e8dfb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6c83c38ae90ada2985c1fd9b6b6adfc2fce1b0e69f57a8059b755130f2f6d50f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execle.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dbefc32c2b94e8b707ff9760f49fc43beb1746cbab12715a01056fd63f362944",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execlp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7bebb3a46dce24f19c63b634efd83418e2c3286be87209828cff95f8799c5fee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ac47b2b9aabddeb8ea86dfa5e42526857136e71b527e1c3be5c3941d063714a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execve.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e75d0c7893a58d9cba5795d3435a0b2a1d71e6e5597345cd8d8085ab25270997",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/execvp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7598e894f65360b1a01e00c12d630e2b6c85147f923027fc032ab55cb9c34d78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/fdop.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "041e5e009bd2b250ece234fbace9892e6ca51e69ef8b04529dfa9e1902411190",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/fexecve.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "45d4abe9056b7b8a04ba3ec577ff1175ea8ea1f06852eeeeed799c15ea1f60cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/fork.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f8905c8b826131ef7cc89ba37ab18cc2e4f29ced4e26c55818f1deb2eb5fe65d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/i386/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef97a769145e07703e0dca2e83dc00bd3fa4684a6bc769e3eada6cb172ce02d8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d223cd70ee0bc2c5b8b1004cf9878ff9e4eba8b7f26187b8cda8770d1f375fc9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_addchdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c84ea61a3a7df055883b8f85f5e0450488d52d76778ef501e29098d489669c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_addclose.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8ab65da5cd7289d09918071893b35c1652e768d58380673ea511dd17ef2416a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_adddup2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d4980b755e77bbf230feecc42e8faf41b9c9e601c488b48060d89b3f38c04f47",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_addfchdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8a7d1c2adfb88a7ca631991de5b070cc4b864b5d8e7a1652ef64c24204cf3c6a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_addopen.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "348ba686bd62cfeab789ff53f008b303d5b706fdb76bdde22c6d3e8ff24913a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ba7678cd8fa182cc6eb34a97734d04f01a62fd06629a9d4ee0c64b58d85986fe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawn_file_actions_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf7350d8243eb7b4daf3c881c2a266bfda2dc707d0a17ff9d906d171df5e48df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "07860ebe9377c64fbf044f405ac0419ff4f0375aff8b440f3e6f6158dec3a29b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_getflags.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b5b3c1699a429f0486d92fb5f3b4a463e84d8e0cd26b567503f5ad8c63bced5c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_getpgroup.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0f9fece4aa11a00689bad5ebbccee6d7d9d429740d87fd71af18863f557ef787",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_getsigdefault.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "386c3a7aa439a697e657fb740e4a80ab9f0ad1e9a5b3e56e76ebe8e29faac5d0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_getsigmask.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63188aad13be5a0fa5d97bcef97776b8a57960d98adf23c7f1280f39ace24369",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6f64d2b7cab2aaeca79f04916b492232ba55df502ee3035bb9513db98e31f3ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_sched.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53a3e7e64831f7bc4b49b8442f3dcf87956b648cfd66a0c61ab7821522945678",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_setflags.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e853c788ed74dff66c7b26b0209276bce4bad5919e6147c190ea18b4a0ab051f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_setpgroup.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b80a47dae9056c572f023161855b2cf8171b868402bf1e76ee4b0a8f079f4561",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_setsigdefault.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce03a057debe18600f768212bb8c08915683d285837758f31c98a9db621479ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnattr_setsigmask.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "892a38d386e75e5f6c1d633836a922f58bf6204b52a61be916f1edab87025ee0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/posix_spawnp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "34d60c90b59e37ca2c6d40426351f9fcc9f90cde6f3b0054ff682b66e9159be7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/riscv64/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b19cde4e945b419cc16b01dc68f729a916661cd76aab12ca6297f2dadee928c5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/s390x/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4f5db33acf268c0f117fa22dffaa7d6dbbf6ec28ec4e1b15f98b930bf256cc71",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/sh/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a582863c8cd7a02770d69b9beabb3cc58fb815cf952bfc7d8d155b5fa840cd63",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/system.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "089ae16e4a7913c7746e6bef8f0fbcbead4575a3b7ece507ece5aa8a38b6d6be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/vfork.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00908166908e051b2cab515f883f73fcc338902571ba185019bb7f235f820b54",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1201894c0e45c0e0550f9c2700f15ffee542f20419f76779f42d9b8eb2a45784",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/waitid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f8ab58e2bb821844b039e1e97cca72a302d8dfa97c2966f6ce7c57e66b5ee7dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/waitpid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e39ffad4f998751c747a5973d2660796d7207f68d0b75df89c3765cf79798a1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/x32/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "060b919604a2458ba1c4e3709ea9e91aea2b7b97850ccc52778b85d9bce50b7a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/process/x86_64/vfork.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d5aad85cb686f9cf66e32f5889471614d7b564503cb2038d21aa6e442287fdd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/fnmatch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b6b0d4f973210b3c825100a3dd684a3147a588e7e61835919096b432334761fe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/glob.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ceb34d24986c6eb39b8ee4f85c5f942559bdb6e0dcd1bcf3e6cff0bc57815fe9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/regcomp.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "56b0a765e084a5cd3ed7113a893b50d259265ba76b6bea98889c45d7aec302a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/regerror.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "72b3ab9c63c88c43aa37c4a4d4a89d07f892f42cbbf8801806b7b40135466bb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/regexec.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "072e8a1092c98830b48e784fb74ce486f7c39e27207f79f1dd161e2c5d86ba77",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/tre-mem.c": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "4721979ce365a395fd7644335c847a8a97913e87f14348641f7f199b57b93e28",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/regex/tre.h": {
-      "license": "BSD-2-Clause",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "e734e68decc33b5ee983db12cabcbdd2589c2d16088677228087b0e5dc365cf3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/affinity.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f4e78c6767cc3a06735c2d0f6b94987ba69fe8d3f1ca2adc5f991948adc6acc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_cpucount.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28b2a0941a45189161f14093746503229c7a31e4ee22c5d31f527bb8f2c825be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_get_priority_max.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ea5947c6ce667a0457d6b1476d9870b7bceb074e9de9ac1a91f6acfd55dbeac0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_getcpu.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d8fe0880b6baacbbaf5140f4a50abac2530bc8213c5c6bd8fdefe27ec1e9601",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_getparam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8df67fb663bff94738826fd5e7a08543c4364d797a508fde174970070a82609e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_getscheduler.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cc6f868c91b1f2a0f7b024657b2af40a219ba835343b618994c94d9739dabfde",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_rr_get_interval.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "de29e7897c5e1a594bf769e29daaa9858b595aa94a11655c633ae5659b914101",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_setparam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9c300994d5dfc1e30a7bb32e46fccf28cff3ea9c8f87c7b6b1ab660781825460",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_setscheduler.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "581d8667d8a855df57cf79421153349a08c8ef72e6f67889d8a2acd163077559",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/sched/sched_yield.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5f168bec1416e2b3813dab55607aa8d971a2122b8a0730b3c658957279a30ca9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/hsearch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f2412d0959655f2aa8f63545ee414fa938875c47f0d081231d036cbf6b1b42e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/insque.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f16aeabe85a54fa81ea6c22b9e83f1ae9b6e474cf64e3d637cca0f527102c18",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/lsearch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2a42feea258b9751480fb679d5c73f19e8dd2b422a1b526649474786d3645675",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/tdelete.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b45dba463d919500bfb83bac123490e7fb4b934a4f8665cca684da7b01cbdb1d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/tdestroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8edb026f0e6a05b4c346b19bd96488ef041eef7eb21c75533c012f1bb1947c10",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/tfind.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "08b00beeffdd3ba5b8853c1e6a0b8cfc9cf7a789086164ffa59866d4b010f941",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/tsearch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2b694a0b5d5298ae62df241f5729a36016d2ec5f95b2546f7f05d23ff51373dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/tsearch.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d3e27ca196493b5c96f32ba1f1adf0ded1792ca472ec33a6190fb785c2b0722",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/search/twalk.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "840581c1330b960234eee1424e3c95d5feba1244e526dfc3bd89ae7562d8ca29",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/select/poll.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8be43ce3826bc12035299d8d88443856cc2c5f139e7d2ddfdfe3fa83f9a7dedb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/select/ppoll.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6c6650e6029354ecac9c3ed9f0e8491ffe10c33eacab1bfd573be5d38406bf29",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/select/pselect.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a02cbcbe4a13cb6ea22558d1d6b562cf0f2f8daaa7bb0d3014efa3a601bf624a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/select/select.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a52f8e60ae644a7cb5fc77ec6d5e339dcf27b41d1a46196dc7eaf10d6058105c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/setjmp/aarch64/longjmp.S": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -53679,483 +42729,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/setjmp/arm/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dabbbcf57c393cce0225f4a7a7601b617c243ea4078d8de08d0fc2595303be9a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/arm/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "25e266f6d87d77c894aa0bc5f509eb140545a4d6481f0f6473acfb73bc6f80cb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/i386/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eb1fb76aea0bba9e125a44f160c0157e4ddd14ae8f404920407b5e04658c979f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/i386/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "910a59359af637dd0429b090bfa70d5d5f8be65c98ece1fb262a9481e91e2a56",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/longjmp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/loongarch64/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d25c36289026c0642a285e73e77b59c779eb2f582bc7a90f6aca7943b89202a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/loongarch64/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6d16be68fe4b40eb335e918eb1697100d0743367e8c0d3a404f5fcb78f2d1e37",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/m68k/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec0624c44a802eedf00041334e57895368c8516581b77acf5fcc9db5cce117b5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/m68k/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5721b725cae79851e86aae06bddf412e880361d875fb0c8caa450cf224f45295",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/microblaze/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dd110d5feec5eed884e18ae3e250caaf9eac1f195f5ff5bbac73c22a1bf619b5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/microblaze/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f28be81f5cf5d98918908300c3e80624a67dfa5380f0ef4b7e2a2d43b3a2e8ea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mips/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e7872ef586459a95b24acf077ffd34b7fbd0b3aaba1177713eb1a9a3ee367810",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mips/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dc4eb90c7ad242b4b8c02d600552135dd5af19c4cb3ce9fba71699d7d7b048df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mips64/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2f2992146d0538d05d7f78ba499c73d290bab6af2aad1d0e9a895b965d99217d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mips64/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2392cf22312472214c13537e226b6a0ffea421fa3545a3eae297354852f5ecf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mipsn32/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1ea7df03f941abd1308586908841e145765a29e2ba75380485eaa9a9223ba198",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/mipsn32/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2392cf22312472214c13537e226b6a0ffea421fa3545a3eae297354852f5ecf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/or1k/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "837e36236b21655a7be650f65f6a7ce3da84c3b9ef92ee5a2a8524912f86c5c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/or1k/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d6eaa1159bf9c85d34935ab298cd5e7854994c8f040fe141a5fb01bf488ee47b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/powerpc/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d4da5fd2b882cfffc03db6f1b3c589c0b8b7a7ca22c336c3a3685de79aefd73e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/powerpc/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4cca3eaab44463fe2eee059d4ad4adc3d9ba1dda4ca7df1f2db839d3b29fb05e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/powerpc64/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f24a85cdb004c7a5f21328e6eaf0d89e5f9782ba88800369e107c07cbcabcd77",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/powerpc64/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "404206d7314879c9bf0cac9dc5d81b1c7cfff13456f4392ac4445376531f0586",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/riscv32/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "19dd51b1112174c77526224891c2d097f4fba0c90be802c0ba7a67bc7546f845",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/riscv32/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f078434cb7fea7c3fb150e1eb2d43eebecb28ebb64c107ebd7d9a4f6d3ed4b58",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/riscv64/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "724e8aa45550ffb0b143c5c3f249b080ee6bea3c1b0a31b7f644dfa64d9e4ac4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/riscv64/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e542901e777e1dab2514824cfce3cbdeb3946805133b661bdf538e8f1a621eca",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/s390x/longjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "14bc4b563f7a636a51479982fe05869c90f151ca71e87ee55c630e376f8bac28",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/s390x/setjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1979a576bcce5792f696456b2551e02530fbd9129454d8d68d1adc760aeb9359",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/setjmp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/sh/longjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e94dc595a4c101d5ae5bfb8fdf290a6841f26cf4677d46284d7c6e171203a138",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/sh/setjmp.S": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd09bad36b76c9a47637811719e6bcac76081440936862ecb6b99cbc7afd44af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/x32/longjmp.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "c505c42f1a48b1150f9b8ef5f8f13b224c65ee1a7c0765354dbdf66d9eb177e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/x32/setjmp.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "7b74b13ad4bdacf019ff72dc55486119b6d8caa5ba1417f88d73d2b583223425",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/x86_64/longjmp.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "c505c42f1a48b1150f9b8ef5f8f13b224c65ee1a7c0765354dbdf66d9eb177e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/setjmp/x86_64/setjmp.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "7b74b13ad4bdacf019ff72dc55486119b6d8caa5ba1417f88d73d2b583223425",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/aarch64/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6b4f46cfe165df449792e77f0f9a0d37d6520288a3bc6246d10d191fe0aec682",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/signal/aarch64/sigsetjmp.s": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "93fc8be0a88594f461f46e94b432516ca3f837acf3a862d8adc3283778c74058",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/arm/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "56ff92f35660bd37e49fc0df9871a1a18532260971dfbfca578fba581b34f582",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/arm/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d0efbb97da1e6169c16a7b0c5e1e53e3386740adfe5d24d59e89c6699cc3e345",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/block.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0288b630002171684c42830f219ac2bc94a108f52e18dcddbd7405b3d5477e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/getitimer.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d787a7786ffaab9339138e3bb6dd7133459d9f23fa6957ac10deae24f246c02",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/i386/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eefa1f8266eedcb1c56f6ca6f40220affb896a759cc666cf99d028b1262362c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/i386/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c153dde580b1ddcb264da3985ab6dcb92bbbe5ef4f0de9b5c53473267905c15a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/kill.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6733ef4d982a9b1496c9d5bf5012c9f8e12da7f3ec6ff961094039dfd1e022f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/killpg.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "602d2012b9c85eb64d5f3ddeb2213f22738ddc07442d463d0ecb389d4c4cee2e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/loongarch64/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f15024f1d8749e35a6e2d53e247a8a28152ad93fdef97a158348be666ea71c68",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/loongarch64/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2423ba7398d865621d7650921271b7d1757679d20375c552388f4bb920207b3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/m68k/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e2ae95344b670fa603627d413f96db00be55071336942ecb8a19d09abd992c34",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/microblaze/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b396202da24873807b93057b6002f858ead5d514f35f60b2aeef09f608ecfdb2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/microblaze/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e300578357427b86261efd6017a92aec9c6e182564345e5858336fc07eef4b81",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/mips/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "92df36324ba0a22ca9492a99de3fe4cff479501f1d0e452a356f9624c6ccf0a9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/mips64/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2658ee4535abc8281dd556ec9a5c0eca3d042d5c442fe555caaf5c3a99ad1388",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/mipsn32/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5769724fd42bea0d7ea665157744d10986198a1e4042a49f01c91ec386d705a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/or1k/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11963bc98dc05ad0969fe33602f6f568d4c81e282a1143a6c08d35d63d7ac7e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/powerpc/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef698570161b1842998bb5285d142aee938745be221ebedbc7e28faaf0401de4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/powerpc/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ace461a3de4abc59bb0c390f0f61af6caaa67ebb0169961ae78f41b232462549",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/powerpc64/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef698570161b1842998bb5285d142aee938745be221ebedbc7e28faaf0401de4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/powerpc64/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "14fd52d6590cedac6fb1e8be62ba9a946a9a0c67615bc113ac286fd71f3cea05",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/psiginfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b5d382794b6c28bfe3f2d302f27b9846a38fc9ef729b0ea4f329eccdcdf9605",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54167,115 +42745,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/signal/raise.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c662f584cb042b82cf69608aeb11a27bde26066610877fbfc7a5f8de29d43fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/restore.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b0d6c7c35db9fc20402ac69190b8d3b996a5686e02037d647023438b90f27208",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/riscv32/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "155aedcec5e3688fdd7eacb058bea78b7bc3affbe9f7a82b72b82a303050fb0e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/riscv32/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6735caf80e2f10f6633c804c187a7f14c3a7e118795d75ff892aa247b6e5f50b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/riscv64/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "155aedcec5e3688fdd7eacb058bea78b7bc3affbe9f7a82b72b82a303050fb0e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/riscv64/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c40419213caac2fb29bae95573ec6ff728e2e51cf8f94758e0caece7f8798492",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/s390x/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0c69536266e4a96d071a0cd03243790f118b4a5e65d7a032e37792766536c423",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/s390x/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1de17b15ca6d645e0ba5fd04ccd29f7db2c8cdcb09ca26c644feb7bccf580310",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/setitimer.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "888cca7645b233c5ab61b59bdd9d0dbc5b5c821596f3636efbc6027c1f3ec798",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sh/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cf6334924d05898e95d4e8a7bccaad419576acc453b06b25be6e63dec6a0529b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sh/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8928821e4c6a4a5de7b2272969cafd2552acefc94c6a41211849474ec99061f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigaction.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f552c570774c9092b83cae411681e9036550dbf8078348b06a1abf8171ce3646",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/signal/sigaddset.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "cd1ca87b0c108ddb9fbb90f0fb869c9f051aacb0b483d542d2a7588873f7e558",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigaltstack.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7914bb4b0b8c1f348e3057e4429693873052aa021046847e18f8deb5edf7b501",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54311,30 +42785,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/signal/sighold.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f1a52b40fb2065ba3ad57fe93cfc84c754b9503a4d39e09d23908daee5d458b1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigignore.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7592692265c6d9e7ae7ea788ad0c933e928ac768bebdcfd83586f4279815624c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/siginterrupt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3e81bb523b22a7f5fb52466c4a7c36658ecc60f295c3eb23161913f413c92c3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/signal/sigisemptyset.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -54359,339 +42809,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/signal/signal.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ffb46a04122de060329c46c1d3a0410db1fd9a629745bba75525365dfc01cd0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/signal/sigorset.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "0854f8628777b4838675c6d16811517333ceea4e703cd1a6458e6631cb394af7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigpause.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aff2161054f1192eb374464883b1d11cf94da565cd28858aec77fe5681caf344",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigpending.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "58466de259abd12ea5b0d2e6ab3d6515d48839edbea0465dc38f4cf5d15d9b87",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigprocmask.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48c66663ec46741ef28ff42d21a6bc61cf44d65896271c3515209872e9b1f6bf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigqueue.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dc0599bfe5ce2e5082502adbe1b30c13e74e42f3a8425cea020ced6eb4ef3e3d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigrelse.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "124b92b823d7fe184360f2d311e1b778197290349c971ef7db62834cfa4f367b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigrtmax.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "64eae0fd6eeb11dabacd7588b77242799ac5fdc107bb3aab9189127ee50434b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigrtmin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a5ba29460347d153d582809b88e42a6b43cae63fef05c1c136a9527820e7ebc6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigset.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d58e22f4d51dad5200e3f691c3ea5f6109b0c31ea7d0395cf57b133257cd3b98",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigsetjmp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigsetjmp_tail.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dab69f8ea2efb291ba6765390e287c6e3d030ddfebd9174d6ccc2ac573533f50",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigsuspend.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b828fa3313e1b88bc6940ef83b961836e8048073086dd9b12198503a8c62304d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigtimedwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4a019683d8993f48d6337acb3587fa522c45bc02e138d7c78008bf7918f702f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec40a2bae533387834432bd0267ffefe93a368148337d8bf303486a11032878b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/sigwaitinfo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "81bb0d0abe09554c24ee017b7330294a32eaaa9fa1554c5fc14f826336616a5f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x32/getitimer.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cdeb947b8202d69c028a9aef8cb49973baed692927fcc5f25199c872b11cf026",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x32/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "47079dfbee63afd6e4d8a4da205a474251c7d0e306a1c4203d33ed2cfcbe3f42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x32/setitimer.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5cb2a0277493c6d5b96ff095c2c66cbbb616a06f49a37e94a23c0c426537f287",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x32/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "335d21706c78605b133fa38fdd4565f7f758beb85d3a46299d3e907f1b2a4a24",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x86_64/restore.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1aa9c1d8b1d809a64f5edcfcb518f9d95e8cf538ddeab74d6048e489e63b3ea1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/signal/x86_64/sigsetjmp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "95ceb12988f7eb92e292b58ef5aa4af16f3b76767e7b4bead1b606e716befa92",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/__xstat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "19b5ed0e2a6c97a37eda8a1cd2b2e45670ea9c1d44296f534cf2f1d26757502e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/chmod.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b32affda1d62a2acd5414d1506adcb6948512a5304b6f6a5617e9d170e02a045",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/fchmod.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dc17e4ebe30bdfa40aa4107ed44a87a90934a05a41f8de9707dbb177cb302394",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/fchmodat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9dac4549b9dab3fc5ddf0219f297a8b5a58f0fc64a82c979912b0455dda3bea",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/fstat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1cacf94233df48ff4cbddb4050704ed91f07f7148fa333ae062161a2784a76b6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/fstatat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "735486ee5c43ee405bc1d0b713d676ac66ef681572e2d93440c8125534df8fc3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/futimens.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2b523b127482debfdfe8c7df6d7265d07269f214b55845c4d5accb914734420",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/futimesat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eb02f55b0b01f73e939e2d8b156971be839b6003299b95d976881b85cce43d86",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/lchmod.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6fd2170677e4df177caedd8f62bed0037e48d45bcf0d205758617a72b0b19e88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/lstat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "908d60b942a0c17593702b71909e892c196f673a32d0d927cc0b965d2c073089",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mkdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa13e56b7ae22dd7f7987091189dd144d2c5569cd324a356d9c488fc366a09c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mkdirat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "439d2a3a203f711c4ee0e4cf04c13e5b573b8ebcaf71f39883c14edc25df5eb5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mkfifo.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "343ec5b8b9206966102c669c2b9f06ad32de4db1e8bf5c07a713b144e79712c6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mkfifoat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b58d736d9cc954e1c08091e3b0a38c11cfa7a0d953328c5ebfd31ef6f41c3f5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mknod.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b665e0f0871015b0dc6f4dfb344efcdbe1bfb7e275cba995d24eb19bb44cf90d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/mknodat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef51f072d0a716afb17edc8790da8424eaf8b285dde2bfe2fe4fae3f245fc3bb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/stat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "64bb2371a4e7e97bfab49194d4715547149a4929e4327b5fbfcb6d4d7719917d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/statvfs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eb0137f2d85dd719a37dadb0a6cd579ec8ac643b6ea0116b76a76d9a9dc85134",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/umask.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7cf31f3b028acbd756189c3bcb63237ccac317723bc99814e103f9ea86eedfd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stat/utimensat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0412e9f3b8ebcd356203dd522d9d609555b8cfe6f871ed80837cc854558d8778",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54727,35 +42849,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/__lockfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dc16d32a802123b549bd1e3ed4f473ff3ce8b5e38ad184229c398b3fd2e5cfe9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/__overflow.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "1d4606389714e1ccd180cd411cac9d766e087e4efc9ded513c92050969366491",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/__stdio_close.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "125f88ccbad7f1a6189dd20d862cd5baefb25531d9646689ac7c38564f995bcc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/__stdio_exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9862e7c37e38efca52e0174401c717afc49c327fcd6954e8a0d241252ff4ee56",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54780,14 +42878,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "9a3f5c2e4b226552afe7b527569a5eeb08d66df59d5bf14bb9fbda01f2d8cdcd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/__stdout_write.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "14bd1a69cfcc4f1d5dd31776cac7a0f0027d8dd970331cc20f5280624a820331",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54855,14 +42945,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/fclose.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e6988cb0307c03aedfd2748bbdb5a1d734df728e1db8fbb248a9ff6be1b27b98",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/feof.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -54919,35 +43001,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/fgetwc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f0367cf2c6fa7a0c97ecf4497b41a74206c98b51dd6781e67e7cbf75d9b0b160",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/fgetws.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "15bb86c0d4759d9c3f1c32d794109b1b7f1b4e403fcbefe59cb81a9f77abd979",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/fileno.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "239efa861cffcc71a4d11691a8b7e367905ffca70e310180ece1db20d20203ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/flockfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4785e11648701ebaf3b8b97c1292f992120813ad105b69dd182e58e31b39f1bc",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -54999,22 +43057,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/fputwc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31d79eeb4826d1242b0cfef854c8574f5a4620016c12047dc9b1fe8f7e02b8dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/fputws.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3d24b90265464fbfccc5a55da53c7c9e0e315bb4d289481a5660911578a3064b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/fread.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -55060,22 +43102,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "c678b9751a4b5d2c96d070522b42d4e2d02b481efb804cdd799bcdb2f866d35d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/ftrylockfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d35066af7688ad13cee22a529eb8f7ce5c85a727730058324f510712d41c35a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/funlockfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "27cf2ab8cde01e56bb9c544d2dd8c6d48285c0b306b4d5ec2e24f06f99e4ec4a",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -55199,14 +43225,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/ofl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0cc470e24f70349bc897db361266a6f0b59f64d29e1ccba5ff770e603242deb3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/ofl_add.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -55231,27 +43249,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/pclose.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2113102dee12628cdcbb9f5329b00d92a64c5b4ae15bd524d4ce46b964864126",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/perror.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "68870526f79a3638463309891a006acf6e84303c615ed5eeca1b35179eaab096",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/popen.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a3251c0dc6d158b3e6d9e4883e7c5266a2fa86c29d6c83c5ea02d0bf92e4a21d",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -55340,14 +43342,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "fb4eaff9c5bd2d20884b0e669bd03543c9b29229ca4b62299b09b24605264719",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/rename.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48087ba007f7736aef77a0382a30a7e059a29384be100d2fd8906cd95721d067",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -55479,27 +43473,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdio/tmpnam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7aa3791a6a255c09c8483f1a56654d7bf4d83cbfaed5a7ff08cfca998587591f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdio/ungetc.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "1a0d5f75b81301e13054976a47d60b74639c9b7cc632d42498d4a93b228adbc8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdio/ungetwc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b9eafa7265ca1ebfb2378fed01e1a307f8c5e85c0cc2ebbd54fd5baac6a08df1",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -55647,14 +43625,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/stdlib/atof.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2d5733fbc1ae1b50b0b0b5bd6533551a6e69dae5491b0150f3b4c459dd722e45",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/stdlib/atoi.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -55692,30 +43662,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "7ff1bca64c5a9a625819e138ad0de98d3888cf853d5a24d2ea5c2e9c7a0aa987",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdlib/ecvt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8c2954c93f86aa873b7b0c109b18f534291149a3648d13c2e659dd718f35cf32",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdlib/fcvt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8385fbf21d45236d234a6eb8c372088fbb0f04a22d0d892d7ca276b4cf52b7e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/stdlib/gcvt.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4e180b2129e0484359af3d660505f1ea16972ea41d201ddad063103dbce39f8e",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -55815,46 +43761,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/string/aarch64/memcpy.S": {
-      "license": "MIT",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "1ead3716276e8a58e2e015e89fd565d9f33c10b2bc482c303b68b90c9d0f7cef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/aarch64/memset.S": {
-      "license": "MIT",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "4eacce5e57f178a284fd5a48925f4398d593df6cb2b6f727bb495a78fd3cbabf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/arm/__aeabi_memcpy.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2838b448e4919816242e268c276b862e5ae60e9a30e70c822b7b8b3575bff1e4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/arm/__aeabi_memset.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a6294ff407ec5f290955b4c5bca1f32994f6ed5a06430f3166071fff27b3358",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/arm/memcpy.S": {
-      "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (a block neither a reviewed notice, a stock GNU notice nor free of legal words); review the file",
-      "reviewed": false,
-      "sha256": "f963aa07a7e5296c62dbe892b9e3e8383a95683bb282e68d75a3c0553ba184ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/src/string/bcmp.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -55884,30 +43790,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "fbd2b46b1b8ca5ad1f47476741eb552beb8b12b9dff9ce2a773f747e1ea07189",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/i386/memcpy.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a1521bfbf6345599bca3d01f9a979d7078a49929fcb8535a30c5bde92b7e0130",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/i386/memmove.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2a29497efa741f200a25b6b4c69bfb8dec4bb0e71556fd9fa4f959709570e3c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/i386/memset.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "701526cab2925b6b7702f824985101359270cf8e38888a79837460e17ab0be3d",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -56471,2899 +44353,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/contrib/musl/src/string/x86_64/memcpy.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "790bdd75f7736c83ed7a21f8813b20454ead1ccfc49e806a88692d2a471024eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/x86_64/memmove.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d954e18e94bf276f8117e3bf5d67089018ed20fce837c8f8ebb5bda2d18a8373",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/string/x86_64/memset.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa843bcfb5b75e232df8d26dab6e5cec4f7123b33bebe655ce957f95f839f2e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/__randname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b12416ce874a789de6dc300fba8da3b9ee89ba635279311c79f0f597d584041d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mkdtemp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f514904b252582f7f7f983118423f99c7b63f3622fec3301674069165ae938f9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mkostemp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5fc607f5ca82da5460c8c366bd4e4881dc99ba5f8616cbeb0ac22e7c3c5707e9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mkostemps.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cb459a4daab2956b14c4d980077206b0cd5616d1b46e61c9b3f17d6fee637e7d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mkstemp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b60a1f2ead92823cb080a3d38d98e7758248095501e2c6405b07723bdc78e21",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mkstemps.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "168aaad0b93c1f51d0a07e6c77288c0ed8d8f339d65a59e756ce28c418c119d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/temp/mktemp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "41cdd2537697e3755864cc8bd628d86c9c78af3cefcce8df92ec6fbf568736b7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/cfgetospeed.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa85094216c8df12c1239d325252fcb423dacb793d5d429365639054108cf888",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/cfmakeraw.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "58b1b28d72cf6565a9221eac550322b61cadf447e6eb5d322022e5a00ccd47c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/cfsetospeed.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fe65799984decbcded5a15242777258ddad97acdd46e0ca0cc32ae24e4f80a99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/cfsetspeed.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f2c3681d396bb59fc33fc10336e4917721f2b6009bc3e396f9cfd1aff03692d3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcdrain.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7ad71128294a1cd705f4dd3b584c837d1c475a0b5ba239fe4d6d345f9b714a5a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcflow.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "734ef1e6fda837b1c26ae41b3d4a0817c6ce21316ee5d9b14104eb3a4be493e5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcflush.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d7ff2aff418013e1a075130a6eb302e5f05108252f65d77d09afd0dddbb922ec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcgetattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2442903f174c86d3340e56626f8619982fa3d606bf711ab9cc2a0a5ae31ee996",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcgetsid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "929b70d12679d39f3a427e9611ccadb09704f6ddf1ae4a788b54e3a5d24ac3b8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcgetwinsize.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f6f98a091673264c4a3e2685a2ea1dd7ba0c16b882adb8e056233bca108a1367",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcsendbreak.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4e4199af08c86ba10a427173a6b13d13ad34fddcbba3d3980ba85bf287ac263a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcsetattr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0ddb0b03f3d4b9ba495009e2c45341ce0c46d5398f2d15de494f17fb2bf65033",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/termios/tcsetwinsize.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f6d3b28a6e00aeee8dfc290871ba890c6a0ac35735aad74acd6ecea38775c3c3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6a0ff64f760ead915f4fea00cb4069052eb0753b86478bec642c435d4a38b551",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__set_thread_area.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1c5bf1f5cefd7d727849f9ffd7125eb71bc1fd6eb5a8fa741a873c75e0e0e1f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__syscall_cp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9bf39f2e3d932dcee04e145bc7fce93f2f6908d08f3a0512a20d642450c437c2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__timedwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8171d93c889f41456cb50647c482bc0e6d8896fc71f759adf86525015fbe4d53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__tls_get_addr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "86abd6a68af64e4fc1eec3580d4c6687c906bdd44f6ce393aebf5274b0ea4a44",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__unmapself.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "293e42bc0bd105d1c358165617d41b3c65aadd35930876ec99330573f709be60",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/__wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dcd6cbad9aafd635788749c407ac13e111c2ccd854cc9e15d271167daa6f3151",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/aarch64/__set_thread_area.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7a0e9b3afecb9d0d5e02d07994f402a90f2e082209ce6565f4e0cdd03721832a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/aarch64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ca4db25bff4c5c063fc5fed3e5dc609bdd43acbea43816553dd148abddde171f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/aarch64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f3bd47baef722642e57d222aa601c00f1f6dce1d16fd363437071a6c4c222b2b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/aarch64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5216f39b30b3a5ba66cbba9b1d5096f76de744110977d6be84b08d5fbc033a53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/__aeabi_read_tp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c5408d8e95479357213f718d7a46f9ed60fd17dd9b4bf078ca8002feb07c1db9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/__set_thread_area.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "92586b6f57c3143b2ba44e2bc80937f27d74517bc736eb01ddd7915f08cf0806",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bf47c7ea981c8149f25930573f142db2f2516b7b1983569c409b887393c3c96f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/atomics.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "559cd57e0ff1d2a519f428cc142c2a375b20d5f9223685d3f599f6e8f694763f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "77ae8303099f06d5a04ecbe020a2f7e02043e5d98914f632d12b6bd4df4a693a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/arm/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d3097b7340aae58ccce931e883e27b0427779c00c4732187ca9321fceff6a2a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/call_once.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2ba2643224915d7d26bc5623076aa1117b9e52cabf376f09c586597bcd58990b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/clone.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c0fdb2394e1dc62d029c5243618feaad438d69a35d9a6706dd4f1d4db1c0749",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_broadcast.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0035c1c91877c2102711fa7428f14361b8472b4033809cbb37ade12702318fff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "131c5ffc8bdc6a67c990090843dd11723715d032b5773f991e073a0835fb7b06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "670138c6ed2512be4ccca4662c5b4d7b07da87b04d26e11c8625f804514742c0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_signal.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b2f40a604a99b82e7164c8885b4dc40ebf622af937c2d8bf1a2f93a17c9e8a37",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_timedwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d8b67e5adea4908c33093598773d79b4c137791baaafc0e5d5250dc39d585f0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/cnd_wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9fa22068185eecb364d9016f18cfcd81ed22f01b1113b3f2f24bc0fcf090e164",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/default_attr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "99be8ab4db8a5ca9278af138db6b3bb7132170c3715f82628acc1d772e3d2680",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/i386/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "201a81dafe66d7f72a92e3d43d0a475850bf46b2d62f62f9b665a7189f5620cd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/i386/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fd7b5733d62c672e6ed4b87c6f168e415313a7283641ac252b42928a624736ef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/i386/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9f3d433a6da937b373fd2ca83b7f83de2335196cd7492500d423c97f1ebd9476",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/i386/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "51fc94a53886df004c85979f5effaa54aa3a72000fc6f24a3b60d8f196d9e093",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/i386/tls.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "294b59c2056dcae03d2ec43e4f592c71ea7c4df3f778b108a0570b55fc5575c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/lock_ptc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3d5524788c9af1bbc0dad76fab254f1bb43a5b046684866ad8c1e2d0ee3ccb5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/loongarch64/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5f2a9261998d9f54d56b232873d91b870fe3827814d53ca0a6677b4a7be56c51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/loongarch64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eedd737c533eb18adbfe7dcbcf1aaf27f06b3b433e89e99e92fc56a93b412e17",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/loongarch64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0d353b9fb4534d7d6a2b8e36817f2a84a8b85fedaffd2ea8817b5b0a03cd60ce",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/loongarch64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5441f05bc9bc41c4a1674e570acdc90643b08f6f027237faeece5dc532b0692d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/m68k/__m68k_read_tp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "951bffe1b24e450ccdfe7cad7310cd386ee3e9948dea2d9a8bdffe87823b23b0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/m68k/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb24a13eb2e67073c8d1392c2cac3eb59d24f15e53cffb731ec9db532c48d7cf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/m68k/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "812c25ddf38f6b4091c2368055e39f0aa8473a96c86bc988611386bfb6ad2a7a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/microblaze/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2991b07de8cd98b45937623a31314a0d12779749082aedfe474dc9e955b03e6c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/microblaze/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "abca3995ed9a92ee1342749516d1e88ba62c0a8793e3cb3fdddbbc02d86d9fa7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/microblaze/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac479a3895417a9f179408d52f9f7e741ab96f34bcd0560b78d884bed8a866a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/microblaze/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb402170f5162c0dbc05946e1838c6f33fa20e37b39dc1f8cd0e99abf68a6f70",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0e43b3f4b33073a0f15e0ee17a4e4576a4aed90331f6b7d323a0c11ea6727e14",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2ff663c7bb8c1af35c834ad35c27733de5d72957b50d4d086da8c52ebdf98afb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "57aab80c7d27fa1b9592c92ed9adf70658ace5dc8b245b0bccd6ea23a63393be",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "24df44b6f519cd7292b9c80041cc7b41fb7def4d3b543ba85c13584bff4f3c4a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "98448d92b63d0b53d0ce936a9aad8f63b948414a13513b4ba4583f663a626b69",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mips64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2bba3e890a25b93f336ada4f07dc50d9301e84d0f8c85802b9f55c058ae51e76",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mipsn32/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bc6d26cdbbc66afce51914cb0ccc971b6d282cab91105d677fef40664708d6d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mipsn32/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a377f7ea5631b0ba8c31342f7e315f1476c82d603d90932eba83577514a0b149",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mipsn32/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e1132dc489ce6d4cff5b90bb00358e5460e5005a9172b66d4cc0a8466b23c1b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a165d2fec542ba2753a648a5d4d7130f37d03de37024ea4e5f30853cdcaac9bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "36edcb31e25c196eecade18a509351f66d84cfd4aadf041803be9b061d8b1892",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e7a0765296e65eb71a3ee7b3277ae613e884fd1a34be69e7cb3b6b747d2e9dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_timedlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d0febddea645ed8e21098a61d2a5879377c4f62d5f147343e9a325156ad0bbf3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_trylock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6cead3b6a2c28fcb5de6b60e6a79e431366151c5078a96decea7c4d9be5bcc3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/mtx_unlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5119b40440f1e844215fe45b023c625bc634ff6b96c259ee8baffaf63c23b260",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/or1k/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c2d9d308aef236c968f2bf0052bd6acf9dcb00c4291a5039910999e602e2cec6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/or1k/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "15fcdc5c787d023a5e8665149af23f81b3cd2109f7ebe2f9cdb831ef32e9dd7e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/or1k/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d5e5fb2a58f14e85b6ff4f936ffc542da2c7933e8cae909a52e2fb42ed3d330a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/or1k/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4aec894c901ab53fbfb13051ecd34f9e0a9ebaa6dcc06a8309a6117aeed3dff8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9aedd096cb8197d09a50d2a007d84806c4ded07a86abd93dfc9706be9a606c16",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "170e4ec9596786f034bc20af08bb73b5dd711c660dd8b437bb7b326a722afae3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32c438279bad5d6b60ff20b88d59b6ac7b6efb0b8d3ea96d3a25650cb296a9ca",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "140225046d1cf335a78b9d64c09e47ad9b15cc04211a2ad1587fef0b445c326e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc64/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3b10cff3f3f5199ea950ceaa1dbe4736913d06b96e32b33dbaf0fc52451d36b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "170e4ec9596786f034bc20af08bb73b5dd711c660dd8b437bb7b326a722afae3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b189cada1fe004efd8047855469d623b6a74d2f1ec1d06569f8d1ac963278984",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/powerpc64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a068955f6fbe6a6f1ef1ce3040379da138da19f89da99caf56b476d3272fa522",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_atfork.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fd25a7f7ddbe5e5de3439d31b01c3d4f8e9b8bd7a844d2c55ca8280bb22962b8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "45043b25fed46f852daac89685ecc10ed17ae8db848bf8d1baca758031d605eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_get.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b1cf396094b8e276571e81b2e11d27f5913dae81837d565f983bc84c559538ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e78ddd6cf0ab1038ac2455f1a26b0c33208ea45a8447db795a02a040928469f5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setdetachstate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e00ed158a01c382124f43622e1967f293bd2ba99fd8ca12d3c7507ef09755c53",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setguardsize.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "51f6383d12992145ced1cfe93283d535259aa99b59595ce27ab97d75cdfec6ed",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setinheritsched.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce2f0c6fd7ad6c93359e789c317b8cc01c517d4643bce906d5a90ed2a1915992",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setschedparam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5c6e5f58c80d80e6b50cc5ecd1d26ae3cfb2112782d3b67191d2f9d7d44f31db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setschedpolicy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6e14dce42ad036cf9ed43e99abd47a52015edf0b3066405bc528ed0aaa3f0d96",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setscope.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6528c6c38d6c09162a1ff369cec98a8969f49e3087a4775d2872b06247b0c06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setstack.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "83a0a745480cc4c1bb3a7a9c794093fd78c81db37b9188cd631ba093689ca540",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_attr_setstacksize.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6c5ac35724b937f9b09d62f7aa0a4ff7a53cc50cc633c84df48f035d82308662",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrier_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a6adf866b5c72d4e696faf907b9cbd0551b1b1e2befa2c366ceaee37c45fe0a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrier_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d664b4ff27f9a404bae427376061136dd4130ea18b7b087584f4524688da124",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrier_wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6ac03090d9f07e17695a8717b793c9599e3db21f1ef6860384a513d70f32ff57",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrierattr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e3c807cc0374ca65a1d89d3042d31141c66ff7e36eefc015495afda38d797d4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrierattr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2ad0a80634ccc89c6c409bdfd54c8b6a46608f2ee359f5746d78b234a151269c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_barrierattr_setpshared.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1b3a109056c2da032f16c38c8ecf764ede5c703dcf4244f97cf403fe0125dad6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cancel.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aedb26402bbafc18e00129040379d906f9e391302e41752584e3ac1ac3259fb1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cleanup_push.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4ba7e36f2f9a2109b21b6788111407d6c33f09bb87c19f89fa3ae39bb3cd2455",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_broadcast.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "77f06bf070fbcff36427ebb710150a66f97be8cbc3a7e3789ba824e7a121ce28",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "df5536a1490a6fe6aeddc85c113b4ad85e719f0c320e04b9da099627f4b62de0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d43dbd4ec6bf071a83b2098f4b3142fdcd4422994027c3c77e502130f3f449b7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_signal.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ce64c3423ef7a8dad0b9e86c330e9c344f37791adc5cbc59f82e275745c045a6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_timedwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2a3413f7e63a59bffb4a5a9d32692bb5f16554e1356318000ce372a9ecfbb4f8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_cond_wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48f47766333cc87727e148cf2c081b8e1ffb23d2a9439e5c62237f8da2ae0eef",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_condattr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "61a41cafedb55806a931fb106b3dec257ae7f730a28bf01a1acb3db5b559396e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_condattr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "05e830ca0721c9926aba95d7d94adce579ba5e4968dac4e579bb87099bcebf51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_condattr_setclock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "25889165c0a2bb3ac0abc7bbec77eb67d0adfe006e8578129d6fbb90343b5e9c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_condattr_setpshared.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9551015abe1e222ca98969cd52b4baf40239f0a6bac153805845ce6fed728ae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "48c232fbc6bb80e0c2cc27a95b22b208274aa424080620c078d130ece02f6dbf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_detach.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a9f697ddea72d943b3a5dcdc7117eb6c67cb5e531ca31352a2a4bb12aafefa0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_equal.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2fe834d78a147f6a7250ece30ea74913d8bd7e265a8fdffcfe3a61a1004d316",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getattr_np.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bd73b72d4f93ba938d4bfa126ade19d15b0c08327149662de19312ae7d8d3bc3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getconcurrency.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c325ef5c631c589e5b8b094a1f636e4d2a8a5c30af06f83cc89316b137048e11",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getcpuclockid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "77faa091f68b29c73d729fbbaec08b85348f938dceebdb5aea119a6e58f24eb4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getname_np.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f2ae1e477e6ad2ede87a8a650092020d07efea3a8a9fcb0782ecc787c28f12d5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getschedparam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "68c4c5f732cd30df1a89d517a528865771ba3c3bda174952449c041d2686d1a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_getspecific.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5b0e9479040a4a891d021daf202dfab5def79233ec948558eaa3c36fd0203cf7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_join.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4032ba942c4093200996edd5ec0c9637124a2e15ec8391ee0c01f1a834c056dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_key_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ae53fb6c10e64cfe05d2f69d5d202e79189c4061efcf1cbc7d07c719dee1c5ba",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_kill.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fdf8fe834b9bdc90ecfb28eeb54bfedf9dba92eae17b052b39a56baac2d4aefa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_consistent.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2abd2bd6c0820310551c2a7fddab855de3b564f687918efffdb97e027853db6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d86609607ceaeb32d05e42d6f46f372eb4df19ef942a36cf9b3f9ae1b08b7600",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_getprioceiling.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "006e0b039f1a631415ad77a3c8465c2a2a61a543612c3b793e610d8e6a85655c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eb50e7c22bc070e65f8ad57d3b33b2cec28df4a544916cd0860567ce3fa75095",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4ebfa08d466b5981c2319f75481d52a3f6e4efc279c0eb802a943b6517d1bbd8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_setprioceiling.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8c5f6c7e4bdc7978b74e463ff6f8eb02922926ac8588f1a69df0b69a2090883b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_timedlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "22e02cc72f5030ba0b2e79bf8d12eef2657669ed92b88f4eb753fc5f1468f488",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_trylock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b980d28ac9bfb9d38c888ee54eb57fbdc9e88866dc2b23c580a1b428d464a585",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutex_unlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3eeb18d0104cf96768f708cdd765ff45ef8ebf1edcedc70246cf518a34bea49b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0203d157e1358aa41353a75dd1a3f406919bca54de93e8b145b4372c3c903bd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec1b86b65f81da30e01c777473058e0014258f9042c17c74dc4aff553f30f836",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_setprotocol.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e1734c783e3f52a44bb1549d7ca731332b33e0c9916dc4e3599fe537a630f1dc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_setpshared.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "726ac9e871184f617e1142a4dd9d86aad35af09c29b99f2a8ca0e505b2c23505",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_setrobust.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "400ecba5257a9eff08f099193b07c5c0b01627a4a202ddaa556bcbf90938c52f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_mutexattr_settype.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "382d865084652de4ff81b29a36e6cdc97034124bcc31771ee91c082659139c40",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_once.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a72861e19fac5033aa45dc443e2aa3fd72f31614c3756eb689c3c5e69c082af",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b17ff09878f097afc3cead8b9aa7b70686dff98233ccecf88b49905d065fe5fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb9d07e113e5eabaec35a1f96a1eeffb84c9429d9df698623f8bbe1bd1700300",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_rdlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "64b6258b486b305c22504fc78af8a4bde4ae8765bf0cfdbec32fa5f5b05db4e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_timedrdlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "63142ac776ff82d0736f926962cd5757604948ff0e5eb77b2eb50a10153c2a2a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_timedwrlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32afcae34f55e92443c3ca54282795b5723b8d9e86abb608b54471865efb79d1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_tryrdlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5dc3f7495eaee990d4a2c0b35fa8f7ae512552ab9a8be4593a38b49fb5e5344a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_trywrlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6390f4efa4f14c17daa2cc946f3223eb3c3a8c30d81a33d1bb21dd3542652bc5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_unlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9cf1b4b79278dccf4ccb0b1a33dca77797c67b397c723f8695b7fefaf2b816f2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlock_wrlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bb40b9e8501a878f29352d6a2f881a7a41abc9587fc690712e8ebde9d444e398",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlockattr_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ea7e030e826c0c874f54c60f53c3414b146fecfbed5edfb35902696d47d643d6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlockattr_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cae088966015ba2d46315b1dfc8c81ccc938bf7b6aefe6d8d6e9c5586ab5bc3c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_rwlockattr_setpshared.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d7e215c09bf4c571dbe8374600b177c9e71071291c79bd454c1f4beaf2ca2389",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_self.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aaaa2602892e93074240ed6017c4c7c1a3fdb65aa69fa975e6e89818ea2fc1f6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setattr_default_np.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "450ecb248beaaaeb132e855814ebf10b784ee91c601adc36541e731b21dc660a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setcancelstate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1ada511c83509d9c32c768ba516b544ee0d6c060357d90d904204aa1af040e78",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setcanceltype.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "70edf4b348b769b76e25648aef47565316702610d1b634052de69edce0c9b379",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setconcurrency.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e382b2a96fe17c5c9da0e60059d355530b072d68ce203d609e89eab1fa493ff6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setname_np.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6e2cce860c29788a370cc006ebfa66603c40074f27ec43edd6c6fd1f8acd73b8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setschedparam.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fbf484e00dd447e2b3c41b21b63fe83569a9d3757b1df5f0d2c4529444463158",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setschedprio.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00fd2964a36b74e21c7c4ab0a7b0a6f0685bcb7dec33b03753f37d02678503a5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_setspecific.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e588f3345a6c8d636fae1b0832827474c74c171fa3dd7861b2a3e5cbe87b5520",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_sigmask.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a08decb52c73a8e01d47f1ff8afd9c18e7ac942a66037aba5402e5daa387b079",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_spin_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a7ba74bbc5721402e62e6cda869cec1a9669187b9b81aef7f6c513f42a8f12dd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_spin_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a2a6ee9331fb581950c658224ae12f2378b207981a46118f13f44874d628a94f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_spin_lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8d4670e8ab8be0921d9d0485c8d9fb4f00182cff87e4d5ac6d2e811cbe58d9c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_spin_trylock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8752be115b62772093bec7bcc7a318dc1dd4e70fb71c9ac6f9a5c726d72db0d4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_spin_unlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5405d5a20d6e3d59b554284c943a7053b37fc1d5970d819ae22475071a785038",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/pthread_testcancel.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7d2f67295f5ea33d5840400f2e20122448475c2bc9b07d218e65f243afa6efbd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv32/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2dadd1139824f6094c778b6c7c93ca0d5e02dcd46ad944ef73510f29dc3b6561",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv32/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d82a7681cb8f55b9d54548de2b4c54b631d069c2e70de87254b5d33e38964ca",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv32/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8103b2b1dd32be07f638686ec659d9d5439733b7b199fe322e204c5e1373fa74",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv32/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "97fed49846f35904faa0332162c33abcb67193c80e62eebfdf90457b41ff04c4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv64/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2dadd1139824f6094c778b6c7c93ca0d5e02dcd46ad944ef73510f29dc3b6561",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d82a7681cb8f55b9d54548de2b4c54b631d069c2e70de87254b5d33e38964ca",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2d595b4c489150fbdad8c4544b122a5198295c1cce223d5281bb4b14f3edafc5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/riscv64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b48b3cbded20744eee7808e41701f0653deb4574cfdcae2afbf1c36c74025127",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/s390x/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ff536eaf4b4455a645b319f4b88df1f88942b98148008e4739bf4144f9dd1d2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/s390x/__tls_get_offset.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "152a7f1ab6243563e83cabf7d32442ec5cc15cdc7933890063156020ed473101",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/s390x/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef03a0eefedd981008b587d6e4efdf25afac8e625364889117c6a7585997862c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/s390x/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cff07c6f5fd1332f4512c8f3b218cd31f513e349d27b190d9f02e43a4e6d61d3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/s390x/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3a2083edff5cb00105a9816102706ef88876b3c2a4f43948cec4ac18f380ef91",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_destroy.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "eade312e29b51a9812394f876088f60548ec536ac45a60fdaa1ad026988e5c72",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_getvalue.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d7cdca7fc67ba76f69eca39a169f24531f9e234bc29c42bdf4cdb7c085c71233",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_init.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6d651e16322418b8c9659a7190ec326a53a64751931a03ef38a53877f11761f7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_open.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "28c7592ec2eff63b563992c4564b0f6daf920000e6d7c6e3f0201951372ab903",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_post.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "382ebcbf42ada882d5d8f067e9dd397f621cd197f0dca8c41e9f35faadb086c8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_timedwait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e013e5365d6b3f4bc1a9dbdf48b63ed46b46681c1c84fb008221e20ca28cffe5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_trywait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b8e27011d461c4b4c0108cbe4697ee7fc338c34939122d546f99eaa35febc5a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_unlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8138760c707dc45b4d91366b78f79106fa863f8a3a5b57788c3491529623b208",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sem_wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2662deae88df26b1e4fb2f88b67f7f7a2ce671b863153be76b928ee927363bd4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/__set_thread_area.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8609564abfc4eb0bc1d731f69c8b0459b515f4153ac37ca9b35db3566efdec9e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/__unmapself.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e37916620a1cf60b8bb7d7ec5d3e96eb22812dbd975afb25fa3b598e19e8437a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/__unmapself_mmu.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a26ad97456d2602acf68928df4359ddbd40ae8d31f75111be24bb5e2ab7e8cf0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/atomics.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "46bc0e8cae6ff26496de161ef7bf2084ae443910caf497d403d8541875255e44",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7f54576a2d7e751c2a627d322c42395382122d3a166a0d4ccb2099f94a2cdac8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/sh/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d4090be7741bb87f40fbd73465ba636e077959bec9f455e76c5aa7171dbfb736",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/synccall.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "220dd1bb651710e4206768856472e9853a8ab4ba25eb2e6dbd3c1cf6607d3c3d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/syscall_cp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/thrd_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f32301bd6559545eb15a8f892f058dd09bdbb3409c776b1baf4ee7be7431538c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/thrd_exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efda8cfc6482a40ab0098e81e72ee5a7c7cc23d3fac2f878a04601575ac86ab7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/thrd_join.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "12f880e6ade406c7605d88133f2a31a5f68e1c7202ec36fd94610c3e8c02b3fc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/thrd_sleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3322d96b4eff9238ba6a33ae28826527317df08b365f15908a19faafaccc37d7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/thrd_yield.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b2a25a0e1ef2d5ea8a37dae2f5dcf8b89301fc30734303429fed5f297364cd67",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/tls.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/tss_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8e263dc0e9d556eeefb0e42b93a6a39f528d9ee23e9e1b5c2db207b928bde000",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/tss_delete.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "852493bab261586a977fd5371aff2f4ed507bf8de82ecf0f006412ae38657d4b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/tss_set.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2dbc898eadabcd478ce8028a0b450e47f02f454d5d66de220805dbd45adcce23",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/vmlock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "03cea690d4f01ba8fd88b869936d64a88e89354832aacec33bc0fb9211b87db7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x32/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "caa8ff84428a49714f4dc7145f7cb22a7607e9ba90c14200b660582fa51fb5da",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x32/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "8e81781f37f871d82c87a1afe4cf690aa0e3ef2574db6a0e99ea99ea9f551bac",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x32/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1fb937004e6d06a8c87170873932e2eebf8d05df59aa4adf22db7fc849d4e0da",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x32/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3d84c844e6a26b934f80fd35e0c7d814b184e489fdd71cd95b176b8ed15be618",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x86_64/__set_thread_area.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "9a6299228be5f8f467652263e8f98c1f9ab2e0937243589b8c5642f0ebe3236d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x86_64/__unmapself.s": {
-      "license": "MIT",
-      "evidence": "file notice",
-      "reviewed": false,
-      "sha256": "dab063e96f4c9874892b39545e3ea02cd6f6e71532d84705422bd0a8ad62eb00",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x86_64/clone.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1046d162ddd8d902a657b8774bc9c0e8f029c24ea6394055b4ffb0a5c39d39f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/thread/x86_64/syscall_cp.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3d84c844e6a26b934f80fd35e0c7d814b184e489fdd71cd95b176b8ed15be618",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__map_file.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a11b16b64f607d0344278f09c059150fd3698306d2f85c121a3c8d6d88b2834d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__month_to_secs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec626ffe4ac4521d7376b148b74cf6eecfe17142e4a1daefd18f9f68c4b01eae",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__secs_to_tm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "36562b874b867912bf5368d505a6402244fab067d5fdf3c905904d225f3e3d06",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__tm_to_secs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dbba28fd7ccb3a774b50732b77d675a3b5b6e4a48a7c713bd31d625018be88c1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__tz.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e8ffa941b3f3527ed8600db7faa96f3b5df09c40efa4b33494a280a31efea06c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__utc.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c3ea0b7f749e684755a005fd7d478bc80c43cc3db39e9dcfa1f58564d2d5b703",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/__year_to_secs.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c11dea580c3810de90a2222c07bbb0b0a127fb326b60ed92e4205bbaace999f1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/asctime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "17a307e8f0692f09a9266a8a9abf10cfc2c63847ec5a9a7700530e023023469a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/asctime_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ddf7eee8be1f8ed310a2b20fa88f65b5a98210adc6c12babe1fd36353d5316a3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9802d9cfeb49e2c2f02d51b21721266d328af56e299f105a375b1fc870737266",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock_getcpuclockid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c7f290b875176168dcb84c22c725f447ab0037fbae066bf8bbc958e4647fb1e2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock_getres.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8b50d9ad7d200e8d9abbde23ccb0947ec8de95d663fa4b4a4a4ce60050bdea9c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock_gettime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b767ffab3299d29ecfff46807b3dd106ad99d503de7f853733ac592ebd51047c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock_nanosleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e4ee1b947194e1c32a9c3a669cad2a64010b98e0ef2b23c39b9622abc7affdd8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/clock_settime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "785dae6a37a18afef3a7bd3c47d2a29457a0fcf0ba885c25ed32d8676b935985",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/ctime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ed504f63339be57b6e143d1d4df3f4c1e13555c0127af124a99ca7077d978b84",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/ctime_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53123b650dec7193e1a4c855b41d051277c86c1f5bb212ec2a7d75d951e659a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/difftime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "db4ad5923b27d68b032d37a0a1e02f023d295e83bba2aa0b13135460667b985d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/ftime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "83add494824da21171a612dfaf0b2bb72cba2a6eac047ca292fc745d20b5347a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/getdate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "be3183b8bc14d6163e0a96d468dda5c60ce95d21a349e85c3ca2a832a9393d43",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/gettimeofday.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c531bf32b9d305808ec78e699a29415eb63fa196203bd0a6d914f08018c04059",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/gmtime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11225ec9f85979a515551a23aa89e761a2ddb291628e68d7c989b69c9fc7c77d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/gmtime_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9d54a7acd47b1f777da4a049eff55786c755bf9ae643422d9f9b614d2cd0fc3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/localtime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f49c8610cc848d1d96421cc5800d28a25cbd7671d65b492938f404583fcff1b7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/localtime_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dce838262d6adb8a6f1ced91ea9c8c335514b5836b0acb2b1c0e655ea45ec022",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/mktime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d51e48e0832b5eeb2cffbe7b774edad3d61f71533160743b63eb351db5d97fec",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/nanosleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ad9738734680a61ac941173a478374a23f9bd2297336d3013a35d51e6030ff7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/strftime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "89d63a7d0eab750829a12dcefdc513cd3cee6d7261c883df08f630ead46e3a51",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/strptime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9d3eb656b897a82c3b43a6ef973239a014ee9ee89361c1b308b0a2429a4766ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/time.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d10837980fcfffa1bd4c7e6f3bfc0904ce002f9ccab9b0458fe4aac6415c2c98",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/time_impl.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "266237304c1524f9af6d2ac0e85534e421da6be35a62e5f0c47c0501e4a2e013",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timegm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1bf6510b27590ef41e9cb181cf8fec3e5b6435f3e57127d95053237ad1a863f8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timer_create.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d38fa6f9e9a1620f01affb24e177a7c87a7d7d46d4b4890e25898481b5db3dee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timer_delete.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "243eccd2a4e6a7ea0d5a9844391afe5ced55d10fb26b6d80ef18d051ad7695c2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timer_getoverrun.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "770835d98c243629d551d29c9acc9950091051f82d9d4d5181f3cba73d681e57",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timer_gettime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b5090c6f60819698238f2a53fe69a8438c2d2c2b46ab5871254ee572626e59db",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timer_settime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2c38bce39bde91ba17ce24313be92bc37e8201655c6bcff6b5dc3ccc00c55973",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/times.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "73d2af2dd7937f038f553d5900d5227c1cf6865558621624ae430c8fcb6d034a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/timespec_get.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "166172fc4bee57193d9f5d4017d0dec1db2e351340c01eb53087f480b1c85d33",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/utime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ae94674bc9930851e8e8c4893ddd979be97f9c3ac56e26682e5bd79c3b88b90b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/time/wcsftime.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "895d612ebf63998db116fe78ec867006d0172b786b6c5bd364c551f0d14667b6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/_exit.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "020b31978d29f1c6dcfbb349a92e4c7cff38623dcf556715271dd0a825f6dc9d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/access.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "35d4db9f8d1bca35a16a13fda70de8f072a98412e704eabfc55d227432b25504",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/acct.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "11684bde59db73a7d6563a63708fdb868c5a4da4575add6563f28a368d97ea1d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/alarm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "df4fdca5c538c12a86778f7e7c4cb91c1c7f3f39221e0ae4a47132c2b8eb4b61",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/chdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5ea9969e788215ab892eb73b8fdb1ff3d8352cbeb024ded853b6ed72219c8abf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/chown.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "576a0fb04a9989d8981f30bc0f14e852baccfbd4dc42aeb179563c8f86ce7cf2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/close.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0a287fdef55394bdedfafc924efcec2d27e584a252cd2c71553fae0bb8ec9672",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/ctermid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "24c7aa15fa9e0e2369339218e55c7e481b198ed213e50dfa8192736b115e9186",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/dup.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b98dbdf4a6fb9ac81aafaa3bc31dcf2c6ebfbc65e864ebee6862d39341a1fcb8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/dup2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cba463e4d44ae7e9a388ba02ea785dfdd66fdd660456efde7e23bab4d93d301e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/dup3.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ebe3d52ea96ad1f810e1b6b46d8aaa896925dd243936c5d3bf5d13021d87aacf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/faccessat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4073be36eca0d929bf4bb6994c5a0ab1c01054a8ab58fbeefd2f7b5fe3157046",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/fchdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c9af2ff1bd5b32807ad596d58e7f182ffd4cfccec669cd2150b2211a65dbb27b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/fchown.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3163a70232ff116d15400054b3055768ac4b3105a0817eae2e3212bd763e65ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/fchownat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "60dbe117e963fc09fa1cb7103d60faf183949ee9b60b5e8acc0077fcc6abd3bd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/fdatasync.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4a418dee81b3a471730725a7acdc0f27df067a3667c3c86c28be49084e3de027",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/fsync.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "260ca42e18a364b8fd0a2e8ce1a35b73ee1e7657bf2c1014d4de760f855b78fe",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/ftruncate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "696f38df3b1229ba9378182c200d324cfb97e4d7b0000c53cff6748ba2705ce2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getcwd.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7101e9ce4e6f16a313deab6196ce8f04ca70a0a060d40a7c5b79733e03c2bf23",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getegid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "efb42be5312fbc0142345beacb599684c37e030f4cceac68feb1425e9bc5f153",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/geteuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d2bccdce936a7eb90eb87d3d2b4a2bc050b28a73e4aa531623518eac4ac9c137",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1dfa6f79608601bef267931b61864ea09f6e57e321406decae16f087f3584604",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getgroups.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1125d5d8c8abc645fddf3b02338d4fed8e1aea1dfaf3fb9e7087e98172be427f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/gethostname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "40215d3eb5a5d944523fe969d006d2d162078f1eff0b70b94a0eda3990925f35",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getlogin.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "00cab271e92ce886e5e74026af2ceb70bd6a7a8a33ea5e0cb262dcdf06240252",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getlogin_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "76207872b13922ecfb5ca8f17c52ddd6e44048b3a8250429e2a9b2946a584d5e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getpgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e99ef4b8ec9feae0fb48f1144e797ff26077ad2604d3e689b88446a0a1168c70",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getpgrp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3a8bf0f553b8be229bd5b7ceb182486c3400e54364322a1febfd9d66386db7c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getpid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "17b3add7a6d6f26d1a97b627bbeb2078a9c863d57a74d0fed2405174f3ba3b3d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getppid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0b3bb03f9d09f4a64d07caf6bba69b57d96a78a33dbdb219f02fe303be170cb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getsid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2ad7f44acab768c2dec0f8d8acd791e5ee5a3a7a848ec7581c98fbd2468f3762",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/getuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "cc4498f9c63fe24093f8f4d3ef3eb1cec0e07a312d22e5dcb0105a5e305664e7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/isatty.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fa627211f092963980d623597e5a9fcaa976dccaa359bf33d9ffbf86fcf289c2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/lchown.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a8a1bebd2dcccda500e7d44508c6c52ed7b722f08c706f36d61d196bf4406a4f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/link.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ec062b7dd552c03934f156ba3c02e0806b9b6112c3e09a1eaa53f5952492629f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/linkat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "7953e796983793ce40b18c68000c9bd7fad66a74f342308dca2f81f01092939a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/lseek.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "aa3e90b93e192921f7ef455e60ab9e9f68677978ab0c9617912af3cb19578771",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/mips/pipe.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "984dd77ad55e5a5f0bea249f7a8f68727e82b13dfd1f62e512d65c33cce21b94",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/mips64/pipe.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "99f9669f6197c7b34f5953e16d3c8d91d858fa4c18942ee1ecf184d4e9b354e6",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/mipsn32/lseek.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "32e48f3c7c44e3250d1bb0b5668c4b03a67717c7fcffd2f39649ad64de2853a0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/mipsn32/pipe.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b6c4fb4a25f451043c432349b0246f13e16e62091f70006406d1b994c5c0c9ad",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/nice.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "95f992415b2ac41f2b6f60bd1c1a997d535c042562cc75673779c0511d08706a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pause.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2affd94d6b5b6d4926a74407e4ed8bacb1b66555b74f69298d68201c63a80e68",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pipe.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3ca3d2ad2511ee4d62703296643513c6e9cd90426927e0128684bbcb9d6f1e6f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pipe2.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4eed462d9419cbaedeea23869fc24cd764ea5cdca6a219ad111a0c35a9a5d919",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/posix_close.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f64372916cd153820c807086850f4d3690421058d852305be274abc551789b30",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pread.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5bcf66862af1a495893d48b24ceac655d469c04d10475635666bbd57e5ca71df",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/preadv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d94799b0a93bf49a7ad83f3300c0f1ebba130da62c93a03d066e91f19205969a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pwrite.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f817c3122957329d0fbaa26a84df3785ff4b80cb2002268003cb10bfaee5db04",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/pwritev.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1d9e003f7aeb66cde9f023aaf2c4405e9a2c5f38ca9f8a69404de45f163de612",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/read.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ca661af47db6b1484ba1ca74e0dbe80de784597dda0b853f79d5cf2b4a74eae3",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/readlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "bf071fbe0b72a5ea65727d578575386d7eb91d55e9a97bbd354dfd2fd44e06c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/readlinkat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1bc3675c7863687663d43d9e2f05511add1dba7c1e725596534b0e329c048f25",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/readv.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3f8f029853ed2ddace6ce795033d6bbd28aedae07f3f73fc8c8551e01368a351",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/renameat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "72699e887950f7a420f57f3b53f8a2c700b7d99267d8c84f4f0a79449312b073",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/rmdir.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0d592c279471195c95964f37c1d917c774da3fc04611363e4aedb2c0ca1e712b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setegid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6d34ebb2d1df14aa9c51308071779154d7d7bbd59799a554dee010892b00077a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/seteuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb4332398fe35d853e11fc42e291893ca69e2d9c607643bf0ec890dc6912e6c1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d096b5c5585f6fcf1e06a44364964559f6355e6a36c05351ff0d994b8f919968",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setpgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5f5f87a72dc1cb20493bfd9a7784d4871df6867641ace0be9e268ff68cf632fd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setpgrp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4af22e529f35af0297db8d41194c5b3ac77dde6653b821bdebe1c3b44b5427ff",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setregid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "760558515f54c2852588b912bd52ef3d2df0ab086a64fc1d507e38906822e075",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setresgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ad0f38671ecd5f170188de481ed059290e0ce425d393db8bfabc5d3ce982126e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setresuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "03e52df44b9705be972d6738456c24b630b39106c0544c03352e417fbaf93f98",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setreuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "85df398876a5e1bc7a88b06244b189671daf1c2ab0647372ab4edf250806efb1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setsid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "55f48783b622fd2df90f55ce8517db0bd4527e2099801a99973987576467490a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setuid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "349044b6b5c4ee4f54d989475c743d45c2553071c26402f068d2632b275ab8c9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/setxid.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4749040d87f264aa13d47fe74dc785b89da6612ec54b79f2a671f56bc1dfa4a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/sh/pipe.s": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c0a6711f4aadb030c84fc53bfa0ec73aa5f2f1f3976de575b44eb198f5dcee3e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/sleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5e8066339b94b4fae331d5fcc3f08b5bbd0948d7ad3a814049b9a12c995d6e3f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/symlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fb0d1585ce1c03d4545eacb8647ffa9766c8f248ad8c1014cf4f8b17330412ee",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/symlinkat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53dbad9423694760f0bd6647649bb001915a7187d7d744af241a455202488ddc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/sync.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4c1b3e5a58a3d8bf611e76eda73c216639a08bf3eb976e5b77e1182905949400",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/tcgetpgrp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "57c1c8ff7ead4d098a7c7afcf1efb211a25188cce2cd5b6f932a241eddc36ee9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/tcsetpgrp.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "a68becf0c813d92806b50f2069a9b3c15b7f6c6fe2ed1637468a1501342e63a1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/truncate.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "1e0624839c1fbb97717fa3da92d31933c8a476854df371190cf6c2b4fde4a1a7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/ttyname.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "db89ff7bda2997f1c7cf3c8a25def6c9dff48dd00aff1d986a1d14d31ff91cd2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/ttyname_r.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fbb4807e4772630cd50cea943265357e619f258c350e7b88ad27855788bd8fb7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/ualarm.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "94503f307596237b32334348e9b603c187cbddb5479439588e35546fc25719c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/unlink.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0b8cee9833681811c2be980624f2a9e5bd8be6ee7884853acf36771b63ca6927",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/unlinkat.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "51b70eebf9a719208ad9a45523bf02969df9dafdecf49fbe2f7987a337821464",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/usleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "9e319e7cd501318009d6b48f982210160668629f494a99b6c80863a383a2d83f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/write.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "30ac4ae6d10c9273476f83370b023bc437cc0584c36cfae77861891a8ee5fb4a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/writev.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "09c788ddd49d6964a52450e1081088de2624fa403715a02765398f21b4b11bb9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/src/unistd/x32/lseek.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "43d778b005b62d85417a98c73e9ee73b244e1c1334c6b02a0742ac80cc82015b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/add-cfi.common.awk": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "42d794af3da089a64965c55536ce47cf781a1d485aeb0ee2ee92f8ba1d85779e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/add-cfi.i386.awk": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e182da82008d82a0e9b6f768e0ac9d89f57d54561cd805666e9a497eb59c20b9",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/add-cfi.x86_64.awk": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b639516afd29ccd161fa3b1ff1afd329ef78c0fbff16a870d077f00cb71bd76a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/install.sh": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "53e2413c0277659a66f03717874e1b0385a58f67ee7ac2a0cf28122ebeb336eb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/ld.musl-clang.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "8eee52b636e0dd854a62848eff7b5ae20158c9b56cab0b6b8a108590ea86b59f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/contrib/musl/tools/mkalltypes.sed": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "8ccea9ec27a8450a52973cab8cdea0af8b4bd93d246b1f206b37ccc6fa0b8b7b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/musl-clang.in": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "4d1a89c5b6da7ab081c9423ccd5ed55ac67ba3802a957bb0825a4be23214e0e2",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/musl-gcc.specs.sh": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ef7baf50ae403b3bf40c7403754daac024de9acf3c83e9b7b4cb9f80eaead343",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/contrib/musl/tools/version.sh": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "0a728e940376c9df6922ca2a723aef4900c02af462bdd91b7348f20af07e216e",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -59447,46 +44441,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc/musl/libc/ARCH-mips/include/sgidefs.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "badb213179595d102a8216a0b07d6ceb8061d2476e1e3100fe2be848c9e3250d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/libc/ARCH-mips/include/sys/asm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b4a6dab584b0bf502ba223723b7b865da6f2c4c4193e2101a9b32585c9919cbc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/libc/ARCH-mips/include/sys/regdef.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "12008b43f8a6e8174fa858a3fb64257c95c350576c25017e4038b4946ae7811e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/libc/ARCH-mips/include/sys/tas.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "086b9c0f76cf4c4bc4507a56b970068e389215e668994d5faa05c9130886591d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc/musl/libc/ARCH-riscv/include/sys/asm.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "d68321bf75dbc20b332849b15f34128d56087f963b126dd3f73b46a87415ebaa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "libc/musl/make_rules.mk": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -59551,304 +44505,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "libc_backends/lib/fs_noop/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "d3cabaa3b7566af15d3d76bb0790bc696ad88e31e0951c531f72fdd482203c1c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/fs_noop/fs.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "1acdc3a1e0aac7e26718daba5c79e8423e904e2b9ab4dd056fdb1d79fd9a9275",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/initcwd/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "5d49c22e4aa0f5ae14c7482cb5959be1897063fb17fd0741e49b33d557ea0cc7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/initcwd/initcwd.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a06fda141c2679908e508cfe50ea24ffa86bb70f80db88af8fe1e96b6daea87f",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "0a11e146f6fee7bf461d56bf7ddb8e8b8411560af68bfe8820645064b33218e1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re/include/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "de7ec332cc24e6e2f1a67f6ed7298423cab3a98cead735700842a73083461089",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re/include/clk.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "8bacc65722e883df3d84787de5c67995cb8c086eca878d70bce1eccffac657bc",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "7794047ead0f7c9489c678d76571f6bff175c7d562acf2eab447bfb19cdf2ddb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re/lib/clock.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "989bf95adad357fd2b4d9be17b33bb5aaaaa0d267684a807644da49362f2ce5d",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re/lib/clock_getres.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "40c40bb3c77457351606e942dff55a4c710a5bc950d9f26eaea64a7ea50eee67",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/clock_gettime.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "cbb80e165f745910aec232b592e5ec35bd6a4e41dea65359b1d3443f4ea91dad",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/clock_nanosleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "dececf5d0f111f2dd514ea7bf59b2c7cd68bdfca8a700bb32d5af35b2ee552a4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re/lib/clock_settime.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "ddc48f692606e4eb2476238218c8c8f6b19dc52b77306e95a25399868e38b487",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/clocks.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "4664a693c253297ced5d80062d563d1c842141687de2b6fe80c858c64f89b679",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/gettimeofday.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "8cfc26a5b21694a6ffccda45c4f3c7dccbd7850d7d97e91bc34a469f9f9e3b3a",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/nanosleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a31ae2b3545ac698628094f231c7118de3fa9c791e31db521a7da50f1b7d2cea",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/sched_yield.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "30e2672ff9a5a71638469bfe7337c9c386d4617697aee732c5157244b7484cd0",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/settimeofday.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "227e69df8a97c24fb57706667597290f42e3b8efe73ecc6717544b40c5789605",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/time.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "06147f22c71e9f61616e649feaebb6cf526b5084126c0734568b89ea5125fd22",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re/lib/usleep.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "f421c977857fe12bb708d67c6a4cb338e9a19da48dbec89e6b124dcac34421f9",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re_file/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "cb3b768d9e2f5f63b562a003e778150b5d3998868a84946757fffc0da8ec1d55",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/l4re_file/file.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a720532b8e2819eeb4e627c06adf91204b452b43215969bacd60aab88755021b",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re_file/mmap.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "0a84a018f1e3c7192ec8424017e33f518f470d42292fbec7ee29ae61b41abdd1",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re_file/mount.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "f7499c2dfe9a1b323ff1be87eae85cc60d337f53dcd0c23ab55029950e11513e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re_file/redirect.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "c3397cebf4cee30e54f8bdeeaab8f4534b689c6eaf6d0c73c82104e3fce39553",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/l4re_file/socket.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "ef64aa5a5b6437fd94eaaf7223d72a5b7e9c5019374a8e3e469dec8123283614",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/math/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "d04d54e403b212af0212684fa7d56003c5c97e6110c93f2e962528890533c96c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/math/_sin.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "6c8193173bc8b94dbda85b94b96ec3d078954e5fdb48a4f0dc16b1bd04bac63e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/math/complex.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "eaf99067c7bf579166d8653867bdab39cb8751831ffa7086df22831229fd50bc",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/math/exp2f.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "ee1402ba4dd445c289562acba6d688e9d532c56aee7db9959ebdd49491826420",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/math/log2f.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "4bfa69487ea1a5893b09bddffa6d607a474fddfd14291adee88dbea5a1d43c69",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/math/sincos.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "0f7263d04d1e7669830183f4507b229ff7152a2d5d08c2fe2c47cbb53488e762",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "libc_backends/lib/minimal_io/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
@@ -59867,336 +44523,6 @@ Third-party notices remain in their original files.
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
       ]
     },
-    "libc_backends/lib/misc/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "c5b05a7e0df99c5186f9795c5c340481bd3ed8768e2d78ad7748de848618aca4",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/daemon.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "52f548c48fc86323f6c7ee463e020b61cf4b2d733e0ac84c7252f5f283fe4aaf",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/exec.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "00990e337d894aa81ed3301b93148f810904ec0d75118448f3a36fdc7879c14a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/fork.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "8d5729e5c417040da97f0941f6aea80ea51b9079d78135094c20237e8da87599",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/getloadavg.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "775b2474237811cd9bb561bcde46032a87ba0dd45b9c9d72b4f15c5cb10980de",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/getpass.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "7b2ad10e489a5fa9ac84f57f33fdfca939161f13d6bb44fe8655823ce71c3df7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/getpid.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "94e124b41e129a212109292c6064c1406d46d41f1a4c9312f4442818cb3f3b68",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/getrusage.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "6ad4150049aaaba53e37cb54b68c6c8bc1b0dcf2546272a8b5e40127fd9bc8c9",
-      "kind": "file",
-      "non_ascii_lines": [
-        "8e2e62b21015bb2d44cb21a4b2491168f2ad4647467cc96e390c7250dd889c65"
-      ]
-    },
-    "libc_backends/lib/misc/kill.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "80d616147eefa113c27c0b5efcf60224360bfc6936334515468db71c357d4795",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/limit.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "1f7d2ae80135afc0c70142c9db5ba21c1a6630c132d55b27d046f85c892d3f82",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/lockf.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "eae0e18523f3adba516c5e52f9e33b7b77f7d29fc82ae2c19e25a9d4f53b811e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "libc_backends/lib/misc/pathconf.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "75f42a504bc760fbe04f2d15e991aeaf46e5a9a7dfac9a0fe500f549953f8d1a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/pipe.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "fb0916620b24f41199effeed51cf5e280e639765da010a72f0733fe9d59f5235",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/posix_fadvise.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "9368d5fce52724887e99e25c153e80f2283cb42f5d16c284338a7b75ef447fd5",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/prctl.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "017c2801520c57cde681215ed223cc0ee89062a5172b66dfc8923653be41ee6a",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/sched.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "b2c468753dafcbf8efc6008dab39ee7279c00642ec8da40859d28aea636c670e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/misc/secure_getenv.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "ef243f25390571fbe20690f039b6ac4e3548215754c4da6d0d28873cd29efb95",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/shadow.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "b5c12abdf700d00edb8c83508aa4abf70838e83d67c43e6b842efaddd7409261",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/shm.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "e6fbd28bdea7d53553a639b5299ef0ce0d99dd29d4354843725c269713c6b3bb",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/spawn.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "bfaa5d5dc83b53b2ca2b8e96031f6775e3e1b88263cf0d748eb3366e08ceb0c7",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/sysconf.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "e1da1368bba3309d03d9b8a86bdfbc92eea5a4d0da268255caec173b803adb42",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/system.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "21c281a9c39b79bf5ee9a34bc320ce49f78254dca78d587ca2ca2ac2913cba99",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/termios.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "3dd0bc4f53242ff3b1774ced9a42bcccb2dc310d7fb0d472d695cb1cc515ebf1",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/timer.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "398c78d215dbdfdf2fb87abb9ee4f2672fe4ae24ca8e3f711f919639dd5e5baa",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/times.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "095d76643af3350c549ac7ef7f05432afbe8881875217515969fe03cb3e8e76e",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/uidgid.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "41ce33e475ec8ab31c3ba61029dca1ad4ca48bd45f885e3a4745babc455c4372",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/umask.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "b8a4db961ffddbeaec0b7680e2951815f1d48721326a75703e19e020f40268bd",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/uname.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "4bcad5a916e2973b0c011d5d764f8726e8437316dd840de2916853ee3eb9af79",
-      "kind": "file",
-      "non_ascii_lines": [
-        "bc35435f0097c2ced67773c28f6119b4bac84c75cdea203fa9ba4a499fc94921"
-      ]
-    },
-    "libc_backends/lib/misc/wait.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a3227f07eb9a83cbd8873893be2a942180cb85de0c79dd1e11ba8159cb312bf3",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "libc_backends/lib/misc/wait3.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "500f29ace782c5262a52921df3047ef2c135c528a538b85b8c7327287fa86057",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/misc/waitpid.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a560b9e7fdeb3587159e3941e78686ad37588fa2b57499a1c122f0c714ea36f0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/mount/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a7a211e15e8879d617cd079bd5c1539aea5d8d62be8be624999d2d92c3678a57",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/mount/mount.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "aa04727f2da8ee0e770b13879c6461d5aa48214ff013b869e43c69aa51082865",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/sem_noop/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a7a2736fef02f0a0b42f36b2c3d5d63ae39502ae64b247b3765f8a36e955a7e0",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/sem_noop/sem_noop.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "bc5b528ebcbf75bdba8259527d74e513b81b4c790c877b7421f318c206a204f9",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/socket_noop/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "73a77caee9e5eab2a6fc972369e361336c2e8465d7abbf46f5be8ad8cf177e6f",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/socket_noop/socket_noop.c": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "97efc84f700d1b66a33db6fdb04558f2a02f98234e38c80559addc2a9bd14f20",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/static_heap/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "9c4ec3f9b6aea3162de845e54f55e5c17dcfd711153f337b63a1f36a41a4cbf8",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libc_backends/lib/static_heap/heap.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "7beb94df3b83dd43d1771f892dcaa7da84085716bf80dc09f6d09c3ac9c3cd6a",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
     "libsigma0/Control": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for libsigma0",
@@ -60210,30 +44536,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for libsigma0",
       "reviewed": true,
       "sha256": "c0128380fbca368cd590bbfd6fc03f091d2ce648ddf53e42810aba73265fbd30",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libsigma0/doc/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libsigma0",
-      "reviewed": true,
-      "sha256": "1582ccca972af7e21ddbc765df4a96541507a36fab0139e9afb26d5eb202b65c",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libsigma0/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libsigma0",
-      "reviewed": true,
-      "sha256": "d590684e67c1cc47b4dd562b241aff8009536b380648d5de7e5711893afdc88b",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "libsigma0/doc/libsigma0.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libsigma0",
-      "reviewed": true,
-      "sha256": "a664fd2616e72490ce53940727e364336c17b7b5bf292afe5444d78e7d2015e2",
       "kind": "file",
       "non_ascii_lines": []
     },
@@ -60351,22 +44653,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "sigma0/doc/files.cfg": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "43db197c9e47618a7f647a727fa477e14adbe93ccd96efff0c08be9916445b88",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "sigma0/doc/sigma0.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "dbd6794dd0c2b858bd01f66ebafe53028a4a34865bb477ddeca4f2d4024bf9ab",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
     "sigma0/server/Makefile": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
@@ -60375,57 +44661,11 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": []
     },
-    "sigma0/server/src/ARCH-amd64/crt0.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "39906dc31a0b074ce972d932111d98fbf470ffd7a219dea34fb7f2daef842e55",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "sigma0/server/src/ARCH-arm/crt0.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "b89cb6e0bcd54abfcc13f5df0f4fef7cd9a6832231454129a9a4674da2425211",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
     "sigma0/server/src/ARCH-arm64/crt0.S": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
       "reviewed": true,
       "sha256": "e9fe249cea717650fcb4afcf0a6f4712d26329a98cb1ea5f83bc5f7354169dae",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "sigma0/server/src/ARCH-mips/crt0.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "f077f18a4e8e74b7e0f75291a8ce4c5c0426931c0604d3474d07f139567bd102",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "sigma0/server/src/ARCH-riscv/crt0.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "915a51672884c5e356712afaf7aecc580ceb00db0ac0cc394862fbf5c2385f97",
-      "kind": "file",
-      "non_ascii_lines": []
-    },
-    "sigma0/server/src/ARCH-x86/crt0.S": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "61ac15423c77722e9b4d510e8c107493b62509085950c788e8ddd862df799f0d",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
@@ -60514,16 +44754,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
       "reviewed": true,
       "sha256": "5aed4be44db4a1649cb18e6c61de49c2594f3b9a43a733e91a7d127eda0042b8",
-      "kind": "file",
-      "non_ascii_lines": [
-        "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "sigma0/server/src/ioports_x86.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for sigma0",
-      "reviewed": true,
-      "sha256": "02fc63a34b96ea56c4e894fe61d985b5cdde0a5fe37b49fe3c39383726a2c2e5",
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"

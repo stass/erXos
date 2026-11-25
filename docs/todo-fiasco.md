@@ -503,15 +503,16 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.for_file`): a
   read block that `config/imports/notices.txt` does not list, that is not a stock GNU
   notice and that holds a legal word leaves a file `LicenseRef-unrecognized-notice`, and
-  so does a second SPDX mention. That is 104 files: the kernel's 56 (35 in
+  so does a second SPDX mention. That is 84 files: the kernel's 56 (35 in
   `src/lib/disasm`, 9 in `src/lib/gzip`, 6 in `tool/kconfig`, 2 in `tool/preprocess`,
-  one each in `src/lib/libc`, `src/lib/libk` and `src/kern`, and `README.md`),
-  `l4re-core`'s 30 (21 linker scripts under `ldscripts`, 7 embedded musl files, one in
+  one each in `src/lib/libc`, `src/lib/libk` and `src/kern`, and `README.md`), `l4re-core`'s 10
+  (4 linker scripts under `ldscripts/ARCH-arm64`, 4 embedded musl files, one in
   `l4util/lib/src` and `README.md`), `mk`'s 14 (5 in `doc/source`, 6 in `tool/kconfig`,
   one each in `tool/gendep` and `tool/vim`, and `README.md`), and two each in
-  `bootstrap` and `libfdt`. None is in the development audit's link closure; a reviewed
-  table row, or a reviewed rule naming the file and its SHA-256, records each one's
-  license.
+  `bootstrap` and `libfdt`. No compiled one is in the development audit's link
+  closure; the linker scripts are link inputs, which the audit's closure of objects
+  and archives does not list. A reviewed table row, or a reviewed rule naming the
+  file and its SHA-256, records each one's license.
 * [Medium] Notice reading scope, `tools/lib/erx/origin.rb` (`read_blocks`): the reader
   reads every block holding a license mark, every comment block of the header (the
   comment blocks before the first line of code) and every comment block beside a marked

@@ -109,8 +109,11 @@ tests, a coverage module and a checksumming console stream that erXos
 never configures, the start code of boards and processors erXos does
 not run on, the build system's test plug-ins, and GCC's C++ library,
 libstdc++. Each tree's import record lists every part left out and
-why. What `l4re-core` keeps is `sigma0` and the libraries it and
-`bootstrap` are built from. The GPL files that remain are
+why. What `l4re-core` keeps is `sigma0` and, of the libraries it and
+`bootstrap` are built from, only the files those builds compile,
+include or install, with their license files, and the whole of
+`l4sys`'s generic and arm64 headers, the system-call API erXos's
+Fiasco backend is written against. The GPL files that remain are
 `jdb_object.cpp` and the configuration tool of the kernel and the
 build system, which runs on the development host while a build is
 configured and is compiled into nothing a boot image carries. The
