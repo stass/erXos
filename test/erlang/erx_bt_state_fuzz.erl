@@ -28,7 +28,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    [{module, _} = code:ensure_loaded(M) || M <- [erx_bt_state, erx_bt_state_file, lists, binary, maps]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Atoms = erlang:system_info(atom_count),
     lists:foreach(fun(_) -> round() end, lists:seq(1, ?ROUNDS)),
     Atoms =:= erlang:system_info(atom_count) orelse verdict({atoms_made, erlang:system_info(atom_count) - Atoms}),

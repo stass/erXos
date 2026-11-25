@@ -25,8 +25,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    %% Loading the facet makes atoms; a round must not.
-    _ = erx_login_facet:admit(cookie, self(), state()),
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     {ok, cookie} = erx_login_facet:operation(cookie),
     Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(request()) =:= accepted]),
     case Accepted >= ?MIN_ACCEPTED of
@@ -44,7 +44,7 @@ round_of(Request) ->
     Operation = try erx_login_facet:operation(Request)
                 catch OpClass:OpReason -> error({operation_raised, OpClass, OpReason})
                 end,
-    erlang:system_info(atom_count) =:= Atoms orelse error(atoms_made),
+    erlang:system_info(atom_count) =:= Atoms orelse error({atoms_made, Request}),
     case {Said, Operation, in_bounds(Request)} of
         {{forward, _, {login, Request, _, _}, _}, {ok, Op}, true} ->
             Op =:= operation_of(Request) orelse error({operation_disagrees, Request, Op}),

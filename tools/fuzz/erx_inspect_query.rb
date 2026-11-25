@@ -22,6 +22,8 @@ module ErxInspectQueryFuzz
   GENERATED = [Erx::Generated.path('erlang/apps/erx/src/generated/erx_schema.erl', root: ROOT)].freeze
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   TARGET = 'test/erlang/erx_inspect_query_fuzz.erl'
+  # The atom-count warm-up every target of this kind shares.
+  WARM = File.join(ROOT, 'test/erlang/erx_fuzz_warm.erl')
   LENGTH_BOUND = 'path([Segment | Rest], Count, Literals) when Count < ?ERX_INSPECT_PATH_MAX ->'
   NO_LENGTH_BOUND = 'path([Segment | Rest], Count, Literals) when is_integer(Count) ->'
   DEADLINE_SECONDS = '120'
@@ -45,7 +47,7 @@ module ErxInspectQueryFuzz
       decoder_path = File.join(work, 'erx_inspect_query.erl')
       File.binwrite(decoder_path, decoder_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, decoder_path,
-                                       *GENERATED, File.join(ROOT, TARGET), stdin_data: '')
+                                       *GENERATED, File.join(ROOT, TARGET), WARM, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

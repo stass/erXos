@@ -366,6 +366,23 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   every OCI image `deps.lock` pins, so a host pulls the oracle toolchain of each platform although its engine
   runs only its own. Fetch only the image whose platform is the local engine's architecture
   (`DependencySchema::OCI_PLATFORMS`), unless `--source` names another.
+* [Medium] check-fuzz, seeded faults (`tools/fuzz/erx_bt_smp.rb`, `erx_bt_link.rb`, `erx_device_record.rb`,
+  `erx_boot_keys.rb`, `erx_media_table.rb`, `erx_bt_hci.rb`, `erx_bt_state.rb`): on seeds 1..20 a seeded fault is not caught on
+  some seeds (`erx_bt_smp` misses its curve check removed on 15 of 20, `erx_device_record` three faults on
+  11, `erx_bt_link` two on 6, `erx_bt_state` one on 2, `erx_boot_keys`, `erx_media_table` and `erx_bt_hci`'s too-few-accepted
+  count on one each), so each target's inputs reach the guarded check on only part of the seeds. Steer or add
+  rounds until each fault fails on every seed of 1..20, as `erx_login_facet` does.
+* [Medium] check-fuzz, atom-count warm-up: fifteen Erlang targets still load their modules from a hand-written
+  `code:ensure_loaded` list (`erx_fat_read`, `erx_rc_conf`, `erx_apps_ctl`, `erx_media_table`, `erx_line_ctl`,
+  `erx_bt_hci`, `erx_media_probe`, `erx_machine_ctl`, `erx_boot_passphrase`, `erx_bt_link`, `erx_boot_keys`,
+  `erx_bt_pair`, `erx_bt_smp`, `erx_bt_ctl`, `erx_bt_att` `_fuzz.erl`), so a module a round reaches that the list
+  omits makes `atoms_made` on some seeds only. Replace each list with `erx_fuzz_warm:closure(?MODULE)` and
+  compile `test/erlang/erx_fuzz_warm.erl` in its driver, as the eight converted targets do.
+* [High] Command shell, `erx_shell_lex`, `erx_shell_parse`: `erx_shell_parse_fuzz` fails with `more_differs`
+  on 10 of seeds 1..20 (3, 4, 8, 9, 10, 12, 13, 16, 17, 18): a unit parsed as more input may follow answers
+  `unexpected redirection` or `a word must follow` where the same unit parsed as complete answers
+  `malformed redirection`, so the two parses of one unit disagree on the diagnostic. Settle which
+  diagnostic is right for a unit that ends in a redirection, and give both parses one.
 * [Medium] Test media harnesses, `tools/lib/erx/native_console_ring.rb` and `tools/lib/erx/kiosk.rb`:
   both build a test program over musl's libc.a as a medium's `Added` (`program`,
   `Kiosk::Run#front_program`), splice the boot value's checkpoint after the image's identity

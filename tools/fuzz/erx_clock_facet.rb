@@ -24,6 +24,8 @@ module ErxClockFacetFuzz
   DECODER = 'erlang/apps/erx/src/erx_clock_facet.erl'
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
   TARGET = 'test/erlang/erx_clock_facet_fuzz.erl'
+  # The atom-count warm-up every target of this kind shares.
+  WARM = File.join(ROOT, 'test/erlang/erx_fuzz_warm.erl')
   # Each seeded fault: the decoder's text, which occurs in it once, its replacement, and
   # the failure the target must report. test/host/erx_clock_test.rb checks at every
   # landing that each text still occurs once, so an edit of the decoder cannot leave this
@@ -62,7 +64,7 @@ module ErxClockFacetFuzz
       decoder_path = File.join(work, 'erx_clock_facet.erl')
       File.binwrite(decoder_path, decoder_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, decoder_path,
-                                       File.join(ROOT, TARGET), stdin_data: '')
+                                       File.join(ROOT, TARGET), WARM, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

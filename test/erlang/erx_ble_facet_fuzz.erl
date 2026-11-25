@@ -31,7 +31,8 @@ run([Seed]) ->
     Registry = spawn_link(fun idle/0),
     true = register(erx_gatt_srv, Registry),
     Caller = self(),
-    %% Loading the facet makes atoms; a round must not.
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Grant = grant(),
     {forward, Registry, _, Grant} = erx_ble_facet:admit({attach, console}, Caller, Grant),
     Forwarded = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(request(), Registry, Caller) =:= forward]),

@@ -26,7 +26,8 @@
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
     Literals = literals(),
-    %% Loading the decoder and the modules it calls makes atoms; a round must not.
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     {ok, _} = erx_inspect_query:decode({inspect, [], #{offset => 0, limit => 1}}),
     {error, badarg} = erx_inspect_query:decode({entries, [bad_segment]}),
     Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(request(Literals), Literals) =:= accepted]),
