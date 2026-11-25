@@ -28,7 +28,7 @@ class GenodeBuildTest < Minitest::Test
   def test_the_run_script_gives_the_program_its_arguments_and_refuses_other_text
     script = Erx::GenodeBuild.run_script(arguments: %w[posix 2])
     assert_includes script, 'build { app/erx_peer_bench }'
-    assert_includes script, "+ arg | value: erx_peer_bench\n      + arg | value: posix\n      + arg | value: 2\n-\n}"
+    assert_includes script, "    + libc | stdout: /dev/log | stderr: /dev/log\n    + arg | : erx_peer_bench\n    + arg | : posix\n    + arg | : 2\n-\n}"
     assert script.start_with?("create_boot_directory\n")
     assert script.end_with?("build_boot_image [build_artifacts]\n")
     ['posix }', 'a b', "x\n", '[exec]'].each do |word|

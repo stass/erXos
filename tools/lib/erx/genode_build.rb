@@ -109,7 +109,7 @@ module Erx
               + dir dev | + log
               + dir tmp | + ram
             + libc | stdout: /dev/log | stderr: /dev/log
-        #{words.map { |word| "      + arg | value: #{word}" }.join("\n")}
+        #{words.map { |word| "    + arg | : #{word}" }.join("\n")}
         -
         }
         build_boot_image [build_artifacts]
