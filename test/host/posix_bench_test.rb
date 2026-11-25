@@ -43,6 +43,13 @@ class PosixBenchTest < Minitest::Test
     assert_match points.last.fetch(:pattern), "erx: bench: done\r\n"
   end
 
+  # A line the program writes through root's session reaches the serial log ending
+  # "\r\r\n"; the reader takes it without either carriage return, as the boot showed.
+  def test_reader_drops_every_carriage_return_before_a_newline
+    serial = "erx_peer_bench posix 1\r\r\nBENCH {}\r\r\nCLOCK {}\r\nWINDOW {}\n"
+    assert_equal ['BENCH {}', 'CLOCK {}', 'WINDOW {}'], Erx::NativeBench.guest_lines(serial)
+  end
+
   def test_flags_build_the_erxos_branch_with_the_peer_flags_and_a_seed
     flags = Erx::PosixBench.flags(seeded: ['-DERX_PEER_SEED_NO_PROBE'])
     assert_equal '-DERX_PEER_ERXOS', flags.first

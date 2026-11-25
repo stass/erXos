@@ -149,9 +149,11 @@ module Erx
     # ended at its deadline that it did not report are timed_out.
     def cells(run, asked) = BenchMeasurement.boot(run.fetch(:lines), asked, timed_out: !run[:timed_out].nil?).fetch(:cells)
 
-    # The BENCH and CLOCK lines of a serial log, each without its line end. They are the
+    # The BENCH and CLOCK lines of a serial log, each without its line end: a newline and
+    # every carriage return before it, as END_LINE takes them, since a line a program
+    # writes through root's session reaches the serial log ending "\r\r\n". They are the
     # guest's, untrusted: BenchMeasurement.boot is their one judge.
-    def guest_lines(serial) = serial.b.split(/\r?\n/n).grep(GUEST_LINE)
+    def guest_lines(serial) = serial.b.split(/\r*\n/n).grep(GUEST_LINE)
 
     def guest(name) = GUESTS.fetch(name) { raise Error, "bench: #{name} has no native bench guest" }
 
@@ -218,7 +220,7 @@ module Erx
     # CLOCK line without a naming line before and after it, which is every one of them
     # when there is no naming line.
     def misnamed_lines(serial, name:)
-      lines = serial.b.split(/\r?\n/n)
+      lines = serial.b.split(/\r*\n/n)
       named = lines.each_index.select { |index| NAMING_HEAD.match?(lines[index]) }
       return lines.grep(GUEST_LINE) if named.empty?
 

@@ -2311,10 +2311,10 @@ the domain release. At root's session the console types
 `rc` cases (`programs.rb:536-556`), with the environment's CPU count
 as its second argument; the program's standard output is an
 open on the session's terminal, so its lines reach the console as it
-wrote them and the serial log is read as every guest's is. Whether the
-terminal's output processing ends a line in a carriage return the
-reader must drop is unverified; the reader drops a final carriage
-return and nothing else. The boot ends at the program's `CLOCK` line and
+wrote them and the serial log is read as every guest's is. A line
+reaches the serial log ending in two carriage returns and a newline,
+and the reader (`NativeBench.guest_lines`) drops a newline with every
+carriage return before it and nothing else. The boot ends at the program's `CLOCK` line and
 QEMU is ended as at a checkpoint. The `erl` cells run in the `xdomain`
 bench image, typed into its shell as `xdomain`'s module is, under that
 boot's one `CLOCK` line.
