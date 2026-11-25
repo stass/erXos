@@ -159,15 +159,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   ([design-bench.md](design-bench.md#the-interrupt-entrys-stamp)), the check of the Glasgow's stock applets for the
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.
   L4Re's pins, its build and its importer come from the L4Re guest package below, built for the board's platform.
-* [Medium] benchmarks, the comparison under HVF, erXos's side
-  ([design-bench.md](design-bench.md#other-systems-in-qemu-under-hvf)): the system in every guest environment's name
-  (`BenchRecord::Environment`, `NativeBench::Landing#environment` passing `erxos`), with every system-specific fact in
-  `subject`; the `monotonic` and `cycles` clocks and the `mean` summary form, which no comparison accepts;
-  `tools/erx bench NAME --systems LIST` booting each system's guest in rounds of turning order, in one-CPU and
-  four-CPU forms, through `QemuPlan.argv` and writing one run per boot; the C and Erlang side-by-side tables, which
-  convert no `cycles`. Tests: the
-  system's environment, a `mean` through the record and `cycles` stays cycles cases of the verification table. Lands
-  first; the guest packages plug a boot step each into its session.
+* [Low] benchmarks, the comparison session's gaps (`tools/lib/erx/bench_session.rb`,
+  [design-bench.md](design-bench.md#a-comparison-session)): erXos's native guest offers only the landing
+  profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'
+  sizes; and a boot whose guest raises (a QEMU or transcript timeout) is a note and no record, where the design's
+  `timed_out` status would record its unreported cells, which needs `BenchMeasurement.boot` to mark them
+  `timed_out` from a partial serial log.
 * [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)): Alpine 3.24.4's
   `vmlinuz-virt`, its configuration and `musl-dev` pinned in `deps.lock` by versioned URL and SHA-256, fetched
   before the build, which runs offline; the static `aarch64-linux-musl` build of `bench/peer/erx_peer_bench.c` with
