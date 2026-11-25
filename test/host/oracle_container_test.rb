@@ -346,11 +346,25 @@ class OracleContainerTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::ContainerOracleJob.suite_flavour_options(suite: 'kernel', flavour: 'unknown') }
   end
 
-  # The runner admits only lower-case names without dots; beam.smp has one.
-  def test_each_guest_program_gets_a_listing_name_the_runner_admits
-    names = Erx::OracleExport::INSTALL_PROGRAMS.map { |program| Erx::ContainerOracleJob.library_listing_name(program) }
-    assert names.all? { |name| Erx::Runner::COMMAND_NAME.match?(name) }, names.inspect
-    assert_equal names.size, names.uniq.size
+  # The loader lists the five programs' libraries and every NIF library's, so crypto's
+  # libcrypto comes along. Each listing gets a name the runner admits (lower case, no
+  # dot, and beam.smp has one), distinct from the others.
+  def test_listed_objects_are_the_programs_and_every_nif_library
+    Dir.mktmpdir do |install|
+      erts = File.join(install, 'lib/erlang/erts-17.1.1/bin')
+      nifs = %w[crypto-5.8/priv/lib/crypto.so asn1-5.4/priv/lib/asn1rt_nif.so].map do |path|
+        File.join(install, 'lib/erlang/lib', path)
+      end
+      [erts, *nifs.map { |nif| File.dirname(nif) }].each { |directory| FileUtils.mkdir_p(directory) }
+      [*nifs, File.join(install, 'lib/erlang/lib/crypto-5.8/priv/lib/README')].each { |file| File.write(file, '') }
+      objects = Erx::ContainerOracleJob.listed_objects(install)
+      assert_equal [*Erx::OracleExport::INSTALL_PROGRAMS.map { |program| File.join(erts, program) }, *nifs.sort],
+                   objects.map(&:path)
+      assert objects.all? { |object| Erx::Runner::COMMAND_NAME.match?(object.name) }, objects.inspect
+      assert_equal objects.size, objects.map(&:name).uniq.size
+      FileUtils.mkdir_p(File.join(install, 'lib/erlang/erts-17.2/bin'))
+      assert_raises(Erx::Error) { Erx::ContainerOracleJob.listed_objects(install) }
+    end
   end
 
   def test_loader_listing_names_every_loaded_file_and_refuses_an_unresolved_one

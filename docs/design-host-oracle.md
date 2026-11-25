@@ -134,8 +134,10 @@ attached host runner remain available independently of artifact export.
 ([design-bench.md](design-bench.md#linuxs-erlang-guest)) runs the oracle's
 stock OTP outside the container, so one operation, `install`, builds as
 `build` does and then has the image's dynamic loader (`ldd`) list the
-files that `beam.smp`, `erlexec`, `erl_child_setup`, `epmd` and
-`inet_gethost` map, into the workspace's `libraries.json`. Its export's
+files that `beam.smp`, `erlexec`, `erl_child_setup`, `epmd`,
+`inet_gethost` and every NIF library of the tree (`lib/*/priv/lib/*.so`,
+so crypto's `libcrypto` comes along) map, into the workspace's
+`libraries.json`. Its export's
 roots are the guest result, the runner logs, the installed tree at
 `install/` and each listed library at `libraries/` followed by its listed
 path. The list is the workload's and untrusted: a listed path is absolute,

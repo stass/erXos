@@ -1561,7 +1561,7 @@ the guest needs one more export of it
 ([Native workspace and artifact export](design-host-oracle.md#native-workspace-and-artifact-export)):
 the installed tree at its prefix, `/tmp/erx-oracle/install`, and the
 shared libraries its programs (`beam.smp`, `erlexec`, `erl_child_setup`,
-`epmd`, `inet_gethost`) load, listed by the image's dynamic loader in the
+`epmd`, `inet_gethost`) and its NIF libraries load, listed by the image's dynamic loader in the
 workload phase and copied, with their paths, by the exporter, which runs
 no stock program. Alpine's package is not used: Alpine 3.24's community
 repository for aarch64 offers `erlang27` 27.3.4.19 and `erlang28`

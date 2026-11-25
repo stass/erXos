@@ -28,9 +28,25 @@ module Erx
       suite == 'emulator' ? ["FLAVOR=#{flavour}"] : []
     end
 
-    # The runner's name for the loader's listing of a program; a command name
-    # admits no dot, and beam.smp has one.
-    def self.library_listing_name(program) = "oracle-libraries-#{program.tr('.', '-')}"
+    # A file the dynamic loader lists the libraries of, and the runner's name
+    # for that listing: lower case, without the dots beam.smp and every NIF
+    # library's name have.
+    LoaderObject = Data.define(:path, :name)
+
+    # What the install export's library listing covers: the five programs the
+    # guest runs, from the installed tree's one ERTS directory, and every NIF
+    # library an application of the tree carries, so a NIF's own libraries
+    # (crypto's libcrypto) reach the guest too.
+    def self.listed_objects(install)
+      directories = Dir.glob(File.join(install, 'lib/erlang/erts-*/bin'))
+      raise Error, 'installed tree has no single ERTS directory' unless directories.size == 1
+      programs = OracleExport::INSTALL_PROGRAMS.map { |program| File.join(directories.first, program) }
+      nifs = Dir.glob(File.join(install, 'lib/erlang/lib/*/priv/lib/*.so')).sort
+      [*programs, *nifs].map do |path|
+        relative = path.delete_prefix("#{install}/lib/erlang/")
+        LoaderObject.new(path: path, name: "oracle-libraries-#{relative.downcase.gsub(/[^a-z0-9]+/, '-')}")
+      end
+    end
 
     LOADED = %r{\A\t(?:\S+ => )?(/\S+) \(0x\h+\)\z}.freeze
     UNLINKED = /\A\tlinux-vdso\.so\.\d+ \(0x\h+\)\z/.freeze
@@ -366,11 +382,8 @@ module Erx
     # Written to the workspace for the exporter, which copies each listed
     # file from its own copy of the image; it runs no program to learn them.
     def list_libraries
-      directories = Dir.glob(File.join(@install, 'lib/erlang/erts-*/bin'))
-      raise Error, 'installed tree has no single ERTS directory' unless directories.size == 1
-      paths = OracleExport::INSTALL_PROGRAMS.flat_map do |program|
-        listing = @runner.run(['/usr/bin/ldd', File.join(directories.first, program)],
-                              name: self.class.library_listing_name(program), deadline: 30, env: @environment)
+      paths = self.class.listed_objects(@install).flat_map do |object|
+        listing = @runner.run(['/usr/bin/ldd', object.path], name: object.name, deadline: 30, env: @environment)
         self.class.loader_paths(File.read(listing.fetch('log')))
       end.uniq.sort
       File.open('/tmp/erx-oracle/libraries.json', File::WRONLY | File::CREAT | File::EXCL, 0o600) do |output|
