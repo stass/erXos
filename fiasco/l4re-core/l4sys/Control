@@ -1,3 +1,5 @@
+# Modified by erXos: libstdc++-headers is not imported; nothing erXos builds
+# compiles a C++ standard library header.
 provides: l4sys l4sys-l4x l4sys-direct
-requires: ldscripts compiler-rt-pure libc-headers libstdc++-headers
+requires: ldscripts compiler-rt-pure libc-headers
 Maintainer: adam@os.inf.tu-dresden.de warg@os.inf.tu-dresden.de

@@ -73,7 +73,7 @@ module Erx
     CORE_PACKAGES = %w[
       compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io
       l4re l4re_c l4sys l4util ldscripts libc libc-headers libc-minimal
-      libc_backends libpthread libsigma0 libstdc++-headers libstdc++-v3
+      libc_backends libpthread libsigma0
       minimal_l4re sigma0
     ].freeze
     UART_FILES = %w[
