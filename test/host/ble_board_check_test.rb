@@ -137,7 +137,7 @@ class BleBoardCheckTest < Minitest::Test
   end
 
   def reconnection_output(shells: 1)
-    "% #{typed('echo fresh^prompt')}freshprompt\r\n% #{typed('ps -o comm')}COMMAND\r\n#{SHELL_ROWS * shells}% "
+    "#{Check::BANNER}\r\n% #{typed('echo fresh^prompt')}freshprompt\r\n% #{typed('ps -o comm')}COMMAND\r\n#{SHELL_ROWS * shells}% "
   end
 
   def test_the_read_passes_when_blew_refuses_it_on_the_declared_properties
@@ -174,6 +174,21 @@ class BleBoardCheckTest < Minitest::Test
     assert_equal :failed, bleuart(session_output, reconnection_output(shells: 2))['bleuart reconnection']
     assert_equal :failed, bleuart(session_output, 'connected')['bleuart reconnection']
   end
+
+def test_top_fails_when_it_ended_before_ctrl_c
+  alone = "% #{typed('echo ble^uart')}bleuart\r\n% #{typed(Check::TOP)}\e[H\e[2Jrun queue: 0\r\n% ^C\r\n% " \
+          "#{typed('echo top^done')}topdone\r\n% "
+  assert_equal :failed, bleuart(alone, reconnection_output)['bleuart top, Ctrl-C']
+end
+
+def test_the_reconnection_fails_without_a_new_shell
+  reattached = reconnection_output.sub("#{Check::BANNER}\r\n", '')
+  assert_equal :failed, bleuart(session_output, reattached)['bleuart reconnection']
+end
+
+def test_the_reconnection_is_unknown_when_the_first_session_decided_nothing
+  assert_equal :unknown, bleuart(session_output, reconnection_output, first_code: 4)['bleuart reconnection']
+end
 
   def test_a_session_blew_did_not_finish_is_unknown
     [2, 3, 4, 6, nil].each do |code|

@@ -139,6 +139,10 @@ module Erx
     # What top writes before each display on a terminal (erx_cmd_top).
     SCREEN_CLEARED = "\e[H\e[2J"
     TOP = 'top -s 600 5'
+    # What a new shell prints before its first prompt.
+    BANNER = 'rc: the command shell; exit ends it'
+    # The tty's echo of Ctrl-C.
+    INTERRUPT_ECHO = '^C'
     SESSION = [Typed.new(pause: 0, text: "echo ble^uart\r"),
                Typed.new(pause: 3, text: "ps -o comm\r"),
                Typed.new(pause: 5, text: "#{TOP}\r"),
@@ -184,7 +188,7 @@ module Erx
       [['bleuart prompt and echo', first, -> { said(first, 'echo ble^uart', 'bleuart') }],
        ['bleuart ps', first, -> { outcome(before&.positive? ? :passed : :failed, "ps lists #{before.inspect} shells") }],
        ['bleuart top, Ctrl-C', first, -> { interrupted(first.output) }],
-       ['bleuart reconnection', second, -> { reconnected(second, before) }]].map do |name, run, check|
+       ['bleuart reconnection', second, -> { reconnected(second, first, before) }]].map do |name, run, check|
         [name, judge(run, deciding: [0]) { check.call }]
       end
     end
@@ -194,18 +198,27 @@ module Erx
       outcome(reply&.include?(printed) ? :passed : :failed, "#{command} prints #{printed}")
     end
 
-    # top showed a display, ended at Ctrl-C (the prompt after it), and the shell then
-    # ran the next command; without Ctrl-C top keeps the line for 600 s.
+    # top showed a display and was still running at Ctrl-C (the key's echo comes before
+    # the prompt that ends top's answer), and the shell then ran the next command;
+    # without Ctrl-C top keeps the line for 600 s.
     def interrupted(output)
-      display = answer(output, TOP)&.include?(SCREEN_CLEARED)
+      reply = answer(output, TOP)
+      display = reply&.include?(SCREEN_CLEARED) && reply.include?(INTERRUPT_ECHO)
       done = answer(output, 'echo top^done')&.include?('topdone')
       outcome(display && done ? :passed : :failed, "display #{display ? 'shown' : 'missing'}, " \
                                                    "shell #{done ? 'answers' : 'silent'} after Ctrl-C")
     end
 
-    # A fresh prompt on the new connection, and as many shells as before: the first
-    # connection's shell ended with it.
-    def reconnected(run, before)
+    # A new shell on the new connection (its banner before the first echo), and as many
+    # shells as before: the first connection's shell ended with it. Unknown when the
+    # first session decided nothing.
+    def reconnected(run, first, before)
+      return outcome(:unknown, 'the first session counted no shells') unless blew_exit(first)&.zero? && before
+
+      start = run.output.index('echo fresh^prompt')
+      banner = run.output.index(BANNER)
+      return outcome(:failed, 'no banner of a new shell') unless start && banner && banner < start
+
       prompt = said(run, 'echo fresh^prompt', 'freshprompt')
       return prompt unless prompt.verdict == :passed
 
