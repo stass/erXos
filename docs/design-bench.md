@@ -941,9 +941,8 @@ host serves over HTTP
   saved log of it afterwards (`bench_import`, `tools/erx:1591`); and both
   runs' records come from one reader of board logs (`BoardLog.read`,
   `tools/lib/erx/board_log.rb:78`), which `BoardRecord.recorded` calls.
-  `BoardConsole` opens a serial device; a console served as a TCP port
-  reaches it only through a pty a relay outside the tree fills
-  ([Raspberry Pi 4 guide](guide/raspberry-pi-4.md)).
+  `BoardConsole` opens a serial device or a console served as a TCP
+  port ([Raspberry Pi 4 guide](guide/raspberry-pi-4.md)).
 
 ### The construction: the server hands out a queue
 
