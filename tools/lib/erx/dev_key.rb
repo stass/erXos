@@ -9,6 +9,7 @@ require_relative 'generated_abi'
 require_relative 'git_environment'
 require_relative 'key_directory'
 require_relative 'source_revision'
+require_relative 'ssh_hardening'
 
 module Erx
   # The development login key (docs/design-ssh.md, "Login keys"): an Ed25519 pair that
@@ -74,10 +75,10 @@ module Erx
     PORT = 2222
     # What every ssh of DevKey's runs with: no configuration file, so nothing of the
     # user's ~/.ssh/config applies; only this key is offered, it never enters the user's
-    # agent, and no agent is forwarded to the guest; and the guest's host key is checked
-    # against the boot's known-hosts file alone (KNOWN_HOSTS).
-    SSH_OPTIONS = ['-F', File::NULL, '-o', 'AddKeysToAgent=no', '-o', 'IdentitiesOnly=yes', '-a',
-                   '-o', 'StrictHostKeyChecking=accept-new', '-o', "GlobalKnownHostsFile=#{File::NULL}"].freeze
+    # agent, and nothing is forwarded to the guest (SshHardening); and the guest's host key
+    # is checked against the boot's known-hosts file alone (KNOWN_HOSTS).
+    SSH_OPTIONS = ['-F', File::NULL, '-o', 'AddKeysToAgent=no', '-o', 'IdentitiesOnly=yes',
+                   *SshHardening::OPTIONS, '-o', 'StrictHostKeyChecking=accept-new', '-o', "GlobalKnownHostsFile=#{File::NULL}"].freeze
 
     module_function
 

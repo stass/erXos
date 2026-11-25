@@ -6,6 +6,7 @@ require 'digest'
 require 'shellwords'
 require_relative 'error'
 require_relative 'runner'
+require_relative 'ssh_hardening'
 
 module Erx
   # QEMU on a second development host (docs/design-build.md, "Placing
@@ -36,10 +37,9 @@ module Erx
 
     # Never prompt, never read a password, give up on a dead link, and open
     # nothing but the one session, whatever the user's ssh configuration
-    # forwards: no agent, X11 or port forwarding, and no shared connection.
-    SSH_OPTIONS = %w[-T -a -x -e none -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=15
-                     -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ClearAllForwardings=yes
-                     -o ControlMaster=no -o ControlPath=none].freeze
+    # forwards (SshHardening).
+    SSH_OPTIONS = [*%w[-T -e none -o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout=15
+                       -o ServerAliveInterval=15 -o ServerAliveCountMax=4], *SshHardening::OPTIONS].freeze
     # user@host or host, as ssh takes it; no leading dash, so never an option.
     DESTINATION = /\A(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}@)?[A-Za-z0-9][A-Za-z0-9.-]{0,252}\z/
     # A remote path: absolute, or relative to the remote home directory, of

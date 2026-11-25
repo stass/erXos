@@ -151,7 +151,7 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   [design-bench.md](design-bench.md#the-walk)): the walk, the console, the ssh calls and `tools/erx bench NAME
   --env pi4-4gb-erxos` walk the desk's board end to end with the console as a serial device. The walk also reads the Glasgow UART
   applet's TCP port directly (`--console tcp:HOST:PORT`); that form has not been walked on the board. What remains
-  is (1) `--profile full`, refused because `NativeBench::BoardSets` builds only the landing form; (2) the ssh calls do not check the board's host key for now, since its development host key is new on every boot
+  is (1) `--profile full`, refused because `NativeBench::BoardSets` builds only the landing form; (2) the ssh calls do not check the board's host key, since its development host key is new on every boot
   (a security residual in `TODO.md`; the fix is a per-boot known-hosts entry from the image's key, as `DevKey` keeps
   for QEMU guests); a reboot ssh ran but reports as failed (exit
   255 as the board drops the connection, or the 30 s deadline) is typed again on the console, so the walk then types

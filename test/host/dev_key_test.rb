@@ -85,7 +85,8 @@ class DevKeyTest < Minitest::Test
 
   def test_the_ssh_argument_vector_keeps_the_key_out_of_the_agent
     pair = Erx::DevKey::Pair.new(directory: '/k', public_line: 'unused')
-    assert_equal ['ssh', '-F', '/dev/null', '-o', 'AddKeysToAgent=no', '-o', 'IdentitiesOnly=yes', '-a',
+    assert_equal ['ssh', '-F', '/dev/null', '-o', 'AddKeysToAgent=no', '-o', 'IdentitiesOnly=yes',
+                  '-a', '-x', '-o', 'ClearAllForwardings=yes', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
                   '-o', 'StrictHostKeyChecking=accept-new', '-o', 'GlobalKnownHostsFile=/dev/null',
                   '-o', 'UserKnownHostsFile=/boot/known_hosts', '-o', 'HostKeyAlias=erxos-development',
                   '-i', '/k/id_ed25519', '-p', '2222', '--', 'root@127.0.0.1'],

@@ -164,9 +164,12 @@ document's "residual risks accepted" paragraph.
   the covert one user-mode `SEV` already gives. Trapping user-mode `WFE`, or erXos's kernel,
   closes it.
 * [Low] board walk: ssh to the board does not check its host key
-  (`tools/lib/erx/board_run.rb`): a development image makes a new key at every boot, so a spoofed
-  board could answer the walk and falsify the numbers of a benchmark. Boards run development
-  builds only. A per-boot known-hosts entry made from the image's key closes it.
+  (`tools/lib/erx/board_run.rb`): a development image makes a new key at every boot, so a host
+  that answers at the board's address could falsify the sensor readings the walk takes over ssh
+  (temperature, throttle, the ARM clock that feeds the cycle-counter check), or answer `reboot`
+  with success while the board stays up, which stalls the walk. Benchmark numbers come from the
+  console log, and the ssh forwards nothing. Boards run development builds only. A per-boot
+  known-hosts entry made from the image's key closes it.
 
 ## Planned features
 

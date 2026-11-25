@@ -15,6 +15,7 @@ require_relative 'board_walk'
 require_relative 'boot_file'
 require_relative 'boot_partition'
 require_relative 'code_ssh'
+require_relative 'ssh_hardening'
 require_relative 'error'
 require_relative 'line_escape'
 require_relative 'native_bench'
@@ -83,12 +84,14 @@ module Erx
       # A reading larger than this is no reading.
       SENSOR_BYTES = 4096
       # ssh and its options, up to the destination. The board's host key is not checked
-      # (and not recorded): a development image makes a new key at every boot, so no
-      # known-hosts entry could match, and the boards run development builds only. A spoofed
-      # board during a benchmark could only falsify numbers that are re-checked. The residual
-      # is in TODO.md's security residuals.
-      SSH = %w[ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-               -o LogLevel=ERROR -T --].freeze
+      # and none is recorded: a development image makes a new key at every boot, so no
+      # known-hosts entry could match, and boards run development builds only. This ssh
+      # carries only `reboot` and the sensors' read, so a host that answers at the board's
+      # address could falsify the readings (temperature, throttle, ARM clock), or answer
+      # `reboot` with success while the board stays up, and nothing else, since SshHardening
+      # forwards nothing of the user's. The residual is in TODO.md's security residuals.
+      SSH = [*%w[ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+                 -o GlobalKnownHostsFile=/dev/null -T], *SshHardening::OPTIONS, '--'].freeze
 
       def initialize(dest, spawn: Open3.method(:popen3), deadline: DEADLINE_SECONDS)
         @dest = CodeSsh.destination(dest)
