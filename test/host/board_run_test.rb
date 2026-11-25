@@ -6,6 +6,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/bench_line'
+require_relative '../../tools/lib/erx/git_environment'
 require_relative '../../tools/lib/erx/board_run'
 require_relative '../fixtures/first_stage_fixture'
 require_relative '../fixtures/pack_fixture'
@@ -196,19 +197,47 @@ class BoardRunTest < Minitest::Test
   end
 
   # The board command takes --profile landing, the form its sets are built in, on to the
-  # signing key it reads next, and refuses full by name before that read.
+  # signing key it reads once the history destination is accepted, and refuses full by
+  # name before either, even with no history root.
   def test_the_board_command_takes_the_landing_profile_and_refuses_full_by_name
-    key = File.join(Dir.mktmpdir, 'absent-key')
-    board = lambda do |profile|
-      Open3.capture2e('ruby', File.join(ROOT, 'tools/erx'), 'bench', 'nullcall', '--env', 'pi4-4gb-erxos', '--console', '/dev/null',
-                      '--ssh', 'board', '--key', key, '--profile', profile, stdin_data: '')
+    Dir.mktmpdir('erx-board-command-') do |scratch|
+      landing, landing_status = board_command(scratch, profile: 'landing', history: separate_history(scratch))
+      full, full_status = board_command(scratch, profile: 'full', history: File.join(scratch, 'absent'))
+      assert_match(/cannot open the signing key/, landing)
+      refute_match(/--profile/, landing)
+      assert_match(/--profile full: the board sets are built only in the landing form/, full)
+      refute_match(/signing key|history/, full)
+      refute(landing_status.success? || full_status.success?)
     end
-    (landing, landing_status), (full, full_status) = %w[landing full].map(&board)
-    assert_match(/cannot open the signing key/, landing)
-    refute_match(/--profile/, landing)
-    assert_match(/--profile full: the board sets are built only in the landing form/, full)
-    refute_match(/signing key/, full)
-    refute(landing_status.success? || full_status.success?)
+  end
+
+  # A history root that does not exist is refused before anything runs: before the
+  # signing key is read (docs/design-bench.md, "The record").
+  def test_the_board_command_refuses_an_absent_history_before_it_reads_the_key
+    Dir.mktmpdir('erx-board-command-') do |scratch|
+      output, status = board_command(scratch, profile: 'landing', history: File.join(scratch, 'absent'))
+      assert_match(/history root does not exist/, output)
+      refute_match(/signing key/, output)
+      refute status.success?
+    end
+  end
+
+  # The bench command on the board with history as ERX_BENCH_HISTORY and a signing key
+  # that does not exist, and none of the caller's GIT_ variables, so the real history
+  # repository is never touched: its output and status.
+  def board_command(scratch, profile:, history:)
+    Open3.capture2e(Erx::GitEnvironment.isolated.merge('ERX_BENCH_HISTORY' => history),
+                    'ruby', File.join(ROOT, 'tools/erx'), 'bench', 'nullcall', '--env', 'pi4-4gb-erxos',
+                    '--console', '/dev/null', '--ssh', 'board', '--key', File.join(scratch, 'absent-key'),
+                    '--profile', profile, stdin_data: '')
+  end
+
+  # A new, empty git repository under scratch, the separate repository a history is.
+  def separate_history(scratch)
+    history = File.join(scratch, 'history')
+    _, status = Open3.capture2e(Erx::GitEnvironment.isolated, 'git', 'init', '-q', history, stdin_data: '')
+    assert status.success?
+    history
   end
 
   def test_ssh_runs_an_argument_vector_in_batch_mode_and_refuses_a_destination_it_could_take_as_an_option
