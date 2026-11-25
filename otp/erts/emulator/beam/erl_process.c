@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Modified by erXos: a process's exit closes its export holders (edit 13) and a spawn from another domain gives the spawner its rights on the child (erx_exports.c); schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; there are no poll threads; the spawn option {erx_untraced, true} sets F_ERX_UNTRACED before any trace session's flags are copied in; a new process holds no message for an interpreted receive (edit 78); the wakeup-other checks are erl_wakeup_other.h's, which no charge overflows (edit 70).
+ * Modified by erXos: a process's exit closes its export holders (edit 13) and a spawn from another domain gives the spawner its rights on the child (erx_exports.c); schedulers are executors, created by erts_start_schedulers, that sleep in erx_park, wake with erx_executor_wake and dispatch the event table; no scheduler busy-waits, whatever +sbwt says; there are no poll threads; the spawn option {erx_untraced, true} sets F_ERX_UNTRACED before any trace session's flags are copied in; a new process holds no message for an interpreted receive (edit 78); the wakeup-other checks are erl_wakeup_other.h's, which no charge overflows (edit 70).
  *
  * %CopyrightEnd%
  */
@@ -73,20 +73,6 @@
 
 #define ERTS_SCHED_SPIN_UNTIL_YIELD 100
 
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_VERY_LONG 40
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_VERY_LONG 1000
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_LONG 20
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_LONG 1000
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_MEDIUM 10
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_MEDIUM 1000
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_SHORT 10
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_SHORT 0
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_VERY_SHORT 5
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_VERY_SHORT 0
-#define ERTS_SCHED_SYS_SLEEP_SPINCOUNT_NONE 0
-#define ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_NONE 0
-
-#define ERTS_SCHED_TSE_SLEEP_SPINCOUNT_FACT 1000
 #define ERTS_SCHED_SUSPEND_SLEEP_SPINCOUNT 0
 
 #if 0 || defined(DEBUG)
@@ -5683,11 +5669,8 @@ erts_early_init_scheduling(int max_no_aux_work_threads)
         erts_sched_set_wakeup_other_threshold(type, "medium");
         erts_sched_set_wakeup_other_type(type, "default");
 
-        erts_sched_set_busy_wait_threshold(type, "medium");
+        erts_sched_set_busy_wait_threshold(type, "none");
     }
-
-    erts_sched_set_busy_wait_threshold(ERTS_SCHED_DIRTY_CPU, "short");
-    erts_sched_set_busy_wait_threshold(ERTS_SCHED_DIRTY_IO, "short");
 }
 
 int
@@ -5728,44 +5711,32 @@ erts_sched_set_wakeup_other_type(ErtsSchedType sched_type, char *str)
     return 0;
 }
 
+/*
+ * erXos: no scheduler busy-waits before it parks (docs/design-runtime.md,
+ * "Spinning"; docs/design-fiasco.md, "A wait blocks"). +sbwt, +sbwtdcpu and
+ * +sbwtdio take stock's values, and every one of them means none on every
+ * backend ERTS runs on. That is Fiasco's rule: a spinning scheduler counts as
+ * awake, so no trigger wakes it for its work, and it keeps the threads of a
+ * lower band off its CPU. erXos's kernel, where very_short stays selectable,
+ * does not host ERTS (docs/todo-runtime.md).
+ */
 int
 erts_sched_set_busy_wait_threshold(ErtsSchedType sched_type, char *str)
 {
+    static const char *const stock_values[] = {
+        "none", "very_short", "short", "medium", "long", "very_long"
+    };
     ErtsBusyWaitParams *params = &sched_busy_wait_params[sched_type];
-    int aux_work_fact, sys_sched;
+    size_t i;
 
-    if (sys_strcmp(str, "very_long") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_VERY_LONG;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_VERY_LONG;
+    for (i = 0; i < sizeof(stock_values) / sizeof(stock_values[0]); i++) {
+        if (sys_strcmp(str, stock_values[i]) == 0) {
+            params->tse = 0;
+            params->aux_work = 0;
+            return 0;
+        }
     }
-    else if (sys_strcmp(str, "long") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_LONG;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_LONG;
-    }
-    else if (sys_strcmp(str, "medium") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_MEDIUM;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_MEDIUM;
-    }
-    else if (sys_strcmp(str, "short") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_SHORT;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_SHORT;
-    }
-    else if (sys_strcmp(str, "very_short") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_VERY_SHORT;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_VERY_SHORT;
-    }
-    else if (sys_strcmp(str, "none") == 0) {
-	sys_sched = ERTS_SCHED_SYS_SLEEP_SPINCOUNT_NONE;
-	aux_work_fact = ERTS_SCHED_AUX_WORK_SLEEP_SPINCOUNT_FACT_NONE;
-    }
-    else {
-	return EINVAL;
-    }
-
-    params->tse = sys_sched * ERTS_SCHED_TSE_SLEEP_SPINCOUNT_FACT;
-    params->aux_work = sys_sched * aux_work_fact;
-
-    return 0;
+    return EINVAL;
 }
 
 int

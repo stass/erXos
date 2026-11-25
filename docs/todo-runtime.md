@@ -87,9 +87,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   absurd N (file_sorter_SUITE `misc` reads a 2^128-1 length field) answers data or `eof` where stock answers `einval` or
   `enomem`, so the case gets `premature_eof` instead of `bad_object`. Read the size path; refuse sizes past the limit
   with `einval`, with a regression test.
-* [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, the default stays stock's
-  `+sbwt`, and `+S` is not derived from `erx_group_info`'s capacity, which no one configures yet
-  (`docs/design-runtime.md`, "Scheduling"). Each waits for a consumer of a capacity word in Phase 2's groups.
+* [Medium] `otp/erts/emulator/beam/erl_process.c`: schedulers are not pinned to the group's run, and `+S` is not
+  derived from `erx_group_info`'s capacity, which no one configures (`docs/design-runtime.md`, "Scheduling"). Each
+  waits for a consumer of a capacity word in Phase 2's groups. Every `+sbwt`, `+sbwtdcpu` and `+sbwtdio` value gives
+  `none`, Fiasco's rule, where on erXos's kernel `very_short` and the longer values give `very_short`; that waits for
+  ERTS on erXos's kernel.
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device.c`, `find_open`: a page run (`find_run`), a line entry (`find_line`) and memory held by another record are told by comparing handle values, so one object given under two handles (a give that installs it twice, or the root's own `-erx_record given` records over slots it holds otherwise) passes: two records carve the same pages of one memory, and one IRQ object under two handles is two entries, whose second bind takes the first binder's deliveries. Compare the objects the backend resolves, or make one handle per object a promise of the domain library that the NIF states.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.h`: the physical form is the zero value of `erx_device_form_t`, so a spec whose form no decoder set makes physical objects; give 0 to a refused `ERX_DEVICE_FORM_NONE` and set the physical form explicitly in `decode_window`.
 * [Low] `otp/erts/emulator/nifs/erxos/erx_device.c`: a failed `erx_device_open` keeps the window's mapping and any line objects it made (in the given form, the window's mapping and the memory's reservation), a retry takes another mapping from the shared device
