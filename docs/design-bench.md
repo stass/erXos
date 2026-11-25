@@ -2608,8 +2608,12 @@ system in memory. Built so in the probe, from a target description
 that links `posix`, `libc` and `libm`, the program compiles on its
 FreeBSD branch, so Genode's build defines `__FreeBSD__` (whether its
 headers or its flags do is unverified), and every call it makes there
-links but `cpuset_setaffinity`, which Genode's C library lacks: how the
-program places its threads on Genode is not yet designed. That the
+links but `cpuset_setaffinity`, which Genode's C library lacks. A
+program of erXos's that references each call links `fork`,
+`posix_spawn`, `pthread_setaffinity_np` and `pthread_getaffinity_np`
+there, and not `sched_setaffinity`, `sched_getaffinity`,
+`pthread_attr_setaffinity_np` or `sched_getcpu`; how the program places
+its threads on Genode is not yet designed. That the
 other calls work is settled only by a boot. Genode's C library is built
 from FreeBSD 12.0's `src.txz`, the archive the `libc` port asks for.
 What comes back is the

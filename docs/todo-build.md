@@ -483,7 +483,7 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `core` for `base-hw` on `virt_qemu_arm_v8a` and their binary archives, and compiled `erx_peer_bench` against
   Genode's C library. Still to do: decide how Genode's boot image is made (Genode's run tool takes a run
   script, which is Tcl), decide how the program places its threads on Genode (it links but for
-  `cpuset_setaffinity`, which Genode's C library lacks), then write the build as a `tools/erx` module on
+  `cpuset_setaffinity`, which Genode's C library lacks; `pthread_setaffinity_np` links), then write the build as a `tools/erx` module on
   `L4ReBuild`'s model, with the target description in `bench/genode/`, and boot the image under erXos's own
   QEMU harness.
 * [Low] Large pinned files, `Dependencies` fetch deadline (`tools/lib/erx/dependencies.rb`): `fetch --genode`
