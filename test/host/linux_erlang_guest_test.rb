@@ -117,10 +117,10 @@ class LinuxErlangGuestTest < Minitest::Test
   # other programs, the applications the boot does not name and the sources stay out.
   def test_only_the_boot_its_code_path_and_the_programs_are_packed
     root = 'install/lib/erlang'
-    kept = [*Erx::OracleExport::INSTALL_PROGRAMS.map { |program| "#{ERTS}/#{program}" }, "#{root}/bin/start.boot",
+    kept = [*Erx::OracleExport::INSTALL_PROGRAMS.map { |program| "#{ERTS}/#{program}" }, "#{root}/bin/no_dot_erlang.boot",
             "#{root}/releases/29/OTP_VERSION", "#{root}/lib/kernel-11.0.4/ebin/kernel.app",
             "#{root}/lib/stdlib-8.1.1/ebin/lists.beam", "libraries#{LOADER}"]
-    left = ["#{ERTS}/escript", "#{root}/bin/start_sasl.boot", "#{root}/releases/29/start.script",
+    left = ["#{ERTS}/escript", "#{root}/bin/start.boot", "#{root}/releases/29/start.script",
             "#{root}/lib/kernel-11.0.4/src/code.erl", "#{root}/lib/kernel-11.0.4/include/file.hrl",
             "#{root}/lib/crypto-6.0/ebin/crypto.beam", "#{root}/lib/kernel-11.0.40/ebin/x.beam",
             "#{root}/usr/include/erl_nif.h"]
@@ -132,9 +132,9 @@ class LinuxErlangGuestTest < Minitest::Test
   # A boot the export lacks, or one that names what the tree cannot hold, refuses the build.
   def test_a_boot_that_cannot_be_packed_is_refused
     guest = Erx::LinuxErlangGuest
-    files = inventory(['install/lib/erlang/bin/start.boot', 'install/lib/erlang/releases/29/OTP_VERSION'])
+    files = inventory(['install/lib/erlang/bin/no_dot_erlang.boot', 'install/lib/erlang/releases/29/OTP_VERSION'])
     assert_match(/OTP_VERSION/, assert_raises(Erx::Error) { guest.packed(files, boot: boot([], vsn: '30')) }.message)
-    assert_match(/start\.boot/, assert_raises(Erx::Error) { guest.packed(files.drop(1), boot: boot([])) }.message)
+    assert_match(/no_dot_erlang\.boot/, assert_raises(Erx::Error) { guest.packed(files.drop(1), boot: boot([])) }.message)
     ['/usr/lib/erlang/ebin', '$ROOT/../x', '$ROOT/lib/./x', "$ROOT/lib/\e]0;x"].each do |dir|
       assert_raises(Erx::Error) { guest.packed(files, boot: boot([dir])) }
     end
@@ -164,9 +164,10 @@ class LinuxErlangGuestTest < Minitest::Test
       def refusal(_profile) = refused
       def call(*) = raise('booted without an export')
     end.new("linux's Erlang guest needs the oracle's install export: run `x`")
-    landing = Erx::LinuxErlangGuest::Landing.new(root: '/nonexistent', runner: nil, guest: refusing, seeded: refusing)
+    landing = Erx::LinuxErlangGuest::Landing.new(root: '/nonexistent', runner: nil, guest: refusing)
     assert_equal({ not_run: refusing.refused },
-                 landing.call(Erx::BenchSuite.benchmark('xdomain'), history: '/nonexistent'))
+                 landing.call(Erx::BenchSuite.benchmark('xdomain'), boot: Erx::BenchSuite::LINUX_ERLANG,
+                                                                    history: '/nonexistent'))
   end
 
   # The client's argument reaches it through the kernel's command line, which splits on

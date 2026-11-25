@@ -1570,8 +1570,10 @@ repository for aarch64 offers `erlang27` 27.3.4.19 and `erlang28`
 
 **The initramfs.** What the two nodes load of the exported tree, at
 its own prefix, so nothing is relocated: the five programs of its ERTS
-directory; `bin/start.boot`, the boot both nodes start with; the
-`OTP_VERSION` of the boot's release, which the identity line reads; and
+directory; `bin/no_dot_erlang.boot`, the boot both nodes start with
+(`-boot no_dot_erlang`, one name the host passes to `/init`'s build); the
+`OTP_VERSION` of the boot's release, which in a stock install is the
+file the identity line reads; and
 every member of the code path the boot's `path` instructions set, read
 from the boot itself (`LinuxErlangGuest.packed`). In interactive mode
 the code server adds each `lib/*/ebin` it finds to that path, so an
@@ -1585,7 +1587,7 @@ modules' beams under `/bench/ebin`; `/etc/hosts` with the IPv4 loopback
 line; `/dev/console` and `/dev/null`; and a launcher of its own as `/init`, `bench/linux/erlang_init.c`,
 which shares its wait and power-off with the C guest's `/init`
 (`bench/linux/launch.h`) and is built the same way, with the export's
-ERTS directory and the beams' directory passed as build flags. The
+ERTS directory, the boot's name and the beams' directory passed as build flags. The
 export's logs and evidence stay out, and the record keeps the initramfs's
 size (`initramfs_bytes`) beside its hash. Execute bits are derived, not
 recorded: `/init`, the five programs of the export's ERTS directory and

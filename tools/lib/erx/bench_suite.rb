@@ -109,9 +109,11 @@ module Erx
     }.freeze
     # Suite cell statuses from worst to best.
     WORST_FIRST = %w[failed timed_out not_run partial passed].freeze
-    # The suite cell of Linux's Erlang guest's boot: the xdomain benchmark on stock OTP at
-    # one CPU (docs/design-bench.md, "Linux's Erlang guest"), named as the boots' cells are.
-    LINUX_ERLANG_CELL = "hvf-1cpu-linux-erlang-xdomain"
+    # Linux's Erlang guest's boot: the xdomain benchmark on stock OTP at one CPU
+    # (docs/design-bench.md, "Linux's Erlang guest"). It is no erXos boot, so it is not
+    # one of BOOTS, whose layers the side-by-side tables and sessions read.
+    LINUX_ERLANG = Boot.new(kind: 'qemu-hvf', cpus: 1, layer: 'Erlang', gate: true)
+    LINUX_ERLANG_BENCHMARK = 'xdomain'
 
     BENCHMARK_FILES = DeclarationFiles.new('benchmarks')
 
@@ -135,8 +137,11 @@ module Erx
     # case (Erx::QemuCells::CELL_CASE_NAME): "hvf-4cpu-native-wake".
     def suite_cells
       erxos = BOOTS.select { |_, entry| entry.gate }.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
-      [*erxos, LINUX_ERLANG_CELL]
+      [*erxos, linux_erlang_cell]
     end
+
+    # Linux's Erlang guest's suite cell, named as a boot's: "hvf-1cpu-linux-erlang-xdomain".
+    def linux_erlang_cell = "#{LINUX_ERLANG.kind.delete_prefix('qemu-')}-#{LINUX_ERLANG.cpus}cpu-linux-erlang-#{LINUX_ERLANG_BENCHMARK}"
 
     def suite_cell_name(boot, benchmark)
       entry = BOOTS.fetch(boot)
@@ -197,8 +202,10 @@ module Erx
       end
       landed << Landed.new(label: 'xdomain', cells: boot_cells('xdomain', booted('xdomain')),
                            outcome: outcome { xdomain.call(booted('xdomain'), boot: BOOTS.fetch('xdomain'), history: history) })
-      landed << Landed.new(label: "linux's Erlang guest", cells: { LINUX_ERLANG_CELL => XdomainBench::BOOT },
-                           outcome: outcome { linux_erlang.call(benchmark(XdomainBench::BOOT), history: history) })
+      landed << Landed.new(label: "linux's Erlang guest", cells: { linux_erlang_cell => LINUX_ERLANG_BENCHMARK },
+                           outcome: outcome do
+                             linux_erlang.call(benchmark(LINUX_ERLANG_BENCHMARK), boot: LINUX_ERLANG, history: history)
+                           end)
       cells = landed.flat_map do |landing|
         landing.cells.map { |cell, name| [cell, outcome_cell(landing.outcome, benchmark: name)] }
       end

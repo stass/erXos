@@ -44,9 +44,13 @@ module Erx
     # Where the oracle installed OTP, so nothing is relocated: install/ of the export.
     PREFIX = OracleExport::GUEST_ROOT.delete_prefix('/')
     # OTP's root directory in the export, ERTS's ROOTDIR, and the boot both nodes start
-    # with, erlexec's default, whose code path is what the nodes load.
+    # with (/init's -boot, from BOOT_NAME), whose code path is what the nodes load.
     ROOTDIR = 'install/lib/erlang'
-    BOOT = "#{ROOTDIR}/bin/start.boot".freeze
+    BOOT_NAME = 'no_dot_erlang'
+    BOOT = "#{ROOTDIR}/bin/#{BOOT_NAME}.boot".freeze
+    # What a boot says of the nodes' code: its release's version and the directories
+    # below $ROOT its path instructions set, each as "/lib/kernel-11.0.4/ebin".
+    BootScript = Data.define(:release, :code_path)
     # A directory of the boot's code path: $ROOT and plain names, none of them . or ..
     CODE_PATH = %r{\A\$ROOT((?:/[A-Za-z0-9_+-][A-Za-z0-9._+-]{0,254}){1,8})\z}n
     RELEASE = /\A[0-9][0-9.]{0,15}\z/n
@@ -200,60 +204,65 @@ module Erx
 
       dependencies = LinuxGuest.lock(root: root, runner: runner)
       flags = ["-DERX_INIT_DEADLINE_S=#{DEADLINE_SECONDS}u", %(-DERX_INIT_ROOTDIR="/#{PREFIX}/#{ROOTDIR}"),
-               %(-DERX_INIT_BINDIR="#{bindir(export.inventory)}"), %(-DERX_INIT_BEAMS="/#{BEAMS}"), *seeded]
+               %(-DERX_INIT_BINDIR="#{bindir(export.inventory)}"), %(-DERX_INIT_BEAMS="/#{BEAMS}"),
+               %(-DERX_INIT_BOOT="#{BOOT_NAME}"), *seeded]
       init = LinuxGuest.compile(root: root, usr: dependencies.fetched_tree(LinuxGuest::MUSL_DEV), output: directory,
                                 runner: runner, source: INIT, flags: flags)
       beams = compile_beams(root: root, runner: runner, output: directory)
       listed = export.inventory.fetch('files')
-      packed = packed(listed, boot: member(export.directory, fetch_member(listed, BOOT)))
-      files = packed.map { |file| [file.fetch('path'), member(export.directory, file)] }
+      loaded = packed(listed, boot: member(export.directory, fetch_member(listed, BOOT)))
+      files = loaded.map { |file| [file.fetch('path'), member(export.directory, file)] }
       initrd = File.join(directory, 'initramfs.cpio')
       File.binwrite(initrd, NewcArchive.write(entries(files: files, init: File.binread(init), beams: beams)))
       { kernel: dependencies.fetched_file(LinuxGuest::KERNEL), initrd: initrd,
-        subject: subject(dependencies: dependencies, export: export, packed: packed, initrd: initrd, init: init,
+        subject: subject(dependencies: dependencies, export: export, packed: loaded, initrd: initrd, init: init,
                          beams: beams) }
     end
 
     # The export's members the two nodes load: the five programs of the ERTS directory,
-    # the libraries the loader listed, the start boot, the OTP_VERSION of the boot's
-    # release, which the identity line reads, and every member of the code path the boot
+    # the libraries the loader listed, the boot the nodes start with, the OTP_VERSION of
+    # the boot's release, the identity line's source in a stock install, and every member of the code path the boot
     # sets. In interactive mode the code server adds each lib/*/ebin it finds to that
     # path, so an application left out is one the nodes cannot load. boot is the boot's
     # bytes; its directories select only inventory members, so they reach nothing the
     # export does not hold.
     def packed(files, boot:)
-      release, code_path = boot_script(boot)
-      wanted = [BOOT, "#{ROOTDIR}/releases/#{release}/OTP_VERSION"].each { |path| fetch_member(files, path) }
-      directories = code_path.map { |directory| "#{ROOTDIR}#{directory}/" }
+      script = boot_script(boot)
+      wanted = [BOOT, "#{ROOTDIR}/releases/#{script.release}/OTP_VERSION"]
+      wanted.each { |path| fetch_member(files, path) }
+      directories = script.code_path.map { |directory| "#{ROOTDIR}#{directory}/" }
       files.select do |file|
         path = file.fetch('path')
         wanted.include?(path) || program?(path) || path.start_with?('libraries/', *directories)
       end
     end
 
-    # The release and the code path of a boot (systools' {script, {Name, Release},
-    # Instructions}): the release's version, and each {path, Directories} instruction's
-    # directories below $ROOT, as "/lib/kernel-11.0.4/ebin".
+    # The BootScript of a boot, systools' {script, {Name, Release}, Instructions}.
     def boot_script(boot)
-      refuse = ->(why) { raise Error, "linux's Erlang guest: the start boot #{why}" }
+      refuse = ->(why) { raise Error, "linux's Erlang guest: the boot #{why}" }
       case Etf.decode(boot)
       in Etf::Tuple(elements: [Etf::Atom(name: 'script'), Etf::Tuple(elements: [_, Array => release]), Array => instructions])
         version = text(release)
         refuse.call('names a malformed release') unless RELEASE.match?(version)
+
         code_path = instructions.flat_map do |instruction|
           case instruction
           in Etf::Tuple(elements: [Etf::Atom(name: 'path'), Array => directories]) then directories
           else []
           end
         end
-        [version, code_path.map { |directory| CODE_PATH.match(text(directory))&.[](1) || refuse.call('sets a path outside $ROOT') }]
+        below_root = code_path.map do |directory|
+          found = CODE_PATH.match(text(directory))
+          found ? found[1] : refuse.call('sets a path outside $ROOT')
+        end
+        BootScript.new(release: version, code_path: below_root)
       else refuse.call('is not a boot script')
       end
     end
 
     # An Erlang string of printable ASCII as Ruby text.
     def text(list)
-      raise Error, "linux's Erlang guest: the start boot holds a string that is not printable ASCII" unless
+      raise Error, "linux's Erlang guest: the boot holds a string that is not printable ASCII" unless
         list.is_a?(Array) && list.all? { |code| code.is_a?(Integer) && code.between?(0x20, 0x7e) }
 
       list.pack('C*')
@@ -265,9 +274,10 @@ module Erx
         raise(Error, "linux's Erlang guest: the export has no #{path}")
     end
 
-    # Whether a boot of the seeded /init showed its fault: the cross cell failed, the echo
-    # node refusing the client's cookie, while the same-node cell was measured, which shows
-    # the cross cell went to the other OS process over distribution.
+    # Whether a boot of the seeded /init, whose echo node has another cookie, showed its
+    # fault: the cross cell failed, the connection refused or unanswered, while the
+    # same-node cell was measured, which shows the cross cell went to the other OS
+    # process over distribution.
     def seed_caught?(cells)
       statuses = cells.to_h { |cell| [cell.operation, cell.status] }
       statuses['local-rtt'] == 'measured' && statuses['xdomain-pingpong'] == 'failed'
@@ -329,11 +339,15 @@ module Erx
     # guest's are, in clock monotonic. A boot whose identity line is not stock OTP 29.1.2
     # in FLAVOUR has every cell rejected.
     class Guest
-      def initialize(root:, runner:, seeded: [])
+      def initialize(root:, runner:, seeded: [], export: nil)
         @root = File.expand_path(root)
         @runner = runner
         @seeded = seeded
+        @export = export if export
       end
+
+      # The same guest with /init built with seeded's flags, on the same export.
+      def with_seed(seeded) = Guest.new(root: @root, runner: @runner, seeded: seeded, export: export)
 
       def system = 'linux'
       def boot = XdomainBench::BOOT
@@ -343,7 +357,7 @@ module Erx
         return "linux's Erlang guest is built with the landing profiles only" unless profile == 'landing'
 
         LinuxGuest::Guest.new(root: @root, runner: @runner).refusal(profile) ||
-          (LinuxErlangGuest.find_export(root: @root) ? nil : "linux's Erlang guest needs the oracle's install export: " \
+          (export ? nil : "linux's Erlang guest needs the oracle's install export: " \
                                                               "run `#{INSTALL_COMMAND}`")
       end
 
@@ -366,11 +380,14 @@ module Erx
           clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
           environment: { 'memory_mib' => NativeBench::MEMORY_MIB, 'machine' => 'virt', 'qemu' => report['qemu_version'],
                          'erts_schedulers' => LinuxErlangGuest.schedulers(cpus) }.compact,
-          subject: built.fetch(:subject), logs: [{ serial: serial }], reused_from: report['reused_from']
+          subject: built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
         )
       end
 
       private
+
+      # The verified install export, found once: nil when there is none.
+      def export = defined?(@export) ? @export : (@export = LinuxErlangGuest.find_export(root: @root))
 
       # The kernel and the initramfs, built at the first boot into a directory of the
       # session's own that it removes when the process ends.
@@ -379,41 +396,37 @@ module Erx
           parent = OutputDirectory.prepare(root: @root, path: File.join(@root, OUTPUT))
           directory = Dir.mktmpdir("build-#{Process.pid}-", parent)
           at_exit { FileUtils.rm_rf(directory) }
-          LinuxErlangGuest.build(root: @root, runner: @runner, export: LinuxErlangGuest.find_export(root: @root),
-                                 directory: directory, seeded: @seeded)
+          LinuxErlangGuest.build(root: @root, runner: @runner, export: export, directory: directory,
+                                 seeded: @seeded)
         end
       end
     end
 
     # Linux's Erlang guest's boot of the bench suite (docs/design-bench.md, "The gates"):
-    # one boot of benchmark's cells at one CPU under HVF, recorded as Linux's, and one of
-    # the seeded /init, whose cells show whether its fault was caught. Without the install
-    # export, or Linux's fetched pins, it boots nothing and answers why it did not run.
+    # one boot of benchmark's cells as boot (a BenchSuite::Boot), recorded as Linux's, and
+    # one of the seeded /init on the same export, whose cells show whether its fault was
+    # caught. Without the install export, or Linux's fetched pins, it boots nothing and
+    # answers why it did not run.
     class Landing
-      CPUS = 1
-      KIND = 'qemu-hvf'
-
       def initialize(root:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     guest: Guest.new(root: root, runner: runner),
-                     seeded: Guest.new(root: root, runner: runner, seeded: [SEED]))
+                     guest: Guest.new(root: root, runner: runner))
         @root = File.expand_path(root)
         @runner = runner
         @guest = guest
-        @seeded = seeded
       end
 
       # The record, the run directory written (nil for a replayed boot), the refused lines'
       # reasons and the seeds missed; or { not_run: } with the reason it did not boot.
-      def call(benchmark, history:)
+      def call(benchmark, boot:, history:)
         refusal = @guest.refusal('landing')
         return { not_run: refusal } if refusal
 
-        host = BenchSystem.host(kind: KIND, root: @root, runner: @runner)
-        recorded = BenchSystem.boot(@guest, benchmark, cells: nil, cpus: CPUS, host: host, started_by: 'landing',
+        host = BenchSystem.host(kind: boot.kind, root: @root, runner: @runner)
+        recorded = BenchSystem.boot(@guest, benchmark, cells: nil, cpus: boot.cpus, host: host, started_by: 'landing',
                                                        load: QemuGate.method(:one_minute_load))
         written = (BenchRecord.write(recorded.record, history: history, erxos_root: @root, logs: recorded.logs) unless
                    recorded.record.run.replayed?)
-        seeded = @seeded.call(benchmark, cells: nil, cpus: CPUS, accel: KIND.delete_prefix('qemu-'))
+        seeded = @guest.with_seed([SEED]).call(benchmark, cells: nil, cpus: boot.cpus, accel: boot.kind.delete_prefix('qemu-'))
         { record: recorded.record, written: written, refused: recorded.refused,
           seeds_missed: LinuxErlangGuest.seed_caught?(seeded.cells) ? [] : ['echo cookie'] }
       end

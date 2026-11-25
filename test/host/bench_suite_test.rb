@@ -114,8 +114,9 @@ class BenchSuiteTest < Minitest::Test
     measured = wake_record(1, 'cross-cpu', 'unsupported').then do |kept|
       kept.with(boots: kept.boots.map { |boot| boot.with(cells: boot.cells.map { |cell| cell.with(benchmark: 'xdomain') }) })
     end
-    missed = lambda do |declared, history:|
-      raise 'the Linux guest runs the xdomain benchmark' unless declared.name == 'xdomain' && history == '/nonexistent'
+    missed = lambda do |declared, boot:, history:|
+      raise 'the Linux guest runs xdomain at one CPU' unless
+        declared.name == 'xdomain' && boot.cpus == 1 && history == '/nonexistent'
 
       { record: measured, written: nil, refused: [], seeds_missed: ['echo cookie'] }
     end

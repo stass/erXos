@@ -36,8 +36,9 @@
 
 #include "launch.h"
 
-#if !defined(ERX_INIT_ROOTDIR) || !defined(ERX_INIT_BINDIR) || !defined(ERX_INIT_BEAMS)
-#error "the build passes the export's directories and the bench modules' directory"
+#if !defined(ERX_INIT_ROOTDIR) || !defined(ERX_INIT_BINDIR) || !defined(ERX_INIT_BEAMS) || \
+    !defined(ERX_INIT_BOOT)
+#error "the build passes the export's directories, its boot's name and the bench modules' directory"
 #endif
 
 #define CLIENT		"bench_client"
@@ -145,7 +146,7 @@ epmd_ready(pid_t epmd)
  * epmd init started, the bench modules on its path, and eval.
  */
 #define NODE(name, cookie, eval) {						\
-	ERX_INIT_BINDIR "/erlexec", "+S", schedulers, "-noshell", "-boot", "no_dot_erlang",	\
+	ERX_INIT_BINDIR "/erlexec", "+S", schedulers, "-noshell", "-boot", ERX_INIT_BOOT,	\
 	"-name", name "@127.0.0.1", "-setcookie", cookie, "-start_epmd", "false",	\
 	"-kernel", "inet_dist_use_interface", "{127,0,0,1}", "-pa", ERX_INIT_BEAMS,	\
 	"-eval", eval, NULL }
