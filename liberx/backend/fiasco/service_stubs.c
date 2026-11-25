@@ -13,8 +13,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <l4/sys/err.h>
 #include <l4/sys/ipc.h>
 #include <l4/sys/irq.h>
+#include <l4/sys/task.h>
 #include <l4/sys/utcb.h>
 
 #include "erx/abi.h"
@@ -32,6 +34,16 @@
 
 #ifdef ERX_FIASCO_TEST_HOOKS
 _Static_assert(ERX_FIASCO_TEST_EMPTY_SLOT_ERROR == L4_IPC_ENOT_EXISTENT, "Fiasco's error for an empty slot");
+_Static_assert(ERX_FIASCO_TEST_KU_MEM_REFUSED == -L4_EINVAL, "Fiasco's refusal of a UTCB area");
+
+/* Adds a UTCB area to the root's own space; an area Fiasco grants stays there for the root's life. */
+int64_t
+erx_fiasco_test_ku_mem_add(uint64_t address, unsigned order)
+{
+	l4_fpage_t area = l4_fpage(address, order, L4_FPAGE_RW);
+
+	return (l4_error(l4_task_add_ku_mem(L4_BASE_TASK_CAP, &area)));
+}
 
 /*
  * Slot 0 lies before Fiasco's base capabilities, the first of which is slot 1

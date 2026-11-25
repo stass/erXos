@@ -57,6 +57,14 @@
 #define SHARE_SPINNERS		ERX_SHARE_SPINNERS
 #define SHARE_WINDOWS		ERX_SHARE_WINDOWS
 #define SHARE_WINDOW_MS		1000u
+/*
+ * The UTCB area probes: where they start in the root's space (16 TiB), how far apart they lie,
+ * one page's order, and the order of the smallest area Fiasco grants, 16 KiB.
+ */
+#define UTCB_PROBE		UINT64_C(0x100000000000)
+#define UTCB_PROBE_STEP		UINT64_C(0x10000)
+#define UTCB_PAGE_ORDER		12u
+#define UTCB_AREA_MIN_ORDER	14u
 
 void erx_fiasco_root_main(void);
 
@@ -202,6 +210,28 @@ case_irq_refused(void)
 	say_status(status);
 	say_case("irq_refused", made && status == 0 && kept && erx_fiasco_test_pool_slots_gone() &&
 	    erx_fiasco_vm_free_pages() == before);
+}
+
+/*
+ * Fiasco refuses a UTCB area whose kernel alias could differ from its user address in bits
+ * 12 and 13 (docs/design-fiasco.md, "A congruent UTCB area"): a one-page area, and a 16 KiB
+ * area at an address aligned only to a page. It grants a 16 KiB area aligned to its size.
+ * Each probe lies UTCB_PROBE_STEP apart at UTCB_PROBE, far above the root's managed memory
+ * (vm.c's object area ends at 512 GiB), so an area granted overlaps nothing the root uses.
+ */
+static void
+case_utcb_area_congruent(void)
+{
+	const int64_t small = erx_fiasco_test_ku_mem_add(UTCB_PROBE, UTCB_PAGE_ORDER);
+	const int64_t misaligned = erx_fiasco_test_ku_mem_add(UTCB_PROBE + UTCB_PROBE_STEP + ERX_PAGE_SIZE,
+	    UTCB_AREA_MIN_ORDER);
+	const int64_t granted = erx_fiasco_test_ku_mem_add(UTCB_PROBE + 2 * UTCB_PROBE_STEP, UTCB_AREA_MIN_ORDER);
+
+	say_status(small);
+	say_status(misaligned);
+	say_status(granted);
+	say_case("utcb_area_congruent", small == ERX_FIASCO_TEST_KU_MEM_REFUSED &&
+	    misaligned == ERX_FIASCO_TEST_KU_MEM_REFUSED && granted == 0);
 }
 
 /*
@@ -357,6 +387,7 @@ erx_fiasco_root_main(void)
 	case_ends("run_rw", ERX_SPACE_JIT, MODE_RUN_RW, ERX_FIASCO_TASK_STATUS_FAULT);
 	case_ends("no_jit", 0, MODE_NO_JIT, 0);
 	case_irq_refused();
+	case_utcb_area_congruent();
 	case_ends("device_refused", 0, MODE_DEVICE_REFUSED, 0);
 	case_ends("machine_end_refused", 0, MODE_MACHINE_END, 0);
 	case_ends("pool_rounds", 0, MODE_POOL_ROUNDS, 0);

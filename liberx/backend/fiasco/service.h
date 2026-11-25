@@ -262,6 +262,14 @@ int erx_fiasco_test_thread_priority(uint32_t, uint32_t, uint64_t);
  */
 #define ERX_FIASCO_TEST_EMPTY_SLOT_ERROR	UINT64_C(4)
 uint64_t erx_fiasco_test_empty_slot_call(void);
+/*
+ * Fiasco's answer to a UTCB area of 2^order bytes at address in the root's space: 0 when it
+ * grants the area, ERX_FIASCO_TEST_KU_MEM_REFUSED (l4sys's -L4_EINVAL) when it refuses one
+ * whose kernel alias could differ from the address in bits 12 and 13 (docs/design-fiasco.md,
+ * "A congruent UTCB area").
+ */
+#define ERX_FIASCO_TEST_KU_MEM_REFUSED	INT64_C(-22)
+int64_t erx_fiasco_test_ku_mem_add(uint64_t, unsigned);
 #endif
 
 #endif /* ERX_FIASCO_SERVICE_H */
