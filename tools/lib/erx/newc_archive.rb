@@ -16,8 +16,9 @@ module Erx
 
     MAGIC = '070701'
     TRAILER = 'TRAILER!!!'
-    # A path component: no separators, no "." or "..", nothing but these characters.
-    COMPONENT = /\A(?!\.{1,2}\z)[A-Za-z0-9._-]{1,64}\z/
+    # A path component: no separators, no "." or "..", nothing but these characters, and
+    # no longer than a Linux file name (NAME_MAX).
+    COMPONENT = /\A(?!\.{1,2}\z)[A-Za-z0-9._+-]{1,255}\z/
     TYPES = { directory: 0o040000, file: 0o100000, character: 0o020000 }.freeze
 
     # One archive member: a directory, a regular file with its bytes, or a character

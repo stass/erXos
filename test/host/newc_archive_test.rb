@@ -56,6 +56,13 @@ class NewcArchiveTest < Minitest::Test
     end
   end
 
+  # The names stock OTP's tree and its libraries use: a plus sign, and names as long as
+  # a file system's.
+  def test_a_library_and_a_long_name_of_the_otp_tree_are_plain_names
+    ['lib/aarch64-linux-gnu/libstdc++.so.6', "lib/#{'n' * 255}"].each { |path| assert_equal path, Entry.directory(path).path }
+    assert_raises(Erx::NewcArchive::Invalid) { Entry.directory('n' * 256) }
+  end
+
   def test_an_entry_before_its_directory_or_twice_is_refused
     assert_raises(Erx::NewcArchive::Invalid) { Erx::NewcArchive.write([Entry.directory('dev/shm')]) }
     assert_raises(Erx::NewcArchive::Invalid) do
