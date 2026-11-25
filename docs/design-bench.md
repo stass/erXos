@@ -1524,9 +1524,10 @@ fetch publishes each tree under `build/l4re-sources`, a root of its own
 (`tools/lib/erx/l4re_fetch.rb`), and the container build copies each in at
 the path L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
 `l4` for `mk`, `l4/pkg/<name>` for packages, `fiasco` for the kernel,
-and `l4/pkg/ipcbench` for ipcbench. Which of the manifest's packages
-the build needs beyond `mk`, `l4re-core`, `bootstrap`, `libfdt` and
-`drivers-frst` is unverified, and the first build names them. Ham, the
+and `l4/pkg/ipcbench` for ipcbench. The build needs no package of the manifest
+beyond `mk`, `l4re-core`, `bootstrap`, `libfdt` and `drivers-frst`:
+with those and ipcbench, L4Re's make skips only `ned-prompt`'s variant
+that needs readline, which ipcbench's image does not load. Ham, the
 manifest's own tool, is not used: the fetch step does its one job. The
 published snapshot (`l4re-snapshot-26.09.0`) is not used, because which
 Fiasco revision it carries is unverified.
@@ -1552,8 +1553,12 @@ thousands of calls, read from the cycle counter on Arm, with Fiasco in
 its `CONFIG_BENCHMARKING=y` configuration.
 
 **Build.** L4Re's own build system, run as its documentation describes
-and as a black box, for `arm64`, with `PT=arm_virt`, the target
-`elfimage E=ipcbench` and `MODULE_SEARCH_PATH` naming the Fiasco build.
+and as a black box: for `arm64` from L4Re's own `arm64-virt-v8a`
+defconfig, then the target `elfimage E=ipcbench` with
+`PLATFORM_TYPE=arm_virt`, `MODULE_SEARCH_PATH`
+naming the Fiasco build and ipcbench's `conf` directory, and
+`MODULES_LIST` its `conf/modules.list`; the image is
+`images/bootstrap_ipcbench.elf`.
 Its makefiles, scripts and the helper programs it builds are code fetched
 from elsewhere, so they run only inside the oracle's container
 ([Container boundary](design-host-oracle.md#container-boundary)): no
@@ -1596,8 +1601,9 @@ configured from erXos's `config/fiasco/kernel.defconfig`, so the two
 kernels differ by the fork's patches and their compilers: the comparison
 is of the kernel configuration erXos runs, not of L4Re's published one.
 That file sets `CONFIG_PERF_CNT_USER`, which ipcbench needs on Arm.
-Whether it configures upstream Fiasco unchanged is unverified; the record
-keeps the resolved `globalconfig.out` and its difference from erXos's.
+Upstream Fiasco keeps every setting of it, and the record keeps the
+resolved `globalconfig.out` and its difference from erXos's, which a
+later revision of either may make nonempty.
 Nothing of L4Re enters the tree.
 
 **Boot and import.** `QemuPlan.argv` with `-kernel` the built
@@ -1611,9 +1617,14 @@ QEMU arguments are erXos's. The guest does not halt: the boot ends at a
 checkpoint on its configuration script's last line, `Benchmarks done.`,
 and QEMU is then ended as at a deadline. The session's boot step passes
 the log's lines to the importer, a pure function from lines to cells,
-and writes the run with the subject the build gave. Each program's lines
-carry its log tag (`sc:single`, `ipc:1AS`, `ipc:2AS`; the tag's exact
-delimiter is read from the first boot); its result is one line
+and writes the run with the subject the build gave. ned prints each line a
+program writes behind its log tag (`sc:single`, `ipc:1AS`, `ipc:2AS`),
+cut or padded to eight columns and followed by `| `, so `sc:single`'s
+lines begin `sc:singl| `, and wraps each write in the color its
+configuration names, a Select Graphic Rendition sequence before it and a
+reset after, so a line written in two writes carries them in its middle
+too. The importer drops those color sequences, and no other control
+sequence, before it reads a line. A program's result is one line
 `CPU <n> done <count> <operation>s in <total> cpu-cycles, <mean>
 cpu-cycles/<operation>`, timed over 10,000 calls with no warm-up. The
 importer requires a count of 10,000 for `syscall` and 20,000 for `IPC`,
@@ -1626,11 +1637,11 @@ erXos's round trips, and never halves erXos's. A program's error line
 (`caller: ipc err`, `IPC error`) makes its cell `failed`; a line the
 importer cannot read is `rejected`; a declared counterpart no line
 reports is `not_run`. ipcbench reads the cycle counter register in user
-mode and first sets its filter to count in the hypervisor's level too; whether HVF lets a guest program
-and read that counter is unverified. If it does not, the first boot shows
-how ipcbench fails (its message for a missing counter, or a fault), the
-importer makes that outcome every row's `unsupported` with ipcbench named
-as its reporter, and L4Re's comparison happens on the board.
+mode and first sets its filter to count in the hypervisor's level too.
+Under HVF, with `-cpu host`, the guest programs and reads that counter
+and it advances, so the rows are measured; what it counts there, the
+core's cycles or QEMU's model of them, is unverified, which is one more
+reason its rows set no ratio.
 
 ### What HVF does to fairness
 

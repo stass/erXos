@@ -40,10 +40,16 @@ module Erx
     # :error, or an :unreadable line, kept escaped for the refusal that names it.
     Line = Data.define(:tag, :kind, :word, :count, :total, :mean, :text)
 
-    # The tag, then the separator ned prints before a program's text. The separator's
-    # exact form is pinned from the first boot's log (docs/design-bench.md, "L4Re's
-    # guest"); until then it is one to four spaces, bars or colons.
-    TAGGED = /\A(?<tag>#{Regexp.union(PROGRAMS.map(&:tag)).source})[ |:]{1,4}/n
+    # ned prints each line a program writes behind the program's log tag, cut or padded
+    # to TAG_WIDTH columns and followed by "| " (sc:single as "sc:singl| "), and wraps
+    # each write in the color its configuration names, so a line written in two writes
+    # carries color sequences in its middle too (docs/design-bench.md, "L4Re's guest").
+    TAG_WIDTH = 8
+    FIELDS = PROGRAMS.to_h { |program| ["#{program.tag[0, TAG_WIDTH].ljust(TAG_WIDTH)}| ", program.tag] }.freeze
+    TAGGED = /\A(?<field>#{Regexp.union(FIELDS.keys).source})/n
+    # ned's color sequences: Select Graphic Rendition, ESC [ parameters m. They are
+    # dropped before a line is read, and nothing else of the line is.
+    COLOR = /\e\[[0-9;]{0,16}m/n
     RESULT = %r{\ACPU[ ]{1,2}\d{1,3}[ ]done[ ](?<count>\d{1,9})[ ](?<word>IPC|syscall)s[ ]in[ ](?<total>\d{1,20})
                 [ ]cpu-cycles,[ ](?<mean>\d{1,20})[ ]cpu-cycles/(?<per>IPC|syscall)\z}xn
     ERROR = /\A(?:caller: ipc err|IPC error)[ -~]*\z/n
@@ -53,11 +59,11 @@ module Erx
     # The line of one of PROGRAMS that text is, or nil for a line of anything else: the
     # boot's own output, the configuration script's titles, the programs not read.
     def read_line(text)
-      line = text.b.delete_suffix("\r")
+      line = text.b.delete_suffix("\r").gsub(COLOR, '')
       tagged = TAGGED.match(line)
       return nil unless tagged
 
-      tag = tagged[:tag]
+      tag = FIELDS.fetch(tagged[:field])
       body = tagged.post_match
       result = RESULT.match(body) if line.bytesize <= MAX_LINE
       if result && result[:word] == result[:per]

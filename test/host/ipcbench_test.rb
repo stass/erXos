@@ -13,9 +13,11 @@ class IpcbenchTest < Minitest::Test
   Ipcbench = Erx::Ipcbench
   Suite = Erx::BenchSuite
 
-  KERNEL = 'sc:single | CPU  0 done 10000 syscalls in 1234567 cpu-cycles, 123 cpu-cycles/syscall'
-  SAME = 'ipc:1AS | CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles/IPC'
-  CROSS = 'ipc:2AS | CPU  0 done 20000 IPCs in 9000001 cpu-cycles, 450 cpu-cycles/IPC'
+  # As ned prints them: the tag cut or padded to eight columns and "| ", each of the
+  # line's two writes wrapped in the configured color (white, SGR 37).
+  KERNEL = "\e[37msc:singl| CPU  0 done 10000 syscalls in 1234567 cpu-cycles, 123 cpu-cycles\e[0m\e[37m/syscall\e[0m"
+  SAME = "\e[37mipc:1AS | CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles\e[0m\e[37m/IPC\e[0m"
+  CROSS = "\e[37mipc:2AS | CPU  0 done 20000 IPCs in 9000001 cpu-cycles, 450 cpu-cycles\e[0m\e[37m/IPC\e[0m"
 
   def cell(operation) = Suite::LandingCell.new(operation: operation, load: 'idle', placement: 'same-cpu', parameters: {})
 
@@ -57,7 +59,7 @@ class IpcbenchTest < Minitest::Test
   end
 
   def test_a_result_in_another_programs_word_is_rejected
-    cells = by_operation([KERNEL.sub('syscalls in', 'IPCs in'), SAME.sub('cpu-cycles/IPC', 'cpu-cycles/syscall'), CROSS])
+    cells = by_operation([KERNEL.sub('syscalls in', 'IPCs in'), SAME.sub('/IPC', '/syscall'), CROSS])
     assert_equal %w[rejected rejected], cells.values_at('kernel', 'root-same-space').map(&:status)
   end
 
@@ -93,7 +95,7 @@ class IpcbenchTest < Minitest::Test
 
   # A counter that did not count prints a total of zero, which is no measurement.
   def test_a_total_of_zero_is_rejected
-    zero = 'sc:single | CPU  0 done 10000 syscalls in 0 cpu-cycles, 0 cpu-cycles/syscall'
+    zero = 'sc:singl| CPU  0 done 10000 syscalls in 0 cpu-cycles, 0 cpu-cycles/syscall'
     assert_equal 'rejected', by_operation([zero, SAME, CROSS]).fetch('kernel').status
   end
 
@@ -115,10 +117,20 @@ class IpcbenchTest < Minitest::Test
 
   def test_the_line_reader_names_each_kind_of_line
     assert_nil Ipcbench.read_line('Benchmarks done.')
-    assert_nil Ipcbench.read_line('sc:PL | CPU  1 done 10000 syscalls in 9 cpu-cycles, 0 cpu-cycles/syscall')
+    assert_nil Ipcbench.read_line('sc:PL   | CPU  1 done 10000 syscalls in 9 cpu-cycles, 0 cpu-cycles/syscall')
     result = Ipcbench.read_line(SAME)
     assert_equal ['ipc:1AS', :result, 20_000, 4_200_000, 210], [result.tag, result.kind, result.count, result.total, result.mean]
     assert_equal :error, Ipcbench.read_line('ipc:2AS | IPC error').kind
-    assert_equal :unreadable, Ipcbench.read_line("sc:single | \xff".b).kind
+    assert_equal :unreadable, Ipcbench.read_line("sc:singl| \xff".b).kind
+  end
+
+  # The field is ned's, pinned from the first boot: the tag in full or another separator
+  # is not a program's line, and only color sequences are dropped, so another control
+  # sequence leaves the line unreadable.
+  def test_only_neds_tag_field_is_read_and_only_its_color_sequences_are_dropped
+    assert_nil Ipcbench.read_line('sc:single | CPU  0 done 10000 syscalls in 1234567 cpu-cycles, 123 cpu-cycles/syscall')
+    assert_nil Ipcbench.read_line('ipc:1AS: CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles/IPC')
+    assert_equal :result, Ipcbench.read_line("ipc:1AS | CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles/IPC\r").kind
+    assert_equal :unreadable, Ipcbench.read_line("\e[37mipc:1AS | CPU  0 done 20000 IPCs\e[2J in 4200000 cpu-cycles, 210 cpu-cycles/IPC").kind
   end
 end

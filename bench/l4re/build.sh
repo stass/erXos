@@ -37,7 +37,7 @@ make -C "$build/l4" elfimage E=ipcbench PLATFORM_TYPE=arm_virt \
 	MODULE_SEARCH_PATH="$build/fiasco:/tmp/l4/pkg/ipcbench/conf" \
 	MODULES_LIST=/tmp/l4/pkg/ipcbench/conf/modules.list
 
-cp "$build/l4/images/bootstrap.elf" "$out/bootstrap.elf"
+cp "$build/l4/images/bootstrap_ipcbench.elf" "$out/bootstrap.elf"
 cp "$build/fiasco/globalconfig.out" "$out/globalconfig.out"
 cp "$build/l4/.kconfig" "$out/l4re.kconfig"
 gcc --version > "$out/compiler"

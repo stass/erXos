@@ -20,16 +20,16 @@ module Erx
       BenchSuite::LandingCell.new(operation: program.operation, load: 'idle', placement: 'same-cpu', parameters: {})
     end.freeze
     # The tokens that turn one field of a line into another.
-    TOKENS = ['0', '9', ' ', '|', ':', 's', 'IPC', 'syscall', '18446744073709551616', "\e[31m", "\r", "\xff".b].freeze
+    TOKENS = ['0', '9', ' ', '|', ':', 's', 'IPC', 'syscall', '18446744073709551616', "\e[31m", "\e[0m", "\r", "\xff".b].freeze
 
     module_function
 
     def seeds
       IPCBENCH::PROGRAMS.map do |program|
         total = 1_000_003 * program.per_call
-        "#{program.tag} | CPU  0 done #{program.count} #{program.word}s in #{total} cpu-cycles, " \
-          "#{total / program.count} cpu-cycles/#{program.word}"
-      end + ['ipc:1AS | caller: ipc err', 'ipc:PL | Found 4 CPUs.', 'Benchmarks done.']
+        "\e[37m#{IPCBENCH::FIELDS.key(program.tag)}CPU  0 done #{program.count} #{program.word}s in #{total} cpu-cycles, " \
+          "#{total / program.count} cpu-cycles\e[0m\e[37m/#{program.word}\e[0m"
+      end + ['ipc:1AS | caller: ipc err', 'ipc:PL  | Found 4 CPUs.', 'Benchmarks done.']
     end
 
     # A seed's text mutated: bytes changed, cut or inserted.
