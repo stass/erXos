@@ -11,5 +11,8 @@ SRC_C    = erx_peer_bench.c
 LIBS     = posix libc libm
 INC_DIR += $(PRG_DIR)/root
 CC_OPT  += -std=c17 -O2
+# Read the counter without the probe (docs/design-bench.md, "The program's clock and
+# placement").
+CC_OPT  += -DERX_PEER_COUNTER
 include $(PRG_DIR)/flags.mk
 vpath erx_peer_bench.c $(PRG_DIR)/root/bench/peer

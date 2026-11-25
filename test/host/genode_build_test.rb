@@ -26,13 +26,18 @@ class GenodeBuildTest < Minitest::Test
   # The run script carries the program's arguments into init's configuration, and only
   # words: a brace or a space would end the Tcl word or the configuration's attribute.
   def test_the_run_script_gives_the_program_its_arguments_and_refuses_other_text
-    script = Erx::GenodeBuild.run_script(arguments: %w[posix 2])
+    script = Erx::GenodeBuild.run_script(arguments: %w[posix 2], cpus: 2)
     assert_includes script, 'build { app/erx_peer_bench }'
+    assert_includes script, "\n+ affinity-space | width: 2 | height: 1\n"
+    assert_includes script, "caps: 1000\n  + affinity | xpos: 0 | ypos: 0 | width: 2 | height: 1\n"
     assert_includes script, "    + libc | stdout: /dev/log | stderr: /dev/log\n    + arg | : erx_peer_bench\n    + arg | : posix\n    + arg | : 2\n-\n}"
     assert script.start_with?("create_boot_directory\n")
     assert script.end_with?("build_boot_image [build_artifacts]\n")
     ['posix }', 'a b', "x\n", '[exec]'].each do |word|
-      assert_raises(Erx::Error) { Erx::GenodeBuild.run_script(arguments: [word]) }
+      assert_raises(Erx::Error) { Erx::GenodeBuild.run_script(arguments: [word], cpus: 1) }
+    end
+    [0, 9, '2'].each do |cpus|
+      assert_raises(Erx::Error) { Erx::GenodeBuild.run_script(arguments: %w[posix], cpus: cpus) }
     end
   end
 
@@ -178,13 +183,13 @@ class GenodeBuildTest < Minitest::Test
       File.write(File.join(out, 'image.elf'), 'ELF')
       File.write(File.join(out, 'compiler'), "genode-aarch64-gcc (GCC) 14.2.0\n")
       record = Erx::GenodeBuild.record(sources: [{ 'id' => 'genode', 'kind' => 'git', 'commit' => 'c' * 40 }],
-                                       image: IMAGE, out: out, arguments: %w[posix 1])
+                                       image: IMAGE, out: out, arguments: %w[posix 1], cpus: 1)
       assert_equal Digest::SHA256.hexdigest('ELF'), record.fetch('image_sha256')
-      assert_equal Digest::SHA256.hexdigest(Erx::GenodeBuild.run_script(arguments: %w[posix 1])), record.fetch('run_script_sha256')
+      assert_equal Digest::SHA256.hexdigest(Erx::GenodeBuild.run_script(arguments: %w[posix 1], cpus: 1)), record.fetch('run_script_sha256')
       assert_equal 'genode-aarch64-gcc (GCC) 14.2.0', record.fetch('compiler')
       assert_equal({ 'genode' => 'c' * 40 }, record.fetch('sources'))
       File.write(File.join(out, 'compiler'), "gcc\e[31m\n")
-      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: []) }
+      assert_raises(Erx::Error) { Erx::GenodeBuild.record(sources: [], image: IMAGE, out: out, arguments: [], cpus: 1) }
     end
   end
 end

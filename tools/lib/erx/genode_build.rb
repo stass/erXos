@@ -70,11 +70,14 @@ module Erx
     # Genode's run script for erx_peer_bench given arguments: the depot's archives the
     # probe of Genode's tools built, the component built from erXos's target description,
     # and init's configuration in the notation Genode Foundations 26.05 documents ("The
-    # init component"): the component's log on Genode's LOG, a /tmp in its memory.
-    def run_script(arguments:)
+    # init component"): the component's log on Genode's LOG, a /tmp in its memory, and an
+    # affinity space of the boot's cpus CPUs in a row, all of it the component's, so that
+    # the program's CPU n is the boot's ("Affinities" of the same chapter).
+    def run_script(arguments:, cpus:)
       words = [PROGRAM, *arguments]
       raise Error, "#{LABEL}: program arguments must be words of letters, digits, '.', '_' or '-'" unless
         words.all? { |word| word.match?(/\A[A-Za-z0-9._-]+\z/) }
+      raise Error, "#{LABEL}: a boot has 1 to 8 CPUs, not #{cpus.inspect}" unless cpus.is_a?(Integer) && cpus.between?(1, 8)
 
       <<~TCL
         create_boot_directory
@@ -93,10 +96,12 @@ module Erx
         + default-route
           + service Timer | + child timer
           + any-service | + parent
+        + affinity-space | width: #{cpus} | height: 1
         + default | caps: 100
         + start timer | ram: 2M
           + provides | + service Timer
         + start #{PROGRAM} | ram: #{PROGRAM_RAM} | caps: 1000
+          + affinity | xpos: 0 | ypos: 0 | width: #{cpus} | height: 1
           + config
             + vfs
               + dir dev | + log
@@ -149,15 +154,15 @@ module Erx
     # The build record (docs/design-bench.md, "The record"): the pins of every source,
     # the image, the tool chain's compiler, the kernel and board, the program's arguments,
     # and the SHA-256 of the run script, which holds init's configuration the boot image
-    # carries, and of the boot image.
-    def record(sources:, image:, out:, arguments:)
+    # carries, and of the boot image; cpus is the boot's CPU count the script was written for.
+    def record(sources:, image:, out:, arguments:, cpus:)
       {
         'sources' => sources.to_h { |source| [source.fetch('id'), source.fetch('kind') == 'git' ? source.fetch('commit') : source.fetch('sha256')] },
         'image' => image, 'platform' => PLATFORM, 'kernel' => KERNEL, 'board' => BOARD,
         'compiler' => GuestBuild.text(out, 'compiler', label: LABEL).lines.first.to_s.strip,
         'compiler_flags' => "Genode's own for this board, and erx_peer_bench's (bench/genode/target.mk)",
-        'arguments' => arguments,
-        'run_script_sha256' => Digest::SHA256.hexdigest(run_script(arguments: arguments)),
+        'arguments' => arguments, 'cpus' => cpus,
+        'run_script_sha256' => Digest::SHA256.hexdigest(run_script(arguments: arguments, cpus: cpus)),
         'image_sha256' => Digest::SHA256.file(File.join(out, 'image.elf')).hexdigest
       }
     end
@@ -175,7 +180,7 @@ module Erx
       work = OutputDirectory.prepare(root: root, path: File.join(root, 'build/genode-work'))
       directory = Dir.mktmpdir('build-', work)
       arguments = PeerBench.arguments('posix', cpus: cpus)
-      inputs = stage_inputs(root: root, fetched: fetched, directory: directory, arguments: arguments)
+      inputs = stage_inputs(root: root, fetched: fetched, directory: directory, arguments: arguments, cpus: cpus)
       writable = File.join(directory, 'writable')
       %w[contrib depot].each do |name|
         FileUtils.mkdir_p(File.join(writable, name))
@@ -193,7 +198,8 @@ module Erx
                          feeds: steps.fetch(:extracts) + steps.fetch(:copies), label: LABEL)
       out = File.join(directory, 'out')
       GuestBuild.unpack(archive: archive, out: out, outputs: OUTPUTS, label: LABEL)
-      publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, arguments: arguments))
+      publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, arguments: arguments,
+                                                         cpus: cpus))
     ensure
       FileUtils.rm_rf(directory) if directory
     end
@@ -202,7 +208,7 @@ module Erx
     # with the name Genode's port tool asks for, and erXos's Genode repository: the
     # component's target description, its flags from their one source (PeerBench.flags),
     # the C files at their tree paths under its root/, and the run script.
-    def stage_inputs(root:, fetched:, directory:, arguments:)
+    def stage_inputs(root:, fetched:, directory:, arguments:, cpus:)
       inputs = File.join(directory, 'inputs')
       app = File.join(inputs, 'repo/src/app', PROGRAM)
       FileUtils.mkdir_p([app, File.join(inputs, 'repo/run')])
@@ -213,7 +219,7 @@ module Erx
         FileUtils.mkdir_p(File.join(app, 'root', File.dirname(path)))
         FileUtils.cp_r(File.join(root, path), File.join(app, 'root', path))
       end
-      File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), run_script(arguments: arguments))
+      File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), run_script(arguments: arguments, cpus: cpus))
       fetched.sources.select { |source| GenodeFetch::PORT.match?(source.fetch('id')) }.each do |source|
         port = File.join(inputs, 'ports', source.fetch('id').delete_prefix('genode-port-'))
         FileUtils.mkdir_p(port)

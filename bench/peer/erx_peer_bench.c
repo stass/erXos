@@ -30,7 +30,9 @@
  *
  * Every interval is ticks of one clock: the architecture's system counter where user mode
  * may read it, clock "counter", and otherwise CLOCK_MONOTONIC in nanoseconds, clock
- * "monotonic"; on erXos the counter as erx_fiasco_counter reads it. Threads are pinned with
+ * "monotonic"; on erXos the counter as erx_fiasco_counter reads it, and where the build
+ * defines ERX_PEER_COUNTER (Genode's) the counter without the probe, since whether such a
+ * system delivers a refused read as a signal is unverified. Threads are pinned with
  * sched_setaffinity on Linux and erXos and pthread_setaffinity_np on FreeBSD, the one
  * placement call Genode's C library, built from FreeBSD's, also has; that and the
  * wake handshake, which reads B's state from Linux's /proc, are where the file differs by
@@ -228,6 +230,7 @@ counter_frequency(void)
 	return (frequency);
 }
 
+#if !defined(ERX_PEER_COUNTER)
 static sigjmp_buf counter_trap;
 
 static void
@@ -259,11 +262,19 @@ counter_readable(uint64_t *frequency)
 	return (readable && *frequency != 0);
 }
 #endif
+#endif
 
 static void
 clock_choose(void)
 {
-#if defined(__aarch64__)
+#if defined(__aarch64__) && defined(ERX_PEER_COUNTER)
+	clock_name = "counter";
+	clock_hz = counter_frequency();
+	clock_read = counter_ticks;
+	if (clock_hz == 0)
+		peer_fail("the counter's frequency reads 0");
+	return;
+#elif defined(__aarch64__)
 	uint64_t frequency = 0;
 
 	if (counter_readable(&frequency)) {

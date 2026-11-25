@@ -2319,8 +2319,14 @@ build's check of every program enforces
 `erx_fiasco_counter_hz`. It does not probe: the probe catches the trap a
 refused read raises, and a program on Fiasco catches no signal
 (`liberx/backend/fiasco/program_task.c:87-92`). Linux keeps the probe it
-has; Genode reads `CLOCK_MONOTONIC`, clock `monotonic`, whose resolution
-there is unverified; the batching rule of
+has. Genode reads the counter as erXos does, without the probe (its
+build defines `ERX_PEER_COUNTER`), so its intervals are ticks of the
+same counter as erXos's and Linux's on the same machine: whether a
+Genode component gets a refused read as a signal it can catch is
+unverified, and a read `base-hw` refused would end the component before
+its `CLOCK` line, so the run is rejected rather than timed on another
+clock; the guest's boot shows the read allowed. Where a guest's clock
+is `monotonic`, the batching rule of
 [the one clock](#the-one-clock) counts the clock's observed increments,
 so a coarse one batches more, and a cell too short for it shows so by
 its batch and its `total`. The
@@ -2648,8 +2654,11 @@ so the run is rejected rather than measured unpinned. A call that
 returns success is not proof that the thread moved: no Genode row is
 published as pinned until a boot shows a cross-CPU handshake between
 CPU 0 and the last completing at the speed of two CPUs, not of one
-CPU's time slices, and until init's affinity for the component spans
-every CPU of the boot, so that the program's CPU n is the boot's.
+CPU's time slices. The run script gives init an affinity space of the
+boot's CPUs in one row (`+ affinity-space | width: N | height: 1`) and
+the component's start node all of it (`+ affinity | xpos: 0 | ypos: 0 |
+width: N | height: 1`), so that the program's CPU n is the boot's; the
+image is built for one CPU count (`tools/erx build genode --cpus N`).
 
 Genode's run tool, the tool that makes the boot image, takes a Tcl
 script. erXos's harness writes it (`GenodeBuild.run_script`) from its
