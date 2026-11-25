@@ -50,6 +50,7 @@ begin
   require_relative 'lib/erx/bench_g3'
   require_relative 'lib/erx/bench_g5'
   require_relative 'lib/erx/bench_session'
+  require_relative 'lib/erx/l4re_bench'
   require_relative 'lib/erx/bench_web'
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
@@ -1549,7 +1550,9 @@ module Erx
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       history = BenchRecord.history
       BenchRecord::Destination.new(history: history, erxos_root: ROOT)
-      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner))]
+      guests = [NativeBench::Guest.new(run: NativeBench::Run.new(root: ROOT, runner: runner)),
+                L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
+                                     qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT))]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, boots: logs) }
       session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
                                       write: write, load: -> { QemuGate.one_minute_load })
