@@ -15,7 +15,10 @@ module Erx
   module PeerBench
     # A run of one of these times the benchmark's cells of the boot named.
     BOOTS = { 'nullcall' => 'native', 'vm' => 'native', 'wake' => 'native', 'sched' => 'native',
-              'xdomain' => 'xdomain' }.freeze
+              'xdomain' => 'xdomain', 'posix' => 'posix' }.freeze
+    # The boots whose runs calibrate CPU 0 against the last on more than one CPU; an
+    # xdomain run is not pinned.
+    CALIBRATED = %w[native posix].freeze
     # A run ends by SIGALRM this long after it starts, so a stalled side ends it.
     RUN_DEADLINE_SECONDS = 300
 
@@ -30,11 +33,11 @@ module Erx
     end
 
     # What a run of benchmark name on a machine of cpus CPUs, reading clock, asks: the
-    # benchmark's cells in its boot, and the pair a native-set run calibrates, CPU 0 and
-    # the last, on more than one CPU.
+    # benchmark's cells in its boot, and the pair a native-set or posix run calibrates,
+    # CPU 0 and the last, on more than one CPU.
     def asked(name, cpus:, clock:)
       boot = BOOTS.fetch(name) { raise Error, "bench: #{name} has no peer counterpart" }
-      pairs = boot == 'native' && cpus > 1 ? [[0, cpus - 1]] : []
+      pairs = CALIBRATED.include?(boot) && cpus > 1 ? [[0, cpus - 1]] : []
       BenchMeasurement::Asked.new(benchmarks: [NativeBench.wanted(BenchSuite.benchmark(name), boot: boot)],
                                   clock: clock, pairs: pairs)
     end

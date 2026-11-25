@@ -20,6 +20,8 @@ module Erx
     # The systems an operation's counterpart can name, and the plain words of its line.
     OTHER_SYSTEMS = (BenchRecord::SYSTEMS - ['erxos']).freeze
     COUNTERPART = /\A[A-Za-z0-9_][ -~]{0,159}\z/
+    # An operation's act: the same on every system, or the nearest counterpart and what differs.
+    ACT = /\A(?:same act|nearest counterpart: [a-z][ -~]{0,239})\z/
 
     # An operation: an exact act with a start and an end on one clock, the profile it is
     # sampled by, and what a correct result of the act is. A handshake (one thread acts,
@@ -29,9 +31,12 @@ module Erx
     # sweep: false, and its lines carry no sweep phases (docs/design-bench.md, "A benchmark").
     # counterparts maps each other system that runs a counterpart of the operation to
     # what it runs, the line the side-by-side table prints; a system it does not name is
-    # not asked for the operation (docs/design-bench.md, "Counterparts").
-    Operation = Data.define(:name, :profile, :result, :handshake, :sweep, :counterparts) do
-      def initialize(name:, profile:, result:, handshake: false, sweep: true, counterparts: {})
+    # not asked for the operation (docs/design-bench.md, "Counterparts"). act, which an
+    # operation of the program layer must give, says whether every system does the same
+    # work for the call, "same act", or what differs, "nearest counterpart: ...", and the
+    # program table prints it (docs/design-bench.md, "Fairness").
+    Operation = Data.define(:name, :profile, :result, :handshake, :sweep, :counterparts, :act) do
+      def initialize(name:, profile:, result:, handshake: false, sweep: true, counterparts: {}, act: nil)
         BenchRecord.check(name.is_a?(String) && BenchRecord::NAME.match?(name), 'operation is not a plain name')
         BenchRecord.check(BenchRecord::PROFILES.include?(profile), 'profile is not one of the profiles')
         BenchRecord.check(result.is_a?(String) && !result.empty?, "#{name} does not say what a correct result is")
@@ -41,8 +46,9 @@ module Erx
         BenchRecord.check(counterparts.is_a?(Hash) &&
                           counterparts.all? { |system, line| OTHER_SYSTEMS.include?(system) && COUNTERPART.match?(line) },
                           "#{name}'s counterparts are not other systems' lines in plain words")
+        BenchRecord.check(act.nil? || ACT.match?(act), "#{name}'s act is neither same act nor a nearest counterpart's line")
         super(name: name, profile: profile, result: result, handshake: handshake, sweep: sweep,
-              counterparts: counterparts.freeze)
+              counterparts: counterparts.freeze, act: act)
       end
     end
 
@@ -69,11 +75,15 @@ module Erx
     # A landing boot: the environment kind and CPU count it boots at, and the layer its
     # cells measure, which names its side-by-side table (docs/design-bench.md,
     # "Counterparts"): the native boot's C cells set the kernels' own paths beside each
-    # other, the xdomain boot's Erlang cells the runtimes' messages.
-    Boot = Data.define(:kind, :cpus, :layer)
+    # other, the xdomain boot's Erlang cells the runtimes' messages, and the posix boot's
+    # cells what a program pays for its POSIX calls (docs/design-bench.md, "What a program
+    # sees"). gate says whether the landing gate boots it: the program table's boots run in
+    # comparison sessions and on demand only.
+    Boot = Data.define(:kind, :cpus, :layer, :gate)
     BOOTS = {
-      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'C'),
-      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang')
+      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'C', gate: true),
+      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang', gate: true),
+      'posix' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'program', gate: false)
     }.freeze
 
     # A benchmark: its operations by name and its landing cells per boot, each naming a
@@ -84,6 +94,9 @@ module Erx
         BenchRecord.check(landing.keys.all? { |boot| BOOTS.key?(boot) }, "#{name} names a boot the suite lacks")
         unknown = landing.values.flatten.map(&:operation).uniq - operations.keys
         BenchRecord.check(unknown.empty?, "#{name}'s landing matrix names an operation it does not declare")
+        unsaid = landing.select { |boot, _| BOOTS.fetch(boot).layer == 'program' }.values.flatten
+                        .map(&:operation).uniq.reject { |operation| operations.fetch(operation).act }
+        BenchRecord.check(unsaid.empty?, "#{name}'s program operations #{unsaid.join(', ')} do not say their act")
         super(name: name, operations: operations.freeze, landing: landing.transform_values(&:freeze).freeze)
       end
     end
@@ -117,7 +130,7 @@ module Erx
 
     # The suite's cells: each boot's benchmarks, named as a QEMU cell that carries its
     # case (Erx::QemuCells::CELL_CASE_NAME): "hvf-4cpu-native-wake".
-    def suite_cells = BOOTS.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
+    def suite_cells = BOOTS.select { |_, entry| entry.gate }.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
 
     def suite_cell_name(boot, benchmark)
       entry = BOOTS.fetch(boot)

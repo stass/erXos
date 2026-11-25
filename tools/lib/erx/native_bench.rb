@@ -98,6 +98,7 @@ module Erx
     # "Profiles"); the root is built with their sizes (flags).
     LANDING_PROFILES = {
       'fast' => BenchRecord::Profile.new(name: 'fast', warmup: 1000, samples: 10_000, runs: 1),
+      'expensive' => BenchRecord::Profile.new(name: 'expensive', warmup: 10, samples: 100, runs: 1),
       'periodic' => BenchRecord::Profile.new(name: 'periodic', warmup: 0, samples: 2000, runs: 1),
       # Three 1 s windows after a 2 s warm-up, in milliseconds (docs/design-bench.md, "Profiles").
       'sustained' => BenchRecord::Profile.new(name: 'sustained', warmup: 2000, samples: 3, runs: 1)
@@ -165,8 +166,9 @@ module Erx
     # The landing profiles' sizes as -D flags, which every bench guest's C, and the peer
     # bench's, takes from them alone.
     def profile_flags
-      fast, periodic, sustained = LANDING_PROFILES.values_at('fast', 'periodic', 'sustained')
+      fast, expensive, periodic, sustained = LANDING_PROFILES.values_at('fast', 'expensive', 'periodic', 'sustained')
       ["-DERX_BENCH_FAST_WARMUP=#{fast.warmup}u", "-DERX_BENCH_FAST_SAMPLES=#{fast.samples}u",
+       "-DERX_BENCH_EXPENSIVE_WARMUP=#{expensive.warmup}u", "-DERX_BENCH_EXPENSIVE_SAMPLES=#{expensive.samples}u",
        "-DERX_BENCH_PERIODIC_SAMPLES=#{periodic.samples}u", "-DERX_BENCH_SUSTAINED_SAMPLES=#{sustained.samples}u",
        "-DERX_BENCH_SUSTAINED_WARMUP_MS=#{sustained.warmup}u"].freeze
     end
