@@ -2362,8 +2362,8 @@ timeout queue (`Config::One_shot_min_interval_us`, `src/kern/config.cpp:60`; `Ti
 `src/kern/timeout.cpp:259-267`), which bounds a CPU's timer interrupts, whatever programs them, at 5,000 a second, against 1,000 under a
 periodic 1 ms tick, and defers a slice end or a deadline that falls inside the floor by up to 200 us. In an MP build a CPU that runs
 a thread also takes a timer interrupt at least every 1 ms for Fiasco's RCU (`Config::Rcu_grace_period`,
-`CONFIG_SCHED_GRANULARITY`, and `Config::Need_rcu_tick`, `src/kern/config.cpp:62` and `:80`; `src/kern/timeout.cpp:350-353`); an idle CPU with no RCU work
-pending takes none until its next timeout (tickless idle, which one-shot mode implies, `src/kern/kernel_thread.cpp:319-348`
+`CONFIG_SCHED_GRANULARITY`, and `Config::Need_rcu_tick`, `src/kern/config.cpp:62` and `:80`; `src/kern/timeout.cpp:350-353`); an idle CPU drives the RCU work it has before it halts ([RCU from idle](#the-releases-fiasco-build)), and one with no RCU work
+pending takes none until its next timeout (tickless idle, which one-shot mode implies, `src/kern/kernel_thread.cpp:345-375`
 and `src/kern/context.cpp:2558-2564`). The quantum case measures the turn a thread gets ([Verification](#verification)).
 
 **Where ERTS puts its schedulers.** Since Fiasco never moves a thread, the adapter places them, as it does under
@@ -3851,7 +3851,7 @@ What happens on each path:
   `Serial_no_input`, Fiasco's default (`kern/config.cpp:41-45,254-255`). On the PL011 the entry and the leave both clear
   the UART's pending interrupts and its error flags (`lib/uart/uart_pl011.cc:120-133`), so an error the driver had not
   yet read is lost unmarked. A development kernel started with `-wait` or `-jdb_cmd` enters the debugger before user mode
-  (`kern/kernel_thread.cpp:194-217`), so the route is `closed` before the first take and the whole run writes the UART as
+  (`kern/kernel_thread.cpp:196-219`), so the route is `closed` before the first take and the whole run writes the UART as
   upstream does. Resuming is otherwise an operator's choice in a development build, and a harness run that enters the debugger ends
   at its deadline.
 * **The machine's end.** Every end path takes the end through `end_take` (`liberx/backend/fiasco/end.c:42-46`), which
@@ -4282,6 +4282,25 @@ no test can drive the change:
   wake covers a waiter it woke too early, and under the emulator the store is relied on to be
   visible before the event's wake arrives. Its test is the native threads suite's `join_loop`
   case in the 4-CPU TCG cell, which fails without it.
+* **RCU from idle.** A CPU whose idle thread finds RCU work pending drives it there, before it
+  would halt, instead of waiting for its tick (`Kernel_thread::idle_op`, `src/kern/kernel_thread.cpp`).
+  Upstream's idle refuses tickless idle while the CPU has RCU work (`Context::enter_tickless_idle`,
+  `src/kern/context.cpp:2551-2552`) and halts until its RCU tick (`src/kern/timeout.cpp:350-353`),
+  which drives one step of the grace period per tick (`Thread::handle_timer_interrupt`), so an object
+  deletion waits about 3 ms on an otherwise idle machine (`Kobject::Reap_list::del`,
+  `src/kern/kobject.cpp:224-232`), and the root's every call waits behind it. The idle thread at the
+  top of its loop holds no RCU-protected reference: it is the point at which upstream's own
+  tickless entry declares the CPU quiescent for as long as it sleeps (`Rcu::enter_idle`), and its
+  suspend path drains RCU there already (`src/kern/context.cpp:2285-2293`). The patch runs at most
+  three steps, the ones a grace period that waits for this CPU alone needs (start it, report the
+  CPU quiescent, run the callbacks that ended it), and schedules as soon as a callback readies a
+  thread. A grace period that waits for another, busy CPU is no work of this CPU after the second
+  step, so the idle CPU halts as before and its tick drives the rest: it never spins on another
+  CPU. The `posix` benchmark's `thread-create-join` cell measures it
+  ([todo-performance.md](todo-performance.md)): without it each reap waits for the RCU tick. A
+  grace period it ended too early would free an object still in use; the cases that delete
+  threads and stop tasks while other CPUs run, the native threads suite's `join_loop` and the
+  native task suite's stops in their 4-CPU cells, run over it.
 * **Test kernels' seeds.** Four defines, set only for a test kernel, compile seeds into the fork:
   `ERX_TEST_KERNEL_TRAP` a kernel-mode load from an unmapped address once boot is done
   (`kernel_thread.cpp`, for `native_kernel_trap.rb`), `ERX_TEST_SEMAPHORE_WAKE_HOLD_US` a hold

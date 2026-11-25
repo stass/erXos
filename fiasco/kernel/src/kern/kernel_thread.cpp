@@ -1,5 +1,7 @@
 // Modified by erXos: a test kernel's seeded kernel trap (ERX_TEST_KERNEL_TRAP,
-// tools/lib/erx/native_kernel_trap.rb); no other kernel builds it.
+// tools/lib/erx/native_kernel_trap.rb), which no other kernel builds; and the
+// tickless idle drives its CPU's pending RCU work before it halts
+// (docs/design-fiasco.md, "The release's Fiasco build", "RCU from idle").
 INTERFACE:
 
 #include "thread_object.h"
@@ -232,6 +234,7 @@ Kernel_thread::idle_op()
 IMPLEMENTATION [tickless_idle]:
 
 #include "processor.h"
+#include "rcupdate.h"
 
 EXTENSION class Kernel_thread
 {
@@ -315,6 +318,29 @@ Kernel_thread::idle_op()
   assert(cpu == home_cpu());
 
   ++_idle_counter.cpu(cpu);
+
+  // erXos: an idle CPU drives its own RCU work now rather than at its next
+  // tick (docs/design-fiasco.md, "The release's Fiasco build", "RCU from
+  // idle"). The idle thread here holds no RCU-protected reference: it has
+  // just taken the CPU lock afresh at the top of its loop, the point at which
+  // enter_tickless_idle() below declares this CPU quiescent for as long as
+  // it sleeps. A CPU with RCU work refuses tickless idle and would otherwise
+  // halt until its tick, up to 1 ms per step of a grace period. Three steps
+  // finish a grace period that waits for this CPU alone: start it for the
+  // newly queued callbacks, report this CPU's quiescent state, and run the
+  // callbacks whose period has ended. In a period that waits for another,
+  // busy CPU the steps after the second find nothing to do, the bound ends
+  // the loop, and the rest falls through to arch_idle() below, where this
+  // CPU's RCU tick drives it as without this patch. So the loop never spins
+  // on a busy CPU.
+  for (unsigned step = 0; step < 3 && Rcu::has_pending_work(cpu); ++step)
+    if (Rcu::do_pending_work(cpu) == Reschedule::Yes)
+      {
+        // A callback made a thread ready, such as the deleter woken from
+        // rcu_wait(): run it now.
+        schedule();
+        return;
+      }
 
   if (can_tickless_idle(cpu) && enter_tickless_idle(cpu))
     {
