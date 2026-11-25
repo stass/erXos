@@ -25,7 +25,9 @@ require_relative '../../tools/lib/erx/xdomain_bench'
 # run, and each process runs under a deadline and is stopped before its test ends.
 class XdomainStockNodesTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
-  FLAVOUR = 'jit'
+  # Host tests hold the jit oracle's lock while they run (Runtime::HOST_OTP_FLAVOUR), so
+  # the stock nodes run on the emu oracle; the cells' protocol does not depend on it.
+  FLAVOUR = 'emu'
   MODULES = %w[erx_bench_hist erx_xdomain_bench].freeze
   ECHO = 'bench_echo@127.0.0.1'
   CLIENT = 'bench_client@127.0.0.1'
