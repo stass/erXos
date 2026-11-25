@@ -17,10 +17,14 @@ class L4ReBenchTest < Minitest::Test
   L4Re = Erx::L4ReBench
   Suite = Erx::BenchSuite
 
+  # A line ipcbench's program tag writes, as ned prints it: behind the tag's field
+  # (Ipcbench::FIELDS), so the test follows the importer's one definition of it.
+  def self.tagged(tag, text) = "#{Erx::Ipcbench::FIELDS.key(tag)}#{text}"
+
   LINES = ['L4 Bootstrapper', 'Syscall benchmark:',
-           'sc:single | CPU  0 done 10000 syscalls in 1234567 cpu-cycles, 123 cpu-cycles/syscall',
-           'ipc:1AS | CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles/IPC',
-           "ipc:2AS | \e[31mgarbage", 'Benchmarks done.'].freeze
+           tagged('sc:single', 'CPU  0 done 10000 syscalls in 1234567 cpu-cycles, 123 cpu-cycles/syscall'),
+           tagged('ipc:1AS', 'CPU  0 done 20000 IPCs in 4200000 cpu-cycles, 210 cpu-cycles/IPC'),
+           tagged('ipc:2AS', "\e[31mgarbage"), 'Benchmarks done.'].freeze
 
   # Records the run it is asked for and writes LINES as its serial log.
   class Qemu
