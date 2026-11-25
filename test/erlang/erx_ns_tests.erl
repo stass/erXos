@@ -456,30 +456,39 @@ facet_mount_refusals() ->
              {einval, {remote_pid(), rw}, <<"/data">>, [{tree, <<"data">>}, rw]}]],
     ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)).
 
-%% The provider of a facet named media carries the nofollow mark, which erx_ns derives
-%% from the facet's name and never from a mount's options: every mount of the facet,
-%% wherever it lies and whatever rights and tree it names, every bind of it or of a
-%% volume under it, a program's table made by change/2 and the table a resolution uses
-%% keep the mark, and no other facet's entry carries it (docs/design-drives.md, "Links
-%% and rights"). The resolver answers eacces where it would follow a link of a marked
-%% entry (erx_path_tests).
+%% An entry of the media tree carries the nofollow mark, which erx_facets:table/1
+%% derives at each resolution from the facet's name, media, and from a grant's tree of
+%% that name, never from a mount's options, a stored key or the registry: every mount of
+%% the facet, wherever it lies and whatever rights and tree it names, every bind of it or
+%% of a volume under it, a program's table made by change/2, and a mount by pid of a
+%% grant's media tree, mount_own(media, _)'s included, carry the mark as a resolution
+%% reads them, granted or ended, and no other entry carries it (docs/design-drives.md,
+%% "Links and rights"). The resolver answers eacces where it would follow a link of a
+%% marked entry (erx_path_tests).
 a_media_facet_entry_follows_no_link() ->
+    Granted = grant(),
     ok = erx_ns:mount({facet, media}, <<"/media">>, [{tree, <<"media">>}, rw]),
     ok = erx_ns:mount({facet, media}, <<"/elsewhere">>, [{tree, <<"other">>}]),
     ok = erx_ns:bind(<<"/media/disk0/s1">>, <<"/stick">>),
     ok = erx_ns:bind(<<"/media">>, <<"/m">>, [ro]),
     ok = erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]),
     ok = erx_ns:bind(<<"/data">>, <<"/d">>),
-    Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
-    Expected = [[<<"media">>], [<<"elsewhere">>], [<<"stick">>], [<<"m">>]],
-    ?assertEqual(Expected, Marked(table())),
+    ok = erx_ns:mount({grant(), rw}, <<"/own">>, [{tree, <<"media">>}, rw]),
+    ok = erx_ns:mount({grant(), rw}, <<"/raw">>, [{tree, <<"data">>}, rw]),
     {ok, Program} = erx_ns:change({bind, <<"/media/disk0">>, <<"/p">>, [ro]}, table()),
-    ?assertEqual(Expected ++ [[<<"p">>]], Marked(Program)),
+    Marked = fun(Table) -> [Point || #{point := Point, nofollow := true} <- Table] end,
+    ?assertEqual({[], []}, {Marked(table()), Marked(Program)}),
+    Expected = [[<<"media">>], [<<"elsewhere">>], [<<"stick">>], [<<"m">>], [<<"own">>]],
     ?assertEqual(Expected, Marked(at_use())),
-    persistent_term:put({erx, facets}, {1, #{media => {grant(), rw}, data => {grant(), rw}}}),
-    ?assertMatch([#{provider := {grant, _, <<"media">>}, nofollow := true} | _],
+    persistent_term:put({erx, facets}, {1, #{media => {Granted, rw}, data => {grant(), rw}}}),
+    ?assertEqual(Expected, Marked(at_use())),
+    ?assertMatch([#{provider := {grant, Granted, <<"media">>}, nofollow := true}],
                  [Entry || #{point := [<<"media">>]} = Entry <- at_use()]),
-    ?assertEqual(Expected, Marked(at_use())).
+    ?assertEqual(Expected ++ [[<<"p">>]], Marked(erx_facets:table(Program))),
+    Own = grant(),
+    ok = erx_ns:mount_own(media, {Own, rw}),
+    ?assertMatch([#{provider := {grant, Own, <<"media">>}, nofollow := true}],
+                 [Entry || #{point := [<<"media">>]} = Entry <- at_use()]).
 
 %% The table as a resolution uses it, prim_file:erx_table/0's.
 at_use() ->

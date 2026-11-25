@@ -351,8 +351,9 @@ updating or loading code from a drive.
   the interface `drive`, one grant of it for each drive window row, its
   mint, its facet and the facet's window proxy ([How the grant reaches the media
   domain](#how-the-grant-reaches-the-media-domain)); one service, `media`,
-  with its durability facet, and its mount point and `nofollow` mark in
-  `erx_ns`'s table of facets; the decoder's source entry, `erx_erofs:mount_source/2`; the
+  with its durability facet, its mount point in `erx_ns`'s table of
+  facets, and its `nofollow` mark, which the resolution of a table
+  derives (`erx_facets:table/1`); the decoder's source entry, `erx_erofs:mount_source/2`; the
   probe's table, `abi/formats/probe.txt`, and beside it two limits,
   `media_volumes_max`, 8, and `media_volume_bytes`, 2 MiB; one statfs type, `media`; the
   argument forms of the shell's `mount` and `umount`; and the modules of
@@ -1350,13 +1351,18 @@ follows none in an app's tree: where it would follow one, it answers
 `eacces`, as FreeBSD's `nosymfollow` mount does, and an operation on the
 link itself acts on it
 ([design-app-trees.md](design-app-trees.md#links)). The rule belongs to
-the provider: `erx_ns` derives the mark from the provider of a facet
-named `media` whenever it builds or resolves that provider, never from
-an option a mount names, so it is not one of the options `place/1`
-gives `media` with its mount point. Every mount of a `media` facet
-therefore carries the mark, wherever it is mounted and whatever
-options it names, and every bind of `/media` or of a volume under
-it, and every program's table that takes its entries, keeps it. The
+the tree: the mark is derived where the table is resolved, at each
+resolution, by `erx_facets:table/1`, from names alone: every entry
+whose provider names the facet `media`, whatever tree it asks, and
+every entry on a grant's tree named `media`, the tree of the facet's
+name, carries it, whether or not the registry holds the facet. It is
+stored in no table and taken from no option a mount names, so it is
+not one of the options `place/1` gives `media` with its mount point,
+and no writer of a table has to keep it. Every mount of a `media`
+facet therefore carries the mark, wherever it is mounted and whatever
+options it names, and so do every bind of `/media` or of a volume
+under it, every program's table that takes its entries, and a mount of
+a media grant by its pid, as `erx_ns:mount_own(media, _)` makes. The
 resolver keeps one rule, to follow no link in a tree whose provider
 carries the mark
 ([design-files.md](design-files.md#building-binding-and-mounting)). A
@@ -1426,7 +1432,7 @@ echo eject > /media/disk0/ctl     the stick safe to pull
 
 `mount SOURCE DIR` is `erx_ns:bind/2`, and `mount -r` its `bind/3` with
 `[ro]`: the entry at DIR is the same `media` grant, rooted at
-`disk0/s1`, so it names the place, keeps the `nofollow` mark, and
+`disk0/s1`, so it names the place, carries the `nofollow` mark, and
 reaches whatever volume `s1` of `disk0` is at each lookup, the next
 stick's after a replug. `-r` is a read-only view: writes through DIR
 answer `erofs`, while the volume stays as the media domain mounted it

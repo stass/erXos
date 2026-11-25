@@ -194,27 +194,44 @@ each entry whose provider is `{facet, Name, Tree}`, binds of one included:
 So a facet entry's rights never exceed its grant's, as an EROFS entry's and a
 grant pid's do. A facet's mount names the facet, never a pid, so a re-grant
 serves the next lookup and nothing has to follow the registry. Every other
-entry is as `Mounts` holds it.
+entry is as `Mounts` holds it, except that
+
+* every entry of the media tree, a drive's volumes, carries the `nofollow`
+  mark: an entry whose provider names the facet `media`, whatever tree it
+  asks, or a grant's tree named `media`, the tree of the facet's name, which
+  a mount of a media grant by its pid names (`erx_ns:mount_own(media, _)`'s
+  among them). So a mount of the facet, a bind of one, a program's table
+  taken from one, and a mount by pid alike carry it, whether or not the
+  registry holds the facet. The mark is derived here, from those names at
+  each resolution, and stored in no table, so no writer of a table has to
+  keep it, and the resolver follows no link a stranger's stick holds
+  (erx_path; docs/design-drives.md, "Links and rights").
 """.
 -spec table(erx_path:table()) -> erx_path:table().
 table(Mounts) ->
     Registry = registry(),
-    [case Entry of
-         #{provider := {facet, Name, Tree}, rights := Asked} ->
-             case Registry of
-                 #{Name := {Pid, Rights}} when is_pid(Pid) ->
-                     on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
-                 _ ->
-                     Entry#{provider := ended}
-             end;
-         #{} ->
-             Entry
-     end || Entry <- Mounts].
+    [marked(Provider, resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
+
+resolved(#{provider := {facet, Name, Tree}, rights := Asked} = Entry, Registry) ->
+    case Registry of
+        #{Name := {Pid, Rights}} when is_pid(Pid) ->
+            on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
+        _ ->
+            Entry#{provider := ended}
+    end;
+resolved(Entry, _Registry) ->
+    Entry.
 
 %% A facet's entry on the grant Pid with Rights, or ended for rights erx_path:lesser/2
 %% does not order.
 on_grant(Entry, _Pid, _Tree, none) -> Entry#{provider := ended};
 on_grant(Entry, Pid, Tree, Rights) -> Entry#{provider := {grant, Pid, Tree}, rights := Rights}.
+
+%% The resolved Entry of a mount whose provider was Provider, marked nofollow when that
+%% provider lies in the media tree.
+marked({facet, media, _Tree}, Entry) -> Entry#{nofollow => true};
+marked({grant, _Pid, <<"media">>}, Entry) -> Entry#{nofollow => true};
+marked(_Provider, Entry) -> Entry.
 
 -doc """
 A file client's handle on the grant of the files facet `Name`, read-only, on

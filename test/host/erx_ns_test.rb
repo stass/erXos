@@ -60,6 +60,10 @@ class ErxNsTest < Minitest::Test
   STAND_IN_FID = "fid() ->\n    erlang:unique_integer([positive]).\n"
   PACKAGE_SALT = ("\x0d".b * 9).freeze
   NS = 'erlang/apps/erx/src/erx_ns.erl'
+  # A seeded erx_facets:table/1 that derives no nofollow mark, so a resolution follows a
+  # link on a drive: a_media_facet_entry_follows_no_link must catch it.
+  FACETS = 'otp/erts/preloaded/src/erx_facets.erl'
+  MEDIA_MARK = "marked({grant, _Pid, <<\"media\">>}, Entry) -> Entry\#{nofollow => true};\n"
   # A seeded erx_ns whose app mount also takes a {layout, Place, Layout} source, the
   # place and layout from the caller rather than the agent's record, so an app could
   # mount any file of its grant with a layout it chose: app_mount_refusals must catch it.
@@ -88,6 +92,15 @@ class ErxNsTest < Minitest::Test
     output, status = eunit
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
+  end
+
+  def test_a_resolution_that_marks_no_media_entry_is_caught
+    facets = File.read(File.join(ROOT, FACETS))
+    assert_equal 1, facets.scan(MEDIA_MARK).size, 'erx_facets has no media mark clause to remove'
+    output, status = eunit(FACETS => facets.sub(MEDIA_MARK, ''))
+    refute status.success?, output
+    assert_match(/a_media_facet_entry_follows_no_link\.\.\.\*failed\*/, output)
+    assert_match(/Failed: 1\./, output)
   end
 
   def test_an_app_mount_taking_the_callers_layout_is_caught

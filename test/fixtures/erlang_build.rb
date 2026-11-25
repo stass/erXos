@@ -46,14 +46,15 @@ module ErlangBuild
   # root-relative paths of test modules compiled in order (a test-only stub of an
   # application's module compiled here replaces that module's beam). replaced maps a
   # root-relative source path, of an application's module (as ErlangApps.modules spells
-  # it) or of a test module, to the text compiled in its place. includes: further -I
-  # directories, root-relative or absolute, searched first by the replaced modules and the
-  # test modules alike, so a replaced module can be compiled against a header generated
-  # from a seeded ABI source. defines: macros erlc defines (-D) for the replaced modules
+  # it), of a PRELOADED module or of a test module, to the text compiled in its place.
+  # includes: further -I directories, root-relative or absolute, searched first by the
+  # replaced modules and the test modules alike, so a replaced module can be compiled
+  # against a header generated from a seeded ABI source. defines: macros erlc defines (-D) for the replaced modules
   # and the test modules, such as TEST for a module that exports a function to its host
   # tests alone. Raises Error with erlc's output on a failed compile.
   def self.compile(work, applications:, tests: [], replaced: {}, includes: [], defines: [])
-    unknown = replaced.keys - tests - with_dependencies(applications).flat_map { |application| modules(application) }
+    compiled = [*tests, *PRELOADED, *with_dependencies(applications).flat_map { |application| modules(application) }]
+    unknown = replaced.keys - compiled
     raise Error, "replaced names no module compiled here: #{unknown.join(' ')}" unless unknown.empty?
 
     FileUtils.cp(Dir.glob(File.join(applications_beams(applications), '*.beam')), work)
