@@ -165,14 +165,15 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   sizes; and a boot whose guest raises (a QEMU or transcript timeout) is a note and no record, where the design's
   `timed_out` status would record its unreported cells, which needs `BenchMeasurement.boot` to mark them
   `timed_out` from a partial serial log.
-* [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)): Alpine 3.24.4's
-  `vmlinuz-virt`, its configuration and `musl-dev` pinned in `deps.lock` by versioned URL and SHA-256, fetched
-  before the build, which runs offline; the static `aarch64-linux-musl` build of `bench/peer/erx_peer_bench.c` with
-  erXos's clang and `ld.lld`, its C table's counterparts (pipe round trips, the `/proc` wake handshake, the `vm`
-  calls with erXos's untimed checks), `/proc` mounted and its process-1 power-off; the Ruby `newc` writer of the
-  initramfs; the boot step, after a probe of whether QEMU loads the zboot kernel directly (if not, the payload's
-  inflation checked against the pin's decoded hash). Needs `erx_peer_bench` landed. Tests: Linux's guest and, if
-  built, the zboot payload, on one-CPU cells, each run written and read back through `BenchRecord`.
+* [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)),
+  `tools/lib/erx/linux_guest.rb`, `bench/peer/erx_peer_bench.c`: the guest boots in a session; what remains is
+  that `erx_peer_bench` reports `nullcall.root-same-space` and `wake.wake-same-cpu` as having no counterpart
+  although the design's counterparts table and `benches/wake.rb` name one (two threads of one process over a
+  pipe pair; the condition-variable wake on one CPU); as process 1 its own deadline rests on `SIGALRM`, which
+  the kernel likely does not deliver to process 1, and its power-off on every end passing through `exit`
+  (a small `/init` that forks the program and powers off when it ends would make both hold by construction);
+  `NewcArchive.member` builds the header from positional fields; whether `shm_open` under `/dev/shm` needs no
+  mount and what `panic=-1` does are still unverified.
 * [Medium] benchmarks, Linux's Erlang guest under HVF ([design-bench.md](design-bench.md#linuxs-erlang-guest)): a
   guest export of the Linux oracle (the installed stock OTP 29.1.2 tree and the libraries its programs load, listed
   in the workload phase and copied by the exporter, [design-host-oracle.md](design-host-oracle.md#native-workspace-and-artifact-export));
