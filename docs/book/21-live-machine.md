@@ -293,7 +293,7 @@ group's `parked` and `ready` figures as its threads park and wake.
 
 | Attribute | On Fiasco | Why |
 | --- | --- | --- |
-| a CPU's `idle_time` | `unsupported` | the backend does not read Fiasco's count of the CPU's idle time, which the design reports ([design-fiasco.md, Reporting kernel objects](../design-fiasco.md#reporting-kernel-objects)) |
+| a CPU's `idle_time` | `unsupported` | Fiasco charges idle time only when the CPU switches away from idle, so a CPU that stays idle reads a count that does not grow |
 | a CPU's `ready_threads` | `unsupported` | Fiasco does not report it |
 | the system domain's group `parked`, `ready` | `ok` | read from the root's status page |
 | another domain's group | every attribute `unsupported` | the group report answers only the root's own group |

@@ -438,7 +438,8 @@ Two rules hold in every profile, so no benchmark declares them:
   cyclictest's absolute mode does. A return before its deadline is
   counted as early, which is a wrong answer.
 * **The phase sweep.** A timer whose interrupts keep a rhythm of their
-  own, a periodic tick or a floor counted from the last interrupt, makes
+  own, a periodic tick or a housekeeping interrupt counted from the last
+  one, makes
   a deadline's lateness depend on where the deadline falls in that
   rhythm, and deadlines a whole period apart would all fall at one phase,
   set by when the run happened to start. Deadline k is therefore the first

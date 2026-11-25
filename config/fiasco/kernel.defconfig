@@ -13,7 +13,8 @@ CONFIG_FPU=y
 # CONFIG_ARM_SVE is not set
 CONFIG_SYNC_CLOCK=y
 # One-shot timer: each timeout and slice end programs the timer, and an idle CPU
-# takes no tick. Kconfig selects fine-grained CPU time and implies tickless idle.
+# with no RCU work pending takes no tick. Kconfig selects fine-grained CPU time and
+# implies tickless idle.
 CONFIG_ONE_SHOT=y
 CONFIG_BENCHMARKING=y
 CONFIG_PERF_CNT=y

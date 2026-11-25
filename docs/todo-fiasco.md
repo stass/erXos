@@ -273,13 +273,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `ERX_END_OFF`; under `-no-reboot` both ends exit QEMU, so the suite cannot tell
   them apart, and the refusal of a bad `how` has no case.
 * [Low] Fiasco backend, `liberx/backend/fiasco/service.c`, `erx_object_info`'s cpu topic: no CPU reports `idle_time`.
-  [design-fiasco.md](design-fiasco.md#reporting-kernel-objects) reports it from `l4_scheduler_idle_time`, which
-  the one-shot kernel's fine-grained CPU time charges at each switch; until the backend reads it the inspector shows
-  the field `unsupported`, which is true. Settle first, from Fiasco's source, whether the count includes the idle
-  stretch in progress and the interrupts taken while idle, and its unit (unverified); then convert it to
-  nanoseconds, set the bit, add `CONFIG_FINE_GRAINED_CPUTIME` to `FiascoConfig::REQUIRED` (a tick-charged count
-  would be a wrong answer), and change `test/fixtures/object_info_driver.c` and `production_image_test.rb`, which
-  expect a CPU to report nothing.
+  The one-shot kernel's fine-grained CPU time charges a context only when it is switched away from
+  (`fiasco/kernel/src/kern/context.cpp:1131-1142`, microseconds), and `l4_scheduler_idle_time` returns the idle
+  context's count without bringing it up to date (`Scheduler::op_sched_idle`, `kern/scheduler.cpp:125-133`), so a
+  CPU that stays idle reads a count that does not grow, and the count includes the interrupts taken while idle.
+  Reporting it needs a Fiasco patch that updates the target CPU's idle context first, by a request to that CPU as
+  `sys_thread_stats` does for a thread (`kern/thread_object.cpp:766-796`), added to design-fiasco.md's patch list;
+  then set the bit, add `CONFIG_FINE_GRAINED_CPUTIME` to `FiascoConfig::REQUIRED`, and change
+  `test/fixtures/object_info_driver.c` and `production_image_test.rb`, which expect a CPU to report nothing.
 * [Low] Fiasco backend, Fiasco's `Ipc_gate_obj::unblock_all`, `fiasco/kernel/src/kern/ipc_gate.cpp:142-166`: the gate dequeues
   a blocked sender and activates it afterwards, the race `Semaphore` closes with `Thread_sem_woken`, so a timed send can
   return first and the activation land in what the thread blocks in next. The root's one gate is created bound
