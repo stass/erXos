@@ -66,9 +66,11 @@ module Erx
     # the null device. A writer is a callable that receives the write end of a
     # pipe to the command, on a thread of its own; the pipe closes when the writer
     # returns or the command ends, and a command that stops reading is no failure,
-    # as in a shell pipeline. A writer that fails raises Error once the command is
-    # cleaned up. The command writes standard output to stdout, a path it creates owner-only
-    # or truncates, or to the log with its standard error. The command
+    # as in a shell pipeline. A writer still running when the command ends, or when
+    # the success or cancelled predicate ends the run, is killed where it stands. A
+    # writer that fails raises Error once the command is cleaned up, ahead of the
+    # command's own failure; the command meanwhile reads end of file. The command writes standard output to stdout, a path
+    # it creates owner-only or truncates, or to the log with its standard error. The command
     # inherits this process's environment with env applied, or with clear_env
     # only env, which must then name PATH for the command to be found.
     def run(argv, name:, deadline:, chdir: Dir.pwd, env: {}, clear_env: false, success: nil, cancelled: nil,
@@ -135,10 +137,10 @@ module Erx
         raise Error, "missing tool or working directory: #{error.message}"
       ensure
         original_error = $!
-        feed_error = stop_feed(feed, reader, sink)
         begin
           record['state'] = 'cancelled' if record['state'] == 'running'
           ProcessGroup.terminate(pid) if pid
+          feed_error = stop_feed(feed, reader, sink)
           record['elapsed_seconds'] = monotonic - started
           record['exit_status'] = status&.exitstatus
           record['signal'] = status&.termsig
@@ -150,7 +152,7 @@ module Erx
         end
       end
 
-      raise Error, "standard input writer failed: #{feed_error.message}" if feed_error
+      raise Error, "standard input writer failed: #{feed_error.class}: #{feed_error.message}" if feed_error
       raise CommandError, record unless record['state'] == 'succeeded'
 
       record
@@ -163,26 +165,30 @@ module Erx
     end
 
     # The writer runs on its own thread, so a writer that waits (a typed session
-    # with pauses) leaves the deadline and the child's end to the caller's loop.
+    # with pauses) leaves the deadline and the child's end to run's poll loop.
+    # The thread's value is the error that ended the writer, or nil. Any Exception
+    # is kept, so that a writer that calls exit or raises a ScriptError cannot
+    # skip run's cleanup when the thread is collected.
     def start_feed(writer, sink)
       Thread.new do
         Thread.current.report_on_exception = false
         writer.call(sink)
+        nil
       rescue Errno::EPIPE
         nil
+      rescue Exception => error
+        error
       ensure
         sink.close unless sink.closed?
       end
     end
 
-    # Ends the writer and returns the error it died of, or nil. Run on the way
-    # out whatever happened, so no writer outlives its command or holds a pipe.
+    # Ends the writer after the command's group is gone, closes the pipe ends
+    # that spawn and the writer left open (the writer never ran if spawn failed),
+    # and returns the writer's error or nil.
     def stop_feed(feed, *pipes)
       feed&.kill
-      feed&.join
-      nil
-    rescue StandardError => error
-      error
+      feed&.value
     ensure
       pipes.each { |pipe| pipe.close if pipe && !pipe.closed? }
     end
