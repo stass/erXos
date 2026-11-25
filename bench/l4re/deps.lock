@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "l4re-mk",
+      "kind": "git",
+      "version": "b6a12946bfafd1f69f8fe71701b9b2506707cea1",
+      "url": "https://github.com/L4Re/mk.git",
+      "commit": "b6a12946bfafd1f69f8fe71701b9b2506707cea1",
+      "sha256": "e1bf0212338a59e93f6543ab100a7e39402df62eeb35867316013612ac703732",
+      "directory": "l4re-mk-b6a1294",
+      "license": "unverified; copyleft for parts of L4Re",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-core",
+      "kind": "git",
+      "version": "e681d70502977080b9bed2aa96bbfcfc6dd0ef26",
+      "url": "https://github.com/L4Re/l4re-core.git",
+      "commit": "e681d70502977080b9bed2aa96bbfcfc6dd0ef26",
+      "sha256": "9bd98d6b2aad46e79c71ad3e966181a7c77f39dd8a5c93b9b85bbaf57f3b9e93",
+      "directory": "l4re-core-e681d70",
+      "license": "unverified; copyleft for parts of L4Re",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-bootstrap",
+      "kind": "git",
+      "version": "6e4a92d040cac17d74b4359e750bb5740e4d3c0a",
+      "url": "https://github.com/L4Re/bootstrap.git",
+      "commit": "6e4a92d040cac17d74b4359e750bb5740e4d3c0a",
+      "sha256": "7a0fd4617b5ec4ad910c3870a27cb81b6760c5b3d734748a0edadf73e32cb942",
+      "directory": "l4re-bootstrap-6e4a92d",
+      "license": "unverified; copyleft for parts of L4Re",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-libfdt",
+      "kind": "git",
+      "version": "5756062b7067dd831b0ef7a7f841a3f63a8b8a22",
+      "url": "https://github.com/L4Re/libfdt.git",
+      "commit": "5756062b7067dd831b0ef7a7f841a3f63a8b8a22",
+      "sha256": "e4f637ae5f6e80239576809743b93c4401c3a90fbca92039721952ca30dedfc3",
+      "directory": "l4re-libfdt-5756062",
+      "license": "unverified; copyleft for parts of L4Re",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-drivers-frst",
+      "kind": "git",
+      "version": "6459d70997da1a2ad97775c8772b4a41284b0a9e",
+      "url": "https://github.com/L4Re/drivers-frst.git",
+      "commit": "6459d70997da1a2ad97775c8772b4a41284b0a9e",
+      "sha256": "3b4c8bcfe99409e7c741e3070828c05b3ebc6346aafe69df0a48be3b36e377d2",
+      "directory": "l4re-drivers-frst-6459d70",
+      "license": "unverified; copyleft for parts of L4Re",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-fiasco",
+      "kind": "git",
+      "version": "50bbe8a981199e17865e8553a4eb02c387b339cf",
+      "url": "https://github.com/L4Re/fiasco.git",
+      "commit": "50bbe8a981199e17865e8553a4eb02c387b339cf",
+      "sha256": "b615afa0f35aba59a9cbbe59d696019be8c63fcf445e1ee997d33c7ae2e85eb2",
+      "directory": "l4re-fiasco-50bbe8a",
+      "license": "MIT, except GPL and LGPL files, among them jdb_object.cpp and kobject_rpc.h",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-ipcbench",
+      "kind": "git",
+      "version": "148682322103a984ddf84eb1a28e67a3d50c0b28",
+      "url": "https://github.com/l4re/ipcbench.git",
+      "commit": "148682322103a984ddf84eb1a28e67a3d50c0b28",
+      "sha256": "77683a39737b79d6991b7ae6c429d37dc9c2c49419f000db6f3d64ad11dad9e4",
+      "directory": "l4re-ipcbench-1486823",
+      "license": "MIT where stated; measure.h and the build files unmarked",
+      "status": "permanent"
+    }
+  ]
+}

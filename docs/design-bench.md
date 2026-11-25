@@ -1449,9 +1449,14 @@ commits each was at on that revision's commit date; and ipcbench
 `148682322103a984ddf84eb1a28e67a3d50c0b28`, the commit its facts record
 read, its last commit before the commit date of the fork's revision
 `50bbe8a9`; a later revision re-checks that ipcbench has no newer commit
-before its date. Each is a `git` source in `deps.lock`, fetched by the fetch step
-into its own directory under the build tree, laid out at the paths
-L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
+before its date. Each is a `git` source pinned by its commit and the
+SHA-256 of git's tar of that commit, in L4Re's own lock,
+`bench/l4re/deps.lock`, in `deps.lock`'s form. Only `tools/erx fetch
+--l4re` reads it, as only `--example` fetches an example: a default
+fetch does not clone L4Re, and a `--cache` fetch does not need it. That
+fetch publishes each tree under `build/l4re-sources`, a root of its own
+(`tools/lib/erx/l4re_fetch.rb`), and the container build mounts each at
+the path L4Re's manifest (`github.com/L4Re/manifest`, `default.xml`) gives them:
 `l4` for `mk`, `l4/pkg/<name>` for packages, `fiasco` for the kernel,
 and `l4/pkg/ipcbench` for ipcbench. Which of the manifest's packages
 the build needs beyond `mk`, `l4re-core`, `bootstrap`, `libfdt` and
@@ -1469,8 +1474,8 @@ with their notice. The unmarked files grant nothing in writing, so
 erXos redistributes neither them nor anything built from them: ipcbench
 is fetched, built out of the tree and run inside a guest, a test tool
 that is never shipped, as the dependency rules allow for a tool of any
-license. Whether that footing is enough for the unmarked files is an
-[open decision](#open-decisions-of-the-comparison). Because `measure.h`
+license. Building and running the unmarked files on that footing, as a
+test tool that is never shipped or redistributed, is accepted. Because `measure.h`
 holds the counter reads and the iteration count, erXos's agents read
 ipcbench only through a facts record written by a separate agent that
 alone read its source; the importer and the counterpart lines are written
@@ -1597,13 +1602,6 @@ is recorded, never corrected:
   compare L4Re on the board, rather than write an erXos program for
   L4Re, which would need L4Re's headers that the clean room keeps
   closed.
-* **ipcbench's unmarked files.** `measure.h` and the build files state no
-  license, so the permission to build and run them rests on their being
-  published in L4Re's own benchmark repository beside MIT sources, not on
-  a grant. Recommendation: accept building and running them as an
-  out-of-tree test tool that is never shipped or redistributed, and ask
-  L4Re's maintainers to add their SPDX line; if not accepted, L4Re's rows
-  are `none` until they do.
 * **L4Re's compiler.** The container that keeps L4Re's build off the host
   and offline has gcc, not erXos's clang, so L4Re's Fiasco and erXos's
   fork come from different compilers. Building on the host with clang,

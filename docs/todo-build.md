@@ -181,19 +181,17 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   chosen by the boot, compiled by the host's stock `erlc`; the `ERX_ORACLE` identity check. Needs the xdomain bench
   module and the Linux guest's boot step landed. Tests: Linux's Erlang guest, with its record read back.
 * [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): the importer
-  (`tools/lib/erx/ipcbench.rb`, fuzz target `tools/fuzz/ipcbench_line.rb`) and the guest on the `BenchSystem` seam
+  (`tools/lib/erx/ipcbench.rb`, fuzz target `tools/fuzz/ipcbench_line.rb`), the guest on the `BenchSystem` seam
   (`tools/lib/erx/l4re_bench.rb`, which refuses a session until `build/l4re/bootstrap.elf` and its build record
-  exist) are built. Remaining: L4Re's repositories at the manifest's paths, resolved to the exact closure the first
-  build names, upstream Fiasco at `fiasco/kernel/ORIGIN.md`'s revision and ipcbench `14868232`, each a `git` source
-  in `deps.lock` with its commit, fetched on demand, since a default fetch and a `--cache` fetch would otherwise
-  clone or miss them (manifest `5ff21e46` resolves, on `50bbe8a9`'s commit date, `mk` `b6a12946`, `l4re-core`
-  `e681d705`, `bootstrap` `6e4a92d0`, `libfdt` `5756062b`, `drivers-frst` `6459d709`); the build in the oracle's
-  offline container with L4Re's own make, the image's gcc and `config/fiasco/kernel.defconfig`, `bootstrap.elf` and
-  `globalconfig.out` exported and the build record (pins, hashes, resolved configuration, toolchain, boot arguments)
-  written beside them as the guest reads it; the first boot, which pins the log tag's separator in
-  `Ipcbench::TAGGED` and shows how ipcbench fails if HVF hides the cycle counter, for the importer's `unsupported`
-  rule; and L4Re's counterparts in the `nullcall` declaration, which waits on that package. Waits on the open
-  decision on ipcbench's unmarked files. Tests: L4Re's container build, with its record read back.
+  exist), the on-demand fetch of L4Re's lock (`tools/erx fetch --l4re`, `bench/l4re/deps.lock`) and L4Re's
+  counterparts in the `nullcall` declaration are built. Remaining: the build in the oracle's offline container
+  with L4Re's own make, the image's gcc and `config/fiasco/kernel.defconfig`, each fetched tree mounted read-only
+  at `L4ReFetch::LAYOUT`'s path, `bootstrap.elf` and `globalconfig.out` exported and the build record (pins,
+  hashes, resolved configuration, toolchain, boot arguments, `bootstrap_sha256`) written beside them as the guest
+  reads it; the lock's package closure, which the first build names (`mk`, `l4re-core`, `bootstrap`, `libfdt`,
+  `drivers-frst`, Fiasco and ipcbench are pinned); and the first boot, which pins the log tag's separator in
+  `Ipcbench::TAGGED` and shows how ipcbench fails if HVF hides the cycle counter, for the importer's
+  `unsupported` rule. Tests: L4Re's container build, with its record read back.
 
 ## Stopgap replacements
 

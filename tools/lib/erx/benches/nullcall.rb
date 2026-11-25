@@ -13,12 +13,20 @@ require_relative '../bench_suite'
 operation = Erx::BenchSuite::Operation
 cell = Erx::BenchSuite::LandingCell
 refused = "ERX_EINVAL, and the caller's count of refusals rises by each call (erx_fiasco_test_refused)"
+# What L4Re runs, ipcbench's programs (docs/design-bench.md, "Counterparts"), read through
+# its facts record; Erx::Ipcbench reads their lines.
 Erx::BenchSuite.declare_benchmark(
   operations: [
-    operation.new(name: 'root-same-space', profile: 'fast', result: refused),
-    operation.new(name: 'root-cross-space', profile: 'fast', result: refused),
+    operation.new(name: 'root-same-space', profile: 'fast', result: refused,
+                  counterparts: { 'l4re' => 'ipcbench: two threads of one task; a blocking call with an empty message ' \
+                                          'to a responder already waiting in reply-and-wait' }),
+    operation.new(name: 'root-cross-space', profile: 'fast', result: refused,
+                  counterparts: { 'l4re' => 'ipcclient and ipcserver: a blocking call with an empty message ' \
+                                          'between two tasks, the responder waiting in reply-and-wait' }),
     operation.new(name: 'kernel', profile: 'fast',
-                  result: "an IPC call to the empty slot 0 answers Fiasco's L4_IPC_ENOT_EXISTENT")
+                  result: "an IPC call to the empty slot 0 answers Fiasco's L4_IPC_ENOT_EXISTENT",
+                  counterparts: { 'l4re' => "syscallbench: an IPC call to the caller's own thread capability " \
+                                          'whose thread-control operation returns early' })
   ],
   landing: {
     'native' => [
