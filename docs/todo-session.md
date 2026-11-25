@@ -388,6 +388,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   admitted grantee and a live job, with an admission that never drops them. `open_job` and the four messages stay
   out of `tty_line`'s interface until then.
 
+* [Low] files, the facet row parameter `tree` (`files_tree`, `abi/services/files.txt`): it picks where a grant
+  is rooted within its service (`installed`, `home`, an app's directory), while a tree is the numbering a server
+  draws qid paths from (docs/design-files.md, "The tree beneath an entry"), so one word names two things. Rename the
+  parameter and its enum to `root` (`files_root`) in `abi/services/files.txt`, the manifest check's `files_grant`
+  and the design documents that cite it.
+
 ## Security residuals
 
 * [Low] SSH, root's login keys on the medium (development builds, before the vault;

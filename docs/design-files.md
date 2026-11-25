@@ -1317,10 +1317,12 @@ reader answers its walks and link reads as a grant does, and the release
 file system holds no links. A link that lies in a tree reached through
 a provider marked `nofollow` is never followed. The provider
 `{facets, svc}`, through which a session reaches an app's tree, always
-carries the mark, and so does the provider of a facet named `media`,
-through which a session reaches a drive's volumes, which the
-resolution of a table derives from the facet's name, and from a
-grant's tree of that name, never from a mount's options
+carries the mark, and so does the provider of every facet the
+registry holds as one of the `media` interface, through which a session
+reaches a drive's volumes, which the resolution of a table derives from
+the facet's interface number, as it decides the `windows` exclusion
+([Narrowing for a program](#narrowing-for-a-program)), never from a
+name, a tree or a mount's options
 ([design-drives.md](design-drives.md#links-and-rights)). Such a link is never followed: where the resolver would
 follow it, it answers `eacces`, as FreeBSD's `vfs_lookup` answers on a
 `nosymfollow` mount, and an operation that acts on the link itself acts

@@ -344,9 +344,9 @@ handles and its `code_objects_max` copies fit its handle table (`BOOT_CAP_LIMIT`
   sharing their offsets, where `start/1` takes pipe ends and buffers only (`docs/design-programs.md`, "A session
   process's program"; `erlang/apps/erx/src/erx_prog_handler.erl:19-30, 86-93`). Design the form in design-programs
   and design-shell. It must keep `docs/design-files.md`'s rule that every description a program holds was opened
-  through a program's table, so that nothing on a window tree enters a program ("A program's window"): for example
-  a description the program's handler opens through the program's own table for the starter, or one whose tree,
-  part of its identity, the handler refuses when it is `windows`.
+  through a program's table, so that no description on a facet of the `windows` interface enters a program
+  ("Narrowing for a program"): for example a description the program's handler opens through the program's own
+  table, `erx_facets:program_table/1`, for the starter.
 * [Medium] shell and programs, finding a tty's relay ([design-shell.md](design-shell.md#the-terminal-relays-protocol)):
   a relay other than the domain's line's holds no name, and no design names how a program's handler, a
   command domain's stream relay or `erx_cmd` finds the relay of the tty its job runs on. Suggested home:
@@ -426,8 +426,8 @@ to the corpus and follow rc
   processes of its starter hold, writing to the shell's terminal, Erlang stage, file or nothing, and
   feeding it from a stage or a file. docs/design-shell.md ("Starting programs") passes a redirection's
   open file itself, sharing its offset, and opens `/dev/tty` for the terminal, which the terminal relay
-  serves; that needs a form of `erx_prog_handler:start/1` for an open file (keeping the rule that nothing
-  on a window tree enters a program) and the relay's tty readers. Until then a redirected program sees a
+  serves; that needs a form of `erx_prog_handler:start/1` for an open file (keeping the rule that no
+  description on a facet of the `windows` interface enters a program) and the relay's tty readers. Until then a redirected program sees a
   pipe (no `lseek`, `isatty` false), its standard output and error reach the terminal through two pumps
   whose order between them is not kept, a program reading standard input from the terminal reads its
   end at once, and the shell's `kill` of a job reaches its programs as their starter's end, `sigkill`.

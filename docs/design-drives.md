@@ -351,9 +351,10 @@ updating or loading code from a drive.
   the interface `drive`, one grant of it for each drive window row, its
   mint, its facet and the facet's window proxy ([How the grant reaches the media
   domain](#how-the-grant-reaches-the-media-domain)); one service, `media`,
-  with its durability facet, its mount point in `erx_ns`'s table of
-  facets, and its `nofollow` mark, which the resolution of a table
-  derives (`erx_facets:table/1`); the decoder's source entry, `erx_erofs:mount_source/2`; the
+  with its durability facet and its mount point in `erx_ns`'s table of
+  facets; the interface `media`, whose facets' entries carry the
+  `nofollow` mark, which the resolution of a table derives from the
+  facet's interface number (`erx_facets:table/1`); the decoder's source entry, `erx_erofs:mount_source/2`; the
   probe's table, `abi/formats/probe.txt`, and beside it two limits,
   `media_volumes_max`, 8, and `media_volume_bytes`, 2 MiB; one statfs type, `media`; the
   argument forms of the shell's `mount` and `umount`; and the modules of
@@ -801,7 +802,10 @@ The manifest check refuses:
   drive record, and a row naming a block drive's holder that the
   holder's list does not admit;
 * more drives on one USB domain's controllers than `usb_drives_max`;
-* a `media` facet row with rights `rx`;
+* a `media` service row of an interface other than `media`, whose
+  links a grantee would follow; a `media` facet row with rights `rx` is
+  refused as every row's parameters are, since the interface's rights
+  lack `rx`;
 * a `service` row or a `facet` row of the interface `drive`, whose only
   grants are the drive windows, and a `service` row named `drive`, the
   service of every drive window's grant record.
@@ -1354,34 +1358,56 @@ follows none in an app's tree: where it would follow one, it answers
 `eacces`, as FreeBSD's `nosymfollow` mount does, and an operation on the
 link itself acts on it
 ([design-app-trees.md](design-app-trees.md#links)). The rule belongs to
-the tree: the mark is derived where the table is resolved, at each
-resolution, by `erx_facets:table/1`, from names alone: every entry
-whose provider names the facet `media`, and every entry on a grant
-whose tree, which comes with the grant from its server, is named
-`media`, carries it, whether or not the registry holds the facet. It is
-stored in no table and taken from no option a mount names, so it is
-not one of the options `place/1` gives `media` with its mount point,
-and no writer of a table has to keep it. Every mount of a `media`
-facet therefore carries the mark, wherever it is mounted and whatever
-options it names, and so do every bind of `/media` or of a volume
-under it, every program's table that takes its entries, and a mount of
-a media grant by its pid, as `erx_ns:mount_own(media, _)` makes. The
+the grant's interface. `abi/services` declares `media` as an interface
+of its own, served as a tree that speaks 9P2000.L as `files` does, with
+`files`'s quantities and one parameter, its rights, `ro` or `rw`: a
+client's contract with a grant of it differs from a `files` grant's in
+that its links are a stranger's and are never followed. The `media`
+service row of the manifest names that interface. The one fact that
+decides the mark is then the one that keeps a display from programs
+([design-files.md](design-files.md#narrowing-for-a-program)): every
+facet a domain's registry holds carries its service's interface number,
+which the domain service sets and no server's reply does, from the
+manifest's row for a facet of the ready answer or of an installation,
+and from the live grant record of its source for a facet
+`erx_domain:grant/4` installs. `erx_facets:table/1`, and
+`erx_facets:program_table/1` with it, gives every entry whose facet the
+registry holds as one of the `media` interface the mark, at each
+resolution. So the mark follows no name: not the facet's, which
+`grant/4` may choose freely, and not the grant's tree, which its server
+names and which keys identities alone. It is stored in no table and
+taken from no option a mount names, so no writer of a table has to keep
+it, and it holds by construction for every order of events:
+
+* a `media` grant installed or re-granted under any name, mounted at any
+  point and bound anywhere, carries the mark, since a bind keeps its
+  source's provider and the name's interface comes with its grant;
+* an entry mounted before its facet is installed resolves to `ended`
+  until the installation, and carries the mark from then on;
+* a program's table that takes such an entry keeps the mark, since
+  `program_table/1` differs from `table/1` only in leaving out the
+  `windows` interface.
+
+A grant of another domain is never mounted by pid
+([design-files.md](design-files.md#building-binding-and-mounting)), so
+outside the media domain every entry on a media grant is a facet's
+entry, and the media domain mounts no grant of its own tree. The
 resolver keeps one rule, to follow no link in a tree whose provider
 carries the mark
 ([design-files.md](design-files.md#building-binding-and-mounting)). A
 drive is a stranger's bytes: a link there to `/root/.ssh/authorized_keys`
-must not make a copy onto the stick write root's keys. No `media` grant
-is `rx`, so nothing runs from a drive; a program on a stick is copied
-off and run from where its user may run it.
+must not make a copy onto the stick write root's keys. The interface's
+rights admit no `rx`, so no `media` grant runs code and nothing runs
+from a drive; a program on a stick is copied off and run from where its
+user may run it.
 
-The mark lies in the namespace because the namespace alone can apply it.
-`abi/services` declares interfaces, and `media` is an instance of
-`files`, whose other instances follow links. A mark on the manifest's
-`media` service row would need a field the service row lacks and a path
-that carries it to every grantee's runtime, which learns its facets by
-name alone (`erx:caps/0`, `erx:granted/0`). The manifest check's entry
-for the well-known service `media` is the build's and never reaches a
-runtime.
+The mark lies with the interface because only the domain service, which
+holds the manifest and every grant record, can attach a fact to a facet
+that reaches every grantee's runtime and that no server, name or mount
+can change. An interface of its own costs one declaration in
+`abi/services` and no field, message or table: the interface number
+already travels with every facet, in the ready answer's map and in each
+installation.
 
 The tree is one grant over many volumes, so the media tree keeps apart
 what the namespace's own `exdev` rule cannot see: a rename or a link
@@ -1647,6 +1673,7 @@ so a pass shows the code under test ran.
 
 | Test | Seeded fault that must fail it |
 | --- | --- |
+| links on a media grant (DR-R6), each followed by a session and by a program it started: a link on a volume read through `/media`, through a bind of a volume at `/mnt`, and through the media facet installed by `erx_domain:grant/4` under the name `stick` and mounted at `/n`, each answering `eacces` where it would be followed and `readlink` answering its text; a stand-in `files` server whose `root` names its tree `media`, whose links are followed | the mark derived from the facet's name or the grant's tree (the grant under `stick`, which then follows the link, and the stand-in, which then refuses it); the mark derived from the interface by `table/1` alone (the program, which then follows the link) |
 | `erx_media_table` over written cases of each rule: an MBR with one and with four entries; a FAT boot sector with zero entries and a plausible BPB, read as no table; a boot sector whose status bytes are not 0 or `0x80`, read as no table; entries of type `0x00` and of start or length 0 skipped; an extended entry listed and not served; an entry past the end, one that runs backwards and two overlapping entries, each refusing the table, the overlap in both orders | the status-byte test dropped, so a boot sector with code is read as a table; the overlap check made order-dependent, so the second order passes; the backwards check dropped |
 | the GPT cases: a GPT behind its protective entry; a primary header that fails its signature, its CRC, its usable area's bounds, an area past the medium's end among them, and its array's bounds in turn, each read from the backup at the last sector; a primary header that passes over an array that fails its CRC, read from the backup at the primary's alternate sector, which is not the last; both copies failing, refused and never read as an MBR or as no table; a signed sector 0 with an `0xEE` entry and a status byte neither `0x00` nor `0x80` over an otherwise mountable FAT boot sector, refused and never mounted whole; an array of 17 KiB; nine used entries, eight served; a primary array that starts at sector 0, one that starts and one that ends inside the usable area, each read from the backup, and one that ends on the last sector, where the backup header is then read, refused; both arrays inside their usable areas, refused `gpt header`; a usable area that meets a header, the other copy's array, and an array that encloses the usable area, each refused `gpt metadata` | a missing primary signature taken as no GPT, so the medium falls back to no table; the status-byte test made before the `0xEE` test, so the protective sector's FAT mounts whole; the usable area's bounds dropped, so the primary whose area lies past the end is taken and the backup never read; the backup read at the last sector after a passing header, so the alternate copy is missed; the array compared by its ends alone, so the enclosing array passes; the other copy's array left out of the metadata set; the array bound removed; the array's place bounded by the medium alone, so the array at sector 0 is taken |
 | the table as a property test: for every MBR and GPT the generator writes, the served volumes lie inside the medium, pairwise apart and apart from every metadata sector, and `place/3` never answers a sector outside its volume | the end check written `<` for `=<` |

@@ -588,8 +588,8 @@ violation fails the build with the property, the record and the field:
     Seeded violation: two grants of one network domain listing the same
     port below 1,024.
 16. **Every receiver of `files`, of `inspect` and of `code` takes its frames:** for each facet of an
-    interface `abi/services` declares `served_as tree` (`files`, `windows`
-    and `line`), compared by number, the
+    interface `abi/services` declares `served_as tree` (`files`, `media`,
+    `windows` and `line`), compared by number, the
     grantee (the system domain under the machine's system runtime limits, a
     configured domain or a session template) and the service's server
     each run with a `max_frame` of at least `files_max_frame_min`, 128 KiB:
