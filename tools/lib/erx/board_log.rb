@@ -37,8 +37,9 @@ module Erx
     UNSEEN = 'the end of its boot was not seen'
 
     # A line the reader keeps, an edge or a guest line, with the byte offset just past its
-    # line end. kind is :naming (name nil when broken), :banner, :end or :guest; text is
-    # kept for a banner and a guest line.
+    # line end. kind is :naming (name nil when broken), :banner, :end or :guest; form is a
+    # naming line's done or deadline, or how the machine ended; text is kept for a banner
+    # and a guest line.
     Kept = Data.define(:kind, :stop, :name, :form, :text)
     # What the log holds of one queued boot name: the indexes in the kept lines of its
     # naming lines, their end forms, its guest lines, and whether it booted twice.
@@ -88,12 +89,14 @@ module Erx
       end
     end
 
+    # The Kept line of text, a log line without its end, whose bytes end at stop, or nil
+    # for a line the reader does not keep; the walk reads the console's lines through it too.
     def classify(text, stop)
       if NativeBench::NAMING_HEAD.match?(text)
         found = NativeBench::NAMING_LINE.match(text)
         Kept.new(kind: :naming, stop: stop, name: found&.[](:name), form: found&.[](:form), text: nil)
       elsif BANNER.match?(text) then Kept.new(kind: :banner, stop: stop, name: nil, form: nil, text: text)
-      elsif NativeBench::MACHINE_END_LINE.match?(text) then Kept.new(kind: :end, stop: stop, name: nil, form: nil, text: nil)
+      elsif (ending = NativeBench::MACHINE_END_LINE.match(text)) then Kept.new(kind: :end, stop: stop, name: nil, form: ending[:how], text: nil)
       elsif NativeBench::GUEST_LINE.match?(text) then Kept.new(kind: :guest, stop: stop, name: nil, form: nil, text: text)
       end
     end
@@ -180,6 +183,6 @@ module Erx
       BoardFiles::Returned.new(status: 'unexpected', identity: identity)
     end
 
-    private_class_method :kept, :classify, :named, :stop, :boot, :not_run, :returned
+    private_class_method :kept, :named, :stop, :boot, :not_run, :returned
   end
 end
