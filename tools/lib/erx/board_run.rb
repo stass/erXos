@@ -18,6 +18,7 @@ require_relative 'line_escape'
 require_relative 'native_bench'
 require_relative 'netboot'
 require_relative 'netboot_entry'
+require_relative 'output_directory'
 
 module Erx
   # A board run's walk (docs/design-bench.md, "The walk"): `tools/erx bench NAME --env
@@ -243,9 +244,10 @@ module Erx
       true
     end
 
+    # A fresh directory for the run's files under the tree's build/bench-board, whose path
+    # OutputDirectory checks, so a link on it cannot send the log elsewhere.
     def run_directory(benchmark)
-      parent = File.join(@root, NativeBench::BoardSets::DIRECTORY)
-      FileUtils.mkdir_p(parent)
+      parent = OutputDirectory.prepare(root: @root, path: NativeBench::BoardSets::DIRECTORY)
       directory = File.join(parent, "#{benchmark}-walk-#{Time.now.utc.strftime('%Y%m%dT%H%M%SZ')}-#{SecureRandom.hex(2)}")
       Dir.mkdir(directory, 0o755)
       directory

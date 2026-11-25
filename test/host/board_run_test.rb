@@ -182,6 +182,15 @@ class BoardRunTest < Minitest::Test
     assert_equal File.basename(@found), File.readlink(@link)
   end
 
+  def test_a_run_directory_whose_path_crosses_a_link_is_refused_and_the_queue_removed
+    elsewhere = File.join(@directory, 'elsewhere')
+    Dir.mkdir(elsewhere)
+    File.symlink(elsewhere, File.join(@root, 'build'))
+    error = assert_raises(Erx::Error) { walk_board }
+    assert_match(/symbolic link/, error.message)
+    assert_equal [[], File.basename(@found), false], [Dir.children(elsewhere), File.readlink(@link), Dir.exist?("#{@link}.ffeeddccbbaa9988")]
+  end
+
   def test_runs_below_one_are_refused
     assert_raises(Erx::Error) { walk_board(runs: 0) }
   end
