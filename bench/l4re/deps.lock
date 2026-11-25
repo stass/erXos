@@ -77,6 +77,26 @@
       "directory": "l4re-ipcbench-1486823",
       "license": "MIT where stated; measure.h and the build files unmarked",
       "status": "permanent"
+    },
+    {
+      "id": "l4re-tool-flex",
+      "kind": "file",
+      "version": "2.6.4-8.2",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/f/flex/flex_2.6.4-8.2_arm64.deb",
+      "sha256": "e457c7052b77de6526b417387d676b63e1b51d4be36be255cf868b2a3c8f23ed",
+      "filename": "flex_arm64.deb",
+      "license": "FLEX (BSD-style), per the package's copyright file; a build tool run only in the container",
+      "status": "permanent"
+    },
+    {
+      "id": "l4re-tool-bison",
+      "kind": "file",
+      "version": "2:3.8.2+dfsg-1+b1",
+      "url": "https://snapshot.debian.org/archive/debian/20261120T000000Z/pool/main/b/bison/bison_3.8.2+dfsg-1+b1_arm64.deb",
+      "sha256": "00301cacacd98f2bece7cfc1d2eaf133596bfba4c5fd89d6bf5f8c3d51d62755",
+      "filename": "bison_arm64.deb",
+      "license": "GPL-3.0-or-later, per the package's copyright file; a build tool run only in the container",
+      "status": "permanent"
     }
   ]
 }

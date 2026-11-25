@@ -46,6 +46,15 @@ class L4ReFetchTest < Minitest::Test
       'sha256' => sha256, 'directory' => directory, 'license' => 'MIT', 'status' => 'permanent' }
   end
 
+  # A Debian package source named filename whose bytes the cache holds.
+  def package(id, filename: "#{id}_arm64.deb")
+    bytes = "#{id} package\n"
+    sha256 = Digest::SHA256.hexdigest(bytes)
+    File.write(File.join(@cache, "#{id}-#{sha256}.deb"), bytes)
+    { 'id' => id, 'kind' => 'file', 'version' => '1.0-1', 'url' => "https://example.org/#{filename}", 'sha256' => sha256,
+      'filename' => filename, 'license' => 'MIT', 'status' => 'permanent' }
+  end
+
   def write_lock(sources) = File.write(File.join(@root, Erx::L4ReFetch::LOCK), JSON.generate('version' => 1, 'sources' => sources))
 
   def fetch = Erx::L4ReFetch.fetch(root: @root, runner: @runner, cache: @cache)
@@ -77,6 +86,18 @@ class L4ReFetchTest < Minitest::Test
     assert_match(/pins git sources/, assert_raises(Erx::Error) { fetch }.message)
   end
 
+  # The build's tools beyond the image come as Debian arm64 packages, fetched beside the
+  # trees; any other file is refused, so the lock cannot carry something the build does
+  # not unpack.
+  def test_tool_packages_are_fetched_beside_the_trees_and_nothing_else_is
+    write_lock([*Erx::L4ReFetch::LAYOUT.keys.map { |id| source(id) }, package('l4re-tool-flex')])
+    assert_equal Erx::L4ReFetch::LAYOUT.size + 1, fetch.size
+    packages = Erx::L4ReFetch.packages(Erx::L4ReFetch.lock(root: @root, runner: @runner))
+    assert_equal ["l4re-tool-flex package\n"], packages.map { |file| File.read(file) }
+    write_lock([*Erx::L4ReFetch::LAYOUT.keys.map { |id| source(id) }, package('l4re-tool-x', filename: 'x_amd64.deb')])
+    assert_match(/l4re-tool-x, which are neither/, assert_raises(Erx::Error) { fetch }.message)
+  end
+
   # Upstream Fiasco at another commit than the fork's would compare two revisions.
   def test_a_lock_pinning_upstream_fiasco_off_the_forks_revision_is_refused
     write_lock(Erx::L4ReFetch::LAYOUT.keys.map { |id| source(id) })
@@ -89,8 +110,9 @@ class L4ReFetchTest < Minitest::Test
   def test_the_checked_in_lock_is_l4res_own
     runner = Erx::Runner.new(owner_root: @directory, log_dir: File.join(@directory, 'logs'))
     pinned = Erx::L4ReFetch.lock(root: ROOT, runner: runner)
-    assert_equal Erx::L4ReFetch::LAYOUT.keys.sort, pinned.sources.map { |source| source.fetch('id') }.sort
+    trees = pinned.sources.select { |source| source.fetch('kind') == 'git' }
+    assert_equal Erx::L4ReFetch::LAYOUT.keys.sort, trees.map { |source| source.fetch('id') }.sort
     erxos = JSON.parse(File.read(File.join(ROOT, 'deps.lock'))).fetch('sources').map { |entry| entry.fetch('id') }
-    assert_empty erxos & Erx::L4ReFetch::LAYOUT.keys
+    assert_empty erxos & pinned.sources.map { |source| source.fetch('id') }
   end
 end

@@ -18,8 +18,9 @@ module Erx
   # fiasco/kernel/ORIGIN.md, which the lock must pin, so the fork's one pin moves both
   # kernels.
   #
-  # The trees are untrusted data: nothing of them runs on the host. L4Re's container
-  # build mounts each at the path L4Re's manifest gives it (LAYOUT).
+  # The trees and packages are untrusted data: nothing of them runs on the host. L4Re's
+  # container build (L4ReBuild) copies each tree in at the path L4Re's manifest gives it
+  # (LAYOUT), and each package beside them.
   module L4ReFetch
     LOCK = 'bench/l4re/deps.lock'
     WORKSPACE = 'build/l4re-sources'
@@ -28,6 +29,9 @@ module Erx
     LAYOUT = { 'l4re-mk' => 'l4', 'l4re-core' => 'l4/pkg/l4re-core', 'l4re-bootstrap' => 'l4/pkg/bootstrap',
                'l4re-libfdt' => 'l4/pkg/libfdt', 'l4re-drivers-frst' => 'l4/pkg/drivers-frst',
                'l4re-fiasco' => 'fiasco', 'l4re-ipcbench' => 'l4/pkg/ipcbench' }.freeze
+    # A tool package's file name: the package's name and arm64, the image's architecture (its
+    # version is the pin's own field).
+    PACKAGE = /\A[a-z0-9][a-z0-9.-]*_arm64\.deb\z/
 
     module_function
 
@@ -38,21 +42,29 @@ module Erx
       dependencies = lock(root: root, runner: runner)
       dependencies.fetch(cache: cache)
       dependencies.sources.map do |source|
-        tree = dependencies.fetched_tree(source.fetch('id')).delete_prefix("#{File.expand_path(root)}/")
-        "l4re: #{source.fetch('id')} #{source.fetch('commit')[0, 12]} fetched to #{tree}"
+        id = source.fetch('id')
+        git = source.fetch('kind') == 'git'
+        path = (git ? dependencies.fetched_tree(id) : dependencies.fetched_file(id)).delete_prefix("#{File.expand_path(root)}/")
+        "l4re: #{id} #{(git ? source.fetch('commit') : source.fetch('sha256'))[0, 12]} fetched to #{path}"
       end
     end
 
-    # The lock's sources over the workspace; refuses a lock that pins anything but git
-    # sources at exactly LAYOUT's ids, so the build mounts every tree it fetched, or that
-    # pins upstream Fiasco at another commit than the fork's. Its fetched_tree(id) is the
-    # tree LAYOUT places.
+    # The lock's sources over the workspace; refuses a lock whose git sources are not
+    # exactly LAYOUT's ids, so the build copies in every tree it fetched, whose other
+    # sources are not Debian arm64 packages (PACKAGE), or that pins upstream Fiasco at
+    # another commit than the fork's. Its fetched_tree(id) is the tree LAYOUT places.
     def lock(root:, runner:)
       dependencies = Dependencies.new(root: OutputDirectory.prepare(root: root, path: File.join(root, WORKSPACE)),
                                       runner: runner, lock_path: File.join(root, LOCK))
-      ids = dependencies.sources.map { |source| source.fetch('id') }
-      unless dependencies.sources.all? { |source| source.fetch('kind') == 'git' } && ids.sort == LAYOUT.keys.sort
-        raise Error, "#{LOCK} pins #{ids.join(', ')}; L4Re's lock pins git sources #{LAYOUT.keys.join(', ')}"
+      trees, others = dependencies.sources.partition { |source| source.fetch('kind') == 'git' }
+      ids = trees.map { |source| source.fetch('id') }
+      unless ids.sort == LAYOUT.keys.sort
+        raise Error, "#{LOCK} pins git sources #{ids.join(', ')}; L4Re's lock pins git sources #{LAYOUT.keys.join(', ')}"
+      end
+      strays = others.reject { |source| source.fetch('kind') == 'file' && PACKAGE.match?(source.fetch('filename')) }
+      unless strays.empty?
+        raise Error, "#{LOCK} pins #{strays.map { |source| source.fetch('id') }.join(', ')}, which are neither " \
+                     "L4Re's trees nor Debian arm64 packages"
       end
       fiasco = dependencies.sources.find { |source| source.fetch('id') == 'l4re-fiasco' }.fetch('commit')
       revision = fork_revision(root)
@@ -60,6 +72,14 @@ module Erx
         raise Error, "#{LOCK} pins upstream Fiasco at #{fiasco}, not the fork's revision #{revision} (#{ORIGIN})"
       end
       dependencies
+    end
+
+    # The fetched Debian packages of a lock, the build's tools beyond the image (flex and
+    # bison among them), which the container unpacks as its non-root user and never
+    # installs.
+    def packages(dependencies)
+      dependencies.sources.select { |source| source.fetch('kind') == 'file' }
+                  .map { |source| dependencies.fetched_file(source.fetch('id')) }
     end
 
     def fork_revision(root)
