@@ -828,7 +828,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--set DIR]... | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE [--runs N] [--profile landing|full] [--set DIR]... | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -1511,7 +1511,7 @@ module Erx
     end
 
     # tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST --key FILE
-    # [--runs N] [--profile full] [--set DIR ...] (docs/design-bench.md, "The walk"): every
+    # [--runs N] [--profile landing|full] [--set DIR ...] (docs/design-bench.md, "The walk"): every
     # refusal before anything is built, then the default set built (or each --set read) and
     # the walk (BoardRun). The environment is the board's for a benchmark with a native
     # bench guest, whose set BoardSets lays out.
@@ -1526,7 +1526,7 @@ module Erx
         flags.on('--ssh DEST') { |value| options[:ssh] = value }
         flags.on('--key FILE') { |value| options[:key] = value }
         flags.on('--runs N', Integer) { |value| options[:runs] = value }
-        flags.on('--profile NAME', %w[full]) { |value| options[:profile] = value }
+        flags.on('--profile NAME', %w[landing full]) { |value| options[:profile] = value }
         flags.on('--set DIR') { |value| options[:sets] << value }
       end.parse!(arguments)
       no_arguments(arguments)
@@ -1538,7 +1538,7 @@ module Erx
       missing = %i[console ssh key].reject { |option| options[option] }
       raise Error, "bench --env #{BoardRun::ENVIRONMENT} needs #{missing.map { |option| "--#{option}" }.join(', ')}" unless missing.empty?
       raise Error, 'bench: --runs is below 1' unless options[:runs].positive?
-      raise Error, 'bench: --profile full: the board sets are built only in the landing form' if options[:profile]
+      raise Error, 'bench: --profile full: the board sets are built only in the landing form' if options[:profile] == 'full'
 
       shell = BoardRun::Ssh.new(options[:ssh])
       NetbootEntry.signing_key(options[:key])

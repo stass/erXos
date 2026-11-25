@@ -195,6 +195,16 @@ class BoardRunTest < Minitest::Test
     assert_raises(Erx::Error) { walk_board(runs: 0) }
   end
 
+  # The board command takes --profile landing, the form its sets are built in, and refuses
+  # full by name, both before it reads the console, the key or anything else.
+  def test_the_board_command_takes_the_landing_profile_and_refuses_full_by_name
+    board = ->(*arguments) { Open3.capture2e('ruby', File.join(ROOT, 'tools/erx'), 'bench', 'nullcall', '--env', 'pi4-4gb-erxos', *arguments, stdin_data: '') }
+    landing, = board.call('--profile', 'landing')
+    full, = board.call('--console', '/dev/null', '--ssh', 'board', '--key', 'key', '--profile', 'full')
+    assert_match(/needs --console, --ssh, --key/, landing)
+    assert_match(/--profile full: the board sets are built only in the landing form/, full)
+  end
+
   def test_ssh_runs_an_argument_vector_in_batch_mode_and_refuses_a_destination_it_could_take_as_an_option
     ssh = Erx::BoardRun::Ssh.new('root@board')
     assert_equal [%w[ssh -o BatchMode=yes -T -- root@board reboot],
