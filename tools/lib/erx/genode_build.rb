@@ -43,10 +43,10 @@ module Erx
     BOARD = 'virt_qemu_arm_v8a'
     # The component's name: its target, its start node and its run script's.
     PROGRAM = 'erx_peer_bench'
-    # The files of erXos's tree the component's one C file includes, at their tree paths.
-    SOURCES = %w[bench/peer/erx_peer_bench.c test/guest/bench/bench_hist.c test/guest/bench/bench_clock.c
-                 test/guest/bench/bench_periodic.c test/guest/bench/bench_window.c
-                 test/guest/bench/bench_line.c].freeze
+    # What of erXos's tree the component's one C file includes, staged at its tree paths
+    # (the program's directory, the bench guest's helpers and the one liberx header they
+    # take), so its includes resolve as under the Linux guest's -I of the tree.
+    SOURCES = %w[bench/peer test/guest/bench liberx/backend/core/mem.h].freeze
     # The component's RAM: the posix rows' two 16 MiB files and untar's extraction live in
     # its /tmp, a file system in its memory.
     PROGRAM_RAM = '192M'
@@ -286,7 +286,7 @@ module Erx
       File.write(File.join(app, 'flags.mk'), "CC_OPT += #{PeerBench.flags.join(' ')}\n")
       SOURCES.each do |path|
         FileUtils.mkdir_p(File.join(app, 'root', File.dirname(path)))
-        FileUtils.copy_file(File.join(root, path), File.join(app, 'root', path))
+        FileUtils.cp_r(File.join(root, path), File.join(app, 'root', path))
       end
       File.write(File.join(inputs, 'repo/run', "#{PROGRAM}.run"), run_script(arguments: arguments))
       fetched.sources.select { |source| GenodeFetch::PORT.match?(source.fetch('id')) }.each do |source|
