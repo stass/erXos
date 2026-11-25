@@ -205,14 +205,12 @@ design does not have, to be deleted so no side-by-side table can show it under s
   64 committed pages and Linux unmaps pages never touched (fault them in during prepare, or call it the nearest
   counterpart); and the non-erXos build opens fixed `/tmp` names with `O_CREAT|O_TRUNC`, so on a shared host a
   planted symlink is truncated and written (`mkdtemp` one directory per run).
-* [Medium] benchmarks, Linux's Erlang guest under HVF ([design-bench.md](design-bench.md#linuxs-erlang-guest)): a
-  guest export of the Linux oracle (the installed stock OTP 29.1.2 tree and the libraries its programs load, listed
-  in the workload phase and copied by the exporter, [design-host-oracle.md](design-host-oracle.md#native-workspace-and-artifact-export));
-  the initramfs carrying it with `/etc/hosts`; `erx_peer_bench`'s launcher role (loopback up, `/proc` and `/sys`,
-  `epmd -daemon`, two nodes started through `erlexec`, power-off); the bench modules compiled by the host's stock
-  `erlc`, the echo node entering at `erx_xdomain_bench:serve/1` and the client at `erx_bench_hist:main/1` with
-  `echo=>{Name, Node}`; the host's `ERX_ORACLE` identity check. Needs the Linux guest's boot step landed. Tests:
-  Linux's Erlang guest, with its record read back.
+* [Medium] benchmarks, Linux's Erlang guest's boot test ([design-bench.md](design-bench.md#linuxs-erlang-guest)): the
+  guest boots in a comparison session (`tools/erx bench xdomain --systems erxos,linux`, once `tools/erx oracle install
+  --flavour jit --docker-context NAME` has made the export), but no suite boots it. The design's test row, a one-CPU
+  boot with an `ERX_ORACLE 29.1.2 jit` line and `measured` `local-rtt` and `xdomain-pingpong` cells, and its seeded
+  fault, `/init` built with `-DERX_INIT_SEED_ECHO_COOKIE` so that `xdomain-pingpong` is `failed` while `local-rtt`
+  is `measured`, were run by hand; they belong in the bench suite, reported as not run when no export exists.
 * [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): the build
   (`tools/erx build l4re --docker-context NAME` on an arm64 engine), the importer and the session run, and
   `tools/erx bench nullcall --systems erxos,l4re` measures all three of L4Re's 1-CPU rows, at upstream Fiasco
