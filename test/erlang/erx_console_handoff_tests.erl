@@ -9,7 +9,7 @@
 -module(erx_console_handoff_tests).
 -include_lib("eunit/include/eunit.hrl").
 
--export([shell/0]).
+-export([shell/0, half_line/0]).
 
 %% Long enough for three of the log service's 100 ms ticks.
 -define(TICKS_MS, 350).
@@ -18,11 +18,13 @@ handoff_test_() ->
     {foreach, fun setup/0, fun cleanup/1,
      [fun the_console_never_takes_the_ring/1,
       fun the_first_take_comes_before_the_drivers_first_write/1,
-      fun the_console_writes_the_services_lines/1]}.
+      fun the_console_writes_the_services_lines/1,
+      fun a_restarted_console_starts_its_slogan_on_a_new_line/1]}.
 
 setup() ->
     process_flag(trap_exit, true),
     persistent_term:erase({erx_syslog, started}),
+    persistent_term:erase({erx_console, line}),
     start_recorder().
 
 cleanup(Recorder) ->
@@ -31,6 +33,7 @@ cleanup(Recorder) ->
     [stop(whereis(Name)) || Name <- [erx_console, erx_syslog_sup, erx_syslog]],
     stop(Recorder),
     persistent_term:erase({erx_syslog, started}),
+    persistent_term:erase({erx_console, line}),
     flush().
 
 %% The console started alone, as before the log service runs: it asks the service for
@@ -71,22 +74,53 @@ the_console_writes_the_services_lines(_Recorder) ->
                                        binary:match(W, <<"system: a<U+001B>[2Jb\r\n">>) =/= nomatch])
            end).
 
+%% The line changes hands when the system console ends and its supervisor starts it
+%% again: the console that ended may have left a line half written, as one killed while
+%% it echoed a command does, and the restarted console's slogan still starts a line of
+%% its own, with the half line kept on the line before it.
+a_restarted_console_starts_its_slogan_on_a_new_line(_Recorder) ->
+    ?_test(begin
+               Ended = start_console(#{domain_line => true, first_shell => {?MODULE, half_line, []}}),
+               timer:sleep(?TICKS_MS),
+               stop(Ended),
+               start_console(#{domain_line => true}),
+               timer:sleep(?TICKS_MS),
+               Stream = iolist_to_binary([Bytes || {write, Bytes} <- events()]),
+               Lines = binary:split(Stream, <<"\n">>, [global]),
+               Starts = [N || {N, <<"Erlang/OTP ", _/binary>>} <- lists:enumerate(Lines)],
+               ?assertMatch([_, _], Starts),
+               Before = lists:nth(lists:last(Starts) - 1, Lines),
+               ?assertNotEqual(nomatch, binary:match(Before, <<"exit(whereis(erx_console)">>))
+           end).
+
 %% erx_syslog_sup as kernel_sup starts it in the system domain; start_link/1 ignores a
 %% runtime whose user is not the system console, as this test's is not.
 start_syslog() ->
     erx_service_sup:start_link(log, erx_syslog).
 
 start_console() ->
-    {ok, Console} = erx_console:start_link(#{role => system, name => erx_console, menu => false,
-                                             principal => 1, owner => fun(_Pid) -> 0 end,
-                                             driver => fun driver/1,
-                                             line_owners => fun() -> {ok, []} end,
-                                             first_shell => {?MODULE, shell, []}}),
+    start_console(#{}).
+
+%% The system console on the fake driver, with Config's keys over the defaults.
+start_console(Config) ->
+    Defaults = #{role => system, name => erx_console, menu => false,
+                 principal => 1, owner => fun(_Pid) -> 0 end,
+                 driver => fun driver/1,
+                 line_owners => fun() -> {ok, []} end,
+                 first_shell => {?MODULE, shell, []}},
+    {ok, Console} = erx_console:start_link(maps:merge(Defaults, Config)),
     Console.
 
 %% A shell that reads nothing and stays.
 shell() ->
     spawn_link(fun() -> receive after infinity -> ok end end).
+
+%% A shell that writes half a line, as a line editor echoing a command does, and stays.
+half_line() ->
+    spawn_link(fun() ->
+                       io:put_chars("exit(whereis(erx_console)"),
+                       receive after infinity -> ok end
+               end).
 
 %% The fake driver: each write is an event of the recorder's and is done at once.
 driver(Console) ->

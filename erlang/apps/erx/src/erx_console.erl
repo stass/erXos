@@ -467,8 +467,7 @@ init(Config = #{role := Role, driver := Start, first_shell := First}) ->
                             relay -> exit({bad_driver, "a system console's driver is never a terminal relay"});
                             _ when is_boolean(Kind) -> {Kind, none}
                         end,
-    %% A domain has one line, which terminal/0 names.
-    [persistent_term:put({?MODULE, line}, self()) || maps:get(domain_line, Config, false)],
+    LineBefore = take_line(maps:get(domain_line, Config, false)),
     FirstShell = case First of
                      Make when is_function(Make, 1) -> Make(shell_terminal(Relay));
                      Given -> Given
@@ -476,7 +475,8 @@ init(Config = #{role := Role, driver := Start, first_shell := First}) ->
     %% As user_drv does for a line with no terminal on it: no editing, no echo and bytes
     %% as they are.
     Size = maps:get(size, Config, ?DEFAULT_SIZE),
-    TTY = banner(Role, prim_tty:init_ssh(tty_options(Terminal), otp_geometry(Size), utf8), DriverPid),
+    Bare = prim_tty:init_ssh(tty_options(Terminal), otp_geometry(Size), utf8),
+    TTY = banner(Role, FirstShell, LineBefore, Bare, DriverPid),
     User = start_user(maps:get(user, Config, take)),
     Group = case FirstShell of
                 none -> User;
@@ -543,19 +543,37 @@ line_principal(#{principal := Principal}) when is_integer(Principal), Principal 
 line_principal(_Config) ->
     unknown.
 
-%% What user_drv writes before it starts a shell, ahead of anything the groups write.
-banner(session, TTY, _Driver) ->
-    TTY;
-banner(system, TTY, Driver) ->
-    case first_shell(shell_arguments()) =/= none of
-        true ->
-            Line = unicode:characters_to_binary([slogan(), $\n]),
-            {Bytes, NewTTY} = prim_tty:handle_request(TTY, {putc, Line}),
-            Driver ! {erx_console_output, none, Bytes},
-            NewTTY;
-        false ->
-            TTY
+%% The domain's line, which terminal/0 names, taken by a console that is the domain's
+%% line (Config's domain_line): `fresh` if no console had it before, `taken` if one that
+%% ended had it, as when erx_console_sup starts the system console again. The console
+%% that ended may have left anything on the line, such as a command's echo half written
+%% when it was killed. Any other console's line is its own, and fresh.
+-spec take_line(boolean()) -> fresh | taken.
+take_line(false) ->
+    fresh;
+take_line(true) ->
+    Before = persistent_term:get({?MODULE, line}, none),
+    persistent_term:put({?MODULE, line}, self()),
+    case Before of
+        none -> fresh;
+        _Ended -> taken
     end.
+
+%% What user_drv writes before it starts a shell, ahead of anything the groups write: a
+%% system console that starts a shell writes the slogan, at the start of a line of its
+%% own. On a line it took from a console that ended, it first ends what that one left
+%% (new_line/2): that line is not known to be at its start, and erasing it would lose the
+%% last thing the ended console showed.
+-spec banner(system | session, shell() | none, fresh | taken, prim_tty:state(), pid()) ->
+          prim_tty:state().
+banner(system, Shell, LineBefore, TTY, Driver) when Shell =/= none ->
+    [ok = new_line(none, Driver) || LineBefore =:= taken],
+    Slogan = unicode:characters_to_binary([slogan(), $\n]),
+    {Bytes, NewTTY} = prim_tty:handle_request(TTY, {putc, Slogan}),
+    Driver ! {erx_console_output, none, Bytes},
+    NewTTY;
+banner(_Role, _Shell, _LineBefore, TTY, _Driver) ->
+    TTY.
 
 slogan() ->
     Default = fun() -> erlang:system_info(system_version) end,
@@ -1114,7 +1132,7 @@ connect_session(Domain, State0 = #state{sessions = Sessions}) ->
                     %% Whatever the line's last holder left, a string open, its text
                     %% hidden or the system shell's prompt, ends before the session's
                     %% held output, which starts on a line of its own.
-                    ok = new_line(none, State0),
+                    ok = new_line(none, State0#state.driver),
                     {ok, set_line({session, Domain}, login_connected(Domain, State0))}
             end;
         #{} ->
@@ -1162,13 +1180,14 @@ to_groups(_Notice, State = #state{line = system}) ->
     State;
 to_groups(Notice, State0) ->
     State = set_line(system, State0),
-    ok = new_line(Notice, State),
+    ok = new_line(Notice, State#state.driver),
     current(State) ! {self(), activate},
     State.
 
-%% Ends whatever a session or a command left on the line, a string open or its text
-%% hidden, and starts a new line, with Notice on it if there is one.
-new_line(Notice, #state{driver = Driver}) ->
+%% Ends whatever a session, a command or a console that ended on the line left there, a
+%% string open, its text hidden or a line half written, and starts a new line, with
+%% Notice on it if there is one.
+new_line(Notice, Driver) ->
     Line = [[erx_text:escape_line(Notice), <<"\r\n">>] || Notice =/= none],
     Driver ! {erx_console_output, none, [<<"\e\\\e[0m\r\n">>, Line]},
     ok.
@@ -1205,7 +1224,7 @@ session_ended(Domain, Reason, State0 = #state{line = Line, sessions = Sessions})
 %% The login's session ended before it ever had the line: the line stays with whoever has
 %% it, and the system shell, if that is who, prompts again after Notice.
 login_ended(Notice, State = #state{line = system}) ->
-    ok = new_line(Notice, State),
+    ok = new_line(Notice, State#state.driver),
     current(State) ! {self(), activate},
     State#state{login = none};
 login_ended(_Notice, State) ->
@@ -1265,7 +1284,7 @@ open_menu(Notice, Back, State0 = #state{driver = Driver, principal = Principal, 
               || Domain := Session = #{name := Name, principal := P} <- Sessions, is_binary(Name)],
     Menu = erx_console_menu:open(Principal, Listed, Back),
     State = set_line({menu, Menu}, State0),
-    ok = new_line(Notice, State),
+    ok = new_line(Notice, State#state.driver),
     Driver ! {erx_console_output, none, erx_console_menu:text(Menu)},
     State.
 
@@ -1397,7 +1416,8 @@ login_timed_out(State = #state{login_restarts = Earlier}) ->
 %% one line saying why if the shell has the line, so the line is never left without a
 %% prompt; the menu shows any refusal if it has the line, and the log reports it otherwise.
 start_failed(login, Reason, State = #state{line = system}) ->
-    ok = new_line(io_lib:format("erx_console: the login session did not start: ~0P", [Reason, 8]), State),
+    ok = new_line(io_lib:format("erx_console: the login session did not start: ~0P", [Reason, 8]),
+                  State#state.driver),
     current(State) ! {self(), activate},
     State#state{login = none};
 start_failed(Why, Reason, State0) ->
