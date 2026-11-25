@@ -149,9 +149,9 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   only by the test's extraction with fsimg itself. A long-name and subdirectory walk in `FatVolume` closes it.
 * [Medium] benchmarks, the board walk (`BoardWalk`, `BoardConsole`, `BoardRun`,
   [design-bench.md](design-bench.md#the-walk)): the walk, the console, the ssh calls and `tools/erx bench NAME
-  --env pi4-4gb-erxos` walked the desk's board end to end through a pty that a relay outside the tree filled from the Glasgow UART applet's
-  TCP port, which the walk reads directly as `--console tcp:HOST:PORT`, unwalked on the board; what remains is (1)
-  `--profile full`, refused because `NativeBench::BoardSets` builds only the landing form; (2) the ssh calls never succeed on the board: its development host key is new on every boot, so
+  --env pi4-4gb-erxos` walk the desk's board end to end with the console as a serial device. The walk also reads the Glasgow UART
+  applet's TCP port directly (`--console tcp:HOST:PORT`); that form has not been walked on the board. What remains
+  is (1) `--profile full`, refused because `NativeBench::BoardSets` builds only the landing form; (2) the ssh calls never succeed on the board: its development host key is new on every boot, so
   `ssh -o BatchMode=yes` against the user's known_hosts fails, the reboot is typed on the console by hand and both
   sensor readings are `unknown`; the walk needs a per-boot known-hosts file as `DevKey` keeps for QEMU guests, and its
   own key, which is a security choice to settle first; with the console as a TCP port, the reset by hand cannot be
@@ -161,9 +161,12 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Medium] benchmarks, re-run on the Pi 4 the cells whose `BENCH` lines the console cut: `nullcall`'s two `other-cpu`
   cells (wide histograms, about 2-3 KiB a line) and `wake`'s `park-deadline` were `rejected` (`nullcall`'s record
   `~/erxos-history/bench/pi4-4gb-erxos/20261125T200107Z-af9b3afc3c2c-dirty-8206ee98ebba`) because each line ended after
-  exactly 1,023 bytes, joined to the next. The cause was the Glasgow relay outside the tree that gave the walk a pty:
-  it dropped what a write to the pty's master did not take, and a macOS pty's queue holds about 1 KiB. The walk reads
-  the applet's TCP port itself (`--console tcp:HOST:PORT`), so a re-run through it settles the three cells.
+  exactly 1,023 bytes, joined to the next. The likely cause is the relay outside the tree that gave the walk a pty
+  from the Glasgow applet's port: it dropped what a write to the pty's master did not take, and a macOS pty's master
+  takes about 1 KiB in one write. A re-run with `--console tcp:HOST:PORT` that carries those lines whole confirms
+  it; one that still cuts them points at `erx_fiasco_console_write` (`liberx/backend/fiasco/console.c`), which
+  returns at the first `l4_vcon_write` that fails and drops the rest of the write unreported. The re-run needs the
+  board reset, which with the TCP form waits on item (2) of the board walk above.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
 other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a

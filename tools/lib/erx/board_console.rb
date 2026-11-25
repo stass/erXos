@@ -27,6 +27,8 @@ module Erx
     BAUD = 115_200
     CHUNK = 4096
     CONNECT_SECONDS = 10
+    # HOST is a name, an IPv4 address, or an IPv6 address in brackets; either alternative
+    # sets the one group host.
     TCP_ENDPOINT = /\Atcp:(?:\[(?<host>[^\[\]]+)\]|(?<host>[^\[\]:]+)):(?<port>[0-9]{1,5})\z/
 
     # The console named by console, a device path or tcp:HOST:PORT, its bytes appended to
@@ -48,11 +50,11 @@ module Erx
     def self.connect(endpoint)
       found = TCP_ENDPOINT.match(endpoint)
       port = found && Integer(found[:port], 10)
-      raise Error, "bench: the console #{LineEscape.escape(endpoint)} is not tcp:HOST:PORT with PORT 1 to 65535" unless port&.between?(1, 65_535)
+      raise Error, "bench: the console #{LineEscape.escape(endpoint)} is not tcp:HOST:PORT, with an IPv6 HOST in brackets and PORT 1 to 65535" unless port&.between?(1, 65_535)
 
       begin
-        Socket.tcp(found[:host], port, connect_timeout: CONNECT_SECONDS).tap(&:binmode)
-      rescue SystemCallError, SocketError => e
+        Socket.tcp(found[:host], port, resolv_timeout: CONNECT_SECONDS, connect_timeout: CONNECT_SECONDS).tap(&:binmode)
+      rescue SystemCallError, SocketError, IO::TimeoutError => e
         raise Error, "bench: the console #{LineEscape.escape(endpoint)} cannot be reached: #{e.class.name.split('::').last}"
       end
     end

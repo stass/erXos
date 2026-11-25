@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
-require 'io/console'
 require 'minitest/autorun'
-require 'pty'
+require 'delegate'
 require 'socket'
 require 'stringio'
 require 'tmpdir'
@@ -97,67 +96,70 @@ class BoardConsoleTest < Minitest::Test
       assert_match(/cannot be opened: ENOENT/, missing.message)
     end
   end
-  # count 4 KiB lines, as a board's wide BENCH lines come.
-  def wide(count) = Array.new(count) { |index| "BENCH #{(index % 10).to_s * 4090}\n" }.join.b
+  LINE = 4097
 
-  # The events of console read slowly: the reader waits until everything has been sent
-  # before its first read, then reads until the console is quiet, and closes it.
-  def slowly_read(console, log:)
-    sleep 0.3
-    events = []
-    loop do
-      read = console.read(Process.clock_gettime(Process::CLOCK_MONOTONIC) + 0.5)
-      break if read.first.is_a?(Erx::BoardWalk::Quiet) || read.first.is_a?(Erx::BoardWalk::Stop)
+  # count lines of LINE bytes, as a board's wide BENCH lines come.
+  def wide(count) = Array.new(count) { |index| "BENCH #{(index % 10).to_s * (LINE - 7)}\n" }.join.b
 
-      events.concat(read)
-    end
-    console.close
-    [events.map { |event| [event.class, event.bytes] }, File.binread(log)]
-  end
+  def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-  def whole?(read, sent)
-    read == [Array.new(sent.bytesize / 4097) { [Erx::BoardWalk::Line, 4097] }, sent]
-  end
-
-  def test_a_console_served_as_a_tcp_port_is_read_directly_and_every_byte_arrives_whole
+  # A board on a TCP port that writes bytes in one write and closes, and the console the
+  # block connects to it at the port; the reader starts only once the board has written
+  # and closed, so it reads slowly.
+  def served(bytes)
     server = TCPServer.new('127.0.0.1', 0)
-    board = Thread.new do
-      server.accept.tap { |client| client.write(wide(3)) }
-    rescue IOError
-      nil
-    end
-    Dir.mktmpdir do |directory|
-      log = File.join(directory, 'tcp.log')
-      console = Erx::BoardConsole.open("tcp:127.0.0.1:#{server.addr[1]}", log: log,
-                                                                          clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
-      assert whole?(slowly_read(console, log: log), wide(3))
-    end
+    board = Thread.new { server.accept.tap { |client| client.write(bytes) }.close }
+    yield(server.addr[1]).tap { board.join }
   ensure
     server&.close
-    board&.value&.close
   end
 
-  # The seeded fault: a relay that copies the port's bytes into a pty and drops what a
-  # write to its master does not take, the out-of-tree relay's bug, fails the same check.
-  # 128 KiB is more than any host's pty queue takes in one write: about 1 KiB on macOS.
-  def test_a_relay_that_drops_what_a_pty_does_not_take_cuts_the_lines
-    PTY.open do |master, slave|
-      slave.raw!
-      master.write_nonblock(wide(32), exception: false)
-      Dir.mktmpdir do |directory|
-        log = File.join(directory, 'pty.log')
-        console = Erx::BoardConsole.new(slave, log: File.open(log, 'wb'), clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
-        refute whole?(slowly_read(console, log: log), wide(32))
-      end
+  # The console's events until it stops, as [class, bytes] pairs and the ending, then the log.
+  def read_to_end(console, log:)
+    events = []
+    events.concat(console.read(monotonic + 5)) until events.last.is_a?(Erx::BoardWalk::Stop)
+    console.close
+    [events[0..-2].map { |event| [event.class, event.bytes] }, events.last.ending, File.binread(log)]
+  end
+
+  def whole(sent) = [Array.new(sent.bytesize / LINE) { [Erx::BoardWalk::Line, LINE] }, 'console_closed', sent]
+
+  def test_a_console_served_as_a_tcp_port_is_read_directly_and_every_byte_arrives_whole
+    Dir.mktmpdir do |directory|
+      log = File.join(directory, 'tcp.log')
+      console = served(wide(3)) { |port| Erx::BoardConsole.open("tcp:127.0.0.1:#{port}", log: log, clock: method(:monotonic)) }
+      assert_equal whole(wide(3)), read_to_end(console, log: log)
     end
   end
 
-  def test_a_malformed_or_unreachable_tcp_console_is_refused
+  # The seeded fault: a socket read that keeps only its first 1,023 bytes, the cut the
+  # board's lines showed, fails the same check.
+  class CuttingSocket < SimpleDelegator
+    def read_nonblock(...) = super.then { |chunk| chunk.is_a?(String) ? chunk.byteslice(0, 1023) : chunk }
+  end
+
+  def test_a_read_that_drops_bytes_is_caught
     Dir.mktmpdir do |directory|
-      malformed = assert_raises(Erx::Error) { Erx::BoardConsole.open('tcp:localhost', log: File.join(directory, 'a.log'), clock: -> { 0 }) }
-      assert_match(/tcp:HOST:PORT/, malformed.message)
+      log = File.join(directory, 'cut.log')
+      console = served(wide(3)) do |port|
+        Erx::BoardConsole.new(CuttingSocket.new(Socket.tcp('127.0.0.1', port)), log: File.open(log, 'wb'), clock: method(:monotonic))
+      end
+      events, ending, bytes = read_to_end(console, log: log)
+      refute_equal whole(wide(3)), [events, ending, bytes]
+      assert_operator bytes.bytesize, :<, wide(3).bytesize
+    end
+  end
+
+  def test_a_malformed_out_of_range_or_unreachable_tcp_console_is_refused
+    Dir.mktmpdir do |directory|
+      %w[tcp:localhost tcp:127.0.0.1:0 tcp:127.0.0.1:65536 tcp:::1:2300].each do |endpoint|
+        malformed = assert_raises(Erx::Error) { Erx::BoardConsole.open(endpoint, log: File.join(directory, 'a.log'), clock: -> { 0 }) }
+        assert_match(/tcp:HOST:PORT/, malformed.message)
+      end
       closed = TCPServer.new('127.0.0.1', 0).then { |server| server.addr[1].tap { server.close } }
-      refused = assert_raises(Erx::Error) { Erx::BoardConsole.open("tcp:127.0.0.1:#{closed}", log: File.join(directory, 'b.log'), clock: -> { 0 }) }
+      refused = assert_raises(Erx::Error) do
+        Erx::BoardConsole.open("tcp:127.0.0.1:#{closed}", log: File.join(directory, 'b.log'), clock: -> { 0 })
+      end
       assert_match(/cannot be reached: ECONNREFUSED/, refused.message)
       refute File.exist?(File.join(directory, 'b.log'))
     end

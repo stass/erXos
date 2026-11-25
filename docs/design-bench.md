@@ -2804,9 +2804,9 @@ is then refused, and the cell is `rejected`.
 reads the found target to its last `point`, so `tools/erx netboot` and a
 second run wait for it, and nothing it prepared or reads changes under
 it; it holds a console device exclusively, so a second run's open is
-refused. A console's TCP port is its server's to share: the Glasgow UART
-applet's serves one connection and closes the walk's when another opens,
-which ends the walk with its console closed. `pi4_http_stage.rb` takes no part in the lock and writes into
+refused. Who reads a console's TCP port is up to the server behind it:
+the Glasgow UART applet serves one connection and closes the walk's when
+another opens, which ends the walk with its console closed. `pi4_http_stage.rb` takes no part in the lock and writes into
 whatever directory its `--www` names, a queue's included, so `Netboot`'s
 HTTP form replaces it ([Decisions](#the-network-boot-the-stager-drives)).
 The walk is one thread over one console; its decisions are `BoardWalk`'s,
