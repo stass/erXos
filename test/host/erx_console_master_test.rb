@@ -51,10 +51,20 @@ class ErxConsoleMasterTest < Minitest::Test
   PIPE_MENU = 'menu = Terminal andalso maps:get(menu, Config, Role =:= system),'
   ANY_MENU = 'menu = maps:get(menu, Config, Role =:= system),'
 
+  # Every move of the line releases the session that had it, and the same without the
+  # release, under which a session that loses the line to the menu keeps writing to it.
+  SET_LINE = 'State = (release(State0))#state{line = Line},'
+  NO_RELEASE = 'State = State0#state{line = Line},'
+
   def test_master_cases_pass_under_eunit
     output, status = eunit
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
+  end
+
+  def test_a_line_move_that_keeps_the_old_sessions_output_fails
+    assert_seed_fails({ CONSOLE => { SET_LINE => NO_RELEASE } },
+                      'erx_console_master_tests:ctrl_g_opens_the_menu/1')
   end
 
   def test_a_loss_answered_after_the_next_input_fails

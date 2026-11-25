@@ -102,7 +102,9 @@
 %% escape, and when the login's session ends the console logs the principal in again.
 %%
 %% The line belongs to the console's own groups, to one connected session (connect/1), or
-%% to the Ctrl-G menu (erx_console_menu). A connected session's output is copied to the
+%% to the Ctrl-G menu (erx_console_menu), and moves only through set_line/2, so input
+%% reaches only the session it names and every other session's output is held. A
+%% connected session's output is copied to the
 %% line as bytes, as a tty's master copies them, each answered only once the driver has
 %% written it, and the bytes typed go to its tty. A typed Ctrl-G never reaches a session or
 %% a group: it opens the menu, which lists the system shell and the line principal's live
@@ -1056,8 +1058,8 @@ driver_lost(State0 = #state{line = Line, sessions = Sessions, keys = Keys}) ->
             own_lost(State)
     end.
 
-%% Bytes typed at the line, for Domain's session, which has it.
-to_session(Domain, Bytes, State = #state{sessions = Sessions}) ->
+%% Bytes typed at the line, for the session the line names: input reaches no other.
+to_session(Bytes, State = #state{line = {session, Domain}, sessions = Sessions}) ->
     #{Domain := #{master := Master}} = Sessions,
     carry_out(Domain, erx_tty_master:input(Bytes, Master), State).
 
@@ -1086,9 +1088,7 @@ connect_session(Domain, State0 = #state{sessions = Sessions}) ->
                     %% hidden or the system shell's prompt, ends before the session's
                     %% held output, which starts on a line of its own.
                     ok = new_line(none, State0),
-                    State = login_connected(Domain, (release(State0))#state{line = {session, Domain}}),
-                    #state{size = Size, sessions = #{Domain := #{master := Disconnected}}} = State,
-                    {ok, carry_out(Domain, erx_tty_master:connect(Size, Disconnected), State)}
+                    {ok, set_line({session, Domain}, login_connected(Domain, State0))}
             end;
         #{} ->
             {{error, unknown}, State0}
@@ -1098,8 +1098,25 @@ connect_session(Domain, State0 = #state{sessions = Sessions}) ->
 login_connected(Domain, State = #state{login = {started, Domain}}) -> State#state{login = {connected, Domain}};
 login_connected(_Domain, State) -> State.
 
-%% State with the line taken from the session that has it, if one does: the session is no
-%% longer connected, and its tty is stopped. Who has the line next is the caller's to set.
+%% Line becomes the console line's owner: system (the console's own groups),
+%% {session, Domain} or the menu. Every move of the line goes through here. The
+%% session that had it, if one did, has its output held and its tty stopped; a session
+%% that takes it has its output written again, at the line's size. Input goes only
+%% to the session the line names (to_session/2, driver_lost/1), so a session not in
+%% front gets nothing typed whatever its master's state, and the masters' output
+%% follows the line because only this moves it.
+set_line(Line, State0) ->
+    State = (release(State0))#state{line = Line},
+    case Line of
+        {session, Domain} ->
+            #state{size = Size, sessions = #{Domain := #{master := Master}}} = State,
+            carry_out(Domain, erx_tty_master:connect(Size, Master), State);
+        _ ->
+            State
+    end.
+
+%% State with the line taken from the session that has it, if one does: its output is
+%% held and its tty stopped.
 release(State = #state{line = {session, Domain}, sessions = Sessions}) ->
     case Sessions of
         #{Domain := Session = #{master := Master}} ->
@@ -1111,12 +1128,13 @@ release(State) ->
     State.
 
 %% The line back to the console's own groups, after Notice, the console's own text, if
-%% there is one. The session that had it is no longer connected, and its tty is stopped;
-%% the current group draws its line again, since what it wrote while hidden was dropped.
+%% there is one. The session that had it, if it is still a session, has its output
+%% held and its tty stopped; the current group draws its line again, since what it
+%% wrote while hidden was dropped.
 to_groups(_Notice, State = #state{line = system}) ->
     State;
 to_groups(Notice, State0) ->
-    State = (release(State0))#state{line = system},
+    State = set_line(system, State0),
     ok = new_line(Notice, State),
     current(State) ! {self(), activate},
     State.
@@ -1207,8 +1225,8 @@ read([], State) ->
     State;
 read([ctrl_g | _Dropped], State = #state{line = Back}) ->
     open_menu(none, Back, State);
-read([Bytes | Rest], State = #state{line = {session, Domain}}) ->
-    read(Rest, to_session(Domain, Bytes, State));
+read([Bytes | Rest], State = #state{line = {session, _Domain}}) ->
+    read(Rest, to_session(Bytes, State));
 read([Bytes | Rest], State = #state{reader = {own, Own = #{unread := Unread}}}) ->
     %% For the console's own tty, which serve/1 fills.
     read(Rest, State#state{reader = {own, Own#{unread := <<Unread/binary, Bytes/binary>>}}}).
@@ -1216,13 +1234,13 @@ read([Bytes | Rest], State = #state{reader = {own, Own = #{unread := Unread}}}) 
 %% The menu takes the line, drawn after Notice if there is one, with Back as the entry
 %% Esc returns to; the session that had the line, if one did, is stopped.
 open_menu(Notice, Back, State0 = #state{driver = Driver, principal = Principal, sessions = Sessions}) ->
-    State = release(State0),
     Listed = [#{domain => Domain, name => Name, principal => P, live => is_live(Session)}
               || Domain := Session = #{name := Name, principal := P} <- Sessions, is_binary(Name)],
     Menu = erx_console_menu:open(Principal, Listed, Back),
+    State = set_line({menu, Menu}, State0),
     ok = new_line(Notice, State),
     Driver ! {erx_console_output, none, erx_console_menu:text(Menu)},
-    State#state{line = {menu, Menu}}.
+    State.
 
 %% The menu's Action, which a read while the menu had the line asked for, carried out.
 menu_action(bell, _Menu, State) ->

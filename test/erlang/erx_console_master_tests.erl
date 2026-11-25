@@ -177,6 +177,7 @@ master() ->
     a_lost_output_is_logged(Facet),
     a_terminal_reply_stays_with_the_session(),
     ctrl_g_opens_the_menu(Facet),
+    only_the_session_in_front_is_typed_into(Console, Facet),
     a_wrong_number_detaches(Facet),
     the_facet_bounds_messages(Console),
     the_menu_lists_the_principals_live_sessions(),
@@ -335,6 +336,56 @@ ctrl_g_opens_the_menu(Facet) ->
     type(<<"1">>),
     {ok, _} = await(<<"S3">>),
     ?assertEqual({tty_taken, 3}, from_console()).
+
+%% With two sessions, only the one the line names is typed into and has its output
+%% written: once domain 8's session takes the line from domain 7's, a key and a loss
+%% reach 8's tty alone, and 7's output is held until 7 takes the line back, when 8's
+%% is held in turn. 8's session is of another principal, so no menu lists it.
+only_the_session_in_front_is_typed_into(Console, FacetA) ->
+    Test = self(),
+    DomainB = spawn(fun() -> receive after infinity -> ok end end),
+    FacetB = facet(8, DomainB, Console),
+    ok = erx_console:add_session(8, session(<<"other_1">>, 2, DomainB)),
+    TtyB = spawn(fun Relay() -> receive Message -> Test ! {b, Message}, Relay() end end),
+    persistent_term:put({?MODULE, tty, TtyB}, 8),
+    FacetB ! {erx_origin, 8, {tty_open, TtyB}},
+    _ = erx_facet:info(FacetB),
+    _ = erx_console:facet(),
+    ok = erx_console:connect(8),
+    %% The line the console starts for a session that takes it.
+    {ok, _} = await(<<"\e[0m\r\n">>),
+    ?assertEqual({tty_size, 24, 80}, from_b()),
+    type(<<"z">>),
+    ?assertEqual({tty_input, <<"z">>}, from_b()),
+    erx_console ! erx_console_lost,
+    ?assertMatch({tty_lost, _}, from_b()),
+    nothing_from_the_console(),
+    tty_output(FacetA, 4, <<"S4">>),
+    nothing_on_the_line(),
+    nothing_from_the_console(),
+    ok = erx_console:connect(7),
+    {ok, _} = await(<<"S4">>),
+    ?assertEqual({tty_taken, 4}, from_console()),
+    FacetB ! {erx_origin, 8, {tty_output, 0, <<"B0">>}},
+    nothing_on_the_line(),
+    type(<<"y">>),
+    ?assertEqual({tty_input, <<"y">>}, from_console()),
+    ?assertEqual(none, receive {b, Stray} -> Stray after ?QUIET_MS -> none end),
+    %% 8's output was held, not dropped: it reaches the line once 8 takes it back.
+    ok = erx_console:connect(8),
+    {ok, _} = await(<<"B0">>),
+    ?assertEqual({tty_taken, 0}, from_b()),
+    ok = erx_console:connect(7),
+    {ok, _} = await(<<"\e[0m\r\n">>),
+    exit(DomainB, kill).
+
+%% The next message the console sent domain 8's tty, its input without its number.
+from_b() ->
+    receive
+        {b, {tty_input, _, Bytes}} -> {tty_input, Bytes};
+        {b, Message} -> Message
+    after ?WAIT_MS -> none
+    end.
 
 %% The menu lists only the live sessions of the line's principal, each name through the
 %% line escape: not another principal's, not one refused, and not one whose domain pid is

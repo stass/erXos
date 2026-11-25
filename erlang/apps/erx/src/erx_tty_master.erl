@@ -10,12 +10,15 @@ erx_tty_link: each call takes one event and returns the actions it decides, in
 order, and the next state. erx_console carries the actions out, one master for
 each session's tty.
 
-The master takes one output at a time. While its session is connected to the
-line, an output is written to the line, and `{tty_taken, N}` is answered only
-once the line has written it, so a session never has more than one output in
-the console and its line driver together. While the session is not connected,
-the tty is stopped: the master holds the one output it was sent and answers
-nothing, and writes it once the session is connected.
+The master takes one output at a time. While its output is open, which
+connect/2 and disconnect/1 set, an output is written to the line, and
+`{tty_taken, N}` is answered only once the line has written it, so a session
+never has more than one output in the console and its line driver together.
+While it is closed, the tty is stopped: the master holds the one output it was
+sent and answers nothing, and writes it once the output is opened. The flag
+gates output only: input and losses go to any tty not refused, and which
+session is typed into is the caller's to decide: the console's line
+(erx_console's set_line/2) or bleuart's one client.
 
 Every message from the tty is checked as the design's table says. It must be
 `{tty_output, N, Bytes}`, Bytes a binary of at most 4 KiB, and N either the
@@ -27,7 +30,7 @@ lost arrives as the next number with no bytes, and is taken as such: those bytes
 are lost, as a line's overrun loses them, and the action `{lost, N}` has the
 console log the loss. Anything else refuses the tty, with the
 action `detach`: the console detaches it, and the master takes nothing from it,
-answers nothing and is never connected again.
+answers nothing and never has its output opened again.
 
 The master numbers its input messages, `{tty_input, N, Bytes}` and
 `{tty_lost, N}` alike, from 0, in the order it sends them, so the tty takes a
@@ -58,16 +61,17 @@ sequence across domains").
           next = 0 :: non_neg_integer(),
           %% The number the next input message to the tty carries.
           input = 0 :: non_neg_integer(),
-          %% The output in the console: none, held while not connected, or being written.
+          %% The output in the console: none, held while the output is closed, or being written.
           output = none :: none | {held, non_neg_integer(), binary()} | {writing, non_neg_integer()},
-          connected = false :: boolean(),
+          %% Whether output goes to the line; it gates nothing else.
+          output_open = false :: boolean(),
           %% The size last sent to the tty, which a repeated answer carries again.
           size = none :: none | erx_console:size(),
           refused = false :: boolean()}).
 
 -opaque master() :: #master{}.
 
--doc "A master that has taken nothing and is not connected.".
+-doc "A master that has taken nothing, its output closed.".
 -spec new() -> master().
 new() -> #master{}.
 
@@ -81,13 +85,13 @@ output({tty_output, N, Bytes}, M)
 output(_Message, M) ->
     refuse(M).
 
-%% A new output is written if connected and held if not, and one with no bytes is a
+%% A new output is written if the output is open and held if not, and one with no bytes is a
 %% resend whose first send was lost, since a tty never sends a new output empty; a
 %% resend of the output in the console changes nothing; a resend of the output last
 %% taken is answered again.
-take(N, Bytes, M = #master{next = N, output = none, connected = Connected}) ->
+take(N, Bytes, M = #master{next = N, output = none, output_open = Open}) ->
     Lost = [{lost, N} || Bytes =:= <<>>],
-    case Connected of
+    case Open of
         true -> {Lost ++ [{write, N, Bytes}], M#master{output = {writing, N}}};
         false -> {Lost, M#master{output = {held, N, Bytes}}}
     end;
@@ -101,7 +105,7 @@ take(_N, _Bytes, M) ->
     refuse(M).
 
 refuse(M) ->
-    {[detach], M#master{output = none, connected = false, refused = true}}.
+    {[detach], M#master{output = none, output_open = false, refused = true}}.
 
 -doc "The line has written output N: it is taken, and the tty told so.".
 -spec written(non_neg_integer(), master()) -> {[action()], master()}.
@@ -111,19 +115,19 @@ written(_N, M) ->
     {[], M}.
 
 -doc """
-The session is connected to a line of size Size: the tty gets the size if it is new,
+The output is opened, to a line of size Size: the tty gets the size if it is new,
 and then the output held is written. Size `none` is a line with no size of its own,
 such as a client of Nordic's UART service (erx_bleuart), which never sends the tty a
-size, so the tty keeps the size it opened at or `stty` gave it. A refused tty is never
-connected.
+size, so the tty keeps the size it opened at or `stty` gave it. A refused tty's output
+is never opened.
 """.
 -spec connect(erx_console:size() | none, master()) -> {[action()], master()}.
 connect(_Size, M = #master{refused = true}) ->
     {[], M};
 connect(Size, M0) ->
     {Sized, M1} = case Size of
-                      none -> {[], M0#master{connected = true}};
-                      _ -> size(Size, M0#master{connected = true})
+                      none -> {[], M0#master{output_open = true}};
+                      _ -> size(Size, M0#master{output_open = true})
                   end,
     case M1 of
         #master{output = {held, N, Bytes}} ->
@@ -133,16 +137,16 @@ connect(Size, M0) ->
     end.
 
 -doc """
-The session is no longer connected: its tty is stopped once the output being
-written, if any, is taken.
+The output is closed: the tty is stopped once the output being written, if any,
+is taken.
 """.
 -spec disconnect(master()) -> master().
-disconnect(M) -> M#master{connected = false}.
+disconnect(M) -> M#master{output_open = false}.
 
 -doc """
-Bytes typed at the line, sent to the tty in parts of at most 4 KiB, connected or not:
-the console types only into the session that has the line, and a client of Nordic's
-UART service may type before it subscribes to the output. A refused tty gets nothing.
+Bytes typed at the line, sent to the tty in parts of at most 4 KiB, its output open
+or not: the console types only into the session its line names, and a client of
+Nordic's UART service may type before it subscribes to the output. A refused tty gets nothing.
 """.
 -spec input(binary(), master()) -> {[action()], master()}.
 input(Bytes, M = #master{refused = false, input = N}) ->
@@ -159,9 +163,9 @@ lost(M = #master{refused = false, input = N}) ->
 lost(M) ->
     {[], M}.
 
--doc "The line's size, sent to a connected tty when it changes.".
+-doc "The line's size, sent to a tty whose output is open when it changes.".
 -spec size(erx_console:size(), master()) -> {[action()], master()}.
-size(Size, M = #master{connected = true, size = Sent}) when Size =/= Sent ->
+size(Size, M = #master{output_open = true, size = Sent}) when Size =/= Sent ->
     {Rows, Columns} = Size,
     {[{send, {tty_size, Rows, Columns}}], M#master{size = Size}};
 size(_Size, M) ->
