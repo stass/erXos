@@ -7,6 +7,8 @@ require 'open3'
 require 'tmpdir'
 require_relative '../../tools/fuzz/bench_line'
 require_relative '../../tools/lib/erx/board_run'
+require_relative '../fixtures/first_stage_fixture'
+require_relative '../fixtures/pack_fixture'
 
 # A board run's walk around its effects (docs/design-bench.md, "The walk"), with the
 # queue's maker, the console and ssh replaced: the queue's and walk's files beside the
@@ -16,12 +18,14 @@ class BoardRunTest < Minitest::Test
   Fuzz = Erx::BenchLineFuzz
   BENCH = Erx::BoardFiles::Identity.new(**Fuzz::BENCH_BUILD)
   SENSORS = "soc_temp 47.2\n\e]0;title\a\n".b
+  ROOT = File.expand_path('../..', __dir__)
+  CODEC = Erx::ABI::Codec.new(Erx::ABI::Generator.plan(root: ROOT).schema)
 
-  # Prints each entry's lines and then the found pair's banner, a few lines a read; raises
-  # interrupt at the read numbered by it, when given.
+  # Prints each entry's lines and then the banner of the build the board returns to, found,
+  # a few lines a read; raises interrupt at the read numbered by it, when given.
   class Console
-    def initialize(names, clock:, interrupt_at: nil)
-      lines = [*names.flat_map { |name| Fuzz.entry_lines(name) }, Fuzz.banner(**Fuzz::FOUND)]
+    def initialize(names, clock:, found:, interrupt_at: nil)
+      lines = [*names.flat_map { |name| Fuzz.entry_lines(name) }, Fuzz.banner(**found)]
       @reads = lines.each_slice(5).to_a
       @clock = clock
       @interrupt_at = interrupt_at
@@ -81,17 +85,69 @@ class BoardRunTest < Minitest::Test
     queue
   end
 
-  def walk_board(interrupt_at: nil, runs: 2)
+  def walk_board(interrupt_at: nil, runs: 2, found: Fuzz::FOUND)
     clock = -> { @now += 1 }
     board = Erx::BoardRun.new(
       root: @root, www: @link, shell: @shell, prepare: method(:prepare),
-      console: ->(log:) { File.write(log, ''); Console.new(@prepared.last.fetch(:names), clock: clock, interrupt_at: interrupt_at) },
-      clock: clock, out: ->(line) { @out << line }, record: ->(ran) { @ran << ran }, pause: ->(_seconds) {}
+      console: ->(log:) { File.write(log, ''); Console.new(@prepared.last.fetch(:names), clock: clock, found: found, interrupt_at: interrupt_at) },
+      clock: clock, out: ->(line) { @out << line }, record: ->(ran) { @ran << ran }, codec: CODEC, pause: ->(_seconds) {}
     )
     board.call(benchmark: 'wake', subjects: [subject], runs: runs, key: '/keys/signing.pem')
   end
 
   def run_directory = Dir[File.join(@root, 'build/bench-board/wake-walk-*')].fetch(0)
+
+  # The found target's one pair, which its way back serves.
+  def stage_pair
+    File.write(File.join(@found, '1', Erx::NetbootEntry::SIGNATURE), "signature\n")
+    File.write(File.join(@found, '1', Erx::NetbootEntry::IMAGE), 'image')
+  end
+
+  # The found target's sets/1/kernel8.img as a stage writes it: the single bootable file of
+  # the fixture's first stage and archive. Returns the identity the archive's header names.
+  def stage_kernel
+    File.binwrite(stage = File.join(@directory, 'first-stage'), FirstStageFixture.bytes)
+    File.binwrite(archive = File.join(@directory, 'archive'), PackFixture.valid)
+    kernel = File.join(@found, Erx::Netboot::SETS, '1', Erx::BootPartition::KERNEL)
+    FileUtils.mkdir_p(File.dirname(kernel))
+    Erx::BootFile.write(codec: CODEC, first_stage: stage, archive: archive, output: kernel, output_root: @directory)
+    header = CODEC.decode_layout('erx_pack_header', File.binread(archive, CODEC.layout_size('erx_pack_header')))
+    { build: header.fetch('build_id').unpack1('H*'), index: header.fetch('index_hash').unpack1('H*') }
+  end
+
+  def test_the_return_to_the_build_a_found_stage_boots_is_booted
+    stage_pair
+    found = stage_kernel
+    walk = walk_board(found: found)
+    assert_equal ['returned', 'booted'], [walk.ending, walk.returned.status]
+    queue = Erx::BoardFiles.read_queue(File.join(run_directory, Erx::BoardFiles::QUEUE))
+    assert_equal Erx::BoardFiles::Identity.new(**found), queue.return_identity
+  end
+
+  def test_the_return_is_unknown_when_the_found_stage_holds_no_bootable_file
+    stage_pair
+    FileUtils.mkdir_p(File.join(@found, Erx::Netboot::SETS, '1'))
+    kernel = File.join(@found, Erx::Netboot::SETS, '1', Erx::BootPartition::KERNEL)
+    [-> { File.write(kernel, "\e[2Jnot a boot file") }, -> { stage_kernel && File.chmod(0o000, kernel) }].each do |make|
+      make.call
+      @out.clear
+      walk = walk_board
+      assert_equal ['returned', 'unknown', nil], [walk.ending, walk.returned.status, walk.returned.identity]
+      said = @out.grep(/names no build/)
+      assert_equal 1, said.size, @out.inspect
+      refute_match(/\e/, said.first)
+    end
+  end
+
+  def test_the_return_is_unknown_when_the_found_stage_holds_no_whole_pair
+    stage_kernel
+    assert_equal 'unknown', walk_board.returned.status
+    assert_empty @out.grep(/names no build/)
+  end
+
+  def test_the_return_is_unknown_when_the_found_target_is_no_stage
+    assert_equal 'unknown', walk_board.returned.status
+  end
 
   def test_a_walk_writes_its_queue_and_walk_beside_the_log_and_points_the_link_back
     walk = walk_board

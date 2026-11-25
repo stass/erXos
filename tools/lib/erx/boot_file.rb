@@ -6,6 +6,7 @@ require 'tmpdir'
 require_relative 'error'
 require_relative 'abi_binary'
 require_relative 'bounded_file'
+require_relative 'no_follow'
 require_relative 'output_directory'
 
 module Erx
@@ -64,6 +65,38 @@ module Erx
       raise Error, "cannot write the bootable file: #{error.message}"
     end
 
+    # The archive header of the single bootable file at path, where its locator
+    # places the archive: what names the build the file boots, its build and
+    # index hash. A file that is not a single bootable file of this version, or
+    # whose last component is a symbolic link, is refused; only the boot header,
+    # the locator and the archive header are read.
+    def archive_header(codec:, path:)
+      NoFollow.open(path, File::RDONLY | File::NONBLOCK | File::BINARY) do |input|
+        stat = input.stat
+        raise Error, 'the bootable file is not a regular file' unless stat.file?
+
+        locator_offset = codec.constant('arch_boot_locator_offset')
+        head = input.read(locator_offset + codec.layout_size('erx_boot_locator')).to_s
+        header = decode(codec, 'erx_arch_boot_header', head, 0)
+        locator = decode(codec, 'erx_boot_locator', head, locator_offset)
+        archive_off = locator.fetch('archive_off')
+        archive_size = locator.fetch('archive_size')
+        unless header.fetch('magic').b == codec.fixed_bytes('arch_boot_magic') &&
+               locator.fetch('magic').b == codec.fixed_bytes('boot_locator_magic') &&
+               locator.fetch('version') == codec.constant('boot_locator_version') && locator.fetch('zero').zero? &&
+               archive_off >= head.bytesize && archive_off + archive_size <= stat.size
+          raise Error, 'the bootable file carries no locator of an archive inside it'
+        end
+
+        input.seek(archive_off)
+        check_archive(codec, input.read(codec.layout_size('erx_pack_header')), archive_size)
+      end
+    rescue NoFollow::Link
+      raise Error, 'the bootable file is a symbolic link'
+    rescue SystemCallError => error
+      raise Error, "cannot read the bootable file: #{error.message}"
+    end
+
     # The archive must be a regular file whose header names this version and
     # its own length, so a wrong input is refused here and not only at boot.
     def assemble(codec, first_stage:, archive:, temporary:)
@@ -91,6 +124,7 @@ module Erx
              header.fetch('version') == codec.constant('pack_version') && header.fetch('total_size') == size
         raise Error, 'the archive input is not an archive of this version and length'
       end
+      header
     end
     private_class_method :check_archive
 

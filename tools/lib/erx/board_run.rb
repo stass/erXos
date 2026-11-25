@@ -10,6 +10,8 @@ require_relative 'bench_record'
 require_relative 'board_console'
 require_relative 'board_files'
 require_relative 'board_walk'
+require_relative 'boot_file'
+require_relative 'boot_partition'
 require_relative 'code_ssh'
 require_relative 'error'
 require_relative 'line_escape'
@@ -25,7 +27,8 @@ module Erx
   # queue, asks the board to reboot, walks the console's lines, and at the end points the
   # link back, removes the queue, writes walk.json, reads the sensors again and hands what
   # it has to the record's seam. The link is pointed back however the walk ends,
-  # an interruption included.
+  # an interruption included. The found pair's identity, what the board returns to, is read
+  # from the found target when it is a stage Netboot made (return_identity).
   #
   # Every byte of the board's that the run shows, from the console or from ssh, reaches
   # the output only through LineEscape; a boot name only selects an entry the host made.
@@ -121,9 +124,10 @@ module Erx
     # prepare makes the queue as Netboot.prepare does, given its keywords but runner and
     # fsimg; console opens the console with a log path (BoardConsole.open); clock gives
     # monotonic seconds; pause sleeps; out takes the run's lines; record is the record's
-    # seam, handed a Ran.
-    def initialize(root:, www:, shell:, prepare:, console:, clock:, out:, record:, pause: Kernel.method(:sleep))
+    # seam, handed a Ran; codec is the ABI's (ABI::Codec), which reads a staged kernel8.img.
+    def initialize(root:, www:, shell:, prepare:, console:, clock:, out:, record:, codec:, pause: Kernel.method(:sleep))
       @root = File.expand_path(root)
+      @codec = codec
       @link = File.expand_path(www)
       @shell = shell
       @prepare = prepare
@@ -145,8 +149,9 @@ module Erx
         raise Error, "bench: #{QUEUE_LEFT}" if found.target && NetbootEntry.entries(found.target) > 1
 
         names = entries.map { SecureRandom.hex(16) }
+        returning = return_identity(found)
         queue_path = @prepare.call(root: @link, sets: entries.map(&:set), names: names, key: key, found: found)
-        directory, queue, state, interruption, restored = walked(benchmark, entries, names, queue_path, found)
+        directory, queue, state, interruption, restored = walked(benchmark, entries, names, returning, queue_path, found)
         walk = BoardWalk.walk(state, restored: restored)
         ended(directory, queue, walk)
         raise interruption if interruption
@@ -161,13 +166,13 @@ module Erx
     # the ended state, the interruption that ended it (or nil) and whether the link was
     # pointed back. The queue is removed, and the link pointed back once it was served,
     # whatever happens here.
-    def walked(benchmark, entries, names, queue_path, found)
+    def walked(benchmark, entries, names, returning, queue_path, found)
       served = false
       restored = nil
       directory = run_directory(benchmark)
-      queue = queue_of(benchmark, entries, names, queue_path)
+      queue = queue_of(benchmark, entries, names, returning, queue_path)
       BoardFiles.write_queue(directory, queue)
-      state, interruption = served_walk(plan_of(entries, names), directory, queue_path) { served = true }
+      state, interruption = served_walk(plan_of(entries, names, returning), directory, queue_path) { served = true }
       restored = point_back(found, queue_path)
       [directory, queue, state, interruption, restored]
     ensure
@@ -242,7 +247,21 @@ module Erx
       directory
     end
 
-    def queue_of(benchmark, entries, names, queue_path)
+    # The found pair's identity (docs/design-bench.md, "The walk", item 1): the build and
+    # index hash of the kernel8.img a stage Netboot made boots, or nil, unknown, when the
+    # found target is no such stage or its kernel8.img is no bootable file.
+    def return_identity(found)
+      kernel = Netboot.stage_kernel(found)
+      return nil unless kernel
+
+      header = BootFile.archive_header(codec: @codec, path: kernel)
+      BoardFiles::Identity.new(build: header.fetch('build_id').unpack1('H*'), index: header.fetch('index_hash').unpack1('H*'))
+    rescue Error => e
+      say("bench: the found stage's #{BootPartition::KERNEL} names no build (#{LineEscape.escape(e.message)}); what the board returns to is unknown")
+      nil
+    end
+
+    def queue_of(benchmark, entries, names, returning, queue_path)
       records = entries.map(&:record).uniq
       BoardFiles::Queue.new(
         benchmark: benchmark,
@@ -251,17 +270,15 @@ module Erx
           BoardFiles::Entry.new(position: position, name: name, set: records.index(entry.record),
                                 image_sha256: Digest::SHA256.file(File.join(queue_path, position.to_s, NetbootEntry::IMAGE)).hexdigest)
         end,
-        # The found pair's identity is read only from a stage Netboot made; no reader of a
-        # staged kernel8.img's banner identity exists yet, so the return is unknown.
-        return_identity: nil
+        return_identity: returning
       )
     end
 
-    def plan_of(entries, names)
+    def plan_of(entries, names, returning)
       # One end deadline for the walk: the longest guest deadline of its sets, so a paired
       # walk's shorter set waits as long as the longer.
       guest = entries.map(&:deadline_seconds).max
-      BoardWalk::Plan.new(names: names, identities: entries.map(&:identity), return_identity: nil,
+      BoardWalk::Plan.new(names: names, identities: entries.map(&:identity), return_identity: returning,
                           deadlines: BoardWalk::Deadlines.new(boot_seconds: BOOT_SECONDS,
                                                               end_seconds: guest + NativeBench::DEADLINE_MARGIN_SECONDS,
                                                               return_seconds: BOOT_SECONDS),

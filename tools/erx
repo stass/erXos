@@ -1527,7 +1527,7 @@ module Erx
         root: ROOT, www: Netboot::DEFAULT_HTTP_ROOT, shell: shell,
         prepare: ->(**queue) { Netboot.prepare(**queue, runner: runner, fsimg: fsimg) },
         console: ->(log:) { BoardConsole.open(options[:console], log: log, clock: clock) },
-        clock: clock, out: Terminal.method(:puts),
+        clock: clock, out: Terminal.method(:puts), codec: ABI::Codec.new(ABI::Generator.plan(root: ROOT).schema),
         record: ->(ran) { Terminal.puts("bench: the board run's record is not built yet; its log, #{BoardFiles::QUEUE} and #{BoardFiles::WALK} are in #{ran.directory}") }
       ).call(benchmark: name, subjects: subjects, runs: options[:runs], key: options[:key])
       walk.ending == 'returned' ? 0 : 1

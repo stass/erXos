@@ -98,6 +98,20 @@ class BootFileTest < Minitest::Test
     assert_equal expected, locate([RAM, TREE], size: archive.bytesize, declared: declared)
   end
 
+  def test_the_archive_header_read_back_is_the_one_the_packer_wrote
+    single, archive = single_file
+    path = File.join(@directory, 'single')
+    header = @codec.decode_layout('erx_pack_header', archive.byteslice(0, @codec.layout_size('erx_pack_header')))
+    assert_equal header, Erx::BootFile.archive_header(codec: @codec, path: path)
+
+    File.symlink(path, link = File.join(@directory, 'link'))
+    assert_raises(Erx::Error) { Erx::BootFile.archive_header(codec: @codec, path: link) }
+    # Cut inside the archive, so the locator names bytes the file does not hold.
+    File.binwrite(path, single.byteslice(0, single.bytesize - 1))
+    error = assert_raises(Erx::Error) { Erx::BootFile.archive_header(codec: @codec, path: path) }
+    assert_match(/no locator of an archive inside it/, error.message)
+  end
+
   def test_writer_refuses_what_is_not_a_first_stage_as_built
     packed = FirstStageFixture.bytes
     packed[FirstStageFixture::LOCATOR, 32] = FirstStageFixture.locator(off: 0x4000, size: 0x1000)

@@ -136,6 +136,22 @@ module Erx
       Found.new(target: nil)
     end
 
+    # The kernel8.img the found target's way back boots when the target is a stage this
+    # module made (stage_http: one entry, an image of sets/1), or nil when it is none or its
+    # entry holds no whole pair, so that prepare's way back is empty (copy_found) and the
+    # board boots its card.
+    def stage_kernel(found)
+      return nil unless found.target && NetbootEntry.entries(found.target) == 1
+
+      pair = NetbootEntry.open_pair(File.join(found.target, '1'))
+      return nil unless pair
+
+      pair.image.close
+      path = File.join(found.target, SETS, '1', BootPartition::KERNEL)
+      # A link, dangling or not, is handed on, so the reader refuses it with a reason.
+      path if File.exist?(path) || File.symlink?(path)
+    end
+
     # Writes a queue as a fresh sibling of the link at root and returns its path; the link
     # is not touched. Each distinct set of sets (by its digests) is copied once under
     # sets/ and checked; entry n, from 1, is a signed image of sets[n - 1] whose boot name
