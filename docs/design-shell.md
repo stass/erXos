@@ -798,7 +798,7 @@ an argument is a usage error:
 
 ```
 % uname -a
-erXos erxos 0.1.0 n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-50bbe8a98119 arm64
+erXos erxos 0.1.0 n1234-5e45e725588e Sun Nov  8 18:02:11 UTC 2026 qemu-virt/development fiasco-07ea18e1f293 arm64
 ```
 
 The version takes the best of FreeBSD's and macOS's: FreeBSD's source
