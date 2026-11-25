@@ -1641,7 +1641,11 @@ its tree and its qid path, and its version is `getattr`'s
 when it first meets a file and at every change to it
 ([design-files.md](design-files.md#identity-and-version)). Every server
 keeps qid paths unique within a tree and never gives a path to a second
-file while its domain lives. The path depends on what the format offers:
+file while its domain lives, and a tree is the numbering, not a grant's
+root: every grant of one volume names the volume's tree, so the data
+volume's `data`, `packages` and `home` grants all name `data`
+([design-files.md](design-files.md#building-binding-and-mounting), "The
+tree beneath an entry"). The path depends on what the format offers:
 
 * **erXos's F2FS**: the inode's node number in the low 32 bits and its
   `i_generation` in the high 32, so a node number the volume reuses for

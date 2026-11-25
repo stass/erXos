@@ -461,9 +461,9 @@ Each record then runs the existing operation: introduce, mint, install,
 under one deadline of 10 s, with a fresh tag, failing once for the pair
 and logging. The mint's request carries the grantee's principal and the
 record's rights, so `erx_svc` knows who holds each facet; it binds no
-tree differently by principal. Its reply names the tree its grant roots
-in, as every mint's reply for a file tree does, and the installation
-sends `{Pid, Tree, Rights}`
+tree differently by principal. Its reply names its grant's tree, as
+every mint's reply for a file tree does, and the installation sends
+`{Pid, Tree, Rights}` with the `files` interface's number
 ([design-files.md](design-files.md#building-binding-and-mounting), "The
 tree beneath an entry").
 

@@ -2410,14 +2410,19 @@ record ([design-domains.md](design-domains.md#authority)). The domain
 service mints the facet, a process of the system domain bound to the
 target as its grantee ([design-domains.md](design-domains.md#facets)), and
 sends its pid under `Name` to the target's capability registry on the
-target's lane from the system domain. A facet that serves a file tree, a
+target's lane from the system domain, with its service's interface
+number (`abi/services`), which the source's live grant record names, so
+a re-grant keeps its source's interface under any name and no server's
+reply sets it. A facet that serves a file tree, a
 storage domain's or a session's file server reached through a facet grant
-included, goes with its rights, from its facet row, and the name of the
-tree its grant roots in, which the server names when it starts the
+included, goes with its rights, from its facet row, and the name of its
+grant's tree, which the server names when it starts the
 grant (below, "the mint's reply"), and the namespace the domain builds
 from it keeps the three together
 ([design-files.md](design-files.md#building-binding-and-mounting), "The
-tree beneath an entry"). The registry
+tree beneath an entry"). The interface, not the tree, is what keeps a
+display's facet from the domain's programs
+([design-files.md](design-files.md#narrowing-for-a-program)). The registry
 installs a name only from that lane, so no other domain can install one,
 and acknowledges; the call returns `{ok, Facet}` at the acknowledgement,
 or `{error, Reason}` when the target has ended or refused the name. A
@@ -2648,18 +2653,24 @@ The record moves on these events, and on nothing else:
   that tag. `{ok, Facet}` with `Facet` a pid the server's incarnation
   owns, node and creation both, or, for a service of an interface
   `abi/services` declares `served_as tree`, `{ok, Facet, Tree}`, which
-  also names the tree the grant roots in, a plain name of 1 to 255
+  also names the grant's tree, the numbering its files' qid paths come
+  from, a plain name of 1 to 255
   bytes, moves the operation to `installing` and
   sends the grantee
-  `{erx_facets_install, Tag, Name, Facet}`, where `Name` is the record's
-  installed name and `Facet` is the pid, or
+  `{erx_facets_install, Tag, Name, Interface, Facet}`, where `Name` is
+  the record's installed name, `Interface` the interface number of the
+  facet row's service, which the manifest states and no reply sets, and
+  `Facet` is the pid, or
   for a service served as a tree `{Pid, Tree, Rights}`, with the reply's
   tree and the rights of the grant's
   facet row, which the manifest states and no reply sets
   ([design-files.md](design-files.md#building-binding-and-mounting),
   "Rights beneath an entry" and "The tree beneath an entry"); any other
-  reply fails it. A tree's name counts only for the server's own files,
-  so the reply may state it. A
+  reply fails it. A tree's name counts only for the server's own files
+  and decides no authority, so the reply may state it; the interface,
+  which decides whether the domain's programs may reach the facet
+  ([design-files.md](design-files.md#narrowing-for-a-program)), comes
+  only from the manifest. A
   reply with an unknown or finished tag, a second reply, or one from
   any other domain is dropped and counted;
 * **the acknowledgement**, `{erx_facets_installed, Tag}` from the
@@ -2700,7 +2711,12 @@ a domain mounts a files facet only where the manifest grants
 it one ([design-files.md](design-files.md#building-binding-and-mounting),
 "A facet's mount"), and the domain's agent keeps the names and their
 interfaces for `erx:granted/0`, which answers the names, and
-`erx:granted/1`, which answers those of one interface. The system domain, which holds the manifest, takes its
+`erx:granted/1`, which answers those of one interface. The ready
+answer's own facets, of the system domain's services, come each with
+its service's interface number too, so every facet the registry holds
+carries the interface the manifest gives it, from the ready answer, an
+installation or a `grant/4`, and none from a server
+([design-files.md](design-files.md#narrowing-for-a-program)). The system domain, which holds the manifest, takes its
 own names from it. Until its grant is installed, and while its server
 restarts, the grantee finds the name absent or its facet dead, and
 treats both as the service being unavailable.
@@ -4407,7 +4423,7 @@ a session that hands it on shares the facet's control with the receiver
 serves the tree from a process linked to it, so revoking the facet ends
 the tree and every fid on it, and no grant of the tree outlives the facet.
 Like every facet that serves a file tree, each of the two installs as its
-pid with the tree its grant roots in and the rights of its facet row; a
+pid with its grant's tree, the interface of its service and the rights of its facet row; a
 namespace entry names only the facet, and resolves on that tree with the
 lesser of its own rights and the facet's
 ([design-files.md](design-files.md#building-binding-and-mounting), "The

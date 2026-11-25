@@ -4038,8 +4038,9 @@ each domain the manifest names gets a grant of the bridge, mounted at
 `/host`, read-only unless the manifest says otherwise. Its grants are
 attached from the moment they are made, as every grant inside the
 machine is: the bridge attaches once to QEMU's server when it opens its
-9P session there, and an erXos client's walk from `NOFID` walks from
-that root fid, so QEMU receives `NOFID` only as an `attach`'s `Afid`
+9P session there, and its map of an erXos client's fids, applied
+through the codec's `map_fids/2`, takes a walk's `NOFID` source to that
+root fid, so QEMU receives `NOFID` only as an `attach`'s `Afid`
 ([design-files.md](design-files.md#version-and-attach)). The bridge asks
 QEMU for an `msize` of 65,560, so a read carries at most the 65,536 bytes
 a read carries inside the machine, and decodes every reply with `erx_9p`,
@@ -4068,14 +4069,19 @@ stream 4, carries 9P2000.L messages, one whole message in each frame's
 body, so the host link's `msize` is 8,192, a frame's body, enough for the
 largest message of every operation, and no message is reassembled.
 `erx_hostlink`'s 9P bridge decodes each with `erx_9p` and relays it to the
-grant of the tree that `attach`'s `Aname` names, among the trees the
-host-link configuration lists: in development builds `proc`, the
-inspector's tree at scope `all`, and `data`, the data partition's root; in
-release builds the trees the system manifest lists, by default none. The
+grant mounted at the point `attach`'s `Aname` names at the top of the
+system domain's namespace, a whole grant whose entry's `root` is `[]`,
+among the names the host-link configuration lists: in development
+builds `proc`, the inspector's tree at scope `all`, and `data`, the data
+partition's root; in release builds the names the system manifest
+lists, by default none. The `attach` it relays names that grant's own
+tree, since several grants, such as the data volume's `data`,
+`packages` and `home`, may name one tree and a tree's name selects no
+grant ([design-files.md](design-files.md#version-and-attach)). The
 bridge tells the two apart by the system manifest's development flag,
 which the image build checks against the kind of build it makes, so one
 source decides; a manifest it cannot read lists none. An `attach` naming
-another tree fails with `enoent`. On the host, `tools/erx
+anything else fails with `enoent`. On the host, `tools/erx
 files` relays a UNIX socket in the harness's owner-only directory to the
 files stream, checking each message's size field against the stream's
 `msize` and nothing more, so any 9P2000.L client of the host mounts the
@@ -4090,9 +4096,12 @@ answers some messages without a grant: `version`, with the smaller
 `enotsup`; a request on a fid it does not hold with `ebadf`, a walk from
 `NOFID` among them, since a host's fid names a tree only once an
 `attach` has made it and the walk from a grant's root is a difference
-inside the machine alone
+inside the machine alone: the codec's `fids/1` lists a walk's source,
+`NOFID` included, with the role `start`, so the bridge looks it up as it
+looks up every fid, renames an ordinary walk's source through
+`map_fids/2`, and finds no fid of its own under `NOFID`
 ([design-files.md](design-files.md#version-and-attach)); one that
-names fids of two trees with `exdev`. It holds at most 256 fids, as many
+names fids of two grants with `exdev`. It holds at most 256 fids, as many
 as a session's program holds on a grant
 ([design-files.md](design-files.md#bounds)), and a fid beyond them fails
 with `emfile`. It keeps at most 32 requests pending and at most 64 tags
@@ -4525,7 +4534,11 @@ faults that must make its tests fail where it has any.
   server's malformed replies fail each request with `eio` and nothing
   more. `erx_9p` has a fuzz target over the files stream's bytes. Seeded:
   a bridge that keeps its fids across a session's replacement; one that
-  skips the `Aname` check. A recorded-frame test establishes behavior for
+  skips the `Aname` check; one that selects a grant by its tree's name,
+  caught by a `packages` grant, of the data volume's tree, mounted ahead
+  of `/data`, to which the host's `attach` of `data` then goes; a walk's
+  source of a plain integer kind, caught by the host's ordinary walk,
+  which the bridge then answers `einval`. A recorded-frame test establishes behavior for
   its chosen identifiers, not a proof that a random collision cannot
   occur.
 * **Logins:** the release console's login, the secure-line rule (V6),

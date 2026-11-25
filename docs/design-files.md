@@ -270,7 +270,7 @@ of each slot's system partition
 | --- | --- | --- | --- |
 | **F1.** A path never reaches a file server the domain does not hold | a request is a frame on the lane from the client's domain to the server's, addressed to a grant pid; the server's funnel admits a frame only to a pid its runtime exported to the domain that lane belongs to, with `send` ([design-domains.md](design-domains.md#invariants) D3); a grant's pid reaches a domain only through the system domain's introduction of the two; a namespace entry stores only a pid | a request path that names servers by anything but a pid; a server that acts on a pid named inside a request; a runtime that exported a grant to a domain the server did not make it for | a domain test mounts a pid its domain was never introduced to and finds every request fails with `eio`; the funnel's export tests |
 | **F2.** No request reaches above its grant's root | a grant's root is fixed at the server when the grant is made; a walk of `..` at the root stays at the root, as 9P's walk(5) specifies and 9P2000.L keeps, and the grammar refuses a name holding `/` or NUL; the server follows no link during a walk or an open, so a link's text is resolved by the client through its own namespace; erXos's clients send neither `.` nor `..`, since both act on the client's place (F11) and every walk `erx_path` asks for carries only plain names, and the client's one request function refuses a walk that names `.`, `..` or an empty name | a server that accepts `/` inside a name, walks above its root on `..`, follows a link during a walk or an open, or roots a grant from anything the client sends after it is made | the resolver's fuzz target and properties; the grammar's refusals; an `erx_fs` test that walks `..` from the root and from below it, and whose links point above the root, at other mounts and in loops |
-| **F3.** Rearranging a namespace or narrowing it for a program never adds authority | `bind` copies an entry that exists, narrowed to a subtree; `unmount` removes one; `mount` takes a pid, which by F1 reaches only what the domain holds; a handler gives a program only entries of its starter's table, each on the provider of the starter's entry, rooted at or below that entry's root, with rights no wider than the starter's there, and walks for it only names the resolver produced over that table; no entry on a window tree passes to any program, and every description a program holds was opened through a program's table, so none lies on one; the one addition, for a program with a window, one its starter asked for or one its handler opened at its first open of `/dev/draw`, is a `/dev` tree of the session's own that serves that window's files through the session's own grant of the display the starter names, less the window's `ctl`, which the starter could open itself, in place of the export's `/dev`, which every program reaches, and of any entry at exactly `/dev`, whose rights cap it ([A program's window](#a-programs-window)) | an operation that creates a pid or a fid beyond its source; a handler that walks `..` for a program, records wider rights than its starter's, carries an entry on a window tree into a program's table, or admits into a program's open table a description that no program's table opened | property tests over sequences of operations: the set of pids in the table only shrinks or gains pids the domain already held; a property test over chains of spawns that every program's mounts lie within, and carry rights within, its starter's, and that no program's table holds an entry whose tree is `windows` |
+| **F3.** Rearranging a namespace or narrowing it for a program never adds authority | `bind` copies an entry that exists, narrowed to a subtree; `unmount` removes one; `mount` takes a pid, which by F1 reaches only what the domain holds; a handler gives a program only entries of its starter's table, each on the provider of the starter's entry, rooted at or below that entry's root, with rights no wider than the starter's there, and walks for it only names the resolver produced over that table; no program's resolution reaches a facet that the registry holds as one of the `windows` interface, an interface the domain service sets and no server's reply does, read at every resolution, so no installation, replacement or name lets one through, and every description a program holds was opened through a program's resolution, so none lies on one; the one addition, for a program with a window, one its starter asked for or one its handler opened at its first open of `/dev/draw`, is a `/dev` tree of the session's own that serves that window's files through the session's own grant of the display the starter names, less the window's `ctl`, which the starter could open itself, in place of the export's `/dev`, which every program reaches, and of any entry at exactly `/dev`, whose rights cap it ([A program's window](#a-programs-window)) | an operation that creates a pid or a fid beyond its source; a handler that walks `..` for a program, records wider rights than its starter's, resolves for a program a facet of the `windows` interface, decides that from a tree's name or once at the program's start, or admits into a program's open table a description that no program's table opened | property tests over sequences of operations: the set of pids in the table only shrinks or gains pids the domain already held; a property test over chains of spawns that every program's mounts lie within, and carry rights within, its starter's, and that no program's resolution reaches a facet of the `windows` interface, over installations, replacements and names that arrive after the program starts |
 | **F4.** A client spends a server's CPU and memory only within the server's admission (on Fiasco: [FD31](design-fiasco.md#downsides-against-erxoss-kernel)) | the protocol checks fid, request, payload and lock bounds before any callback; a grant is one process with a `max_heap_size` that counts its binaries, so what it holds for its client is bounded by its fid pool times the server's per-fid bound; the server runs on its own group's grant and its grant processes schedule among themselves as Erlang processes do, so a flooding client fills its own lane and waits in its own runtime ([design-domains.md](design-domains.md#connections), [design-scheduler.md](design-scheduler.md#service-work)); a request that waits for an event, a blocking lock or a stream's read or write, is a waiting request held by the process that owns what it waits for, the tree's lock table for a lock and the tree's keeper for a stream ([Serving](#serving-the-erx_fs-behaviour), "Waiting requests"), within the client's requests in flight, and nothing in the server blocks on it | a callback before admission; a grant that holds unbounded state for one fid; a server thread that runs on a client's time; a request whose work grows with the client's input outside the grammar's bounds; a callback that waits for an event in the grant, which runs the client's other requests | hostile-client tests below: fid floods, lock floods, retained `/proc` results, a tiny expensive request, a client that never drains its replies, a window of waiting reads that is flushed and clunked |
 | **F5.** A read-only grant never writes | a grant with rights `ro` or `rx` refuses with `erofs`, as part of decoding the request and so before any callback, every operation the protocol's table marks as writing: `lopen` for writing or with truncation, `lcreate` whatever its flags, since whether it creates a file only the server learns, `write`, `setattr`, `remove`, `unlinkat`, `rename`, `renameat`, `link`, `symlink`, `mknod`, `mkdir`, `xattrcreate`, and a write lock | an operation added to the table and not marked; a request that reaches the grant's dispatch by a path other than its decoding funnel | the refusal set is generated from the protocol's operation table, each operation marked as reading or writing; a test of every writing operation through a read-only grant |
 | **F6.** No grant carries write and execute together, and a session's handler gives a program code from a file only through an `rx` entry of the program's, the file-level twin of K8 (on Fiasco: [FD8](design-fiasco.md#downsides-against-erxoss-kernel)). It protects a program from running a file that it or another program could rewrite, not a program from its session, which is the trusted supplier of its programs' code ([design-system.md](design-system.md#creating-a-domain), "Code objects for a session") | a grant's rights are one of `ro`, `rw` and `rx`, a type with no value for both; an `rx` grant writes nothing (F5); an entry's rights only lower the grant's beneath it, so the handler's image check, before the session's command server fills a code object, needs `rx` on the entry the path resolved through, which an entry has only over an `rx` grant beneath it: a facet's grant, whose rights a resolution lowers the entry to, a grant pid's, whose rights its mount lowers the entry to, or for an EROFS entry the grant its fid came through ([Building, binding and mounting](#building-binding-and-mounting), "Rights beneath an entry"; [design-programs.md](design-programs.md#file-objects)); a handler gives a program rights within its starter's; an EROFS mount's rights are `ro` or `rx`, and `rx` only through an `rx` grant, and no argument of the mount names a layout | a rights representation with separate write and execute bits; a resolution that keeps the rights a facet's mount asked, which runs a file through an `rx` entry on an `rw` grant; a grant pid's mount whose rights come from its options alone; a code object filled from a fid on an `ro` or `rw` grant; an EROFS mount whose rights come from its options or its source rather than its fid's grant | the grammar's rights type; a test that running a file through an `ro` and through an `rw` mount fails with `EACCES` and that an `rx` grant refuses every writing operation; a test that a session's `erx_ns:mount({facet, data}, "/x", [rx])` succeeds and that running a file the session wrote there fails with `EACCES`; a test that an `rx` mount of a file of `/apps`, reached through the `rw` `apps` grant, is refused with `eacces`, while `/app` mounts `rx` through the `rx` `packages` grant; a test that an `rx` mount of an `rw` grant pid makes an `ro` entry; seeded: a resolution that keeps the rights a facet's mount asked, which the `/x` test catches, a grant pid's mount that keeps the rights its options ask, which the grant pid test catches, and a mount that takes its rights from its options alone, which the `/apps` test catches |
@@ -304,7 +304,7 @@ of each slot's system partition
                                            % process
                   | {grant, pid(), Tree :: name()}
                                            % a grant at a file server, by pid,
-                                           % and the tree it roots in, which
+                                           % and its tree, which
                                            % came with the pid from the code
                                            % that started the grant
                   | {facet, atom()}        % a facet's grant, by the facet's
@@ -354,14 +354,18 @@ starter's entry, or from the `/dev` tree a handler makes for a program
 with a window, a tree of the session's own. A grant entry's tree is named once, by the code
 that starts the grant: `erx_fs:start_link/3,4`, through which every grant
 starts, answers its pid with the tree its callback module's `root`
-names, and the tree travels
+names, the numbering its files' qid paths come from, whatever the
+grant's root or its service, and the tree travels
 with the pid to every holder of the grant, through the facet registry
 for a facet or in the handle of a grant the domain started itself
 ([Building, binding and mounting](#building-binding-and-mounting),
 "The tree beneath an entry"). No mount names a tree and no request
 carries one inside the machine, and a grant's tree is fixed when the
-server makes it, so a client never keys a file by a tree its grant does
-not root in ([Identity and version](#identity-and-version)).
+server makes it, so a client keys a file only by the tree its server
+numbers it in ([Identity and version](#identity-and-version)). The
+tree keys identities and decides no authority: what keeps a display
+from programs is the interface of the facet beneath an entry
+([Narrowing for a program](#narrowing-for-a-program)).
 
 ### The file protocol
 
@@ -392,7 +396,7 @@ and back ([Errors](#errors)).
 | --- | --- | --- | --- |
 | version | `{version, Msize, Version}` | `{ok, Msize, Version}` | answered with the smaller of the client's `Msize` and the server's, 65,560 inside the machine, never more than the client offered; a `Msize` below 4,096 is refused, as Linux and QEMU refuse it; a version other than `<<"9P2000.L">>` is answered `<<"unknown">>`; inside the machine it changes nothing ([Version and attach](#version-and-attach)) |
 | auth | `{auth, Afid, Uname, Aname, NUname}` | `{error, enotsup}` | not served: a grant's identity is its lane's, so authentication is not required, and the answer is `Rlerror`, as diod answers when it requires none |
-| attach | `{attach, Fid, Afid, Uname, Aname, NUname}` | `{ok, Qid}` | `Fid` then names the grant's root; `Afid` is `?NOFID`, since `auth` is not served; `Aname` names the tree the grant roots in, and any other name fails with `enoent`; `Uname` and `NUname` are recorded and grant nothing; served for the host link's bridge, since erXos's clients inside the machine walk from `NOFID` instead ([Version and attach](#version-and-attach)) |
+| attach | `{attach, Fid, Afid, Uname, Aname, NUname}` | `{ok, Qid}` | `Fid` then names the grant's root; `Afid` is `?NOFID`, since `auth` is not served; `Aname` names the grant's tree, and any other name fails with `enoent`; `Uname` and `NUname` are recorded and grant nothing; served for the host link's bridge, since erXos's clients inside the machine walk from `NOFID` instead ([Version and attach](#version-and-attach)) |
 | walk | `{walk, Fid, NewFid, Names}` | `{ok, Qids}` | at most 16 names; `Fid` a fid of the grant's, or `?NOFID`, which starts the walk at the grant's root as if from a fid that `attach` had just made; `NewFid` never `?NOFID`; `Fid` not open, as walk(5) asks and erXos's servers enforce; `NewFid` not in use unless it equals `Fid`; a failure at the first name is an error reply; a walk that passes at least one name and then fails lists the qids it walked and leaves `NewFid` unused; `NewFid` names the result only when every name was walked; a walk from a symbolic link fails at the next name |
 | lopen | `{lopen, Fid, Flags}` | `{ok, Qid, Iounit}` | `Flags` 9P2000.L's open flags ([Flags](#flags)); a link fails with `eloop`, a device node or FIFO with `enxio`; `Iounit` 65,536 inside the machine |
 | lcreate | `{lcreate, Fid, Name, Flags, Mode, Gid}` | `{ok, Qid, Iounit}` | `Fid` a directory, after which it names the file, open, so no unopened fid of the file remains; one atomic step that creates the file, or, without `EXCL`, opens the regular file `Name` already names with `Flags`, `TRUNC` included, as QEMU's `openat` with `O_CREAT` does; `eexist` with `EXCL` for any existing name, a dangling link included; `eloop` for a link without `EXCL`, which the client then follows; `eisdir` for a directory |
@@ -423,11 +427,19 @@ A `Qid` is `{Type, Version, Path}`, 9P2000.L's eight-bit type, 32-bit
 version and 64-bit path. Fids, modes, flags and masks are the integers
 9P2000.L gives them, so the codec at an edge moves each field without
 translating it, but for the error numbers. A request on a fid the grant
-does not hold fails with `ebadf`. In the frame profile a walk's `Fid` is
-a `u32` that may be `NOFID`, as `attach`'s `Afid` is, and every other fid
-field, a walk's `NewFid` among them, has the fid type, which excludes
-`NOFID`, so `NOFID` anywhere but a walk's source fails the profile with
-`einval`. 9P2000.L's wire constants, its message
+does not hold fails with `ebadf`. In the frame profile every fid field
+has the kind `fid`, which excludes `NOFID`, and states what its fid
+names: `directory`, `node` or `new`, or, for a walk's `Fid` alone,
+`start`, a fid that may name any node or be `NOFID`, the grant's root.
+`start` is the one role whose field also admits `NOFID`, so `NOFID`
+anywhere but a walk's source, a walk's `NewFid` included, fails the
+profile with `einval`, and the field stays a fid of the table: the
+generated codec's `fids/1` lists it as `{start, Fid}`, `NOFID` included,
+and `map_fids/2` maps it, so a bridge renames a walk's source from the
+table as it renames every other fid and decides there what `NOFID`
+becomes ([Version and attach](#version-and-attach)); `directory_fids/1`
+does not list it. A field of a plain integer kind, as `attach`'s `Afid`
+is, is no fid of the table and no bridge maps it. 9P2000.L's wire constants, its message
 type numbers, `NOTAG`, `NOFID`, `MAXWELEM` and `getattr`'s mask bits,
 live in `abi/protocols/9p.txt` with the operation table, and every client,
 server and codec takes them from there.
@@ -477,26 +489,61 @@ that the server would otherwise answer for it. `version`, the walk from
 `NOFID` and `write`'s `At` are the three deliberate differences from
 9P2000.L inside the machine; every other operation has its full meaning.
 
+**The root is admitted when the grant is made.** `erx_fs:start_link/3,4`
+calls the tree's `root` callback once, before the grant takes any
+request, and admits its answer by one check: the tree a plain name of
+1 to 255 bytes, and the qid one of the grammar's qid kind whose type
+is a directory. An answer that fails the check fails the start, so no
+grant exists whose root is unchecked. The grant then fixes, for its
+life, the root's node, the tree's name, which the start answers with
+the pid, and the root's identity, its qid's type and path, which a
+directory keeps while its tree lives. A walk from `NOFID` and an
+`attach` both start at that node, and the fid they make records the
+admitted qid, so a walk of no names from `NOFID`, whose reply lists no
+qid, records only what the start checked. The start does not fix the
+root's version: an `attach`, which only an edge's bridge sends, asks
+`root` afresh for the qid its reply carries and answers `eio`, making
+no fid, unless that answer names the fixed tree, type and path, its
+version alone free; and a client takes a file's version only from
+`getattr`, which asks the tree each time, never from a qid's `Version`
+([Identity and version](#identity-and-version)).
+
 At an edge `NOFID` keeps 9P2000.L's meaning and names no fid. A
-bridge's fid tables never hold it: a walk from `NOFID` that reaches the
-host link's bridge from the host names no fid the bridge holds and fails
-with `ebadf`, and the
-host-tree bridge, which serves the host's tree to erXos's clients, walks
-an erXos client's walk from `NOFID` from the root fid it attached on
+bridge's fid tables never hold it, and a bridge renames a walk's source
+through the codec's `fids/1` and `map_fids/2` as it renames every fid
+(`start` in [The file protocol](#the-file-protocol)): a walk from
+`NOFID` that reaches the host link's bridge from the host finds no fid
+of the bridge's under it and fails with `ebadf`, while an ordinary walk
+from a fid the host attached is renamed and relayed; the
+host-tree bridge, which serves the host's tree to erXos's clients, maps
+an erXos client's walk from `NOFID` to the root fid it attached on
 QEMU's server, so no server outside the machine receives `NOFID` as a
 walk's source
 ([design-live.md](design-live.md#files-between-the-host-and-the-machine)).
 
-`attach`'s `Aname` names a **tree**: one file system that a server
-serves, such as a partition's volume, an image or `/proc`. One domain
-may serve several trees, and every grant roots in exactly one of them,
-fixed when the server makes it. At an edge the name selects one of the
-trees the bridge lists
-([design-live.md](design-live.md#files-between-the-host-and-the-machine)),
-and the host link's bridge relays the host's `attach` to the grant of
-that tree. A grant answers an `attach` as 9P2000.L says, with a fid of
-its own on the grant's root each time, and only for the name of the tree
-it roots in; any other name fails with `enoent`.
+A **tree** is one numbering of a server's files: the files whose qid
+paths one table of the server draws, whatever subtree a grant of them is
+rooted at and whatever service serves it. One domain may serve several
+trees, such as a partition's volume, an image or `/proc`; every grant
+reaches files of exactly one of them, fixed when the server makes it;
+and two grants of one server domain name one tree exactly when their
+files' paths come from one numbering, so one file has one identity
+through every grant that reaches it
+([Identity and version](#identity-and-version)). The storage domain's
+`data`, `packages` and `home` services are grants of one tree, its
+littlefs volume's, rooted at the volume's top, at `/packages` or below,
+and at one user's home ([Building, binding and
+mounting](#building-binding-and-mounting), "The tree beneath an
+entry"). `attach`'s `Aname` names the tree, and a grant answers an
+`attach` as 9P2000.L says, with a fid of its own on the grant's root
+each time, and only for the name of its tree; any other name fails
+with `enoent`. Since several grants may name one tree, a tree's name
+selects no grant: at an edge the host's `Aname` names a mount point at
+the top of the bridge's domain's namespace, among those the bridge
+lists, `data` the entry at `/data`, and the host link's bridge relays
+the host's `attach` to the grant of that entry, a whole grant whose
+`root` is `[]`, with that grant's own tree as `Aname`
+([design-live.md](design-live.md#files-between-the-host-and-the-machine)).
 
 Fids are the client's to choose, as in 9P. A runtime draws them for all
 its processes from one counter, a 64-bit atomic in `prim_file`'s NIF,
@@ -584,7 +631,10 @@ A file's **identity** is its server's domain, the tree it lies in
 **version** is the 64-bit `data_version` of `getattr`, which 9P2000.L
 reserves and erXos's servers fill; `Version` in the qid is its low 32
 bits. A server keeps qid paths unique within a tree and never gives a
-path to a second file while its domain lives; how each format draws them
+path to a second file while its domain lives, and names one tree for
+every grant whose files' paths it draws from one table, so a file has
+one identity through every grant that reaches it, whatever each
+grant's root; how each format draws them
 is in [design-storage.md](design-storage.md#read-write-storage). Every
 server draws a file's version from one counter of its domain's
 runtime, shared by every file server of the domain and kept across a
@@ -1451,8 +1501,8 @@ construction rather than by a check at each use:
 * beneath a facet's entry is the grant the registry holds for the
   facet, which the registry holds as `{Pid, Tree, Rights}`, the rights
   of the grant's facet row, which the domain service takes from the
-  manifest and no reply of the server's sets (above), and the tree the
-  grant roots in (below, "The tree beneath an entry"). A resolution
+  manifest and no reply of the server's sets (above), and the grant's
+  tree (below, "The tree beneath an entry"). A resolution
   gives the entry the lesser of the rights its mount asked and the
   facet's (`erx_facets:table/1`): `ro` lies below `rw` and `rx`,
   and `rw` and `rx`, which no grant holds together, meet at `ro`. A
@@ -1482,17 +1532,37 @@ any other read, so the handler's image check needs `rx` on the entry
 the path resolved through, which by the rules above an entry has only
 over an `rx` grant ([design-programs.md](design-programs.md#file-objects)).
 
-**The tree beneath an entry.** An entry on a grant names the tree the
-grant roots in, which keys its files' identities, so two entries reach
-one file under one identity exactly when they reach it through grants
-of one tree ([Identity and version](#identity-and-version)), and an
-entry on a window tree passes to no program ([Narrowing for a
-program](#narrowing-for-a-program)). That name comes from one place, the
+**The tree beneath an entry.** An entry on a grant names the tree its
+grant's files lie in, the numbering their qid paths come from
+([Version and attach](#version-and-attach)), which keys their
+identities, so two entries reach one file under one identity exactly
+when they reach it through grants of one tree
+([Identity and version](#identity-and-version)), whatever root each
+grant is narrowed to, whatever service serves it and whatever rights it
+carries. The tree keys identities and nothing else; it decides no
+authority, and a display is kept from programs by its facet's interface
+([Narrowing for a program](#narrowing-for-a-program)). A tree names the
+backing numbering, never a grant's root: the storage domain's littlefs
+volume draws every qid path from its owner's one path table
+([design-storage.md](design-storage.md#read-write-storage)), so
+`erx_lfs`'s `root` answers one tree, `data`, the name of the volume's
+partition role, for the grants of the `data`, `packages` and `home`
+services alike, rooted at the volume's top, at `/packages` or
+`/packages/installed`, and at one user's home. In root's development
+session, whose table holds both the `data` facet at `/data` and its
+`home` facet at `/root`, `/data/root/notes` and `/root/notes` are one
+file under one identity, with one mapper when mapped from both paths
+(P14 of [design-programs.md](design-programs.md#invariants)). A facet
+row's `tree` (`files_tree`, `abi/services/files.txt`) picks where a
+grant is rooted within its service, `installed` or `home`, and is not
+the grant's tree. That name comes from one place, the
 server: `erx_fs:start_link/3,4`, through which every grant starts, a
 mint's, a domain's own and a session export's alike, answers the
 grant's pid with the tree its callback module's `root` names, the name
-an `attach` is checked against, and every holder receives the tree with
-the pid:
+an `attach` is checked against, admitted with the root before the grant
+takes any request ([Version and attach](#version-and-attach), "The root
+is admitted when the grant is made"), and every holder receives the
+tree with the pid:
 
 * a facet's grant reaches the domain with it: the mint's reply names
   the tree beside the facet's pid, the domain service installs it with
@@ -1506,14 +1576,37 @@ the pid:
   are (above).
 
 No mount option and no place names a tree. A facet's entry therefore
-cannot name a tree its grant does not root in, and a pid's entry names
+cannot name a tree other than its grant's, and a pid's entry names
 one only through a handle of the domain's own, on a grant of its own
-runtime, never on another domain's tree, a display's window tree among
-them. A server's tree name counts only for its own files, since a file's
-identity begins with the server's domain, which the client takes from
-the pid and no server states; a server that misnamed its tree would
-confuse only the identities of its own files, as a server that
-misnumbered its qids would.
+runtime, never on another domain's tree. A server's tree name counts
+only for its own files, since a file's identity begins with the
+server's domain, which the client takes from the pid and no server
+states; a server that misnamed its tree, or named two trees for one
+numbering, would confuse only the identities of its own files, as a
+server that misnumbered its qids would. That is why the mint's reply
+may state the tree: the tree comes from the server that numbers the
+files, not from the manifest, which would be a second source of a name
+the server's code fixes with nothing at run time to compare the two,
+nor from the facet's name, which would give two facets of one tree two
+identities for each file ([Alternatives
+considered](#alternatives-considered)).
+
+**A grant handle is built by its starter.** The handle a pid's mount
+takes, `{Pid, Tree, Rights}`, is a plain tuple at run time, and any code
+of the domain's runtime could build one with another tree or other
+rights. Its authority does not rest on the tuple: `erx_ns:mount/3`
+refuses a pid of another runtime, so a handle never names another
+domain's grant, and rights wider than the grant's buy nothing, since the
+grant's funnel refuses every write its own rights forbid (F5). Its tree
+does rest on one assumption, stated here: a handle is built only by the
+starter of the grant it names, from `erx_fs:start_link/3,4`'s answer,
+by `erx_fs:start_mounted/5` or `erx_fs_grants:own/1,2`, whose type,
+`erx_fs:grant_handle()`, is opaque, so Dialyzer refuses any other
+construction. A domain whose own code broke that assumption would key
+files of its own runtime's grants under a wrong tree, confusing only its
+own view of its own files, as any code of a domain can corrupt that
+domain's own state; no program builds a handle, since a program
+reaches the namespace only through its handler.
 `erx_ns:mount({erofs, Source}, To, Options)`, the one EROFS mount, adds
 an entry for the image a package file holds: `erx_ns`'s process mounts
 the image with the EROFS reader, which reads it through `erx_verity`
@@ -1612,8 +1705,8 @@ through a facet's mount, never by its pid: the entry's provider is
 each such entry, binds of it included, read at that moment against the
 domain's facet registry, `erx_facets`, which `erx:cap/1` also
 reads ([design-system.md](design-system.md#facets-a-configured-domain-serves)):
-on the grant the registry holds for `Name` and the tree that grant
-roots in, `{grant, Pid, Tree}`, or `ended` when it holds
+on the grant the registry holds for `Name` and that grant's tree,
+`{grant, Pid, Tree}`, or `ended` when it holds
 none (`erx_facets:table/1`, which `prim_file:erx_table/0` applies
 to the term at each resolution). A domain mounts a facet only where the
 manifest grants it one: the domain service names, in a domain's ready
@@ -1721,7 +1814,7 @@ release on / (release, local, read-only)
 ```
 
 The source is `release` or `erofs` for a local provider, the server's
-pid and the tree a grant roots in, `PID:/TREE`, as NFS writes
+pid and the grant's tree, `PID:/TREE`, as NFS writes
 `host:/export`, or `ended`; a bind's root follows as a path. The type is
 FreeBSD's `f_fstypename`: a local provider's own, and a grant's from its
 server's statfs at the entry's root (`erx_file_remote:statfs/2`), whose
@@ -1769,7 +1862,7 @@ the starter's:
   `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/tty`; and
   `/etc/passwd` and `/etc/group`, with qid paths from the session's
   counter ([design-programs.md](design-programs.md)). Each tree has
-  grants of its own, since a grant roots in one tree ([Version and
+  grants of its own, since a grant reaches files of one tree ([Version and
   attach](#version-and-attach)); so the export is the set of those
   grants, and a program started with a window adds one, of its own
   `/dev` tree, for as long as the program runs ([A program's
@@ -1780,23 +1873,52 @@ paths over it as `prim_file` resolves a domain's over the domain's
 table, walking from the grant's root through the entry's `root` with the
 names the resolver produced, and it holds no fid for an entry. So a fork
 copies it, nothing clunks it, and a `root` that a rename takes away
-answers `enoent` on the next walk, as a bind's does. An entry whose tree
-is a window tree, `windows` (`windows_tree`,
-`abi/services/windows.txt`), passes to no program, whatever its point
-and however it got into the starter's table, a bind of one included;
-a program reaches a display only through its own window ([A program's
-window](#a-programs-window)). The drop is the rule for a narrowing too:
-a starter that narrows a program to a place on a window tree, such as
-`within [/mnt/w/w1]`, starts it with nothing at that place, and the
-start is not refused. The tree is the one fact the test needs:
-a bind keeps its source's provider, and an entry's tree is the one its
-grant roots in, which came with the grant from the server and which no
-mount names ([Building, binding and
-mounting](#building-binding-and-mounting), "The tree beneath an
-entry"), so every entry that
-reaches a display names `windows`, under any point and any alias. A tree
-of another server that took the same name would only stay out of
-programs, which grants nothing.
+answers `enoent` on the next walk, as a bind's does.
+
+**No program reaches a facet of the `windows` interface.** A program
+reaches a display only through its own window ([A program's
+window](#a-programs-window)), and the one fact that decides it is the
+interface of the facet beneath an entry, which the system domain
+supplies, never the tree a server names. Every facet a domain's
+registry holds carries its service's interface number
+(`abi/services`), which the domain service sets and no server's reply
+does: for a facet of the ready answer and for each installation, from
+the manifest's row, and for a facet `erx_domain:grant/4` installs, from
+the live grant record of its source, so a re-grant keeps its source's
+interface under whatever name it is installed
+([design-system.md](design-system.md#facets-a-configured-domain-serves)).
+The handler resolves a program's paths over the program's table through
+`erx_facets:program_table/1`, which reads each facet's entry against
+the session's registry at that moment, as `erx_facets:table/1` does for
+the session, and differs in one rule: an entry whose facet the registry
+holds as one of the `windows` interface is left out of that
+resolution, as if the table had no entry there, and so is such a facet
+under `{facets, svc}`. The rule is applied at every resolution, not when
+the table is built, so it holds by construction for every order of
+events:
+
+* a facet mounted before its grant is installed resolves to `ended` for
+  a program, as for the session, until the installation, and from the
+  installation on is left out, since the installation brings its
+  interface;
+* a replacement under the same name, a re-grant from a display's new
+  incarnation or `grant/4` installing a display over a name that held a
+  files facet, is read at the next resolution with its own interface;
+* a display installed under any name, mounted at any point and bound
+  anywhere, is left out, since a bind keeps its source's provider, the
+  facet's name, and the name's interface comes with its grant.
+
+No other entry reaches a display: a pid's entry is a grant of the
+session's own runtime ([Building, binding and
+mounting](#building-binding-and-mounting)), and the server of every
+`windows` service is a display's configured domain, never a session
+(property 18 of [design-system.md](design-system.md#the-manifest)).
+The rule is the rule for a narrowing too: a starter that narrows a
+program to a place on a display's facet, such as `within [/mnt/w/w1]`,
+starts it with nothing at that place, and the start is not refused.
+The tree a window server names plays no part, so a server whose tree
+took another name, or a files server whose tree took the name
+`windows`, changes nothing a program reaches.
 
 **Where the export and a grant meet.** A session may also mount a grant
 at `/etc` or `/dev`, where the export serves names of its own: a session
@@ -1901,17 +2023,18 @@ own `ctl`, which presents any range of the session's whole pixel area
 program holding it could show another program's buffer in its own
 window. **A program reaches only its own window's files, and of them not
 the window's `ctl`.** It follows from one rule, which names no path:
-nothing on a window tree enters a program. A program reaches files
+no facet of the `windows` interface resolves for a program. A program reaches files
 through its table and its open table, both kept by its handler
 ([design-programs.md](design-programs.md#the-handler)), and:
 
-* no entry on a window tree passes to any program ([Narrowing for a
-  program](#narrowing-for-a-program)), so whatever mounts and binds of a
-  display its starter's table holds, the program's holds none, below
-  `/dev` or anywhere else;
+* no program's resolution reaches a facet of the `windows` interface
+  ([Narrowing for a program](#narrowing-for-a-program)), so whatever
+  mounts and binds of a display its starter's table holds, and whenever
+  the display's grant is installed, the program reaches none of them,
+  below `/dev` or anywhere else;
 * every file-backed description in a program's open table was opened through a
-  program's table ([Narrowing for a program](#narrowing-for-a-program)),
-  so none is on a window tree, a directory's included: no starter can
+  program's resolution ([Narrowing for a program](#narrowing-for-a-program)),
+  so none is on a display's grant, a directory's included: no starter can
   hand a program an open of a window's `ctl`, or of a window's directory
   to walk to it from, by a spawn, a fork, a passed descriptor or
   `start/1`, which refuses such a descriptor with `EINVAL`;
@@ -2179,9 +2302,12 @@ writes in Erlang form the `erx_files` application
 %% without it starts no grant whose row states a tree.
 -callback subtree(Args :: term(), Tree :: atom(), Grantee :: erx_fs_grants:grantee()) ->
               {ok, Args1 :: term()} | {error, einval}.
-%% The tree the grant roots in: its name, which erx_fs:start_link/3,4 answers with the
-%% grant's pid and attach's Aname must match, and its root, where an attach and a walk
-%% from NOFID start.
+%% The grant's tree and root: the name of the numbering its files' qid paths come from,
+%% the same for every grant whose paths come from one table, whatever its root, which
+%% erx_fs:start_link/3,4 answers with the grant's pid and attach's Aname must match; the
+%% root node, where an attach and a walk from NOFID start; and the root's qid, a
+%% directory's. Called once when the grant starts, whose check the answer must pass,
+%% and at each attach for the root's current version.
 -callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
@@ -2538,8 +2664,12 @@ other client's request can come between its parts:
   would leave before anything is kept, and only a reply the check
   accepts keeps it; a rejected reply is answered `eio` and, like a
   refusal, keeps only a `remove`'s clunk. Every qid the grant records
-  (attach, walk, `lcreate`) travels in the reply that records it, so a
-  malformed qid leaves no fid or open behind. `lcreate`
+  either travels in the reply that records it (attach, a walk of names,
+  `lcreate`) or is the root's, which the grant's start admitted before
+  the grant took any request (a walk from `NOFID`, whose reply lists only
+  the qids of the names it walked; [Version and
+  attach](#version-and-attach), "The root is admitted when the grant is
+  made"), so a malformed qid leaves no fid or open behind. `lcreate`
   checks its reply before it records the open, and clunks at once a
   handle the tree opened for a reply the check rejects, since no fid
   holds it. A request that fails is answered
@@ -2838,9 +2968,10 @@ module for an open file
 ([design-storage.md](design-storage.md#reading-erofs-images)). On a
 grant it runs through `erx_file_remote`. A grant entry's provider is
 `{grant, Pid, Tree}` with the entry's `rights`, as the table held them
-when the resolution started: `Tree` is the tree the grant roots in,
-which keys the identities of the files the client reaches through it
-and which no request carries, since a grant roots in exactly one tree
+when the resolution started: `Tree` is the grant's tree, the numbering
+of its files' qid paths, which keys the identities of the files the
+client reaches through it and which no request carries, since a grant
+reaches files of exactly one tree
 ([Building, binding and mounting](#building-binding-and-mounting),
 "The tree beneath an entry"), and `rights`
 is the entry's `ro`, `rw` or `rx`, so a read-only bind of an `rw` grant
@@ -2853,14 +2984,42 @@ rights are other than `rw`, as the grant's own funnel refuses it for
 the grant's rights; and it refuses with `einval`, sending nothing, a
 walk that names `.`, `..` or an empty name, so no walk a client sends
 carries one, whoever built it (F2, F3, F11). It does not check the rest
-of a request against the grammar: the client builds every request it
-sends, and the grant's funnel decodes every frame against the grammar
-before any callback sees it and answers a malformed one `einval`
+of a request against the grammar: every request comes from code of the
+client's own domain, the client's operations or a caller of
+`erx_file_remote:exchange/2` and `send/2` such as `erx_win`, and the
+grant's funnel decodes every frame against the grammar before any
+callback sees it and answers a malformed one `einval`
 ([Failure handling](#failure-handling-diagnostics-and-debuggability)),
-so a second check would only re-validate the client's own output. The grammar,
-`erx_9p_grammar`, is preloaded with the client, answers `writes/1` and
-holds each reply to its request, since a reply is the server's and
-untrusted. The client walks an action's names, whose first are the
+so a malformed request, a read whose count passes the protocol's bound
+among them, is refused by the server and reaches its caller as that
+ordinary `{error, einval}`. The grammar, `erx_9p_grammar`, is preloaded
+with the client, and the two generated functions the client calls on
+every request are total, so neither assumes a request the client
+checked:
+
+* `writes/1` answers `true` exactly for a request of an operation the
+  table marks as writing whose marked field, where its rule reads one,
+  is an integer of the field's kind and matches the rule, and `false`
+  for every other term, a malformed request included; it never raises.
+  A `false` for a malformed request lets nothing write, since the
+  grant's funnel refuses that request `einval` before its own rights
+  check;
+* `decode_reply/2` holds a reply to its request and never raises: an
+  error reply `{error, Posix}`, `Posix` one of the table's errors, is
+  answered as it is whatever the request, since it states only the
+  server's refusal; any other reply is answered only when the request
+  is one the grammar accepts and the reply has its operation's shape and
+  holds to it by the operation's checks, such as a read's data no
+  longer than its count; every other pair is `{error, eio}`. So a
+  server's refusal of a malformed request stays the caller's ordinary
+  error, and no reply is taken on the bounds of a request the grammar
+  refuses: a reply that is not an error, to such a request, is `eio`.
+
+The reply check keeps all its bounds; what the client sheds is the
+validation of each request before its send, and `decode_reply/2`
+validates a request only for a reply that is not an error. The server's
+own uses are unchanged, since the grant and the host link's bridge hand
+`decode_reply/2` only requests the grammar accepted. The client walks an action's names, whose first are the
 entry's `root` names, from `NOFID`, the grant's root, into a new fid
 ([Version and attach](#version-and-attach)), and never sends `attach`.
 The client is the resolver's executor:
@@ -3337,8 +3496,11 @@ recovers a value's exact bytes
   itself through before its start returns (`exports`) and the tree's
   lock table (`locks`, absent for a grant that is a tree of its own,
   which starts its own); every file server is one. Both answer
-  `{ok, Pid, Tree}`, the grant's pid and the name of the tree it roots
-  in, from its callback module's `root`, which is the one source of an
+  `{ok, Pid, Tree}`, the grant's pid and the name of its tree, from its
+  callback module's `root`, which they call and admit before the grant
+  takes any request, failing the start on an answer the check refuses
+  ([Version and attach](#version-and-attach), "The root is admitted
+  when the grant is made"); it is the one source of an
   entry's tree ([Building, binding and
   mounting](#building-binding-and-mounting), "The tree beneath an
   entry"). A keeper keeps its
@@ -3689,7 +3851,7 @@ request function.
   outside `logs` through `..`, links or other programs' file numbers;
   a program's sub-space holds only its channel, data area, pipe ends and
   mapped memory; a starter's table with a display facet mounted and bound
-  elsewhere gives the program no entry on the `windows` tree.
+  elsewhere gives the program nothing of the display.
 * Walks from the root: a walk from `NOFID` of no names, of names and of
   `..`, on a grant rooted at its tree's top and on a home grant rooted
   at one user's home, each answering the qids and making the fid that an
@@ -3697,14 +3859,45 @@ request function.
   grant's root (F2); a walk whose `NewFid` is `NOFID`, and `NOFID` as the
   fid of any other request, refused with `einval` before the grant's
   dispatch, making no fid; a host's walk from `NOFID` at the host link's
-  bridge answered `ebadf`; an Erlang `open` and `close` of a file on a
-  grant sending exactly a walk, an `lopen` and a `clunk`, counted at the
-  grant.
+  bridge answered `ebadf`, while the host's ordinary walk from a fid it
+  attached is renamed and relayed and answers the grant's qids, and the
+  host-tree bridge's relay of an erXos client's walk from `NOFID` reaching
+  QEMU's server as a walk from the bridge's root fid; an Erlang `open`
+  and `close` of a file on a grant sending exactly a walk, an `lopen` and
+  a `clunk`, counted at the grant.
+* The root: a tree whose `root` answers a qid that is not a directory,
+  or a malformed qid or tree name, fails the grant's start, so no grant
+  takes a request; a walk of no names from `NOFID` on a well-formed
+  grant makes a fid whose `getattr` answers the root, and once the
+  tree draws the root a new version, that `getattr` and an `attach`'s
+  reply at the edge carry the new version, not the start's.
 * Trees: two facets of one tree, one `rw` and one `rx`, mounted at two
   points of a session, through which a file mapped from both points has
-  one mapper (P14); a display facet that a session mounts at any point,
-  under any facet name, giving its programs no entry on the `windows`
-  tree (F3).
+  one mapper (P14); overlapping grants with different roots, root's
+  development session holding the `data` facet at `/data` and its
+  `home` facet at `/root`, through which `/data/root/notes` and
+  `/root/notes` give one identity, one mapper when mapped shared from
+  both paths, and one file object when run from both; the host link's
+  bridge, given `data` and `proc`, relaying the host's `attach` of
+  `data` to the grant at `/data` when a `packages` grant, which names
+  the same tree, lies ahead of it in the table.
+* Programs and displays (F3), each with a program started before the
+  event and resolving after it: a display facet mounted at `/mnt/w`
+  before its grant is installed, the installation arriving after the
+  program started, after which the program finds nothing at `/mnt/w`
+  and the session reaches the display; a display facet replaced by its
+  display's new incarnation, and a files facet replaced through
+  `erx_domain:grant/4` by a display under the same name, after which the
+  program reaches neither display; a display installed through `grant/4`
+  under the name `notes`, mounted at `/n` and bound at `/dev/w`, of
+  which the program reaches nothing; and a stand-in window server whose
+  `root` names its tree `files`, which programs still do not reach.
+* Client errors: an `erx_win:send_read/4` whose count passes the
+  protocol's bound, and an `erx_file_remote:exchange/2` of a malformed
+  `lopen`, each answering the caller `{error, einval}` from the server,
+  not raising; an `ok` reply to such a request answered `eio`; `writes/1`
+  answering `false` for a term of no operation and for a write-marked
+  operation whose marked field is not an integer.
 * F4: fid floods, lock floods, retained `/proc` results, clients that
   never read their replies, 100,000 short-lived owners after which the
   grant holds no monitor, a flood of a tiny slow request that delays only
@@ -3761,7 +3954,12 @@ request function.
   taken only bare, or another alias's taken out of an envelope; the
   numeric offset rule applied to `At` = `unknown`; one operation's reply
   check removed from the generated table; a codec without its size check;
-  a name decoder without its count check;
+  a name decoder without its count check; a `decode_reply/2` that checks
+  the request before an error reply (the oversized `send_read/4`, which
+  then raises), or that takes an `ok` reply to a request the grammar
+  refuses (its `eio` case); a `writes/1` with a clause for each
+  operation and none for other terms (its `false` cases, which then
+  raise);
 * grant: a fid kept after a failed walk; a later fid made for an ended
   owner without monitoring it again; an owner's monitor kept after its
   last fid; a frame taken out of any domain's envelope; a clunk answered
@@ -3775,11 +3973,28 @@ request function.
   process, or each waiting read in a process of its own; a walk from
   `NOFID` started at the tree's top rather than the grant's root (the
   home grant's walk of `..`); a profile that gives a walk's `NewFid` the
-  source's type (the walk whose `NewFid` is `NOFID`); a host link bridge
-  that passes the host's `NOFID` through to a grant (its `ebadf` case);
+  source's role (the walk whose `NewFid` is `NOFID`); a walk's source
+  declared a plain `u32` rather than a fid of role `start` (the host's
+  ordinary walk, which the bridge then answers `einval`); a host link
+  bridge that passes the host's `NOFID` through to a grant (its `ebadf`
+  case); a start that skips its check of `root` (the root whose qid is
+  not a directory, which then serves); an `attach` that answers the
+  qid the start admitted (the version case);
 * trees: a facet entry whose tree is its facet's name (the two facets of
-  one tree, which then have two mappers, and the display facet installed
-  under another name, which then passes to programs);
+  one tree, which then have two mappers); an `erx_lfs` whose `root`
+  answers the service's name, `home` (the overlapping grants, which then
+  give `/data/root/notes` and `/root/notes` two identities and two
+  mappers); a host link bridge that selects a grant by its tree's name
+  (the bridge case, which then relays `data` to the `packages` grant
+  ahead of it in the table);
+* programs and displays: the exclusion decided when the program's table
+  is built (the delayed installation, which then exposes the display);
+  the exclusion read from the ready answer's names alone (the `grant/4`
+  display under `notes`, which then passes); the exclusion read from the
+  tree's name (the stand-in window server whose tree is `files`, which
+  then passes); an installation that carries no interface, its facet
+  taken as not of `windows` (the replacement through `grant/4`, which
+  then passes);
 * waiting requests: a tree whose `read` waits inside its callback,
   which makes a write on the same grant miss its deadline; an
   `erx_fs_waits` whose `info/2` ignores a flush, that answers a begun
@@ -4056,6 +4271,39 @@ process at a flush says nothing of what it took.
 loses: a begun request whose effect takes its time, a present or a reset,
 would stall every other fid of the client for one fid's close.
 
+**A facet's tree from anywhere but the mint's reply.** Decided: the
+server names a grant's tree, and a mint's reply carries it with the
+facet's pid ([Building, binding and
+mounting](#building-binding-and-mounting), "The tree beneath an
+entry"). Naming it in the manifest, one tree name per service served as
+a tree, loses: it is a second source of a name the server's code fixes,
+and nothing at run time would compare the two. Deriving it from the
+facet's name loses: two facets of one tree would give each file two
+identities and two mappers. Keeping a tree in each mount and checking
+it with one `attach` per grant loses: every installation of a re-grant
+would need the check, and `erx_ns`'s one writer would wait on a server.
+
+**Qid paths unique within a server's domain, with no tree.** A file's
+identity would be its server's domain and its qid path alone, so no
+grant would carry a tree. Decided against: the formats' own numbers
+would have to be remapped into one numbering per domain, since erXos's
+F2FS already spends all 64 bits of a path on the node number and its
+generation and EROFS gives its inode numbers
+([design-storage.md](design-storage.md#read-write-storage), "File
+identity and version"), and the remapping would add a table with its
+own bounds and lifetime to every server of such a format, while a tree
+that names the numbering the format already has costs one name per
+grant.
+
+**Keeping displays from programs by their tree's name.** An entry
+whose tree is `windows` would pass to no program. It loses: the tree is
+the server's word about identities, so a window server that named its
+tree otherwise would let programs reach a display, and a check made once
+when a program's table is built would miss a display installed or
+re-granted later. The interface of the facet, which the domain service
+sets, read at every resolution, holds for every order of events
+([Narrowing for a program](#narrowing-for-a-program)).
+
 ## Risks and open questions
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -4098,23 +4346,6 @@ Open question for the user:
    before the handler exits. Recommendation: share, one rule for every
    entry; a child that must not reach the window is spawned without
    `/dev`, as a child is kept from any directory.
-3. **Where a facet's tree comes from.** An entry's tree keys its files'
-   identities and keeps window trees from programs, so it must be the
-   tree the grant roots in ([Building, binding and
-   mounting](#building-binding-and-mounting), "The tree beneath an
-   entry"). The design takes it from the server: the grant's start names
-   it, and a mint's reply carries it to the domain service with the
-   facet's pid. One alternative names it in the manifest, one tree name
-   per service served as a tree, which the domain service installs as it
-   installs a facet's rights; that is a second source of a name the
-   server's code already fixes, and nothing at run time would compare
-   the two. Another derives it from the facet's name, which gives two
-   facets of one tree two names, so a file reached through both has two
-   identities and two mappers. A third keeps a tree in each mount and
-   checks it with one `attach` per grant, which needs a check at every
-   installation of a re-grant and makes `erx_ns`'s one writer wait on a
-   server. Recommendation: the server names it; the mint's reply grows
-   one field and every declared tree name goes.
 
 ## References
 

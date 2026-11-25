@@ -8,8 +8,10 @@
 > on a RAM file system in Erlang; `/proc` as a read-only view of the
 > inspector; the host link's 9P bridge; and the session's export, a
 > file server of `/bin`, `/dev` and `/etc` that every session starts.
-> Designed: walks from a grant's root without an `attach`, and every
-> grant's tree named by its server; entries on the export in a
+> Designed: walks from a grant's root without an `attach`; every
+> grant's tree named by its server as the numbering of its files,
+> whatever the grant's root; a display's facet kept from programs by
+> its interface at every resolution; entries on the export in a
 > program's table, and the
 > export serving the session's local files; shared mappings of files;
 > a `sysctl(3)` reader for programs; and an app's own tree at
@@ -88,12 +90,12 @@ entry starts, as plain names (`/data` is the one name `data`). The
 * an EROFS image, the read-only format of
   [chapter 16](16-storage.md#162-read-only-system-images), held in a file and read by the
   domain's own runtime;
-* a file grant at a file server, named by its pid and the tree it
-  serves, which came with the pid from the code that started the grant;
+* a file grant at a file server, named by its pid and its tree, which
+  came with the pid from the code that started the grant;
 * a facet's file grant, named by the facet's name alone: the
   file grant that the domain's **facet registry** (`erx_facets`, the
   table of every facet the domain holds, by name) has under that name,
-  with the tree its server said the grant roots in, looked up afresh at
+  with the tree its server named for the grant, looked up afresh at
   each resolution;
 * `ended`, a file grant that has gone, on which every request answers
   `eio`.
@@ -128,7 +130,7 @@ facet, `data`, which the domain service minted for this session from
 a row of the system manifest and handed to it by name
 ([chapter 11](11-security.md#1161-one-grant-one-grantee-one-process)).
 The app's session got no such facet, so no path it writes can reach
-the data tree. The storage, apps and machine services appear at
+what the `data` grant reaches. The storage, apps and machine services appear at
 `/data`, `/apps` and `/machine` this way in every session that holds
 their facets. All of this is built.
 
@@ -136,7 +138,8 @@ their facets. All of this is built.
 
 Figure 14.1 shows root's session and an app's session over the same
 storage domain. Each reaches the storage server through a grant of
-its own, and the app's grant is of a different tree.
+its own, and the app's grant is rooted elsewhere in the volume, where
+nothing above its root can be reached.
 
 ```mermaid
 flowchart LR
@@ -149,8 +152,8 @@ flowchart LR
     AT["/tmp"]
   end
   subgraph S[storage domain]
-    G1[grant: data tree, for root's session]
-    G2[grant: packages tree, for the app]
+    G1[grant: data, the volume's top, for root's session]
+    G2[grant: packages, rooted below, for the app]
   end
   RD --> G1
   AP --> G2
@@ -160,7 +163,7 @@ flowchart LR
 
 *Figure 14.1. Two domains' namespaces over one storage domain. Each
 entry that crosses a wall ends at a grant made for that domain alone;
-the app has no entry that leads to the data tree, and neither domain's
+the app has no entry that leads above its grant's root, and neither domain's
 `/tmp` is the other's.*
 
 Even a grant's pid, leaked to the app, is useless to it. The storage
@@ -308,7 +311,14 @@ client sends the walk and the open together, without waiting for
 either reply; the grant's checks run before any callback of the tree.*
 
 A **qid** in the replies is the server's identity for a file, and an
-**iounit** is the most bytes one read or write may carry. Sending the
+**iounit** is the most bytes one read or write may carry. A client
+keys a file by the server's domain, the grant's **tree** and the qid's
+path. A tree is the numbering the server draws qid paths from, not
+the place a grant starts: the `data`, `packages` and `home` grants of
+the storage domain all lie in its one volume and name one tree, so
+root's `/data/root/notes` and its home's `/root/notes` are one file to
+every client, and two programs that map it shared through the two paths
+share one copy. Sending the
 walk and the open together saves a round trip across the wall, and
 walking from the grant's root rather than from a fid that an `attach`
 made spares the server an `attach` and a `clunk` on every open.
@@ -449,6 +459,19 @@ The program cannot be a confused deputy ([chapter 2](02-microkernels.md#234-the-
 no grant to confuse: every request goes through a handler that acts
 only on the program's own table
 ([chapter 11](11-security.md#1172-narrowing-for-a-program)).
+
+One kind of grant never reaches a program through its table: a
+display's. A program draws only through its own window, so the
+handler leaves out of every resolution of a program's path any facet of
+the `windows` interface. The interface comes with the facet from the
+system domain, which takes it from the manifest, never from the
+display's server, and the handler reads it each time it resolves, so a
+display whose grant arrives after the program started, one that
+replaces another under the same name, and one installed under any name
+and bound anywhere all stay out
+([design-files.md, Narrowing for a program](../design-files.md#narrowing-for-a-program)).
+The built handler drops such entries once, by their tree's name, when
+it builds the table; the rule above is designed.
 
 A session's local files, such as its release slice, are not on any
 grant, so a program cannot reach them through the session's grants.
