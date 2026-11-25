@@ -27,7 +27,8 @@ module Erx
 
     # The musl files whose grant no notice form states: musl's COPYRIGHT, the
     # MIT license text with its list of exceptions, and the public-domain
-    # dedications. Every other notice Attribution reads itself.
+    # dedications. Every other notice Attribution reads itself, a permissive
+    # one only when config/imports/notices.txt lists it.
     def musl_license_rules
       explicit = {
         'COPYRIGHT' => 'MIT',

@@ -505,7 +505,7 @@ is under `changes`.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (5 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "13676d0c25990979405d4c8b002ba14ddb31e0f9da3e3842df2bca9ed4360472",
       "kind": "file",
@@ -10059,7 +10059,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/LEB128.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "7407777de1d486ca512a511dd4549e923dcda097d4d387e8864b24c481b9d29b",
       "kind": "file",
@@ -10067,7 +10067,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/LICENSE.TXT": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "65e9ed46a59976eda8f5bd1ea79a680dea38dd299c760bc9a8d87a764ef5029b",
       "kind": "file",
@@ -10083,7 +10083,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MCFixedLenDisassembler.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "a38633e42770cb7ea99c945058bdb036418e2a717ec3836711a73e6e43a41153",
       "kind": "file",
@@ -10099,7 +10099,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MCInst.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "ea5f0cc89736237fe57fdbea5a07d02dfd82a7799e4164bd52f2077849fe07b2",
       "kind": "file",
@@ -10115,7 +10115,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MCInstrDesc.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "b2da8bf1eaef0b5434247566ecc02e8b27f38d370d813e235003caf5f7cc65e4",
       "kind": "file",
@@ -10123,7 +10123,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MCRegisterInfo.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "7243e125850d0d767a99c043337ff90f4ea0de4c2e9acda898cee7a8292e4b93",
       "kind": "file",
@@ -10131,7 +10131,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MCRegisterInfo.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "5be79e1f6dc1e74209d6504ff0440189752faf2caac07a6fa939bf813109675c",
       "kind": "file",
@@ -10139,7 +10139,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/MathExtras.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "b19eb7cd15886722a7701a7b93552a61dc8f2c05d27fcf5c61c8cd8bfa224a1e",
       "kind": "file",
@@ -10163,7 +10163,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64AddressingModes.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "a103c7ba4bbde9bed8c175a5c61650bcd1c695dd5eae8980b92f3a4f8494ee38",
       "kind": "file",
@@ -10171,7 +10171,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64BaseInfo.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "59f4ef2e3f288117bd0d84b277fd4476fc30d4ec95890ad7123b1ba46a2fcf11",
       "kind": "file",
@@ -10179,7 +10179,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64BaseInfo.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d842527a3c2df5e56df7c82d30468c3b13b3a3d966cfe9e5af36e0ad6fdac90c",
       "kind": "file",
@@ -10187,7 +10187,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64Disassembler.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "4fde78e29124d8a86494566a1036bf2028c6ab514af0d5000793520c83178fd1",
       "kind": "file",
@@ -10243,7 +10243,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64InstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "3f14e51504555bd9cb7f428f599146726d65cdfb2b0e444397602ad797072954",
       "kind": "file",
@@ -10251,7 +10251,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/AArch64/AArch64InstPrinter.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "9cf59a6429f34360eae2f64aa96b37c89aecc43c5ab96947702e0961e4f883a6",
       "kind": "file",
@@ -10307,7 +10307,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/ARM/ARMAddressingModes.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "3c0e23801f881e38e1e0d959590df3f25dd2fe5c0302d2666e8a6fcf902769ed",
       "kind": "file",
@@ -10315,7 +10315,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/ARM/ARMBaseInfo.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d61bfe473de5839455a29e6ee697d0f46b876d0d07ba19713e35ca14315ffcbe",
       "kind": "file",
@@ -10323,7 +10323,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/ARM/ARMDisassembler.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "dfd11ea4926dce855b77aa51280c70cf883feaef13938d624091320272155544",
       "kind": "file",
@@ -10379,7 +10379,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/ARM/ARMInstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "f81c89e6954ea4f844603e9ca9297d9e642d84deb993e9f614f9412b522795db",
       "kind": "file",
@@ -10387,7 +10387,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/ARM/ARMInstPrinter.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "453588aafa19d6ea1c193917c96a41da773d9b72f45e2141a60a129cf3f39f66",
       "kind": "file",
@@ -10443,7 +10443,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/Mips/MipsDisassembler.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d7206d56fb50e43c3c1b22bdb03f4033a52aed26b737492fd430438561f66f55",
       "kind": "file",
@@ -10499,7 +10499,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/Mips/MipsInstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "a4592187b95037ee30747ea289066ba491c45a28de2bea41a11a357266eca3a1",
       "kind": "file",
@@ -10507,7 +10507,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/Mips/MipsInstPrinter.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "ba66009e3554e7251c910a38ba443ef9fb65ddcba22fd3723d31b6bcadfbccae",
       "kind": "file",
@@ -10555,7 +10555,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/RISCV/RISCVBaseInfo.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "f2779ae3c7506a330644c679974787f8edcf23a3c0fb486e95eb9d1a621369e5",
       "kind": "file",
@@ -10563,7 +10563,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/RISCV/RISCVDisassembler.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "afeb8b56e9ebc303f077f48071667209d8a957c045b2f864bf4b390bc4010e51",
       "kind": "file",
@@ -10627,7 +10627,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/RISCV/RISCVInstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "ebb7c27e3f4f849365f06621579c08d09a95faf597f2ae079bd91619c5b33e2e",
       "kind": "file",
@@ -10635,7 +10635,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/RISCV/RISCVInstPrinter.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "2dadd989772c7973d6f9867b50c1e0b7d0a585bd07eeb3f9e0efc07671909239",
       "kind": "file",
@@ -10683,7 +10683,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86ATTInstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "b8dbdc7753a0953ebae1d3a2f2215d421a03f1b8b2f5c02fecd7fa00dee0ed90",
       "kind": "file",
@@ -10691,7 +10691,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86BaseInfo.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "6595b09d9343bc085de7d348be6f0941fe2e090b804eb7b41be013a399b5f164",
       "kind": "file",
@@ -10699,7 +10699,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86Disassembler.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "022b6ea2fe4f50318ffbfedbdf231a4de5f893a916eae6999ad29af072112a8f",
       "kind": "file",
@@ -10707,7 +10707,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86Disassembler.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "c6b1022cdd1b6ab45c46ec9062daba50228766db98435aa0a44477d1074332b3",
       "kind": "file",
@@ -10715,7 +10715,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoder.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "640f16cac521e6ac7cf782fecf836a33ea535df5b347efa9a649f147134a6520",
       "kind": "file",
@@ -10723,7 +10723,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoder.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "8a17fb566df43a67fe32c312149df59bc844917521ffad70cb230c876550bf97",
       "kind": "file",
@@ -10731,7 +10731,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86DisassemblerDecoderCommon.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "5a5bbc564abca67fa02275795fb1948caa25bb34f6831f2c7b187c6c96de35bf",
       "kind": "file",
@@ -10787,7 +10787,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86InstPrinter.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "1cf8a1fcb491c9720c22160d64e045079dfb3c65ec6906312d23230c500af7ef",
       "kind": "file",
@@ -10795,7 +10795,7 @@ is under `changes`.
     },
     "src/lib/disasm/capstone/arch/X86/X86IntelInstPrinter.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "425a1fb42ea55e9025306c04bc65d9a477ade65f040fe702b3fc21d38fc69f7f",
       "kind": "file",
@@ -11035,7 +11035,7 @@ is under `changes`.
     },
     "src/lib/gzip/zlib.h": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "7388aeb8cc550dcbc158fd43dc90ee900f5fc6a3d055ceaf4c83aa441e6d387f",
       "kind": "file",
@@ -11067,7 +11067,7 @@ is under `changes`.
     },
     "src/lib/libc/COPYRIGHT": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (6 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (3 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "f699f9ce43f98c3b09b3e194cf62f5237979a0e765bc079650e07e1e7c8334cb",
       "kind": "file",
@@ -14311,7 +14311,7 @@ is under `changes`.
     },
     "tool/kconfig/scripts/basic/fixdep.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "16634c3444a92b85f7993c8c631ed8c5974b1f6981544f0085e25529cdfbbfb2",
       "kind": "file",
@@ -14439,7 +14439,7 @@ is under `changes`.
     },
     "tool/kconfig/scripts/kconfig/gconf.ui": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "ccb10be947b636701f568a65b31bfa201ad9bb2e7f1cb28a589d77de719d5d48",
       "kind": "file",
@@ -14839,7 +14839,7 @@ is under `changes`.
     },
     "tool/preprocess/COPYING": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (64 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "595d6077a558c388a1e98b597e67823bcedb5da0587478e60ea973785b643f70",
       "kind": "file",
@@ -14895,7 +14895,7 @@ is under `changes`.
     },
     "tool/preprocess/doc/manpage.dox": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d2e4a154bf57476940673381dec5574acb7db8f4b04c978b88b15b6757ab6c33",
       "kind": "file",

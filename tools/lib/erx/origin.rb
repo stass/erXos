@@ -32,17 +32,27 @@ module Erx
     # declared license to the files of a whole tree that state none of their own.
     RULE_KINDS = %w[reviewed package].freeze
 
-    # A notice is read from the whole file once its comment leaders (runs of
-    # them, as in `%%` or `##`), the comment closers and box characters
-    # ending its lines, and its line breaks are gone.
+    # A notice is read in blocks: each /* comment that spans lines, whole
+    # with its blank lines; each run of line comments (one-line /* comments
+    # included, as in a boxed notice) with the blank lines between them; and
+    # each run of other lines between comments, blank lines included, so a
+    # notice whose clauses hold no license word is never read in part. A block's
+    # normalised text is its words without comment leaders (runs of them, as
+    # in `%%` or `##`), the comment closers and box characters ending its
+    # lines, or its line breaks.
     COMMENT_LEADER = %r{^[ \t]*(?:/\*+|\*+/?|//+|[#;%!]+|--+|dnl\b)?[ \t]*}n
     COMMENT_TRAILER = %r{[ \t]*(?:\*+/|[*#]+)?[ \t]*$}n
-    # Every word that can belong to a license notice. Each occurrence must lie
-    # inside a notice recognised below, or the file's notice is unrecognised:
-    # a license is never read from part of a notice while the rest of it, or
-    # a second notice, goes unread. The permissive notices' opening phrases
-    # are marks too, since some of them hold no license word, and so is the
-    # X11 clause that follows an MIT notice.
+    # A line opening a /* comment; a line opening with a comment leader; and
+    # the comment delimiters, where an opener counts
+    # at a line's start or after a space, not in a path such as `src/*.c`.
+    COMMENT_LINE = %r{\A[ \t]*/\*}n
+    LINE_COMMENT = %r{\A[ \t]*(?:/\*|//|[#;%!]|--|dnl\b)}n
+    COMMENT_DELIMITER = %r{(?:^|(?<=[ \t]))/\*|\*/}n
+    # Every word that can belong to a license notice: a block holding one is
+    # a notice, which is recognised whole or leaves the file unrecognised. The
+    # permissive notices' opening phrases are marks too, since some of them
+    # hold no license word, and so is the X11 clause that follows an MIT
+    # notice.
     LICENSE_MARK = Regexp.union(
       /licen[cs]|public domain|copyleft|CeCILL|proprietary|confidential|commercial/in, /\b[AL]?GPL/in,
       /\b(?:CDDL|MPL|EPL)\b|Mozilla Public|Eclipse Public|Creative Commons|\bCC BY/in,
@@ -50,41 +60,14 @@ module Erx
       /Redistribution and use in source and binary forms|Copying and distribution of this file/in,
       /Except as contained in this notice/in
     )
-    # A name, year or holder inside a notice: a short stretch of one clause
-    # holding no license mark, so a recognised notice never covers a second
-    # one. What it does not exclude stays a residual of reading by pattern.
-    HOLDER = /(?:(?!#{LICENSE_MARK})(?:[^.;:]|\.(?=\S)|(?<=Inc|Ltd|Co|Corp)\. )){1,160}?/n
-    # The quotation marks around "Software" or "AS IS", in any style.
-    QUOTE = /[^ A-Za-z0-9]{1,6}/n
-    # A list item's number or bullet in a BSD notice.
-    ITEM = /(?:\(?\d\)?\.? |- )?/n
-    BSD_PREAMBLE = /Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: ?/in
-    BSD_SOURCE = /#{ITEM}Redistributions of source code must retain the above copyright notices?(?: unmodified)?,? this list of conditions,? and the following disclaimer\. ?/in
-    BSD_BINARY = /#{ITEM}Redistributions in binary form must reproduce the above copyright notices?,? this list of conditions,? and the following disclaimer in the documentation and\/or other materials provided with the distribution\. ?/in
-    BSD_ENDORSE = /#{ITEM}(?:Neither the names? of #{HOLDER} nor the names of #{HOLDER} may be used|The names? of #{HOLDER} may not be used) to endorse or promote products derived from this software without specific prior written permission\. ?/in
-    BSD_ADVERTISING = /#{ITEM}All advertising materials mentioning features or use of this software must display the following acknowledge?ment: #{HOLDER}\. ?/in
-    BSD_ATTRIBUTION = /#{ITEM}Redistributions of any form whatsoever must retain the following acknowledge?ment: #{HOLDER}\. ?/in
-    BSD_DISCLAIMER = /THIS SOFTWARE IS PROVIDED (?:BY #{HOLDER} )?#{QUOTE}AS IS#{QUOTE} AND ANY EXPRESS OR IMPLIED WARRANTIES/in
-    # The permissive notices recognised, each by its canonical wording in
-    # full, with the license it grants; nil for the pointer to the package
-    # declaration in LICENSE.spdx, which grants nothing itself. A notice that
-    # differs anywhere is not recognised, and its words leave the file
-    # unrecognised.
-    PERMISSIVE_NOTICES = [
-      ['MIT', /Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files \(the #{QUOTE}Software#{QUOTE}\), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and\/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notices? and this permission notice shall be included in all copies or substantial portions of the Software\. THE SOFTWARE IS PROVIDED #{QUOTE}AS IS#{QUOTE},? WITHOUT WARRANTY OF ANY KIND/in],
-      ['MIT', /(?:licensed|released|distributed) under (?:the )?(?:terms of the )?(?:standard )?MIT License\b(?! ?,? (?:with|except|but|and|plus|subject)\b)/in],
-      ['ISC', /Permission to use, copy, modify, and(?:\/or)? distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies\. THE SOFTWARE IS PROVIDED #{QUOTE}AS IS#{QUOTE} AND #{HOLDER} DISCLAIMS? ALL WARRANTIES/in],
-      ['SunPro', /Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice is preserved\./in],
-      ['FSFAP', /Copying and distribution of this file, with or without modification, are permitted in any medium without royalty provided the copyright notice and this notice are preserved\./in],
-      ['BSD-2-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_DISCLAIMER}/n],
-      ['BSD-3-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_ENDORSE}#{BSD_DISCLAIMER}/n],
-      ['BSD-4-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_ADVERTISING}#{BSD_ENDORSE}#{BSD_DISCLAIMER}/n],
-      ['BSD-3-Clause-Attribution',
-       /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}(?:#{BSD_ENDORSE}#{BSD_ATTRIBUTION}|#{BSD_ATTRIBUTION}#{BSD_ENDORSE})#{BSD_DISCLAIMER}/n],
-      ['Apache-2.0', /Licensed under the Apache License,? (?:Version |v)?2\.0 \(the #{QUOTE}License#{QUOTE}\)[.;] You may not use this file except in compliance with the License\. You (?:may|can) obtain a copy (?:of the License at|in the file LICENSE in the source distribution or at) \S+(?: Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an #{QUOTE}AS IS#{QUOTE} BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\. See the License for the specific language governing permissions and limitations under the License\.)?/in],
-      ['Apache-2.0 WITH LLVM-exception', /Part of the LLVM Project, under the Apache License v2\.0 with LLVM Exceptions\. See \S+ for license information\./in],
-      [nil, /License: see (?:the )?(?:file )?LICENSE\.spdx/in]
-    ].freeze
+    # The reviewed notices: each row the SHA-256 of a notice block's
+    # normalised text, the file it was reviewed in and the license it grants,
+    # POINTER for the pointer to a package declaration, which grants nothing
+    # itself. Only a listed block is read as a permissive notice; no pattern
+    # recognises one, so a block that differs in any word is unrecognised.
+    NOTICE_TABLE = File.expand_path('../../../config/imports/notices.txt', __dir__)
+    POINTER = 'POINTER'
+    NOTICE_ROW = %r{\A([0-9a-f]{64}) ([!-~]+) ([!-~](?:[ -~]*[!-~])?)\z}n
 
     # A GNU notice is read sentence by sentence, a period ending a sentence
     # only before a space (not in "2.1", "gnu.org" or "Inc.,").
@@ -109,9 +92,6 @@ module Erx
     GCC_EXCEPTION = /\A ?Under Section 7 of GPL version 3, you are granted additional permissions described in the GCC Runtime Library Exception, version 3\.1/in
     OTHER_EXCEPTION = /special exception|additional permission|Library Exception|linking exception/in
 
-    # A recognised notice: the license it grants, nil for one that grants
-    # nothing itself, and where it lies in the file's normalised text.
-    Grant = Data.define(:license, :span)
 
     module_function
 
@@ -161,7 +141,8 @@ module Erx
     # declaration, the file's SPDX line, its sidecar's, a reviewed rule, the
     # file's own license notice, then a package rule and the default. A
     # package declaration covers only files without a notice of their own.
-    def for_file(path, bytes:, sidecar:, review:)
+    # Notices are those of the reviewed table unless a caller names others.
+    def for_file(path, bytes:, sidecar:, review:, notices: nil)
       explicit = spdx(bytes)
       correction = review.fetch('rules').find do |rule|
         rule['declared_license'] && rule.fetch('declared_license') == explicit && matches_path?(rule, path)
@@ -188,7 +169,7 @@ module Erx
       named = by_kind.fetch('reviewed', []).find { |candidate| matches_path?(candidate, path) }
       return reviewed(named) if named
 
-      own = notice(bytes)
+      own = notice(bytes, notices: notices || listed_notices)
       return own if own
 
       package = by_kind.fetch('package', []).find { |candidate| matches_path?(candidate, path) }
@@ -209,85 +190,136 @@ module Erx
     end
     private_class_method :reviewed
 
-    # The license a file's own notice grants: nil when the file has no notice,
-    # or only the pointer to LICENSE.spdx; UNRECOGNIZED_NOTICE when any license
-    # mark lies outside every notice recognised; otherwise every license
-    # granted, joined by AND. A file holding a NUL byte (a binary, or UTF-16
-    # text) is not read: one whose text, with its NUL bytes removed, holds a
-    # license mark is unrecognised.
-    def notice(bytes)
+    # The license a file's own notice grants: nil when the file has no
+    # notice, or only pointers to a package declaration; UNRECOGNIZED_NOTICE
+    # when a notice block is neither in the table nor read as a GNU notice;
+    # otherwise every license granted, joined by AND, the listed notices'
+    # first. A file holding a NUL byte (a binary, or UTF-16 text) is not
+    # read: one whose text, with its NUL bytes removed, holds a license mark
+    # is unrecognised.
+    def notice(bytes, notices:)
       bytes = bytes.b
       if bytes.include?("\0")
         words = bytes.delete("\0").scan(LICENSE_MARK).size
-        return words.positive? ? unrecognized(words) : nil
+        return words.positive? ? unrecognized("#{words} license words in a file holding NUL bytes") : nil
       end
 
-      text = bytes.delete("\r").gsub(COMMENT_LEADER, '').gsub(COMMENT_TRAILER, '').gsub(/\s+/n, ' ')
-      marks = matches(text, LICENSE_MARK)
-      return nil if marks.empty?
+      marked = notice_blocks(bytes).select { |block| block.match?(LICENSE_MARK) }
+      # The table's license of each listed block, POINTER included; nil collects the unlisted.
+      by_license = marked.group_by { |block| notices[Digest::SHA256.hexdigest(block)] }
+      unlisted = by_license.delete(nil) || []
+      gnu = unlisted.map { |block| gnu_licenses(block) }
+      return unrecognized("#{gnu.count(nil)} notice blocks neither reviewed nor GNU") if gnu.include?(nil)
 
-      grants = PERMISSIVE_NOTICES.flat_map do |license, pattern|
-        matches(text, pattern).map { |span| Grant.new(license: license, span: span) }
-      end + gnu_grants(text)
-      outside = marks.count { |mark| grants.none? { |grant| grant.span.cover?(mark) } }
-      return unrecognized(outside) if outside.positive?
-
-      licenses = grants.sort_by { |grant| grant.span.begin }.filter_map(&:license).uniq
+      licenses = (by_license.keys - [POINTER] + gnu.flatten).uniq
       return nil if licenses.empty?
 
-      { 'license' => validate_expression(licenses.join(' AND ')), 'evidence' => 'file notice', 'reviewed' => false }
+      # Each license is one operand, so an OR in one never reaches across the AND.
+      expression = licenses.map { |license| license.include?(' OR ') ? "(#{license})" : license }.join(' AND ')
+      { 'license' => validate_expression(expression), 'evidence' => 'file notice', 'reviewed' => false }
     end
     private_class_method :notice
 
-    def unrecognized(outside)
+    # The normalised text of each block of a file (COMMENT_LEADER above).
+    # Each line is labelled with its block's kind: the number of the
+    # multi-line comment it lies in, :line_comments, :text, or :blank for a
+    # blank line that ends a multi-line comment's block or opens the file;
+    # every other blank line continues the run before it.
+    def notice_blocks(bytes)
+      inside = false
+      comments = 0
+      kind = :blank
+      labelled = bytes.b.gsub(/\r\n?/n, "\n").lines.map do |line|
+        started_inside = inside
+        inside = line.scan(COMMENT_DELIMITER).reduce(inside) { |open, mark| open ? mark != '*/' : mark == '/*' }
+        comments += 1 if inside && !started_inside
+        kind = case line
+               when ->(_) { started_inside || (inside && line.match?(COMMENT_LINE)) } then comments
+               when LINE_COMMENT then :line_comments
+               when /\S/n then :text
+               else kind.is_a?(Integer) ? :blank : kind
+               end
+        [kind, line]
+      end
+      labelled.slice_when { |(before, _), (after, _)| before != after }
+              .reject { |run| run.first.first == :blank }
+              .map { |run| normalise(run.map(&:last).join) }
+    end
+
+    # A block's words without comment leaders, closers, box characters or
+    # line breaks: the text a notice table row hashes.
+    def normalise(text)
+      text.gsub(COMMENT_LEADER, '').gsub(COMMENT_TRAILER, '').gsub(/\s+/n, ' ').strip
+    end
+    private_class_method :normalise
+
+    def unrecognized(reason)
       { 'license' => UNRECOGNIZED_NOTICE, 'reviewed' => false,
-        'evidence' => "unrecognized license notice (#{outside} license words outside a recognised notice); review the file" }
+        'evidence' => "unrecognized license notice (#{reason}); review the file" }
     end
     private_class_method :unrecognized
 
-    # The ranges of text where pattern matches, without overlap.
-    def matches(text, pattern)
-      text.enum_for(:scan, pattern).map { Regexp.last_match.then { |match| match.begin(0)...match.end(0) } }
+    # The reviewed notice table, read once: SHA-256 to license.
+    def listed_notices
+      @listed_notices ||= notice_table(BoundedFile.read(NOTICE_TABLE, maximum: 1_048_576))
     end
-    private_class_method :matches
 
-    # The GNU notices of a text: each grant sentence names one GNU license and
-    # one version, with "any later version" or not, and is recognised with
-    # the boilerplate sentences beside it. A text with any exception but the
-    # GCC Runtime Library Exception to GPL-3.0-or-later has none recognised.
-    def gnu_grants(text)
-      return [] unless text.match?(GNU_NAME)
+    # A notice table's rows, refused whole at the first malformed, unsorted
+    # or repeated one.
+    def notice_table(bytes)
+      rows = bytes.b.lines.map(&:chomp).reject { |line| line.empty? || line.start_with?('#') }
+      table = rows.each_with_object({}) do |row, read|
+        sha256, _example, license = NOTICE_ROW.match(row)&.captures
+        raise Error, "malformed notice table row: #{row[0, 80].inspect}" unless sha256
+        raise Error, "notice table repeats #{sha256}" if read.key?(sha256)
 
+        read[sha256] = license == POINTER ? POINTER : validate_expression(license)
+      end
+      raise Error, 'notice table rows are not sorted by hash' unless rows.sort == rows
+
+      table.freeze
+    end
+    private_class_method :notice_table
+
+    # The licenses of one block's GNU notice, or nil unless every sentence
+    # holding a license mark is a grant naming one GNU license and one
+    # version, with "any later version" or not, and nothing else, a
+    # boilerplate sentence, or the GCC Runtime Library Exception to the
+    # block's GPL-3.0-or-later grants.
+    def gnu_licenses(block)
       grants = []
-      boilerplate = []
       exception = false
-      matches(text, SENTENCE).each do |span|
-        sentence = text[span]
+      block.scan(SENTENCE).each do |sentence|
         if sentence.match?(GCC_EXCEPTION)
           exception = true
-          boilerplate << span
         elsif sentence.match?(GNU_BOILERPLATE)
-          boilerplate << span
+          next
         elsif sentence.match?(OTHER_EXCEPTION)
-          return []
-        elsif sentence.match?(GNU_NAME)
+          return nil
+        elsif sentence.match?(LICENSE_MARK)
           license = gnu_license(sentence)
-          grants << Grant.new(license: license, span: span) if license
+          return nil unless license
+
+          grants << license
         end
       end
-      return [] if grants.empty? || (exception && grants.any? { |grant| grant.license != 'GPL-3.0-or-later' })
+      return nil if grants.empty? || (exception && grants.any? { |grant| grant != 'GPL-3.0-or-later' })
 
-      grants = grants.map { |grant| grant.with(license: "#{grant.license} WITH GCC-exception-3.1") } if exception
-      grants + boilerplate.map { |span| Grant.new(license: nil, span: span) }
+      exception ? grants.map { |grant| "#{grant} WITH GCC-exception-3.1" } : grants
     end
-    private_class_method :gnu_grants
+    private_class_method :gnu_licenses
 
-    # The license of one GNU grant sentence, or nil when it names more than
-    # one GNU license or version, or a pair GNU_LICENSES does not hold.
+    # Whether one notice block reads as a GNU notice.
+    def gnu_notice?(block) = !gnu_licenses(block).nil?
+
+    # The license of one GNU grant sentence, or nil when it names no GNU
+    # license, more than one GNU license or version, or a pair GNU_LICENSES
+    # does not hold.
     def gnu_license(sentence)
       names = GNU_NAMES.select { |_, name| sentence.match?(name) }.keys
       versions = sentence.scan(GNU_VERSION).map { |(version)| version.delete_suffix('.0') }.uniq
       return nil unless names.size == 1 && versions.size == 1
+      return nil if sentence.gsub(GNU_NAME, '').gsub(/\blicen[cs]e[ds]?\b/in, '').match?(LICENSE_MARK)
 
       base = GNU_LICENSES[[names.first, versions.first]]
       base && "#{base}-#{sentence.match?(GNU_LATER) ? 'or-later' : 'only'}"

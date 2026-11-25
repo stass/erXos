@@ -30,7 +30,13 @@ class FiascoOriginsTest < Minitest::Test
     'lib/gpl2.cpp' => "/*\n * This file is distributed under the terms of the GNU General Public\n" \
                       " * License, version 2. Please see the COPYING-GPL-2 file for details.\n */\n",
     'lib/unversioned.c' => "/* Distributed under the terms of the GNU General Public License. */\n",
-    'lib/pointer.c' => "/*\n * License: see LICENSE.spdx in the top-level directory\n */\nint g(void);\n",
+    # A pointer the reviewed notice table lists (bootstrap's armada38x.cc),
+    # and the same pointer with words added, which it does not.
+    'lib/pointer.c' => "/*\n * (c) 2015\n * Author(s)\n *\n" \
+                       " * License: see LICENSE.spdx (in this directory or the directories above)\n */\nint g(void);\n",
+    'lib/pointer_plus.c' => "/*\n * (c) 2015\n * Author(s)\n *\n" \
+                            " * License: see LICENSE.spdx (in this directory or the directories above),\n" \
+                            " * for evaluation only\n */\nint g(void);\n",
     'lib/plain.c' => "int h(void);\n"
   }.freeze
 
@@ -54,6 +60,7 @@ class FiascoOriginsTest < Minitest::Test
                    'lib/gpl2.cpp' => 'GPL-2.0-only',
                    'lib/unversioned.c' => 'LicenseRef-unrecognized-notice',
                    'lib/pointer.c' => 'MIT',
+                   'lib/pointer_plus.c' => 'LicenseRef-unrecognized-notice',
                    'lib/plain.c' => 'MIT' }, licenses(FILES, part: 'mk'))
   end
 

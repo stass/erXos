@@ -32788,7 +32788,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (4 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "3019ace9fd5bf0fa84bc47b68c0fbceba0f2cff7a7f492079f09117b912786f1",
       "kind": "file",
@@ -37625,7 +37625,7 @@ Third-party notices remain in their original files.
     },
     "l4util/lib/src/base64.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (3 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "616f1ee1a421d2859e70a278123541103a68508f91bf898d7271fb57224bab83",
       "kind": "file",
@@ -38118,7 +38118,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/README": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "99be6432b41de50d702dbee423149c8abcd52d06e29dc1715013c25865a2eda8",
       "kind": "file",
@@ -38134,7 +38134,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/WHATSNEW": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "9f9f1b45a27f0fed463e151f26784ab1fdeaddb4ca3d3b5bc7fe2dd36d538182",
       "kind": "file",
@@ -55849,7 +55849,7 @@ Third-party notices remain in their original files.
     },
     "libc/musl/contrib/musl/src/string/arm/memcpy.S": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "f963aa07a7e5296c62dbe892b9e3e8383a95683bb282e68d75a3c0553ba184ee",
       "kind": "file",

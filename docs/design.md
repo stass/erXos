@@ -2020,7 +2020,11 @@ hold by construction:
   its `deps.lock` entry; a generated file takes the provenance of the
   inputs its build rule records. Each file's license is recorded with its
   provenance: an imported file's entry in its `ORIGIN.md` holds the SPDX
-  identifier of its header or, for a file without one, the license its
+  identifier of its header; or the license its own notice grants, where
+  each notice in the file is a GNU notice or a text listed by hash in the
+  reviewed table `config/imports/notices.txt`, any other notice recording
+  the file as unrecognised, which no build admits; or, for a file without
+  either, the license its
   tree's manifest declares for its package, such as Fiasco's
   `LICENSE.spdx`, or the license the import's review assigned, marked as
   reviewed; a fetched artifact's

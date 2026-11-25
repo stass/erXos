@@ -63,7 +63,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (5 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "b66f00b16a866b03e6d3b2334a18d12f3dcb9f8d77f39e9bc947ee0dbecfad5e",
       "kind": "file",
@@ -311,7 +311,7 @@ Third-party notices remain in their original files.
     },
     "doc/source/doxygen-awesome-css/LICENSE": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "e3da754c3f657cc78594fa2e8a3283665f78c743df2485fa9e498a8973051191",
       "kind": "file",
@@ -1957,7 +1957,7 @@ Third-party notices remain in their original files.
     },
     "tool/gendep/COPYING": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (3 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d5e738cd78e3452658ea66a90f7fbe2e03e9e1dfa249ed4f2bd88de7b5bbbb89",
       "kind": "file",
@@ -2285,7 +2285,7 @@ Third-party notices remain in their original files.
     },
     "tool/kconfig/scripts/basic/fixdep.c": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "53a9e1a710120a71b094a6de2f10f328cc15b6e24e6adf7543b0bad72432762a",
       "kind": "file",
@@ -2413,7 +2413,7 @@ Third-party notices remain in their original files.
     },
     "tool/kconfig/scripts/kconfig/gconf.ui": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (2 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "ccb10be947b636701f568a65b31bfa201ad9bb2e7f1cb28a589d77de719d5d48",
       "kind": "file",
@@ -3037,7 +3037,7 @@ Third-party notices remain in their original files.
     },
     "tool/vim/syntax/simics.vim": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (1 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (1 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "016e1822afb9fd58a627e6373933e4ceb906bb82ebf5cb75c7d146f676cd3610",
       "kind": "file",

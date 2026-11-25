@@ -29,6 +29,9 @@ module Erx
         'evidence' => "LinuxThreads in L4Re's libpthread, by file name; the LGPL its notices state" }
     ].freeze
 
+    # The parts of the frozen pins, each with its own inventory.
+    PARTS = %w[kernel l4re-core mk bootstrap libfdt drivers-frst].freeze
+
     module_function
 
     def package_rules(directory)
@@ -70,6 +73,51 @@ module Erx
         'default_evidence' => 'reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence',
         'rules' => rules }
     end
+
+    # The notice blocks of the inventories' files that the notice table must
+    # list before a file can be read as permissive: every block holding a
+    # license mark in a file whose license its notice decides, but those
+    # read as GNU notices. Each distinct block is one row, as the table holds
+    # it, with the files that hold it, one example and the license the table
+    # gives it ('-' for none), so a reviewer reads each text once. A file is
+    # read from the tree when its bytes are the row's, else from its part's
+    # original tree when one is named, else not at all. No text is printed.
+    def notices(root:, originals: {})
+      project = File.expand_path(root)
+      listed = Attribution.listed_notices
+      found = PARTS.each_with_object({}) do |part, blocks|
+        directory = File.join(project, 'fiasco', part)
+        review = profile(directory, part: part)
+        Origin.new(root: directory).inventory.fetch('files').each do |path, row|
+          bytes = recorded_bytes([directory, originals[part]].compact.map { |base| File.join(base, path) },
+                                 row: row)
+          next unless bytes && Attribution.for_file(path, bytes: bytes, sidecar: nil, review: review,
+                                                          notices: {}).fetch('license') == Attribution::UNRECOGNIZED_NOTICE
+
+          Attribution.notice_blocks(bytes).each do |block|
+            next unless block.match?(Attribution::LICENSE_MARK) && !Attribution.gnu_notice?(block)
+
+            (blocks[Digest::SHA256.hexdigest(block)] ||= []) << "#{part}/#{path}"
+          end
+        end
+      end
+      found.sort.map { |sha256, paths| [sha256, paths.size, paths.min, listed.fetch(sha256, '-')].join(' ') }
+    end
+
+    # A row's bytes from the first candidate path holding them; nil for a
+    # symlink or when none does.
+    def recorded_bytes(candidates, row:)
+      return nil unless row.fetch('kind') == 'file'
+
+      candidates.each do |candidate|
+        next unless File.file?(candidate) && !File.symlink?(candidate)
+
+        bytes = File.binread(candidate)
+        return bytes if Digest::SHA256.hexdigest(bytes) == row.fetch('sha256')
+      end
+      nil
+    end
+    private_class_method :recorded_bytes
 
     def write(root:, kernel_archive:, core_archive:, cache:, part: nil)
       project = File.expand_path(root)
@@ -168,15 +216,29 @@ end
 if $PROGRAM_NAME == __FILE__
   options = { root: File.expand_path('..', __dir__) }
   parser = OptionParser.new do |arguments|
-    arguments.banner = 'usage: ruby tools/fiasco_origins.rb --kernel-archive FILE --core-archive FILE --cache DIRECTORY'
+    arguments.banner = "usage: ruby tools/fiasco_origins.rb --kernel-archive FILE --core-archive FILE --cache DIRECTORY\n" \
+                       '       ruby tools/fiasco_origins.rb --notices [--original PART=DIRECTORY]...'
+    arguments.on('--notices', 'list the notice blocks the notice table must review') { options[:notices] = true }
+    arguments.on('--original PART=DIRECTORY', 'an unpacked original tree of a part, for its changed files') do |value|
+      part, directory = value.split('=', 2)
+      raise OptionParser::InvalidArgument, value unless Erx::FiascoOrigins::PARTS.include?(part) && directory
+
+      (options[:originals] ||= {})[part] = File.expand_path(directory)
+    end
     arguments.on('--kernel-archive FILE') { |value| options[:kernel_archive] = value }
     arguments.on('--core-archive FILE') { |value| options[:core_archive] = value }
     arguments.on('--cache DIRECTORY') { |value| options[:cache] = value }
     arguments.on('--root DIRECTORY') { |value| options[:root] = value }
-    arguments.on('--part NAME', %w[kernel l4re-core mk bootstrap libfdt drivers-frst]) { |value| options[:part] = value }
+    arguments.on('--part NAME', Erx::FiascoOrigins::PARTS) { |value| options[:part] = value }
   end
   begin
     remaining = parser.parse(ARGV)
+    raise OptionParser::InvalidArgument, remaining.join(' ') unless remaining.empty?
+    if options.delete(:notices)
+      Erx::FiascoOrigins.notices(root: options.fetch(:root), originals: options.fetch(:originals, {}))
+                        .each { |row| Erx::Terminal.puts(row) }
+      exit 0
+    end
     %i[kernel_archive core_archive cache].each do |name|
       raise OptionParser::MissingArgument, "--#{name.to_s.tr('_', '-')}" unless options[name]
     end

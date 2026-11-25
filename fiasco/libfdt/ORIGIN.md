@@ -42,7 +42,7 @@ Third-party notices remain in their original files.
     },
     "README.md": {
       "license": "LicenseRef-unrecognized-notice",
-      "evidence": "unrecognized license notice (4 license words outside a recognised notice); review the file",
+      "evidence": "unrecognized license notice (2 notice blocks neither reviewed nor GNU); review the file",
       "reviewed": false,
       "sha256": "d18cac7fe8deda9127353a18743fcb82d679730bb797a9c11ff7e1c4079dfcc6",
       "kind": "file",

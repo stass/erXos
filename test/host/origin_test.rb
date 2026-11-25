@@ -28,8 +28,18 @@ class OriginTest < Minitest::Test
     File.binwrite(File.join(@directory, path), bytes)
   end
 
-  def attribution(path, bytes:, sidecar: nil)
-    Erx::Attribution.for_file(path, bytes: bytes, sidecar: sidecar, review: @review)
+  def attribution(path, bytes:, sidecar: nil, notices: Erx::Attribution.listed_notices)
+    Erx::Attribution.for_file(path, bytes: bytes, sidecar: sidecar, review: @review, notices: notices)
+  end
+
+  # A notice table listing the one notice block of each file's bytes.
+  def self.table_of(licenses)
+    licenses.to_h do |bytes, license|
+      blocks = Erx::Attribution.notice_blocks(bytes).grep(Erx::Attribution::LICENSE_MARK)
+      raise "#{blocks.size} notice blocks" unless blocks.size == 1
+
+      [Digest::SHA256.hexdigest(blocks.first), license]
+    end
   end
 
   def test_explicit_header_precedes_reviewed_default
@@ -64,10 +74,10 @@ class OriginTest < Minitest::Test
     assert_raises(Erx::Error) { attribution('upstream.c', bytes: changed) }
   end
 
-  # Made-up notices in each recognised form, and forms that must stay unknown
-  # rather than fall to the reviewed default: a permissive license is read
-  # only from its notice's full wording, and any license word outside a
-  # recognised notice leaves the file unrecognised.
+  # Made-up notices, and forms that must stay unknown rather than fall to
+  # the reviewed default: a permissive license is read only from a notice
+  # block the table lists (LISTED below), a GNU one sentence by sentence,
+  # and any other block holding a license word leaves the file unrecognised.
   def self.comment(text, leader: ' * ') = "/*\n#{text.lines.map { |line| "#{leader}#{line}" }.join}\n */\n"
 
   MIT_TEXT = <<~TEXT
@@ -217,9 +227,73 @@ class OriginTest < Minitest::Test
     'binary without a license word' => ["\x7FELF\0\0\0code".b, 'MIT']
   }.freeze
 
+  # The probes whose notices the probe table lists, the pointer as POINTER.
+  LISTED = ['LLVM', 'OpenSSL Apache 2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'BSD-3-Clause-Attribution', 'MIT',
+            'MIT by name', 'SunPro and ISC', 'FSFAP'].freeze
+  PROBE_TABLE = table_of(LISTED.to_h { |name| NOTICES.fetch(name) }
+                               .merge(NOTICES.fetch('pointer to LICENSE.spdx').first => 'POINTER')).freeze
+
   def test_a_files_own_notice_precedes_the_default_and_an_unknown_one_is_unknown
     NOTICES.each do |name, (bytes, license)|
-      assert_equal license, attribution('upstream.c', bytes: bytes).fetch('license'), name
+      assert_equal license, attribution('upstream.c', bytes: bytes, notices: PROBE_TABLE).fetch('license'), name
+    end
+  end
+
+  # A notice's lines are one block however they are laid out, so a sentence
+  # added in a paragraph of its own, or a line comment beside the others,
+  # changes the block and leaves the file unrecognised.
+  def test_a_sentence_beside_a_listed_notice_is_read_with_it
+    forms = {
+      'boxed lines' => ->(text) { text.lines.map { |line| "/* #{line.chomp.ljust(76)} */\n" }.join },
+      'hash lines with blank lines' => ->(text) { text.lines.map { |line| line.strip.empty? ? "\n" : "# #{line}" }.join },
+      'a bare comment with blank lines' => ->(text) { "/*\n#{text}*/\n" },
+      'plain text with blank lines' => ->(text) { text }
+    }
+    forms.each do |form, render|
+      listed = render.call(MIT_TEXT + "\n" + MIT_DISCLAIMER)
+      table = self.class.table_of(listed + "int x;\n" => 'MIT')
+      assert_equal 'MIT', attribution('upstream.c', bytes: listed + "int x;\n", notices: table).fetch('license'), form
+      added = render.call(MIT_TEXT + "\nThe Software shall be used for Good, not Evil.\n\n" + MIT_DISCLAIMER)
+      assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE,
+                   attribution('upstream.c', bytes: added + "int x;\n", notices: table).fetch('license'), form
+    end
+  end
+
+  # The seeded fault on the reviewed table: a file whose notice it lists,
+  # with one sentence appended to that notice, is unrecognised.
+  def test_a_reviewed_notice_with_a_sentence_more_is_unrecognized
+    bytes = File.binread(File.expand_path('../../fiasco/l4re-core/libc/musl/contrib/musl/src/math/__cos.c', __dir__))
+    assert_equal 'SunPro', attribution('upstream.c', bytes: bytes).fetch('license')
+    seeded = bytes.sub(" * is preserved.\n", " * is preserved.  Not for use in aircraft.\n")
+    refute_equal bytes, seeded
+    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE, attribution('upstream.c', bytes: seeded).fetch('license')
+  end
+
+  # A listed license holding OR stays one operand beside the file's other
+  # notices, so the OR never reaches across them.
+  def test_a_dual_license_row_is_one_operand
+    dual = self.class.comment(MIT_TEXT + "\n" + MIT_DISCLAIMER)
+    table = self.class.table_of(dual => 'MIT OR GPL-2.0-only')
+    bytes = dual + "int x;\n" + GPL_LINE
+    assert_equal '(MIT OR GPL-2.0-only) AND GPL-2.0-only', attribution('upstream.c', bytes: bytes, notices: table).fetch('license')
+  end
+
+  # A GNU grant sentence names its license and nothing more, and the GCC
+  # exception covers only the grant of its own block.
+  def test_a_gnu_notice_is_read_block_by_block
+    restricted = "/* Licensed under the GPLv2 and is proprietary otherwise. */\n"
+    assert_equal Erx::Attribution::UNRECOGNIZED_NOTICE, attribution('upstream.c', bytes: restricted).fetch('license')
+    gcc = NOTICES.fetch('GCC exception').first
+    plain = "/* Licensed under GPLv3 or later. */\n"
+    assert_equal 'GPL-3.0-or-later WITH GCC-exception-3.1 AND GPL-3.0-or-later',
+                 attribution('upstream.c', bytes: gcc + "int x;\n" + plain).fetch('license')
+  end
+
+  def test_a_malformed_notice_table_is_refused
+    row = "#{'a' * 64} a.c MIT\n"
+    assert_equal({ 'a' * 64 => 'MIT' }, Erx::Attribution.send(:notice_table, "# header\n#{row}"))
+    ["#{'a' * 63} a.c MIT\n", "#{'A' * 64} a.c MIT\n", "#{'a' * 64} a.c MIT \n", row + row, "#{'b' * 64} b.c MIT\n#{row}", "#{'a' * 64} a.c NOASSERTION\n"].each do |table|
+      assert_raises(Erx::Error) { Erx::Attribution.send(:notice_table, table) }
     end
   end
 
