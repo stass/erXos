@@ -21,9 +21,8 @@ module Erx
     Run = Data.define(:output, :exit_code)
     Outcome = Data.define(:verdict, :detail)
 
-    # A step's blew arguments after the global options (none for a step blew cannot
-    # run yet), the exit codes that decide it, and its verdict on the output and the
-    # exit code.
+    # A step's blew arguments after the global options, the exit codes that decide it,
+    # and its verdict on the output and the exit code.
     Step = Data.define(:name, :argv, :deciding, :check)
 
     # The scan's verdict, and the identifier of the board when the verdict is passed.
@@ -85,10 +84,7 @@ module Erx
       check.call(run.output, code)
     end
 
-    # The verdict of a step on its run (nil for a step with no blew command).
     def step_outcome(step, run)
-      return outcome(:unknown, 'needs blew nus') unless step.argv
-
       judge(run, deciding: step.deciding, &step.check)
     end
 
@@ -104,11 +100,7 @@ module Erx
       end
       [exec_step.call('connect and discover', 'gatt tree', method(:discover_outcome)),
        exec_step.call('write NUS RX', "write -r -f utf8 #{NUS_RX} erxos", method(:write_outcome)),
-       exec_step.call('read NUS RX, refused', "read #{NUS_RX}", method(:read_outcome)),
-       # The echo needs a subscription open while RX is written, which blew's exec
-       # cannot do: its sub ends only at a notification. Switch to `blew nus` once a
-       # blew release has it.
-       Step.new(name: 'NUS echo', argv: nil, deciding: [], check: nil)]
+       exec_step.call('read NUS RX, refused', "read #{NUS_RX}", method(:read_outcome))]
     end
 
     def discover_outcome(output, code)
@@ -129,8 +121,96 @@ module Erx
 
     # CoreBluetooth's message for a characteristic without the read property; the
     # same English-locale assumption.
+    # blew also refuses, with the same code, a read the declared properties do not allow.
     def read_outcome(output, code)
-      outcome(code == 5 && output.include?('not permitted') ? :passed : :failed, 'refuses a read of RX')
+      refused = code == 5 && (output.include?('not permitted') || output.include?('is not readable'))
+      outcome(refused ? :passed : :failed, 'refuses a read of RX')
+    end
+
+    # bleuart (docs/design-bluetooth.md, "The console"): root's shell on the NUS
+    # line. A session is one `blew nus` connection that types its lines, each after
+    # its pause, and keeps what the line answered. rc joins words with ^, so what
+    # echo printed is never the tty's echo of the command line. top runs until
+    # Ctrl-C: a display of 5 processes, then the next one every 600 s.
+    Typed = Data.define(:pause, :text)
+    PROMPT = '% '
+    # ps's name of a command shell's group: one row for each shell of root's session.
+    SHELL_ROW = '{group,{erx_shell,server,'
+    # What top writes before each display on a terminal (erx_cmd_top).
+    SCREEN_CLEARED = "\e[H\e[2J"
+    TOP = 'top -s 600 5'
+    SESSION = [Typed.new(pause: 0, text: "echo ble^uart\r"),
+               Typed.new(pause: 3, text: "ps -o comm\r"),
+               Typed.new(pause: 5, text: "#{TOP}\r"),
+               Typed.new(pause: 10, text: "\x03"),
+               Typed.new(pause: 3, text: "echo top^done\r")].freeze
+    # The next connection, after the first has ended.
+    RECONNECTION = [Typed.new(pause: 0, text: "echo fresh^prompt\r"),
+                    Typed.new(pause: 3, text: "ps -o comm\r")].freeze
+
+    # blew nus's arguments after the global options: connect to the board, then keep
+    # listening linger seconds after standard input ends.
+    def nus_argv(id, linger:)
+      raise Error, 'a device identifier is hexadecimal groups' unless /\A#{IDENTIFIER}\z/.match?(id)
+
+      ['nus', '-i', id, '-d', linger.to_s]
+    end
+
+    # What the line answered command: everything after the command's echo up to the
+    # next prompt, nil when the command was not echoed or no prompt followed it. The
+    # tty echoes the line and rc then redraws it, so the answer follows the last echo.
+    def answer(output, command)
+      start = output.rindex(command)
+      return nil unless start
+
+      rest = output[(start + command.size)..]
+      finish = rest.index(PROMPT)
+      finish && rest[0, finish]
+    end
+
+    # The rows of ps -o comm that name a shell, nil when the answer has no COMMAND
+    # header (an error, or no answer).
+    def shells(answer)
+      rows = answer&.split(/\r?\n/)
+      rows&.include?('COMMAND') ? rows.count { |row| row.start_with?(SHELL_ROW) } : nil
+    end
+
+    # The verdicts on the first session (SESSION) and on the reconnection
+    # (RECONNECTION), in order. A session that blew did not end with 0 (no device
+    # found again, a connection timed out, Bluetooth unavailable) says nothing about
+    # the board, so its verdicts are unknown.
+    def bleuart_outcomes(first, second)
+      before = shells(answer(first.output, 'ps -o comm'))
+      [['bleuart prompt and echo', first, -> { said(first, 'echo ble^uart', 'bleuart') }],
+       ['bleuart ps', first, -> { outcome(before&.positive? ? :passed : :failed, "ps lists #{before.inspect} shells") }],
+       ['bleuart top, Ctrl-C', first, -> { interrupted(first.output) }],
+       ['bleuart reconnection', second, -> { reconnected(second, before) }]].map do |name, run, check|
+        [name, judge(run, deciding: [0]) { check.call }]
+      end
+    end
+
+    def said(run, command, printed)
+      reply = answer(run.output, command)
+      outcome(reply&.include?(printed) ? :passed : :failed, "#{command} prints #{printed}")
+    end
+
+    # top showed a display, ended at Ctrl-C (the prompt after it), and the shell then
+    # ran the next command; without Ctrl-C top keeps the line for 600 s.
+    def interrupted(output)
+      display = answer(output, TOP)&.include?(SCREEN_CLEARED)
+      done = answer(output, 'echo top^done')&.include?('topdone')
+      outcome(display && done ? :passed : :failed, "display #{display ? 'shown' : 'missing'}, " \
+                                                   "shell #{done ? 'answers' : 'silent'} after Ctrl-C")
+    end
+
+    # A fresh prompt on the new connection, and as many shells as before: the first
+    # connection's shell ended with it.
+    def reconnected(run, before)
+      prompt = said(run, 'echo fresh^prompt', 'freshprompt')
+      return prompt unless prompt.verdict == :passed
+
+      after = shells(answer(run.output, 'ps -o comm'))
+      outcome(after && after == before ? :passed : :failed, "ps lists #{after.inspect} shells, #{before.inspect} before")
     end
 
     # 0 when a step passed and none failed, 1 when one failed, 3 when none passed.

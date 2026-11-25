@@ -124,10 +124,66 @@ class BleBoardCheckTest < Minitest::Test
     assert_equal 0, Check.blew_exit(run_of("Error: exit code 08\n", 0))
   end
 
-  def test_the_echo_waits_for_blew_nus
-    echo = step('NUS echo')
-    assert_nil echo.argv
-    assert_equal :unknown, Check.step_outcome(echo, nil).verdict
+  # What bleuart's line answers a session, in the shape of the Pi 4's: the tty echoes
+  # each typed line, rc redraws it after the prompt, and the answer follows.
+  SHELL_ROWS = "{group,{erx_shell,server,[{erx_shell_runner,\r\n"
+  def typed(command) = "#{command}\r\n\e[A\e[J% #{command}\r\n"
+
+  def session_output(shells: 1, display: true, interrupted: true)
+    ps = "#{typed('ps -o comm')}COMMAND\r\ninit\r\n#{SHELL_ROWS * shells}% "
+    top = "#{typed(Check::TOP)}#{display ? "\e[H\e[2Jrun queue: 0\r\n" : ''}"
+    top += interrupted ? "^C\r\n% #{typed('echo top^done')}topdone\r\n% " : ''
+    "rc: the command shell; exit ends it\r\n% #{typed('echo ble^uart')}bleuart\r\n% #{ps}#{top}"
+  end
+
+  def reconnection_output(shells: 1)
+    "% #{typed('echo fresh^prompt')}freshprompt\r\n% #{typed('ps -o comm')}COMMAND\r\n#{SHELL_ROWS * shells}% "
+  end
+
+  def test_the_read_passes_when_blew_refuses_it_on_the_declared_properties
+    output = "Error: Read failed: characteristic #{Check::NUS_RX} is not readable (properties: write, writeNoResp)\n"
+    assert_equal :passed, outcome_of('read NUS RX, refused', output, 5).verdict
+  end
+
+  def bleuart(first, second, first_code: 0, second_code: 0)
+    Check.bleuart_outcomes(run_of(first, first_code), run_of(second, second_code)).to_h.transform_values(&:verdict)
+  end
+
+  def test_a_bleuart_session_that_answers_everything_passes
+    assert_equal({ 'bleuart prompt and echo' => :passed, 'bleuart ps' => :passed, 'bleuart top, Ctrl-C' => :passed,
+                   'bleuart reconnection' => :passed }, bleuart(session_output, reconnection_output))
+  end
+
+  def test_top_fails_without_its_display_or_without_the_shell_after_ctrl_c
+    assert_equal :failed, bleuart(session_output(display: false), reconnection_output)['bleuart top, Ctrl-C']
+    assert_equal :failed, bleuart(session_output(interrupted: false), reconnection_output)['bleuart top, Ctrl-C']
+  end
+
+  def test_the_tty_echo_of_a_command_is_not_its_answer
+    echoed_only = "% #{typed('echo ble^uart')}% "
+    assert_equal :failed, bleuart(echoed_only, reconnection_output)['bleuart prompt and echo']
+  end
+
+  def test_ps_fails_without_its_header_or_a_shell
+    assert_equal :failed, bleuart(session_output.sub("COMMAND\r\n", ''), reconnection_output)['bleuart ps']
+    assert_equal :failed, bleuart(session_output(shells: 0), reconnection_output)['bleuart ps']
+  end
+
+  # The first connection's shell outlived it, or the reconnection got no prompt.
+  def test_the_reconnection_fails_on_a_shell_left_behind_or_no_prompt
+    assert_equal :failed, bleuart(session_output, reconnection_output(shells: 2))['bleuart reconnection']
+    assert_equal :failed, bleuart(session_output, 'connected')['bleuart reconnection']
+  end
+
+  def test_a_session_blew_did_not_finish_is_unknown
+    [2, 3, 4, 6, nil].each do |code|
+      verdicts = bleuart(session_output, reconnection_output, first_code: code, second_code: code)
+      assert_equal [:unknown], verdicts.values.uniq, code.inspect
+    end
+  end
+
+  def test_an_identifier_that_is_no_uuid_reaches_no_nus_session
+    assert_raises(Erx::Error) { Check.nus_argv('F8A0E70B; x', linger: 5) }
   end
 
   def test_the_exit_of_a_checklist

@@ -630,7 +630,8 @@ checklist with a phone follows. The board has run the domain to
 advertising on the ROM alone, with the pins set by the system domain's
 root at boot. A script, `tools/ble_board_check.rb`, drives a Mac's `blew`
 through the scripted steps (scan, connect and discover, write and read the
-serial service); the console and pairing are not yet run on the board.
+serial service) and two sessions of root's shell over `bleuart`, which
+the board passes; pairing is not yet run on the board.
 
 ## 19.8 Design choices
 

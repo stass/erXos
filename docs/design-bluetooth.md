@@ -3437,7 +3437,10 @@ USB dongle on the development host, which makes the peer side scripted,
 and with a Mac as a second scripted peer: `tools/ble_board_check.rb` drives
 `blew`, a macOS command-line tool over CoreBluetooth, to scan, connect and
 discover, write and read Nordic's UART service, one `blew` run per step
-and one connection per step after the scan. CoreBluetooth hides GAP and GATT's own services from
+and one connection per step after the scan, then two `blew nus` sessions
+on `bleuart`: the first types `echo`, `ps -o comm`, a `top` and Ctrl-C
+with pauses between them, the second, a reconnection, needs a fresh
+prompt and as many shells as before. CoreBluetooth hides GAP and GATT's own services from
 an app, so the Mac's steps work on the UART service, and a step reports
 unknown when `blew` times out or cannot use Bluetooth. The list:
 the machine appears in the phone's scanner with its name; nRF-style GATT

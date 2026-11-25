@@ -35,10 +35,44 @@ def blew(runner, step_name, argv, timeout)
   Erx::BleBoardCheck::Run.new(output: output, exit_code: record['state'] == 'timed_out' ? nil : record['exit_status'])
 end
 
+# One bleuart session: blew nus reads the typed lines from a named pipe in the logs,
+# which a thread writes, each line after its pause, and the line's answers go to the
+# run's log. A blew that ends early leaves the thread a broken pipe.
+def nus_session(runner, logs, id, name, typed, timeout)
+  fifo = File.join(logs, "#{name}.in")
+  File.unlink(fifo) if File.exist?(fifo)
+  File.mkfifo(fifo, 0o600)
+  writer = Thread.new do
+    File.open(fifo, 'wb') do |pipe|
+      typed.each do |line|
+        sleep(line.pause)
+        pipe.write(line.text)
+        pipe.flush
+      end
+    end
+  rescue Errno::EPIPE
+    nil
+  end
+  argv = ['blew', '--timeout', timeout.to_s, *Erx::BleBoardCheck.nus_argv(id, linger: NUS_LINGER)]
+  record = begin
+    runner.run(argv, name: name, deadline: (timeout * 3) + typed.sum(&:pause) + NUS_LINGER, stdin: fifo)
+  rescue Erx::CommandError => error
+    error.result
+  end
+  output = File.binread(record.fetch('log')).force_encoding(Encoding::UTF_8).scrub
+  Erx::BleBoardCheck::Run.new(output: output, exit_code: record['state'] == 'timed_out' ? nil : record['exit_status'])
+ensure
+  writer&.kill
+  File.unlink(fifo) if fifo && File.exist?(fifo)
+end
+
 def report(step_name, outcome)
   puts "#{outcome.verdict}: #{step_name} (#{outcome.detail})"
   outcome
 end
+
+# Seconds blew nus listens after a session's last line.
+NUS_LINGER = 5
 
 USAGE = 'usage: ruby tools/ble_board_check.rb --name NAME --logs DIR [--timeout SECS]'
 options = { timeout: 15 }
@@ -70,9 +104,12 @@ begin
   outcomes = [report('scan', scan.outcome)]
   if scan.id
     outcomes += Erx::BleBoardCheck.steps(scan.id).map do |step|
-      run = step.argv && blew(runner, step.name, step.argv, options[:timeout])
-      report(step.name, Erx::BleBoardCheck.step_outcome(step, run))
+      report(step.name, Erx::BleBoardCheck.step_outcome(step, blew(runner, step.name, step.argv, options[:timeout])))
     end
+    first = nus_session(runner, options[:logs], scan.id, 'bleuart-session', Erx::BleBoardCheck::SESSION, options[:timeout])
+    second = nus_session(runner, options[:logs], scan.id, 'bleuart-reconnection', Erx::BleBoardCheck::RECONNECTION,
+                         options[:timeout])
+    outcomes += Erx::BleBoardCheck.bleuart_outcomes(first, second).map { |name, outcome| report(name, outcome) }
   else
     outcomes << report('the steps after the scan', Erx::BleBoardCheck::NO_DEVICE)
   end
