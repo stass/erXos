@@ -2294,22 +2294,36 @@ line, and QEMU is ended as at a checkpoint.
 ### How erXos runs the program
 
 The `posix` image is the programs suite's test image
-(`tools/lib/erx/programs.rb:600-627`), with one change to its manifest
-and its memory: the development manifest caps a session's `/tmp` at
-2 MiB (`config/manifest/development.txt:87`), which the two 16 MiB files
-of `read-seq` and `copy` and `untar`'s extraction exceed, so the image's
-build raises the session's `tmp` limit to 48 MiB and its QEMU memory by
-the same, through the harness's manifest edit (`ManifestEdit`), as the
-`g5` and `web` benchmarks build their images from edited manifests
-(`tools/lib/erx/bench_g5.rb:222`, `bench_web.rb:145`); the session's
-Linux guest gets that memory too. It is the production image with
-`erx_peer_bench`, built as a program from `NativeRoot::PROGRAM` and the
-file as the suite builds its programs, and toybox's `true`, `find`,
-`xargs`, `grep`, `wc`, `tar` and `rm`, the generated tree and archive in
-the domain release. At root's session the console types
-`/bin/erx_peer_bench posix` at the command shell, as the suite types its
-`rc` cases (`programs.rb:536-556`), with the environment's CPU count
-as its second argument; the program's standard output is an
+(`Programs.test_image`, `tools/lib/erx/programs.rb:573-599`), with one
+change to its manifest and its memory. The development manifest caps a
+session's `/tmp` at 2 MiB (`config/manifest/development.txt:87`), which
+the two 16 MiB files of `read-seq` and `copy` and `untar`'s extraction
+exceed, so the image's build (`PosixBench.manifest`) raises the
+session's `tmp` limit to 48 MiB. `/tmp` is charged to the session's
+budget as it is used, so the build grows by the same 48 MiB each budget
+that holds it: the session's memory (`limits session`), the system
+principal's memory, which admits the session, and the machine's
+`root_memory`, which holds the principal's
+(`config/manifest/qemu-virt-development.txt:268`, `:303`); QEMU's RAM
+grows by as much (`PosixBench.machine`, 752 MiB on QEMU `virt`). A
+session's runtime limits must lie within its principal's ceiling
+(`dom_limits_within`, `liberx/system/dom_core.c:295-305`, called at
+`:1235`), and the system principal's ceiling is the system domain's own
+`runtime_limits`, so the build raises the system domain's `tmp` limit to
+48 MiB too. That limit is a cap, charged only as the system domain's
+own `/tmp` is used, which nothing in the image does. The edits go
+through the harness's manifest edit (`Manifest::Edit`), as the `g5` and
+`web` benchmarks build their images from edited manifests
+(`tools/lib/erx/bench_g5.rb:222`, `bench_web.rb:145`), and the session's
+Linux guest boots with the same RAM (`LinuxGuest.machine`). It is the
+production image with `erx_peer_bench`, built as a program from
+`NativeRoot::PROGRAM` and the file as the suite builds its programs, and
+toybox's `true`, `find`, `xargs`, `grep`, `wc`, `tar` and `rm`, the
+generated tree and archive in the domain release. At root's session the
+console types `erx_peer_bench posix`, by its bare name, at the command
+shell, as the suite types its `rc` cases (`Programs.checkpoints`), with
+the environment's CPU count as its second argument; the program's
+standard output is an
 open on the session's terminal, so its lines reach the console as it
 wrote them and the serial log is read as every guest's is. A line
 reaches the serial log ending in two carriage returns and a newline,

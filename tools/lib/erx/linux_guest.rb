@@ -92,27 +92,31 @@ module Erx
         subject: { 'kernel' => pin_of(dependencies, KERNEL), 'c_library' => pin_of(dependencies, MUSL_DEV),
                    'command_line' => COMMAND_LINE, 'initramfs_sha256' => Digest::SHA256.file(initrd).hexdigest,
                    'peer_sha256' => Digest::SHA256.file(peer).hexdigest,
-                   'init_sha256' => Digest::SHA256.file(init).hexdigest, 'compiler' => compiler_version(runner),
+                   'init_sha256' => Digest::SHA256.file(init).hexdigest,
+                   'compiler' => PeerBench.compiler_version(runner, compiler),
                    'peer_flags' => c_flags('MUSL_DEV', peer_flags).join(' ') } }
     end
 
-    # What QEMU boots a run of benchmark on cpus CPUs with: the program's arguments after the
-    # kernel's, which /init hands on, and the memory, which a posix run's /tmp adds to as it
-    # does erXos's posix image's (PosixBench::TMP_MIB).
-    def machine(benchmark, cpus:)
-      tmp = PeerBench::BOOTS.fetch(benchmark) == 'posix' ? PosixBench::TMP_MIB : 0
+    # What QEMU boots a run of benchmark on cpus CPUs of platform with: the program's
+    # arguments after the kernel's, which /init hands on, and the memory of the erXos
+    # machine the run is set beside: a posix run's erXos's posix image's
+    # (PosixBench.machine), whose /tmp a posix run's files fill as they fill Linux's, and
+    # any other run the native bench guest's.
+    def machine(benchmark, cpus:, platform:)
+      posix = PeerBench::BOOTS.fetch(benchmark) == 'posix'
       { command_line: [COMMAND_LINE, '--', *PeerBench.arguments(benchmark, cpus: cpus)].join(' '),
-        memory_mib: NativeBench::MEMORY_MIB + tmp }
+        memory_mib: posix ? PosixBench.machine(platform).memory_mib : NativeBench::MEMORY_MIB }
     end
 
-    # One boot of the guest for benchmark at cpus CPUs, its serial log in directory.
-    def boot(root:, runner:, built:, benchmark:, cpus:, accel: 'hvf', directory:)
+    # One boot of the guest for benchmark at cpus CPUs of platform, its serial log in
+    # directory.
+    def boot(root:, runner:, built:, benchmark:, cpus:, platform:, accel: 'hvf', directory:)
       checkpoints = [{ name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
                      { name: 'bench-done', pattern: /\Aerx: bench: done/n,
                        seconds: DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
-      machine = machine(benchmark, cpus: cpus)
+      machine = machine(benchmark, cpus: cpus, platform: platform)
       Qemu.new(root: root, runner: runner).run(
-        platform: Platform.development(root), accel: accel, cpus: cpus, memory_mib: machine.fetch(:memory_mib),
+        platform: platform, accel: accel, cpus: cpus, memory_mib: machine.fetch(:memory_mib),
         image: built.fetch(:kernel), initrd: built.fetch(:initrd), hostlink: QemuPlan::NO_HOSTLINK,
         command_line: machine.fetch(:command_line), checkpoints: checkpoints, machine_end: true, directory: directory
       )
@@ -151,12 +155,7 @@ module Erx
 
     def compiler = ENV.fetch('ERX_CLANG') { raise Error, 'linux guest: set ERX_CLANG to the LLVM clang' }
 
-    # The first line of the compiler's own report of its version.
-    def compiler_version(runner)
-      log = runner.run([compiler, '--version'], name: 'linux-guest-cc-version', deadline: 30).fetch('log')
-      File.binread(log, 4096).lines.first.to_s.strip
-    end
-    private_class_method :pin_of, :c_flags, :compile, :compiler, :compiler_version
+    private_class_method :pin_of, :c_flags, :compile, :compiler
 
     # Linux's guest for one boot (BenchSystem), native or posix: one boot of the kernel and its
     # initramfs, whose erx_peer_bench prints a BENCH line for every cell of the boot, a
@@ -167,12 +166,13 @@ module Erx
     # program reports every cell of the boot, the cells a session asks only decide that it
     # boots, and the record keeps each line the guest printed.
     class Guest
-      def initialize(root:, runner:, boot: 'native')
+      def initialize(root:, runner:, boot: 'native', platform: Platform.development(root))
         raise Error, "linux guest: no #{boot} boot" unless BOOTS.include?(boot)
 
         @root = File.expand_path(root)
         @runner = runner
         @boot = boot
+        @platform = platform
       end
 
       attr_reader :boot
@@ -192,7 +192,7 @@ module Erx
         @built ||= LinuxGuest.build(root: @root, runner: @runner)
         directory = File.join(@root, 'build/qemu', "linux-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = LinuxGuest.boot(root: @root, runner: @runner, built: @built, benchmark: benchmark.name, cpus: cpus,
-                                 accel: accel, directory: directory)
+                                 platform: @platform, accel: accel, directory: directory)
         # The kernel QEMU booted is the pinned one, as the record says.
         unless report.fetch('image_sha256') == @built.fetch(:subject).fetch('kernel').fetch('sha256')
           raise Error, "#{@built.fetch(:kernel)} is not the kernel Linux's lock pins: run `#{SideLock.fetch_command(LABEL)}`"
@@ -202,7 +202,8 @@ module Erx
         answer = BenchMeasurement.boot(lines, PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))
         BenchSystem::Booted.new(
           clock: answer.fetch(:clock) || {}, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
-          environment: { 'memory_mib' => LinuxGuest.machine(benchmark.name, cpus: cpus).fetch(:memory_mib),
+          environment: { 'memory_mib' => LinuxGuest.machine(benchmark.name, cpus: cpus, platform: @platform)
+                                                    .fetch(:memory_mib),
                          'machine' => 'virt',
                          'qemu' => report['qemu_version'] }.compact,
           subject: @built.fetch(:subject), logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']

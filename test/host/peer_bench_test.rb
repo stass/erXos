@@ -68,15 +68,16 @@ class PeerBenchTest < Minitest::Test
   end
 
   # Linux's guest boots posix with the count after the kernel's arguments, a /tmp for its
-  # files and the memory they take, which erXos's posix image is given too.
+  # files, and the memory of erXos's posix machine it is set beside.
   def test_linux_boots_posix_with_its_arguments_tmp_and_memory
-    posix = Erx::LinuxGuest.machine('posix', cpus: 4)
-    assert_equal "#{Erx::LinuxGuest::COMMAND_LINE} -- posix 4", posix.fetch(:command_line)
-    assert_equal Erx::NativeBench::MEMORY_MIB + Erx::PosixBench::TMP_MIB, posix.fetch(:memory_mib)
-    assert_equal({ command_line: "#{Erx::LinuxGuest::COMMAND_LINE} -- wake", memory_mib: Erx::NativeBench::MEMORY_MIB },
-                 Erx::LinuxGuest.machine('wake', cpus: 4))
-    assert_includes Erx::LinuxGuest.initramfs(init: ''.b, peer: ''.b), "tmp\0"
     root = File.expand_path('../..', __dir__)
+    platform = Erx::Platform.development(root)
+    posix = Erx::LinuxGuest.machine('posix', cpus: 4, platform: platform)
+    assert_equal "#{Erx::LinuxGuest::COMMAND_LINE} -- posix 4", posix.fetch(:command_line)
+    assert_equal Erx::PosixBench.machine(platform).memory_mib, posix.fetch(:memory_mib)
+    assert_equal({ command_line: "#{Erx::LinuxGuest::COMMAND_LINE} -- wake", memory_mib: Erx::NativeBench::MEMORY_MIB },
+                 Erx::LinuxGuest.machine('wake', cpus: 4, platform: platform))
+    assert_includes Erx::LinuxGuest.initramfs(init: ''.b, peer: ''.b), "tmp\0"
     assert_equal 'posix', Erx::LinuxGuest::Guest.new(root: root, runner: nil, boot: 'posix').boot
     assert_equal 'native', Erx::LinuxGuest::Guest.new(root: root, runner: nil).boot
     assert_raises(Erx::Error) { Erx::LinuxGuest::Guest.new(root: root, runner: nil, boot: 'xdomain') }

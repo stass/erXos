@@ -49,6 +49,15 @@ module Erx
                                   clock: clock, pairs: pairs)
     end
 
+    # The first line of compiler's own report of its version: how every system's record
+    # names the compiler that built the program, so the records compare.
+    def compiler_version(runner, compiler)
+      raise Error, 'bench: set ERX_CLANG to the LLVM clang that builds erx_peer_bench' if compiler.to_s.empty?
+
+      log = runner.run([compiler, '--version'], name: 'peer-bench-cc-version', deadline: 30).fetch('log')
+      File.binread(log, 4096).lines.first.to_s.strip
+    end
+
     def xdomain_parameters
       cells = BenchSuite.benchmark('xdomain').landing.fetch('xdomain').map(&:parameters).uniq
       raise Error, 'bench: the xdomain cells disagree on their parameters' unless cells.one?

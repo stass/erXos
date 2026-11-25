@@ -77,7 +77,8 @@ module Erx
     end
 
     # Builds the image under OUTPUT on platform, with Fiasco as last built. Answers the
-    # built image, its machine and manifest, and the program's flags and SHA-256.
+    # built image, its machine and manifest, and the program's flags, SHA-256 and compiler
+    # (PeerBench.compiler_version, as Linux's record names it).
     def build(root:, runner:, compiler:, linker:, platform:, seeded: [])
       on = machine(platform)
       source = manifest(platform.manifest_source(root))
@@ -86,7 +87,8 @@ module Erx
                                             build: File.join(root, OUTPUT), programs: { PROGRAM => PeerBench::SOURCE },
                                             manifest_source: source, flags: flags(seeded: seeded))
       { built: built, machine: on, manifest: source, flags: flags(seeded: seeded),
-        program_sha256: Digest::SHA256.file(programs.fetch(PROGRAM).fetch(:program)).hexdigest }.freeze
+        program_sha256: Digest::SHA256.file(programs.fetch(PROGRAM).fetch(:program)).hexdigest,
+        compiler: PeerBench.compiler_version(runner, compiler) }.freeze
     end
 
     # One boot of the built image (build's answer) at cpus CPUs under accel, its serial
@@ -130,7 +132,7 @@ module Erx
         answer = BenchMeasurement.boot(NativeBench.guest_lines(File.binread(serial)),
                                        PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))
         measured = { serial: serial, image_sha256: report.fetch('image_sha256'), flags: @built.fetch(:flags),
-                     compiler: @compiler, workloads: { PROGRAM => @built.fetch(:program_sha256) },
+                     compiler: @built.fetch(:compiler), workloads: { PROGRAM => @built.fetch(:program_sha256) },
                      qemu_version: report['qemu_version'], reused_from: report['reused_from'] }
         BenchLanding.booted(measured, answer, memory_mib: @built.fetch(:machine).memory_mib)
       end
