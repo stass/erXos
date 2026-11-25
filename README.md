@@ -419,9 +419,10 @@ Eshell V17.1.1 (type help(). for help)
   the Pi 4's development manifest and off for the published card. On QEMU
   `virt` the Bluetooth suite's `bleuart` cell, with a Bumble central,
   scans for the service, connects without pairing, gets `rc`'s prompt,
-  runs `echo` and `ps`, and after `service bleuart stop` scans again and
-  finds no service. The cell does not yet run Ctrl-C, a reconnect or
-  `service bleuart start`, and no Pi 4 run of `bleuart` has been made.
+  runs `echo` and `ps`, interrupts a `top` with Ctrl-C, disconnects and
+  reconnects to a fresh prompt with no shell left behind, and after
+  `service bleuart stop` finds no service until `service bleuart start`
+  brings it back. No Pi 4 run of `bleuart` has been made.
 
 **Display and input**
 
