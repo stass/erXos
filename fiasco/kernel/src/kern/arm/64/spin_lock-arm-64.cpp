@@ -1,3 +1,5 @@
+// Modified by erXos: the unlock signals an event, so a waiter in WFE wakes on an
+// emulator that does not wake it for the store (docs/design-fiasco.md, "Patches").
 INTERFACE [arm && mp]:
 
 EXTENSION class Spin_lock
@@ -45,6 +47,16 @@ Spin_lock<Lock_t>::lock_arch()
 #undef LOCK_ARCH
 }
 
+/*
+ * The store clears the exclusive monitor of every waiter in lock_arch()'s WFE,
+ * which wakes it on ARMv8 hardware. Under QEMU's TCG a waiter was seen asleep in
+ * that WFE with the lock free, until an interrupt became pending; a waiter inside
+ * the one-shot timer's handler, with that timer masked, may have none coming. The
+ * SEV wakes the waiters without the monitor. It has no DSB before it, as the
+ * pre-ARMv8 ARM32 unlock has: on hardware the monitor's wake covers a waiter that
+ * the SEV woke too early, and the emulator is relied on to make the store
+ * visible before the SEV's wake arrives.
+ */
 IMPLEMENT template<typename Lock_t> inline
 void
 Spin_lock<Lock_t>::unlock_arch()
@@ -56,6 +68,7 @@ Spin_lock<Lock_t>::unlock_arch()
       "ldr"#z " %" #u "[tmp], %[lock]              \n" \
       "bic %x[tmp], %x[tmp], #2                    \n" /* Arch_lock == #2 */ \
       "stlr"#z " %" #u "[tmp], %[lock]             \n" \
+      "sev                                         \n" \
       : [lock] "+Q" (_lock), [tmp] "=&r" (tmp) : : "memory")
 
   switch (sizeof(Lock_t))

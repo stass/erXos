@@ -157,6 +157,12 @@ document's "residual risks accepted" paragraph.
   2 items (1 Medium, 1 Low).
 * [Build, tooling and tests](docs/todo-build.md#security-residuals): the build, the host tools, the test harnesses and the gates.
   5 items (3 Medium, 2 Low).
+* [Low] Fiasco, AArch64 spin lock: every kernel spin-lock release ends with `SEV`
+  (docs/design-fiasco.md, "The spin lock's event"), and Fiasco leaves user-mode `WFE`
+  untrapped, so a user thread looping on `WFE` and the counter can count the kernel's lock
+  releases on every CPU, including those made for other domains: a coarse side channel, beside
+  the covert one user-mode `SEV` already gives. Trapping user-mode `WFE`, or erXos's kernel,
+  closes it.
 
 ## Planned features
 

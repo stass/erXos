@@ -2365,7 +2365,7 @@ periodic 1 ms tick, and defers a slice end or a deadline that falls inside the f
 a thread also takes a timer interrupt at least every 1 ms for Fiasco's RCU (`Config::Rcu_grace_period`,
 `CONFIG_SCHED_GRANULARITY`, and `Config::Need_rcu_tick`, `src/kern/config.cpp:62` and `:80`; `src/kern/timeout.cpp:350-353`); an idle CPU with no RCU work
 pending takes none until its next timeout (tickless idle, which one-shot mode implies, `src/kern/kernel_thread.cpp:319-348`
-and `src/kern/context.cpp:2542-2548`). The quantum case measures the turn a thread gets ([Verification](#verification)).
+and `src/kern/context.cpp:2558-2564`). The quantum case measures the turn a thread gets ([Verification](#verification)).
 
 **Where ERTS puts its schedulers.** Since Fiasco never moves a thread, the adapter places them, as it does under
 erXos's kernel ([design-runtime.md](design-runtime.md#scheduling)): online normal scheduler `i` is pinned with
@@ -4242,6 +4242,19 @@ no test can drive the change:
 * **The semaphore's wake.** A semaphore's down waits for the activation of the up that dequeued it
   (`semaphore.cpp`, [A semaphore's wake across CPUs](#thread-creation)). Its test is the case of
   that name in [The backend's cases](#the-backends-cases).
+* **The spin lock's event.** The AArch64 spin lock's unlock ends with `SEV`
+  (`Spin_lock::unlock_arch`, `src/kern/arm/64/spin_lock-arm-64.cpp`), as the pre-ARMv8 ARM32
+  unlock does after a DSB; upstream's ARMv8 unlocks have none, since on ARMv8 hardware a waiter in
+  the lock's `WFE` loop wakes when the unlock's store clears its exclusive monitor. Under QEMU's
+  TCG a waiter was seen asleep in that `WFE` with the lock free, until an interrupt became pending
+  (observed in a register dump of the hung guest; QEMU's source is not read). In the one-shot
+  timer's handler the CPU's timer is masked (`Timer::acknowledge`) until the handler reprograms it
+  after RCU's work (`Thread::handle_timer_interrupt`), so a waiter for RCU's lock there
+  (`Rcu_data::check_quiescent_state`) may have no interrupt coming, and every grace period, and
+  every thread deletion with it, stops. The `SEV` has no DSB before it: on hardware the monitor's
+  wake covers a waiter it woke too early, and under the emulator the store is relied on to be
+  visible before the event's wake arrives. Its test is the native threads suite's `join_loop`
+  case in the 4-CPU TCG cell, which fails without it.
 * **Test kernels' seeds.** Four defines, set only for a test kernel, compile seeds into the fork:
   `ERX_TEST_KERNEL_TRAP` a kernel-mode load from an unmapped address once boot is done
   (`kernel_thread.cpp`, for `native_kernel_trap.rb`), `ERX_TEST_SEMAPHORE_WAKE_HOLD_US` a hold
