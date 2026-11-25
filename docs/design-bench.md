@@ -1069,7 +1069,8 @@ counter, reads both again, and exits with the cycles per tick in
 thousandths, as `MODE_TURNS` exits with its median. The read is one
 accessor beside `erx_fiasco_counter` in the backend's architecture layer,
 `erx_fiasco_cycles` (`liberx/backend/fiasco/arch/aarch64/clock.c`), over
-the generated read of `PMCCNTR_EL0` from `hw/sysreg/aarch64.json`, which
+the generated read of the cycle counter register from
+`hw/sysreg/aarch64.json`, which
 the `sysreg-read` chokepoint permits in that file alone. The task's
 records come to a gate of the root's, as `vm`'s disposable task's do, so
 a fault on the read is an answer, not a lost boot.
@@ -1092,16 +1093,20 @@ counter's ticks and a `cycles` cell in cycles; a reader puts the two on
 one clock by the boot's count, by hand, and says so.
 
 What the probe found under HVF (QEMU 11.1.3, `-accel hvf -cpu host`, the
-primary host, an Apple M4 Max; one boot of each benchmark of `--suite bench`
-on 2026-11-24, HVF only): the cycle counter is readable in user mode
+primary host, an Apple M3 Max, model `Mac15,9`, as the records name it;
+one boot of each native benchmark of `--suite bench` and the two erXos
+boots of one `nullcall` session against L4Re, on 2026-11-24 and 25, HVF
+only): the cycle counter is readable in user mode
 under erXos's Fiasco and advances, at 128.000 counts per tick of the
-24 MHz counter, 3.072 GHz, in seven of the eight native boots and 128.001
-in the eighth. A ratio exact to a thousandth over one second is not a
+24 MHz counter, 3.072 GHz, in nine of those ten boots and 128.001 in
+one. A ratio exact to a thousandth over one second is not a
 core's clock, whose frequency moves
 with its load and its performance state: under HVF the guest's cycle
 counter is the system counter scaled by 128, so it resolves no more than
-the counter does, unless its step is finer than 128, which ipcbench's
-totals, every one a multiple of 64, suggest and no read has measured.
+the counter does, unless its step is finer than 128: every ipcbench
+total read is a multiple of 64, the session's three (1,052,416,
+2,922,112 and 5,755,008) of 128, and no pair of reads has measured the
+step.
 Under HVF a `cycles` total is therefore a time, 1/3.072 ns per count, and
 erXos's ticks times 128 are counts of the same clock. TCG was not run.
 
