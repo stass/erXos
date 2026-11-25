@@ -136,8 +136,41 @@ pipe_input(Console, Bytes) ->
 pipe_read() ->
     receive {read, Line} -> {read, Line} after ?WAIT_MS -> none end.
 
+%% A console of a line of its own passes a command's bytes through its own tty: on a
+%% person's terminal each newline goes out CR-LF, as a cooked tty's ONLCR sends it,
+%% so a CR-LF the command wrote goes out CR CR LF; a pipe takes the bytes as written.
+a_commands_bytes_take_the_lines_processing_test_() ->
+    {timeout, 60, fun() ->
+                          ?assertEqual(<<"a\r\nb\r\r\n">>, tail(7, command_bytes(true))),
+                          ?assertEqual(<<"a\nb\r\n">>, tail(5, command_bytes(false)))
+                  end}.
+
+%% What reached the line until a command's write of "a\nb\r\n" returned.
+command_bytes(Terminal) ->
+    Trapping = process_flag(trap_exit, true),
+    {ok, Console} = erx_console:start_link(#{role => session, user => none,
+                                             driver => driver(self(), Terminal),
+                                             first_shell => {?MODULE, shell, []}}),
+    try
+        ok = erx_console:write(Console, <<"a\nb\r\n">>),
+        lines(<<>>)
+    after
+        unlink(Console),
+        exit(Console, kill),
+        process_flag(trap_exit, Trapping)
+    end.
+
+lines(Seen) ->
+    receive {line, Bytes} -> lines(<<Seen/binary, Bytes/binary>>) after 0 -> Seen end.
+
+tail(N, Bytes) when byte_size(Bytes) >= N -> binary:part(Bytes, byte_size(Bytes), -N);
+tail(_N, Bytes) -> Bytes.
+
 %% The fake driver: the line's bytes go to the test, and each write is done at once.
 driver(Test) ->
+    driver(Test, true).
+
+driver(Test, Terminal) ->
     fun(Console) ->
             Pid = spawn_link(fun Loop() ->
                                      receive
@@ -147,7 +180,7 @@ driver(Test) ->
                                              Loop()
                                      end
                              end),
-            {ok, Pid, true}
+            {ok, Pid, Terminal}
     end.
 
 master_test_() ->

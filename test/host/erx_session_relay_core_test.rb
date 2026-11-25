@@ -141,7 +141,12 @@ class ErxSessionRelayCoreTest < Minitest::Test
                                  broken: "    case erx_tty:set(Termios, Tty) of\n        {ok, _, _} ->",
                                  case_name: /tcsetattr_in_the_background_test/),
     drain_ignores_held: Fault.new(text: 'Empty = queue:is_empty(Writes) andalso erx_tty_link:held(Link) =:= 0,',
-                                  broken: 'Empty = queue:is_empty(Writes),', case_name: /a_drain_waits_for_the_master_test/)
+                                  broken: 'Empty = queue:is_empty(Writes),', case_name: /a_drain_waits_for_the_master_test/),
+    rendering_processed: Fault.new(text: 'rendered -> erx_tty:rendered(Bytes, Free, Tty)',
+                                   broken: 'rendered -> erx_tty:output(Bytes, Free, Tty)',
+                                   case_name: /output_processing_follows_the_message_test/),
+    rest_loses_its_kind: Fault.new(text: 'queue:in_r({Done, Kind, Left}, Rest)', broken: 'queue:in_r({Done, write, Left}, Rest)',
+                                   case_name: /a_held_rest_keeps_its_kind_test/)
   }.freeze
 
   def test_the_cases_and_the_exploration_pass

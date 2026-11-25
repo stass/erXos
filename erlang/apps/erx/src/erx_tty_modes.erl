@@ -18,11 +18,12 @@ job that left the tty raw leaves nothing. libedit
 keeps one speed for both directions (tty.c:611-616, :1017-1025); a termios
 keeps the two it was given, which differ only after a program sets them
 apart, and a pseudo-terminal acts on neither. editing/1 is the design's
-setting for the console's line editor: ICANON, ECHO and OPOST clear, ISIG
-and ICRNL set, VMIN 1 and VTIME 0. libedit's own editing setting keeps ISIG
-and ICRNL set too (tty.c:79-84) and sets the same VMIN and VTIME
-(tty.c:107-116); it keeps OPOST, which the console clears to write its own
-CR-LF.
+setting for the console's line editor: ICANON and ECHO clear, ISIG and
+ICRNL set, VMIN 1 and VTIME 0, and the cooked output flags kept, so a
+program's line written at the prompt goes out as under the cooked setting.
+libedit's own editing setting keeps ISIG, ICRNL and OPOST set too
+(tty.c:79-84) and sets the same VMIN and VTIME (tty.c:107-116). The line
+editor's own rendering does not pass OPOST (erx_tty:rendered/3).
 """.
 
 -export([adopt/2, editing/1]).
@@ -38,7 +39,6 @@ CR-LF.
 %% The editing setting's masks, the design's rather than libedit's.
 -define(EDITING_MASKS,
         #{iflag => {[icrnl], []},
-          oflag => {[], [opost]},
           lflag => {[isig], [echo, icanon]}}).
 
 -doc """

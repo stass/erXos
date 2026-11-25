@@ -2657,8 +2657,11 @@ that shell, not the runtime, a documented difference from stock OTP. As `user_dr
 groups below are not shown: their output is acknowledged and dropped, and their
 questions answered; `user`, which carries the logger's output, is always shown.
 `Ctrl-C` interrupts the command shell, which ends its running line and reads on. A line's output is bytes: it reaches the driver through
-`erx_console:write/1`, past `prim_tty`, with each newline sent as CR-LF, as a
-cooked tty's `ONLCR` sends it, and every other byte unchanged.
+`erx_console:write/1`, past `prim_tty`, and through the console's own tty, whose
+`OPOST` and `ONLCR` send each newline as CR-LF on a person's terminal, as a cooked
+tty sends it, and leave every other byte, and a pipe's every byte, unchanged. A
+session's console hands a command's bytes to its terminal relay instead, as a
+program's write ([design-shell.md](design-shell.md#the-terminal-relays-protocol)).
 
 `prim_tty` stays because the group's requests (insert, move, delete, redraw) carry
 edit state across wrapped lines, so a console without it would be a larger
@@ -2759,7 +2762,7 @@ speak these messages:
 
 They send input as it arrives, one message outstanding at a time
 ([design-live.md](design-live.md#lost-input)), and `erx_console` takes it into
-a tty of its own, input alone, with a terminal's settings or a pipe's as
+a tty of its own, for its input and a command's output, with a terminal's settings or a pipe's as
 `Terminal` says, which its groups read on demand as a session's console reads
 its relay, so what waits for a group is bounded by that tty. A session's terminal
 relay is the line driver of a console of the session role for output and

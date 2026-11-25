@@ -256,6 +256,8 @@ relay(_Sup) ->
     ?assertMatch({erx_session_relay, init, _}, proc_lib:initial_call(Tty)),
     {ok, _} = await(Master, Tty, <<"% ">>),
     echo_and_erl_return(Master, Tty),
+    ctrl_c_under_a_cooked_job(Master, Tty),
+    lines_at_the_prompt(Master, Tty),
     exit_starts_the_shell_again(Master, Tty),
     a_taken_output_asks_nothing_more(Master, Tty),
     a_lost_answer_is_asked_for_again(Master, Tty),
@@ -274,11 +276,16 @@ a_hangup_ends_the_tty(Master, Tty, Console) ->
     _ = ended(TtyEnded, Tty),
     exit(Master, kill).
 
+%% A command's line and the Erlang shell's each reach the master ending in one CR-LF:
+%% the command's through the relay's ONLCR alone, the Erlang shell's as its line
+%% editor rendered it, though `erl` holds the terminal cooked.
 echo_and_erl_return(Master, Tty) ->
     type(Tty, <<"echo hi\r">>),
-    {ok, _} = await(Master, Tty, <<"hi\n% ">>),
+    {ok, _} = await(Master, Tty, <<"echo hi\r\nhi\r\n% ">>),
     type(Tty, <<"erl\r">>),
     {ok, _} = await(Master, Tty, <<"1> ">>),
+    type(Tty, <<"io:format(\"a~nb~n\").\r">>),
+    {ok, _} = await(Master, Tty, <<"\r\na\r\nb\r\nok\r\n2> ">>),
     %% The Erlang shell's group ends, so run_shell/1 returns and `erl` with it.
     type(Tty, <<"exit(group_leader(), kill).\r">>),
     {ok, Seen} = await(Master, Tty, <<"% ">>),
@@ -286,9 +293,32 @@ echo_and_erl_return(Master, Tty) ->
 
 exit_starts_the_shell_again(Master, Tty) ->
     type(Tty, <<"exit\r">>),
-    {ok, _} = await(Master, Tty, <<"exit ends it\n% ">>),
+    {ok, _} = await(Master, Tty, <<"exit ends it\r\n% ">>),
     type(Tty, <<"echo again\r">>),
-    {ok, _} = await(Master, Tty, <<"again\n% ">>).
+    {ok, _} = await(Master, Tty, <<"again\r\n% ">>).
+
+%% Ctrl-C while a job holds the terminal cooked: the newline the shell writes
+%% reaches the master as one CR-LF, whether it comes before or after
+%% the shell takes the terminal back.
+ctrl_c_under_a_cooked_job(Master, Tty) ->
+    type(Tty, <<"cat\r">>),
+    {ok, _} = await(Master, Tty, <<"cat\r\n">>),
+    %% cat holds the terminal once the shell has started it.
+    [take_outputs(Master, Tty) || _ <- lists:seq(1, 10)],
+    type(Tty, <<3>>),
+    {ok, _} = await(Master, Tty, <<"\r\n% ">>).
+
+%% A line written while the console edits reaches the master ending in CR-LF: a
+%% background job's, and a write of the runtime's as a program of the domain makes
+%% one (erx_output:write/2).
+lines_at_the_prompt(Master, Tty) ->
+    type(Tty, <<"{ echo bg } &\r">>),
+    {ok, _} = await(Master, Tty, <<"bg\r\n">>),
+    {ok, _} = await(Master, Tty, <<"% ">>),
+    Write = make_ref(),
+    Tty ! {tty_write, self(), Write, <<"written\n">>},
+    receive {Write, ok} -> ok after ?WAIT_MS -> error(unanswered) end,
+    {ok, _} = await(Master, Tty, <<"written\r\n">>).
 
 %% With every output answered at once, the tty names itself again only with a resend:
 %% the timer of an output already taken sends nothing. A tty that named itself at each
@@ -299,7 +329,7 @@ exit_starts_the_shell_again(Master, Tty) ->
 a_taken_output_asks_nothing_more(Master, Tty) ->
     _ = flush_opens(Master),
     type(Tty, <<"echo quiet\r">>),
-    {ok, _} = await(Master, Tty, <<"quiet\n% ">>),
+    {ok, _} = await(Master, Tty, <<"quiet\r\n% ">>),
     {Opens, Resends} = answer_until(Master, Tty, erlang:monotonic_time(millisecond) + 1500, 0, 0),
     ?assert(Opens =< Resends, {opens, Opens, resends, Resends}).
 
@@ -313,7 +343,7 @@ a_lost_answer_is_asked_for_again(Master, Tty) ->
     receive {Master, {tty_output, N, <<>>}} -> ok after 3000 -> error(no_resend) end,
     ?assert(erlang:monotonic_time(millisecond) - Started >= 900),
     Tty ! {tty_taken, N},
-    {ok, _} = await(Master, Tty, <<"lost\n% ">>).
+    {ok, _} = await(Master, Tty, <<"lost\r\n% ">>).
 
 %% Two masters open ttys under the session's supervisor. What is typed at one tty
 %% reaches only its own master, and when one master ends, its tty hangs up and ends,
@@ -334,9 +364,9 @@ two_masters(Sup) ->
     {ok, _} = await(Two, TtyTwo, <<"% ">>),
 
     type(TtyOne, <<"echo one\r">>),
-    {ok, _} = await(One, TtyOne, <<"one\n% ">>),
+    {ok, _} = await(One, TtyOne, <<"one\r\n% ">>),
     type(TtyTwo, <<"echo two\r">>),
-    {ok, SeenTwo} = await(Two, TtyTwo, <<"two\n% ">>),
+    {ok, SeenTwo} = await(Two, TtyTwo, <<"two\r\n% ">>),
     ?assertEqual(nomatch, binary:match(SeenTwo, <<"one">>)),
 
     ConsoleEnded = monitor(process, ConsoleOne),
@@ -345,7 +375,7 @@ two_masters(Sup) ->
     ?assertEqual(normal, ended(ConsoleEnded, ConsoleOne)),
     _ = ended(TtyEnded, TtyOne),
     type(TtyTwo, <<"echo still\r">>),
-    {ok, _} = await(Two, TtyTwo, <<"still\n% ">>),
+    {ok, _} = await(Two, TtyTwo, <<"still\r\n% ">>),
     ?assert(is_pid(User) andalso whereis(user) =:= User),
     ?assertEqual(Line, whereis(erx_tty_owner)),
     Children = supervisor:which_children(Sup),
@@ -394,10 +424,9 @@ answer_until(Master, Tty, Deadline, Opens, Resends) ->
             {Opens, Resends}
     end.
 
-%% Takes every output until what it took, carriage returns aside, contains Pattern,
-%% and returns it. A command's newline reaches the master as CR CR LF while its job
-%% holds the terminal (docs/todo-session.md, "a command's output through the console"), so no
-%% pattern names a CR.
+%% Takes every output until what it took contains Pattern, and returns it. No
+%% output here writes a CR before a CR-LF, so none may reach the master as CR CR
+%% LF.
 await(Master, Tty, Pattern) ->
     await(Master, Tty, Pattern, <<>>).
 
@@ -406,7 +435,8 @@ await(Master, Tty, Pattern, Seen) ->
         {Master, {tty_output, N, Bytes}} ->
             Tty ! {tty_taken, N},
             All = <<Seen/binary, Bytes/binary>>,
-            case binary:match(binary:replace(All, <<"\r">>, <<>>, [global]), Pattern) of
+            ?assertEqual({nomatch, All}, {binary:match(All, <<"\r\r">>), All}),
+            case binary:match(All, Pattern) of
                 nomatch -> await(Master, Tty, Pattern, All);
                 _ -> {ok, All}
             end

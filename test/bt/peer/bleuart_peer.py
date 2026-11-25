@@ -200,9 +200,7 @@ async def shell(device):
         answers[command] = await typed(peer, rx, line, command)
     if SYSTEM_ONLY in answers[b'ps -o comm']:
         raise Failed('ps on the line lists the system domain\'s login service')
-    # Carriage returns aside: a command's output reaches the line CR CR LF
-    # (docs/todo-session.md, a command's output through the console).
-    if b'echo hi\nhi\n' not in answers[b'echo hi'].replace(b'\r', b''):
+    if b'echo hi\r\nhi\r\n' not in answers[b'echo hi']:
         raise Failed('echo hi did not answer hi')
     before = shells(answers[b'ps -o comm'])
     if before < 1:

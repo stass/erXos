@@ -275,7 +275,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   `erx_shell_script:run/2`'s `0 => null`), not the session's tty as design-shell.md ("Pipelines") has it,
   so an SSH `exec` on a channel with a tty reads nothing where FreeBSD's sshd gives it the pty. The runtime's
   writers' sender, `otp/lib/kernel/src/erx_output.erl`, which the design and the `relay-name` rule name, is
-  not in the tree, so nothing sends `tty_write`, and `tty_drain` comes only from a console that exits with
+  not in the tree, so only the console's write/1 sends `tty_write`, and `tty_drain` comes only from a console that exits with
   its shell (`erx_console`'s `on_shell_end`), nor are edit 35's trap and edit 42
   (`beam/bif.c`), which reach it; and `erx_tty_owner` is missing from `erx_session.app.src`'s
   `registered` list. In a session with no console facet nothing holds `erx_tty_owner`, against
@@ -294,12 +294,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   (`{tty, Open, ...}`, `{foreground, ...}`, `{console_group, G}`), which nothing checks. Option: one request
   tag, `{erx_relay, Req}`, that the relay requires of every call, with one atom chokepoint keeping
   `erx_relay` to `erx_session_relay`, which replaces the `relay-requests` shape rule.
-* [Medium] session, a command's output through the console (`erlang/apps/erx/src/erx_console.erl`,
-  `onlcr/1`): an Erlang command writes through the console's write/1, which turns each newline into CR-LF
-  for a cooked tty, and the relay's `OPOST` and `ONLCR`, set while the command's job holds the terminal,
-  turn it again, so the master gets CR CR LF (`test/erlang/erx_session_tty_tests.erl` compares output
-  with carriage returns aside). Commands writing through `erx_cmd`'s opens, whose bytes only the relay
-  processes, remove the console's conversion for a relay's console.
+* [Low] session, the column after the console's rendering (`erlang/apps/erx/src/erx_tty.erl`, `rendered/3`):
+  rendered output counts every byte as a column, CR and LF included, as `output/3` does with `OPOST`
+  clear, so after the line editor's redraw the tty's column is not 0. Erasing a tab typed first in a cooked
+  job then backs up too few columns, `^T`'s status line starts with a newline it does not need, and `TAB3`
+  expands a program's first tab to the wrong width. Option: move the column for CR, LF, BS and TAB as
+  `post/2` does, bytes unchanged; what FreeBSD does with `t_column` under a clear `OPOST` is unverified.
 * [Medium] session, the console's reads of the relay (`erlang/apps/erx/src/erx_console.erl`, `read_for_ask/2`):
   a process of the session's domain that sets the tty raw with `VMIN` 0 and `VTIME` 0 (an open's
   `tcsetattr` with SIGTTOU ignored) makes the console's one-byte watch ready at once and its read answer

@@ -440,6 +440,53 @@ output_takes_the_links_room_test() ->
     {[written], T6} = take(pw, T5),
     {_, _, _} = report(pa, aw, T6).
 
+%% Output processing follows the message, not the holder. A program's bytes,
+%% a writer's message, take the holder's OPOST and ONLCR: an LF goes out
+%% CR-LF, and a CR-LF the program wrote goes out CR CR LF, as on FreeBSD.
+%% The console's rendering, made for the terminal already, goes out as it
+%% is, while a cooked job holds as while the console edits.
+output_processing_follows_the_message_test() ->
+    T0 = ev({rendered, {console, r}, <<"c\r\n">>}, ev({write, {pw, w}, <<"a\nb\r\n">>}, a_holds())),
+    ?assertMatch({[w], _}, take(pw, T0)),
+    ?assert(lists:member(r, element(1, take(console, T0)))),
+    {Cooked, N, T1} = master_bytes(0, T0),
+    ?assertEqual(<<"a\r\nb\r\r\nc\r\n">>, Cooked),
+    T2 = fg(s1, console, {g1, 0}, T1),
+    T3 = ev({rendered, {console, r}, <<"% \r\n">>}, ev({write, {pw, w}, <<"bg\n">>}, T2)),
+    ?assertMatch({<<"bg\r\n% \r\n">>, _, _}, master_bytes(N, T3)).
+
+%% What the master got from its output N on, taking each output as the console
+%% does, and the number of the next output.
+master_bytes(N, T) ->
+    case take(master, T) of
+        {[], T1} ->
+            {<<>>, N, T1};
+        {Outs, T1} ->
+            Next = N + length(Outs),
+            Taken = lists:foldl(fun(I, Acc) -> ev({master, {tty_taken, I}}, Acc) end,
+                                T1, lists:seq(N, Next - 1)),
+            {More, Last, T2} = master_bytes(Next, Taken),
+            {iolist_to_binary([Outs, More]), Last, T2}
+    end.
+
+%% With OPOST clear a program's LF stays LF.
+a_raw_jobs_newline_stays_a_newline_test() ->
+    Raw = with(oflag, [], [opost], #{}, termios(a_holds())),
+    T0 = ev({write, {pw, w}, <<"a\n">>}, ok(pa, {tty, ar, {tcsetattr, Raw}}, a_holds())),
+    {Out, _} = take(master, T0),
+    ?assertEqual(<<"a\n">>, iolist_to_binary(Out)).
+
+%% A message the room takes part of keeps its kind for the rest: the rest of
+%% the console's rendering goes out as it is, and a program's write behind it
+%% is processed, though a cooked job holds.
+a_held_rest_keeps_its_kind_test() ->
+    Fill = binary:copy(<<"x">>, 4095),
+    T0 = ev({write, {pw, w}, <<"p\n">>}, ev({rendered, {console, r}, <<Fill/binary, "ab\n">>}, a_holds())),
+    {Out0, T1} = take(master, T0),
+    ?assertEqual(<<Fill/binary, "a">>, iolist_to_binary(Out0)),
+    {Out1, _} = take(master, ev({master, {tty_taken, 0}}, T1)),
+    ?assertEqual(<<"b\np\r\n">>, iolist_to_binary(Out1)).
+
 %% A signal's flush drops the held output and the writers' messages, but
 %% the outstanding output stays, and the room is the link's.
 a_flush_drops_what_is_held_test() ->

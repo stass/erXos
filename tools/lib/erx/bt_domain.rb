@@ -243,11 +243,10 @@ module Erx
     # and the line root_line mints (config/manifest/raspi4b-development.txt).
     BLEUART_CONNECTIONS = 3
     STOP_BLEUART = "service bleuart stop\r"
-    # A command's output reaches the console CR CR LF (docs/todo-session.md).
-    STOPPED = /\AStopping bleuart\.\r*\n/n
+    STOPPED = /\AStopping bleuart\.\r\n/n
     STOP_SECONDS = 60
     START_BLEUART = "service bleuart start\r"
-    STARTED = /\AStarting bleuart\.\r*\n/n
+    STARTED = /\AStarting bleuart\.\r\n/n
 
     # The bleuart cell's manifest from the development manifest's text, source, on platform,
     # and the Pi 4's, board: the cells' medium manifest (medium) with the system principal's

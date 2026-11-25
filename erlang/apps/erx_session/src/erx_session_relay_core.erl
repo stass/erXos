@@ -64,7 +64,8 @@ and names in actions.
 -type event() :: {master, erx_tty_link:master_message()} % from the master
                | {resend, non_neg_integer()}             % erx_tty_link's resend timer
                | {timer, erx_tty:timer()}                % a read's timer ended
-               | {write, done(), binary()}               % a writer's message
+               | {write, done(), binary()}               % a writer's message: a program's bytes
+               | {rendered, done(), binary()}            % the console's rendering
                | {drain, done()}                         % a normal halt waits for output
                | {down, term()}.                         % a monitored process ended
 -type answer() :: ok | {ok, term()} | {ok, term(), non_neg_integer()} | lost | eof | eagain
@@ -79,6 +80,12 @@ and names in actions.
                 | give_up_name.                          % unregister erx_tty_owner
 
 -type holder() :: console | {job, Tag :: term(), Shell :: term(), Group :: term()}.
+
+%% What a writer's message carries, named by its event: a program's bytes
+%% (write), which the termios of the moment processes (output/3), or the
+%% console's rendering (rendered), which its line
+%% editor made for the terminal and which goes out as it is (rendered/3).
+-type output_kind() :: write | rendered.
 
 -record(open, {holder :: term(), mode :: read | write, maker :: term()}).
 -record(wait, {caller :: term(), spec :: spec(), armed :: boolean()}).
@@ -99,8 +106,9 @@ and names in actions.
     signal = 0 :: non_neg_integer(),
     %% Each group met and not ended: {Sent, Seen}.
     groups = #{} :: #{term() => {non_neg_integer(), non_neg_integer()}},
-    %% The writers' messages not yet all through output/3, oldest first.
-    writes = queue:new() :: queue:queue({done(), binary()}),
+    %% The writers' messages not yet all through output/3 or rendered/3,
+    %% oldest first.
+    writes = queue:new() :: queue:queue({done(), output_kind(), binary()}),
     drains = [] :: [done()]
 }).
 
@@ -287,7 +295,7 @@ write(Bytes, #core{writes = Writes} = Core) ->
         false ->
             {eagain, [], Core};
         true ->
-            case put_output(Bytes, Core) of
+            case put_output(write, Bytes, Core) of
                 {0, Actions, Core1} -> {eagain, Actions, Core1};
                 {Taken, Actions, Core1} -> {{ok, Taken}, Actions, Core1}
             end
@@ -451,8 +459,9 @@ on_event({resend, N}, #core{link = Link} = Core) ->
 on_event({timer, Timer}, #core{tty = Tty} = Core) ->
     {Actions, Tty1} = erx_tty:timer(Timer, Tty),
     carry(Actions, Core#core{tty = Tty1});
-on_event({write, Done, Bytes}, #core{writes = Writes} = Core) when is_binary(Bytes) ->
-    {[], Core#core{writes = queue:in({Done, Bytes}, Writes)}};
+on_event({Kind, Done, Bytes}, #core{writes = Writes} = Core)
+  when (Kind =:= write orelse Kind =:= rendered), is_binary(Bytes) ->
+    {[], Core#core{writes = queue:in({Done, Kind, Bytes}, Writes)}};
 on_event({drain, Done}, #core{drains = Drains} = Core) ->
     {[], Core#core{drains = Drains ++ [Done]}};
 on_event({down, Process}, Core) ->
@@ -581,15 +590,19 @@ flush(#core{link = Link} = Core) ->
     {Linked ++ drop_writes(Core1), Core1#core{writes = queue:new()}}.
 
 drop_writes(#core{writes = Writes}) ->
-    [done(Done) || {Done, _Bytes} <- queue:to_list(Writes)].
+    [done(Done) || {Done, _Kind, _Bytes} <- queue:to_list(Writes)].
 
 done({To, Message}) -> {send, To, Message}.
 
-%% Bytes through output/3 with the room free now, and what it took to the
-%% link, which holds it within that room.
-put_output(Bytes, #core{tty = Tty, link = Link} = Core) ->
+%% Bytes through output/3, or rendered/3 for the console's rendering, with
+%% the room free now, and what it took to the link, which holds it within
+%% that room.
+put_output(Kind, Bytes, #core{tty = Tty, link = Link} = Core) ->
     {Free, _Kept, _Stopped} = erx_tty_link:room(Link),
-    {Taken, Out, Tty1} = erx_tty:output(Bytes, Free, Tty),
+    {Taken, Out, Tty1} = case Kind of
+                             write -> erx_tty:output(Bytes, Free, Tty);
+                             rendered -> erx_tty:rendered(Bytes, Free, Tty)
+                         end,
     {Actions, Core1} = to_master(Out, Core#core{tty = Tty1}),
     {Taken, Actions, Core1}.
 
@@ -614,14 +627,14 @@ settle(Core0) ->
 
 pump(#core{writes = Writes} = Core) ->
     case queue:out(Writes) of
-        {{value, {Done, Bytes}}, Rest} ->
-            {Taken, Actions, Core1} = put_output(Bytes, Core),
+        {{value, {Done, Kind, Bytes}}, Rest} ->
+            {Taken, Actions, Core1} = put_output(Kind, Bytes, Core),
             case Bytes of
                 <<_:Taken/binary>> ->
                     {More, Core2} = pump(Core1#core{writes = Rest}),
                     {Actions ++ [done(Done)] ++ More, Core2};
                 <<_:Taken/binary, Left/binary>> ->
-                    {Actions, Core1#core{writes = queue:in_r({Done, Left}, Rest)}}
+                    {Actions, Core1#core{writes = queue:in_r({Done, Kind, Left}, Rest)}}
             end;
         {empty, _} ->
             {[], Core}

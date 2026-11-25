@@ -196,7 +196,7 @@ with it.
 
 | Invariant | Why it holds | What would break it | How it is checked |
 | --- | --- | --- | --- |
-| **V1.** A tty changes a program's bytes only as its `termios` says | every write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
+| **V1.** A tty changes a program's bytes only as its `termios` says | every program's write to a session's or a pseudo-terminal's tty goes through `erx_tty:output/3`, a pure function of the bytes, the room and the output flags, which returns its input with `OPOST` clear and otherwise changes only what a set flag names; nothing after it reads the bytes: `erx_console` copies a connected session's bytes to the console's driver, and the host tool's `console` command copies the terminal stream to its standard output | a filter on the output path; a write path that skips `output/3` | a test at the tty's byte boundary: it writes all 256 byte values and every CSI, OSC, DCS, APC, PM and SOS form through `write`, stdio and `erlang:display_string/2`, and compares the bytes on the line and at the host tool with what was handed to the tty; with an escaping step added on the path, the comparison fails. `io:put_chars/1` is text for the group's editor, not bytes ([The tty](#the-tty)), so its test compares `prim_tty`'s rendering with stock OTP's |
 | **V2.** Inspection never fabricates | every attribute value is a tagged status and carries its reporter (`kernel`, `service`, `runtime` or a backend reporter the schema declares); renderers of inspection records print the status and reporter of every value, and the command shell's text commands, which print as FreeBSD's do, print a value without the status `ok` as `-` or not at all, never as a bare number; `top`'s header alone prints a partial figure's number with its reporter named, in the line's label or after the figure ([design-shell.md](design-shell.md#invariants) SH3) | a renderer that drops statuses, or an attribute filled with a default; a partial figure of `top`'s header printed without its reporter named | one test per status and per reporter; a property test that every rendered record shows the same statuses as the record; `top`'s header tests with each figure in turn of every status ([design-shell.md](design-shell.md#invariants) SH3) |
 | **V3.** The host link's authority is exactly its session's facet table and the trees its configuration lists | calls name a facet by its number in the session table and nothing else; the table is created empty with the session, holds at most 1,024 entries (opening one more fails with `{error, system_limit}`), and dies with it; the files stream reaches only the grants of the listed trees, by `attach`'s tree name, and its fids end with the session | a request path that resolves names to processes; a table or a fid that survives its session; an `attach` that reaches a tree not listed | session replacement tests; a request naming a number of an ended session is refused; an `attach` of an unlisted tree fails with `enoent`, and a fid of a replaced session names nothing |
 | **V4.** A call on the host link executes at most once per session | `erx_hostlink` keeps a window of the 64 highest call identifiers, each unseen, executing or answered, and never moves it past a call still executing: a call that would push one out is answered `{error, busy}` without executing; answered calls keep their replies while the kept replies total at most 1 MiB, and a reply that does not fit is not kept; a duplicate is answered from the window, or with `{error, reply_lost}` when its reply was not kept, and an identifier below the window is refused | a window that forgets executing calls | retry and expiry tests with a lost reply and a duplicate in flight; 64 calls executing when a 65th arrives, which gets `{error, busy}` and runs once when sent again |
@@ -490,6 +490,9 @@ on the host:
   POSIX's output flags. With `OPOST` clear the bytes are its input. A CR-LF is
   never split, so 4 KiB of newlines with 4 KiB of room takes 2 KiB. This is the
   only thing that ever happens to a program's output.
+* `rendered(Bytes, Room, Tty)` is `output/3` with `OPOST` clear, whatever the
+  `termios` says: it takes what another renderer, the console's line editor,
+  made for the terminal already.
 * `input(Bytes, Room, Tty)` returns what to do (bytes to echo, a signal
   for the foreground group, `flushed_loss` ahead of a signal whose flush
   dropped a loss, a report that a waiting read can go on), the
@@ -659,25 +662,30 @@ A new tty starts cooked, with FreeBSD's defaults
 
 **A shell's line editor is a program on a raw tty.** `group`, `edlin` and
 `prim_tty` are to a shell what readline is to `bash` and libedit to
-FreeBSD's `sh`. While the shell prompts, its tty has `ICANON`, `ECHO` and
-`OPOST` clear, as stock OTP sets a real terminal
-(`erts/emulator/nifs/common/prim_tty_nif.c:1115-1127`, so `prim_tty`
-writes its own CR-LF), and `VMIN` 1 and `VTIME` 0, so a key is read as
-it is typed. `ISIG` and `ICRNL` stay set, which stock OTP clears, as
-libedit keeps them while it edits (`contrib/libedit/tty.c:79-88`):
-`Ctrl-C` and `Ctrl-Z` are then the tty's signals whether or not the
-editor is reading, and an Enter typed ahead of a command is a newline in
-the tty, the end of the command's cooked line
-([design-shell.md](design-shell.md#the-terminal-relays-protocol)), and
-`edlin` takes `\n` as it takes `\r`
-(`lib/stdlib/src/edlin_key.erl:201-202`). The process that drives the group
+FreeBSD's `sh`. While the shell prompts, its tty has `ICANON` and `ECHO`
+clear, as stock OTP sets a real terminal
+(`erts/emulator/nifs/common/prim_tty_nif.c:1115-1127`), and `VMIN` 1 and
+`VTIME` 0, so a key is read as it is typed. `ISIG`, `ICRNL` and `OPOST`
+stay set, which stock OTP clears, as libedit keeps them while it edits
+(`contrib/libedit/tty.c:79-88`): `Ctrl-C` and `Ctrl-Z` are then the
+tty's signals whether or not the editor is reading, an Enter typed ahead
+of a command is a newline in the tty, the end of the command's cooked
+line ([design-shell.md](design-shell.md#the-terminal-relays-protocol)),
+and `edlin` takes `\n` as it takes `\r`
+(`lib/stdlib/src/edlin_key.erl:201-202`); and a line a program writes
+while the shell prompts, a background job's, goes out with the CR-LF of
+the tty's `ONLCR`, as on FreeBSD. `prim_tty` writes its own CR-LF, which
+`OPOST` never processes again ("The editor's rendering is not the
+tty's", below). The process that drives the group
 is `erx_console`, whose line driver is the session's terminal relay for a
 session's shell and the UART's driver for the system shell
 ([design-runtime.md](design-runtime.md)). It takes each request through
 `prim_tty:handle_request/2`, whose state comes from `prim_tty:init_ssh/3`
 (`lib/kernel/src/prim_tty.erl:308`), which needs neither a terminal
 descriptor nor terminfo, and writes the bytes to its driver; the relay
-writes them to the tty as any writer does. Input goes to the group as `{self(), {data, Chars}}`, the protocol `ssh_cli`
+writes them to the tty as rendered output, which takes its turn in the
+tty's one output queue as any writer's bytes do but passes the tty with
+`OPOST` clear (`erx_tty:rendered/3`). Input goes to the group as `{self(), {data, Chars}}`, the protocol `ssh_cli`
 uses (`lib/ssh/src/ssh_cli.erl:420`). A session's console takes it from
 the tty as libedit does, one byte at a time and only while its group's
 editor waits for a key (`contrib/libedit/read.c:289`, at FreeBSD commit
@@ -709,7 +717,11 @@ Erlang's text I/O, not a write of bytes: the group turns it into
 CR-LF for a newline and caret notation for a control character
 (`prim_tty.erl:696`, `:1227`, `:1280`). That is the shell's line editor at work,
 as readline's redraw is `bash`'s. What `prim_tty` returns then reaches the tty
-as a write. So there are two exact comparisons, each at its own boundary: what a
+as rendered output, whose bytes the tty passes with `OPOST` clear whoever holds
+the terminal, so a redraw that reaches the tty after a job has taken it cooked
+is not processed a second time. A program's bytes, a command's through
+`erx_console:write/1` among them, are processed once, by the tty, and the
+editor's rendering once, by `prim_tty`. So there are two exact comparisons, each at its own boundary: what a
 writer hands the tty against what the master gets, which V1 tests; and what
 `prim_tty` renders from a request against what stock OTP's renders from the same
 request. A program that needs exact bytes uses `write` or stdio, and Erlang code
@@ -738,9 +750,11 @@ under a session's domain (V8), so no program opens it and nothing can call
 `tcsetattr` on it: its settings follow the driver's `Terminal` for as long as
 it lives, the prompt's `termios` above less `IXON` and `IMAXBEL` on a
 person's terminal, and every flag clear on a pipe, which also has no
-`Ctrl-G` menu ([Lost input](#lost-input)). `erx_console` runs it for input
-alone, as the bounded store its groups read on demand, and copies output
-from the group's `prim_tty` to the driver unchanged. `erx:console_size/2` checks the
+`Ctrl-G` menu ([Lost input](#lost-input)). `erx_console` runs it as the
+bounded store its groups read on demand and as the output processing of a
+command's bytes (`erx_console:write/1`), which its `OPOST` and `ONLCR` send
+CR-LF on a person's terminal and its clear flags leave as written on a pipe;
+it copies output from the group's `prim_tty` to the driver unchanged. `erx:console_size/2` checks the
 size as `erx_tty:size/3` does, so a zero column count never reaches `prim_tty`.
 
 **Between domains.** A tty and a master in the system domain exchange seven
@@ -1405,13 +1419,15 @@ the console answers it with what the bytes read for it complete, or with
 with `{tty_read_input, Open, N}`
 ([design-shell.md](design-shell.md#the-terminal-relays-protocol)). The
 system console reads a tty of its own the same way, an `erx_tty` in its
-process that holds its groups' input and makes no output, its settings
-chosen by the driver's `Terminal`:
+process that holds its groups' input and processes a command's bytes on
+their way to the driver, its settings chosen by the driver's `Terminal`:
 
 * **A person's terminal** (`Terminal` true, both UARTs and `erx_stdio` on
   a terminal): the prompt's `termios` of [A shell's line editor](#the-tty)
   less `IXON` and `IMAXBEL`, so nothing stops or rings the console's
-  output, whose writes do not pass through this tty. `ISIG` makes
+  output: the driver writes whole what passes this tty, a command's bytes
+  alone, under its `OPOST` and `ONLCR`, and the console's rendering does
+  not pass it. `ISIG` makes
   `Ctrl-C`, `Ctrl-Z` and `Ctrl-\` signals at arrival, which the console
   carries out as a session's console carries out the relay's events, and
   `ICRNL` reads CR as LF, as a session's prompt does: CR and LF each end a

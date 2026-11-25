@@ -47,7 +47,7 @@ module Erx
         # erx_session_relay's client functions make every request to a
         # relay, so no request, an open for reading included, is built by
         # hand (the rule below). The name's other holders: erx_output, the runtime's writers'
-        # one sender of tty_write and tty_drain, which every owner serves,
+        # sender of tty_write and tty_drain, which every owner serves,
         # and the modules that hold the name in other domains, erx_console
         # in the system domain and erx_log_h's proxy in a domain with no
         # terminal (docs/design-runtime.md, "A process waits on its tty's

@@ -80,7 +80,8 @@ and takes no flow control.
 
 -export([new/0, master_room/0, widest_rendering/0, termios/1, set/2, winsize/1, size/3, input/3,
          input_room/1, lost/1, event_name/1,
-         output/3, read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, read_input/2, status/3,
+         output/3, rendered/3, read_wait/3, poll_wait/2, cancel/2, timer/2, read/3, read_input/2,
+         status/3,
          hangup/1, waiting/1, dropped/1]).
 -export_type([tty/0, termios/0, open/0, timer/0, room/0, action/0]).
 
@@ -892,13 +893,22 @@ ttydisc_write fills the output queue whatever TF_STOPPED says
           {non_neg_integer(), binary(), tty()}.
 output(Bytes, Room, Tty) when is_binary(Bytes), is_integer(Room), Room >= 0 ->
     case on(opost, Tty) of
-        false ->
-            Taken = min(Room, byte_size(Bytes)),
-            <<Out:Taken/binary, _/binary>> = Bytes,
-            {Taken, Out, wrote(Taken, forward(Taken, Tty), Tty)};
-        true ->
-            post_bytes(Bytes, Room, 0, [], Tty)
+        false -> rendered(Bytes, Room, Tty);
+        true -> post_bytes(Bytes, Room, 0, [], Tty)
     end.
+
+-doc """
+Bytes another renderer already made for the terminal, such as a line
+editor's, for the master with at most Room bytes to give: output/3 with
+OPOST clear, whatever the termios says, so they go out as they are and
+the column counts them as output/3 counts a raw program's.
+""".
+-spec rendered(binary(), non_neg_integer(), tty()) ->
+          {non_neg_integer(), binary(), tty()}.
+rendered(Bytes, Room, Tty) when is_binary(Bytes), is_integer(Room), Room >= 0 ->
+    Taken = min(Room, byte_size(Bytes)),
+    <<Out:Taken/binary, _/binary>> = Bytes,
+    {Taken, Out, wrote(Taken, forward(Taken, Tty), Tty)}.
 
 post_bytes(<<Byte, Rest/binary>>, Room, Taken, Acc, Tty) ->
     {Piece, Tty1} = case caret(Byte) orelse Byte =:= $\t orelse Byte =:= $\n of

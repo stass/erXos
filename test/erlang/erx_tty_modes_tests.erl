@@ -98,8 +98,8 @@ a_raw_holder_leaves_nothing_but_its_speed_test() ->
 the_editing_setting_reads_each_key_with_signals_test() ->
     Cooked = changed([], [], #{vmin => 4, vtime => 2}, cooked()),
     Editing = erx_tty_modes:editing(Cooked),
-    [?assertNot(has(Flag, Editing)) || Flag <- [icanon, echo, opost]],
-    [?assert(has(Flag, Editing)) || Flag <- [isig, icrnl]],
+    [?assertNot(has(Flag, Editing)) || Flag <- [icanon, echo]],
+    [?assert(has(Flag, Editing)) || Flag <- [isig, icrnl, opost, onlcr]],
     ?assertMatch(#{cc := #{vmin := 1, vtime := 0}}, Editing),
     %% The tty takes both as they are.
     {ok, _, _} = erx_tty:set(Editing, erx_tty:new()),

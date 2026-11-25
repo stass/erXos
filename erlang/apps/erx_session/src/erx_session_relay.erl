@@ -247,10 +247,12 @@ handle_info({timeout, Ref, Event}, #state{timers = Timers} = State) ->
         #{Event := Ref} -> event(Event, State#state{timers = maps:remove(Event, Timers)});
         #{} -> {noreply, State}
     end;
+%% The console's rendering goes out as its line editor made it; a program's
+%% bytes, the console's command output among them, through the termios.
 handle_info({erx_console_output, From, Bytes}, #state{console = {Console, _}} = State) ->
-    take_write({Console, {erx_console_written, From}}, Bytes, State);
+    take_write(rendered, {Console, {erx_console_written, From}}, Bytes, State);
 handle_info({tty_write, From, Ref, Bytes}, State) when is_pid(From), is_reference(Ref) ->
-    take_write({From, {Ref, ok}}, Bytes, State);
+    take_write(write, {From, {Ref, ok}}, Bytes, State);
 handle_info({tty_drain, From, Ref}, State) when is_pid(From), is_reference(Ref) ->
     event({drain, {From, {Ref, ok}}}, State);
 handle_info({erx_origin, D, Message}, #state{master = {domain, _Pid, D, _Ref}} = State) ->
@@ -265,11 +267,11 @@ handle_info(Message, #state{master = {local, _Pid, _Ref}} = State) ->
 handle_info(_Message, State) ->
     {noreply, State}.
 
-%% A writer's message joins the output queue as one binary; one whose bytes
-%% are not iodata is dropped.
-take_write(Done, Bytes, State) ->
+%% A writer's message joins the output queue as one binary, as the event
+%% Kind; one whose bytes are not iodata is dropped.
+take_write(Kind, Done, Bytes, State) ->
     try iolist_to_binary(Bytes) of
-        Binary -> event({write, Done, Binary}, State)
+        Binary -> event({Kind, Done, Binary}, State)
     catch
         error:badarg -> {noreply, State}
     end.

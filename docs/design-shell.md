@@ -1590,7 +1590,7 @@ has answered the request. The core holds the line discipline's state and
 derives from what `erx_tty_link` holds, so no part of the relay counts echo
 or held bytes. A signal's `flush_output` empties what `erx_tty_link` holds
 but the output outstanding at the master, and drops the writers' messages
-not yet through `output/3`, which are answered then. Every step ends in
+not yet through `output/3` or `rendered/3`, which are answered then. Every step ends in
 one place: there every `read` and `in` wait is armed in the line discipline
 exactly when its open may read and parked otherwise, so no rule lists the
 steps that park or arm, and what the step left in `erx_tty_link` goes to
@@ -1684,13 +1684,23 @@ the relay waits on none of them:
 
 | Message | Sent by | Answer |
 | --- | --- | --- |
-| `{erx_console_output, From, Bytes}` | the console | `{erx_console_written, From}`, once every byte has passed `output/3` into what the relay holds for the master, or a flush or a hangup has dropped it |
-| `{tty_write, From, Ref, Bytes}` | `erx_output:write/2`, for a process of the session's domain | `{Ref, ok}`, on the same condition |
+| `{erx_console_output, From, Bytes}` | the console, for what its line editor renders | `{erx_console_written, From}`, once every byte has passed `rendered/3` into what the relay holds for the master, or a flush or a hangup has dropped it |
+| `{tty_write, From, Ref, Bytes}` | `erx_output:write/2`, for a process of the session's domain, and the console, for a command's bytes (`erx_console:write/1`) | `{Ref, ok}`, once every byte has passed `output/3` into what the relay holds, or a flush or a hangup has dropped it |
 | `{tty_drain, From, Ref}` | `erx_output:halt/2`, at a normal halt | `{Ref, ok}`, once nothing waits to be written and the master has answered every byte the relay holds, or at once while output is stopped, the relay has no master or the line has hung up, since nothing would take the bytes; a relay started with no master, as a session's tty may have none, sends nothing for one, holds its output as it does while output is stopped and drops any message as from a master; the relay of the domain's line gives up `erx_tty_owner` as it answers, so a second call of `erlang:halt/2` goes straight on; a request by name after it exits in its caller, and the runtime is halting |
 
 These bytes join the one output queue with the opens' writes, in the
 order they arrive ([Job control](#job-control), "Output"). Each writer
-has one write waiting at most, since it waits for the answer.
+has one write waiting at most, since it waits for the answer. Room,
+`VSTOP`, a flush and a hangup treat both messages alike; only `OPOST`
+tells them apart, by message and never by holder. A program's bytes,
+a `tty_write`'s and an open's write, pass `output/3` under the `termios`
+of the moment, so an LF goes out CR-LF while `ONLCR` is set, and a CR-LF
+the program wrote goes out CR CR LF, as on FreeBSD. The console's
+rendering is made for the terminal already, CR-LF included: it passes
+`rendered/3`, `output/3` with `OPOST` clear, which keeps the column
+count, whoever holds, so the line editor's redraw at Enter that reaches
+the relay after the shell has given a job the terminal goes out as the
+editor made it. Only the console sends `erx_console_output`.
 
 **One watch per kind.** A watch names one kind, and `{read, Count}` is
 one kind whatever its count. A `poll` for input and output sends two
@@ -1737,10 +1747,11 @@ the close's answer, and none after.
   acted on ([A signal suspends a job's
   input](#the-terminal-relays-protocol)). `{foreground, console,
   Signals}` gives it to the console with its
-  **editing setting**: the cooked `termios` less `ICANON`, `ECHO` and
-  `OPOST`, with `VMIN` 1 and `VTIME` 0, so its line editor takes each key
-  as it is typed and writes its own CR-LF, while `ISIG` and `ICRNL` stay
-  set. libedit's editing setting keeps the same two flags and sets the
+  **editing setting**: the cooked `termios` less `ICANON` and `ECHO`,
+  with `VMIN` 1 and `VTIME` 0, so its line editor takes each key as it is
+  typed, while `ISIG`, `ICRNL` and `OPOST` stay set, so a program's line
+  written at the prompt goes out as under the cooked setting.
+  libedit's editing setting keeps the same three flags and sets the
   same `VMIN` and `VTIME` (`contrib/libedit/tty.c:79-88`, `:108-116`)
   ([design-live.md](design-live.md#the-tty), "A shell's line editor is a
   program on a raw tty").
@@ -2321,7 +2332,8 @@ which three rules give:
   bare, quoted or in a string, from which `list_to_atom/1` could make
   it, in any module but `erx_session_relay`,
   whose client functions make every request to the relay, `erx_output`,
-  the runtime's writers' one sender of `tty_write` and `tty_drain`,
+  the runtime's writers' sender of `tty_write` and `tty_drain`, the
+  console's `write/1` being the other sender of `tty_write`,
   which every owner serves, and the two modules that hold the name in
   other domains, `erx_console` in the system domain and `erx_log_h`,
   whose proxy holds it in a domain with no terminal

@@ -30,8 +30,12 @@
 %% user_drv's `s` and `c` start a shell and connect to it, and gives it back to the group
 %% below when it ends; the groups below are not shown, so their output is acknowledged
 %% and dropped, and only write/1's callers still reach the line. A command's output, which is bytes,
-%% goes to the line through write/1, past prim_tty, with only a cooked tty's newline
-%% processing.
+%% goes to the line through write/1, past prim_tty, and through one tty's output processing
+%% (command_output/3): the terminal relay's on a session's tty, the console's own tty's on
+%% a line of its own. What the console renders, its groups' output above all, goes to the
+%% line as prim_tty made it: the console sends it as erx_console_output, which a relay
+%% passes unprocessed (erx_tty:rendered/3), and a command's bytes as a relay's writer,
+%% tty_write, so a relay tells the two apart by message.
 %%
 %% Each of a session's ttys has a console too, of the `session` role (start_link/1,
 %% config()): the same groups, unregistered. Each is driven by a terminal relay of
@@ -227,6 +231,9 @@
                 %% to answer when it ends and the shell it runs. The innermost gets the
                 %% input, or `base` when there are none (current/1).
                 shells = [] :: [{pid(), gen_server:from(), shell()}],
+                %% The callers of write/1 whose bytes a relay has not yet answered for,
+                %% by the reference of the write (command_output/3).
+                pending_writes = #{} :: #{reference() => gen_server:from()},
                 %% Whether the input has ended: each group that gets the input from then
                 %% on is told so.
                 input_ended = false :: boolean(),
@@ -346,9 +353,10 @@ run_shell(Console, Shell = {Module, Function, Args})
     gen_server:call(Console, {run_shell, Shell}, infinity).
 
 -doc """
-Writes Bytes to the console's line as they are, but for each newline, which goes out
-as CR-LF as a cooked tty's ONLCR sends it, and returns once they are written: the
-output of a command, which is bytes, never text the console renders.
+Writes Bytes, the output of a command, to the console's line through the line's tty,
+whose output flags alone process them, as a program's write on FreeBSD: on a cooked
+tty each newline goes out CR-LF, and a CR-LF written goes out CR CR LF. It returns
+once they are written. They are bytes, never text the console renders.
 """.
 -spec write(iodata()) -> ok.
 write(Bytes) ->
@@ -514,10 +522,11 @@ reader(Relay, true) ->
     {relay, #{relay => Relay, open => Open, watching => false}}.
 
 %% The settings of the console's own tty (docs/design-live.md, "Lost input"). A person's
-%% terminal gets a session prompt's, less IXON and IMAXBEL, since the console's output
-%% does not pass through this tty: ISIG makes Ctrl-C, Ctrl-Z and Ctrl-\ signals as they
-%% arrive, and ICRNL reads CR as LF. A pipe gets every flag clear, so its bytes reach the
-%% group as it gave them.
+%% terminal gets a session prompt's, less IXON and IMAXBEL, since no output waits in this
+%% tty: the driver writes whole what passes it, a command's bytes alone. ISIG makes Ctrl-C,
+%% Ctrl-Z and Ctrl-\ signals as they arrive, ICRNL reads CR as LF, and OPOST and ONLCR
+%% send a command's newline as CR-LF. A pipe gets every flag clear, so its bytes reach the
+%% group as it gave them and a command's reach the pipe as it wrote them.
 own_termios(true) ->
     Editing = #{iflag := Input} = erx_tty_modes:editing(erx_tty:termios(erx_tty:new())),
     Editing#{iflag := Input -- [ixon, imaxbel]};
@@ -653,9 +662,8 @@ handle_call({run_shell, Shell}, From, State = #state{shells = Shells, terminal =
     {noreply, gets_input(State#state{shells = [{New, From, Shell} | Shells]})};
 handle_call(first_group, _From, State = #state{base = Base}) ->
     {reply, Base, State};
-handle_call({write, Bytes}, From, State = #state{driver = Driver}) ->
-    Driver ! {erx_console_output, {caller, From}, onlcr(Bytes)},
-    {noreply, State};
+handle_call({write, Bytes}, From, State) ->
+    {noreply, command_output(Bytes, From, State)};
 handle_call(login_session, _From, State = #state{login = {_Phase, Domain}}) ->
     {reply, {ok, Domain}, State};
 handle_call(login_session, _From, State) ->
@@ -767,6 +775,10 @@ info({erx_console_written, {Group, Reply}}, State) ->
 info({Ref, ok}, State = #state{exiting = {Ref, Ending}, on_shell_end = {exit, Notify}}) ->
     Notify(Ending),
     {stop, normal, State};
+info({Ref, ok}, State = #state{pending_writes = Pending}) when is_map_key(Ref, Pending) ->
+    {From, Left} = maps:take(Ref, Pending),
+    gen_server:reply(From, ok),
+    {noreply, State#state{pending_writes = Left}};
 info({'EXIT', User, Reason}, State = #state{user = User}) ->
     %% `user` ends only with its console or as the runtime stops (user_sup kills the
     %% system console's supervisor, and the console with it).
@@ -1748,11 +1760,20 @@ ended(State) ->
 
 %% -- Output ---------------------------------------------------------------------------
 
-%% A command's bytes as a cooked tty's OPOST and ONLCR send them: each newline as CR-LF,
-%% every other byte unchanged.
--spec onlcr(binary()) -> binary().
-onlcr(Bytes) ->
-    binary:replace(Bytes, <<"\n">>, <<"\r\n">>, [global]).
+%% A command's bytes through the line's one tty, answered once written. A relay takes
+%% them as a program's write, as erx_output:write/2 sends one, and processes them under
+%% the termios of the moment; it is the driver, which the console's rendering goes to,
+%% so the two keep the order they were sent in. The console's own tty processes them
+%% here, with room for all of them, since the driver writes each message whole.
+command_output(Bytes, From, State = #state{reader = {relay, _}, driver = Relay, pending_writes = Pending}) ->
+    Ref = make_ref(),
+    Relay ! {tty_write, self(), Ref, Bytes},
+    State#state{pending_writes = Pending#{Ref => From}};
+command_output(Bytes, From, State = #state{driver = Driver, reader = {own, Own = #{tty := Tty}}}) ->
+    Room = byte_size(Bytes) * erx_tty:widest_rendering(),
+    {_All, Out, Tty1} = erx_tty:output(Bytes, Room, Tty),
+    Driver ! {erx_console_output, {caller, From}, Out},
+    State#state{reader = {own, Own#{tty := Tty1}}}.
 
 %% The console's ask for its next batch of the log (erx_syslog:next/1).
 log_ask() ->
