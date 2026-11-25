@@ -14,6 +14,7 @@
  *   previous FORM HEX       -> previous LENGTH
  *   read HEX                -> read STATUS REASON CHECK LENGTH START END RECORD-HEX
  *   write FORM CAUSE CPU VALUE SLOT NFRAMES FRAMES REGS KIND MESSAGE-HEX LOG-LINES END
+ *         NCPUS STATES
  *                           -> record LENGTH CHECK HEX
  *                              frame HEX
  *
@@ -23,7 +24,10 @@
  * whose counters a wild store has corrupted. END is "fault" for a frame written
  * as the machine goes down on a fault, "watchdog" for one the watchdog's end
  * writes, and "task" for one written for a task's fault while the machine runs
- * on; any other word is refused.
+ * on; any other word is refused. NCPUS is the census's count and STATES the
+ * stop's states of CPUs 0, 1, ... as decimal numbers joined by commas, or "-"
+ * for no entries (a NULL pointer). Every entry handed over has all its
+ * register words set and a cpu field the writer must not copy.
  */
 
 #include <stdbool.h>
@@ -49,6 +53,7 @@ static size_t driver_frame_used;
 static erx_log_t driver_log;
 
 static void driver_command(char *);
+static const void *driver_cpus(char *);
 static erx_crash_end_t driver_end(const char *);
 static _Noreturn void driver_fail(const char *);
 static void driver_print_hex(const uint8_t *, size_t);
@@ -57,7 +62,8 @@ static void driver_write(char *);
 
 static const char *const driver_checks[] = {
 	"ok", "short", "magic", "version", "form", "length", "crc", "cause", "cpu",
-	"boot", "padding", "nframes", "fault", "regs", "frames", "text", "not_run",
+	"boot", "ncpus", "nframes", "fault", "regs", "frames", "cpus", "text",
+	"not_run",
 };
 static const char *const driver_statuses[] = {
 	"none", "absent", "valid", "truncated", "corrupt",
@@ -132,6 +138,37 @@ driver_end(const char *word)
 	driver_fail("bad write: END is fault, watchdog or task");
 }
 
+/*
+ * The entries STATES names, entry N for CPU N, with every register word set
+ * to a value that names its CPU and its word; NULL for "-".
+ */
+static const void *
+driver_cpus(char *states)
+{
+	static erx_crash_cpu_t cpus[ERX_CPU_LIMIT];
+	char *state, *rest;
+	uint64_t base;
+	size_t count;
+
+	if (strcmp(states, "-") == 0)
+		return (NULL);
+	memset(cpus, 0, sizeof(cpus));
+	count = 0;
+	for (state = strtok_r(states, ",", &rest); state != NULL;
+	    state = strtok_r(NULL, ",", &rest)) {
+		if (count == ERX_CPU_LIMIT)
+			driver_fail("bad write: more states than CPUs");
+		base = UINT64_C(0x1000) * (count + 1);
+		cpus[count] = (erx_crash_cpu_t){ .cpu = 0xee,
+		    .state = (erx_stop_cpu_state_t)strtoul(state, NULL, 10),
+		    .pc = base + 1, .sp = base + 2, .fp = base + 3,
+		    .return_address = base + 4, .processor_state = base + 5,
+		    .aux = base + 6 };
+		count++;
+	}
+	return (cpus);
+}
+
 static void
 driver_write(char *arguments)
 {
@@ -139,15 +176,16 @@ driver_write(char *arguments)
 	static uint8_t regs[ERX_CRASH_REGS_BYTES];
 	static char message[DRIVER_HEX_MAX];
 	erx_crash_input_t input;
-	char message_hex[DRIVER_LINE_MAX], end_word[16];
+	char message_hex[DRIVER_LINE_MAX], states[DRIVER_LINE_MAX], end_word[16];
 	erx_crash_end_t end;
 	unsigned int form, cause, cpu, value, slot, nframes, has_frames, has_regs, kind;
+	unsigned int ncpus;
 	size_t length, message_length;
 	int lines;
 
-	if (sscanf(arguments, "%u %u %u %u %u %u %u %u %u %s %d %15s", &form, &cause,
-	    &cpu, &value, &slot, &nframes, &has_frames, &has_regs, &kind, message_hex,
-	    &lines, end_word) != 12)
+	if (sscanf(arguments, "%u %u %u %u %u %u %u %u %u %s %d %15s %u %s", &form,
+	    &cause, &cpu, &value, &slot, &nframes, &has_frames, &has_regs, &kind,
+	    message_hex, &lines, end_word, &ncpus, states) != 14)
 		driver_fail("bad write");
 	end = driver_end(end_word);
 	for (size_t index = 0; index < 128; index++)
@@ -172,6 +210,8 @@ driver_write(char *arguments)
 	}
 	input.regs = has_regs != 0 ? regs : NULL;
 	input.frames = has_frames != 0 ? frames : NULL;
+	input.ncpus = ncpus;
+	input.cpus = driver_cpus(states);
 	input.message = strcmp(message_hex, "-") == 0 ? NULL : message;
 	input.message_length = message_length;
 

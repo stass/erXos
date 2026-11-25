@@ -31,6 +31,8 @@ class CrashTest < Minitest::Test
   MEMORY = CODEC.member('fault_kind', 'memory')
   CRC_OFFSET = FRAME::CRC_START - 4
   CAUSE_OFFSET = 24
+  NCPUS_OFFSET = 68
+  STATE = FRAME::SCHEMA.types.fetch('stop_cpu_state').members.freeze
   DRIVER_SECONDS = 30
 
   ReadAnswer = Data.define(:status, :reason, :check, :length, :frame_start, :frame_end, :record)
@@ -65,7 +67,7 @@ class CrashTest < Minitest::Test
 
   # Full paths: the sanitizer gate looks for each core source's path in this file's text.
   def core_sources
-    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c]
+    %w[kernel/core/crash.c kernel/core/crash_frame.c kernel/core/crash_read.c kernel/core/log.c kernel/core/machine_stop.c]
       .map { |file| File.join(@root, file) }
   end
 
@@ -98,12 +100,13 @@ class CrashTest < Minitest::Test
   # Everything the driver's write command takes, each with a usable default.
   # ends is :fault for a frame written as the machine goes down on a fault,
   # :watchdog for one the watchdog's end writes, :task for a task's fault the
-  # machine survives.
+  # machine survives. states are the stop's states of CPUs 0, 1, ..., or nil
+  # for no entries.
   def write(form: FULL, cause: CAUSE.fetch(:panic), cpu: 1, value: NORMAL, slot: SLOT_A, nframes: 3, frames: 1, regs: 1,
-            kind: 0, message: 'boom', lines: 2, ends: :fault)
+            kind: 0, message: 'boom', lines: 2, ends: :fault, ncpus: 0, states: nil)
     message_hex = message.nil? ? '-' : message.b.unpack1('H*')
     answer = drive(["write #{form} #{cause} #{cpu} #{value} #{slot} #{nframes} #{frames} #{regs} #{kind} " \
-                    "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends}"])
+                    "#{message_hex.empty? ? '-' : message_hex} #{lines} #{ends} #{ncpus} #{states_word(states)}"])
     _, length, check, record = answer.fetch(0).split
     printed = unhex(answer.fetch(1).split.fetch(1))
     assert printed.start_with?("\n"), 'the writer opens with a newline'
@@ -111,6 +114,8 @@ class CrashTest < Minitest::Test
     Written.new(length: length.to_i, check: check, record: unhex(record),
                 art: printed.byteslice(1, header), frame: printed.byteslice(header + 1..))
   end
+
+  def states_word(states) = states.nil? ? '-' : states.join(',')
 
   def read_c(log)
     fields = drive(["read #{hex(log.b)}"]).fetch(0).split
@@ -363,6 +368,118 @@ class CrashTest < Minitest::Test
     assert_operator lines.size, :>, 100
   end
 
+  # The states a reader has registers for (docs/design-debugger.md, "CPU stop states").
+  WITH_REGISTERS = %w[leader stopped waiting concurrent starting].map { |name| STATE.fetch(name) }.freeze
+  REGISTER_WORDS = %w[pc sp fp return_address processor_state aux].freeze
+
+  def entry_offset(index) = FRAME::CPUS_OFFSET + index * CODEC.layout_size('erx_crash_cpu')
+
+  # What the driver hands over for CPU index in state, as the record must hold it.
+  def expected_entry(index, state)
+    settled = STATE.value?(state) ? state : STATE.fetch('unanswered')
+    words = REGISTER_WORDS.each_with_index.to_h do |word, position|
+      [word, WITH_REGISTERS.include?(settled) ? 0x1000 * (index + 1) + position + 1 : 0]
+    end
+    { 'cpu' => index, 'state' => settled, **words }
+  end
+
+  # Every state, and two outside the enum, over 1, 4 and 16 CPUs: both readers
+  # accept the record and the entries read back as the writer settled them.
+  def test_cpu_entries_round_trip_for_one_four_and_sixteen_cpus
+    states = [*STATE.values, 0, 99]
+    [1, 4, 16].each do |ncpus|
+      cycle = states.cycle.first(ncpus)
+      written = write(form: FULL, cause: CAUSE.fetch(:fault), kind: MEMORY, ncpus: ncpus, states: cycle)
+      assert_equal 'ok', written.check, "#{ncpus} CPUs"
+      record = read_both(written.frame).record
+      assert_equal ncpus, record.fetch('ncpus')
+      assert_equal cycle.each_with_index.map { |state, index| expected_entry(index, state) }, record.fetch('cpus')
+      untouched = written.record.byteslice(entry_offset(ncpus), FRAME::RECORD_SIZE - entry_offset(ncpus))
+      assert untouched.each_byte.all?(&:zero?), "nothing past CPU #{ncpus - 1}"
+    end
+  end
+
+  def test_the_census_count_is_kept_past_the_entries_and_bounded
+    many = write(ncpus: 20, states: Array.new(20, STATE.fetch('stopped')))
+    record = read_both(many.frame).record
+    assert_equal [20, FRAME::CPU_ENTRIES], [record.fetch('ncpus'), record.fetch('cpus').size]
+    past = write(ncpus: FRAME::CPU_LIMIT + 1, states: [STATE.fetch('leader')])
+    assert_equal FRAME::CPU_LIMIT, read_both(past.frame).record.fetch('ncpus')
+    assert_equal 0, read_both(write(ncpus: 4, states: nil).frame).record.fetch('ncpus')
+    assert_equal 0, read_both(write(ncpus: 0, states: [STATE.fetch('leader')]).frame).record.fetch('ncpus')
+  end
+
+  # The design's seeded fault for this side: entries copied into the brief form.
+  def test_the_brief_form_carries_no_cpu_entry
+    written = write(form: BRIEF, ncpus: 4, states: Array.new(4, STATE.fetch('waiting')))
+    assert_equal ['ok', FRAME::BRIEF_SIZE], [written.check, written.length]
+    assert_equal 0, read_both(written.frame).record.fetch('ncpus')
+    refute read_both(written.frame).record.key?('cpus')
+  end
+
+  def test_a_census_count_past_the_limit_or_cut_entries_are_refused
+    full, = clean_records
+    oversized = patch(full, NCPUS_OFFSET, [FRAME::CPU_LIMIT + 1].pack('L<'))
+    huge = patch(full, NCPUS_OFFSET, [0xffffffff].pack('L<'))
+    cut = full.byteslice(0, entry_offset(2) + 10)
+    { oversized => :ncpus, huge => :ncpus, cut => :short }.each do |record, expected|
+      assert_equal expected, FRAME.check(record)
+      assert_equal expected, check_c(record)
+    end
+    assert_equal :ncpus, read_both(frame_of(oversized)).check
+    assert_equal %i[corrupt header], read_both(frame_of(cut, length: cut.bytesize)).then { |r| [r.status, r.reason] }
+  end
+
+  # The clean full record holds CPUs 0 stopped, 1 leader and 2 unanswered.
+  def test_each_entry_rule_refuses_on_both_sides
+    full, = clean_records
+    {
+      'a state outside the enum' => patch(full, entry_offset(1) + 4, [99].pack('L<')),
+      'a state of zero' => patch(full, entry_offset(0) + 4, [0].pack('L<')),
+      'registers where the state has none' => patch(full, entry_offset(2) + 8, "\1"),
+      'an auxiliary word where the state has none' => patch(full, entry_offset(2) + 48, "\1"),
+      'an entry past the census count' => patch(full, entry_offset(3) + 4, [STATE.fetch('leader')].pack('L<')),
+      'a number past the count' => patch(full, entry_offset(3), "\1"),
+      'a number that is not its index' => patch(full, entry_offset(1), [2].pack('L<')),
+      'the last entry set' => patch(full, FRAME::RECORD_SIZE - 1, "\1")
+    }.each do |name, record|
+      assert_equal :cpus, FRAME.check(record), "ruby: #{name}"
+      assert_equal :cpus, check_c(record), "c: #{name}"
+    end
+    named = patch(full, entry_offset(0) + 48, "\1")
+    assert_equal [:ok, :ok], [FRAME.check(named), check_c(named)], 'a stopped CPU may name a word'
+  end
+
+  # The design's seeded fault for the readers: one of them accepts a state
+  # outside the enum. A copy of the Ruby reader without its state test must
+  # disagree with the C reader on such a record.
+  def test_a_reader_that_accepts_any_state_disagrees
+    full, = clean_records
+    stray = frame_of(patch(full, entry_offset(2) + 4, [99].pack('L<')))
+    assert_equal :cpus, read_both(stray).check
+    source = File.read(File.join(@root, 'tools/lib/erx/crash_frame.rb'))
+    from = "entry.fetch('cpu') == index && STATES.key?(entry.fetch('state'))"
+    assert_equal 1, source.scan(from).size, 'the mutant must edit exactly one place'
+    mutant = File.join(@directory, 'crash_frame_mutant.rb')
+    File.write(mutant, source.sub(from) { "entry.fetch('cpu') == index" }
+                             .gsub(/require_relative '([a-z_]+)'/) { "require '#{File.join(@root, 'tools/lib/erx', Regexp.last_match(1))}'" })
+    log = File.join(@directory, 'stray.log')
+    File.binwrite(log, stray)
+    script = 'print Erx::CrashFrame.read(File.binread(ARGV.fetch(0))).check'
+    answer = IO.popen([RbConfig.ruby, '-r', mutant, '-e', script, log], in: File::NULL, &:read)
+    assert $?.success?, 'the mutant must load'
+    assert_equal 'ok', answer, 'the mutant accepts what the C reader refuses'
+  end
+
+  def test_the_report_names_each_cpu_and_its_registers
+    states = [STATE.fetch('waiting'), STATE.fetch('unanswered')]
+    report = FRAME.report(FRAME.read(write(ncpus: 2, states: states).frame))
+    assert_includes report, 'cpu 0: waiting pc 0x1001 sp 0x1002 fp 0x1003 return_address 0x1004 ' \
+                            'processor_state 0x1005 aux 0x1006'
+    assert_includes report, 'cpu 1: unanswered'
+    refute report.any? { |line| line.start_with?('cpus:') }
+  end
+
   def test_a_buffer_full_of_stale_bytes_does_not_reach_the_record
     # The driver fills the buffer with 0xa5 and fails on a byte past the length.
     written = write(form: BRIEF)
@@ -379,23 +496,25 @@ class CrashTest < Minitest::Test
       cause: patch(brief, CAUSE_OFFSET, [5].pack('L<')),
       cpu: patch(brief, 28, [FRAME::CPU_LIMIT].pack('L<')),
       boot: patch(brief, 60, [SLOT_NONE].pack('L<')),
-      padding: patch(brief, FRAME::PADDING.begin, "\1"),
+      ncpus: patch(brief, NCPUS_OFFSET, [1].pack('L<')),
       nframes: patch(brief, 64, [1].pack('L<')),
       fault: patch(patch(brief, CAUSE_OFFSET, [CAUSE.fetch(:fault)].pack('L<')), 72, [99].pack('L<')),
       regs: patch(patch(full, CAUSE_OFFSET, [CAUSE.fetch(:watchdog)].pack('L<')).then { |record| zero_frames(record) },
                   FRAME::REGS_OFFSET, "\1"),
-      frames: patch(full, FRAME::RECORD_SIZE - 8, "\1"),
+      frames: patch(full, FRAME::CPUS_OFFSET - 8, "\1"),
+      cpus: patch(full, entry_offset(0) + 4, [99].pack('L<')),
       text: patch(full, FRAME::RECORD_SIZE, "\e")
     }
   end
 
   def zero_frames(record)
-    patch(patch(record, 64, [0].pack('L<')), FRAME::FRAMES_OFFSET, "\0".b * (FRAME::RECORD_SIZE - FRAME::FRAMES_OFFSET))
+    patch(patch(record, 64, [0].pack('L<')), FRAME::FRAMES_OFFSET, "\0".b * (FRAME::CPUS_OFFSET - FRAME::FRAMES_OFFSET))
   end
 
   def clean_records
     brief = write(form: BRIEF, cause: CAUSE.fetch(:watchdog)).record
-    full = write(form: FULL, cause: CAUSE.fetch(:panic), regs: 0, nframes: 0, lines: 1).record
+    full = write(form: FULL, cause: CAUSE.fetch(:panic), regs: 0, nframes: 0, lines: 1, ncpus: 3,
+                 states: [STATE.fetch('stopped'), STATE.fetch('leader'), STATE.fetch('unanswered')]).record
     [full, brief]
   end
 
@@ -449,8 +568,8 @@ class CrashTest < Minitest::Test
     assert_equal :length, read_both(full_says_brief).check
     bad_pair = frame_of(patch(brief, 60, [SLOT_NONE].pack('L<')))
     assert_equal :boot, read_both(bad_pair).check
-    padded = frame_of(patch(brief, FRAME::PADDING.begin, "\1"))
-    assert_equal :padding, read_both(padded).check
+    counted = frame_of(patch(brief, NCPUS_OFFSET, [1].pack('L<')))
+    assert_equal :ncpus, read_both(counted).check
   end
 
   def test_a_record_whose_length_differs_from_its_frames_is_refused
@@ -470,7 +589,7 @@ class CrashTest < Minitest::Test
       "#{FRAME::BEGIN_MARKER} brief 121\n" => :header,
       "#{FRAME::BEGIN_MARKER} brief 120 \n" => :header,
       "#{FRAME::BEGIN_MARKER}  brief 120\n" => :header,
-      "#{FRAME::BEGIN_MARKER} full 903\n" => :header,
+      "#{FRAME::BEGIN_MARKER} full #{FRAME::RECORD_SIZE - 1}\n" => :header,
       "#{FRAME::BEGIN_MARKER} full 16385\n" => :header,
       "#{FRAME::BEGIN_MARKER} full 99999999999999999999\n" => :header,
       "#{FRAME::BEGIN_MARKER} huge 120\n" => :header }.each do |header, reason|
@@ -492,8 +611,8 @@ class CrashTest < Minitest::Test
     assert_equal :base64, read_both(good.lines.then { |l| l[1] = "#{'!' * FRAME::LINE_CHARS}\n"; l }.join).reason
   end
 
-  # A frame of a full-form length whose last line ends in group: 905 bytes end
-  # in a group of two bytes and 907 in a group of one.
+  # A frame of a full-form length whose last line ends in group: 1802 bytes end
+  # in a group of two bytes and 1801 in a group of one.
   def frame_with_last(length, group)
     count = (length - 1) / FRAME::LINE_BYTES
     filler = 'A' * (((length - 1) % FRAME::LINE_BYTES + 3) / 3 - 1) * 4
@@ -501,8 +620,8 @@ class CrashTest < Minitest::Test
   end
 
   def test_base64_has_one_spelling
-    { [905, 'AAQ='] => :record, [905, 'AAR='] => :base64, [907, 'AQ=='] => :record, [907, 'AR=='] => :base64,
-      [905, 'AA=='] => :base64, [907, 'AAA='] => :base64, [905, 'A=A='] => :base64, [907, '=A=='] => :base64 }.each do |(length, group), reason|
+    { [1802, 'AAQ='] => :record, [1802, 'AAR='] => :base64, [1801, 'AQ=='] => :record, [1801, 'AR=='] => :base64,
+      [1802, 'AA=='] => :base64, [1801, 'AAA='] => :base64, [1802, 'A=A='] => :base64, [1801, '=A=='] => :base64 }.each do |(length, group), reason|
       answer = read_both(frame_with_last(length, group))
       assert_equal [:corrupt, reason], [answer.status, answer.reason], "#{length} #{group}"
     end
@@ -590,6 +709,11 @@ class CrashTest < Minitest::Test
        "byte != '\\n' && (byte < 0x1b || byte > 0x7e)"],
       ['the CPU limit is off by one', 'header.cpu >= ERX_CPU_LIMIT', 'header.cpu > ERX_CPU_LIMIT'],
       ['the writer leaves the buffer', '__builtin_memset(buffer, 0, ERX_CRASH_SIZE);', '(void)0;'],
+      ['the check accepts a state outside the enum', 'erx_stop_cpu_state_name(entry.state) == NULL',
+       'entry.state == 0'],
+      ['entries go into the brief form', '	erx_crash_settle(input, &record->header);',
+       '	erx_crash_settle(input, &record->header);
+	erx_crash_write_cpus(input, record);'],
       ['the message goes unescaped', 'escaped = erx_log_escape(input->message, input->message_length,
 		    text, ERX_CRASH_MESSAGE_MAX);', "__builtin_memcpy(text, input->message, input->message_length);
 		escaped = (erx_log_escape_result_t){ .written = input->message_length };"]
@@ -626,22 +750,25 @@ class CrashTest < Minitest::Test
   end
 
   def write_with(driver, form:, lines: 1, regs: 1, nframes: 1)
-    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} fault"],
+    states = states_word([STATE.fetch('leader'), STATE.fetch('offline')])
+    answer = drive(["write #{form} #{CAUSE.fetch(:panic)} 1 #{NORMAL} #{SLOT_A} #{nframes} 1 #{regs} 0 #{hex("m\ek".b)} #{lines} fault " \
+                    "2 #{states}"],
                    driver: driver)
     unhex(answer.fetch(0).split.fetch(3))
   end
 
-  # One bit flipped either side of the CRC's start, the CPU's limit and a
-  # control byte in the text; and the Ruby side's view of what the driver wrote.
+  # One bit flipped either side of the CRC's start, the CPU's limit, a control
+  # byte in the text and a CPU's state outside the enum; and the Ruby side's
+  # view of what the driver wrote.
   def check_answers(driver, full, brief)
     flip = ->(offset) { brief.dup.tap { |record| record.setbyte(offset, record.getbyte(offset) ^ 1) } }
     cases = [brief, full, patch(brief, 28, [FRAME::CPU_LIMIT].pack('L<')), patch(full, FRAME::RECORD_SIZE, "\e"),
-             *(CRC_OFFSET - 4...CRC_OFFSET + 8).map(&flip)]
+             patch(full, entry_offset(1) + 4, [99].pack('L<')), *(CRC_OFFSET - 4...CRC_OFFSET + 8).map(&flip)]
     drive(cases.map { |bytes| "check #{hex(bytes)}" }, driver: driver) + [full, brief, FRAME.check(full), FRAME.check(brief)]
   end
 
   def read_answers(driver, brief)
     too_long = "#{FRAME::BEGIN_MARKER} full #{FRAME::CRASH_SIZE + 1}\n"
-    drive([frame_of(brief), too_long, frame_with_last(907, 'AR==')].map { |log| "read #{hex(log.b)}" }, driver: driver)
+    drive([frame_of(brief), too_long, frame_with_last(1801, 'AR==')].map { |log| "read #{hex(log.b)}" }, driver: driver)
   end
 end

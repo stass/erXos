@@ -114,13 +114,26 @@ layout erx_crash_brief wire_le 8 120
   field boot_value boot_value 56
   field boot_slot boot_slot 60
   field nframes u32 64
-  padding 68 4
+  field ncpus u32 68
   field fault erx_fault 72
+# One CPU's entry in the full form, entry N for CPU N (docs/design-debugger.md,
+# "The record's CPU entries"): its stop state and, for a state with registers,
+# where it was; every other byte is zero.
+layout erx_crash_cpu wire_le 8 56
+  field cpu u32 0
+  field state stop_cpu_state 4
+  field pc u64 8
+  field sp u64 16
+  field fp u64 24
+  field return_address u64 32
+  field processor_state u64 40
+  field aux u64 48
 # The full form's text starts at this fixed prefix's generated size.
-layout erx_crash_record wire_le 8 904
+layout erx_crash_record wire_le 8 1800
   field header erx_crash_brief 0
   field regs erx_regs 120
   field frames u64 392 count 64
+  field cpus erx_crash_cpu 904 count @crash_cpus
 
 layout erx_msgtag wire_le 8 8
   field raw u64 0

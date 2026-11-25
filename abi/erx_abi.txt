@@ -130,8 +130,11 @@ bytes pin_state_default 7 value 64656661756c74
 limit boot_strings_max u32 2048
 # The longest node path of /chosen/stdout-path the handoff record carries.
 limit boot_stdout_path_max u32 256
-limit crash_version u32 2
+limit crash_version u32 3
 limit crash_size u32 16384
+# The CPU entries a full crash record holds (docs/design-debugger.md, "The
+# record's CPU entries").
+limit crash_cpus u32 16
 limit crash_magic u64 0x4853415243585245
 limit crash_frame_line u32 76
 limit crash_frame_lines_max u32 288

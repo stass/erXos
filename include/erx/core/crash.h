@@ -45,10 +45,15 @@ typedef struct erx_crash_fault {
 } erx_crash_fault_t;
 
 /*
- * What an end knows. The writer reads regs, frames, message and log only for
- * the full form, so the brief form cannot carry them whatever the caller
+ * What an end knows. The writer reads regs, frames, cpus, message and log only
+ * for the full form, so the brief form cannot carry them whatever the caller
  * holds. regs is ERX_CRASH_REGS_BYTES laid out as the ABI's erx_regs_t, or
- * NULL for zeros. log is the kernel's erx_log_t, or NULL for no log lines.
+ * NULL for zeros. ncpus is the number of CPUs the stop's census covered, and
+ * cpus their entries, entry N for CPU N, each ERX_CRASH_CPU_BYTES laid out as
+ * the ABI's erx_crash_cpu_t with the state erx_machine_stop_final gave the CPU
+ * and its registers: the first ncpus of them, at most ERX_CRASH_CPUS, are
+ * read, and each entry's cpu field is not. cpus is NULL for an end before any
+ * census. log is the kernel's erx_log_t, or NULL for no log lines.
  */
 typedef struct erx_crash_input {
 	uint32_t	 form;		/* ERX_CRASH_FORM_*, from the boot image */
@@ -57,12 +62,14 @@ typedef struct erx_crash_input {
 	uint32_t	 boot_value;
 	uint32_t	 boot_slot;
 	uint32_t	 nframes;
+	uint32_t	 ncpus;
 	uint64_t	 uptime_ns;
 	uint64_t	 since_pet_ns;
 	uint8_t		 build_id[ERX_BUILD_ID_SIZE];
 	erx_crash_fault_t fault;
 	const void	*regs;
 	const uint64_t	*frames;
+	const void	*cpus;
 	const char	*message;	/* escaped by the writer; need not end in NUL */
 	size_t		 message_length;
 	const void	*log;

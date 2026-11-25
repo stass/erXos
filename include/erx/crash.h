@@ -40,11 +40,12 @@ typedef enum erx_crash_check {
 	ERX_CRASH_CHECK_CAUSE,
 	ERX_CRASH_CHECK_CPU,
 	ERX_CRASH_CHECK_BOOT,		/* boot value and slot are no allowed pair */
-	ERX_CRASH_CHECK_PADDING,
+	ERX_CRASH_CHECK_NCPUS,		/* past the CPU limit, or set in the brief form */
 	ERX_CRASH_CHECK_NFRAMES,
 	ERX_CRASH_CHECK_FAULT,		/* the fault record contradicts the cause */
 	ERX_CRASH_CHECK_REGS,		/* registers where the cause has none */
 	ERX_CRASH_CHECK_FRAMES,		/* frames past nframes */
+	ERX_CRASH_CHECK_CPUS,		/* a CPU entry breaks its state's rules */
 	ERX_CRASH_CHECK_TEXT,		/* a byte neither printable nor a newline */
 	ERX_CRASH_CHECK_NOT_RUN		/* the reader stopped before the record */
 } erx_crash_check_t;

@@ -429,7 +429,8 @@ kernel that reads every page of the map once
 ### The record's CPU entries
 
 The full form of the crash record carries one **CPU entry** for each CPU
-the stop's census covered, in the order of their numbers:
+the stop's census covered, entry N for CPU N, since an `offline` CPU has
+its entry too:
 `erx_crash_cpu` in `abi/kernel.txt`, 56 bytes, in a fixed array of
 `crash_cpus` (16) entries after the backtrace. The header's count
 `ncpus`, in the four bytes of padding after `nframes`, is the number of
@@ -447,9 +448,11 @@ The crash core writes the entries from what the stop hands it. Its
 writer cannot refuse, since nothing can report a refusal at the
 machine's end, so it settles an entry as it settles every other field: a
 state outside the enum is written as `unanswered`, and a state without
-registers gets none. Its check refuses a state outside the enum, a
-nonzero byte where the state has no registers, and a nonzero entry past
-`ncpus`, as it refuses any other malformed field (`kernel/core/crash.c`,
+registers gets none; it writes each entry's number itself. Its check
+refuses an entry whose number is not its index, a state outside the
+enum, a nonzero byte where the state has no registers, a nonzero entry
+past `ncpus`, and an `ncpus` past `cpu_limit` or in the brief form, as
+it refuses any other malformed field (`kernel/core/crash.c`,
 `erx_crash_check`). `kernel/core/crash_read.c` and
 `tools/lib/erx/crash_frame.rb` read the entries and are held to the same
 answer on mutated frames, as they are for the rest of the record.

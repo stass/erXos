@@ -118,6 +118,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] crash record, `kernel/core/crash.c`, `kernel/core/machine_stop.c`,
+  `tools/lib/erx/crash_frame.rb`, `tools/fuzz/crash_fuzz.c`: which stop states carry
+  registers (design-debugger.md, "CPU stop states") is written in the stop core, the Ruby
+  reader, its test and the fuzz oracle. Make it an attribute of each `stop_cpu_state`
+  value in `abi/erx_abi.txt`, generated into C and Ruby, so a new state cannot leave the
+  record's check refusing its registers; the crash core then no longer links the stop core.
+* [Medium] crash seam, `include/erx/core/crash.h`: the writer takes CPU entries as
+  `const void *` laid out as `erx_crash_cpu_t`, which the seam does not declare, so the
+  Fiasco glue that fills them from the stop slots would have to reach `erx/abi.h`. Give
+  the seam a struct pinned to the generated layout, as `erx_crash_fault_t` is, before
+  that glue lands.
+* [Medium] crash fuzz, `tools/fuzz/crash_frame.rb`: the Ruby reader's target mutates
+  framed bytes without fixing the CRC, so its record checks (registers, frames, CPU
+  entries, text) and `report` are never reached. Add a full seed with entries and a mode
+  that mutates the record, recomputes the CRC and frames it.
 * [Medium] watchdog, `erlang/apps/erx/src/erx_watchdog.erl`: the process pets unconditionally
   and makes no liveness calls, where design-system.md (A6, and the failure table's row for a
   domain service that stops answering) has it pet only after every listed service answers

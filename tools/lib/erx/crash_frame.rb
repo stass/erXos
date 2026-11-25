@@ -43,6 +43,14 @@ module Erx
     SLOTS = [CODEC.member('boot_slot', 'a'), CODEC.member('boot_slot', 'b')].freeze
     VALUE_UNKNOWN = CODEC.member('boot_value', 'unknown')
     VALUES_WITH_SLOT = [CODEC.member('boot_value', 'normal'), CODEC.member('boot_value', 'trial')].freeze
+    # A CPU's stop state by value, and the states a reader has registers for
+    # (docs/design-debugger.md, "CPU stop states").
+    STATES = SCHEMA.types.fetch('stop_cpu_state').members.invert.freeze
+    WITH_REGISTERS = %w[leader stopped waiting concurrent starting].map { |name| CODEC.member('stop_cpu_state', name) }.freeze
+    CPU_ENTRIES = CODEC.constant('crash_cpus')
+    CPU_SIZE = CODEC.layout_size('erx_crash_cpu')
+    # An entry's words past its number and state, which only a state with registers sets.
+    REGISTER_WORDS = (SCHEMA.types.fetch('erx_crash_cpu').fields.map(&:name) - %w[cpu state]).freeze
 
     # A field's offset from the generated schema, never a copied number.
     def self.offset(layout, field)
@@ -51,10 +59,10 @@ module Erx
     private_class_method :offset
 
     CRC_START = offset('erx_crash_brief', 'crc') + 4
-    PADDING = ((offset('erx_crash_brief', 'nframes') + 4)...offset('erx_crash_brief', 'fault')).freeze
     REGS_OFFSET = offset('erx_crash_record', 'regs')
     FRAMES_OFFSET = offset('erx_crash_record', 'frames')
-    FRAMES_MAX = (RECORD_SIZE - FRAMES_OFFSET) / 8
+    CPUS_OFFSET = offset('erx_crash_record', 'cpus')
+    FRAMES_MAX = (CPUS_OFFSET - FRAMES_OFFSET) / 8
 
     # status is :absent, :valid, :truncated or :corrupt; reason says why, and
     # check which test a record failed. record and text are set only when
@@ -101,15 +109,25 @@ module Erx
       framing(header, bytes.bytesize) || crc_check(header, bytes) || fields(header, bytes) || body(header, bytes) || :ok
     end
 
-    # Lines for a terminal, each one already escaped.
+    # Lines for a terminal, each one already escaped: the record's fields, a
+    # line for each CPU entry, the text, and a failed frame's own lines.
     def report(result)
       head = ["crash frame: #{result.status}#{" (#{result.reason})" if result.reason}" \
               "#{" check #{result.check}" if result.check}"]
-      fields = (result.record || {}).map { |name, value| "#{name}: #{value}" }
+      record = result.record || {}
+      fields = record.except('cpus').map { |name, value| "#{name}: #{value}" }
+      cpus = record.fetch('cpus', []).map { |entry| cpu_line(entry) }
       text = (result.text || '').split("\n", -1)
       kept = result.status == :valid ? [] : result.lines
-      [*head, *fields, *text, *kept].map { |line| Terminal.escape(line) }
+      [*head, *fields, *cpus, *text, *kept].map { |line| Terminal.escape(line) }
     end
+
+    # A checked entry: its CPU, its state's name and the words its state has.
+    def cpu_line(entry)
+      words = WITH_REGISTERS.include?(entry.fetch('state')) ? REGISTER_WORDS.map { |word| format('%s 0x%x', word, entry.fetch(word)) } : []
+      ["cpu #{entry.fetch('cpu')}: #{STATES.fetch(entry.fetch('state'))}", *words].join(' ')
+    end
+    private_class_method :cpu_line
 
     def banner_end(bytes, banner)
       return 0 if banner.nil?
@@ -236,7 +254,9 @@ module Erx
       return CODEC.decode_layout('erx_crash_brief', record, prefix: true) if record.bytesize == BRIEF_SIZE
 
       full = CODEC.decode_layout('erx_crash_record', record, prefix: true)
-      full.fetch('header').merge('regs' => full.fetch('regs'), 'frames' => full.fetch('frames')).freeze
+      header = full.fetch('header')
+      cpus = full.fetch('cpus').first([header.fetch('ncpus'), CPU_ENTRIES].min)
+      header.merge('regs' => full.fetch('regs'), 'frames' => full.fetch('frames'), 'cpus' => cpus).freeze
     end
     private_class_method :decode_valid
 
@@ -277,9 +297,11 @@ module Erx
       return :cause unless CAUSE.value?(cause)
       return :cpu unless header.fetch('cpu') < CPU_LIMIT
       return :boot unless boot_pair?(header.fetch('boot_value'), header.fetch('boot_slot'))
-      return :padding unless zero?(bytes.byteslice(PADDING.begin, PADDING.size))
 
       full = header.fetch('form') == FORMS.fetch('full')
+      ncpus = header.fetch('ncpus')
+      return :ncpus if ncpus > CPU_LIMIT || (ncpus != 0 && !full)
+
       nframes = header.fetch('nframes')
       return :nframes if nframes > FRAMES_MAX || (nframes != 0 && !(full && cause == CAUSE.fetch(:panic)))
 
@@ -305,12 +327,30 @@ module Erx
         return :regs unless zero?(bytes.byteslice(REGS_OFFSET, REGS_SIZE))
       end
       unused = FRAMES_OFFSET + header.fetch('nframes') * 8
-      return :frames unless zero?(bytes.byteslice(unused, RECORD_SIZE - unused))
+      return :frames unless zero?(bytes.byteslice(unused, CPUS_OFFSET - unused))
+      return :cpus unless cpus_fit?(bytes, header.fetch('ncpus'))
 
       text = bytes.byteslice(RECORD_SIZE, header.fetch('length') - RECORD_SIZE)
       text.match?(/\A[\x20-\x7e\n]*\z/n) ? nil : :text
     end
     private_class_method :body
+
+    # Each of the first ncpus entries is its own CPU's, in a state of the enum,
+    # with no word its state does not have; every entry past them is zero.
+    def cpus_fit?(bytes, ncpus)
+      CPU_ENTRIES.times.all? do |index|
+        raw = bytes.byteslice(CPUS_OFFSET + index * CPU_SIZE, CPU_SIZE)
+        index < ncpus ? entry_fits?(CODEC.decode_layout('erx_crash_cpu', raw), index) : zero?(raw)
+      end
+    end
+    private_class_method :cpus_fit?
+
+    def entry_fits?(entry, index)
+      return false unless entry.fetch('cpu') == index && STATES.key?(entry.fetch('state'))
+
+      WITH_REGISTERS.include?(entry.fetch('state')) || REGISTER_WORDS.all? { |word| entry.fetch(word).zero? }
+    end
+    private_class_method :entry_fits?
 
     def zero?(bytes) = bytes.each_byte.all?(&:zero?)
     private_class_method :zero?

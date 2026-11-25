@@ -25,7 +25,7 @@ module Erx
                  'length' => FRAME::BRIEF_SIZE, 'crc' => 0, 'form' => FRAME::FORMS.fetch('brief'),
                  'cause' => FRAME::CAUSE.fetch(:watchdog), 'cpu' => 0, 'uptime_ns' => 1, 'since_pet_ns' => 1,
                  'build_id' => 'BUILDID8', 'boot_value' => FRAME::VALUE_UNKNOWN, 'boot_slot' => FRAME::SLOT_NONE,
-                 'nframes' => 0, 'fault' => fault }
+                 'nframes' => 0, 'ncpus' => 0, 'fault' => fault }
       record = FRAME::CODEC.encode_layout('erx_crash_brief', fields).dup
       record[FRAME::CRC_START - 4, 4] = [FRAME.crc32c(record.byteslice(FRAME::CRC_START..))].pack('L<')
       record
@@ -41,7 +41,7 @@ module Erx
 
     def seeds
       frame = frame_of(brief_record)
-      [frame, "text\n#{frame}tail\n", frame.gsub("\n", "\r\n"), "#{FRAME::BEGIN_MARKER} full 904\n", frame.lines[0...-1].join]
+      [frame, "text\n#{frame}tail\n", frame.gsub("\n", "\r\n"), "#{FRAME::BEGIN_MARKER} full #{FRAME::RECORD_SIZE}\n", frame.lines[0...-1].join]
     end
 
     def mutate(bytes, random)

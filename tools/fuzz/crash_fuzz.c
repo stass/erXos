@@ -20,7 +20,8 @@
  *      that the fields past the CRC are reached
  *   2: erx_crash_frame_read over any log
  *   3: erx_crash_record_write from any input, through the frame and back. The
- *      next byte selects: 1 registers, 2 frames, 4 a log, 8 the full form, 0x40
+ *      next byte selects: 1 registers and CPU entries, 2 frames, 4 a log, 8 the
+ *      full form, 0x40
  *      the form as the input has it, 0x80 scribble on the log's counters and
  *      ring; 0x30 scales the log's lines. The frame is written and read back
  *      for both kinds of end
@@ -31,6 +32,7 @@
 int LLVMFuzzerTestOneInput(const uint8_t *, size_t);
 
 static void fuzz_check(const uint8_t *, size_t);
+static bool fuzz_entries_expected(const uint8_t *, uint32_t);
 static bool fuzz_expected(const uint8_t *);
 static void fuzz_fixed(const uint8_t *, size_t);
 static void fuzz_handed_on(const uint8_t *, size_t);
@@ -64,13 +66,42 @@ fuzz_u32(const uint8_t *bytes, size_t offset)
 }
 
 /*
+ * The CPU entries: entry N is CPU N in a state 1 to 7 for N below the count,
+ * with nothing past its state unless the state is leader, stopped, waiting,
+ * concurrent or starting (2 to 6); every entry past the count is zero.
+ */
+static bool
+fuzz_entries_expected(const uint8_t *bytes, uint32_t ncpus)
+{
+	const uint8_t *entry;
+	uint32_t state;
+	size_t from;
+
+	for (uint32_t cpu = 0; cpu < ERX_CRASH_CPUS; cpu++) {
+		entry = bytes + ERX_CRASH_RECORD_OFF_CPUS + cpu * ERX_CRASH_CPU_SIZE;
+		from = 0;
+		if (cpu < ncpus) {
+			state = fuzz_u32(entry, 4);
+			if (fuzz_u32(entry, 0) != cpu || state < 1 || state > 7)
+				return (false);
+			from = state >= 2 && state <= 6 ? ERX_CRASH_CPU_SIZE : 8;
+		}
+		for (size_t index = from; index < ERX_CRASH_CPU_SIZE; index++) {
+			if (entry[index] != 0)
+				return (false);
+		}
+	}
+	return (true);
+}
+
+/*
  * An independent reading of the design's list, for a record whose framing and
  * CRC erx_crash_check has already accepted: the fields only.
  */
 static bool
 fuzz_expected(const uint8_t *bytes)
 {
-	uint32_t cause, form, kind, length, nframes, value, slot;
+	uint32_t cause, form, kind, length, ncpus, nframes, value, slot;
 	static const uint8_t none[ERX_REGS_SIZE];
 
 	form = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_FORM);
@@ -79,13 +110,14 @@ fuzz_expected(const uint8_t *bytes)
 	value = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_BOOT_VALUE);
 	slot = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_BOOT_SLOT);
 	nframes = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_NFRAMES);
+	ncpus = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_NCPUS);
 	kind = fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_FAULT);
 
 	if (cause < 1 || cause > 4 || fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_CPU) >= 64)
 		return (false);
 	if (value < 1 || value > 3 || slot > 2 || (value == 1) != (slot == 0))
 		return (false);
-	if (fuzz_u32(bytes, ERX_CRASH_BRIEF_OFF_NFRAMES + 4) != 0)
+	if (ncpus > 64 || (ncpus != 0 && form != 2))
 		return (false);
 	if (nframes > 64 || (nframes != 0 && (form != 2 || cause != 4)))
 		return (false);
@@ -103,10 +135,12 @@ fuzz_expected(const uint8_t *bytes)
 	    memcmp(bytes + ERX_CRASH_RECORD_OFF_REGS, none, sizeof(none)) != 0)
 		return (false);
 	for (size_t index = ERX_CRASH_RECORD_OFF_FRAMES + nframes * 8;
-	    index < ERX_CRASH_RECORD_SIZE; index++) {
+	    index < ERX_CRASH_RECORD_OFF_CPUS; index++) {
 		if (bytes[index] != 0)
 			return (false);
 	}
+	if (!fuzz_entries_expected(bytes, ncpus))
+		return (false);
 	for (size_t index = ERX_CRASH_RECORD_SIZE; index < length; index++) {
 		if (bytes[index] != '\n' && (bytes[index] < 0x20 || bytes[index] > 0x7e))
 			return (false);
@@ -252,6 +286,7 @@ fuzz_write(const uint8_t *bytes, size_t length)
 {
 	static const uint8_t regs[ERX_CRASH_REGS_BYTES] = { 1 };
 	static uint64_t frames[64] = { 0x1000, 0x1001 };
+	static erx_crash_cpu_t cpus[ERX_CRASH_CPUS];
 	static _Alignas(8) uint8_t back[ERX_CRASH_SIZE];
 	static const erx_crash_end_t ends[] = { ERX_CRASH_END_FAULT,
 	    ERX_CRASH_END_WATCHDOG, ERX_CRASH_END_TASK };
@@ -276,6 +311,10 @@ fuzz_write(const uint8_t *bytes, size_t length)
 	}
 	input.regs = (selector & 1) != 0 ? regs : NULL;
 	input.frames = (selector & 2) != 0 ? frames : NULL;
+	/* The entries are the message's bytes: any state, any words. */
+	memset(cpus, 0, sizeof(cpus));
+	memcpy(cpus, bytes, length < sizeof(cpus) ? length : sizeof(cpus));
+	input.cpus = (selector & 1) != 0 ? cpus : NULL;
 	input.message = (const char *)bytes;
 	input.message_length = length;
 	input.log = NULL;

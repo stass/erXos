@@ -581,13 +581,14 @@ module Erx
       end
 
       # What the crash core's seam needs of the ABI: every value the glue
-      # hands the crash record's writer, spelled as include/erx/abi.h spells
-      # it, so a file that includes both redefines nothing differently.
+      # hands the crash record's writer, the sizes of its registers and of
+      # its CPU entries among them, spelled as include/erx/abi.h spells it,
+      # so a file that includes both redefines nothing differently.
       def crash_seam(schema)
         members = %w[crash_cause crash_form boot_value boot_slot].flat_map do |name|
           schema.types.fetch(name).members.keys.sort.map { |member| "#{Model.constant_prefix(name)}_#{member}" }
         end
-        constants = [*members, 'crash_size', 'build_id_size'].map { |name| schema.constants.fetch(name) }
+        constants = [*members, 'crash_size', 'crash_cpus', 'build_id_size'].map { |name| schema.constants.fetch(name) }
         values = schema.types.fetch('fault_kind').members.values
         raise SchemaError, 'a fault kind does not fit the crash seam\'s mask' unless values.all? { |value| value.between?(0, 31) }
 
@@ -597,7 +598,8 @@ module Erx
          '#include <stddef.h>', '#include <stdint.h>', '',
          *constants.map { |item| CEmitter.constant_definition(item) },
          "#define ERX_CRASH_FAULT_KINDS UINT32_C(#{format('0x%x', kinds)})",
-         "#define ERX_CRASH_REGS_BYTES #{regs.size}", '',
+         "#define ERX_CRASH_REGS_BYTES #{regs.size}",
+         "#define ERX_CRASH_CPU_BYTES #{schema.types.fetch('erx_crash_cpu').size}", '',
          *%w[boot_value boot_slot].flat_map { |name| CEmitter.enum_name_lookup(schema.types.fetch(name)) },
          '#endif /* ERX_CORE_ABI_CRASH_H */', ''].join("\n")
       end

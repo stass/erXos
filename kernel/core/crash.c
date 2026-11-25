@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #include "erx/core/boot_pair.h"
+#include "erx/core/machine_stop.h"
 #include "erx/crash.h"
 #include "erx/log.h"
 
@@ -39,14 +40,12 @@ _Static_assert(ERX_FAULT_OFF_PC == offsetof(erx_crash_fault_t, pc), "pc");
 _Static_assert(ERX_FAULT_OFF_THREAD == offsetof(erx_crash_fault_t, thread), "thread");
 _Static_assert(ERX_FAULT_OFF_SPACE == offsetof(erx_crash_fault_t, space), "space");
 _Static_assert(ERX_FAULT_OFF_STATUS == offsetof(erx_crash_fault_t, status), "status");
+_Static_assert(ERX_CRASH_CPU_SIZE == ERX_CRASH_CPU_BYTES, "CPU entry bytes");
 
-/* The padding between nframes and the fault record. */
-#define ERX_CRASH_PADDING_OFF	(ERX_CRASH_BRIEF_OFF_NFRAMES + sizeof(uint32_t))
-#define ERX_CRASH_PADDING_BYTES	(ERX_CRASH_BRIEF_OFF_FAULT - ERX_CRASH_PADDING_OFF)
 /* Bytes after the crc field, where the CRC starts. */
 #define ERX_CRASH_CRC_START	(ERX_CRASH_BRIEF_OFF_CRC + sizeof(uint32_t))
 #define ERX_CRASH_FRAMES_MAX	\
-	((ERX_CRASH_RECORD_SIZE - ERX_CRASH_RECORD_OFF_FRAMES) / sizeof(uint64_t))
+	((ERX_CRASH_RECORD_OFF_CPUS - ERX_CRASH_RECORD_OFF_FRAMES) / sizeof(uint64_t))
 #define ERX_CRASH_TEXT_ROOM	(ERX_CRASH_SIZE - ERX_CRASH_RECORD_SIZE)
 /* A panic message gets one log record's text, so it never crowds out the log. */
 #define ERX_CRASH_MESSAGE_MAX	ERX_LOG_TEXT_MAX
@@ -73,8 +72,8 @@ typedef struct erx_crash_log_walk {
 
 static bool erx_crash_all_zero(const uint8_t *, size_t);
 static bool erx_crash_cause_known(uint32_t);
-static erx_crash_check_t erx_crash_check_body(const uint8_t *, uint32_t, uint32_t,
-    uint32_t);
+static bool erx_crash_cpus_fit(const uint8_t *, uint32_t);
+static erx_crash_check_t erx_crash_check_body(const uint8_t *, const erx_crash_brief_t *);
 static bool erx_crash_fault_fits(uint32_t, const erx_crash_fault_t *);
 static bool erx_crash_kind_known(uint32_t);
 static bool erx_crash_log_next(erx_crash_log_walk_t *, size_t *);
@@ -83,6 +82,7 @@ static erx_crash_log_walk_t erx_crash_log_start(const erx_log_t *,
 static size_t erx_crash_log_tail(const erx_log_t *, erx_crash_scratch_t *, char *,
     size_t);
 static void erx_crash_settle(const erx_crash_input_t *, erx_crash_brief_t *);
+static void erx_crash_write_cpus(const erx_crash_input_t *, erx_crash_record_t *);
 static uint32_t erx_crash_write_body(const erx_crash_input_t *, erx_crash_record_t *,
     erx_crash_scratch_t *);
 
@@ -273,6 +273,41 @@ erx_crash_log_tail(const erx_log_t *log, erx_crash_scratch_t *scratch, char *dst
 	return (used);
 }
 
+/*
+ * The stop's CPU entries, for the full form. Entry N is CPU N, so the writer
+ * writes each number itself. A state outside the enum is unanswered, what a
+ * CPU nobody heard from is, and a state without registers keeps none, so the
+ * check accepts whatever the stop handed over. A census count past the limit
+ * is the limit; no entries mean no census.
+ */
+static void
+erx_crash_write_cpus(const erx_crash_input_t *input, erx_crash_record_t *record)
+{
+	erx_crash_cpu_t entry, *out;
+	uint32_t ncpus;
+
+	if (input->cpus == NULL)
+		return;
+	ncpus = input->ncpus < ERX_CPU_LIMIT ? input->ncpus : ERX_CPU_LIMIT;
+	record->header.ncpus = ncpus;
+	for (uint32_t cpu = 0; cpu < ncpus && cpu < ERX_CRASH_CPUS; cpu++) {
+		__builtin_memcpy(&entry, (const uint8_t *)input->cpus + cpu * sizeof(entry),
+		    sizeof(entry));
+		out = &record->cpus[cpu];
+		out->cpu = cpu;
+		out->state = erx_stop_cpu_state_name(entry.state) != NULL ? entry.state :
+		    ERX_STOP_CPU_STATE_UNANSWERED;
+		if (!erx_machine_stop_has_regs(out->state))
+			continue;
+		out->pc = entry.pc;
+		out->sp = entry.sp;
+		out->fp = entry.fp;
+		out->return_address = entry.return_address;
+		out->processor_state = entry.processor_state;
+		out->aux = entry.aux;
+	}
+}
+
 /* The full form's fields past the brief form's end; returns the record's length. */
 static uint32_t
 erx_crash_write_body(const erx_crash_input_t *input, erx_crash_record_t *record,
@@ -295,6 +330,7 @@ erx_crash_write_body(const erx_crash_input_t *input, erx_crash_record_t *record,
 		    nframes * sizeof(uint64_t));
 		record->header.nframes = nframes;
 	}
+	erx_crash_write_cpus(input, record);
 
 	text = (char *)record + ERX_CRASH_RECORD_SIZE;
 	room = ERX_CRASH_TEXT_ROOM;
@@ -333,21 +369,54 @@ erx_crash_record_write(const erx_crash_input_t *input, void *buffer, void *scrat
 	return (length);
 }
 
+/*
+ * The CPU entries of a full record whose census count the header check has
+ * bounded: each of the first ncpus is its own CPU's, in a state of the enum,
+ * with no register word where the state has none, and every entry past them
+ * is zero.
+ */
+static bool
+erx_crash_cpus_fit(const uint8_t *bytes, uint32_t ncpus)
+{
+	erx_crash_cpu_t entry;
+	const uint8_t *at;
+
+	for (uint32_t cpu = 0; cpu < ERX_CRASH_CPUS; cpu++) {
+		at = bytes + ERX_CRASH_RECORD_OFF_CPUS + cpu * sizeof(entry);
+		if (cpu >= ncpus) {
+			if (!erx_crash_all_zero(at, sizeof(entry)))
+				return (false);
+			continue;
+		}
+		__builtin_memcpy(&entry, at, sizeof(entry));
+		if (entry.cpu != cpu || erx_stop_cpu_state_name(entry.state) == NULL)
+			return (false);
+		if (!erx_machine_stop_has_regs(entry.state) &&
+		    !erx_crash_all_zero(at + ERX_CRASH_CPU_OFF_PC,
+		    sizeof(entry) - ERX_CRASH_CPU_OFF_PC))
+			return (false);
+	}
+	return (true);
+}
+
 /* The full form's fields past the brief form's end. */
 static erx_crash_check_t
-erx_crash_check_body(const uint8_t *bytes, uint32_t length, uint32_t cause,
-    uint32_t nframes)
+erx_crash_check_body(const uint8_t *bytes, const erx_crash_brief_t *header)
 {
 	const uint8_t *frames;
+	uint32_t cause;
 	uint8_t byte;
 
+	cause = header->cause;
 	if (cause != ERX_CRASH_CAUSE_FAULT && cause != ERX_CRASH_CAUSE_PANIC &&
 	    !erx_crash_all_zero(bytes + ERX_CRASH_RECORD_OFF_REGS, ERX_REGS_SIZE))
 		return (ERX_CRASH_CHECK_REGS);
-	frames = bytes + ERX_CRASH_RECORD_OFF_FRAMES + nframes * sizeof(uint64_t);
-	if (!erx_crash_all_zero(frames, (size_t)(bytes + ERX_CRASH_RECORD_SIZE - frames)))
+	frames = bytes + ERX_CRASH_RECORD_OFF_FRAMES + header->nframes * sizeof(uint64_t);
+	if (!erx_crash_all_zero(frames, (size_t)(bytes + ERX_CRASH_RECORD_OFF_CPUS - frames)))
 		return (ERX_CRASH_CHECK_FRAMES);
-	for (uint32_t index = ERX_CRASH_RECORD_SIZE; index < length; index++) {
+	if (!erx_crash_cpus_fit(bytes, header->ncpus))
+		return (ERX_CRASH_CHECK_CPUS);
+	for (uint32_t index = ERX_CRASH_RECORD_SIZE; index < header->length; index++) {
 		byte = bytes[index];
 		if (byte != '\n' && (byte < 0x20 || byte > 0x7e))
 			return (ERX_CRASH_CHECK_TEXT);
@@ -395,8 +464,9 @@ erx_crash_check(const void *bytes, size_t available)
 		return (ERX_CRASH_CHECK_CPU);
 	if (!erx_boot_pair_valid(header.boot_value, header.boot_slot))
 		return (ERX_CRASH_CHECK_BOOT);
-	if (!erx_crash_all_zero(in + ERX_CRASH_PADDING_OFF, ERX_CRASH_PADDING_BYTES))
-		return (ERX_CRASH_CHECK_PADDING);
+	if (header.ncpus > ERX_CPU_LIMIT ||
+	    (header.ncpus != 0 && header.form != ERX_CRASH_FORM_FULL))
+		return (ERX_CRASH_CHECK_NCPUS);
 	if (header.nframes > ERX_CRASH_FRAMES_MAX || (header.nframes != 0 &&
 	    (header.form != ERX_CRASH_FORM_FULL ||
 	    header.cause != ERX_CRASH_CAUSE_PANIC)))
@@ -406,8 +476,7 @@ erx_crash_check(const void *bytes, size_t available)
 		return (ERX_CRASH_CHECK_FAULT);
 	if (header.form == ERX_CRASH_FORM_BRIEF)
 		return (ERX_CRASH_CHECK_OK);
-	return (erx_crash_check_body(in, header.length, header.cause,
-	    header.nframes));
+	return (erx_crash_check_body(in, &header));
 }
 
 const char *
@@ -425,11 +494,12 @@ erx_crash_check_reason(erx_crash_check_t status)
 		[ERX_CRASH_CHECK_CAUSE] = "the cause is not one of the four",
 		[ERX_CRASH_CHECK_CPU] = "the CPU is past the limit",
 		[ERX_CRASH_CHECK_BOOT] = "the boot value and slot are no allowed pair",
-		[ERX_CRASH_CHECK_PADDING] = "the padding is not zero",
+		[ERX_CRASH_CHECK_NCPUS] = "the CPU count is past the limit or set in the brief form",
 		[ERX_CRASH_CHECK_NFRAMES] = "the frame count is wrong for the form and cause",
 		[ERX_CRASH_CHECK_FAULT] = "the fault record contradicts the cause",
 		[ERX_CRASH_CHECK_REGS] = "registers are set where the cause has none",
 		[ERX_CRASH_CHECK_FRAMES] = "frames are set past the frame count",
+		[ERX_CRASH_CHECK_CPUS] = "a CPU entry breaks its state's rules",
 		[ERX_CRASH_CHECK_TEXT] = "the text holds a byte neither printable nor a newline",
 		[ERX_CRASH_CHECK_NOT_RUN] = "the frame stopped before the record",
 	};
