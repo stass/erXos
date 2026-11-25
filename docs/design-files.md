@@ -508,6 +508,20 @@ version alone free; and a client takes a file's version only from
 `getattr`, which asks the tree each time, never from a qid's `Version`
 ([Identity and version](#identity-and-version)).
 
+A tree whose nodes are paths, as the storage volume's are, roots a
+grant at the path its start fixed, so the fixed root holds only while
+that directory stays where it is, and a tree that cannot answer its
+root, a directory the volume lacks or an owner that has ended, fails
+the grant's start rather than fixing a made-up identity. A rename or
+removal of a grant's root directory through another grant of the tree
+fails safe and is not repaired: the grant keeps its root path, so it
+never reaches anything outside the subtree it was granted; its
+requests fail with the errors the tree answers for a path it lacks,
+and an `attach` answers `eio`, until the grant is restarted. A
+directory made later at the same path is served as the root, under
+the same authority, though a walk of no names from `NOFID` still
+records the identity the start fixed.
+
 At an edge `NOFID` keeps 9P2000.L's meaning and names no fid. A
 bridge's fid tables never hold it, and a bridge renames a walk's source
 through the codec's `fids/1` and `map_fids/2` as it renames every fid
@@ -1515,7 +1529,7 @@ construction rather than by a check at each use:
 * beneath a grant pid's entry is a grant of the domain's own, which the
   mount takes as `{Pid, Tree, Rights}`, built by what started the grant
   with the tree it answered and the rights it started it with:
-  `erx_fs:start_mounted/5`, which starts a tree's grant and mounts it,
+  `erx_fs:start_mounted/4`, which starts a tree's grant and mounts it,
   naming its rights once, or `erx_fs_grants:own/1,2`, whose answer
   `erx_ns:mount_own/2` mounts.
   `erx_ns` gives the entry the lesser of those and the rights the
@@ -1602,7 +1616,7 @@ domain's grant, and rights wider than the grant's buy nothing, since the
 grant's funnel refuses every write its own rights forbid (F5). Its tree
 does rest on one assumption, stated here: a handle is built only by the
 starter of the grant it names, from `erx_fs:start_link/3,4`'s answer,
-by `erx_fs:start_mounted/5` or `erx_fs_grants:own/1,2`, whose type,
+by `erx_fs:start_mounted/4` or `erx_fs_grants:own/1,2`, whose type,
 `erx_fs:grant_handle()`, is opaque, so Dialyzer refuses any other
 construction. A domain whose own code broke that assumption would key
 files of its own runtime's grants under a wrong tree, confusing only its

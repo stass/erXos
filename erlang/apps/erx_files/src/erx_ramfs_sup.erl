@@ -54,5 +54,5 @@ init({Cap, Point, Name}) ->
 -spec start_grant(atom(), binary()) -> {ok, pid()} | {error, term()}.
 start_grant(Name, Point) ->
     ok = code:ensure_modules_loaded(erx_ramfs_serving:modules()),
-    erx_fs:start_mounted(erx_ramfs, Name, rw, Point, <<"tmp">>).
+    erx_fs:start_mounted(erx_ramfs, Name, rw, Point).
 

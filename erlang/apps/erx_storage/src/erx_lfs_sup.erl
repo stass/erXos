@@ -56,7 +56,7 @@ start_grant(Name) ->
             ignore;
         _ ->
             ok = code:ensure_modules_loaded([erx_fs, erx_fs_grant, erx_lfs, erx_littlefs]),
-            erx_fs:start_mounted(erx_lfs, {Name, data}, rw, ?POINT, <<"data">>)
+            erx_fs:start_mounted(erx_lfs, {Name, data}, rw, ?POINT)
     end.
 
 -doc false.

@@ -210,6 +210,8 @@ app_package(Bytes) ->
     {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"packages">>},
                                                       {file, <<"clock.app">>, Bytes}], rx),
     unlink(Grant),
+    %% The grant's start asks the tree's root once, before it answers.
+    [root] = tree_calls(),
     persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, rx}}}}),
     {_, Layout} = package(),
     persistent_term:put(erx_connections_app, {ok, #{place => {packages, [<<"clock.app">>]}, layout => Layout,
@@ -431,7 +433,7 @@ an_own_tree_mounts_its_grant_at_its_place() ->
 %% whatever else it holds (docs/design-packaging.md, "Where a package lies"). A tree a
 %% session mounts has no system place.
 the_packages_place_is_the_system_domains_alone() ->
-    ?assertEqual({<<"/packages">>, [{tree, <<"packages">>}, rw]}, erx_ns:packages_place()),
+    ?assertEqual({<<"/packages">>, [{tree, <<"data">>}, rw]}, erx_ns:packages_place()),
     ?assertEqual(ok, erx_ns:mount_facets([packages, system, data, apps, start, machine, line])),
     ?assertEqual([], [Entry || #{point := [<<"packages">> | _]} = Entry <- at_use()]).
 
@@ -439,7 +441,7 @@ the_packages_place_is_the_system_domains_alone() ->
 %% /home/NAME, and a name that is not one path name has none, so no name places a
 %% home above /home (docs/design-files.md, "A user's home").
 home_places_test() ->
-    Options = [{tree, <<"home">>}, rw],
+    Options = [{tree, <<"data">>}, rw],
     ?assertEqual({ok, {<<"/root">>, Options}}, erx_ns:home_place(<<"root">>)),
     ?assertEqual({ok, {<<"/home/clock">>, Options}}, erx_ns:home_place(<<"clock">>)),
     [?assertEqual({error, einval}, erx_ns:home_place(Name))

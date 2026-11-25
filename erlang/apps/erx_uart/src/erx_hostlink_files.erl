@@ -25,8 +25,9 @@ Which trees the host may reach is the host-link configuration's:
 one, and otherwise the build's (`default_trees/1`): `proc` and `data` in a
 development build, none in a release build, as erx_build:development/0
 tells them apart, a manifest that cannot be read counting as a release
-build's. Each tree is found among the system domain's namespace entries as
-the grant mounted with that tree name and no root below it (`tree_grant/3`).
+build's. Each name is found among the system domain's namespace entries as
+the grant mounted whole at the top-level point of that name, and the attach
+relayed to it names the grant's own tree (`tree_grant/3`).
 """.
 
 -export([start/2, tree_grant/3, configured_trees/0, default_trees/1]).
@@ -104,15 +105,18 @@ new_alias() ->
     erlang:alias([reply]).
 
 -doc """
-The grant of tree `Aname` when it is one of `Names` and the namespace `Table`
-mounts it whole, as `erx_ns` entries `{grant, Pid, Tree}` with root `[]`;
-`error` otherwise. Pure, for the tests.
+The grant `Aname` names when it is one of `Names` and the namespace `Table`
+mounts a whole grant at the top-level point `Aname`, as an `erx_ns` entry
+`{grant, Pid, Tree}` with root `[]`, and the tree `Tree` that grant answers,
+which the relayed attach names: several grants may answer one tree, so the
+point, not the tree, selects the grant; `error` otherwise. Pure, for the tests.
 """.
--spec tree_grant(binary(), [binary()], erx_ns:table()) -> {ok, pid()} | error.
+-spec tree_grant(binary(), [binary()], erx_ns:table()) -> {ok, pid(), binary()} | error.
 tree_grant(Aname, Names, Table) ->
-    Mounted = [Pid || #{provider := {grant, Pid, Tree}, root := []} <- Table, Tree =:= Aname],
+    Mounted = [{Pid, Tree} || #{point := [Point], provider := {grant, Pid, Tree}, root := []} <- Table,
+                              Point =:= Aname],
     case {lists:member(Aname, Names), Mounted} of
-        {true, [Pid | _]} -> {ok, Pid};
+        {true, [{Pid, Tree} | _]} -> {ok, Pid, Tree};
         _ -> error
     end.
 

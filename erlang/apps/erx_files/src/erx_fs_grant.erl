@@ -58,7 +58,7 @@ fids name, whichever way the step went: a walk that stopped, a reply the
 check rejected, a clunk, `..`, an owner's end.
 """.
 
--export([new/1, tree/1, handle_frame/2, monitored/3, waiting/3, answered/3, down/3, client_ended/1,
+-export([new/1, tree/1, rights/1, handle_frame/2, monitored/3, waiting/3, answered/3, down/3, client_ended/1,
          drained/1, info/1, in_flight_max/0]).
 
 -export_type([grant/0, effect/0, rights/0, client/0]).
@@ -234,6 +234,10 @@ admitted_root(_) ->
 -doc "The tree the grant reaches files of, as its start admitted it.".
 -spec tree(grant()) -> binary().
 tree(#grant{tree = Tree}) -> Tree.
+
+-doc "The rights the grant serves: those it was made with, `ro` for `rw` on a tree that writes nothing.".
+-spec rights(grant()) -> rights().
+rights(#grant{rights = Rights}) -> Rights.
 
 -doc "One message the grant received, other than a `DOWN` or a keeper's answer.".
 -spec handle_frame(term(), grant()) -> {[effect()], grant()}.

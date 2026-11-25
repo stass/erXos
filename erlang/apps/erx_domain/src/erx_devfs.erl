@@ -68,7 +68,7 @@ start_link() ->
     end.
 
 serve() ->
-    case erx_fs:start_mounted(?MODULE, #{rights => rw}, rw, ?POINT, ?TREE) of
+    case erx_fs:start_mounted(?MODULE, #{rights => rw}, rw, ?POINT) of
         {ok, Grant} ->
             {ok, Grant};
         {error, Reason} ->

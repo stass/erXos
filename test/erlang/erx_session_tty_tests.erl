@@ -36,7 +36,7 @@ leaving the other tty and the line's `user` running.
 %% directory; a session without one starts them at /, and its terminal sets no $home,
 %% so rc keeps its default, /.
 home_test() ->
-    Home = {ok, {<<"/root">>, [{tree, <<"home">>}, rw]}},
+    Home = {ok, {<<"/root">>, [{tree, <<"data">>}, rw]}},
     Write = fun(_) -> ok end,
     {erx_shell, server, [{erx_shell_runner, #{vars := #{<<"home">> := [<<"/root">>]}, cwd := <<"/root">>} = At}]} =
         erx_session_tty:shell_of(shell, #{write => Write}, Home),

@@ -47,14 +47,14 @@ packages tree's `installed/`, where the app template's grant roots, and `home`,
 the grantee's user's home, made by the grant's start when the volume lacks it;
 the home tree has no root of its own, so a home grant whose row states no tree
 is not started.
-tree_root/1 is the one table of the roots. A grant names its root in init/1
+root_path/1 is the one table of the roots. A grant names its root in init/1
 and roots there, and nothing it sends names a node above that root:
 the grant answers `..` itself, staying at its root (erx_fs_grant), and every
 path the owner makes extends a node the grant already holds by one name that
 is neither `.` nor `..` (child/2). The mount makes each root's directory the
 volume lacks, each after the one it lies within; one it cannot make is
 logged and costs only the grants rooted there, whose
-requests then fail, never the volume or the `data` tree.
+starts then fail (root/1), never the volume or the `data` tree.
 
 Every grant of the volume answers `root` with one tree name, `data`, whatever its
 service or root: a tree is the numbering its files' qid paths come from, and the
@@ -80,13 +80,12 @@ only on a request that carries the reference.
 -include("generated/erx_abi.hrl").
 
 -export([start_link/2, owner/1, worker/2, trees/0, subtree/3]).
-%% The one tree the volume's qid paths come from, which every grant of it answers.
--define(TREE, <<"data">>).
-
 -export([init/1, root/1, walk/3, getattr/2, open/3, read/4, readdir/4, statfs/1,
          clunk/2, write/4, make/4, setattr/3, unlink/4, rename/5,
          fsync/2]).
 
+%% The one tree the volume's qid paths come from, which every grant of it answers.
+-define(TREE, <<"data">>).
 -define(ROOT, <<"/">>).
 -define(BLOCK_SIZE, 4096).
 -define(SECTOR_SIZE, 512).
@@ -267,7 +266,7 @@ reply(Alias, Reply) -> erlang:send(Alias, {?MODULE, Alias, Reply}).
 %% say, is logged and leaves the grants rooted there failing their requests.
 mount(Vol) ->
     case erx_littlefs:mount(Vol) of
-        ok -> make_roots(Vol, [Root || Root <- [tree_root(At) || At <- roots()], Root =/= ?ROOT]);
+        ok -> make_roots(Vol, [Root || Root <- [root_path(At) || At <- roots()], Root =/= ?ROOT]);
         Error -> Error
     end.
 
@@ -664,14 +663,14 @@ subtree({_Name, _Tree}, _Subtree, _Grantee) -> {error, einval}.
 roots() -> [data, packages, installed].
 
 %% Where each root of roots/0, and a home, lies in the volume.
-tree_root(data) -> ?ROOT;
-tree_root(packages) -> <<"/packages">>;
-tree_root(installed) -> <<"/packages/installed">>;
-tree_root({home, Home}) -> Home.
+root_path(data) -> ?ROOT;
+root_path(packages) -> <<"/packages">>;
+root_path(installed) -> <<"/packages/installed">>;
+root_path({home, Home}) -> Home.
 
 -doc false.
 init({Name, Tree}) when is_atom(Name) ->
-    Root = tree_root(Tree),
+    Root = root_path(Tree),
     {Pid, Secret} = persistent_term:get({?MODULE, Name}),
     true = Pid =:= whereis(Name),
     Server = {Pid, Secret, Tree},
@@ -681,8 +680,8 @@ init({Name, Tree}) when is_atom(Name) ->
 %% A home grant's start makes the home's directories the volume lacks, /home before
 %% /home/NAME, each through the owner's own make, so a user's first login creates
 %% the home (docs/design-files.md, "A user's home"). Each answer is ignored: a
-%% directory that exists answers eexist, and one that cannot be made leaves the
-%% grant's requests failing, as a root the mount cannot make does.
+%% directory that exists answers eexist, and one that cannot be made fails the
+%% grant's start at root/1, as a root the mount cannot make does.
 make_home({home, _}, Home, Server) ->
     Make = fun(Name, Dir) ->
                    _ = call(Server, {make, Dir, Name, {directory, 8#755}}),
@@ -695,12 +694,13 @@ make_home(_Tree, _Root, _Server) ->
 
 -doc false.
 root({_Pid, _Secret, Tree} = Server) ->
-    Root = tree_root(Tree),
+    Root = root_path(Tree),
+    %% A grant's root identity is fixed for its life (erx_fs_grant:new/1), so a
+    %% root the owner cannot answer, an owner that has ended or a root directory
+    %% the volume lacks, fails the grant's start rather than fixing a made-up one.
     case call(Server, {getattr, Root}) of
         {ok, #{qid := Qid}} -> {ok, ?TREE, Root, Qid};
-        %% An owner that has ended still roots a tree, whose every
-        %% request then answers eio.
-        _ -> {ok, ?TREE, Root, {?ERX_P9_QTDIR, 0, 0}}
+        {error, _} = Error -> Error
     end.
 
 -doc false.

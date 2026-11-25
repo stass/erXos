@@ -44,7 +44,7 @@ same tree. A callback's answer that is not one of its shapes reaches the
 client as `eio`.
 """.
 
--export([start_link/3, start_link/4, start_mounted/5]).
+-export([start_link/3, start_link/4, start_mounted/4]).
 -export([init/2, loop/2, drain/1, format_status/1]).
 
 -include("erx_fs_waits.hrl").
@@ -76,7 +76,8 @@ client as `eio`.
 -callback subtree(Args :: term(), Tree :: atom(), Grantee :: erx_fs_grants:grantee()) ->
               {ok, Args1 :: term()} | {error, einval}.
 %% The tree the grant roots in: its name, which attach's Aname must match, and its root.
--callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()}.
+%% An error fails the grant's start, as an answer that fails the root's check does.
+-callback root(Fs :: term()) -> {ok, Tree :: binary(), Node :: term(), qid()} | {error, file:posix()}.
 -callback walk(Node :: term(), Name :: binary(), Fs :: term()) ->
               {ok, Node1 :: term(), qid()} | {error, file:posix()}.
 %% A tree that adds forget keeps each node its walk answers alive for the
@@ -135,7 +136,8 @@ client as `eio`.
 
 -doc """
 Serves one grant of `Module`'s tree to the server's own domain, and answers its
-pid with its handle, which carries the tree the callback module's `root` names. The
+pid with its handle, which carries the tree the callback module's `root` names and
+the rights the grant serves, `ro` for `rw` on a tree that writes nothing. The
 root is asked once and checked before the grant takes any request; a root that
 fails the check fails the start with `{error, root}` (erx_fs_grant:new/1).
 """.
@@ -146,26 +148,30 @@ start_link(Module, Args, Rights) ->
 
 -doc """
 Serves one grant of `Module`'s tree to the server's own domain, as
-start_link/3 does, and mounts it at `Point` on its tree `Tree` with the
-rights it was started with, `{Pid, Rights}` (erx_ns:mount/3), after
-removing any entry an earlier instance left there. So the entry's rights
-are the grant's, named once (docs/design-files.md, "Rights beneath an
+start_link/3 does, and mounts it at `Point` with the tree and the rights
+its handle carries, `{Pid, Rights}` (erx_ns:mount/3), after removing any
+entry an earlier instance left there. So the entry's tree and rights are
+the grant's, named once (docs/design-files.md, "Rights beneath an
 entry"). A mount that fails ends the grant, which the caller's supervisor
 does not know of, and answers its `{error, Reason}`.
 """.
--spec start_mounted(module(), term(), erx_fs_grant:rights(), binary(), binary()) ->
+-spec start_mounted(module(), term(), erx_fs_grant:rights(), binary()) ->
           {ok, pid()} | {error, term()}.
-start_mounted(Module, Args, Rights, Point, Tree) ->
-    {ok, Grant, _} = start_link(Module, Args, Rights),
-    _ = erx_ns:unmount(Point),
-    case erx_ns:mount({Grant, Rights}, Point, [{tree, Tree}, Rights]) of
-        ok ->
-            {ok, Grant};
-        {error, _} = Error ->
-            unlink(Grant),
-            exit(Grant, kill),
-            Error
+start_mounted(Module, Args, Requested, Point) ->
+    case start_link(Module, Args, Requested) of
+        {ok, Grant, {Grant, Tree, Rights}} ->
+            _ = erx_ns:unmount(Point),
+            mounted(Grant, erx_ns:mount({Grant, Rights}, Point, [{tree, Tree}, Rights]));
+        {error, _} = Refused ->
+            Refused
     end.
+
+mounted(Grant, ok) ->
+    {ok, Grant};
+mounted(Grant, {error, _} = Error) ->
+    unlink(Grant),
+    exit(Grant, kill),
+    Error.
 
 -doc """
 Serves one grant of `Module`'s tree. `client` names the domain the grant is
@@ -211,21 +217,21 @@ init(Parent, {Module, Args, Rights, Options}) ->
     case erx_fs_grant:new((maps:with([pool, in_flight, msize], Options))#{
                             module => Module, fs => Fs, rights => Rights, client => Client}) of
         {ok, Grant} ->
-            serve(Parent, Grant, Rights, Client, Options);
+            serve(Parent, Grant, Client, Options);
         {error, root} = Refused ->
             proc_lib:init_ack(Parent, Refused)
     end.
 
 %% A grant whose root the core admitted, exported to its client and then
 %% answered with its handle.
-serve(Parent, Grant, Rights, Client, Options) ->
+serve(Parent, Grant, Client, Options) ->
     %% The monitor comes first: a connection that ends at any time from here on,
     %% before the export or after it, ends the grant, and a port or process that
     %% has ended already is answered at once with a 'DOWN'.
     ConnectionMonitor = connection_monitor(Client, Options),
     case export(Client, maps:get(exports, Options, erx_dist)) of
         ok ->
-            proc_lib:init_ack(Parent, {ok, self(), {self(), erx_fs_grant:tree(Grant), Rights}}),
+            proc_lib:init_ack(Parent, {ok, self(), {self(), erx_fs_grant:tree(Grant), erx_fs_grant:rights(Grant)}}),
             loop(Grant, ConnectionMonitor);
         {error, _} = Refused ->
             proc_lib:init_ack(Parent, Refused)

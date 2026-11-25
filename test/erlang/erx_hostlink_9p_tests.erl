@@ -27,7 +27,7 @@ core() ->
 core(Options) ->
     A = spawn(fun() -> receive stop -> ok end end),
     B = spawn(fun() -> receive stop -> ok end end),
-    Trees = fun(<<"a">>) -> {ok, A}; (<<"b">>) -> {ok, B}; (_) -> error end,
+    Trees = fun(<<"a">>) -> {ok, A, <<"a">>}; (<<"b">>) -> {ok, B, <<"b">>}; (_) -> error end,
     {erx_hostlink_9p:new(Options#{trees => Trees, alias => fun make_ref/0}), A, B}.
 
 %% One host message with the drawn fid Drawn; the alias is that of the one
@@ -160,6 +160,34 @@ attach_names_only_listed_trees_test() ->
     ?assertEqual({2, {error, enoent}}, answer(Effects)),
     {_, _, Effects1} = host(2, {attach, 1, 5, <<"u">>, <<"a">>, 0}, 101, versioned(Bridge)),
     ?assertEqual({2, {error, einval}}, answer(Effects1)).
+
+%% The host's Aname names a mount point at the top of the namespace, and the attach
+%% the bridge relays names that grant's own tree: the storage volume's packages grant
+%% answers the tree data, which its point's name does not select
+%% (docs/design-live.md, "A host client mounts an erXos tree").
+attach_relays_the_grants_own_tree_test() ->
+    Grant = spawn(fun() -> receive stop -> ok end end),
+    Trees = fun(<<"packages">>) -> {ok, Grant, <<"data">>}; (_) -> error end,
+    Bridge = erx_hostlink_9p:new(#{trees => Trees, alias => fun make_ref/0}),
+    {_, Alias, Effects} = host(2, {attach, 1, ?NOFID, <<"u">>, <<"packages">>, 0}, 101, versioned(Bridge)),
+    ?assertEqual([{Grant, Alias, {attach, 101, ?NOFID, <<"u">>, <<"data">>, 0}}], sent(Effects)),
+    Grant ! stop.
+
+%% The grant a host's Aname reaches is the whole grant mounted at the top-level point
+%% of that name, among the listed names, whatever tree it answers: two grants of one
+%% tree are told apart by their points, and a listed name with no such mount, or a
+%% mount beneath the top or rooted below its grant's root, reaches nothing.
+tree_grant_selects_by_point_test() ->
+    [Data, Packages, Deep, Sub] = [list_to_pid("<0.1." ++ integer_to_list(N) ++ ">") || N <- [1, 2, 3, 4]],
+    Table = [#{point => [<<"packages">>], provider => {grant, Packages, <<"data">>}, root => []},
+             #{point => [<<"data">>], provider => {grant, Data, <<"data">>}, root => []},
+             #{point => [<<"a">>, <<"proc">>], provider => {grant, Deep, <<"proc">>}, root => []},
+             #{point => [<<"proc">>], provider => {grant, Sub, <<"proc">>}, root => [<<"x">>]}],
+    Names = [<<"data">>, <<"packages">>, <<"proc">>],
+    ?assertEqual({ok, Data, <<"data">>}, erx_hostlink_files:tree_grant(<<"data">>, Names, Table)),
+    ?assertEqual({ok, Packages, <<"data">>}, erx_hostlink_files:tree_grant(<<"packages">>, Names, Table)),
+    ?assertEqual(error, erx_hostlink_files:tree_grant(<<"proc">>, Names, Table)),
+    ?assertEqual(error, erx_hostlink_files:tree_grant(<<"packages">>, [<<"data">>], Table)).
 
 walk_renames_fids_and_a_failed_walk_frees_its_new_fid_test() ->
     {Bridge, A, _} = attached(),
@@ -464,7 +492,7 @@ bridge(Options) ->
     unlink(Grant),
     Counter = atomics:new(1, []),
     Draw = fun() -> atomics:add_get(Counter, 1, 1) end,
-    Trees = fun(<<"test">>) -> {ok, Grant}; (_) -> error end,
+    Trees = fun(<<"test">>) -> {ok, Grant, <<"test">>}; (_) -> error end,
     {Bridge, Ref} = erx_hostlink_files:start(self(), Options#{trees => Trees, draw_fid => Draw}),
     {Bridge, Ref, Grant}.
 
@@ -531,7 +559,7 @@ the_bridges_end_clunks_its_fids_test() ->
     {ok, Grant, _} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}], rw),
     unlink(Grant),
     Counter = atomics:new(1, []),
-    {Bridge, Ref} = erx_hostlink_files:start(self(), #{trees => fun(_) -> {ok, Grant} end,
+    {Bridge, Ref} = erx_hostlink_files:start(self(), #{trees => fun(_) -> {ok, Grant, <<"test">>} end,
                                                         draw_fid => fun() -> atomics:add_get(Counter, 1, 1) end}),
     {ok, _, _} = call(Bridge, 0, {version, ?MSIZE, <<"9P2000.L">>}),
     {ok, _} = call(Bridge, 1, {attach, 10, ?NOFID, <<"u">>, <<"test">>, 0}),

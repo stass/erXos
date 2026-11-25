@@ -164,6 +164,12 @@ a_root_that_is_no_directory_fails_the_start_test() ->
     File = fun({ok, Tree, _, _}) -> {ok, Tree, 6, {0, 0, 6}} end,
     ?assertEqual({error, root}, erx_fs:start_link(erx_fs_test_tree, [{root_answer, File}], rw)).
 
+%% A mounted start whose root fails the check answers the refusal and mounts nothing.
+a_refused_root_is_not_mounted_test() ->
+    Refused = fun(_) -> {error, eio} end,
+    ?assertEqual({error, root},
+                 erx_fs:start_mounted(erx_fs_test_tree, [{root_answer, Refused}], rw, <<"/t">>)).
+
 a_malformed_root_fails_the_start_test() ->
     Long = binary:copy(<<"t">>, 256),
     Answers = [{ok, <<>>, 1, {16#80, 0, 1}}, {ok, Long, 1, {16#80, 0, 1}},

@@ -142,9 +142,9 @@ made with, and makes no other effect itself.
                  counts = #{} :: #{atom() => pos_integer()}}).
 
 -opaque bridge() :: #bridge{}.
-%% The grant of the tree an attach's Aname names, among the trees the host may
-%% reach; error for any other name.
--type trees() :: fun((binary()) -> {ok, pid()} | error).
+%% The grant an attach's Aname names, among the names the host may reach, and the
+%% tree that grant answers, which the relayed attach names; error for any other name.
+-type trees() :: fun((binary()) -> {ok, pid(), Tree :: binary()} | error).
 %% A message of the host with a fid drawn for it, which the request may use; a
 %% grant's reply to an alias; a grant's end.
 -type event() :: {host, binary(), non_neg_integer()}
@@ -268,8 +268,8 @@ route({attach, Fid, Afid, Uname, Aname, NUname}, Drawn, #bridge{trees = Trees} =
     case {Afid, new_fid(Fid, B)} of
         {?ERX_P9_NOFID, ok} ->
             case Trees(Aname) of
-                {ok, Grant} when is_pid(Grant) ->
-                    {ok, Grant, {attach, Drawn, ?ERX_P9_NOFID, Uname, Aname, NUname}};
+                {ok, Grant, Tree} when is_pid(Grant), is_binary(Tree) ->
+                    {ok, Grant, {attach, Drawn, ?ERX_P9_NOFID, Uname, Tree, NUname}};
                 _ ->
                     {error, enoent}
             end;

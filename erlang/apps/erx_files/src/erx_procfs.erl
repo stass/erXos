@@ -59,7 +59,7 @@ Starts this domain's tree, a grant over inspector/1, and mounts it at
 """.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    erx_fs:start_mounted(?MODULE, fun ?MODULE:inspector/1, ro, ?POINT, ?TREE).
+    erx_fs:start_mounted(?MODULE, fun ?MODULE:inspector/1, ro, ?POINT).
 
 -doc """
 The answer to one of the tree's two queries as this domain's inspector

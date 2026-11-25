@@ -112,7 +112,7 @@ start_link(Prim) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, Prim, []).
 
 %% Mounts at To the grant {Pid, Rights}, a local process and the rights it was started
-%% with, as what started it builds the pair (erx_fs:start_mounted/5, erx_fs_grants:own/1,2,
+%% with, as what started it builds the pair (erx_fs:start_mounted/4, erx_fs_grants:own/1,2,
 %% whose answer is erx_fs_grants:facet/2's value). Options name
 %% the tree the grant roots in, {tree, Name}, once, and at most one of ro, rw and rx, ro
 %% when none is given; the entry has the lesser of those and Rights (erx_path:lesser/2),
@@ -195,7 +195,7 @@ place(_Name) -> none.
 %% "Where a package lies"). place/1 gives packages no place, so mount_facets/1 never
 %% mounts it, whatever facets a session holds.
 -spec packages_place() -> {binary(), [option()]}.
-packages_place() -> {<<"/packages">>, [{tree, <<"packages">>}, rw]}.
+packages_place() -> {<<"/packages">>, [{tree, <<"data">>}, rw]}.
 
 %% Where the home of the user named User lies, with the same options as place/1
 %% (docs/design-files.md, "A user's home"): /root for root and /home/User for any
@@ -207,10 +207,10 @@ packages_place() -> {<<"/packages">>, [{tree, <<"packages">>}, rw]}.
 home_place(User) when User =:= <<>>; User =:= <<".">>; User =:= <<"..">> ->
     {error, einval};
 home_place(<<"root">>) ->
-    {ok, {<<"/root">>, [{tree, <<"home">>}, rw]}};
+    {ok, {<<"/root">>, [{tree, <<"data">>}, rw]}};
 home_place(User) when is_binary(User) ->
     case binary:match(User, [<<"/">>, <<0>>]) of
-        nomatch -> {ok, {<<"/home/", User/binary>>, [{tree, <<"home">>}, rw]}};
+        nomatch -> {ok, {<<"/home/", User/binary>>, [{tree, <<"data">>}, rw]}};
         _ -> {error, einval}
     end.
 

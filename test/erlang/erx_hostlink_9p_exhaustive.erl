@@ -77,7 +77,7 @@ run() ->
 %% A session with fid 1 attached to tree a, the one grant's.
 world(Requests, Tags, Budget) ->
     Grant = spawn(fun() -> receive stop -> ok end end),
-    Trees = fun(<<"a">>) -> {ok, Grant}; (_) -> error end,
+    Trees = fun(<<"a">>) -> {ok, Grant, <<"a">>}; (_) -> error end,
     B0 = erx_hostlink_9p:new(#{trees => Trees, alias => fun make_ref/0, requests => Requests, tags => Tags}),
     {B1, _} = erx_hostlink_9p:step({host, erx_9p:encode(100, {version, ?MSIZE, <<"9P2000.L">>}), 0}, B0),
     {B2, Effects} = erx_hostlink_9p:step({host, erx_9p:encode(101, {attach, 1, ?NOFID, <<"u">>, <<"a">>, 0}), 11}, B1),

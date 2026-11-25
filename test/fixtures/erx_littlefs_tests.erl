@@ -14,7 +14,7 @@
          mount_failure_ends_the_owner/0, corrupt_volume_never_formats/0, blank_blocks_do_not_mount/0,
          deadline_ends_a_request/0, refuses_bad_arguments/0, fsync_flushes_the_window/0,
          failed_flush_fails_the_fsync/0, a_tree_reaches_only_its_own/0,
-         a_home_reaches_only_its_own/0]).
+         a_home_reaches_only_its_own/0, a_grant_without_its_root_is_not_started/0]).
 
 -include("generated/erx_abi.hrl").
 
@@ -31,7 +31,8 @@ main() ->
              worker_end_ends_the_owner, window_end_ends_the_owner,
              mount_failure_ends_the_owner, corrupt_volume_never_formats, blank_blocks_do_not_mount,
              deadline_ends_a_request, refuses_bad_arguments, fsync_flushes_the_window,
-             failed_flush_fails_the_fsync, a_tree_reaches_only_its_own, a_home_reaches_only_its_own],
+             failed_flush_fails_the_fsync, a_tree_reaches_only_its_own, a_home_reaches_only_its_own,
+             a_grant_without_its_root_is_not_started],
     Results = [run(Case) || Case <- Cases],
     erlang:halt(case lists:all(fun(R) -> R end, Results) of true -> 0; false -> 1 end).
 
@@ -441,3 +442,21 @@ refuses_bad_arguments() ->
     false = erx_littlefs:broken(Vol),
     {error, enodev} = erx_littlefs:read(Vol, 99, 0, 1),
     ok.
+
+%% A grant's root identity is fixed for its life, so a root the owner cannot answer
+%% fails the grant's start instead of fixing a made-up one: a root directory the volume
+%% lacks answers enoent, and every root of an owner that has ended answers eio
+%% (erx_lfs:root/1); erx_fs_tests checks that a root's error fails the start.
+a_grant_without_its_root_is_not_started() ->
+    Volume = {_, Owner, Data} = start_volume(fresh_disk(), lfs_roots),
+    {ok, <<"data">>, Top, _} = erx_lfs:root(Data),
+    {ok, Packages, _} = erx_lfs:walk(Top, <<"packages">>, Data),
+    ok = erx_lfs:unlink(Packages, <<"installed">>, directory, Data),
+    {ok, Args} = erx_lfs:subtree({lfs_roots, packages}, installed, #{client => 5, principal => <<"clock">>}),
+    {ok, Installed} = erx_lfs:init(Args),
+    {error, enoent} = erx_lfs:root(Installed),
+    Ref = erlang:monitor(process, Owner),
+    exit(Owner, kill),
+    receive {'DOWN', Ref, process, Owner, _} -> ok end,
+    {error, eio} = erx_lfs:root(Data),
+    stop_volume(Volume).

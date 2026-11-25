@@ -41,7 +41,7 @@ run([Seed]) ->
     rand:seed(exsss, {9, 4, list_to_integer(Seed)}),
     A = spawn(fun() -> receive stop -> ok end end),
     B = spawn(fun() -> receive stop -> ok end end),
-    Trees = fun(<<"a">>) -> {ok, A}; (<<"b">>) -> {ok, B}; (_) -> error end,
+    Trees = fun(<<"a">>) -> {ok, A, <<"a">>}; (<<"b">>) -> {ok, B, <<"b">>}; (_) -> error end,
     Options = #{trees => Trees, pool => ?POOL, alias => fun make_ref/0},
     lists:foreach(fun(_) -> round(erx_hostlink_9p:new(Options), [A, B]) end, lists:seq(1, ?ROUNDS)),
     io:format("fuzz: ~b rounds ok~n", [?ROUNDS]).

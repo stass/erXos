@@ -240,6 +240,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] files, a mount's tree (`erlang/apps/erx/src/erx_ns.erl`, `place/1`, `packages_place/0`,
+  `home_place/1` and the `{tree, Name}` mount option; `erx_fs:start_mounted/4`): a mount still names
+  its tree in an option, a second copy of the tree the grant's root answers, which must match it for
+  every operation beneath the entry; design-files.md ("A grant handle is built by its starter") takes
+  the tree from the grant handle `erx_fs:start_link/3,4` answers. Take it from there and drop the option.
 * [Medium] storage and images, the development boot image is 68 MB (`kernel8.img` on the Pi 4 boot
   partition, 68,202,496 bytes) and stays in RAM for the whole boot; it also weighs on the Pi 4 secure-boot
   check item below. Three shrinks are open: 12.2 MB are byte-identical OTP files in both `system/lib` and
@@ -486,6 +491,11 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Security residuals
 
+* [Low] files, a path-named grant's moved root (`erlang/apps/erx_storage/src/erx_lfs.erl`, `root/1`;
+  design-files.md, "Version and attach"): a grant's root identity is fixed at its start, so a rename or
+  removal of its root directory through another grant leaves it failing until it is restarted, and a
+  directory made later at the same path is served while a walk of no names from `NOFID` records the old
+  identity. Restarting the grants rooted at a moved directory, or refusing the move, would close it.
 * [Medium] storage, a window served to another domain (`erlang/apps/erx_blk/src/erx_blk_window.erl`;
   [design-storage.md](design-storage.md#data-model), "The block service"): a client in another domain
   reaches its window directly, outside any facet, so one that sends requests without waiting for their
