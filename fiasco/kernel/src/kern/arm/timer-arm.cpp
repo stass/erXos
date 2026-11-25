@@ -1,3 +1,5 @@
+// Modified by erXos: the one-shot timer's compare value is the first count at
+// which the kernel's clock reads the wakeup (Erx_clock::first_count).
 INTERFACE [arm]:
 
 #include "irq_chip.h"
@@ -17,7 +19,6 @@ private:
   static Unsigned64 time_stamp();
   static Global_data<Scaler_shift> _scaler_shift_ts_to_ns;
   static Global_data<Scaler_shift> _scaler_shift_ts_to_us;
-  static Global_data<Scaler_shift> _scaler_shift_us_to_ts;
 };
 
 // ------------------------------------------------------------------------
@@ -45,13 +46,13 @@ IMPLEMENTATION [arm]:
 
 #include "config.h"
 #include "context_base.h"
+#include "erx_clock.h"
 #include "kip.h"
 #include "watchdog.h"
 #include "warn.h"
 
 DEFINE_GLOBAL Global_data<Scaler_shift> Timer::_scaler_shift_ts_to_ns;
 DEFINE_GLOBAL Global_data<Scaler_shift> Timer::_scaler_shift_ts_to_us;
-DEFINE_GLOBAL Global_data<Scaler_shift> Timer::_scaler_shift_us_to_ts;
 
 IMPLEMENT_DEFAULT
 Unsigned64
@@ -72,10 +73,12 @@ Unsigned64
 Timer::ts_to_us(Unsigned64 ts)
 { return _scaler_shift_ts_to_us->transform(ts); }
 
-PUBLIC static inline
+// The first count at which ts_to_us reads us, so a timeout due at us has
+// expired by the clock when the counter reaches it.
+PUBLIC static inline NEEDS["erx_clock.h"]
 Unsigned64
-Timer::us_to_ts(Unsigned64 ts)
-{ return _scaler_shift_us_to_ts->transform(ts); }
+Timer::us_to_ts(Unsigned64 us)
+{ return Erx_clock::first_count(_scaler_shift_ts_to_us, us); }
 
 // ------------------------------------------------------------------------
 IMPLEMENTATION [arm && !sync_clock]:

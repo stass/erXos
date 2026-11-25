@@ -1,3 +1,5 @@
+// Modified by erXos: no scaler from microseconds to counts; Timer::us_to_ts
+// inverts the clock's own (timer-arm.cpp).
 // --------------------------------------------------------------------------
 INTERFACE [arm && arm_generic_timer]:
 
@@ -76,7 +78,6 @@ Timer::init(Cpu_number cpu)
 
       _scaler_shift_ts_to_ns->init(_freq0, 1'000'000'000);
       _scaler_shift_ts_to_us->init(_freq0, 1'000'000);
-      _scaler_shift_us_to_ts->init(1'000'000, _freq0);
     }
   else if (_freq0 != frequency())
     {

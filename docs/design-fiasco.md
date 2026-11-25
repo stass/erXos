@@ -2580,7 +2580,10 @@ A deadline is absolute monotonic nanoseconds. The backend reads the architecture
 `erx_fiasco_clock_ns` in the architecture layer's `clock.c`, and not the time page, which only a caller of
 `erx_time_page` needs; the page's scale gives the same nanosecond for years of counting at QEMU's and the Raspberry Pi's frequencies, and at most one
 above it after that, since `time_table.c` rounds its multiplier up at the largest shift that fits. `erx_fiasco_time_wait_us` takes the remainder, rounds it up to
-microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout. So a
+microseconds and the caller passes `l4_timeout_from_us`, which rounds up again (`__timeout.h:292`), as the receive timeout.
+Fiasco counts a relative timeout from the microsecond its clock reads, so the kernel's timeout may end up to a microsecond
+before the deadline; a remainder under a microsecond is never asked of the kernel, whose one-shot floor would stretch it to
+200 us, but spun out in user mode on the counter, as is a deadline that close when the wait begins. So a
 wait is never early, and beyond the woken thread's scheduling is late by up to the 200 us floor on Fiasco's one-shot
 timer ([Scheduling](#scheduling), "The quantum") plus one part in 512. A deadline already past
 returns without a kernel call.
@@ -4269,6 +4272,20 @@ no test can drive the change:
 * **The semaphore's wake.** A semaphore's down waits for the activation of the up that dequeued it
   (`semaphore.cpp`, [A semaphore's wake across CPUs](#thread-creation)). Its test is the case of
   that name in [The backend's cases](#the-backends-cases).
+* **The timer's compare value.** The one-shot timer is programmed at the first count at which the
+  kernel's clock reads the earliest timeout's wakeup (`Timer::us_to_ts`, `src/kern/arm/timer-arm.cpp`,
+  through the glue `erx/erx_clock.cpp` onto `kernel/core/clock_inverse.c`), the inverse of the clock's
+  own arithmetic. Upstream converts the wakeup to counts with a second scaler, from microseconds to
+  counts, while its clock converts counts to microseconds with a scaler rounded down
+  (`Scaler_shift::init`, `src/lib/libk/scaler_shift.cpp:50-56`), so at the compare value its clock
+  still reads the wakeup less one or more: at 24 MHz `24 * floor(2^32 / 24)` is `2^32 - 16`, so the
+  clock reads `W - 1` at count `24 W`, and lags a further microsecond every 268 seconds of uptime.
+  `Timeout_q::do_timeouts` then expires nothing (`_wakeup <= now`, `src/kern/timeout.cpp:335`) and
+  reprograms the timer at the 200 us floor, so a timeout on a CPU that does not halt meanwhile is
+  late by 200 us once the lag passes the interrupt's own latency. The inverse makes the clock read
+  the wakeup at the compare value by construction, and the upstream scaler from microseconds to
+  counts is deleted. Its test is `test/host/clock_inverse_test.rb`, which holds the core to Fiasco's
+  clock arithmetic at the frequencies of QEMU, the Raspberry Pi and others, with seeded faults.
 * **The spin lock's event.** The AArch64 spin lock's unlock ends with `SEV`
   (`Spin_lock::unlock_arch`, `src/kern/arm/64/spin_lock-arm-64.cpp`), as the pre-ARMv8 ARM32
   unlock does after a DSB; upstream's ARMv8 unlocks have none, since on ARMv8 hardware a waiter in
