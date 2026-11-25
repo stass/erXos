@@ -153,12 +153,16 @@ calibrate() ->
       wait_rounding => erlang:convert_time_unit(1, millisecond, native),
       cycles_per_tick => <<"unknown">>, pairs => []}.
 
-%% The clock ERTS's monotonic time reads: the system counter on erXos (erx_clock_ns),
-%% and under stock OTP the operating system's monotonic clock.
+%% The clock ERTS's monotonic time reads, as ERTS reports its source: on erXos
+%% erx_clock_ns, the system counter (otp/erts/emulator/sys/erxos/sys_time.c), and
+%% under stock OTP the operating system's monotonic clock, CLOCK_MONOTONIC on Linux
+%% or the clock ERTS takes elsewhere. An ERTS with no operating-system clock beneath
+%% its monotonic time has no clock a line can name, so calibrate/0 raises.
 clock_name() ->
-    case os:type() of
-        {unix, erxos} -> <<"counter">>;
-        _ -> <<"monotonic">>
+    case lists:keyfind(function, 1, erlang:system_info(os_monotonic_time_source)) of
+        {function, erx_clock_ns} -> <<"counter">>;
+        {function, _} -> <<"monotonic">>;
+        false -> error(no_os_monotonic_clock)
     end.
 
 read_pair() ->

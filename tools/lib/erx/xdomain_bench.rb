@@ -64,13 +64,20 @@ module Erx
     # conditions are the declared ones. erpc's deadline ends before the checkpoint's, so
     # a guest that never answers shows as erpc's timeout in the serial log.
     def run_line(asked)
-      guests = asked.benchmarks.map do |wanted|
+      "[io:put_chars([XbL,$\n])||XbL<-erpc:call(#{NODE},erx_bench_hist,run,[#{guests(asked, echo: 'facet')}]," \
+        "#{ERPC_SECONDS * 1000})],io:format(\"#{DONE}~n\").\r"
+    end
+
+    # The guest list erx_bench_hist's run/1 and main/1 take for asked's benchmarks, as
+    # Erlang text: each benchmark's guest module and its arguments. echo is the Erlang
+    # term of xdomain-pingpong's echo: `facet` on erXos, {Name,'Node'} under stock OTP.
+    def guests(asked, echo:)
+      terms = asked.benchmarks.map do |wanted|
         name = wanted.benchmark.name
         profile = only(wanted.cells.map { |cell| wanted.profiles.fetch(cell.operation) }, "#{name} cells mix profiles")
-        "{#{GUESTS.fetch(name)},#{arguments(name, profile, wanted.cells)}}"
+        "{#{GUESTS.fetch(name)},#{arguments(name, profile, wanted.cells, echo: echo)}}"
       end
-      "[io:put_chars([XbL,$\\n])||XbL<-erpc:call(#{NODE},erx_bench_hist,run,[[#{guests.join(',')}]]," \
-        "#{ERPC_SECONDS * 1000})],io:format(\"#{DONE}~n\").\r"
+      "[#{terms.join(',')}]"
     end
 
     # The guest's lines in a serial log; a boot that timed out may have been cut inside
@@ -81,13 +88,13 @@ module Erx
     end
 
     # The map a benchmark's guest module takes for its cells, which share profile:
-    # xdomain's one request size and its echo, the domain's echo facet, and wake's
-    # erlang-timer priorities, one cell each.
-    def arguments(name, profile, cells)
+    # xdomain's one request size and its echo, and wake's erlang-timer priorities, one
+    # cell each.
+    def arguments(name, profile, cells, echo:)
       case name
       in 'xdomain'
         bytes = only(cells.map { |cell| cell.parameters.fetch('bytes') }, 'xdomain cells ask for different request sizes')
-        "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes},echo=>facet}"
+        "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes},echo=>#{echo}}"
       in 'wake'
         raise Error, 'the xdomain boot times only wake\'s erlang-timer' unless cells.all? { |cell| cell.operation == 'erlang-timer' }
 

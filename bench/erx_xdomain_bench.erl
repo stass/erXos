@@ -27,9 +27,9 @@ answers both cells and the host always sees how each ended.
 
 -define(BENCHMARK, <<"xdomain">>).
 -define(CALL_MS, 5000).
-%% How long, and how often, cells/2 waits for the domain's echo facet, and for the
-%% peer node's echo: a peer node that refuses the connection, as one with another
-%% cookie does, looks like one not yet started, so its wait is shorter.
+%% How often cells/2 tries the domain's echo facet and the peer node's echo, and how
+%% long it waits between tries: a peer node that refuses the connection, as one with
+%% another cookie does, looks like one not yet started, so its tries are fewer.
 -define(FACET_POLLS, 600).
 -define(PEER_POLLS, 100).
 -define(POLL_MS, 100).
@@ -86,19 +86,30 @@ facet(Polls) ->
     end.
 
 %% Name on the peer node Node, waiting for the node to accept this one's connection
-%% and for Name to be registered there.
-peer(_Name, _Node, 0) ->
-    {error, <<"the echo node refused the connection or has no echo registered">>};
+%% and for Name to be registered there; a wait that runs out reports its last
+%% attempt's failure. Each attempt is bounded by the connection's setup time and
+%% CALL_MS, so the wait is at most Polls of those.
 peer(Name, Node, Polls) ->
-    case net_kernel:connect_node(Node) =:= true andalso registered(Name, Node) of
-        true -> {ok, {Name, Node}};
-        false -> timer:sleep(?POLL_MS), peer(Name, Node, Polls - 1)
+    case attempt(Name, Node) of
+        ok -> {ok, {Name, Node}};
+        {error, Why} when Polls =< 1 -> {error, Why};
+        {error, _} -> timer:sleep(?POLL_MS), peer(Name, Node, Polls - 1)
+    end.
+
+attempt(Name, Node) ->
+    case net_kernel:connect_node(Node) of
+        true -> registered(Name, Node);
+        false -> {error, <<"the echo node refused or did not answer the connection">>};
+        ignored -> {error, <<"this node is not distributed">>}
     end.
 
 registered(Name, Node) ->
-    try is_pid(erpc:call(Node, erlang, whereis, [Name], ?CALL_MS))
+    try erpc:call(Node, erlang, whereis, [Name], ?CALL_MS) of
+        Pid when is_pid(Pid) -> ok;
+        undefined -> {error, <<"the echo node has no echo registered">>}
     catch
-        error:_ -> false
+        error:{erpc, timeout} -> {error, <<"the echo node did not answer in time">>};
+        error:_ -> {error, <<"the echo node's connection was lost">>}
     end.
 
 %% One cell's fields: its round trips to the server Find answers, timed after the
