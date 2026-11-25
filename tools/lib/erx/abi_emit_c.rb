@@ -496,8 +496,28 @@ module Erx
         extent = layout_extent(layout)
         typedef = "typedef struct #{tag} #{tag}_t;"
         return [*extent, typedef] if layout.private?
+        return seam_layout(layout) if SEAM_LAYOUTS.include?(layout.name)
 
         [*extent, *layout_offsets(layout), typedef, *layout_definition(layout)]
+      end
+
+      # The layouts a seam header of include/erx/core/ also declares, so a core
+      # and the Fiasco glue share the ABI type itself instead of a copy of it.
+      SEAM_LAYOUTS = %w[erx_ram_range].freeze
+
+      # A layout as include/erx/abi.h and a seam header both declare it: under
+      # one guard, so a file may include both, and valid C17 and C++17, so the
+      # glue includes it. C++ has no _Alignas or _Static_assert, so the layout
+      # must be naturally aligned and its assertions are C's, which every core
+      # that includes it compiles.
+      def seam_layout(layout)
+        natural = layout.fields.map { |field| field.type.alignment }.max
+        raise SchemaError, "seam layout #{layout.name} is not naturally aligned" unless natural == layout.alignment
+
+        tag = name(layout.name)
+        guard = "#{constant(layout.name)}_T_DEFINED"
+        ["#ifndef #{guard}", "#define #{guard}", *layout_extent(layout), *layout_offsets(layout),
+         "typedef struct #{tag} #{tag}_t;", *layout_definition(layout, neutral: true), "#endif /* #{guard} */"]
       end
 
       def layout_offsets(layout)
@@ -507,14 +527,14 @@ module Erx
 
       # The record and the assertions that pin its size, alignment and
       # offsets to the ABI file's.
-      def layout_definition(layout)
+      def layout_definition(layout, neutral: false)
         tag = name(layout.name)
         prefix = constant(layout.name)
         out = ["struct #{tag} {"]
         members = layout.fields.map { |field| [field.offset, :field, field] }
         layout.padding.each_with_index { |range, index| members << [range[0], :padding, [index, range[1]]] }
         members.sort_by(&:first).each_with_index do |(_offset, kind, member), index|
-          align = index.zero? ? "_Alignas(#{layout.alignment}) " : ''
+          align = index.zero? && !neutral ? "_Alignas(#{layout.alignment}) " : ''
           if kind == :padding
             out << "\t#{align}uint8_t\tpadding_#{member[0]}[#{member[1]}];"
           else
@@ -527,6 +547,7 @@ module Erx
           out << "\t#{c_type(layout.tail.type)}\t#{layout.tail.name}[];"
         end
         out << '};'
+        out << '#ifndef __cplusplus' if neutral
         out << "_Static_assert(sizeof(#{tag}_t) == #{prefix}_SIZE, \"#{tag} size\");"
         out << "_Static_assert(_Alignof(#{tag}_t) == #{prefix}_ALIGN, \"#{tag} alignment\");"
         layout.fields.each do |field|
@@ -537,6 +558,7 @@ module Erx
           out << "_Static_assert(offsetof(#{tag}_t, #{layout.tail.name}) == #{prefix}_SIZE,"
           out << "    \"#{tag}.#{layout.tail.name} offset\");"
         end
+        out << '#endif' if neutral
         out
       end
 

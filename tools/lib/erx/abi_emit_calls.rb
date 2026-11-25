@@ -625,8 +625,8 @@ module Erx
       # What the stop core's seam (include/erx/core/machine_stop.h) needs of
       # the ABI: the CPU limit, the census bound, the readable-RAM map's
       # capacity and page size, the stop states and RAM classes with their
-      # types, which stop states carry registers, and the readable-RAM range's layout, which the stop core pins
-      # its own range struct to. Spelled as include/erx/abi.h spells each, so
+      # types, which stop states carry registers, and the readable-RAM range
+      # (CEmitter.seam_layout). Spelled as include/erx/abi.h spells each, so
       # a file that includes both redefines nothing differently, and valid C
       # and C++, so the glue includes it.
       def stop_seam(schema)
@@ -636,11 +636,11 @@ module Erx
           type.members.keys.sort.map { |member| schema.constants.fetch("#{Model.constant_prefix(type.name)}_#{member}") }
         end
         constants = %w[cpu_limit debug_ram_ranges page_size stop_census_ms].map { |name| schema.constants.fetch(name) }
-        range = schema.types.fetch('erx_ram_range')
+        layouts = CEmitter::SEAM_LAYOUTS.map { |name| schema.types.fetch(name) }
         [CEmitter::NOTICE, '#ifndef ERX_CORE_ABI_STOP_H', '#define ERX_CORE_ABI_STOP_H', '',
-         '#include <stdbool.h>', '#include <stdint.h>', '',
+         '#include <stdbool.h>', '#include <stddef.h>', '#include <stdint.h>', '',
          *(constants + members).map { |item| CEmitter.constant_definition(item) },
-         *CEmitter.layout_extent(range), *CEmitter.layout_offsets(range), '',
+         '', *layouts.flat_map { |layout| CEmitter.seam_layout(layout) }, '',
          *enums.flat_map { |type| CEmitter.type_declaration(type) }, '',
          *CEmitter.enum_attribute_predicate(state, 'registers', state.attributes.fetch('registers')),
          '#endif /* ERX_CORE_ABI_STOP_H */', ''].join("\n")

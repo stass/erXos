@@ -15,10 +15,6 @@
 #include "erx/core/machine_stop.h"
 
 _Static_assert(ERX_CPU_LIMIT <= 64, "the admitted set and the census sets are one u64");
-_Static_assert(sizeof(erx_ram_map_range_t) == ERX_RAM_RANGE_SIZE, "range size");
-_Static_assert(_Alignof(erx_ram_map_range_t) == ERX_RAM_RANGE_ALIGN, "range alignment");
-_Static_assert(offsetof(erx_ram_map_range_t, base) == ERX_RAM_RANGE_OFF_BASE, "range base");
-_Static_assert(offsetof(erx_ram_map_range_t, length) == ERX_RAM_RANGE_OFF_LENGTH, "range length");
 
 #define	CENSUS_NS	((uint64_t)ERX_STOP_CENSUS_MS * 1000000u)
 
@@ -282,7 +278,7 @@ map_add(erx_ram_map_t *map, uint64_t first, uint64_t end)
 		return (ERX_RAM_MAP_TOO_MANY);
 	if (end > UINT64_MAX / ERX_PAGE_SIZE)
 		return (ERX_RAM_MAP_OVERFLOW);
-	map->range[map->nranges++] = (erx_ram_map_range_t){
+	map->range[map->nranges++] = (erx_ram_range_t){
 		.base = first * ERX_PAGE_SIZE,
 		.length = (end - first) * ERX_PAGE_SIZE,
 	};

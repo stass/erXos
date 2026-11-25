@@ -170,19 +170,10 @@ typedef struct erx_ram_entry {
 	erx_ram_class_t		ram_class;
 } erx_ram_entry_t;
 
-/*
- * One range of the readable-RAM map, the fields of the ABI's erx_ram_range_t;
- * kernel/core/machine_stop.c pins each one.
- */
-typedef struct erx_ram_map_range {
-	uint64_t		base;
-	uint64_t		length;
-} erx_ram_map_range_t;
-
 /* The readable-RAM map: whole pages, sorted by base, disjoint and never touching. */
 typedef struct erx_ram_map {
 	uint32_t		nranges;
-	erx_ram_map_range_t	range[ERX_DEBUG_RAM_RANGES];
+	erx_ram_range_t		range[ERX_DEBUG_RAM_RANGES];
 } erx_ram_map_t;
 
 typedef enum erx_ram_map_status {

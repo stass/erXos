@@ -604,7 +604,7 @@ typedef struct ram_case {
 	erx_ram_entry_t		 entries[24];
 	erx_ram_map_status_t	 status;
 	uint32_t		 nranges;
-	erx_ram_map_range_t	 ranges[4];
+	erx_ram_range_t		 ranges[4];
 } ram_case_t;
 
 static const ram_case_t ram_cases[] = {
