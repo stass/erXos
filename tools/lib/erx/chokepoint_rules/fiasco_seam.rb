@@ -260,6 +260,7 @@ module Erx
                   Chokepoints::Site.new(glob: 'test/guest/native_bench/vm.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_bench/vm_task.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_bench/nullcall_time.c'),
+                  Chokepoints::Site.new(glob: 'test/guest/native_bench/cycles.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_bench/program.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_libc_test/guest.c'),
                   Chokepoints::Site.new(glob: 'test/guest/native_task/guest.c'),
