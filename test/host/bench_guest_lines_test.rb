@@ -37,7 +37,8 @@ class BenchGuestLinesTest < Minitest::Test
   def test_the_guests_lines_pass_the_hosts_validator
     fast, periodic, costly, clock, boundary, window = guest_lines
     cell = Erx::BenchMeasurement.cell(fast, Erx::BenchLineFuzz::ASKED)
-    assert_equal [40, 1000, 1199], cell.summary.values_at('samples', 'min', 'max')
+    # Batch 1: the total is the samples' sum, 40,780 with 192 and 97 more for the two outliers.
+    assert_equal [40, 1000, 1199, 40, 41_069], cell.summary.values_at('samples', 'min', 'max', 'count', 'total')
     assert_equal({ 'threads' => 2, 'mode' => 'spin' }, cell.conditions.parameters)
     late = Erx::BenchMeasurement.cell(periodic, Erx::BenchLineFuzz::ASKED)
     assert_equal ['partial', 'cut short', 32], [late.status, late.reason, late.summary.fetch('samples')]

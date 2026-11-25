@@ -62,9 +62,10 @@ module Erx
     REQUIRED = %w[benchmark operation conditions frequency_hz status samples counts].freeze
     # The tick statistics: every profile's line but a sustained one's carries the first two.
     TICKED = %w[histogram largest].freeze
-    TICK_STATISTICS = (TICKED + %w[min max uncertainty raw phases excess]).freeze
+    TICK_STATISTICS = (TICKED + %w[min max uncertainty total raw phases excess]).freeze
     # The optional fields, and the profile each belongs to (nil: any profile).
-    OPTIONAL = { 'reason' => nil, 'min' => nil, 'max' => nil, 'uncertainty' => nil, 'raw' => 'expensive',
+    OPTIONAL = { 'reason' => nil, 'min' => nil, 'max' => nil, 'uncertainty' => nil, 'total' => 'fast',
+                 'raw' => 'expensive',
                  'phases' => 'periodic', 'excess' => 'periodic' }.freeze
     CONDITIONS = %w[load placement parameters clock batch].freeze
     COUNTS = %w[lost early missed].freeze
@@ -439,7 +440,10 @@ module Erx
         need(!fields.key?('phases') && !fields.key?('excess'), 'holds phases or excess of an operation with no sweep')
       end
       need(!fields.key?('uncertainty') || tick?(fields['uncertainty']), 'field uncertainty is not a tick count')
-      fields.slice('frequency_hz', 'histogram', 'min', 'max', 'largest', 'raw', 'phases', 'excess', 'uncertainty')
+      need(!fields.key?('total') || tick?(fields['total']), 'field total is not a tick count')
+      # A one-way cell's samples are corrected by its pair's offset; a raw total is not.
+      need(!(fields.key?('total') && fields.key?('uncertainty')), 'holds a total beside an uncertainty')
+      fields.slice('frequency_hz', 'histogram', 'min', 'max', 'largest', 'raw', 'phases', 'excess', 'uncertainty', 'total')
     end
 
     def histogram(value, name)

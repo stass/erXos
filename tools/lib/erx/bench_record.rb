@@ -131,6 +131,23 @@ module Erx
       uncertainty.is_a?(Integer) && !median.nil? && 10 * uncertainty <= median
     end
 
+    # Whether a cell's total, where it has one, is the ticks its samples' batches spanned
+    # together (docs/design-bench.md, "Short operations"). Each sample is its batch's ticks
+    # over batch, rounded down, so the batches spanned from batch times the samples' sum to
+    # that plus batch - 1 a sample, and the histogram's buckets bound the sum. A total of no
+    # samples is refused: it is a mean of nothing.
+    def self.total_bounded?(detail, batch)
+      return true unless detail.key?('total')
+
+      total = detail['total']
+
+      histogram = detail.fetch('histogram', [])
+      samples = histogram.sum { |_, _, count| count }
+      least = batch * histogram.sum { |low, _, count| low * count }
+      most = batch * histogram.sum { |_, last, count| last * count } + samples * (batch - 1)
+      total.is_a?(Integer) && samples.positive? && total.between?(least, most)
+    end
+
     # The upper end of the bucket holding the sample of rank ceil(n / 2); nil for none.
     def self.median(histogram)
       rank = (histogram.sum { |_, _, count| count } * P50).ceil
@@ -263,7 +280,7 @@ module Erx
         if form == 'mean'
           BenchRecord.mean!(status: status, profile: profile, counts: counts, detail: detail)
         else
-          BenchRecord.histogram!(status: status, profile: profile, counts: counts, detail: detail)
+          BenchRecord.histogram!(status: status, profile: profile, counts: counts, detail: detail, batch: conditions.batch)
         end
         super(benchmark: benchmark, operation: operation, conditions: conditions, form: form, profile: profile,
               status: status, reason: reason, counts: counts && BenchRecord.frozen(counts),
@@ -272,15 +289,18 @@ module Erx
 
       # What the cell claims, from its detail; a cell whose status has no summary claims
       # nothing. A histogram claims its sample count, extremes, the percentiles the count
-      # allows, and whether the samples are partial; a mean its count, total and mean.
+      # allows, whether the samples are partial and, where it kept its total, its operation
+      # count and that total; a mean its count, total and mean.
       def summary
         return {} if NO_SUMMARY.include?(status)
         return detail.slice(*MEAN_FIELDS) if form == 'mean'
         return BenchRecord.sustained_summary(self) if profile.name == 'sustained'
 
         histogram = detail.fetch('histogram', [])
-        { 'samples' => histogram.sum { |_, _, count| count }, 'partial' => status != 'measured' }
-          .merge(detail.slice('min', 'max'), BenchRecord.percentiles(histogram))
+        samples = histogram.sum { |_, _, count| count }
+        operations = detail.key?('total') ? { 'count' => samples * conditions.batch, 'total' => detail['total'] } : {}
+        { 'samples' => samples, 'partial' => status != 'measured' }
+          .merge(detail.slice('min', 'max'), BenchRecord.percentiles(histogram), operations)
       end
 
       def key = [benchmark, operation, conditions]
@@ -289,7 +309,7 @@ module Erx
 
     # A histogram cell's shape: its profile, its counts, and buckets that hold every
     # sample a measured cell's profile asked for, none where its status has no summary.
-    def self.histogram!(status:, profile:, counts:, detail:)
+    def self.histogram!(status:, profile:, counts:, detail:, batch:)
       check(profile.is_a?(Profile), 'a histogram cell has no profile')
       check(counts.is_a?(Hash) && counts.keys.sort == %w[early lost missed] &&
             counts.values.all? { |count| count.is_a?(Integer) && !count.negative? },
@@ -305,6 +325,7 @@ module Erx
             'a cell with a lost wake or an early return is failed, not measured')
       check(!NO_SUMMARY.include?(status) || samples(profile, detail).zero?, "a #{status} cell has no samples")
       check(status != 'measured' || uncertainty_bounded?(detail), 'a measured cell has an uncertainty above a tenth of its median')
+      check(total_bounded?(detail, batch), "a total is not the ticks its samples' batches spanned")
     end
 
     # A mean cell's shape (docs/design-bench.md, "A mean"): no profile and no counts; a

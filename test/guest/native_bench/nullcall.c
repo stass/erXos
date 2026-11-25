@@ -185,6 +185,8 @@ print_cell(cell_index_t index)
 	const nullcall_run_t *const run = &runs[index];
 
 	cell.batch = run->batch;
+	cell.has_total = true;
+	cell.total = run->total;
 	bench_summarize(&cell, samples[index], run->taken, top);
 	if (run->wrong != 0) {
 		cell.status = "failed";

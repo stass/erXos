@@ -41,17 +41,18 @@ class BenchRecordTest < Minitest::Test
     raise "git #{arguments.first} failed: #{error}" unless status.success?
   end
 
-  def cell(benchmark: 'wake', operation: 'park-deadline', batch: 1, status: 'measured', early: 0,
+  def cell(benchmark: 'wake', operation: 'park-deadline', batch: 1, status: 'measured', early: 0, profile: 'periodic',
+           total: nil,
            histogram: [[1000, 1016, 2000]], reason: status == 'measured' ? nil : 'test',
            extremes: histogram.empty? ? {} : { 'min' => histogram.first.first, 'max' => histogram.last[1] })
     Record::Cell.new(
       benchmark: benchmark, operation: operation,
       conditions: Record::Conditions.new(load: 'idle', placement: 'service-cpu', parameters: {}, clock: 'counter',
                                          batch: batch),
-      profile: Record::Profile.new(name: 'periodic', warmup: 0, samples: 2000, runs: 1),
+      profile: Record::Profile.new(name: profile, warmup: 0, samples: 2000, runs: 1),
       status: status, reason: reason,
       counts: { 'lost' => 0, 'early' => early, 'missed' => 0 },
-      detail: { 'histogram' => histogram }.merge(extremes)
+      detail: { 'histogram' => histogram }.merge(extremes, total.nil? ? {} : { 'total' => total })
     )
   end
 
@@ -246,6 +247,30 @@ class BenchRecordTest < Minitest::Test
     assert_match(/uncertainty/, assert_raises(Erx::Error) { cell(extremes: bounds.merge('uncertainty' => 102)) }.message)
     cell(extremes: bounds.merge('uncertainty' => 101))
     cell(status: 'partial', extremes: bounds.merge('uncertainty' => 5000))
+  end
+
+  # A batched cell's total is the ticks its batches spanned. Each of its 2,000 samples is
+  # its batch of 4 calls' ticks divided by 4, rounded down, so the total lies between 4
+  # times the samples' sum and that sum plus 3 for each sample. Its summary claims the
+  # calls and the total, from which a mean follows; a total held as null is refused.
+  def test_a_total_is_the_ticks_its_batches_spanned
+    histogram = [[4, 4, 1500], [5, 5, 500]]
+    least = 4 * (4 * 1500 + 5 * 500)
+    most = least + 2000 * 3
+    [least, most].each do |total|
+      summary = cell(profile: 'fast', batch: 4, histogram: histogram, total: total).summary
+      assert_equal [8000, total], summary.values_at('count', 'total')
+    end
+    # A total outside that range, such as one batch's ticks, is refused.
+    [least - 1, most + 1, 5].each do |total|
+      assert_match(/total/, assert_raises(Erx::Error) do
+        cell(profile: 'fast', batch: 4, histogram: histogram, total: total)
+      end.message)
+    end
+    assert_raises(Erx::Error) do
+      Record::Cell.new(**cell(profile: 'fast', batch: 4, histogram: histogram).to_h.merge(detail: { 'histogram' => histogram, 'min' => 4, 'max' => 5, 'total' => nil }))
+    end
+    refute cell.summary.key?('total')
   end
 
   def test_the_median_is_its_buckets_upper_end_at_any_count

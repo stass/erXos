@@ -258,6 +258,8 @@ erx_bench_line_cell(char *buf, size_t size, const erx_bench_cell_t *cell)
 	}
 	if (cell->has_uncertainty)
 		number(&t, "uncertainty", cell->uncertainty);
+	if (cell->has_total && cell->hist->samples != 0)
+		number(&t, "total", cell->total);
 	if (cell->periodic != NULL) {
 		open_value(&t, "phases", "[");
 		for (unsigned p = 0; p < ERX_BENCH_PHASES; p++)

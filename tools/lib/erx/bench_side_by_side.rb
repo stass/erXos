@@ -87,22 +87,29 @@ module Erx
                 values: values(cell, boot.clock), ratio: nil)
     end
 
-    # What a cell's summary reports, each amount in its own run's units.
+    # What a cell's summary reports, each amount in its own run's units: a histogram's
+    # statistics, and the mean of a cell that kept its count and total, a mean's or a
+    # batched histogram's.
     def values(cell, clock)
       summary = cell.summary
-      return {} if summary.empty?
+      statistics = cell.form == 'mean' ? {} : STATISTICS.to_h { |name| [name, reported(summary[name])] }.compact
+      statistics.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock) }
+                .merge(mean(summary, cell.conditions.clock, clock))
+    end
 
-      # A mean is shown as its total over its count, one operation of the cell: a
-      # program's printed mean may count each operation as more than one (ipcbench's
-      # IPC mean is half a round trip), and the record keeps it as printed.
-      if cell.form == 'mean'
-        count = summary.fetch('count')
-        { 'count' => Quantity.new(amount: count, unit: 'operations'),
-          'mean' => amount(summary.fetch('total').fdiv(count), cell.conditions.clock, clock) }
-      else
-        STATISTICS.to_h { |name| [name, summary[name].is_a?(Hash) ? summary[name]['value'] : summary[name]] }
-                  .compact.transform_values { |ticks| amount(ticks, cell.conditions.clock, clock) }
-      end
+    # A statistic's amount: a percentile is reported as a map holding its value.
+    def reported(value) = value.is_a?(Hash) ? value['value'] : value
+
+    # A mean is shown as its total over its count, one operation of the cell: a program's
+    # printed mean may count each operation as more than one (ipcbench's IPC mean is half
+    # a round trip), and the record keeps it as printed; a batched histogram's count is
+    # its calls, not its samples.
+    def mean(summary, clock_name, clock)
+      return {} unless summary.key?('total')
+
+      count = summary.fetch('count')
+      { 'count' => Quantity.new(amount: count, unit: 'operations'),
+        'mean' => amount(Rational(summary.fetch('total'), count), clock_name, clock) }
     end
 
     # ticks of clock_name as one run's clock group gives them: nanoseconds for a clock
@@ -160,7 +167,7 @@ module Erx
       "#{amount.is_a?(Integer) ? amount : format('%.1f', amount)} #{quantity.unit}"
     end
 
-    private_class_method :columns, :entry, :values, :amount, :ratio, :render_row, :parameters, :render_column,
+    private_class_method :columns, :entry, :values, :reported, :mean, :amount, :ratio, :render_row, :parameters, :render_column,
                          :render_entry, :quantity_text
   end
 end

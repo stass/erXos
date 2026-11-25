@@ -354,14 +354,17 @@ print_lines(void)
 		{ { 0, 2 }, { 0, 0, true }, { INT64_MIN, INT64_MAX, false } },
 	};
 
+	uint64_t total = 0;
+
 	for (uint64_t i = 0; i < 40; i++) {
 		values[i] = i == 7 ? 1199 : i == 3 ? 1100 : 1000 + i;
 		erx_bench_hist_add(&fast, values[i]);
+		total += values[i];
 	}
 	erx_bench_cell_t cell = { .benchmark = "wake", .operation = "wake-same-cpu", .load = "idle",
 		.placement = "same-cpu", .params = params, .nparams = 2, .clock = "counter", .batch = 1,
 		.frequency_hz = 24000000, .status = "measured", .hist = &fast, .min = 1000, .max = 1199,
-		.largest = largest, .nlargest = largest_of(values, 40, largest) };
+		.largest = largest, .nlargest = largest_of(values, 40, largest), .has_total = true, .total = total };
 	if (erx_bench_line_cell(line, sizeof(line), &cell) != 0)
 		printf("%s\n", line);
 

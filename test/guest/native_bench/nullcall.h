@@ -29,12 +29,14 @@ typedef int64_t (*nullcall_fn_t)(void);
 
 /*
  * A timed run: the batch, erx_bench_batch_for of the warm-up median; the samples taken,
- * each a batch's ticks over its calls, rounded down; every call made, warm-up included;
- * and the first answer that was not the correct result, with wrong set.
+ * each a batch's ticks over its calls, rounded down; the ticks those batches spanned, added
+ * up undivided; every call made, warm-up included; and the first answer that was not the
+ * correct result, with wrong set.
  */
 typedef struct {
 	uint64_t	batch;
 	uint64_t	taken;
+	uint64_t	total;
 	uint64_t	calls;
 	int64_t		answer;
 	uint32_t	wrong;

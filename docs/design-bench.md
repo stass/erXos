@@ -235,7 +235,8 @@ console, `BENCH` followed by one JSON object of at most 64 KiB, in clock
 ticks: the benchmark, the operation, the cell's conditions, the clock and
 its frequency, the status, the sample count, the batch size, the
 histogram, the exact maximum and minimum, the sixteen largest samples with
-their sequence numbers, and the counts of lost, early and missed events.
+their sequence numbers, the counts of lost, early and missed events, and,
+for a batched cell that keeps it, its `total` ([the one clock](#the-one-clock)).
 A swept periodic cell adds its sixteen phases and its excess histogram;
 an unswept one carries neither, and a line that carries them for an
 unswept operation, or lacks them for a swept one, is refused. A
@@ -380,7 +381,20 @@ A round trip is never halved into a one-way number.
 **Short operations.** An operation whose warm-up median is under 100
 ticks is timed in batches: the smallest power of two of operations that
 spans 100 ticks. The record states the batch size, and its percentiles
-are of batch means; they are never called per-operation tails. An
+are of batch means; they are never called per-operation tails. Each
+sample is its batch's ticks over the batch, rounded down, so an operation
+of a few ticks reads in whole ticks. A cell may therefore also report
+`total`, the ticks its timed batches spanned, added up before any is
+divided: the host derives the cell's operation count, its samples times
+its batch, and its mean, the total over that count, and refuses a total
+that its samples rule out: below the batch times the least sum their
+histogram allows, or above the batch times the greatest sum plus the
+batch less one for each sample. Only a `fast` cell reports it, and never
+one with an uncertainty, whose samples are corrected and its total would
+not be. `nullcall`'s cells report it,
+so the side-by-side table sets their mean beside a counterpart's `mean`:
+both are an operation's share of a run timed whole, while the median is
+of rounded batch means. An
 operation timed as a handshake (`wake-same-cpu`, `wake-cross-cpu`,
 `trigger-take`) is exempt, because B must return before A pokes again,
 so its operations cannot run back to back: its declaration marks it a
@@ -1341,8 +1355,9 @@ The side-by-side table is two tables, the C table and the Erlang table
 of [Counterparts](#other-systems-on-the-same-raspberry-pi-4), each with a
 row per erXos cell and a column per system: each run's status, its
 clock, its summary's form, the median, 99th percentile and maximum of a
-`histogram` where its profile allows them, or the operation count and
-mean of a `mean`, and the counterpart's line. It prints nanoseconds for
+`histogram` where its profile allows them, with its operation count and
+mean where it reports its total, or the operation count and mean of a
+`mean`, and the counterpart's line. It prints nanoseconds for
 the clocks that have a frequency (`counter`, `monotonic`) and cycles for
 `cycles`, and sets a ratio only between two cells of clocks with a
 frequency. A cell in `cycles` gets no ratio and no conversion, whatever
@@ -2335,6 +2350,7 @@ fault that must fail it:
 | L4Re's importer | a fixture erXos writes in the facts record's format gives one `measured` `mean` cell in `cycles` per counterpart, with 10,000 calls and a round trip of the total over 10,000 | a fixture with one counterpart's line removed: that cell is `not_run`, never a number; one with a field cut short: `rejected`; one with the program's error line: `failed` |
 | the ipcbench line reader | a fuzz target over the importer's line reader, with the fixtures as seeds, runs its budget clean | the count check removed: the fuzzer finds a line of count 0 that divides by zero or is accepted |
 | a `mean` through the record | a `mean` cell written by `BenchRecord.write` and read back has its count, total and printed mean, no percentiles, no maximum and no event counts, and the side-by-side table shows it without a ratio | the writer summarizing every cell from its histogram: the read-back cell reports a median of 0 and zero lost wakes |
+| a batched cell's total | an erXos cell of 20 samples in batches of 32 that spanned 3,000 ticks of the 24 MHz counter shows 640 operations and a mean of 195.3 ns beside its median of 4 ticks, and a total its samples rule out, such as one batch's ticks, is refused | the total shown without dividing it by its count, or the count taken as the samples instead of the operations: the mean is 3,000 ticks or 150; the range check dropped: one batch's ticks are read as the run's |
 | `cycles` stays cycles | an L4Re `mean` beside an erXos cell whose boot's `CLOCK` line measured cycles per tick prints cycles and no ratio | the conversion through the other boot's calibration put back: the table prints nanoseconds for L4Re |
 | Linux's Erlang guest | a one-CPU boot gives an `ERX_ORACLE 29.1.2` line and `measured` `local-rtt` and `xdomain-pingpong` cells in `monotonic` | the echo node started with another cookie: `xdomain-pingpong` is `failed`, the connection refused, while `local-rtt` is `measured`, which shows the cross cell went to the other OS process over distribution |
 | L4Re's guest | a one-CPU boot of `bootstrap.elf` reaches `Benchmarks done.` and the importer reads every counterpart | an image built with `E=hello` instead of `E=ipcbench`: every L4Re cell is `not_run`, which shows the rows came from ipcbench's own output |

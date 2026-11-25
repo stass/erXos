@@ -118,13 +118,31 @@ class BenchSideBySideTest < Minitest::Test
     refute_match(/\bns\b|\bratio\b/, line)
   end
 
-# ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table
-# shows the total over the calls, one round trip, beside erXos's round trips.
-def test_a_mean_is_shown_as_its_total_over_its_count
-  halved = boot('l4re', 1, [mean('same', total: 4_200_000, printed: 210)], clock: nil)
-  l4re = column(Tables.tables(BENCHMARK, [runs.first, halved], systems: %w[erxos l4re]).first.rows.first, 'l4re')
-  assert_equal Tables::Quantity.new(amount: 420.0, unit: 'cycles'), l4re.entries.first.values.fetch('mean')
-end
+  # ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table
+  # shows the total over the calls, one round trip, beside erXos's round trips.
+  def test_a_mean_is_shown_as_its_total_over_its_count
+    halved = boot('l4re', 1, [mean('same', total: 4_200_000, printed: 210)], clock: nil)
+    l4re = column(Tables.tables(BENCHMARK, [runs.first, halved], systems: %w[erxos l4re]).first.rows.first, 'l4re')
+    assert_equal Tables::Quantity.new(amount: 420.0, unit: 'cycles'), l4re.entries.first.values.fetch('mean')
+  end
+
+  # A batched erXos cell that keeps its total shows its mean per call beside its median:
+  # 20 batches of 32 calls spanned 3,000 ticks of the 24 MHz counter, 640 calls of
+  # 4.6875 ticks, 195.3125 ns each, though every sample rounds down to 4 or 5 ticks.
+  def test_a_batched_cells_total_gives_its_mean_per_call
+    batched = Record::Cell.new(
+      benchmark: 'probe', operation: 'same', conditions: conditions('same', 'counter').with(batch: 32),
+      profile: PROFILE, status: 'measured', reason: nil, counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 },
+      detail: { 'histogram' => [[4, 4, 15], [5, 5, 5]], 'min' => 4, 'max' => 5, 'total' => 3000 }
+    )
+    erxos = column(Tables.tables(BENCHMARK, [boot('erxos', 1, [batched, unsupported('cross')], clock: ERXOS_CLOCK)],
+                                 systems: %w[erxos]).first.rows.first, 'erxos')
+    values = erxos.entries.first.values
+    assert_equal [Tables::Quantity.new(amount: 640, unit: 'operations'), ns(3125 / 16r), ns(Rational(4_000, 24))],
+                 values.values_at('count', 'mean', 'p50')
+    assert(Tables.render([Tables.tables(BENCHMARK, [boot('erxos', 1, [batched], clock: ERXOS_CLOCK)],
+                                        systems: %w[erxos]).first]).any? { |text| text.include?('mean 195.3 ns') })
+  end
 
   def test_the_rendered_table_names_its_layer_and_each_counterpart
     lines = Tables.render([table])

@@ -31,7 +31,7 @@ nullcall_refusal(void)
 nullcall_run_t
 nullcall_time(nullcall_fn_t call, int64_t expected, uint64_t *samples, erx_bench_hist_t *scratch)
 {
-	nullcall_run_t run = { .batch = 1, .taken = 0, .calls = 0, .answer = expected, .wrong = 0 };
+	nullcall_run_t run = { .batch = 1, .taken = 0, .total = 0, .calls = 0, .answer = expected, .wrong = 0 };
 
 	for (size_t at = 0; at < ERX_BENCH_HIST_BUCKETS; at++)
 		scratch->count[at] = 0;
@@ -59,7 +59,10 @@ nullcall_time(nullcall_fn_t call, int64_t expected, uint64_t *samples, erx_bench
 				return (run);
 			}
 		}
-		samples[run.taken] = (erx_fiasco_counter() - start) / run.batch;
+		const uint64_t spanned = erx_fiasco_counter() - start;
+
+		run.total += spanned;
+		samples[run.taken] = spanned / run.batch;
 	}
 	return (run);
 }

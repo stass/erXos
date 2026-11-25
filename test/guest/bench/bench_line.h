@@ -69,6 +69,13 @@ typedef struct {
 	/* A one-way cell across CPUs: the half-width of its pair's offset hull. */
 	bool has_uncertainty;
 	uint64_t uncertainty;
+	/*
+	 * A cell that keeps its timed run's total: the ticks its samples' batches spanned, added
+	 * up before any is divided by its batch, so the host derives the mean per operation
+	 * finer than a tick (docs/design-bench.md, "Short operations"); written only beside samples.
+	 */
+	bool has_total;
+	uint64_t total;
 	/* A periodic cell's classification, whose late histogram is hist; NULL otherwise. */
 	const erx_bench_periodic_t *periodic;
 	/*
