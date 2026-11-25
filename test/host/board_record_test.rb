@@ -150,7 +150,8 @@ class BoardRecordTest < Minitest::Test
   def test_a_set_whose_build_record_names_linux_is_recorded_as_linuxs
     set = Erx::BoardRecord.set(set_directory('linux', kernel: '11' * 32, linux: LINUX), benchmark: 'wake')
     assert_equal 'pi4-4gb-linux', set.environment.name
-    assert_equal '55' * 32, set.subject.details.fetch('init_sha256')
+    assert_equal '55' * 32, set.subject.details.fetch('linux').fetch('init_sha256')
+    assert_equal COMPILER, set.subject.details.fetch('compiler')
     assert_equal '11' * 32, set.subject.details.fetch('kernel8_sha256')
     assert_equal Erx::PeerBench.asked('wake', cpus: 4, clock: 'counter'), set.asked
     erxos = Erx::BoardRecord.set(set_directory('erxos', kernel: '11' * 32), benchmark: 'wake')

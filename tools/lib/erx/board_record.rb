@@ -48,8 +48,8 @@ module Erx
     # compiler that built it (BL31's, the set's one compiler). The walk names every set
     # by its absolute directory, so the record reads the set the walk booted wherever the
     # import runs. A set whose record names Linux among its inputs is Linux's
-    # (LinuxBoard): its environment's system is linux, its subject holds Linux's facts,
-    # and its boots ask erx_peer_bench's counterparts of benchmark rather than erXos's
+    # (LinuxBoard): its environment's system is linux, its subject holds Linux's facts
+    # under linux, and its boots ask erx_peer_bench's counterparts of benchmark rather than erXos's
     # native cells.
     def set(boot_set, benchmark:)
       raise Error, "board record: the set #{boot_set.directory} is not named by an absolute directory" unless
@@ -77,7 +77,7 @@ module Erx
           revision: commit, dirty: dirty,
           details: { 'kernel8_sha256' => files.fetch(BootPartition::KERNEL), 'record_sha256' => boot_set.record_sha256,
                      'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }
-                     .merge(linux || {}).compact
+                     .merge('linux' => linux).compact
         ),
         asked: linux ? PeerBench.asked(benchmark, cpus: CPUS, clock: 'counter') : NativeBench.asked(BenchSuite.benchmark(benchmark), cpus: CPUS),
         arm_clock_hz: card.arm_clock_hz

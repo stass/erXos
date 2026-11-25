@@ -39,14 +39,20 @@ class LinuxBoardTest < Minitest::Test
     laid.each_key { |name| assert_match Erx::BootPartition::NAME, name }
   end
 
+  def test_linux_on_the_board_runs_only_what_linuxs_guest_runs
+    assert Erx::LinuxBoard.runs?('posix')
+    assert Erx::LinuxBoard.runs?('wake')
+    refute Erx::LinuxBoard.runs?('xdomain')
+  end
+
   def test_firmware_that_would_replace_a_file_of_the_set_is_refused
     error = assert_raises(Erx::Error) { plan(firmware: FIRMWARE.merge('config.txt' => '/f/config.txt')) }
     assert_match(/config\.txt would replace/, error.message)
   end
 
-  # The board's /init (bench/linux/init.c with ERX_INIT_BOARD) builds and links for Linux
-  # with erXos's compiler, as LinuxBoard.lay_out builds it; skipped where the compiler or
-  # Linux's C library is not at hand.
+  # The board's /init (bench/linux/init.c with ERX_INIT_BOARD), and the guest's beside it,
+  # build and link for Linux with erXos's compiler, as LinuxBoard.lay_out builds them;
+  # skipped where the compiler or Linux's C library is not at hand.
   def test_the_boards_init_builds_for_linux
     skip 'set ERX_CLANG and ERX_LLD' unless ENV['ERX_CLANG'] && ENV['ERX_LLD']
     Dir.mktmpdir('erx-linux-board-') do |directory|
@@ -56,9 +62,13 @@ class LinuxBoardTest < Minitest::Test
       rescue Erx::Error => e
         skip e.message
       end
-      program = Erx::LinuxGuest.compile(root: ROOT, usr: usr, output: directory, runner: runner, source: Erx::LinuxGuest::INIT,
-                                        flags: ['-DERX_INIT_DEADLINE_S=60u', '-DERX_INIT_BOARD', '-Werror'])
-      assert File.size(program).positive?
+      [['-DERX_INIT_BOARD'], []].each do |mode|
+        output = File.join(directory, mode.empty? ? 'guest' : 'board')
+        Dir.mkdir(output)
+        program = Erx::LinuxGuest.compile(root: ROOT, usr: usr, output: output, runner: runner, source: Erx::LinuxGuest::INIT,
+                                          flags: ['-DERX_INIT_DEADLINE_S=60u', *mode, '-Werror'])
+        assert File.size(program).positive?
+      end
     end
   end
 end

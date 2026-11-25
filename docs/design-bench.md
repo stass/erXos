@@ -2124,8 +2124,9 @@ holds the configured frequency, a restart on a panic, the run's CPU count and th
 entry appends its boot name as a last word, `erx.arg=NAME`.
 
 The board's `/init` takes that word off the program's arguments and
-prints the naming line before the run and its end line after it, as
-erXos's bench root does, so the console's lines of the run are tied to
+prints the naming line before the run and its end line after it, in
+the deadline form when the program's alarm or `/init`'s own deadline
+ended it, as erXos's bench root does, so the console's lines of the run are tied to
 the entry. It does not power the board off, which would halt it until a
 person cycles its power: once its end line has left the console, it
 restarts the board through Linux's own reboot, as erXos's bench boots

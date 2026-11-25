@@ -52,27 +52,44 @@ start(char **argv, const sigset_t *before)
 	_exit(EXEC_FAILED);
 }
 
-/* Runs the program with argv under the deadline and reports its end. */
-static void
+/*
+ * Whether status is the end of a program a deadline stopped: the program's own alarm at
+ * its run deadline, or init's kill at ERX_INIT_DEADLINE_S.
+ */
+static bool
+timed_out(int status)
+{
+	return (WIFSIGNALED(status) &&
+	    (WTERMSIG(status) == SIGALRM || WTERMSIG(status) == SIGKILL));
+}
+
+/*
+ * Runs the program with argv under the deadline and reports its end. Answers whether a
+ * deadline ended it.
+ */
+static bool
 run(char **argv)
 {
+	int status;
 	const int64_t deadline = monotonic_s() + ERX_INIT_DEADLINE_S;
 	sigset_t chld, before;
 	pid_t peer;
 
 	if (!catch_children(&chld, &before)) {
 		printf("erx: init: SIGCHLD could not be caught\n");
-		return;
+		return (false);
 	}
 	fflush(stdout);
 	peer = fork();
 	if (peer < 0) {
 		printf("erx: init: %s could not be started\n", PEER);
-		return;
+		return (false);
 	}
 	if (peer == 0)
 		start(argv, &before);
-	report(PEER, await(peer, PEER, &chld, deadline));
+	status = await(peer, PEER, &chld, deadline);
+	report(PEER, status);
+	return (timed_out(status));
 }
 
 #ifdef ERX_INIT_BOARD
@@ -121,13 +138,16 @@ main(int argc ERX_UNUSED, char **argv)
 	if (name != NULL)
 		printf("erx: bench: boot %s\n", name);
 #endif
+	bool late = false;
+
 	if (mount("proc", "/proc", "proc", 0, NULL) == 0)
-		run(argv);
+		late = run(argv);
 	else
 		printf("erx: init: /proc did not mount\n");
 #ifdef ERX_INIT_BOARD
+	/* The end line's deadline form marks the cells the run did not report timed out. */
 	if (name != NULL)
-		printf("erx: bench: boot %s done\n", name);
+		printf("erx: bench: boot %s %s\n", name, late ? "deadline" : "done");
 	restart();
 #else
 	power_off();

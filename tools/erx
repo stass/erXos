@@ -1548,7 +1548,7 @@ module Erx
       no_arguments(arguments)
       require_relative 'lib/erx/linux_board'
       BenchSuite.benchmark(name)
-      declared = [(BoardRun::ENVIRONMENT if NativeBench::GUESTS.key?(name)), (LinuxBoard::ENVIRONMENT if PeerBench::BOOTS.key?(name))].compact
+      declared = [(BoardRun::ENVIRONMENT if NativeBench::GUESTS.key?(name)), (LinuxBoard::ENVIRONMENT if LinuxBoard.runs?(name))].compact
       raise Error, "bench #{name} declares no environment #{options[:env]}; it declares: #{declared.join(', ').then { |listed| listed.empty? ? 'none run on a board' : listed }}" unless
         declared.include?(options[:env])
 
@@ -1577,9 +1577,6 @@ module Erx
       walk.ending == 'returned' ? 0 : 1
     end
 
-    # The records of a board walk that ended (BoardRecord), one per set, written under
-    # history; when they cannot be, the walk's files stay for `tools/erx bench import`,
-    # whose command line is printed before the failure is raised.
     # The walk's subject of benchmark name's default set for the board environment env:
     # erXos's bench images (NativeBench::BoardSets), or Linux's set (LinuxBoard), each laid
     # out under the tree's build directory.
@@ -1596,6 +1593,9 @@ module Erx
                          revision: SourceRevision.read(root: ROOT, runner: runner))
     end
 
+    # The records of a board walk that ended (BoardRecord), one per set, written under
+    # history; when they cannot be, the walk's files stay for `tools/erx bench import`,
+    # whose command line is printed before the failure is raised.
     def self.bench_board_record(name, env, ran, history)
       require_relative 'lib/erx/board_record'
       log = BoundedFile.read(File.join(ran.directory, BoardRun::LOG), maximum: BoardLog.max_bytes(ran.queue))

@@ -59,6 +59,10 @@ module Erx
         "initramfs #{INITRAMFS} 0x#{INITRAMFS_ADDRESS.to_s(16)}\n"
     end
 
+    # Whether Linux on the board runs benchmark name: erx_peer_bench has its counterpart
+    # in a boot Linux's guest runs (LinuxGuest::BOOTS).
+    def runs?(name) = LinuxGuest::BOOTS.include?(PeerBench::BOOTS[name])
+
     # The kernel command line of a run of benchmark name on the board's CPUs.
     def command_line(name)
       [COMMAND_LINE, "maxcpus=#{BoardRecord::CPUS}", '--', *PeerBench.arguments(name, cpus: BoardRecord::CPUS)].join(' ')
@@ -86,7 +90,7 @@ module Erx
     # subject of it (BoardRun::Subject): no banner names Linux's boot, and the walk waits
     # for its end as long as /init waits for the program.
     def lay_out(root:, runner:, platform:, name:, directory:, compiler:, linker:, revision:)
-      PeerBench::BOOTS.fetch(name) { raise Error, "linux board: #{name} has no peer counterpart" }
+      raise Error, "linux board: Linux's guest runs no counterpart of #{name}" unless runs?(name)
       lock = LinuxGuest.lock(root: root, runner: runner)
       built = LinuxGuest.build(root: root, runner: runner, board: true)
       pinned = BootPartition::FIRMWARE.map { |id| Dependencies.new(root: root, runner: runner).archive_for(id) }
