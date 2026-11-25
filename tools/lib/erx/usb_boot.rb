@@ -20,7 +20,8 @@ module Erx
   # the USB domain's restarts 0, so a failure is seen, not restarted away. It keeps the
   # session template, so the console's login at boot starts root's session, root_1, with
   # the media tree mounted at /media, and root_1's command shell takes the line; Ctrl-G
-  # gives it to the system's shell, where erl starts the Erlang shell (first_key).
+  # opens the console's menu, whose s gives it to the system's shell, where erl starts
+  # the Erlang shell (first_key).
   #
   # From the system's Erlang shell the keyboard's two lines run. The first (line) waits for
   # the domain and polls, at the USB domain's node, the controller's and the bus's states
@@ -46,13 +47,12 @@ module Erx
   # status stands in for the design's case of the unit's path. The same line then waits at
   # the media domain, the holder of the manifest's drive disk0, until its drive process
   # holds the medium, a window proxy its facet {drive, 0} answers, and through the proxy
-  # reads the harness's sectors equal, writes a pattern, reads it back equal and flushes:
-  # the medium's path from the stick to the media domain (docs/design-drives.md, "How the
-  # grant reaches the media domain"), in the gap before the medium's one volume, a FAT16
-  # volume. Last, at root's session's node, it lists the
-  # volume at /media/disk0/s1 and reads its one file (root_body), through the session's
-  # own namespace. Then
-  # the harness ejects the stick's medium through QMP, and a fourth line (ended_line)
+  # reads the harness's sectors equal, writes a pattern, reads it back equal and flushes,
+  # all in the gap before the medium's one volume, a FAT16 volume: the medium's path from
+  # the stick to the media domain (docs/design-drives.md, "How the grant reaches the media
+  # domain"). Last, at root's session's node, it lists the volume at /media/disk0/s1 and
+  # reads its one file (root_body), through the session's own namespace. Then the harness
+  # ejects the stick's medium through QMP, and a fourth line (ended_line)
   # waits for its transport to end while the function runs on; then it unplugs the stick
   # through device_del, and a fifth (gone_line) waits for the function to end. After QEMU
   # stops, the harness checks HOST_STAGES itself: the image holds the written pattern, and
@@ -198,13 +198,10 @@ module Erx
     # 200 ms and the follower poll's 100. The second waits at most 15 s for the tracer.
     ANSWER_SECONDS = PcieDomain::HOLD_SECONDS + 90
     TYPED_SECONDS = 30
-    # How long UbAt (AT) lets a call run. The third line makes STICK_CALLS of them, at the
-    # USB domain, at the media domain and in root's session, each bounded by it, with
-    # ten seconds more for the shell to print the answer. The fourth's and fifth's polls
-    # take 20 s each, and the fourth's another second.
+    # How long UbAt (AT) lets a call run; the third line's wait follows from it
+    # (STICK_SECONDS).
     AT_SECONDS = 60
-    STICK_CALLS = 3
-    STICK_SECONDS = (STICK_CALLS * AT_SECONDS) + 10
+    # The fourth's and fifth's polls take 20 s each, and the fourth's another second.
     GONE_SECONDS = 30
     # The restart line's wait for another incarnation, 1200 rounds of 100 ms, then the
     # enumeration's and the follower's polls as in the first line.
@@ -297,7 +294,7 @@ module Erx
     STICK_OF = 'StOf=fun(StMo)->[StP||StP<-processes(),' \
                'case proc_lib:initial_call(StP) of {StMo,_,_}->true;_->false end] end'
 
-    # How long a stick line's request to the transport may wait, inside UbAt's minute with
+    # How long a stick line's request to the transport may wait, inside UbAt's AT_SECONDS with
     # its 20 s poll: the engine answers within 28 s (erx_blk_usb's moduledoc), so a stuck
     # request is reported as timed out, not left to the checkpoint.
     STICK_CALL_MS = 9000
@@ -440,11 +437,18 @@ MEDIA_BODY = [
     # The restart boot's last line, typed once the key has been sent again.
     def self.retyped_line = typed_line(tag: 'usb_retyped')
 
+    # The third line's calls, in order: each a node and the body of the fun UbAt runs there.
+    STICK_CALLS = [[NODE, STICK_BODY], [MEDIA_NODE, MEDIA_BODY], [ROOT_NODE, root_body]].freeze
+    # How long the third line may take: each of its calls bounded by AT_SECONDS, and ten
+    # seconds more for the shell to print the answer.
+    STICK_SECONDS = (STICK_CALLS.size * AT_SECONDS) + 10
+
     # The third, fourth and fifth lines, typed once the key's records, the stick's answer
     # and the medium's end are read.
-    def self.stick_line = "io:format(\"~0kp~n\",[{usb_stick,UbAt(#{NODE},fun()->#{STICK_BODY} end)," \
-                          "UbAt(#{MEDIA_NODE},fun()->#{MEDIA_BODY} end)," \
-                          "UbAt(#{ROOT_NODE},fun()->#{root_body} end)}]).\r".freeze
+    def self.stick_line
+      calls = STICK_CALLS.map { |node, body| "UbAt(#{node},fun()->#{body} end)" }.join(',')
+      "io:format(\"~0kp~n\",[{usb_stick,#{calls}}]).\r".freeze
+    end
     # The fourth binds UbBots, the functions running before the stick is unplugged, which
     # the fifth waits on.
     def self.ended_line = "UbBots=UbAt(#{NODE},fun()->#{STICK_OF},StOf(erx_usb_bot) end)," \
