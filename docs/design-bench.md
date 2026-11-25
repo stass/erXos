@@ -1110,7 +1110,13 @@ answer and the next state ([design-platforms.md, The HTTP form](design-platforms
 `BoardWalk` and `BoardLog` are pure and tested on the host;
 `BoardConsole` opens the device, sets its line, and appends what it reads
 to the log, yielding each line, at most a `BENCH` line's 64 KiB and its
-end, to the walk. Nothing else is new: the image is `BootImage`'s, the
+end, to the walk. `BoardRun` is the walk's effects around them: under
+the lock it reads the found target and its return identity, prepares
+the queue, writes `queue.json`, reads the sensors, points the link at
+the queue and asks the board to reboot over ssh, hands the console's
+lines to `BoardWalk`, points the link back, writes `walk.json`, reads
+the sensors again and hands what it has to the record. Nothing else is
+new: the image is `BootImage`'s, the
 set `BootPartition`'s, the judge `BenchMeasurement`'s and the writer
 `BenchRecord`'s. Every byte of the board's that the run shows, in its
 own diagnostics or from ssh, reaches the terminal only through
