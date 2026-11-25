@@ -2599,7 +2599,7 @@ an exiting thread runs on the stack to be freed and musl's lock word must outlas
 
 1. **Delete.** A private `reap(handle)` request deletes the thread and its semaphore in one `l4_task_unmap_batch`
    with `L4_FP_DELETE_OBJ`: Fiasco puts both on one reap list, kills the thread before the list's one RCU grace
-   period, and returns once both are gone (`Task::sys_unmap`, `src/kern/task.cpp:801-833`;
+   period, and returns once their capabilities are gone, the thread can no longer reach user mode and the list's grace period has passed; an object still referenced is freed when its last reference goes (`Task::sys_unmap`, `src/kern/task.cpp:801-833`;
    `Kobject::Reap_list`, `src/kern/kobject.cpp:224-232` and `:408-411`). When it returns the thread never reaches
    user mode again, so its stack is free. A refusal ends the machine.
 2. **Release.** If the record names a range (a detached thread), `erx_vm_release` it.
