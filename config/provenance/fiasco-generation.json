@@ -1,7 +1,7 @@
 {
   "version": 1,
   "recipes": {
-    "config/fiasco/kernel.defconfig": "420c225aef293e611f1279190fc571752cd878d75567b559b0a7f0ce6df2578a",
+    "config/fiasco/kernel.defconfig": "7d65fab7d7da10c42b7a8bbd0976b51794cdb24b90bd843bfa87137e86285498",
     "config/fiasco/modules.list": "415aae92ab8b8baf1c43b9229bdf039cc931d580d58e0014f72fbbb63959e2fb",
     "config/fiasco/user.defconfig": "a21e9c2bbb12b9eb4749380fd532dc8abd691dbd5bfc0e224e921c29988e518d",
     "fiasco/bootstrap/server/src/Make.rules": "1ed4ed98cc2ea4a93527693ba50e597a2378e09e848b7d9ae3a60a610e4bc986",
