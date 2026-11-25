@@ -29,7 +29,9 @@ The readers read the registry at use:
 * table/1 puts the grant beneath each facet's entry of a namespace table at
   each resolution, so a re-grant serves the next lookup, and program_table/1
   does the same for a program's table, less every facet of the `windows`
-  interface;
+  interface. A program's table is a program/0 value, which program/1 makes
+  and only program_table/1 reads, and table/1 takes only a list, so no
+  resolution of a program's path by its handler reaches a display;
 * file_grant/2,3 is the one maker of a file client's handle on a files facet's
   grant. A caller that keeps the handle, as an image mount keeps the grant
   it opened its file on, keeps that grant until it lets it go.
@@ -42,14 +44,24 @@ path reads it, the code loader's included.
 """.
 
 -export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/1,
-         files/2, table/1, program_table/1, file_grant/2, file_grant/3]).
--export_type([name/0, interface/0, facet/0]).
+         files/2, table/1, program/1, program_table/1, file_grant/2, file_grant/3]).
+-export_type([name/0, interface/0, facet/0, program/0]).
 
 -include("generated/erx_abi.hrl").
 
 %% The registry's persistent term, which no other module names: {Generation, Facets},
 %% the count of installations and each facet by name as {Interface, Facet}.
 -define(REGISTRY, {erx, facets}).
+
+%% A program's table as program/1 wraps it; only program_table/1 takes it apart.
+-record(program, {mounts :: erx_path:table()}).
+
+-doc """
+A program's table, as its handler holds it for each resolution of the
+program's paths (program/1). It is not a table: table/1 refuses it, and
+program_table/1 alone turns it into the entries a resolution walks.
+""".
+-opaque program() :: #program{}.
 
 -doc """
 A facet as the registry holds it: its pid, or for a facet of a files service
@@ -223,13 +235,22 @@ entry is as `Mounts` holds it, except that
   (erx_path; docs/design-drives.md, "Links and rights").
 """.
 -spec table(erx_path:table()) -> erx_path:table().
-table(Mounts) ->
+table(Mounts) when is_list(Mounts) ->
     Registry = registry(),
     [marked(Provider, resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
 
 -doc """
+A table a program's path resolves over, `Mounts`, as the one value
+program_table/1 resolves: the program's own table as its handler's core
+narrowed it, or for its image the starter's table.
+""".
+-spec program(erx_path:table()) -> program().
+program(Mounts) when is_list(Mounts) ->
+    #program{mounts = Mounts}.
+
+-doc """
 The table a resolution of a program's path walks, made from `Mounts`, the
-program's table, as it starts (docs/design-files.md, "Narrowing for a
+program's table (program/1), as it starts (docs/design-files.md, "Narrowing for a
 program"): table/1's, less every entry on a facet the registry holds as one
 of the `windows` interface, as if `Mounts` had no entry there. The handler
 calls it at every resolution, so a display's facet installed after the
@@ -239,8 +260,8 @@ as the registry holds them: a bind keeps its source's facet name, and the
 interface comes with the facet from the system domain, never from a server
 or a tree's name.
 """.
--spec program_table(erx_path:table()) -> erx_path:table().
-program_table(Mounts) ->
+-spec program_table(program()) -> erx_path:table().
+program_table(#program{mounts = Mounts}) ->
     Registry = registry(),
     [marked(Provider, resolved(Entry, Registry))
      || #{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].

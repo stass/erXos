@@ -70,7 +70,9 @@ fun an_end_behind_a_closed_port_keeps_its_status/1,
       fun a_first_draw_without_a_display_is_enodev_and_retried/1,
       fun a_first_draw_the_connection_refuses_ends_the_program/1,
       fun window_names_before_draw_are_enoent/1,
-      fun opens_behind_the_first_draw_meet_its_tree/1]}.
+      fun opens_behind_the_first_draw_meet_its_tree/1,
+      fun an_image_beneath_a_display_is_not_found/1,
+      fun an_open_walks_no_display/1]}.
 
 setup() ->
     erx_pipe_fake_nif:setup(self()),
@@ -521,9 +523,9 @@ program_table_test_() ->
 %% display's facet is installed no entry at all, from the same table.
 a_display_installed_after_the_start_is_left_out(_) ->
     Table = [?FACET_ENTRY([<<"n">>, <<"display">>], display, ?ERX_WINDOWS_TREE_BYTES)],
-    Before = erx_facets:program_table(Table),
+    Before = erx_facets:program_table(erx_facets:program(Table)),
     ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), rw}}}),
-    After = erx_facets:program_table(Table),
+    After = erx_facets:program_table(erx_facets:program(Table)),
     [?_assertMatch([#{provider := ended}], Before),
      ?_assertEqual([], After)].
 
@@ -533,9 +535,9 @@ a_files_facet_replaced_by_a_display_is_left_out(_) ->
     Server = self(),
     Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
     ok = erx_facets:install(#{data => {?ERX_SERVICE_FILES, {Server, rw}}}),
-    Files = erx_facets:program_table([Data]),
+    Files = erx_facets:program_table(erx_facets:program([Data])),
     ok = erx_facets:install(#{data => {?ERX_SERVICE_WINDOWS, {Server, rw}}}),
-    Display = erx_facets:program_table([Data]),
+    Display = erx_facets:program_table(erx_facets:program([Data])),
     [?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Files),
      ?_assertEqual([], Display)].
 
@@ -549,8 +551,44 @@ a_display_under_another_name_and_its_bind_are_left_out(_) ->
     Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
     ok = erx_facets:install(#{notes => {?ERX_SERVICE_WINDOWS, {Server, rw}},
                               data => {?ERX_SERVICE_FILES, {Server, rw}}}),
-    Granted = erx_facets:program_table([Notes, Bind, Data]),
+    Granted = erx_facets:program_table(erx_facets:program([Notes, Bind, Data])),
     ?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Granted).
+
+%% A program's table with a display's facet at /n/display, beside the release slice
+%% (docs/design-files.md, "Narrowing for a program"): the handler resolves the image
+%% and every open over the table with no display's facet, so an image there is not
+%% found, as in a table of nothing else, and an open there walks the release slice alone.
+%% The stock emulator has no prim_file:erx_walk/2, so an image that is found cannot be
+%% started here: the image case shows only that the display's entry is not walked.
+-define(RELEASE_ENTRY, #{point => [], provider => release, root => [], rights => ro}).
+
+an_image_beneath_a_display_is_not_found(_) ->
+    on_a_display([], fun() ->
+                         Answer = start((spec([]))#{image := <<"/n/display/prog">>}),
+                         ?_assertEqual({error, enoent}, Answer)
+                 end).
+
+an_open_walks_no_display(_) ->
+    on_a_display([?RELEASE_ENTRY], fun() ->
+                         persistent_term:put(erx_win, self()),
+                         {H, Port, []} = started([]),
+                         H ! {erx_channel, Port, ?OPEN(4, <<"/n/display/w">>)},
+                         Opened = receive {erx_win, {open, Path, Table}} -> {Path, Table}
+                                  after ?WAIT -> none
+                                  end,
+                         ?_assertEqual({<<"/n/display/w">>, [?RELEASE_ENTRY]}, Opened)
+                 end).
+
+%% Case with the stand-in's table holding Entries and a display's facet at /n/display,
+%% which the registry holds as one of the windows interface.
+on_a_display(Entries, Case) ->
+    Display = ?FACET_ENTRY([<<"n">>, <<"display">>], display, ?ERX_WINDOWS_TREE_BYTES),
+    persistent_term:put({erx_file_description, table}, Entries ++ [Display]),
+    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), rw}}}),
+    try Case()
+    after
+        [persistent_term:erase(Key) || Key <- [{erx_file_description, table}, {erx, facets}, erx_win]]
+    end.
 
 %% Case with the stand-ins telling the test, and the registry and the connection's
 %% refusal cleared after it.

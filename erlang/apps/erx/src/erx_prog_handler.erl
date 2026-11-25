@@ -286,11 +286,11 @@ perform([Action | Rest], H) ->
         H1 -> perform(Rest, H1)
     end.
 
-act({resolve, Image, Table}, H) ->
+act({resolve, Image, Program}, H) ->
     %% Each facet's mount is read as the grant the registry holds now, as an open reads it,
     %% with no display's facet (erx_facets:program_table/1).
-    Granted = erx_facets:program_table(Table),
-    {event, {resolved, erx_prog_handler_core:resolve_image(Image, Granted, fun prim_file:erx_walk/2)}, H};
+    Table = erx_facets:program_table(Program),
+    {event, {resolved, erx_prog_handler_core:resolve_image(Image, Table, fun prim_file:erx_walk/2)}, H};
 act(holder, #h{spec = #{pid := Pid}} = H) ->
     {event, {holder, erx_pipe_nif:program_holder(Pid)}, H};
 act({inherit, End}, #h{starter = Starter, spec = #{pid := Pid}} = H) ->
@@ -355,8 +355,9 @@ act({end_program, Status}, #h{port = Port} = H) ->
     %% A program already ending refuses the stop; its exit status follows.
     _ = driver(Port, fun() -> erx_program:stop(Port, anchor, Status) end, {error, einval}),
     H;
-act({open, Slot, Path, Flags, Mode, Table, Cwd}, H) ->
-    _ = erx_file_description:open(Slot, Path, Flags, Mode, Table, Cwd),
+act({open, Slot, Path, Flags, Mode, Program, Cwd}, H) ->
+    %% The open walks the program's table as the registry stands now, with no display's facet.
+    _ = erx_file_description:open(Slot, Path, Flags, Mode, erx_facets:program_table(Program), Cwd),
     H;
 act({read, Description, Slot, Count}, H) ->
     ok = erx_file_description:read(Description, Slot, Count),

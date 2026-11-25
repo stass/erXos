@@ -48,6 +48,9 @@ table() ->
 Starts a description that opens `Path` for the calling handler, with the
 open's reply slot `Slot`, the program's `Flags` and `Mode` (`none` for an
 `lopen`), over `Table` from `Cwd`; its answer follows as a message.
+`Table` is the program's table as the handler resolved it for this open,
+each facet's grant in place and no display's facet
+(erx_facets:program_table/1).
 """.
 -spec open(non_neg_integer(), binary(), non_neg_integer(), none | non_neg_integer(),
            erx_path:table(), erx_path:place()) -> pid().
@@ -105,8 +108,7 @@ clunk(Description, Slot) ->
 
 init(Handler, Slot, Path, Flags, Mode, Table, Cwd) ->
     process_flag(trap_exit, true),
-    Granted = erx_facets:program_table(Table),
-    case prim_file:erx_open_at(Path, Flags, Mode, Granted, Cwd) of
+    case prim_file:erx_open_at(Path, Flags, Mode, Table, Cwd) of
         {ok, File} ->
             Handler ! {erx_file_opened, Slot, {ok, self()}},
             serve(Handler, File);

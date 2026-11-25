@@ -1890,7 +1890,13 @@ the live grant record of its source, so a re-grant keeps its source's
 interface under whatever name it is installed
 ([design-system.md](design-system.md#facets-a-configured-domain-serves)).
 The handler resolves a program's paths over the program's table through
-`erx_facets:program_table/1`, which reads each facet's entry against
+`erx_facets:program_table/1`. The program's table reaches the handler as a
+value of its own, `erx_facets:program()`, which only `program_table/1`
+turns into entries and which `erx_facets:table/1` refuses, so none of
+the handler's resolutions of a program's paths can take the session's
+way. The open-file description it starts for an open walks the table
+the handler resolved.
+`program_table/1` reads each facet's entry against
 the session's registry at that moment, as `erx_facets:table/1` does for
 the session, and differs in one rule: an entry whose facet the registry
 holds as one of the `windows` interface is left out of that

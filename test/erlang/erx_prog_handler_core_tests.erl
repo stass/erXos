@@ -33,6 +33,8 @@ nothing follows the end.
 -define(REFUSED, 268).
 -define(KILLED, 265).
 -define(TABLE, [#{point => [], provider => release, root => [], rights => ro}]).
+%% The program's table an action carries, which only erx_facets:program_table/1 reads.
+-define(PROGRAM(Table), erx_facets:program(Table)).
 
 new_refuses_bad_specs_test_() ->
     [?_assertEqual({error, einval}, new(1, [])),
@@ -145,9 +147,9 @@ open_is_relayed_then_answered_with_an_open_test_() ->
     {C1, Relayed} = erx_prog_handler_core:step(running(), ?ASK(7, {file, lopen, <<"doom.wad">>, 0})),
     {C2, Answered} = erx_prog_handler_core:step(C1, {file_opened, 7, {ok, desc}}),
     {_, Second} = erx_prog_handler_core:step(sent(C2), ?ASK(8, {file, lcreate, <<"f">>, 1, 8#644})),
-    [?_assertEqual([{open, 7, <<"doom.wad">>, 0, none, ?TABLE, [<<"data">>]}], Relayed),
+    [?_assertEqual([{open, 7, <<"doom.wad">>, 0, none, ?PROGRAM(?TABLE), [<<"data">>]}], Relayed),
      ?_assertEqual([?ANSWER(7, {ok, 0})], Answered),
-     ?_assertEqual([{open, 8, <<"f">>, 1, 8#644, ?TABLE, [<<"data">>]}], Second)].
+     ?_assertEqual([{open, 8, <<"f">>, 1, 8#644, ?PROGRAM(?TABLE), [<<"data">>]}], Second)].
 
 refused_open_answers_its_errno_test_() ->
     {C1, _} = erx_prog_handler_core:step(running(), ?ASK(7, {file, lopen, <<"x">>, 0})),
@@ -357,13 +359,13 @@ narrowing_test_() ->
     Table = [#{point => [], provider => release, root => [], rights => ro},
              #{point => [<<"data">>], provider => {grant, self(), <<"t">>}, root => [<<"r">>], rights => rw}],
     Narrow = fun(Within) -> files_of(erx_prog_handler_core:new(?PID, [], (files())#{table := Table, within := Within})) end,
-    [?_assertEqual([#{point => [<<"data">>, <<"logs">>], provider => {grant, self(), <<"t">>},
-                      root => [<<"r">>, <<"logs">>], rights => ro}],
+    [?_assertEqual(?PROGRAM([#{point => [<<"data">>, <<"logs">>], provider => {grant, self(), <<"t">>},
+                               root => [<<"r">>, <<"logs">>], rights => ro}]),
                    Narrow([{<<"/data/logs">>, ro}])),
-     ?_assertEqual([(lists:last(Table))#{point := [<<"data">>]}], Narrow([{<<"/data">>, rw}])),
+     ?_assertEqual(?PROGRAM([(lists:last(Table))#{point := [<<"data">>]}]), Narrow([{<<"/data">>, rw}])),
      %% A mount below a narrowed path stays, read-only when that was asked.
-     ?_assertEqual([#{point => [<<"data">>], provider => {grant, self(), <<"t">>}, root => [<<"r">>], rights => ro},
-                    #{point => [<<"data">>, <<"logs">>], provider => {grant, self(), <<"l">>}, root => [], rights => ro}],
+     ?_assertEqual(?PROGRAM([#{point => [<<"data">>], provider => {grant, self(), <<"t">>}, root => [<<"r">>], rights => ro},
+                             #{point => [<<"data">>, <<"logs">>], provider => {grant, self(), <<"l">>}, root => [], rights => ro}]),
                    files_of(erx_prog_handler_core:new(?PID, [], (files())#{
                        table := Table ++ [#{point => [<<"data">>, <<"logs">>], provider => {grant, self(), <<"l">>},
                                             root => [], rights => rw}],
@@ -385,8 +387,8 @@ display_facet_entries_pass_the_core_test_() ->
     Alias = Display#{point := [<<"mnt">>, <<"w">>], root := [<<"client">>]},
     Table = ?TABLE ++ [Display, Alias],
     Narrow = fun(Within) -> files_of(erx_prog_handler_core:new(?PID, [], (files())#{table := Table, within := Within})) end,
-    [?_assertEqual(Table, Narrow(all)),
-     ?_assertMatch([#{provider := {facet, display, _}, root := [<<"client">>, <<"w1">>]}],
+    [?_assertEqual(?PROGRAM(Table), Narrow(all)),
+     ?_assertEqual(?PROGRAM([Alias#{point := [<<"mnt">>, <<"w">>, <<"w1">>], root := [<<"client">>, <<"w1">>]}]),
                    Narrow([{<<"/mnt/w/w1">>, rw}]))].
 
 %% The names the export serves at /dev and /etc: a start whose table holds an
@@ -403,8 +405,8 @@ export_names_test_() ->
      ?_assertEqual({error, einval}, Start([Bind([<<"etc">>, <<"passwd">>])], all)),
      ?_assertEqual({error, einval}, Start([Bind([<<"dev">>, <<"tty">>, <<"x">>])], [{<<"/dev">>, ro}])),
      %% Beside the export's names, and at /dev itself, an entry stays.
-     ?_assertMatch([_, _], Start([Bind([<<"dev">>, <<"draw">>])], all)),
-     ?_assertMatch([_, _], Start([Bind([<<"dev">>])], all))].
+     ?_assertEqual(?PROGRAM(?TABLE ++ [Bind([<<"dev">>, <<"draw">>])]), Start([Bind([<<"dev">>, <<"draw">>])], all)),
+     ?_assertEqual(?PROGRAM(?TABLE ++ [Bind([<<"dev">>])]), Start([Bind([<<"dev">>])], all))].
 %% A program's window (docs/design-files.md, "A program's window"): after the
 %% holder entry and the descriptors, the window action; its /dev grant takes
 %% the place of every entry at /dev; a window beside a buffer, an entry at or
@@ -434,7 +436,7 @@ window_test_() ->
      ?_assertMatch({_, [{window, none}]},
                    erx_prog_handler_core:step(element(2, NewOn([], [], none)), {holder, ok})),
      ?_assertEqual([{start, []}], Start),
-     ?_assertEqual(?TABLE ++ [Bind([<<"data">>]), Bind([<<"dev">>, <<"usb">>]), Dev], Table),
+     ?_assertEqual(?PROGRAM(?TABLE ++ [Bind([<<"data">>]), Bind([<<"dev">>, <<"usb">>]), Dev]), Table),
      ?_assertEqual([holder_drop, {answer, {error, enodev}}], Refused),
      ?_assertEqual({error, einval}, New([], [{3, {buffer, 1, 4096}}])),
      ?_assertEqual({error, einval}, New([Bind([<<"dev">>, <<"kbd">>, <<"x">>])], [])),
@@ -487,9 +489,9 @@ first_window_test_() ->
     DeviceDev = #{point => [<<"dev">>], provider => {grant, self(), <<"dev">>}, root => [], rights => rw},
     [?_assertEqual([{first_window, none}], Asked),
      %% The window's /dev stands at /dev, and the open goes there.
-     ?_assertEqual([{open, 7, <<"/dev/draw">>, 2, none, ?TABLE ++ [Dev], [<<"data">>]}], Opened),
+     ?_assertEqual([{open, 7, <<"/dev/draw">>, 2, none, ?PROGRAM(?TABLE ++ [Dev]), [<<"data">>]}], Opened),
      %% One window: a later open of /dev/draw meets the program's own tree.
-     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?TABLE ++ [Dev], [<<"data">>]}],
+     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?PROGRAM(?TABLE ++ [Dev]), [<<"data">>]}],
                    Relayed(run(C2, [{file_opened, 7, {ok, d}}]), <<"/dev/draw">>)),
      %% A display refused before anything opened fails the open; a later open tries again.
      ?_assertEqual([?ANSWER(7, {error, enodev})], Refused),
@@ -498,8 +500,8 @@ first_window_test_() ->
      %% A failure once the opening began ends the handler, and answers nothing.
      ?_assertEqual({ended, {shutdown, {window, enomem}}}, erx_prog_handler_core:phase(Failed)),
      %% Other window names, a relative path, a path with .., go to the shared /dev.
-     ?_assertEqual([{open, 8, <<"/dev/ctl">>, 0, none, ?TABLE, [<<"data">>]}], Relayed(running(), <<"/dev/ctl">>)),
-     ?_assertEqual([{open, 8, <<"/dev/kbd">>, 0, none, ?TABLE, [<<"data">>]}], Relayed(running(), <<"/dev/kbd">>)),
+     ?_assertEqual([{open, 8, <<"/dev/ctl">>, 0, none, ?PROGRAM(?TABLE), [<<"data">>]}], Relayed(running(), <<"/dev/ctl">>)),
+     ?_assertEqual([{open, 8, <<"/dev/kbd">>, 0, none, ?PROGRAM(?TABLE), [<<"data">>]}], Relayed(running(), <<"/dev/kbd">>)),
      ?_assertEqual([{first_window, none}], Relayed(running(), <<"//dev/./draw">>)),
      %% An open the window's /dev would refuse opens no window.
      ?_assertMatch([{open, 8, <<"/dev/draw/">>, _, _, _, _}], Relayed(running(), <<"/dev/draw/">>)),
@@ -515,13 +517,13 @@ first_window_test_() ->
      ?_assertEqual([{first_window, <<"hdmi">>}], Relayed(run(Named, [{holder, ok}, started]), <<"/dev/draw">>)),
      %% An entry at /dev takes /dev/draw, whatever its provider and rights, so
      %% the open goes to that entry's draw and opens no window.
-     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?TABLE ++ [DeviceDev], [<<"data">>]}],
+     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?PROGRAM(?TABLE ++ [DeviceDev]), [<<"data">>]}],
                    Relayed(OnDev(DeviceDev), <<"/dev/draw">>)),
-     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?TABLE ++ [ParentDev], [<<"data">>]}],
+     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?PROGRAM(?TABLE ++ [ParentDev]), [<<"data">>]}],
                    Relayed(OnDev(ParentDev), <<"/dev/draw">>)),
-     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?TABLE ++ [ParentDev#{rights := ro}], [<<"data">>]}],
+     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?PROGRAM(?TABLE ++ [ParentDev#{rights := ro}]), [<<"data">>]}],
                    Relayed(OnDev(ParentDev#{rights := ro}), <<"/dev/draw">>)),
-     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?TABLE ++ [ReleaseDev], [<<"data">>]}],
+     ?_assertEqual([{open, 8, <<"/dev/draw">>, 0, none, ?PROGRAM(?TABLE ++ [ReleaseDev]), [<<"data">>]}],
                    Relayed(OnDev(ReleaseDev), <<"/dev/draw">>)),
      %% A table the window start refuses, here with an entry at one of the
      %% window's names, refuses the open.
@@ -794,9 +796,9 @@ start_resolves_an_absolute_image_test_() ->
     {ok, C0, Actions} = erx_prog_handler_core:new(?PID, [{0, {pipe, r}}], Files),
     Entry = hd(?TABLE),
     Narrowing = Files#{within => [{<<"/data">>, ro}]},
-    [?_assertEqual([{resolve, <<"/app/bin/x">>, ?TABLE}], Actions),
+    [?_assertEqual([{resolve, <<"/app/bin/x">>, ?PROGRAM(?TABLE)}], Actions),
      %% The starter's own table, not the program's narrowed one.
-     ?_assertEqual([{resolve, <<"/app/bin/x">>, ?TABLE}],
+     ?_assertEqual([{resolve, <<"/app/bin/x">>, ?PROGRAM(?TABLE)}],
                    element(3, erx_prog_handler_core:new(?PID, [], Narrowing))),
      ?_assertMatch({ok, _, [holder]}, erx_prog_handler_core:new(?PID, [], (files())#{image => <<"bin/x">>})),
      [?_assertEqual([{answer, {error, Errno}}], element(2, erx_prog_handler_core:step(C0, {resolved, {error, Errno}})))

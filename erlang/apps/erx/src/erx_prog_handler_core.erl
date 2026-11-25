@@ -209,7 +209,9 @@ session code and the program's own driver.
                  | {copied, file_read | file_pread, non_neg_integer()}
                  | {count, file_write | file_pwrite, pos_integer()}.
 
--type action() :: {resolve, binary(), erx_path:table()}
+%% Every action that carries a table a program's path resolves over carries it as
+%% erx_facets:program(), which only erx_facets:program_table/1 reads.
+-type action() :: {resolve, binary(), erx_facets:program()}
                 | holder
                 | {inherit, term()}
                 | {lend, pos_integer(), pos_integer()}
@@ -227,7 +229,7 @@ session code and the program's own driver.
                 | {forward, tuple()}
                 | {end_program, non_neg_integer()}
                 | {open, slot(), binary(), non_neg_integer(), none | non_neg_integer(),
-                   erx_path:table(), erx_path:place()}
+                   erx_facets:program(), erx_path:place()}
                 | {read, description(), slot(), pos_integer()}
                 | {pread, description(), slot(), non_neg_integer(), pos_integer()}
                 | {write, description(), slot(), slot(), pos_integer()}
@@ -328,7 +330,7 @@ new(Pid, Fds, #{table := Table, within := Within, cwd := Cwd, slots := Slots} = 
                  #{} -> none
              end,
     case {valid_fds(Fds) andalso drawn_once(Window, Fds), erx_path:cwd(Cwd),
-          program_table(Table, Within, Window)} of
+          start_table(Table, Within, Window)} of
         {false, _, _} -> {error, einval};
         {_, error, _} -> {error, einval};
         {_, _, {error, _} = Refused} -> Refused;
@@ -337,7 +339,7 @@ new(Pid, Fds, #{table := Table, within := Within, cwd := Cwd, slots := Slots} = 
                       slots = Slots, first = first(Window, Fds, Files)},
             case Files of
                 #{image := <<"/", _/binary>> = Image} ->
-                    {ok, C#core{phase = resolving}, [{resolve, Image, Table}]};
+                    {ok, C#core{phase = resolving}, [{resolve, Image, erx_facets:program(Table)}]};
                 #{} ->
                     {ok, C, [holder]}
             end
@@ -470,7 +472,7 @@ drawn_once({window, _}, Fds) -> [Buffer || {_, {buffer, _, _}} = Buffer <- Fds] 
 %% started on it. A display's facet is left out at each resolution of the
 %% program's paths (erx_facets:program_table/1), not here, so one installed
 %% or re-granted after the program starts stays out too.
-program_table(Table, Within, Window) ->
+start_table(Table, Within, Window) ->
     case narrowed(Table, Within) of
         {ok, Narrowed} ->
             case refusal(Window, Narrowed) of
@@ -794,7 +796,7 @@ open(#core{opens = Opens, pending = Pending, first = First} = C, Slot, Case, Pat
     end.
 
 relay_open(#core{table = Table, cwd = Cwd} = C, Slot, Case, Path, Flags, Mode) ->
-    relay(C, Slot, Case, {open, Slot, Path, Flags, create_mode(Flags, Mode), Table, Cwd}).
+    relay(C, Slot, Case, {open, Slot, Path, Flags, create_mode(Flags, Mode), erx_facets:program(Table), Cwd}).
 
 %% Whether an open of Path opens the program's window first: no; {open, Named};
 %% or {refused, Errno} for a table a window start refuses (refusal/2). Path

@@ -111,12 +111,10 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Low] session, `erx_file_remote:open_flags/4`: an `lopen` that writes on an entry that is not `rw`
   answers `erofs` before the path is walked, so a missing file opened to write there is `erofs`, where
   FreeBSD's `vn_open` answers `ENOENT` from the lookup first.
-* [Medium] session, `erx_prog_handler` and `erx_file_description` (window exclusion): a display is kept
-  from a program because both of the program's resolvers call `erx_facets:program_table/1`, not
-  `table/1`; reverting either call site passes every host test, since the handler tests' stand-in
-  `erx_file_description` serves a fixed table and the real one needs `prim_file:erx_open_at`. Make the
-  program's table a value only `program_table/1` resolves (one funnel), and write the property test
-  design-files.md's verification row F3 names (spawn chains, late installations, replacements, names).
+* [Medium] session, `erx_prog_handler` (window exclusion): the property test design-files.md's
+  verification row F3 names (spawn chains, late installations, replacements, names) is not written;
+  the handler tests check one late installation, one replacement, one other name and a bind, and each
+  of the handler's two resolutions on one table.
   The start-time checks (`refusal/2`, `shared_dev/1`) still count display entries the program never
   sees, which can refuse a start with `einval` or send the first `/dev/draw` to a dropped entry.
 * [Medium] session, `erx_prog_handler_core` (narrowing): a narrowed entry is a path re-walked at each

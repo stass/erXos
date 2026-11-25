@@ -15,7 +15,9 @@ require_relative '../fixtures/erlang_build'
 # test/erlang/erx_prog_handler_tests.erl. The core's resolve of an executable file
 # walks the EROFS reader's fixture images (erx_erofs_tests), and the table a program's
 # resolution walks, erx_facets:program_table/1, is read over the real facet registry
-# by the same suite. Each seeded fault must fail the EUnit case named beside it.
+# by the same suite, and the handler's two resolutions of a program's paths, its
+# image's and each open's, over a table the stand-in erx_file_description hands out.
+# Each seeded fault must fail the EUnit case named beside it.
 class ErxProgHandlerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATIONS = %w[erx erx_files].freeze
@@ -185,6 +187,14 @@ class ErxProgHandlerTest < Minitest::Test
                  original: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].",
                  replacement: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, \#{})].",
                  caught_by: 'a_display_installed_after_the_start_is_left_out'),
+    'a program image resolved through table/1, which refuses a program table' =>
+      Mutant.new(file: HANDLER, original: '    Table = erx_facets:program_table(Program),',
+                 replacement: '    Table = erx_facets:table(Program),',
+                 caught_by: 'an_image_beneath_a_display_is_not_found'),
+    'a program open resolved through table/1, which refuses a program table' =>
+      Mutant.new(file: HANDLER, original: 'Mode, erx_facets:program_table(Program), Cwd),',
+                 replacement: 'Mode, erx_facets:table(Program), Cwd),',
+                 caught_by: 'an_open_walks_no_display'),
     'a first draw that takes an entry at /dev for the shared /dev, which opens a window on its grant' =>
       Mutant.new(file: CORE, original: '#{point := Point} -> Point =:= []',
                  replacement: '#{point := Point} -> length(Point) =< 1', caught_by: 'first_window_test_'),
