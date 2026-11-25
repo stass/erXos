@@ -21,6 +21,7 @@ module Erx
   # container build (L4ReBuild) copies each tree in at the path L4Re's manifest gives it
   # (LAYOUT), and each package beside them.
   module L4ReFetch
+    LABEL = 'l4re'
     LOCK = 'bench/l4re/deps.lock'
     WORKSPACE = 'build/l4re-sources'
     ORIGIN = 'fiasco/kernel/ORIGIN.md'
@@ -38,7 +39,7 @@ module Erx
     # build/l4re-sources/build/downloads, from which the archives come with no network.
     # Returns the lines that say what was done.
     def fetch(root:, runner:, cache: nil)
-      SideLock.fetch(lock(root: root, runner: runner), root: root, label: 'l4re', cache: cache)
+      SideLock.fetch(lock(root: root, runner: runner), root: root, label: LABEL, cache: cache)
     end
 
     # The lock's sources over the workspace; refuses a lock whose git sources are not
@@ -46,8 +47,7 @@ module Erx
     # sources are not Debian arm64 packages (PACKAGE), or that pins upstream Fiasco at
     # another commit than the fork's. Its fetched_tree(id) is the tree LAYOUT places.
     def lock(root:, runner:)
-      dependencies = SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE,
-                                           refetch: 'ruby tools/erx fetch --l4re')
+      dependencies = SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE, label: LABEL)
       trees, others = dependencies.sources.partition { |source| source.fetch('kind') == 'git' }
       ids = trees.map { |source| source.fetch('id') }
       unless ids.sort == LAYOUT.keys.sort

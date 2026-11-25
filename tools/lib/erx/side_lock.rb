@@ -15,11 +15,15 @@ module Erx
   module SideLock
     module_function
 
-    # The sources lock pins (a path below root), over workspace, also below root;
-    # refetch is the command that fetches them, named when one is not fetched.
-    def dependencies(root:, runner:, lock:, workspace:, refetch:)
+    # The command that fetches the side lock label names (`--l4re`, `--linux`), which a
+    # refusal of a source it has not fetched names.
+    def fetch_command(label) = "ruby tools/erx fetch --#{label}"
+
+    # The sources lock pins (a path below root), over workspace, also below root, its
+    # unfetched sources naming the fetch of label.
+    def dependencies(root:, runner:, lock:, workspace:, label:)
       Dependencies.new(root: OutputDirectory.prepare(root: root, path: File.join(root, workspace)),
-                       runner: runner, lock_path: File.join(root, lock), refetch: refetch)
+                       runner: runner, lock_path: File.join(root, lock), refetch: fetch_command(label))
     end
 
     # Fetches every source of dependencies, from cache (another checkout's

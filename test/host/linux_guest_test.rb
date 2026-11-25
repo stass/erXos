@@ -83,7 +83,7 @@ class LinuxGuestTest < Minitest::Test
     write_lock
     assert_match(/landing profiles only/, guest.refusal('full'))
     assert_equal "linux's guest needs alpine-kernel-config, alpine-musl-dev, alpine-vmlinuz-virt: " \
-                 'run `tools/erx fetch --linux`', guest.refusal('landing')
+                 'run `ruby tools/erx fetch --linux`', guest.refusal('landing')
     Erx::LinuxGuest.fetch(root: @root, runner: @runner, cache: @cache)
     assert_nil guest.refusal('landing')
   end

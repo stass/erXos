@@ -26,6 +26,7 @@ module Erx
   # files and libc.a, the members its pin names, are inputs to the compiler and linker, and
   # the kernel runs only in QEMU, whose guest has no network device and no disk.
   module LinuxGuest
+    LABEL = 'linux'
     LOCK = 'bench/linux/deps.lock'
     WORKSPACE = 'build/linux-sources'
     OUTPUT = 'build/linux-guest'
@@ -46,14 +47,13 @@ module Erx
 
     # The lock's sources over their own workspace.
     def lock(root:, runner:)
-      SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE,
-                            refetch: 'ruby tools/erx fetch --linux')
+      SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE, label: LABEL)
     end
 
     # Fetches every source the lock pins, from cache (another checkout's
     # build/linux-sources/build/downloads) when given. Answers what was done.
     def fetch(root:, runner:, cache: nil)
-      SideLock.fetch(lock(root: root, runner: runner), root: root, label: 'linux', cache: cache)
+      SideLock.fetch(lock(root: root, runner: runner), root: root, label: LABEL, cache: cache)
     end
 
     # The initramfs: /init, the program it runs, and the directories and console the
@@ -164,7 +164,7 @@ module Erx
 
         dependencies = LinuxGuest.lock(root: @root, runner: @runner)
         missing = dependencies.sources.map { |source| source.fetch('id') }.reject { |id| dependencies.fetched?(id) }
-        "linux's guest needs #{missing.join(', ')}: run `tools/erx fetch --linux`" unless missing.empty?
+        "linux's guest needs #{missing.join(', ')}: run `#{SideLock.fetch_command(LABEL)}`" unless missing.empty?
       end
 
       def call(benchmark, cells:, cpus:, accel:)
@@ -174,7 +174,7 @@ module Erx
                                  accel: accel, directory: directory)
         # The kernel QEMU booted is the pinned one, as the record says.
         unless report.fetch('image_sha256') == @built.fetch(:subject).fetch('kernel').fetch('sha256')
-          raise Error, "#{@built.fetch(:kernel)} is not the kernel Linux's lock pins: run `tools/erx fetch --linux`"
+          raise Error, "#{@built.fetch(:kernel)} is not the kernel Linux's lock pins: run `#{SideLock.fetch_command(LABEL)}`"
         end
         serial = report.fetch('serial_log')
         lines = NativeBench.guest_lines(File.binread(serial))
