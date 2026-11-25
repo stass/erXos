@@ -52,7 +52,8 @@ module Erx
     # The record facts of board_queue's one set, as BoardRecord.set reads them.
     BOARD_SET = BoardRecord::SetFacts.new(
       environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}),
-      subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {})
+      subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {}),
+      arm_clock_hz: nil
     )
 
     module_function

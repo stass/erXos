@@ -75,11 +75,11 @@ module Erx
       unknown = record.keys - KEYS
       raise Error, "#{self.class.record_path(name)}: unknown key #{unknown.first.inspect}" unless unknown.empty?
 
-clock = record['arm_clock_hz']
-raise Error, "#{self.class.record_path(name)}: arm_clock_hz must be a positive whole number of megahertz" unless
-  clock.nil? || (clock.is_a?(Integer) && clock.positive? && (clock % 1_000_000).zero?)
+      clock = record['arm_clock_hz']
+      raise Error, "#{self.class.record_path(name)}: arm_clock_hz must be a positive whole number of megahertz" unless
+        clock.nil? || (clock.is_a?(Integer) && clock.positive? && (clock % 1_000_000).zero?)
 
-MIB_FIELDS.each do |field, mib|
+      MIB_FIELDS.each do |field, mib|
         bytes = record.fetch(field) { raise Error, "#{self.class.record_path(name)}: no #{field}" }
         raise Error, "#{self.class.record_path(name)}: #{field} must be a whole number of MiB in #{mib}" unless
           bytes.is_a?(Integer) && (bytes % (1 << 20)).zero? && mib.cover?(bytes >> 20)

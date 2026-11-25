@@ -93,7 +93,7 @@ module Erx
       end
       return nil unless cell
 
-      arm_hz = BoardClock.recorded_hz(run.record.run) if cell.conditions.clock == 'cycles'
+      arm_hz = BoardClock.stated_hz(run.record.run.details) if cell.conditions.clock == 'cycles'
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
                 values: values(cell, boot.clock, arm_hz), converted_hz: arm_hz, ratio: nil)
     end
@@ -135,9 +135,12 @@ module Erx
       end
     end
 
-    # entry's median over erXos's, where both are histograms in nanoseconds; a mean is
-    # never set in a ratio (docs/design-bench.md, "A mean").
+    # entry's median over erXos's, where both are histograms in nanoseconds and neither was
+    # converted from cycles at a configured clock; a mean is never set in a ratio
+    # (docs/design-bench.md, "A mean").
     def ratio(entry, erxos)
+      return nil if entry.converted_hz || erxos&.converted_hz
+
       own, base = [entry, erxos].map { |side| side&.form == 'histogram' ? side.values['p50'] : nil }
       own && base && base.unit == 'ns' && own.unit == 'ns' && base.amount.positive? ? own.amount / base.amount : nil
     end
@@ -172,7 +175,7 @@ module Erx
       status = entry.reason ? "#{entry.status} (#{entry.reason})" : entry.status
       values = entry.values.map { |name, quantity| "#{name} #{quantity_text(quantity)}" }
       ratio = entry.ratio ? ["ratio #{format('%.2f', entry.ratio)}"] : []
-      clock = entry.converted_hz ? "cycles, shown in ns at the #{entry.converted_hz / 1_000_000} MHz ARM clock its config.txt held" : entry.clock
+      clock = entry.converted_hz ? "cycles, shown in ns at the #{entry.converted_hz / 1_000_000} MHz ARM clock its config.txt set, not measured" : entry.clock
       "#{[status, clock, entry.form].join(', ')}#{values.empty? ? '' : ": #{[*values, *ratio].join(', ')}"}"
     end
 

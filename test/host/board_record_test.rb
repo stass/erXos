@@ -31,7 +31,7 @@ class BoardRecordTest < Minitest::Test
 
   # A set's directory holding its build record as BootPartition writes one: the
   # partition's files with their SHA-256, the source, and the inputs the record reads.
-  def set_directory(name, kernel:)
+  def set_directory(name, kernel:, clock: 1_500_000_000)
     directory = File.join(@scratch, name)
     FileUtils.mkdir_p(directory)
     files = { 'kernel8.img' => kernel, 'start4.elf' => '22' * 32, 'fixup4.dat' => '33' * 32 }
@@ -42,6 +42,7 @@ class BoardRecordTest < Minitest::Test
                               'firmware' => [{ 'id' => 'rpi-firmware-start4', 'filename' => 'start4.elf' },
                                              { 'id' => 'rpi-firmware-fixup4', 'filename' => 'fixup4.dat' }],
                               'bl31' => { 'compiler' => COMPILER } } }
+    receipt['arm_clock_hz'] = clock if clock
     path = File.join(directory, 'boot.receipt.json')
     File.write(path, JSON.generate(receipt))
     Erx::BoardFiles::BootSet.new(directory: directory, record_sha256: Digest::SHA256.file(path).hexdigest,
@@ -65,9 +66,10 @@ class BoardRecordTest < Minitest::Test
 
   def recorded(queue, walk: walk(), log: Fuzz.board_log, readings: { 'before' => "cpu_temp 41.2\n", 'after' => nil })
     read = Erx::BoardLog.read(log, queue: queue, asked: Fuzz.board_asked * queue.sets.size, walk: walk)
-    Erx::BoardRecord.records(read, sets: queue.sets.map { |set| Erx::BoardRecord.set(set) },
+    sets = queue.sets.map { |set| Erx::BoardRecord.set(set) }
+    Erx::BoardRecord.records(read, sets: sets,
                                    run: Erx::BoardRecord.run(queue: queue, walk: walk, read: read, readings: readings,
-                                                             started_by: 'manual', arm_clock_hz: 1_500_000_000))
+                                                             started_by: 'manual', arm_clock_hz: Erx::BoardRecord.clock(sets)))
   end
 
   def test_a_walk_of_three_entries_of_one_set_is_one_record_of_three_boots
@@ -117,6 +119,12 @@ class BoardRecordTest < Minitest::Test
     assert_equal [nil, nil, nil], record.boots.map { |boot| boot.details.fetch('outcome') }
   end
 
+  # The run keeps the ARM clock its sets' build records state, and none when they differ.
+  def test_the_run_keeps_the_clock_its_sets_state
+    mixed = queue([set_directory('wake', kernel: '11' * 32), set_directory('unheld', kernel: '44' * 32, clock: nil)], [0, 1, 1])
+    assert_nil recorded(mixed).first.record.run.details.fetch('arm_clock_hz')
+  end
+
   def test_a_sensor_reading_is_kept_escaped
     readings = { 'before' => "fan \e]0;x\a\xff\n", 'after' => nil }
     record = recorded(queue([set_directory('wake', kernel: '11' * 32)], [0, 0, 0]), readings: readings).first.record
@@ -139,11 +147,11 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log([*Fuzz::FIRMWARE_LINES, Fuzz.banner(**Fuzz::FOUND), 'erXos']))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
+      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/names no boot/, error.message)
     other = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
+      Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/is a walk of wake/, other.message)
   end
@@ -160,7 +168,7 @@ class BoardRecordTest < Minitest::Test
     log = File.join(directory, 'console.log')
     File.write(log, Fuzz.board_log(Fuzz::FIRMWARE_LINES))
     error = assert_raises(Erx::Error) do
-      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch, arm_clock_hz: 1_500_000_000)
+      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/names no boot/, error.message)
   end

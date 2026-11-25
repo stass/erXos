@@ -1430,7 +1430,10 @@ the clocks that have a frequency (`counter`, `monotonic`) and cycles for
 `cycles`, and sets a ratio only between two cells of clocks with a
 frequency. A cell in `cycles` gets no ratio and no conversion, whatever
 another boot's `CLOCK` line measured: a calibration describes only its
-own boot, and under HVF the next boot may run on other host cores.
+own boot, and under HVF the next boot may run on other host cores. On
+the board a `cycles` cell is shown in nanoseconds at its own run's
+configured ARM clock, still with no ratio
+([The board's ARM clock](#the-boards-arm-clock)).
 
 The record of a run that is not erXos keeps, in its `subject`, the erXos
 source revision of the harness and of `erx_peer_bench`, and every pin
@@ -1925,27 +1928,32 @@ which no card writes; and that the firmware still throttles the ARM at
 `arm_freq` on a board revision that allows 1800 MHz, so an explicit
 `arm_freq` makes it moot. So erXos and L4Re, which ask the firmware for
 no clock, and Linux, whatever governor it runs, run at 1500 MHz unless
-the firmware throttles; the Linux set takes the same
-`config.txt` as erXos's.
+the firmware throttles; the Linux set's `config.txt` carries the same
+clock lines.
 
 How each system's clock is known:
 
 | System | What says the clock | What says it was not throttled |
 | --- | --- | --- |
 | erXos | the cycle-counter probe of each boot ([The cycle counter](#the-cycle-counter)): its count times the counter's frequency, measured in that boot | `/proc/sensors/status` read over ssh before and after the walk, where the found target serves it |
-| L4Re | the clock its `config.txt` held, recorded as the run's `arm_clock_hz`; nothing in L4Re's boot measures it | nothing from L4Re's boot; the readings before and after, on erXos, bound the time around it |
+| L4Re | the clock its `config.txt` sets, recorded as the run's `arm_clock_hz`; nothing in L4Re's boot measures it | none: L4Re's run reads no sensors |
 | Linux | the same `config.txt`; the governor is not relied on | Linux's own report, where the set reads it, else none |
 
-Every board run's record keeps `arm_clock_hz` in its run's details, the
-clock its cards held, from the harness tree's platform record, the one
-source `config.txt` is written from. The side-by-side table converts a
+A bench set's build record states the clock its `config.txt` sets
+(`BootPartition.lay_out_set`, from the platform record that `config.txt`
+is written from), and every board run's record keeps it as `arm_clock_hz`
+in its run's details: erXos's walk from the build records of the sets it
+booted (none when they differ), L4Re's run from its set's build record,
+which the run copies beside its console log; a log without it gives no
+clock. The side-by-side table converts a
 `cycles` cell to nanoseconds at its own run's `arm_clock_hz`, never at
 another run's or another boot's count, and its row says so (`cycles,
-shown in ns at the 1500 MHz ARM clock its config.txt held`); a `cycles`
+shown in ns at the 1500 MHz ARM clock its config.txt set, not measured`),
+and it sets no ratio, since the clock is configured, not measured; a `cycles`
 cell of a run with no such clock, as under QEMU, stays in cycles. An
 erXos boot's probe that disagrees with its run's clock by more than 2%
-says the clock was not held, which the reader of the record sees beside
-the table; the table does not correct for it.
+says the clock was not held; the reader compares the two by hand, and
+the table does not correct for it.
 
 `bench/peer/erx_peer_bench.c` is one C17 file under erXos's license that
 Linux compiles on the board with its own compiler; the record

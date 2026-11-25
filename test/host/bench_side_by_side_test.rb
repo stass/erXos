@@ -139,7 +139,7 @@ class BenchSideBySideTest < Minitest::Test
     assert_equal [ns(Rational(4_213_000 * 1000, 10_000 * 1500)), 1_500_000_000, nil],
                  [entry.values.fetch('mean'), entry.converted_hz, entry.ratio]
     line = Tables.render([board]).find { |text| text.include?('280.9 ns') }
-    assert_match(/cycles, shown in ns at the 1500 MHz ARM clock its config\.txt held, mean/, line)
+    assert_match(/cycles, shown in ns at the 1500 MHz ARM clock its config\.txt set, not measured, mean/, line)
   end
 
   # ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table

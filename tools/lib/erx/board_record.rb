@@ -35,8 +35,9 @@ module Erx
     CPUS = 4
     MEMORY_MIB = 4096
 
-    # What a set's record holds of the set: its environment and its subject.
-    SetFacts = Data.define(:environment, :subject)
+    # What a set's record holds of the set: its environment, its subject, and the ARM clock
+    # its config.txt set (BoardClock), nil when its build record states none.
+    SetFacts = Data.define(:environment, :subject, :arm_clock_hz)
 
     module_function
 
@@ -69,14 +70,15 @@ module Erx
           revision: commit, dirty: dirty,
           details: { 'kernel8_sha256' => files.fetch(BootPartition::KERNEL), 'record_sha256' => boot_set.record_sha256,
                      'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }.compact
-        )
+        ),
+        arm_clock_hz: BoardClock.stated_hz(receipt)
       )
     rescue NoMatchingPatternError, KeyError, TypeError, NoMethodError
       raise Error, "board record: #{path} does not name the set's source, firmware and kernel"
     end
 
-    # The run's facts: the queue's date; the ARM clock the board's cards held (BoardClock),
-    # nil when the board's record names none; the sensor readings, each named for when it was
+    # The run's facts: the queue's date; the ARM clock its sets' config.txt set (BoardClock),
+    # nil unless every set states the same one; the sensor readings, each named for when it was
     # read and nil when none was; how the walk ended and whether the link was restored,
     # nil without the walk; and what the board returned to (BoardLog's read).
     def run(queue:, walk:, read:, readings:, started_by:, arm_clock_hz:)
@@ -105,15 +107,19 @@ module Erx
     end
 
     # The records of the walk whose console log is log, of queue, with the walk's
-    # outcomes (or nil), the sensor readings and the board's ARM clock; read is BoardLog's read of it, against
+    # outcomes (or nil) and the sensor readings; read is BoardLog's read of it, against
     # what the queue's benchmark asks at the landing profile on the board.
-    def recorded(log, queue:, walk:, readings:, started_by:, arm_clock_hz:)
+    def recorded(log, queue:, walk:, readings:, started_by:)
       read = BoardLog.read(log, queue: queue, asked: Array.new(queue.sets.size, asked(queue.benchmark)), walk: walk)
       yield read if block_given?
-      records(read, sets: queue.sets.map { |boot_set| set(boot_set) },
+      sets = queue.sets.map { |boot_set| set(boot_set) }
+      records(read, sets: sets,
                     run: run(queue: queue, walk: walk, read: read, readings: readings, started_by: started_by,
-                                   arm_clock_hz: arm_clock_hz))
+                                   arm_clock_hz: clock(sets)))
     end
+
+    # The ARM clock every one of sets states, or nil when they state none or differ.
+    def clock(sets) = sets.map(&:arm_clock_hz).uniq.then { |clocks| clocks.size == 1 ? clocks.first : nil }
 
     # Writes each record under history; returns the run directories.
     def write(made, history:, root:)
@@ -122,9 +128,9 @@ module Erx
 
     # `tools/erx bench import NAME --queue FILE LOG` (docs/design-bench.md, "Importing a
     # log"): the records of the walk of NAME whose queue file is queue and whose console
-    # log is log, with walk.json beside the queue when the walk wrote it and the board's ARM
-    # clock arm_clock_hz, written under history. A log no line of which names a boot is refused.
-    def import(name, queue:, log:, root:, history:, arm_clock_hz:)
+    # log is log, with walk.json beside the queue when the walk wrote it, written under
+    # history. A log no line of which names a boot is refused.
+    def import(name, queue:, log:, root:, history:)
       walked = BoardFiles.read_queue(queue)
       raise Error, "board record: #{queue} is a walk of #{walked.benchmark}, not of #{name}" unless walked.benchmark == name
 
@@ -132,7 +138,7 @@ module Erx
       walk = File.file?(walk_path) ? BoardFiles.read_walk(walk_path) : nil
       bytes = BoundedFile.read(log, maximum: BoardLog.max_bytes(walked))
       made = recorded(bytes, queue: walked, walk: walk, readings: { 'before' => nil, 'after' => nil },
-                             started_by: 'manual', arm_clock_hz: arm_clock_hz) do |read|
+                             started_by: 'manual') do |read|
         raise Error, "board record: #{log} names no boot of the queue, so no line of it is tied to a boot" if
           read.boots.all? { |boot| boot.cells.all? { |cell| cell.reason == BoardLog::UNNAMED } }
       end

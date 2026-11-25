@@ -72,15 +72,15 @@ class L4ReBoardTest < Minitest::Test
     raise "git init failed: #{error}" unless status.success?
   end
 
-  def imported(lines)
+  def imported(lines, set_record: { 'arm_clock_hz' => 1_500_000_000 })
     log = File.join(@scratch, 'console.log')
+    File.write(File.join(@scratch, Erx::BootPartition::SET_RECORD), JSON.generate(set_record)) if set_record
     File.binwrite(log, "#{lines.join("\r\n")}\r\n")
     erxos, history = File.join(@scratch, 'erxos'), File.join(@scratch, 'history')
     [erxos, history].each { |path| git_init(path) }
     Board.import('nullcall', subject: subject_file, log: log, root: erxos, history: history,
                              revision: Erx::SourceRevision::Revision.new(count: 1, hash: 'c' * 12, commit: 'c' * 40,
-                                                                               dirty: false, committed_at: nil),
-                             arm_clock_hz: 1_500_000_000)
+                                                                               dirty: false, committed_at: nil))
   end
 
   def test_a_log_is_imported_as_a_one_cpu_l4re_record_of_the_board
@@ -97,7 +97,8 @@ class L4ReBoardTest < Minitest::Test
   def test_cpus_started_after_benchmarks_done_are_erxos_return_and_not_counted
     returned = ['erx: boot image build 0123456789abcdef index ' + ('a' * 64) + ' x', LOG[1],
                 *(1..3).map { |cpu| "CPU#{cpu} booted (same IDs as CPU0)." }]
-    _, record = imported([*LOG, *returned])
+    _, record = imported([*LOG, *returned], set_record: nil)
+    assert_nil record.run.details.fetch('arm_clock_hz')
     assert_equal 1, record.environment.cpus
   end
 

@@ -474,6 +474,7 @@ module Erx
     # Lays the partition's files for bootable out into directory with their build record,
     # as lay_out does, without the card: a bench set (write_set). With boot_cpu_only, the
     # board's tree keeps only the boot CPU (BoardTree.boot_cpu_only), and the record says so.
+    # The record states the ARM clock config.txt sets, when the platform's record names one.
     def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
                     revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false)
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
@@ -482,6 +483,9 @@ module Erx
       # A set has no card, so its record names no card's tool.
       record = record.merge('inputs' => record.fetch('inputs').except('card'))
       record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
+      # The ARM clock the set's config.txt sets, which a board run's record keeps (BoardClock).
+      clock = BoardClock.configured_hz(platform.record)
+      record = record.merge(BoardClock::KEY => clock) if clock
       write_set(root: root, directory: directory, plan: plan, record: record)
     end
 
