@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative 'bench_record'
+require_relative 'error'
 require_relative 'line_escape'
 
 module Erx
@@ -46,6 +47,8 @@ module Erx
     # carries color sequences in its middle too (docs/design-bench.md, "L4Re's guest").
     TAG_WIDTH = 8
     FIELDS = PROGRAMS.to_h { |program| ["#{program.tag[0, TAG_WIDTH].ljust(TAG_WIDTH)}| ", program.tag] }.freeze
+    raise Error, 'two ipcbench tags share their first eight columns' unless FIELDS.size == PROGRAMS.size
+
     TAGGED = /\A(?<field>#{Regexp.union(FIELDS.keys).source})/n
     # ned's color sequences: Select Graphic Rendition, ESC [ parameters m. They are
     # dropped before a line is read, and nothing else of the line is.

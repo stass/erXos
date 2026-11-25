@@ -28,9 +28,10 @@ module Erx
   # written, then unpacked only where it holds the expected regular files within their
   # bounds. The attached run's log is bounded too.
   #
-  # The decisions are pure (kernel_defconfig, difference, plan, check_container, unpack,
-  # record); build runs the plan's docker commands and always removes the container it
-  # created and its work directory.
+  # The decisions are pure (kernel_defconfig, difference, plan, check_container, record);
+  # unpack reads the exported archive whole before it writes anything, and build runs the
+  # plan's docker commands and always removes the container it created and its work
+  # directory.
   module L4ReBuild
     IMAGE_ID = 'oracle-toolchain-arm64'
     PLATFORM = 'linux/arm64'
@@ -165,29 +166,47 @@ module Erx
     private_class_method :text
 
     # Writes OUTPUTS from archive, the tar docker cp streamed of /tmp/out, into the new
-    # directory out. The container wrote the archive, so it is refused unless it holds
-    # out's directory and exactly OUTPUTS, each a regular file within its bound: no link,
-    # device, extended header or other name is followed or written.
+    # directory out, once the whole archive is read and checked (outputs).
     def unpack(archive:, out:)
+      files = outputs(archive)
       Dir.mkdir(out, 0o700)
-      names = File.open(archive, 'rb') do |io|
-        Gem::Package::TarReader.new(io).filter_map do |entry|
-          next if entry.directory? && entry.full_name.delete_suffix('/') == 'out'
+      files.each { |name, bytes| File.binwrite(File.join(out, name), bytes) }
+    end
 
-          name = entry.full_name.delete_prefix('out/')
-          bound = entry.header.typeflag == '0' && OUTPUTS[name]
+    # The outputs archive holds, as name => bytes. The container wrote it, so it is refused
+    # unless it holds the directory out and exactly OUTPUTS in it, each a regular file
+    # within its bound with all its bytes present, and ends in tar's zero block: no link,
+    # device, extended header, other name or truncated archive is accepted.
+    def outputs(archive)
+      File.open(archive, 'rb') do |io|
+        files = Gem::Package::TarReader.new(io).filter_map do |entry|
+          path = entry.full_name
+          next if entry.directory? && path.delete_suffix('/') == 'out'
+
+          name = path.delete_prefix('out/')
+          bound = entry.header.typeflag == '0' && path == "out/#{name}" && OUTPUTS[name]
           raise Error, "L4Re's build exported an entry other than out/ and its regular files within their bounds" unless
             bound && entry.header.size <= bound
 
-          File.binwrite(File.join(out, name), entry.read.to_s)
-          name
+          bytes = entry.read.to_s
+          raise Error, "L4Re's build exported a truncated archive" unless bytes.bytesize == entry.header.size
+
+          [name, bytes]
         end
+        raise Error, "L4Re's build exported an archive without tar's end" unless ended?(io)
+        raise Error, "L4Re's build exported #{files.size} outputs, not once each of #{OUTPUTS.keys.join(', ')}" unless
+          files.map(&:first).sort == OUTPUTS.keys.sort
+
+        files.to_h
       end
-      raise Error, "L4Re's build exported #{names.size} outputs, not once each of #{OUTPUTS.keys.join(', ')}" unless
-        names.sort == OUTPUTS.keys.sort
     rescue Gem::Package::Error
       raise Error, "L4Re's build exported an archive that is not a tar"
     end
+    private_class_method :outputs
+
+    # Whether the reader stopped at tar's zero block, not at the end of a cut archive.
+    def ended?(io) = io.pos >= 512 && io.pread(512, io.pos - 512) == "\0".b * 512
+    private_class_method :ended?
 
     # Builds L4Re's guest on the engine of the docker context, leaving bootstrap.elf,
     # globalconfig.out and the build record in build/l4re. Returns bootstrap.elf's path.
@@ -217,11 +236,10 @@ module Erx
         steps.fetch(:copies).each(&run)
         run.call(steps.fetch(:start))
         run.call(steps.fetch(:export))
-      rescue StandardError
-        remove(runner: runner, endpoint: endpoint, name: name, raising: false)
-        raise
+      ensure
+        # Also on an interrupt; a failed removal raises only when nothing else propagates.
+        remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
       end
-      remove(runner: runner, endpoint: endpoint, name: name, raising: true)
       out = File.join(directory, 'out')
       unpack(archive: archive, out: out)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, defconfig: defconfig))
