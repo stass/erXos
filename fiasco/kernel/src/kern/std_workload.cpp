@@ -28,7 +28,7 @@ static constexpr Cap_index C_pager   = Cap_index(Initial_kobjects::Pager);
 // one-page area's kernel alias differs from the user address in bit 12 or 13 in
 // three of four placements, and on Apple silicon under HVF every kernel call from
 // a thread on such an area is then measurably slower.
-static constexpr unsigned Boot_utcb_area_shift = 14;
+static constexpr unsigned Boot_utcb_area_shift = Task::Ku_mem_order_min;
 
 static
 Task *

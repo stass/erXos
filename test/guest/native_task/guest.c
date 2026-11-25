@@ -217,7 +217,7 @@ case_irq_refused(void)
  * 12 and 13 (docs/design-fiasco.md, "Congruent UTCB areas"): a one-page area, and a 16 KiB
  * area at an address aligned only to a page. It grants a 16 KiB area aligned to its size.
  * Each probe lies UTCB_PROBE_STEP apart at UTCB_PROBE, far above the root's managed memory
- * (vm.c's object area ends at 512 GiB), so an area granted overlaps nothing the root uses.
+ * (vm.c's area table ends at 512 GiB), so an area granted overlaps nothing the root uses.
  */
 static void
 case_utcb_area_congruent(void)
@@ -227,6 +227,7 @@ case_utcb_area_congruent(void)
 	    UTCB_AREA_MIN_ORDER);
 	const int64_t granted = erx_fiasco_test_ku_mem_add(UTCB_PROBE + 2 * UTCB_PROBE_STEP, UTCB_AREA_MIN_ORDER);
 
+	/* The statuses in order: the one-page area, the misaligned area, the aligned area. */
 	say_status(small);
 	say_status(misaligned);
 	say_status(granted);

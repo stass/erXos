@@ -1814,7 +1814,7 @@ no range call changes, and it goes with the thread. The address it picks is
 congruent modulo 16 KiB with the page's address in the kernel's own
 mapping, because the kernel picks it from that address: where a data cache
 is indexed by the bits above the page offset, a mismatch slows every kernel
-call of the thread ([design-fiasco.md](design-fiasco.md), "Congruent UTCB
+call of the thread (measured on Fiasco under HVF; the cause is unverified) ([design-fiasco.md](design-fiasco.md), "Congruent UTCB
 areas", where Fiasco refuses an area that could mismatch).
 
 ```text

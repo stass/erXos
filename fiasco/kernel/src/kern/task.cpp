@@ -1,4 +1,5 @@
-// Modified by erXos: alloc_ku_mem refuses a UTCB area under 16 KiB or not aligned to its size, so its kernel alias is congruent with its user address.
+// Modified by erXos: alloc_ku_mem refuses an area under 16 KiB or not aligned
+// to its size (docs/design-fiasco.md, "Congruent UTCB areas").
 INTERFACE:
 
 #include "context.h"
@@ -22,6 +23,11 @@ class Task :
   friend class Jdb_space;
 
 public:
+  // The least order of a kernel-user area alloc_ku_mem grants: an area at least
+  // this large and aligned to its size has a kernel alias congruent with its user
+  // address in bits 12 and 13 (docs/design-fiasco.md, "Congruent UTCB areas").
+  static constexpr unsigned Ku_mem_order_min = 14;
+
   enum class Op : Mword
   {
     Map           = 0,
@@ -362,12 +368,11 @@ Task::alloc_ku_mem(L4_fpage *ku_area, bool need_remote_tlb_flush)
   if (size == 0)
     return -L4_err::EInval;
 
-  // erXos: the area's kernel alias, which the buddy allocator aligns to the
-  // area's size, agrees with its user address in bits 12 and 13 only when the
-  // area is at least 16 KiB and its user address is aligned to its size, so any
-  // other area is refused (docs/design-fiasco.md, "Congruent UTCB areas").
-  constexpr unsigned Congruent_order = 14;
-  if (ku_area->order() < Congruent_order
+  // erXos: the buddy allocator aligns the area's kernel alias to the area's
+  // size, so an area of at least 16 KiB at a size-aligned user address agrees
+  // with its alias in bits 12 and 13; every other area is refused, before
+  // anything is allocated (docs/design-fiasco.md, "Congruent UTCB areas").
+  if (ku_area->order() < Ku_mem_order_min
       || (cxx::int_value<Virt_addr>(ku_area->mem_address()) & (size - 1)) != 0)
     return -L4_err::EInval;
 

@@ -179,9 +179,9 @@ capability-table page (`obj_space_phys_util.cpp:163,226`), refused as `Insert_er
 refused as `L4_error::Map_failed` (`map_util.cpp:745-770,784-785`). A factory's create fails the same
 way, from the factory it is made from. So does a task's added kernel-user memory, which
 [vCPU arming](#vcpu-upcalls-on-fiasco) takes: `l4_task_add_ku_mem` charges the area to the task's
-quota (`task.cpp:249`), maps it into the task (`:255`), and when either is refused frees the area
-itself (`:260-261`) and answers `-L4_err::ENomem` (`:250-251`, `:266`); a request of several areas
-keeps those added before the refused one (`task.cpp:891-901`), so the root adds one area per call. A
+quota (`task.cpp:255`), maps it into the task (`:262-263`), and when either is refused frees the area
+itself (`:267-268`) and answers `-L4_err::ENomem` (`:257-258`, `:273-274`); a request of several areas
+keeps those added before the refused one (`task.cpp:896-906`), so the root adds one area per call. A
 domain reaches any of these refusals at will, by spending its factory. So every Fiasco call that
 charges a task's quota, `l4_task_map`, the `l4_factory_create` family and `l4_task_add_ku_mem`, lives
 in one module of the root, `liberx/backend/fiasco/charge.c`, and the `fiasco-charge` chokepoint fails
@@ -789,7 +789,7 @@ that kernel, and otherwise stays a published downside.
 | FD20 | D7, D17, K18, K27, K28 | a stop's bounded finishing path (K18, K27) and fault and exit records from the kernel with the thread's identity (K28) | the root stops a tree children first and posts each exit record, at the gate fixed at creation, after every thread's deletion has returned and the space's teardown has given its memory back; a fault's record comes from a pool of its space; a fault message's words are the task's own | an exit record arrives when the root's teardown of the space completes, with no bound under hostile load, so D7 and D17 hold without their bound; a dead domain's write position is final when its end is reported; a task that reaps faulted threads and faults again can run its own pool out and lose its own records, and its raw IPC can put stale numbers in its own crash record | erXos's kernel |
 | FD21 | K30 | a whole-space hold that every call it started runs out under (K30) | the root holds each thread at its gate ([The pause](#threads-bands-and-stops)) | `fork` and job control work; a thread in a kernel call is cancelled out of it and retries after the resume; a thread of the paused space can make its own space's pause return early, and a space whose threads do not all arrive within the deadline ends | erXos's kernel |
 | FD22 | none (a missing call) | umtx in the kernel, across spaces, with `ERX_EFAULT`, `ERX_ESTALE` and `ERX_EINTR` | umtx within a task ([The umtx table](#the-umtx-table)) | no futex in memory shared between programs | erXos's kernel |
-| FD23 | K29 | vCPU upcalls with no event lost (K29), events ending a wait | the subset of [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco), over a vCPU state area its program can write, harming only itself, since the resume validates the frame and Fiasco sanitizes what it restores (`task.cpp:94-117`, `arm/64/context-arm-hyp-64.cpp:27-35`) | signals in programs arrive late around waits and raw kernel calls, and `sem_wait` never fails with `EINTR` | narrowed by stage F3 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
+| FD23 | K29 | vCPU upcalls with no event lost (K29), events ending a wait | the subset of [vCPU upcalls on Fiasco](#vcpu-upcalls-on-fiasco), over a vCPU state area its program can write, harming only itself, since the resume validates the frame and Fiasco sanitizes what it restores (`task.cpp:100-123`, `arm/64/context-arm-hyp-64.cpp:27-35`) | signals in programs arrive late around waits and raw kernel calls, and `sem_wait` never fails with `EINTR` | narrowed by stage F3 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
 | FD24 | K7, K10 to K15, K20, K33, CLAUDE.md "Untrusted input", CLAUDE.md "Kernel stacks are proven", "Chokepoints are build checks" and "The ABI and the hardware each have one source" | a kernel built under erXos's construction rules: the stack proof, recursion only through `musttail`, the kernel chokepoint checks, generated register access, a generated kernel ABI, one route from user mode, once-only reads of every user-writable field (K7), no panic on a user thread's input (K12), bounded kernel paths (K13), and K10, K11, K14, K15, K20 and K33 by construction | Fiasco's C++, its 8 KiB thread block measured by the conformance suite's watermark (`kernel/stack_fiasco.txt`), never proven; each of those properties holds only as far as Fiasco's own code gives it | a Fiasco defect reachable from a domain's capabilities can break isolation; the system-call fuzz campaign and the upstream watch are the defence; that the kernel never loads or stores through an address a domain supplies, and reads each user-writable field once per decision (K7), holds only as far as Fiasco's own code gives it, which no erXos audit checks | erXos's kernel |
 | FD25 | D12, D16, K3, K32 | budgets with caps above guarantees, borrowing, every charge returning at once, a resize of the whole, a watch, and exact `used` for every budget (K3, K32) | every budget is a wall at its guarantee, `used + carved <= wall` checked at every charge, carve, resize and destroy, a carved budget's kernel memory a share fixed at its creation ([Memory and budgets](#memory-and-budgets)); only the user-page part resizes; each budget record counts the user pages charged to it, and its kernel memory is not counted; a destroy is the root deleting everything charged to the budget | a program is refused while its session has memory free in another part, or is sized at its largest; an app shares the `apps` wall with the others only through the principal's wall the domain service carves for each session and destroys at its retire, as on erXos's kernel ([design-packaging.md](design-packaging.md#an-apps-principal)); D16's charging of a connection to its child budget holds, at walls | narrowed by stage F6 of [Track F](plan.md#track-f-fiasco-improved-to-the-decision); erXos's kernel |
 | FD26 | K19, K31 | the kernel's trace ring, entropy, log, watchdog and deterministic mode at the kernel's level (K19, K31) | the root's, in user mode ([The trace ring](#the-trace-ring), [The console](#the-console), [The watchdog](#the-watchdog)); entropy is `liberx`'s generator in the root, and a read's bytes stay in the Fiasco UTCB message registers of the reader and of the root service until a later message long enough overwrites them, and in whatever registers and stack spill slots the compiler used on both sides | the inspector's kernel row is `unsupported`; a kernel hang or a stalled watchdog thread is caught only by the board's hardware watchdog or the harness's deadline; a record still in the ring, the root's own C output among them, is lost at a watchdog end or an end on a thread other than the root service's ([The end path](#the-end-path)); the crash frame and a kernel stop's report may interleave with a writing console driver and a task's frame with the watchdog end's; after the handoff the kernel's own lines reach the log only at the log service's next take, are lost with the kernel's 4 KiB ring at a hang, are lost with the root's untaken records at a kernel stop once a take has moved them, and at the machine's end come out ahead of untaken log records older than them; in a development kernel the console's driver stops being the UART's only user when the debugger takes the console, for the rest of the run if the operator resumes, with the UART's receive interrupt on under the driver, and for the whole run when `-wait` or `-jdb_cmd` enters the debugger before user mode ([The kernel's lines](#the-kernels-lines)); in a boot that never takes the log, a test root's or a partial boot's, the kernel writes the UART whenever it prints, as upstream does; deterministic mode's comparison starts at erXos's banner, or at the root's first line if Fiasco's own boot proves not deterministic | erXos's kernel |
@@ -2452,8 +2452,8 @@ whose window addresses the service keeps. A record starts with the thread's publ
 ([Transport](#transport)), followed by the starting registers, a free or used state, the semaphore's slot, the
 group slot, the word to clear, the range to release and the umtx node.
 
-The same indices own 128 native UTCB slots of 1 KiB, the most one Fiasco area holds (`task.cpp:358`), zeroed by
-Fiasco (`task.cpp:254`). `l4_factory_create_task`'s `utcb_area` makes them for a task, and one
+The same indices own 128 native UTCB slots of 1 KiB, the most one Fiasco area holds (`task.cpp:364`), zeroed by
+Fiasco (`task.cpp:260`). `l4_factory_create_task`'s `utcb_area` makes them for a task, and one
 `l4_task_add_ku_mem` for the root, whose first thread keeps its kernel-given slot as index 0. The root's service
 thread holds no index: it runs before the table's area exists and is no client of it, so it takes the next free
 slot of the kernel-given UTCB area.
@@ -2622,7 +2622,7 @@ never uses `FUTEX_REQUEUE`, so neither umtx needs a requeue. The cost, one extra
 #### Task exit
 
 Deleting a task capability does not delete its threads, which the root holds and which keep references to the task
-(`task.cpp:697-710`, `thread.cpp:306`). So a task's end starts in one service body, reached by a thread's
+(`task.cpp:702-715`, `thread.cpp:306`). So a task's end starts in one service body, reached by a thread's
 `erx_space_stop(ERX_CAP_SELF, status)`, which musl's `exit` does, its creator's `erx_space_stop(task, status)`, a
 fault in a task with no fault gate, the destroy of the budget its space was created from, or its parent's exit, and
 finishes in a **teardown** that the service carries out a piece at a time between other requests
@@ -2649,7 +2649,7 @@ the stops (a space's release finishes its own tree first, and withdraws the reco
    addresses, in the root's walk of its page index and in Fiasco's of the task's page tables (`map_util.cpp:876-896`
    visits every entry of a table that exists), and the end of an object whose last mapping it drops.
 3. **The objects.** Once the table is empty, the task object, whose deletion unmaps what is left and frees its
-   page tables before the call returns (`task.cpp:697-710`). Step 2's unmaps clear entries and free no table
+   page tables before the call returns (`task.cpp:702-715`). Step 2's unmaps clear entries and free no table
    (`arm/mem_space-arm.cpp:322-341`), so the deletion still walks every entry of the tables the task touched
    before it frees them (`arm/mem_space-arm.cpp:346-356`), which makes this the teardown's longest piece; then
    the handle table is emptied, each entry dropping its object's count, and freed with its runs, and every object
@@ -3093,8 +3093,10 @@ directory up), and have not been executed; `native_signal` ([Verification](#veri
   the entry address. `vcpu_control` arms a thread through any capability to it, and arming cannot be undone
   (`thread_object.cpp:550-610`, `:598-604`); `vcpu_resume` acts only on the calling thread (`thread_object.cpp:250`).
 * **Arming** runs `vcpu_control` on the thread with a Fiasco state area in a second kernel-user memory area of the task,
-  which the backend adds with `l4_task_add_ku_mem` (`task.cpp:871-901`), since the task's UTCB area holds exactly its 128
-  UTCB slots and Fiasco requires the state area to lie in kernel-user memory (`space.cpp:152-170`). The add charges the
+  which the backend adds with `l4_task_add_ku_mem` (`task.cpp:876-906`), since the task's UTCB area holds exactly its 128
+  UTCB slots and Fiasco requires the state area to lie in kernel-user memory (`space.cpp:152-170`); the area is at least
+  16 KiB and aligned to its size, since Fiasco refuses any other ("Congruent UTCB areas" in [The release's Fiasco build](#the-releases-fiasco-build)), and that refusal is a
+  backend bug, not `ERX_ENOMEM`. The add charges the
   task's factory and can be refused; it goes through the root's one kernel-user memory add, so a refusal answers the arming
   call `ERX_ENOMEM` and leaves no area and no armed thread ([The construction](#the-construction)). Every state bit that
   diverts faults or selects vCPU user mode is clear, so page faults still reach the pager and exceptions the exception
@@ -3112,7 +3114,7 @@ directory up), and have not been executed; `native_signal` ([Verification](#veri
   Fiasco's layout reaches it. Fiasco saves no FP or SIMD register, so the backend entry, like `liberx`'s entry, executes
   no FP or SIMD instruction, and the trampoline's save is the one that keeps the interrupted code's FP state.
 * **`erx_vcpu_resume`** validates the public frame, writes it into Fiasco's area and resumes through Fiasco's resume,
-  which restores the whole frame (`task.cpp:94-117`) and, when the restored state has events enabled and the sticky flag
+  which restores the whole frame (`task.cpp:100-123`) and, when the restored state has events enabled and the sticky flag
   is set, takes the queued delivery and enters the upcall again in the same call (`thread_object.cpp:307-341`), so K29
   holds at a handler's return.
 
@@ -4171,15 +4173,17 @@ no test can drive the change:
   its seeded case puts the option back with the `select` from `BENCHMARKING` that set it whatever the
   defconfig said, which the check must catch. The switch itself has the *FP state* case of
   [The release's cases](#the-releases-cases).
-* **Congruent UTCB areas.** The buddy allocator aligns a UTCB area's kernel alias to the area's size,
-  so the kernel's and the thread's addresses of a UTCB agree in bits 12 and 13 when the area is at
-  least 16 KiB and its user address is aligned to its size; a one-page area's alias matches in only
-  one placement in four. On Apple silicon under HVF a mismatch makes every kernel call of a thread
+* **Congruent UTCB areas.** The buddy allocator aligns a kernel-user area's kernel alias to the area's
+  size, so the kernel's and the thread's addresses of a UTCB agree in bits 12 and 13 when the area is
+  at least 16 KiB and its user address is aligned to its size; a one-page area's alias matches in only
+  one placement in four. The rule covers every kernel-user area, a vCPU state area's included. On Apple silicon under HVF a mismatch makes every kernel call of a thread
   on that area slower, by about half of a null call (the likely cause, unverified, is a data cache
   indexed by those bits). So `Task::alloc_ku_mem` (`task.cpp`), which both `l4_factory_create_task`'s
   `utcb_area` and `l4_task_add_ku_mem` reach, refuses with `-L4_EINVAL`, before it allocates, an area
-  under 16 KiB or one whose user address is not aligned to its size, and every UTCB is congruent by
-  construction. The kernel gives `sigma0` and the root a 16 KiB area 64 KiB below the top of user
+  under 16 KiB or one whose user address is not aligned to its size (`Task::Ku_mem_order_min`, which
+  the boot area's size also reads), and every area it allocates is congruent by construction.
+  `map_ku_mem`, which maps memory the kernel already holds, skips the check; nothing in erXos's
+  configuration calls it. The kernel gives `sigma0` and the root a 16 KiB area 64 KiB below the top of user
   memory where upstream gives one page (`std_workload.cpp`), on which the root's first thread, its
   service thread and its watchdog sit; the areas `liberx` adds are 128 KiB and size-aligned. Under
   HVF, `native_threads`' `first_thread_null_call` case holds the first thread's null call within a
