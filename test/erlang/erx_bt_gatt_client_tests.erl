@@ -268,12 +268,15 @@ console_serial_answers_its_service_alone() ->
 %% The echo app of examples/echo over the serial service: a write from each of two links
 %% comes back on that link alone, the second link's first, so an echo that sent every
 %% write to the first link to have written would send the first link's bytes to the
-%% second. Nothing else is notified on either link.
+%% second. Nothing else is notified on either link. The echo's start answers before its
+%% handler attaches, and a write to nus before the attach is refused at once, so the case
+%% writes only once the handler's start has finished.
 echo_answers_each_link_alone() ->
     {LinkA, _ConnA} = joined_link(),
     {LinkB, _ConnB} = joined_link(),
     {ok, Echo} = erx_echo:start_link(),
     unlink(Echo),
+    _ = sys:get_state(erx_gatt_serial),
     echoed(LinkB, 7, <<"from b">>),
     echoed(LinkA, 8, <<"from a">>),
     receive {from_link, _, {'$gen_call', _, {notify, notify, _, Piece}}} -> error({notified_again, Piece})
