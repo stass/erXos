@@ -20,7 +20,9 @@ module Erx
   #   system          the system it runs, one of BenchRecord::SYSTEMS
   #   boot            the landing boot whose cells it runs (BenchSuite::BOOTS)
   #   forms(cpus)     the CPU counts it boots in, given the landing boot's
-  #   offers?(name)   whether it runs the cells at that profile form (landing, full)
+  #   refusal(profile)
+  #                   why it cannot boot at that profile form (landing, full) on this
+  #                   host, such as a pin the fetch step has not fetched; nil when it can
   #   call(benchmark, cells:, cpus:, accel:)
   #                   one boot of those cells at cpus CPUs, as a Booted
   # erXos's native bench image is the first (NativeBench::Guest).

@@ -25,8 +25,8 @@ module Erx
     # frequency) or operations.
     Quantity = Data.define(:amount, :unit)
     # One run's cell in a row: its status and reason, clock and summary form, the
-    # statistics its summary reports, and its central value over erXos's run of the same
-    # round, nil where either has no frequency or no central value.
+    # statistics its summary reports, and its median over erXos's run of the same round,
+    # nil unless both are histograms in nanoseconds.
     Entry = Data.define(:round, :status, :reason, :clock, :form, :values, :ratio)
     # One system in a row: what it runs for the operation (nil for erXos, whose cell the
     # row is; 'none' where the system has no counterpart, and then no entries), and its
@@ -111,14 +111,12 @@ module Erx
       end
     end
 
-    # entry's central value (a histogram's median, a mean's mean) over erXos's, where both
-    # are in nanoseconds.
+    # entry's median over erXos's, where both are histograms in nanoseconds; a mean is
+    # never set in a ratio (docs/design-bench.md, "A mean").
     def ratio(entry, erxos)
-      own, base = [entry, erxos].map { |side| side && central(side) }
+      own, base = [entry, erxos].map { |side| side&.form == 'histogram' ? side.values['p50'] : nil }
       own && base && base.unit == 'ns' && own.unit == 'ns' && base.amount.positive? ? own.amount / base.amount : nil
     end
-
-    def central(entry) = entry.values[entry.form == 'mean' ? 'mean' : 'p50']
 
     # The tables as lines for the terminal; the caller escapes them at its sink.
     def render(tables)
@@ -157,7 +155,7 @@ module Erx
       "#{amount.is_a?(Integer) ? amount : format('%.1f', amount)} #{quantity.unit}"
     end
 
-    private_class_method :columns, :entry, :values, :amount, :ratio, :central, :render_row, :parameters, :render_column,
+    private_class_method :columns, :entry, :values, :amount, :ratio, :render_row, :parameters, :render_column,
                          :render_entry, :quantity_text
   end
 end

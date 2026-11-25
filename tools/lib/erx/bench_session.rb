@@ -47,7 +47,7 @@ module Erx
 
     # The session's plan for benchmark over systems at profile with guests, refused
     # whole, before any boot, when a system is not one, has no guest under HVF, or has
-    # a guest that does not run the profile.
+    # a guest that refuses the profile, in the guest's own words.
     def plan(benchmark, systems:, profile:, guests:)
       rounds = ROUNDS.fetch(profile) { raise Error, "bench: profile #{profile} is not landing or full" }
       check_systems(systems, guests, profile)
@@ -81,8 +81,8 @@ module Erx
         own = guests.select { |guest| guest.system == system }
         raise Error, "bench: #{system} has no guest under HVF yet" if own.empty?
 
-        refusing = own.find { |guest| !guest.offers?(profile) }
-        raise Error, "bench: #{system}'s guest offers no #{profile} profile" if refusing
+        refusal = own.filter_map { |guest| guest.refusal(profile) }.first
+        raise Error, "bench: #{refusal}" if refusal
       end
     end
     private_class_method :check_systems
@@ -120,7 +120,7 @@ module Erx
         result.fetch(:runs) << BenchSideBySide::Run.new(round: step.round, record: recorded.record)
         result.fetch(:written) << @write.call(recorded.record, recorded.logs) unless recorded.record.run.replayed?
         result.fetch(:notes).concat(recorded.refused.map { |reason| "#{label(step)}: refused: #{reason}" })
-      rescue Error => e
+      rescue Error, SystemCallError => e
         result.fetch(:failed) << label(step)
         result.fetch(:notes) << "#{label(step)} failed: #{e.message}"
       end

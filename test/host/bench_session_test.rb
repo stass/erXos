@@ -24,7 +24,7 @@ class BenchSessionTest < Minitest::Test
     end
 
     def forms(cpus) = @one_cpu ? [1] : [1, cpus]
-    def offers?(profile) = @profiles.include?(profile)
+    def refusal(profile) = ("#{system} offers no #{profile} profile" unless @profiles.include?(profile))
 
     def call(benchmark, cells:, cpus:, accel:)
       @calls << [cells.map(&:operation), cpus, accel]
@@ -83,7 +83,7 @@ class BenchSessionTest < Minitest::Test
     assert_match(/profile/, refusal.call(%w[erxos], profile: 'quick'))
     landing_only = [Guest.new('erxos', profiles: %w[landing])]
     error = assert_raises(Erx::Error) { Session.plan(wake, systems: %w[erxos], profile: 'full', guests: landing_only) }
-    assert_match(/erxos's guest offers no full profile/, error.message)
+    assert_equal 'bench: erxos offers no full profile', error.message
   end
 
   # Each boot is written as it ends, so a guest that fails leaves the runs before it and

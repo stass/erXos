@@ -10,9 +10,10 @@ require_relative '../bench_suite'
 # gpio-edge, on the Raspberry Pi 4 only, is declared with its responders.
 operation = Erx::BenchSuite::Operation
 cell = Erx::BenchSuite::LandingCell
-# What FreeBSD and Linux run, erx_peer_bench's POSIX counterparts (docs/design-bench.md,
-# "Counterparts"); L4Re's ipcbench has none for a wake.
-posix = ->(line) { { 'freebsd' => line, 'linux' => line } }
+# What Linux runs, erx_peer_bench's POSIX counterparts (docs/design-bench.md,
+# "Counterparts"); FreeBSD's join with the board's package, which settles how it sees
+# B blocked, and L4Re's ipcbench has none for a wake.
+posix = ->(line) { { 'linux' => line } }
 condition_wake = 'pthread_cond_timedwait woken by a signal once /proc shows B asleep'
 Erx::BenchSuite.declare_benchmark(
   operations: [

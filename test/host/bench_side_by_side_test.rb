@@ -105,6 +105,12 @@ class BenchSideBySideTest < Minitest::Test
     l4re = column(table.rows.first, 'l4re')
     entry = l4re.entries.first
     assert_equal ['mean', 'cycles', nil], [entry.form, entry.clock, entry.ratio]
+    # A mean in nanoseconds beside erXos's median still takes no ratio.
+    timed = boot('linux', 1, [histogram('cross', 'monotonic', 3000), mean('same').with(conditions: conditions('same', 'monotonic'))],
+                 clock: LINUX_CLOCK)
+    mixed = Tables.tables(BENCHMARK, [runs.first, timed], systems: %w[erxos linux]).first
+    assert_equal [[Tables::Quantity.new(amount: 421.3, unit: 'ns'), nil]],
+                 column(mixed.rows.first, 'linux').entries.map { |linux| [linux.values['mean'], linux.ratio] }
     assert_equal({ 'count' => Tables::Quantity.new(amount: 10_000, unit: 'operations'),
                    'mean' => Tables::Quantity.new(amount: 421.3, unit: 'cycles') }, entry.values)
     line = Tables.render([table]).find { |text| text.include?('421.3') }

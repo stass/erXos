@@ -368,8 +368,8 @@ module Erx
 
       def system = 'erxos'
       def boot = 'native'
-      def forms(cpus) = [1, cpus]
-      def offers?(profile) = profile == 'landing'
+      def forms(cpus) = [1, cpus].uniq
+      def refusal(profile) = ("erxos's native bench image is built with the landing profiles only" unless profile == 'landing')
 
       def call(benchmark, cells:, cpus:, accel:)
         measured = @run.call(benchmark.name, accel: accel, cpus: cpus)
