@@ -478,14 +478,18 @@ design does not have, to be deleted so no side-by-side table can show it under s
   `GenodeFetch.lock` compare only the sources of the running host, so a source pinned for another host
   (`host:`) passes their refusal unseen; nothing is fetched for it. Refuse any host-bound entry in a side lock.
 * [Medium] Genode's guest, its container build (`bench/genode/deps.lock`, docs/design-bench.md "Genode's
-  guest"): not built. Every input is pinned: the offline probe, with only `libc`'s port prepared and the
-  pinned tool packages extracted into the container's root, built `libc`, `vfs`, `posix`, `init`, `timer` and
-  `core` for `base-hw` on `virt_qemu_arm_v8a` and their binary archives, and compiled `erx_peer_bench` against
-  Genode's C library. Still to do: decide how Genode's boot image is made (Genode's run tool takes a run
-  script, which is Tcl), decide how the program places its threads on Genode (it links but for
-  `cpuset_setaffinity`, which Genode's C library lacks; `pthread_setaffinity_np` links), then write the build as a `tools/erx` module on
-  `L4ReBuild`'s model, with the target description in `bench/genode/`, and boot the image under erXos's own
-  QEMU harness.
+  guest"): not built. Every input is pinned: an offline probe at the pinned release, with only `libc`'s port
+  prepared and the tool packages extracted into the container, built `core`, `init`, `timer`, `lib/ld`,
+  `lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` for `base-hw` on `virt_qemu_arm_v8a`, the binary archives
+  of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and `posix`, and `erx_peer_bench` against Genode's C
+  library. Still to do: approve the language of Genode's run script (the run tool, which makes the boot
+  image, takes a Tcl script), design how the program places its threads on Genode (it links but
+  `cpuset_setaffinity`; `pthread_setaffinity_np` links), then write the build as a `tools/erx` module on
+  `L4ReBuild`'s model, with the data-archive reader the design names and the target description in
+  `bench/genode/`, and boot the image under erXos's own QEMU harness.
+* [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
+  lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
+  No lock has one; give ids and run names one pattern.
 * [Low] Large pinned files, `Dependencies` fetch deadline (`tools/lib/erx/dependencies.rb`): `fetch --genode`
   downloaded FreeBSD's 160 MB `src.txz` in about 170 s of its 200 s deadline, so a slower link fails the fetch.
   Scale the deadline with the file's size, or give a pin its own.

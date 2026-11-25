@@ -2572,53 +2572,61 @@ tree it unpacked itself), shows how:
 So each port's archive is pinned in `bench/genode/deps.lock` as
 `genode-port-<port>`, under the file name `prepare_port` asks for, at
 the archive's HTTPS address and a SHA-256 its publisher states where
-one does (FreeBSD's release `MANIFEST` for `libc`'s `src.txz`). `libc`,
-which has one archive, is the only port the guest needs: with it
-prepared, the probe built `core`, `init`, `timer`, `lib/ld`,
-`lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` for `base-hw` on
-`virt_qemu_arm_v8a`, and `tool/depot/create` built the binary archives
-of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and `posix`, with
-no other port prepared and no error. Genode's tree is copied in owned by root, except
-`contrib/` and `depot/`, which are the build's own, empty and writable
-by the build user. The build's script, erXos's and run as that user,
-runs `prepare_port` for each pinned port once offline, takes the
-fingerprint from the one directory `contrib/<port>-<fingerprint>.incomplete`
-that run created, refusing any name whose fingerprint is not 40
-hexadecimal digits, places the archive there under its file name and
-runs `prepare_port` again; Genode's own hash check then confirms the pin
-inside the container. The tools the image lacks
-are Debian bookworm amd64 packages pinned as `genode-tool-<name>` by
-their `snapshot.debian.org` URL and the SHA-256 Debian's bookworm
-package index lists for each: flex and its library `libfl2`, which the
-tool chain's `ar` loads, bison, Tcl's `tclsh` (`tcl`, `tcl8.6` and
-`libtcl8.6`), which runs `tool/check_abi`, and `expect` (with
-`tcl-expect`), which runs Genode's run tool. The probe ran each of the
-two with no arguments before and after each set of packages: neither
-starts in the image ("required file not found"), the ABI check starts
-once Tcl's packages are in, and the run tool only once `expect`'s are
-too. A script that does not start while its file is present names an
-interpreter that is missing at the path it gives, so these packages
-cannot sit under a prefix as L4Re's do: each one's data archive is taken
-out of the verified package on the host and extracted by the engine into
-the container's root (`docker cp -`) before the build starts, owned by
-root as the tree is. `erx_peer_bench` is built as a Genode
-component from a target description of erXos's (`bench/genode/`), with
-Genode's C library, a VFS that gives the program `/tmp` as a file
-system in memory. Built so in the probe, from a target description
-that links `posix`, `libc` and `libm`, the program compiles on its
+one does (FreeBSD's release `MANIFEST` for `libc`'s `src.txz`). At the
+pinned release, `libc`, which has one archive, is the only port the
+guest needs: with it prepared, `core`, `init`, `timer`, `lib/ld`,
+`lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` build for `base-hw`
+on `virt_qemu_arm_v8a`, and `tool/depot/create` builds the binary
+archives of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and
+`posix`, asking for no other port. Genode's tree is copied in owned by
+root, except `contrib/` and `depot/`, which are the build's own, empty
+and writable by the build user. The build's script, erXos's and run as
+that user, runs `prepare_port` for each pinned port once offline, takes
+the fingerprint from the one directory
+`contrib/<port>-<fingerprint>.incomplete` that run created, refusing any
+name whose fingerprint is not 40 hexadecimal digits, places the archive
+there under its file name and runs `prepare_port` again; Genode's own
+hash check then confirms the pin inside the container.
+
+The tools the image lacks are Debian bookworm amd64 packages pinned as
+`genode-tool-<name>` by their `snapshot.debian.org` URL and SHA-256:
+flex and its library `libfl2`, which the tool chain's `ar` loads,
+bison, Tcl's `tclsh` (`tcl`, `tcl8.6` and `libtcl8.6`), which runs
+`tool/check_abi`, and `expect` (with `tcl-expect`), which runs Genode's
+run tool, the tool that makes the boot image; erXos's harness, not the
+run tool, boots it. Each pin is the SHA-256 that Debian's bookworm main
+amd64 package index (`Packages.xz`, SHA-256
+`9e0b5aabb2465b3d2e7a7fe27f9913846277833f7a2826e7767acccff5b588c5`)
+lists at the snapshot the URLs name; the index came over HTTPS from the
+same server, and its signature was not checked. Neither script starts
+in the image ("required file not found"); the ABI check starts with
+Tcl's packages, and the run tool only with `expect`'s as well. A script
+that does not start while its file is present names an interpreter
+missing at the path it gives, so a prefix, as L4Re's packages use, does
+not serve, and every tool package is installed one way: the host checks
+the package's SHA-256, takes out its `data.tar.xz` member and nothing
+else (no control archive, so no maintainer script, and nothing of the
+package runs on the host), and refuses a data archive unless each entry
+is a directory, a regular file or a relative symbolic link under
+`./usr/`; the engine extracts it into the container's file system
+(`docker cp -`, which takes the compressed archive) before the container
+starts, every file owned by uid 0 as the tree is.
+
+`erx_peer_bench` is built as a Genode component from a target
+description of erXos's (`bench/genode/`) that links Genode's `posix`,
+`libc` and `libm`, and given a VFS that serves `/tmp` as a file system
+in memory. Genode's C library is built from FreeBSD 12.0's `src.txz`,
+the archive the `libc` port asks for. The program compiles there on its
 FreeBSD branch, so Genode's build defines `__FreeBSD__` (whether its
-headers or its flags do is unverified), and every call it makes there
-links but `cpuset_setaffinity`, which Genode's C library lacks. A
-program of erXos's that references each call links `fork`,
-`posix_spawn`, `pthread_setaffinity_np` and `pthread_getaffinity_np`
-there, and not `sched_setaffinity`, `sched_getaffinity`,
-`pthread_attr_setaffinity_np` or `sched_getcpu`; how the program places
-its threads on Genode is not yet designed. That the
-other calls work is settled only by a boot. Genode's C library is built
-from FreeBSD 12.0's `src.txz`, the archive the `libc` port asks for.
-What comes back is the
-boot image and the resolved configuration, as L4Re's build returns its
-files, bounded and read only as data.
+headers or its flags do is unverified), and every call it makes links
+but `cpuset_setaffinity`, which Genode's C library lacks. Of the calls
+that place threads, the library links `pthread_setaffinity_np` and
+`pthread_getaffinity_np`, and not `sched_setaffinity`,
+`sched_getaffinity`, `pthread_attr_setaffinity_np` or `sched_getcpu`;
+how the program places its threads on Genode is an open question of
+this design. Whether the linked calls work is settled by a boot. What
+comes back is the boot image and the resolved configuration, as L4Re's
+build returns its files, bounded and read only as data.
 
 **Boot and lines.** `QemuPlan.argv` with Genode's boot image as
 `-kernel`, Genode's own QEMU start is not used, so its QEMU arguments are
