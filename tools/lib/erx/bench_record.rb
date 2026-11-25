@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'open3'
 require 'time'
@@ -14,15 +15,16 @@ require_relative 'source_revision'
 module Erx
   # One benchmark run's record and its one writer (docs/design-bench.md, "The record").
   # A record separates where the run happened (its Environment, whose name is derived and
-  # names the directory) from what ran (its Subject), and holds one Cell per operation
-  # under one set of conditions. The writer puts it under
-  # <history>/bench/<environment>/<run>/ and refuses any destination that is not a
-  # separate git repository outside every worktree of the erXos repository, or that a
-  # symbolic link would carry elsewhere. Every file name is derived from validated
-  # declaration names and the run's own facts, never from a guest's line.
+  # names the directory) from what ran (its Subject), and holds the run's boots of that
+  # subject, each with its own clock and one Cell per operation under one set of
+  # conditions. The writer puts it under <history>/bench/<environment>/<run>/ and
+  # refuses any destination that is not a separate git repository outside every
+  # worktree of the erXos repository, or that a symbolic link would carry elsewhere.
+  # Every file name is derived from validated declaration names and the run's own facts,
+  # never from a guest's line.
   module BenchRecord
     # The format a record is written in; a record of any other is refused, never read.
-    FORMAT = 2
+    FORMAT = 3
     STATUSES = %w[measured partial timed_out unsupported failed rejected not_run].freeze
     CLOCKS = %w[counter host analyser virtual monotonic cycles].freeze
     PROFILES = %w[fast expensive periodic sustained].freeze
@@ -190,12 +192,18 @@ module Erx
         BenchRecord.check(BenchRecord.plain_hash?(details), 'subject details are not a map')
         super(revision: revision, dirty: dirty, details: BenchRecord.frozen(details))
       end
+
+      # The SHA-256 of the subject as the record writes it: two subjects of one revision,
+      # such as two sets a board's walk boots, have different digests.
+      def digest = Digest::SHA256.hexdigest(JSON.generate(to_h))
     end
 
     # When and why the run happened. load is the host's load average before and after,
-    # nil where it was not read; reused_from names the run a replayed boot came from.
-    Run = Data.define(:date, :started_by, :load, :host_cpus, :reused_from) do
-      def initialize(date:, started_by:, load:, host_cpus:, reused_from:)
+    # nil where it was not read; reused_from names the run a replayed boot came from;
+    # details are the run's other facts, such as a board walk's sensor readings, how it
+    # ended, and whether the board and the served link came back to what they were.
+    Run = Data.define(:date, :started_by, :load, :host_cpus, :reused_from, :details) do
+      def initialize(date:, started_by:, load:, host_cpus:, reused_from:, details:)
         BenchRecord.check(date.is_a?(Time) && date.utc?, 'date is not a UTC time')
         BenchRecord.check(started_by.is_a?(String) && STARTED_BY.match?(started_by), 'started_by is not a known start')
         BenchRecord.check(load.nil? || (load.is_a?(Array) && load.size == 2 &&
@@ -204,7 +212,9 @@ module Erx
         BenchRecord.check(host_cpus.nil? || (host_cpus.is_a?(Integer) && host_cpus.positive?),
                           'host CPU count is not positive')
         BenchRecord.check(reused_from.nil? || reused_from.is_a?(String), 'reused_from is not a run path')
-        super
+        BenchRecord.check(BenchRecord.plain_hash?(details), 'run details are not a map')
+        super(date: date, started_by: started_by, load: load, host_cpus: host_cpus, reused_from: reused_from,
+              details: BenchRecord.frozen(details))
       end
 
       def replayed? = !reused_from.nil?
@@ -274,7 +284,7 @@ module Erx
       end
 
       def key = [benchmark, operation, conditions]
-      def file = "#{benchmark}/#{operation}.json"
+      def file = BenchRecord.operation_file(benchmark, operation)
     end
 
     # A histogram cell's shape: its profile, its counts, and buckets that hold every
@@ -312,26 +322,72 @@ module Erx
             'a measured mean is not a positive count, a positive total and a mean')
     end
 
-    # Where a run happened, what ran, when, its boot's calibration and its cells. A run
-    # whose cells are all means has no clock group, since their program measures no
-    # calibration; any other has its boot's, empty when the boot gave no valid CLOCK line.
-    Record = Data.define(:environment, :subject, :run, :clock, :cells) do
-      def initialize(environment:, subject:, run:, clock:, cells:)
-        BenchRecord.check(environment.is_a?(Environment) && subject.is_a?(Subject) && run.is_a?(Run),
-                          'record parts are not typed')
-        BenchRecord.check(cells.is_a?(Array) && !cells.empty? && cells.all?(Cell), 'record holds no cells')
+    # A boot's position in its run: a board entry's in the walk's queue, or 1 for the
+    # one boot of a QEMU run.
+    POSITIONS = (1..65_535)
+
+    # Where a boot's files lie in its run directory: the directory of its operation files,
+    # which also names its logs, and an operation's file of cells within it.
+    def self.boot_directory(position) = "boot-#{position}"
+    def self.operation_file(benchmark, operation) = "#{benchmark}/#{operation}.json"
+
+    # One boot of a run: its position, its calibration, its cells and the facts only it
+    # has, such as a board entry's name, its boot.img SHA-256 and how the walk saw it
+    # end. A boot whose cells are all means has no clock group, since their program
+    # measures no calibration; any other has its own, empty when it gave no valid CLOCK
+    # line. A boot holds each cell once.
+    Boot = Data.define(:position, :clock, :cells, :details) do
+      def initialize(position:, clock:, cells:, details:)
+        BenchRecord.check(position.is_a?(Integer) && POSITIONS.cover?(position), 'boot position is not a queue position')
+        BenchRecord.check(cells.is_a?(Array) && !cells.empty? && cells.all?(Cell), 'boot holds no cells')
         if cells.all? { |cell| cell.form == 'mean' }
-          BenchRecord.check(clock.nil?, 'a record of means has no clock group')
+          BenchRecord.check(clock.nil?, 'a boot of means has no clock group')
         else
           BenchRecord.check(BenchRecord.plain_hash?(clock), 'clock calibration is not a map')
         end
-        BenchRecord.check(cells.map(&:key).uniq.size == cells.size, 'record holds one cell twice')
-        super(environment: environment, subject: subject, run: run, clock: BenchRecord.frozen(clock), cells: cells.freeze)
+        BenchRecord.check(cells.map(&:key).uniq.size == cells.size, 'boot holds one cell twice')
+        BenchRecord.check(BenchRecord.plain_hash?(details), 'boot details are not a map')
+        super(position: position, clock: BenchRecord.frozen(clock), cells: cells.dup.freeze, details: BenchRecord.frozen(details))
       end
 
-      # The run directory's name: UTC time, the revision's first twelve hex digits, and
-      # -dirty when the tree was.
-      def name = "#{run.date.strftime('%Y%m%dT%H%M%SZ')}-#{subject.revision[0, 12]}#{subject.dirty ? '-dirty' : ''}"
+      # The boot's directory of operation files, and its logs' name before their kind.
+      def directory = BenchRecord.boot_directory(position)
+      def file(cell) = File.join(directory, cell.file)
+    end
+
+    # Where a run happened, what ran, when, and the run's boots of that subject, in
+    # ascending positions. Every boot of one subject was asked the same cells, so each
+    # holds the same keys, whatever their statuses: a comparison counting the boots of a
+    # record that holds its cell finds the cell in each.
+    Record = Data.define(:environment, :subject, :run, :boots) do
+      def initialize(environment:, subject:, run:, boots:)
+        BenchRecord.check(environment.is_a?(Environment) && subject.is_a?(Subject) && run.is_a?(Run),
+                          'record parts are not typed')
+        BenchRecord.check(boots.is_a?(Array) && !boots.empty? && boots.all?(Boot), 'record holds no boots')
+        BenchRecord.check(boots.each_cons(2).all? { |before, after| before.position < after.position },
+                          'boots are not in ascending positions, each once')
+        BenchRecord.check(boots.map { |boot| boot.cells.map(&:key).to_set }.uniq.size == 1,
+                          'boots of one record hold different cells')
+        super(environment: environment, subject: subject, run: run, boots: boots.dup.freeze)
+      end
+
+      # The keys of the cells every boot holds.
+      def keys = boots.first.cells.map(&:key)
+
+      # The one boot of a record that has one, as a QEMU run's record does; a record of
+      # several is refused, since which of them is meant is not said.
+      def boot
+        BenchRecord.check(boots.size == 1, "a record of #{boots.size} boots has no one boot")
+        boots.first
+      end
+
+      # The run directory's name: UTC time, the revision's first twelve hex digits,
+      # -dirty when the tree was, and the subject's digest's first twelve, so that two
+      # subjects of one revision a walk boots at one time are two runs.
+      def name
+        "#{run.date.strftime('%Y%m%dT%H%M%SZ')}-#{subject.revision[0, 12]}#{subject.dirty ? '-dirty' : ''}" \
+          "-#{subject.digest[0, 12]}"
+      end
     end
 
     module_function
@@ -395,17 +451,20 @@ module Erx
     # ~/erxos-history (docs/design-bench.md, "The record").
     def history = ENV.fetch('ERX_BENCH_HISTORY') { File.join(Dir.home, 'erxos-history') }
 
-    # Writes record under history and returns the run directory's real path. boots is one
-    # { serial:, qemu: } map of log paths per boot, copied as boot-<n>.serial.log and
-    # boot-<n>.qemu.log. Everything is serialized and bounded before the directory is made,
-    # and run.json is written last, by rename, so a run is complete once it exists.
-    def write(record, history:, erxos_root:, boots: [])
-      files = serialized(record).merge(boot_logs(boots))
+    # Writes record under history and returns the run directory's real path. logs is
+    # none, or one { serial:, qemu: } map of log paths per boot of the record, in its
+    # order, copied as boot-<n>.serial.log and boot-<n>.qemu.log for the boot at
+    # position n. Everything is serialized and bounded before the directory is made, a
+    # bound applying to each file, and run.json is written last, by rename, so a run is
+    # complete once it exists.
+    def write(record, history:, erxos_root:, logs: [])
+      files = serialized(record).merge(boot_logs(record, logs))
       oversized = files.find { |name, bytes| bytes.bytesize > (name.end_with?('.log') ? LOG_BYTES : FILE_BYTES) }
       check(oversized.nil?, "#{oversized&.first} exceeds its size bound")
       destination = Destination.new(history: history, erxos_root: erxos_root)
       run = destination.make_run_directory(['bench', record.environment.name, record.name])
       manifest = files.delete(MANIFEST)
+      directories(files.keys).each { |directory| make_directory(run, directory) }
       files.each { |name, bytes| create(run, name, bytes) }
       create(run, "#{MANIFEST}.partial", manifest)
       File.rename(File.join(run, "#{MANIFEST}.partial"), File.join(run, MANIFEST))
@@ -413,14 +472,14 @@ module Erx
     end
 
     # The record in the run directory run, refused whole if any file is missing, too
-    # large, of another format or not a record.
+    # large, of another format or not a record. Each cell's operation file is derived
+    # from its boot's position and its validated names, as the writer derives it, and a
+    # manifest naming any other is refused. operations reads each operation file's cells
+    # on first use, and once.
     def read(run)
       manifest = parse(File.join(run, MANIFEST))
-      details = manifest.fetch('cells').map { |cell| cell.fetch('file') }.uniq.to_h do |file|
-        check(file.is_a?(String) && %r{\A[a-z][a-z0-9-]*/[a-z][a-z0-9-]*\.json\z}.match?(file), 'cell file is not derived')
-        [file, parse(File.join(run, file)).fetch('cells')]
-      end
-      from_h(manifest, details)
+      operations = Hash.new { |cells, file| cells[file] = parse(File.join(run, file)).fetch('cells') }
+      from_h(manifest, operations)
     rescue KeyError, TypeError, NoMethodError, ArgumentError => error
       raise Error, "bench record #{run}: not a record (#{error.class})"
     end
@@ -433,24 +492,44 @@ module Erx
     end
 
     def serialized(record)
-      operations = record.cells.group_by(&:file).transform_values do |cells|
-        JSON.pretty_generate('format' => FORMAT, 'benchmark' => cells.first.benchmark,
-                             'operation' => cells.first.operation,
-                             'cells' => cells.map { |cell| { 'conditions' => cell.conditions.to_h, 'detail' => cell.detail } })
+      operations = record.boots.flat_map do |boot|
+        boot.cells.group_by { |cell| boot.file(cell) }.map do |file, cells|
+          [file, JSON.pretty_generate('format' => FORMAT, 'benchmark' => cells.first.benchmark,
+                                      'operation' => cells.first.operation,
+                                      'cells' => cells.map { |cell| { 'conditions' => cell.conditions.to_h, 'detail' => cell.detail } })]
+        end
       end
-      { MANIFEST => JSON.pretty_generate(to_h(record)) }.merge(operations)
+      { MANIFEST => JSON.pretty_generate(to_h(record)) }.merge(operations.to_h)
     end
 
-    def boot_logs(boots)
-      boots.each_with_index.flat_map do |logs, index|
-        check(logs.keys.all? { |kind| BOOT_LOGS.include?(kind) }, 'a boot log is not serial or qemu')
-        logs.map { |kind, path| ["boot-#{index + 1}.#{kind}.log", BoundedFile.read(path, maximum: LOG_BYTES)] }
+    def boot_logs(record, logs)
+      check(logs.empty? || logs.size == record.boots.size, 'boot logs are not one map per boot')
+      record.boots.zip(logs).flat_map do |boot, kept|
+        kept.to_h.map do |kind, path|
+          check(BOOT_LOGS.include?(kind), 'a boot log is not serial or qemu')
+          ["#{boot.directory}.#{kind}.log", BoundedFile.read(path, maximum: LOG_BYTES)]
+        end
       end.to_h
     end
 
+    # Every directory names lie in, relative to the run directory, each after its parent.
+    def directories(names)
+      names.flat_map do |name|
+        parts = File.dirname(name).split('/') - ['.']
+        (1..parts.size).map { |count| parts.first(count).join('/') }
+      end.uniq
+    end
+
+    # Makes directory in the run directory, which this writer made exclusively: whatever
+    # is already there, a symbolic link above all, was not made by it and is refused.
+    def make_directory(run, directory)
+      Dir.mkdir(File.join(run, directory), 0o755)
+    rescue SystemCallError => error
+      raise Error, "bench record: cannot make #{directory}: #{error.class}"
+    end
+
+    # Writes name, relative to the run directory, as a new file that is no symbolic link.
     def create(run, name, bytes)
-      directory = File.dirname(name)
-      Dir.mkdir(File.join(run, directory)) unless directory == '.' || File.directory?(File.join(run, directory))
       flags = File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW
       File.open(File.join(run, name), flags, 0o644) { |output| output.write(bytes) }
     rescue SystemCallError => error
@@ -463,33 +542,56 @@ module Erx
         'environment' => environment.to_h.transform_keys(&:to_s).merge('name' => environment.name),
         'subject' => subject.to_h.transform_keys(&:to_s),
         'run' => run.to_h.transform_keys(&:to_s).merge('date' => run.date.iso8601),
-        'clock' => record.clock,
-        'cells' => record.cells.map do |cell|
-          cell.to_h.except(:detail).transform_keys(&:to_s)
-              .merge('conditions' => cell.conditions.to_h.transform_keys(&:to_s),
-                     'profile' => cell.profile&.to_h&.transform_keys(&:to_s), 'summary' => cell.summary,
-                     'file' => cell.file)
+        'boots' => record.boots.map do |boot|
+          { 'position' => boot.position, 'details' => boot.details, 'clock' => boot.clock,
+            'cells' => boot.cells.map do |cell|
+              cell.to_h.except(:detail).transform_keys(&:to_s)
+                  .merge('conditions' => cell.conditions.to_h.transform_keys(&:to_s),
+                         'profile' => cell.profile&.to_h&.transform_keys(&:to_s), 'summary' => cell.summary,
+                         'file' => boot.file(cell))
+            end }
         end }
     end
 
-    def from_h(manifest, details)
-      keyword = ->(hash, *drop) { hash.except(*drop).transform_keys(&:to_sym) }
-      cells = manifest.fetch('cells').map do |cell|
-        conditions = Conditions.new(**keyword.call(cell.fetch('conditions')))
-        detail = details.fetch(cell.fetch('file')).find { |entry| entry.fetch('conditions') == cell.fetch('conditions') }
-        check(detail, 'an operation file lacks a cell the manifest lists')
-        profile = cell.fetch('profile')&.then { |sizes| Profile.new(**keyword.call(sizes)) }
-        Cell.new(**keyword.call(cell, 'conditions', 'profile', 'summary', 'file'), conditions: conditions,
-                                                                   profile: profile, detail: detail.fetch('detail'))
+    BOOT_FIELDS = %w[cells clock details position].freeze
+
+    def from_h(manifest, operations)
+      boots = manifest.fetch('boots').map do |boot|
+        check(boot.keys.sort == BOOT_FIELDS, 'a boot is not its position, details, clock and cells')
+        position = boot.fetch('position')
+        check(position.is_a?(Integer) && POSITIONS.cover?(position), 'boot position is not a queue position')
+        cells = boot.fetch('cells').map do |cell|
+          cell_from_h(cell, directory: boot_directory(position), operations: operations)
+        end
+        Boot.new(position: position, clock: boot.fetch('clock'), cells: cells, details: boot.fetch('details'))
       end
       run = manifest.fetch('run')
-      Record.new(environment: Environment.new(**keyword.call(manifest.fetch('environment'), 'name')),
-                 subject: Subject.new(**keyword.call(manifest.fetch('subject'))),
-                 run: Run.new(**keyword.call(run, 'date'), date: Time.iso8601(run.fetch('date')).utc),
-                 clock: manifest.fetch('clock'), cells: cells)
+      Record.new(environment: Environment.new(**keywords(manifest.fetch('environment'), 'name')),
+                 subject: Subject.new(**keywords(manifest.fetch('subject'))),
+                 run: Run.new(**keywords(run, 'date'), date: Time.iso8601(run.fetch('date')).utc),
+                 boots: boots)
     end
 
-    private_class_method :parse, :serialized, :boot_logs, :create, :to_h, :from_h
+    # A cell the manifest lists in the boot whose directory is given, with its detail
+    # from the operation file its names derive, which must be the file it names.
+    def cell_from_h(cell, directory:, operations:)
+      names = cell.values_at('benchmark', 'operation')
+      check(names.all? { |name| name.is_a?(String) && NAME.match?(name) }, 'benchmark or operation is not a declaration name')
+      file = File.join(directory, operation_file(*names))
+      check(cell.fetch('file') == file, 'a cell names an operation file not derived from it')
+      detail = operations[file].find { |entry| entry.fetch('conditions') == cell.fetch('conditions') }
+      check(detail, 'an operation file lacks a cell the manifest lists')
+      profile = cell.fetch('profile')&.then { |sizes| Profile.new(**keywords(sizes)) }
+      Cell.new(**keywords(cell, 'conditions', 'profile', 'summary', 'file'),
+               conditions: Conditions.new(**keywords(cell.fetch('conditions'))), profile: profile,
+               detail: detail.fetch('detail'))
+    end
+
+    # A manifest map without the fields drop names, as keyword arguments.
+    def keywords(hash, *drop) = hash.except(*drop).transform_keys(&:to_sym)
+
+    private_class_method :parse, :serialized, :boot_logs, :directories, :make_directory, :create, :to_h, :from_h,
+                         :cell_from_h, :keywords
 
     # The checks on where a record may be written (docs/design-bench.md, "Where records
     # are written"). The history root must exist, be the top of a git work tree whose

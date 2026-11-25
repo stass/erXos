@@ -59,8 +59,8 @@ class BenchSideBySideTest < Minitest::Test
       environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: cpus, system: system, details: {}),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
       run: Record::Run.new(date: Time.utc(2026, 11, 24), started_by: 'manual', load: [0.5, 0.5], host_cpus: 12,
-                           reused_from: nil),
-      clock: clock, cells: cells
+                           reused_from: nil, details: {}),
+      boots: [Record::Boot.new(position: 1, clock: clock, cells: cells, details: {})]
     )
     Tables::Run.new(round: round, record: record)
   end
@@ -114,9 +114,9 @@ class BenchSideBySideTest < Minitest::Test
     assert_equal({ 'count' => Tables::Quantity.new(amount: 10_000, unit: 'operations'),
                    'mean' => Tables::Quantity.new(amount: 421.3, unit: 'cycles') }, entry.values)
     line = Tables.render([table]).find { |text| text.include?('421.3') }
-  assert_match(/mean 421\.3 cycles/, line)
-  refute_match(/\bns\b|\bratio\b/, line)
-end
+    assert_match(/mean 421\.3 cycles/, line)
+    refute_match(/\bns\b|\bratio\b/, line)
+  end
 
 # ipcbench prints an IPC mean over two IPCs per call, half a round trip; the table
 # shows the total over the calls, one round trip, beside erXos's round trips.

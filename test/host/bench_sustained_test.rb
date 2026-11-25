@@ -111,8 +111,8 @@ class BenchSustainedTest < Minitest::Test
         environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {}),
         subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
         run: Record::Run.new(date: Time.utc(2026, 11, 23), started_by: 'manual', load: [0.5, 0.5], host_cpus: 12,
-                             reused_from: nil),
-        clock: {}, cells: [cell]
+                             reused_from: nil, details: {}),
+        boots: [Record::Boot.new(position: 1, clock: {}, cells: [cell], details: {})]
       )
       Erx::BenchCompare::Side.new(record: record, cell: cell)
     end

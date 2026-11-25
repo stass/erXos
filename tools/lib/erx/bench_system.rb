@@ -82,9 +82,10 @@ module Erx
                    refused: booted.refused, logs: booted.logs)
     end
 
-    # The record of a boot: its environment is the host's kind and model at cpus CPUs
-    # running system, with the accelerator and the host's operating system beside the
-    # guest's own facts; its subject is the harness's revision with the guest's facts.
+    # The record of a boot, the one boot of its run: its environment is the host's kind
+    # and model at cpus CPUs running system, with the accelerator and the host's
+    # operating system beside the guest's own facts; its subject is the harness's
+    # revision with the guest's facts.
     def record(booted, system:, cpus:, host:, date:, started_by:, load:)
       details = { 'accelerator' => host.kind.delete_prefix('qemu-'), 'host_os' => RbConfig::CONFIG['host_os'] }
       BenchRecord::Record.new(
@@ -92,8 +93,8 @@ module Erx
                                                   details: details.merge(booted.environment)),
         subject: BenchRecord::Subject.new(revision: host.revision, dirty: host.dirty, details: booted.subject),
         run: BenchRecord::Run.new(date: date, started_by: started_by, load: load, host_cpus: host.cpus,
-                                  reused_from: booted.reused_from),
-        clock: booted.clock, cells: booted.cells
+                                  reused_from: booted.reused_from, details: {}),
+        boots: [BenchRecord::Boot.new(position: 1, clock: booted.clock, cells: booted.cells, details: {})]
       )
     end
   end

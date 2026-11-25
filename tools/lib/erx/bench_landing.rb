@@ -50,7 +50,7 @@ module Erx
       booted = BenchLanding.booted(measured, answer, memory_mib: memory_mib)
       record = BenchSystem.record(booted, system: 'erxos', cpus: boot.cpus, host: host, date: date,
                                           started_by: 'landing', load: before && after && [before, after])
-      written = (BenchRecord.write(record, history: history, erxos_root: @root, boots: booted.logs) unless record.run.replayed?)
+      written = (BenchRecord.write(record, history: history, erxos_root: @root, logs: booted.logs) unless record.run.replayed?)
       { record: record, written: written, refused: booted.refused, timed_out: timed_out }
     end
   end

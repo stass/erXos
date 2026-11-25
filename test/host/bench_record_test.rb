@@ -55,22 +55,27 @@ class BenchRecordTest < Minitest::Test
     )
   end
 
-  def record(cells: [cell], date: Time.utc(2026, 11, 23, 12, 0, 0))
+  def boot(position: 1, cells: [cell], clock: { 'frequency_hz' => 24_000_000 }, details: {}) =
+    Record::Boot.new(position: position, clock: clock, cells: cells, details: details)
+
+  def run_facts(date: Time.utc(2026, 11, 23, 12, 0, 0), details: {}) =
+    Record::Run.new(date: date, started_by: 'manual', load: [0.5, 0.6], host_cpus: 12, reused_from: nil, details: details)
+
+  def record(cells: [cell], date: Time.utc(2026, 11, 23, 12, 0, 0), boots: [boot(cells: cells)], subject: {}, run: run_facts(date: date))
     Record::Record.new(
       environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {}),
-      subject: Record::Subject.new(revision: REVISION, dirty: false, details: {}),
-      run: Record::Run.new(date: date, started_by: 'manual', load: [0.5, 0.6], host_cpus: 12, reused_from: nil),
-      clock: { 'frequency_hz' => 24_000_000 }, cells: cells
+      subject: Record::Subject.new(revision: REVISION, dirty: false, details: subject),
+      run: run, boots: boots
     )
   end
 
-  def write(history, **options) = Record.write(record(**options), history: history, erxos_root: @erxos)
+  def write(history, logs: [], **options) = Record.write(record(**options), history: history, erxos_root: @erxos, logs: logs)
 
   def test_a_record_under_a_separate_repository_is_written
     run = write(@history)
-    assert_equal File.join(@history, 'bench', 'qemu-hvf-Mac16,10-4cpu-erxos', '20261123T120000Z-abcdef012345'), run
+    assert_equal File.join(@history, 'bench', 'qemu-hvf-Mac16,10-4cpu-erxos', "20261123T120000Z-abcdef012345-#{record.subject.digest[0, 12]}"), run
     assert File.file?(File.join(run, 'run.json'))
-    assert File.file?(File.join(run, 'wake', 'park-deadline.json'))
+    assert File.file?(File.join(run, 'boot-1', 'wake', 'park-deadline.json'))
     assert_equal Record::FORMAT, JSON.parse(File.read(File.join(run, 'run.json'))).fetch('format')
   end
 
@@ -206,7 +211,7 @@ class BenchRecordTest < Minitest::Test
   def test_the_summary_in_run_json_is_the_derived_one
     run = write(@history)
     manifest = JSON.parse(File.read(File.join(run, 'run.json')))
-    assert_equal 2000, manifest.fetch('cells').first.fetch('summary').fetch('samples')
+    assert_equal 2000, manifest.fetch('boots').first.fetch('cells').first.fetch('summary').fetch('samples')
   end
 
   def test_nothing_is_made_inside_a_worktree_at_the_history_roots_bench
@@ -321,9 +326,7 @@ class BenchRecordTest < Minitest::Test
     Record::Record.new(
       environment: environment('qemu-hvf', system: 'l4re', cpus: 1),
       subject: Record::Subject.new(revision: REVISION, dirty: false, details: {}),
-      run: Record::Run.new(date: Time.utc(2026, 11, 23, 12, 0, 0), started_by: 'manual', load: [0.5, 0.6], host_cpus: 12,
-                           reused_from: nil),
-      clock: clock, cells: cells
+      run: run_facts, boots: [boot(cells: cells, clock: clock)]
     )
   end
 
@@ -334,10 +337,10 @@ class BenchRecordTest < Minitest::Test
     run = Record.write(mean_record, history: @history, erxos_root: @erxos)
     back = Record.read(run)
     assert_equal mean_record, back
-    cell = back.cells.first
+    cell = back.boot.cells.first
     assert_equal ['mean', MEAN, nil, nil], [cell.form, cell.summary, cell.counts, cell.profile]
-    assert_nil back.clock
-    listed = JSON.parse(File.read(File.join(run, 'run.json'))).fetch('cells').first
+    assert_nil back.boot.clock
+    listed = JSON.parse(File.read(File.join(run, 'run.json'))).fetch('boots').first.fetch('cells').first
     assert_equal MEAN, listed.fetch('summary')
     assert_nil listed.fetch('counts')
   end
@@ -355,11 +358,95 @@ class BenchRecordTest < Minitest::Test
     assert_raises(Erx::Error) { cell.with(form: 'median') }
   end
 
-  # A record whose cells are all means has no clock group, since their program measures
-  # no calibration; a record with a histogram cell keeps its boot's.
-  def test_only_a_record_of_means_has_no_clock_group
+  # A boot whose cells are all means has no clock group, since their program measures no
+  # calibration; a boot with a histogram cell keeps its own.
+  def test_only_a_boot_of_means_has_no_clock_group
     assert_raises(Erx::Error) { mean_record(clock: { 'frequency_hz' => 24_000_000 }) }
-    assert_raises(Erx::Error) { record.with(clock: nil) }
+    assert_raises(Erx::Error) { boot(clock: nil) }
     mean_record(cells: [mean_cell, cell], clock: {})
+  end
+
+  # docs/design-bench.md, "The record of a board run": one record per subject holds that
+  # set's boots, one per queued entry, each at its position in the queue with its own
+  # facts, clock and cells, and each boot's cells in a directory of their own.
+  def two_boots
+    record(boots: [boot(position: 1, details: { 'outcome' => 'ended' }),
+                   boot(position: 3, cells: [cell(status: 'not_run', histogram: [])], clock: {},
+                        details: { 'outcome' => 'not_run' })],
+           run: run_facts(details: { 'ending' => 'returned', 'restored' => true }))
+  end
+
+  def test_a_record_of_two_boots_reads_back
+    run = Record.write(two_boots, history: @history, erxos_root: @erxos)
+    assert_equal two_boots, Record.read(run)
+    assert File.file?(File.join(run, 'boot-1', 'wake', 'park-deadline.json'))
+    assert File.file?(File.join(run, 'boot-3', 'wake', 'park-deadline.json'))
+    listed = JSON.parse(File.read(File.join(run, 'run.json'))).fetch('boots')
+    assert_equal [[1, 'boot-1/wake/park-deadline.json'], [3, 'boot-3/wake/park-deadline.json']],
+                 listed.map { |boot| [boot.fetch('position'), boot.fetch('cells').first.fetch('file')] }
+  end
+
+  # Each boot holds one cell per key; two boots of one record hold the same cell each.
+  def test_a_boot_holds_one_cell_once_and_two_boots_hold_it_each
+    error = assert_raises(Erx::Error) { boot(cells: [cell, cell]) }
+    assert_match(/boot holds one cell twice/, error.message)
+    record(boots: [boot(position: 1), boot(position: 2)])
+  end
+
+  def test_boots_are_in_ascending_positions_once_each
+    [[2, 1], [1, 1]].each do |positions|
+      boots = positions.map { |position| boot(position: position) }
+      assert_raises(Erx::Error, positions.inspect) { record(boots: boots) }
+    end
+    [0, -1, 1 << 16, '1'].each { |position| assert_raises(Erx::Error, position.inspect) { boot(position: position) } }
+    assert_raises(Erx::Error) { record(boots: []) }
+  end
+
+  def test_each_boots_logs_are_named_by_its_position
+    serial = File.join(@scratch, 'serial.log')
+    File.write(serial, "erx: done\n")
+    run = Record.write(two_boots, history: @history, erxos_root: @erxos, logs: [{}, { serial: serial }])
+    assert_equal ['boot-3.serial.log'], Dir.children(run).grep(/\.log\z/)
+    assert_raises(Erx::Error) { Record.write(two_boots, history: @history, erxos_root: @erxos, logs: [{ serial: serial }]) }
+  end
+
+  # Two sets of one revision booted in one walk share its date: the subject's digest
+  # keeps their run directories apart.
+  def test_two_subjects_of_one_revision_and_date_are_two_runs
+    first = Record.write(record(subject: { 'image_sha256' => 'a' * 64 }), history: @history, erxos_root: @erxos)
+    second = Record.write(record(subject: { 'image_sha256' => 'b' * 64 }), history: @history, erxos_root: @erxos)
+    refute_equal first, second
+  end
+
+  # The format before boots held one boot's clock and cells at the top: refused by its
+  # format, never misread.
+  def test_a_record_of_the_previous_format_is_refused
+    run = write(@history)
+    path = File.join(run, 'run.json')
+    manifest = JSON.parse(File.read(path))
+    boot = manifest.delete('boots').first
+    File.write(path, JSON.generate(manifest.merge('format' => 2, 'clock' => boot.fetch('clock'), 'cells' => boot.fetch('cells'))))
+    assert_match(/not of format #{Record::FORMAT}/, assert_raises(Erx::Error) { Record.read(run) }.message)
+  end
+
+  # A cell's file is derived from its boot's position and its names; a manifest naming
+  # another file, even one that exists and holds the same cell, or one outside the run,
+  # is not a record.
+  def test_a_manifest_naming_another_cell_file_is_refused
+    run = Record.write(record(boots: [boot(position: 1), boot(position: 2)]), history: @history, erxos_root: @erxos)
+    path = File.join(run, 'run.json')
+    written = File.read(path)
+    ['boot-1/wake/park-deadline.json', '../../x/run.json'].each do |file|
+      manifest = JSON.parse(written)
+      manifest.fetch('boots').last.fetch('cells').first['file'] = file
+      File.write(path, JSON.generate(manifest))
+      assert_match(/not derived from it/, assert_raises(Erx::Error) { Record.read(run) }.message, file)
+    end
+  end
+
+  # Every boot of one subject was asked the same cells, whatever their statuses.
+  def test_the_boots_of_a_record_hold_the_same_cells
+    error = assert_raises(Erx::Error) { record(boots: [boot(position: 1), boot(position: 2, cells: [cell(batch: 2)])]) }
+    assert_match(/different cells/, error.message)
   end
 end

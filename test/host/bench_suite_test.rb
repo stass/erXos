@@ -147,8 +147,8 @@ class BenchSuiteTest < Minitest::Test
       record = Erx::BenchRecord::Record.new(
         environment: Erx::BenchRecord::Environment.new(kind: boot.kind, model: 'Mac16,10', cpus: boot.cpus, system: 'erxos', details: {}),
         subject: Erx::BenchRecord::Subject.new(revision: '0' * 40, dirty: false, details: {}),
-        run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
-        clock: {}, cells: [cell]
+        run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil, details: {}),
+        boots: [Erx::BenchRecord::Boot.new(position: 1, clock: {}, cells: [cell], details: {})]
       )
       { record: record, written: File.join(history, 'native'), refused: [], seeds_missed: [], timed_out: nil }
     end
@@ -177,7 +177,8 @@ class BenchSuiteTest < Minitest::Test
       assert(notes.none? { |note| note.include?("\e") })
       written = Dir.glob(File.join(history, '**', 'run.json'))
       assert_equal 1, written.size
-      statuses = JSON.parse(File.read(written.first)).fetch('cells').to_h { |cell| [cell.fetch('operation'), cell.fetch('status')] }
+      boot, = JSON.parse(File.read(written.first)).fetch('boots')
+      statuses = boot.fetch('cells').to_h { |cell| [cell.fetch('operation'), cell.fetch('status')] }
       assert_equal({ 'local-rtt' => 'partial', 'xdomain-pingpong' => 'timed_out', 'erlang-timer' => 'timed_out' }, statuses)
     end
   end
@@ -195,8 +196,8 @@ class BenchSuiteTest < Minitest::Test
     Erx::BenchRecord::Record.new(
       environment: Erx::BenchRecord::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: cpus, system: 'erxos', details: {}),
       subject: Erx::BenchRecord::Subject.new(revision: '0' * 40, dirty: false, details: {}),
-      run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
-      clock: {}, cells: [cell]
+      run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil, details: {}),
+      boots: [Erx::BenchRecord::Boot.new(position: 1, clock: {}, cells: [cell], details: {})]
     )
   end
 

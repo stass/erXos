@@ -149,7 +149,7 @@ module Erx
     def boot_cell(record, benchmark:, refused:, seed_caught: true)
       return 'failed' unless seed_caught
 
-      judged = record.cells.select { |cell| cell.benchmark == benchmark }
+      judged = record.boot.cells.select { |cell| cell.benchmark == benchmark }
                      .map { |cell| [cell.status, expected_unsupported?(cell.conditions, record.environment)] }
       suite_cell(judged + (refused.empty? ? [] : [['rejected', false]]))
     end
@@ -215,7 +215,7 @@ module Erx
               in { error: String => error } then ["failed: #{error}"]
               in { record:, written:, refused: }
                 kept = written ? "recorded #{written}" : "replayed the stored log #{record.run.reused_from}, no record added"
-                cells = record.cells.reject { |cell| cell.status == 'measured' }
+                cells = record.boot.cells.reject { |cell| cell.status == 'measured' }
                               .map { |cell| "#{cell.operation} #{cell.conditions.placement}: #{cell.status} (#{cell.reason})" }
                 [kept, *outcome.fetch(:seeds_missed, []).map { |missed| "the seeded #{missed} was not caught" },
                  *[outcome[:timed_out]].compact, *cells, *refused.map { |reason| "refused: #{reason}" }]

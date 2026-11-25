@@ -24,15 +24,22 @@ class BenchCompareTest < Minitest::Test
     )
   end
 
-  def side(kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, cell: nil, **cell_options)
-    record = Record::Record.new(
+  # A record of one boot per cell given, at positions 1, 2 and so on.
+  def record(cells, kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil)
+    Record::Record.new(
       environment: environment(kind, system: system),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
       run: Record::Run.new(date: Time.utc(2026, 11, 23), started_by: 'manual', load: load, host_cpus: 12,
-                           reused_from: reused_from),
-      clock: cell ? nil : {}, cells: [cell || cell(**cell_options)]
+                           reused_from: reused_from, details: {}),
+      boots: cells.each_with_index.map do |cell, index|
+        Record::Boot.new(position: index + 1, clock: cell.form == 'mean' ? nil : {}, cells: [cell], details: {})
+      end
     )
-    Compare::Side.new(record: record, cell: record.cells.first)
+  end
+
+  def side(kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, cell: nil, **cell_options)
+    record = record([cell || cell(**cell_options)], kind: kind, system: system, load: load, reused_from: reused_from)
+    Compare::Side.new(record: record, cell: record.boot.cells.first)
   end
 
   # docs/design-bench.md, "Comparison": two systems' records differ in their environment,
@@ -116,5 +123,63 @@ class BenchCompareTest < Minitest::Test
     result = Compare.verdict(statistic: 'p50', baseline: rates, candidate: [80, 85, 101].map { |rate| side(median: rate) },
                              threshold: 1 / 10r, rate: true)
     assert_equal 'slower', result.verdict
+  end
+
+  def key = cell.key
+
+  def p50(baseline, candidate) =
+    Compare.verdict(statistic: 'p50', baseline: baseline, candidate: candidate, threshold: 1 / 10r)
+
+  # docs/design-bench.md, "Comparison": a boot is one run, so three records of one boot
+  # and one record of three boots are the same baseline.
+  def test_three_one_boot_records_and_one_three_boot_record_are_one_baseline
+    cells = BASELINE_MEDIANS.map { |median| cell(median: median) }
+    apart = Compare.sides(cells.map { |one| record([one]) }, key)
+    together = Compare.sides([record(cells)], key)
+    assert_equal [3, 3], [apart.size, together.size]
+    candidate = Compare.sides([record([cell(median: 150)])], key)
+    assert_equal p50(apart, candidate), p50(together, candidate)
+    assert_equal 'outside the band', p50(together, candidate).verdict
+  end
+
+  # A boot the walk saw twice (its cells rejected) or never began (not_run) stays a side
+  # of the baseline, so the comparison counts it and is inconclusive, never shorter.
+  def test_a_twice_booted_or_not_run_boot_makes_the_comparison_inconclusive
+    %w[rejected not_run].each do |status|
+      sides = Compare.sides([record([cell(median: 100), cell(status: status), cell(median: 101)])], key)
+      result = p50(sides, [side(median: 101)])
+      assert_equal ['inconclusive', "a side is #{status}"], [result.verdict, result.reason], status
+    end
+  end
+
+  def test_a_record_without_the_cell_is_refused
+    other = record([cell(batch: 2)])
+    assert_match(/holds no such cell/, assert_raises(Erx::Error) { Compare.sides([other], key) }.message)
+  end
+
+  # The gates' baseline (docs/design-bench.md, "The gates"): the newest committed runs,
+  # taken newest first until they hold three boots, so one run of one boot is never the
+  # whole baseline.
+  def test_the_baseline_takes_the_newest_runs_until_three_boots
+    one = ->(count) { record(Array.new(count) { cell }) }
+    runs = Array.new(5) { one.call(1) }
+    assert_equal runs.first(3), Compare.baseline(runs, key)
+    assert_equal 3, Compare.sides(Compare.baseline(runs, key), key).size
+    pairs = [one.call(2), one.call(2), one.call(2)]
+    assert_equal pairs.first(2), Compare.baseline(pairs, key)
+    whole = [one.call(3), one.call(1)]
+    assert_equal whole.first(1), Compare.baseline(whole, key)
+    short = [one.call(1), one.call(1)]
+    assert_equal short, Compare.baseline(short, key)
+    result = p50(Compare.sides(Compare.baseline(short, key), key), [side(median: 101)])
+    assert_equal 'the baseline has 2 of 3 boots', result.reason
+  end
+
+  # A newer run that did not run the cell, such as one from before its operation was
+  # declared, is passed over rather than refused.
+  def test_the_baseline_passes_over_runs_without_the_cell
+    without = record([cell(batch: 2)])
+    with = Array.new(3) { record([cell]) }
+    assert_equal with, Compare.baseline([without, *with], key)
   end
 end

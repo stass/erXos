@@ -8,18 +8,20 @@ require_relative 'error'
 module Erx
   # The one comparison of benchmark records (docs/design-bench.md, "Comparison"): a pure
   # function of records that compares one statistic of one cell between a baseline of at
-  # least three runs and a candidate of one run or three. Records are compared only when
-  # their environments and cells are equal; a TCG or deterministic record is compared only
-  # with its own kind, two systems never, and a mean, which has one number per run, with
-  # nothing. Inconclusive is never a pass, and a replayed boot is never a side.
+  # least three boots and a candidate of one boot or three. Each boot of a record is one
+  # side, so one record of three boots is as many as three records of one. Records are
+  # compared only when their environments and cells are equal; a TCG or deterministic
+  # record is compared only with its own kind, two systems never, and a mean, which has
+  # one number per boot, with nothing. Inconclusive is never a pass, and a replayed boot
+  # is never a side.
   module BenchCompare
-    # One run's cell, with the record that holds it.
+    # One boot's cell, with the record that holds the boot.
     Side = Data.define(:record, :cell)
     # verdict is one of VERDICTS; reason says why an inconclusive one is; band is the
     # baseline's noise band as [low, high], nil when none was computed.
     Verdict = Data.define(:verdict, :reason, :band)
     VERDICTS = ['same', 'slower', 'faster', 'inconclusive', 'outside the band'].freeze
-    BASELINE_RUNS = 3
+    BASELINE_BOOTS = 3
     # The advisory thresholds' starting values, as fractions of the baseline's median
     # (docs/design-bench.md, "Advisory thresholds"). Deterministic mode takes any change.
     ADVISORY = {
@@ -44,6 +46,28 @@ module Erx
                   .merge('profile sizes' => ->(cell) { cell.profile }).freeze
 
     module_function
+
+    # The Sides of the cell whose key is given (BenchRecord::Cell#key), one per boot of
+    # records, in their order. Every boot keeps its side whatever its cell's status, so a
+    # boot that ran twice or never makes the comparison inconclusive rather than shorter.
+    # Every boot of a record holds the same cells, so a record without the cell ran
+    # other cells, and is refused.
+    def sides(records, key)
+      records.flat_map do |record|
+        raise Error, "#{record.environment.name}/#{record.name} holds no such cell" unless record.keys.include?(key)
+
+        record.boots.map { |boot| Side.new(record: record, cell: boot.cells.find { |cell| cell.key == key }) }
+      end
+    end
+
+    # The baseline the gates take for the cell whose key is given, from records newest
+    # first (docs/design-bench.md, "The gates"): the newest of those holding the cell
+    # until they hold BASELINE_BOOTS boots, or all of them.
+    def baseline(newest_first, key)
+      held = 0
+      newest_first.select { |record| record.keys.include?(key) }
+                  .take_while { |record| held < BASELINE_BOOTS && (held += record.boots.size) }
+    end
 
     def threshold(environment, statistic)
       ADVISORY.dig(environment.kind, THRESHOLD_OF.fetch(statistic, statistic)) or
@@ -78,7 +102,7 @@ module Erx
     def verdict(statistic:, baseline:, candidate:, threshold:, rate: false)
       sides = baseline + candidate
       raise Error, 'a replayed log is not a new run' if sides.any? { |side| side.record.run.replayed? }
-      raise Error, 'a candidate is one run or three' unless [1, 3].include?(candidate.size)
+      raise Error, 'a candidate is one boot or three' unless [1, 3].include?(candidate.size)
 
       sides.each { |side| comparable!(sides.first, side) }
       reason = inconclusive_reason(statistic, baseline, sides)
@@ -89,8 +113,8 @@ module Erx
 
     def inconclusive_reason(statistic, baseline, sides)
       unmeasured = sides.find { |side| side.cell.status != 'measured' }
-      if baseline.size < BASELINE_RUNS
-        "the baseline has #{baseline.size} of #{BASELINE_RUNS} runs"
+      if baseline.size < BASELINE_BOOTS
+        "the baseline has #{baseline.size} of #{BASELINE_BOOTS} boots"
       elsif unmeasured
         "a side is #{unmeasured.cell.status}"
       elsif sides.any? { |side| !reported?(side, statistic) }
@@ -124,7 +148,7 @@ module Erx
       below = candidate.count { |side| value.call(side) < band.first }
       outcome = ->(name, reason = nil) { Verdict.new(verdict: name, reason: reason, band: band) }
       return outcome.call('same') if above.zero? && below.zero?
-      return outcome.call('outside the band', 'one candidate run cannot say slower or faster') if candidate.size == 1
+      return outcome.call('outside the band', 'one candidate boot cannot say slower or faster') if candidate.size == 1
 
       base, cand = median(baseline.map(&value)), median(candidate.map(&value))
       if above >= 2 && cand > base * (1 + threshold)
@@ -132,7 +156,7 @@ module Erx
       elsif below >= 2 && cand < base * (1 - threshold)
         outcome.call(rate ? 'slower' : 'faster')
       else
-        outcome.call('inconclusive', 'the candidate runs disagree or move less than the threshold')
+        outcome.call('inconclusive', 'the candidate boots disagree or move less than the threshold')
       end
     end
 

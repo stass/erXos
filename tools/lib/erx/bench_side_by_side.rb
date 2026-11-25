@@ -75,7 +75,8 @@ module Erx
     # conditions both systems share (load, placement, parameters); nil when the run has
     # no such cell.
     def entry(run, declared, benchmark)
-      cell = run.record.cells.find do |candidate|
+      boot = run.record.boot
+      cell = boot.cells.find do |candidate|
         [candidate.benchmark, candidate.operation, candidate.conditions.load, candidate.conditions.placement,
          candidate.conditions.parameters] ==
           [benchmark, declared.operation, declared.load, declared.placement, declared.parameters]
@@ -83,7 +84,7 @@ module Erx
       return nil unless cell
 
       Entry.new(round: run.round, status: cell.status, reason: cell.reason, clock: cell.conditions.clock, form: cell.form,
-                values: values(cell, run.record.clock), ratio: nil)
+                values: values(cell, boot.clock), ratio: nil)
     end
 
     # What a cell's summary reports, each amount in its own run's units.
