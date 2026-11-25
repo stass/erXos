@@ -2508,7 +2508,17 @@ supports on 64-bit ARM (References). So `base-hw` on QEMU's `virt` and
 on the Raspberry Pi 4, seL4 on the Raspberry Pi 4, and Fiasco.OC
 anywhere on 64-bit ARM are unverified, each until Genode's own
 documentation at the pinned release says so; a kernel it does not
-support there has no row.
+support there has no row. The guest is built first for `base-hw` on
+Genode's board `virt_qemu_arm_v8a`, QEMU's `virt` machine: it is the
+one kernel built from nothing but Genode's own tree and tool chain, so
+it needs no further pinned source, and the offline probe of Genode's
+tools built its core and the depot's archive
+`base-hw-virt_qemu_arm_v8a` at the pinned release.
+
+Genode's documentation names no IPC or system-call benchmark scenario
+(the release notes from 24.11 to 26.08 and Genode Foundations 26.05),
+so unlike L4Re's guest, which runs L4Re's own `ipcbench` for the kernel
+table, Genode's runs only `erx_peer_bench`.
 
 **License and clean room.** Genode is under the GNU Affero General
 Public License version 3 (References). It is a test oracle: fetched at
@@ -2622,11 +2632,33 @@ headers or its flags do is unverified), and every call it makes links
 but `cpuset_setaffinity`, which Genode's C library lacks. Of the calls
 that place threads, the library links `pthread_setaffinity_np` and
 `pthread_getaffinity_np`, and not `sched_setaffinity`,
-`sched_getaffinity`, `pthread_attr_setaffinity_np` or `sched_getcpu`;
-how the program places its threads on Genode is an open question of
-this design. Whether the linked calls work is settled by a boot. What
-comes back is the boot image and the resolved configuration, as L4Re's
-build returns its files, bounded and read only as data.
+`sched_getaffinity`, `pthread_attr_setaffinity_np` or `sched_getcpu`.
+So the program's FreeBSD branch pins a thread with
+`pthread_setaffinity_np` on itself, which on FreeBSD makes the same
+`cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_TID, -1)` call, and one
+call serves both. A refused call prints `FAILED` and no `CLOCK` line,
+so the run is rejected rather than measured unpinned. A call that
+returns success is not proof that the thread moved: no Genode row is
+published as pinned until a boot shows a cross-CPU handshake between
+CPU 0 and the last completing at the speed of two CPUs, not of one
+CPU's time slices, and until init's affinity for the component spans
+every CPU of the boot, so that the program's CPU n is the boot's.
+
+Genode's run tool, the tool that makes the boot image, takes a Tcl
+script. erXos's harness writes it (`GenodeBuild.run_script`) from its
+own values into the container's inputs, beside the component's target
+description (`bench/genode/target.mk`) and its flags from their one
+source (`PeerBench.flags`), as erXos's Genode repository; no Tcl file is
+in erXos's tree, and Tcl runs only in the container. The script imports
+the depot's archives the build made, builds the component, installs
+init's configuration in the notation Genode Foundations 26.05 documents
+("The init component"), with the component's log on Genode's LOG and a
+`/tmp` in its memory, and makes the boot image; nothing of it boots
+anything. The tool chain's archive names its entries from `/` and
+carries GNU long names, which the host's check of every extracted
+archive reads as the engine does. What comes back is the boot image
+and the resolved configuration, as L4Re's build returns its files,
+bounded and read only as data.
 
 **Boot and lines.** `QemuPlan.argv` with Genode's boot image as
 `-kernel`, Genode's own QEMU start is not used, so its QEMU arguments are

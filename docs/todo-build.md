@@ -482,11 +482,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   prepared and the tool packages extracted into the container, built `core`, `init`, `timer`, `lib/ld`,
   `lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` for `base-hw` on `virt_qemu_arm_v8a`, the binary archives
   of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and `posix`, and `erx_peer_bench` against Genode's C
-  library. Still to do: approve the language of Genode's run script (the run tool, which makes the boot
-  image, takes a Tcl script), design how the program places its threads on Genode (it links but
-  `cpuset_setaffinity`; `pthread_setaffinity_np` links), then write the build as a `tools/erx` module on
-  `L4ReBuild`'s model, with the data-archive reader the design names and the target description in
-  `bench/genode/`, and boot the image under erXos's own QEMU harness.
+library. `tools/erx build genode` (`GenodeBuild`) runs the build on the x86-64 host's engine: it writes the
+run script, checks every archive the engine extracts, and brings back `image.elf`, the configuration and the
+build record; which file the run tool names the boot image, and whether init takes the documented
+configuration, are settled by its first run. Still to do: boot the image under erXos's own QEMU harness,
+import its lines (the label dropped, as the design says), give init's start node the boot's CPUs as its
+affinity, and show by a cross-CPU handshake that `pthread_setaffinity_np` moves the thread before any row
+is published as pinned; the image takes the posix run's CPU count when built (`GenodeBuild.build`'s
+`cpus:`, 1 from the command line).
 * [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
   lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
   No lock has one; give ids and run names one pattern.
