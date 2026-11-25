@@ -63,9 +63,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "3abfc76738040674454ba78926da546329ef92a3e792ba0301fb1fb1d1928acc",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "Kconfig.L4": {
       "license": "MIT",
@@ -73,9 +71,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "d70370c072d78c3faa0349bd1e23649ba1b1c6cf9149d0496160908955da37ff",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "LICENSE.spdx": {
       "license": "CC0-1.0",
@@ -83,9 +79,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "3c32105532f6401644a9286ae3ab893b86d5ba5772e0938e2f54659c9da48c6f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "Makefile": {
       "license": "MIT",
@@ -93,19 +87,15 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4fd65ebd444b3622979a0f06e5698cbed6c0ef180f103c02be165b599afaa56f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
+      "license": "LicenseRef-unrecognized-notice",
+      "evidence": "unrecognized license notice (4 license words outside a recognised notice); review the file",
+      "reviewed": false,
       "sha256": "219cab2773facb9e0c8288987b21ee16eecdc64c1a405d2a86c63b1014af888a",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "SECURITY.md": {
       "license": "MIT",
@@ -113,9 +103,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "8e6279a7a655c39617fd89ec987cab177c694364f6bda1a961003ee698a72173",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "doc/bootstrap.dox": {
       "license": "MIT",
@@ -123,9 +111,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "87b0e69d1aee96c8b7111a2103fe0ac2c850f4149c74039c6fc1c1e855ceb1ec",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "doc/files.cfg": {
       "license": "MIT",
@@ -133,9 +119,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ee68728486e395f4e4fa6082e4443f870289474d0b20be37ed200d61d62c6e18",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/Makefile": {
       "license": "MIT",
@@ -143,9 +127,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "d04f8f4d816327a365cfd1c3a8366106935fea2a39a72a9ad46ea0c1ad187969",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/boot32/boot.S": {
       "license": "MIT",
@@ -203,9 +185,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "791b0e4e6f326ec4b20534c6fb53461c3842a8d8e31b319f2c94311e77763515",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/boot32/load_elf.c": {
       "license": "MIT",
@@ -213,9 +193,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "706b110deddd85f67490b0e2197ff139c3f5e45084d50cbf4699d2ce0f64905c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/boot32/load_elf.h": {
       "license": "MIT",
@@ -263,9 +241,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "fd2fbfa6b19c2f232c8f6e9b23e21fca17aee7dc434f6138be241afc1eaf597c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/boot32/support.h": {
       "license": "MIT",
@@ -273,9 +249,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ee9dfd783eb154558d29a2a6b6e38b575fa7aeb0eb11dbf9219243dd338b6e9f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/cpu_info.c": {
       "license": "MIT",
@@ -283,9 +257,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "bd173ee00b21a62b58adcefcda999e7f43eb0e1c32417c59d896d2271843e5d1",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/cpu_info.h": {
       "license": "MIT",
@@ -293,9 +265,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "26c9fd10725438d713ce2cc5b5a4bba91b851b5304b159f8379b628e9e5615ec",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/crt0.S": {
       "license": "MIT",
@@ -313,9 +283,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "53a802839fb71b4a7321bdc49f1b9c26811c1cb49f04db542f1f0af021dcada7",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/__assert_fail.c": {
       "license": "MIT",
@@ -323,9 +291,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "320046616a5dd4c88de4c0091eb2796d5dd715d692a47b498e37d3edd55a626e",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/glue/printf.c": {
       "license": "MIT",
@@ -333,9 +299,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "fe25a0cbefe7ead4e7558112fca8d0727eb2077dd17732a79cc840d046b99a73",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/glue/putchar.c": {
       "license": "MIT",
@@ -343,9 +307,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "e7fe34d03b8839586e1d394d86f5dffb4978d8332fdbd0a1b7ae85e31a5727ec",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/glue/puts.c": {
       "license": "MIT",
@@ -353,9 +315,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "3914692e3bf6fd13cc4f8f60ea278515c3489b830ee8ebd56e3e041765219d24",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/glue/stdout_write.c": {
       "license": "MIT",
@@ -363,9 +323,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "af6a3a2a79d8b936308b7909398f4f63988063e679eaa3f2329430768528a354",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/glue/vprintf.c": {
       "license": "MIT",
@@ -373,9 +331,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "b1a77732e5e90f0173317a3e07e0cdf0ce904101e625cb5c09ee49c9da1c3df7",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/alloca.h": {
       "license": "MIT",
@@ -383,9 +339,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "8768404d7cf4af5fb135b1a2ca91765bd2be311ac072e0ec8b68f5cb3e6e0f3e",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/assert.h": {
       "license": "MIT",
@@ -393,9 +347,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "f68cd7f6942e0920c7567307a588a83e818b2e921617d10714058df7dabebedb",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/bits/alltypes.h": {
       "license": "MIT",
@@ -403,9 +355,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a0c07e6be40345e57f63604ea7892b4aa9f4c63d9b377ea3d2af66c74254680f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/ctype.h": {
       "license": "MIT",
@@ -413,9 +363,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "edb1d279fc91819bd8a14e400c5046f5023e0180134e8ed81bf55afda8272161",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/features.h": {
       "license": "MIT",
@@ -423,9 +371,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "94eba7dd31d2eb18b6e65411261f1adf0d8b631d983dc89843db4f2af1f86390",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/inttypes.h": {
       "license": "MIT",
@@ -433,9 +379,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dac325b843b43d6e9348a91fce5113f3e8b9d518c28a63883f2c91acc5716b1d",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/libc_backend.h": {
       "license": "MIT",
@@ -443,9 +387,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "338f349542e8bb0bc175a934328989684249a96d20dbd2b4ea60dc34c7bec781",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/limits.h": {
       "license": "MIT",
@@ -453,9 +395,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a86dfa8c8b3a29576067917a455bfa9399039e85a1baebc1551ec08b362928a6",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/stdarg.h": {
       "license": "MIT",
@@ -463,9 +403,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "20b903cf4ddd7e0244e0bee6e615e24e1921bab2f0986957fe4f7869c608890a",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/stddef.h": {
       "license": "MIT",
@@ -473,9 +411,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4a61f6a8e59d22385475a2122c338e44fa37d7322668d6e6b589f7a695803dfc",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/stdint.h": {
       "license": "MIT",
@@ -483,9 +419,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "b06272f6e81989183f65ae6fb7d73b9d46fae2a717a654de6e77338eaad37192",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/stdio.h": {
       "license": "MIT",
@@ -493,9 +427,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "f298f99c51b9563c7d6179be81f170cd51dff11591ecaeedc75a020bcfea4f41",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/stdlib.h": {
       "license": "MIT",
@@ -503,9 +435,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dbd1c40ff09b6d40274d0ff0a122e6c1d636dc18176855039fd642e48d389f33",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/string.h": {
       "license": "MIT",
@@ -513,9 +443,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a0905e04d845348610fb4b6bee4d0e6ec383450d30076af419ef6f313836c90b",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/include/strutil.h": {
       "license": "MIT",
@@ -523,9 +451,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "7f7a2a500f87def837c70c30ed68256dc0ba75f17451b0a7a830e6e64fe08413",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/ctype/isdigit.c": {
       "license": "MIT",
@@ -533,9 +459,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "81d4c676b018feb751c800bbbf184dc18c88b9529305b5638bcfbce5d74d90ad",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/include/features.h": {
       "license": "MIT",
@@ -543,9 +467,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "15e649d7cbbd9c3300607948512aab5ab2ea5a751ebe648e7d98e6a2abbf5480",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/include/libc_stdio.h": {
       "license": "MIT",
@@ -553,9 +475,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4b2b70569393ca03641fdd2ff6fb008ea33a6f93965521bed1fc3f1195592a7d",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/include/stdio.h": {
       "license": "MIT",
@@ -563,9 +483,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4bd8fe307b950ea898e7aeadedc28fe85735c372c5be05d30569aa8a895e116a",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/internal/stdio_impl.h": {
       "license": "MIT",
@@ -573,9 +491,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "df04d6f33d5467605913807f0bdecae17db2f1f8553921c5ed983bcc77e39166",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/stdio/vfprintf.c": {
       "license": "MIT",
@@ -583,9 +499,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "7ca90a5b321cff03eb9b504fbd84cfbe1a87c41eca1530863641873733dff5b0",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/i386/memcpy.S": {
       "license": "MIT",
@@ -593,9 +507,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a1521bfbf6345599bca3d01f9a979d7078a49929fcb8535a30c5bde92b7e0130",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/memchr.c": {
       "license": "MIT",
@@ -603,9 +515,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dc5a40b41f7b74c0fd01adff943c5ed6f082ad579eca1813e2600484353f1d39",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/memmove.c": {
       "license": "MIT",
@@ -613,9 +523,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "7fb3d2672bb325e2c4c019fc3ae2cb0d1cfa84df12791351b6c5e8522bcbf081",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/memset.c": {
       "license": "MIT",
@@ -623,9 +531,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "6bd9e51fad017d4de1c2023d44f3baef4e64e45a2cad73765bb19b7857a77dd2",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/strlen.c": {
       "license": "MIT",
@@ -633,9 +539,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "cfc8725af99a65a51534c64c5bd37299676e58b8fb1a6a8d9c2674d4ad758f45",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/libc32/src/string/strnlen.c": {
       "license": "MIT",
@@ -643,9 +547,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "11d64d6b32c34abc9f9fea7bbd0c2ef2fd2a55989f390e2b70153ac06614211f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/paging.c": {
       "license": "MIT",
@@ -653,9 +555,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "5bc2dd7c4dc7384ccde853e2b6a98897f1507518366411d681494ab792fc58ce",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/paging.h": {
       "license": "MIT",
@@ -663,9 +563,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "767f13b758e80a0abf78ff1f67b8d6cd902fddd372bf626b51a94f50f76c6663",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-amd64/paging_alloc.cc": {
       "license": "MIT",
@@ -673,9 +571,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ac7a8c0306d616354ff7bbee89fab4ed7ca86f395d7de9f54464c94779d6c39f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm/bootstrap.ld.in": {
       "license": "MIT",
@@ -683,9 +579,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "fac5be1c25e5b92eb6ea309103a1a5f1a86138bcd596614e7d0352da680f367c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm/crt0.S": {
       "license": "MIT",
@@ -703,9 +597,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ac28d545434a4efadc35cb6bb4b6fff6c228bb1f8d1578fc24422e6777f11096",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm/platform.cc": {
       "license": "MIT",
@@ -713,9 +605,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "9657a5b41a0ff79645885722cb3104382d254de8527761e662d4838f3ba59f02",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm/reboot.cc": {
       "license": "MIT",
@@ -753,9 +643,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "89abf4f502a2182ef3434a54312eedeb6d055b2e32ab06786b9038e91f0f3205",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm64/bootstrap.ld.in": {
       "license": "MIT",
@@ -763,9 +651,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "fe6b5901b629bf8f488bca7b71b482d009aa3cd6265fbbb178b58351b252686c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm64/cache.S": {
       "license": "MIT",
@@ -803,9 +689,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "52749a9387bd919df957c2311fa9cdd6e8a7d130fd838cdd2d05216aa258749d",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm64/platform.cc": {
       "license": "MIT",
@@ -813,9 +697,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a1e3bc4c17d5f89a5794be171484636dc103969380f26af83089d191b3b38552",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-arm64/spin_addr_boot-generic.S": {
       "license": "MIT",
@@ -843,9 +725,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "03f0a0b50129022cb02c73a146ec648756b55dfb4a5b8c081302850a450ce63f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/crt0.S": {
       "license": "MIT",
@@ -853,9 +733,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "226968172b475d836d9117d2544c86007280f920abc9e46e5c5250d9473d8541",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/head.cc": {
       "license": "MIT",
@@ -863,9 +741,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "27868603525fbfce7409212b23664cfeb2ed9ac4e1fdc4016f21e8b00505d1e3",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/isa_parser.h": {
       "license": "MIT",
@@ -873,9 +749,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "5d8be266c049473ddd3b8d2ce31e720e7d3fc27e6e33f4fef55a870b1bb90fd8",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/platform_riscv.cc": {
       "license": "MIT",
@@ -883,9 +757,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a17a1a4f87a40ebb951ef680fece856b800869eac1492fb31dbae9fbaa0804a0",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/platform_riscv.h": {
       "license": "MIT",
@@ -893,9 +765,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "07dbc4a1cd077e30971e90fa9b87caa9c88dcb0860461063d168415384f99178",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-riscv/reboot.cc": {
       "license": "MIT",
@@ -903,9 +773,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "faaa9ba834a0fd8e8d9e52e433fd0802d54f62a9719dee33e963ea2ce133d7b8",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-x86/bootstrap.ld.in": {
       "license": "MIT",
@@ -913,9 +781,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "25523fa1e8377a040b0bb796229137f06f1394ca859ec792d13ea309da219364",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-x86/crt0.S": {
       "license": "MIT",
@@ -933,9 +799,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "212b4a6ab96a74e42944406e0c17d76c9c90c0caec36ba2e9d97e8d534fea64c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ARCH-x86/reboot.cc": {
       "license": "MIT",
@@ -953,9 +817,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "f15c49c595eeaa7c8ceb0cdf162c3cfef3034a69158b5c0d2a11c42ca2cfecfb",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/Makefile": {
       "license": "MIT",
@@ -963,9 +825,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "bcb284b8628aa51cbdff07be184f4225fc4a70c2fbfaa59dd2ba3ae6d5e89571",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/Makefile.platform": {
       "license": "MIT",
@@ -973,9 +833,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "7e9bc73676740f816d52795379b7f64e48953f42c83c800b4e9ca0b1fbb1f0b8",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/README": {
       "license": "MIT",
@@ -983,9 +841,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "46feaa4bed2b22c3be8b34b1e7de14f064e60cfea38fcac48967efff0a32cc30",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/acpi.cc": {
       "license": "MIT",
@@ -1013,9 +869,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "0616ed5afb8f6026ce91d431f83b07cd1cbe71174069eea72833efbbd44c3a2a",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v5.h": {
       "license": "MIT",
@@ -1023,9 +877,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "9ef587767d23703118e0afc4dedc38585a29846bfe3702b062599f4751087e6c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v6.h": {
       "license": "MIT",
@@ -1033,9 +885,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "a9c7df54806a2d01f96e3588ad347a1cda53e54310b339c3b784b427f10929ef",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v7.h": {
       "license": "MIT",
@@ -1043,9 +893,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "2f1200005e7ccb49e9309b52b81e873311ed176f46476c94ef4949effe1e5c03",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v7plus.h": {
       "license": "MIT",
@@ -1053,9 +901,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "8cd53d7567894e6d5ea9d6cb728b0004b905db6ede5057e1f736a9483f396d81",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v8_32.h": {
       "license": "MIT",
@@ -1063,9 +909,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "596cb623a8776b20857ea6277bed8e11b58a9097cb3405ebebc03205c0952493",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mem_v8_64.h": {
       "license": "MIT",
@@ -1073,9 +917,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dd669a5591702cbd57da62e1943f50abed01965222271a62ff2f5431c3dff950",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/arch/arm/mpu.h": {
       "license": "MIT",
@@ -1123,9 +965,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4e7cf2dff0d73ab21a68cfbe2cc9d1d7f471f453126631f127c99a9423446134",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/boot_modules.h": {
       "license": "MIT",
@@ -1153,9 +993,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "54307d750d2ee35f43ace6734b0d20f36a68aa0209ea21f97da5db351b570417",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/dt.h": {
       "license": "MIT",
@@ -1163,9 +1001,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "773a4b73d05cc2f0fb8faa2b6bfccdf42d83a049110a12ecb05259dee8e716cd",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/efi-support.cc": {
       "license": "MIT",
@@ -1183,9 +1019,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4567a2a66de708ee55d673b25ba80c89fb3ebabaff0f570b005739b696b5c1c0",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/exec.cc": {
       "license": "MIT",
@@ -1213,9 +1047,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "1fbbe617d5f302518bae458d8016ddb77ca8ba64db80a390873bf9ab3b599d0b",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/init_kip.cc": {
       "license": "MIT",
@@ -1243,9 +1075,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "7158e1bd66da7e7ba48351829250f988a7aba854f73de32967317d0b1ba3f0c9",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/koptions.cc": {
       "license": "MIT",
@@ -1253,9 +1083,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "5e4311ac283a3c9931928c1f9ca23c29c032966a473c07cd0d91bf2abb96c263",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/koptions.h": {
       "license": "MIT",
@@ -1263,9 +1091,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "b18343bd5b13097ee909c72e9b03e8fbc82fb1cca445d206bca7c79167d6a3e0",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/ldscript.inc": {
       "license": "MIT",
@@ -1273,9 +1099,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "20bcdb2ff12be0a8b5b50d65f5a8a4d9fcabbc8be184f899c720dc323bad88ef",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/libc_support+.cc": {
       "license": "MIT",
@@ -1293,9 +1117,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "e864630c4da792e0966fe996418cef30a07a39e1840feeb0abf6240b244baef8",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/memcpy_aligned.h": {
       "license": "MIT",
@@ -1303,9 +1125,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "21520914188d55956356ff94f2f22773b5fbc5c1229d6ce356deaeb2f87896eb",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/memory.cc": {
       "license": "MIT",
@@ -1313,9 +1133,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "70a37064c2f2281eac959d3546e32dad4ec9cd8cde1cbf5030d87384630bee09",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/memory.h": {
       "license": "MIT",
@@ -1333,9 +1151,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "571e1d172efc573554fe141328b499a169f86b0c3a61d89dec2219ebe532c955",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/mod_info.h": {
       "license": "MIT",
@@ -1343,9 +1159,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "86db08b89278648a4f4292485792a3785cb4a9ebac6daf2171d7ef3688f7d794",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/module.cc": {
       "license": "MIT",
@@ -1373,9 +1187,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "24515a07b34e8a91c38175bb314cdf98faf8afe82771e0e1e8288ac5afe5ad68",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/panic.h": {
       "license": "MIT",
@@ -1413,9 +1225,7 @@ Third-party notices remain in their original files.
       "reviewed": false,
       "sha256": "7a3e403798b553781b72f37adddef3d35e90dc30aaaede7596238db93910450f",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/Kconfig.s32n": {
       "license": "MIT",
@@ -1423,9 +1233,7 @@ Third-party notices remain in their original files.
       "reviewed": false,
       "sha256": "49c687d821593e63e0eaef76d7c05ae0f2b43cc88f4d700b78586cbe214627e8",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/Kconfig.s32z": {
       "license": "MIT",
@@ -1433,9 +1241,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "c93b55693e68e0751b276cec19fa056de6ca97235aa6807bb8c2405411c70e98",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/arm_fvp_base.cc": {
       "license": "MIT",
@@ -1443,9 +1249,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "41a06a2f0bdb79cf0cbb27f0ba8876faf9785bba9f0820118f4c91b5c68b02b5",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/arm_fvp_base.h": {
       "license": "MIT",
@@ -1473,9 +1277,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "1687440f806b8942ed894d1cd1ad58965629bd4767bf4fb1b4390964705be8ec",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/arm_mps3_an536.cc": {
       "license": "MIT",
@@ -1483,9 +1285,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "97f456c9b18ef9625c94c9be4934d9a73394f73d7217e0c15d1784a2ac287e62",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/arm_virt.cc": {
       "license": "MIT",
@@ -1493,9 +1293,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "46a77fb0216833d6bfb5d1567083c7e72879429ed24e29e956bfa7b802cdac5d",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/armada37xx.cc": {
       "license": "MIT",
@@ -1503,9 +1301,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "04fbaa529e352553c20636cd2d9af5ce2f0202ba2c81ccfb70eaef55b565fc99",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/armada38x.cc": {
       "license": "MIT",
@@ -1513,9 +1309,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "4b48d1dc357e1cbe89663db0ba6259346b9a65b2736aa6a3ce0d404de6bf640e",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/exynos.cc": {
       "license": "MIT",
@@ -1533,9 +1327,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "81cf2e8d4f08bcaf1d1a4b4feb255d790eedb5e10645c3a95f3a3370b5f7f889",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/imx.cc": {
       "license": "MIT",
@@ -1573,9 +1365,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "d77325e42b1867494adc10a04e84ae87442b7ddf7e18f32048342a53e1d65c1c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/migv.cc": {
       "license": "MIT",
@@ -1583,9 +1373,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "8799daaebe59ed33e580f07e3179e0401b4d55c85247a3e46764aeda920d0206",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/mmio_16550.h": {
       "license": "MIT",
@@ -1593,9 +1381,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "758816243db95b03240ddd3c8ad4cedc1c17e6b621614269bbf1f47005c3b62c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/om.cc": {
       "license": "MIT",
@@ -1623,9 +1409,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dfb9b235415f81ce3d10670819051b89cf46ffbcfeb81fcb5e60432a126f516e",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/pfsoc.cc": {
       "license": "MIT",
@@ -1633,9 +1417,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "9dc7960cc371961b59c614c1e3435420eba05a36bd347e0fc3769cbef3e05633",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/pxa.cc": {
       "license": "MIT",
@@ -1653,9 +1435,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "bd630172f6bef16af480e59190100ef6a5abd3e943f672d7a60ba6263af8a5fd",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/rpi.cc": {
       "license": "MIT",
@@ -1703,9 +1483,7 @@ Third-party notices remain in their original files.
       "reviewed": false,
       "sha256": "48c718057551d04be447d19d835c580cb84647bc205c4484adf72693e22acf25",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/s32n-crt0.S": {
       "license": "MIT",
@@ -1713,9 +1491,7 @@ Third-party notices remain in their original files.
       "reviewed": false,
       "sha256": "a5330adcbbe5ae081375321ed0a6222a0fcc91c86b015f8202395b995b8a347e",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/s32n.cc": {
       "license": "MIT",
@@ -1723,9 +1499,7 @@ Third-party notices remain in their original files.
       "reviewed": false,
       "sha256": "9acf3d65cf6ee82a46b12deb9b181585d9e170bd3169a32196ec51b567ac9536",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/s32z-crt0.S": {
       "license": "MIT",
@@ -1773,9 +1547,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ecdb2b1c9b0997e7a50a501928f5c19018707f5b3428f6adbd8b86c38904743c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/sr6p7g7.cc": {
       "license": "MIT",
@@ -1823,9 +1595,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "c5a86a5759cf31b7f9119196fafb53bc68b6648d16384f0a67cb247cf015dda1",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/x86_pc-base.h": {
       "license": "MIT",
@@ -1833,9 +1603,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "f67dd7ef979713b7df531d57a84dae4292ce4aa55845a6c00d39d49bbbba383a",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform/x86_pc.cc": {
       "license": "MIT",
@@ -1883,9 +1651,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "31aee22cee63d4d8179b034d43f455766bcada75a58214f6d1630d3f3d46a2a0",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/platform_single_ram_region.cc": {
       "license": "MIT",
@@ -1893,9 +1659,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "2a5635b11e8a5825085b9fd479f7b2a97aac968c0411af7c79196e39e79b635b",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/qemu_fw_cfg.cc": {
       "license": "MIT",
@@ -1903,9 +1667,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "60ec8d4d2c55e213736586844c2f19f1bcadbeceb7424659d1283ce44f90812c",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/qemu_fw_cfg.h": {
       "license": "MIT",
@@ -1913,9 +1675,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "ac61f1727d5eac9105df4181386d85065880b9066fcbfb68cc37be7262de0d1b",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/qemu_fw_cfg_mmio.cc": {
       "license": "MIT",
@@ -1923,9 +1683,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "dd62b8ffe077d7f9fa7e1534b2808a03a2152b1b4764bbd8c433cb1a937f78f1",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/qemu_ramfb.cc": {
       "license": "MIT",
@@ -1933,9 +1691,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "c759ea9f824f08722e6e58d4878e0ad1e8d308eebb6be2d34e964aadc06b5630",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/qemu_ramfb.h": {
       "license": "MIT",
@@ -1943,9 +1699,7 @@ Third-party notices remain in their original files.
       "reviewed": true,
       "sha256": "b483360e01731d95c77a1a2465177fef205b4a63774aadb7495bd68097da3b10",
       "kind": "file",
-      "non_ascii_lines": [
-
-      ]
+      "non_ascii_lines": []
     },
     "server/src/region.cc": {
       "license": "MIT",
@@ -2028,7 +1782,6 @@ Third-party notices remain in their original files.
       ]
     }
   },
-  "changes": {
-  }
+  "changes": {}
 }
 ```

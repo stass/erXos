@@ -215,6 +215,16 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] Import inventories under the old precedence, `otp/ORIGIN.md`, `musl/ORIGIN.md`,
+  `openssl/ORIGIN.md`: they were written when a pattern rule or the default came before a
+  file's own license notice, and before notices were read whole and refused unless
+  recognised in full (`Attribution.for_file`). They are not re-derived with the Fiasco
+  trees: OTP's and OpenSSL's checked-in profiles have no `package` rules yet, so each of
+  their pattern rules would still precede the files' notices. Mark their package
+  declarations as `package` rules, then re-derive them, or survey their pattern-attributed
+  files for notices. Re-deriving musl's with `config/imports/musl.json` changes three rows
+  (`README`, `WHATSNEW` and `src/string/arm/memcpy.S`) to `LicenseRef-unrecognized-notice`.
+
 * [Medium] `otp/erts/emulator/nifs/erxos/erx_device_nif.c` (`status_error`): a hand-kept copy of the ABI's
   status-to-atom table; a status it lacks reaches Erlang as `{error, {status, N}}`. Generate it from
   `abi/errno.txt`, as the other tables are, or route it through the one table ERTS already generates.

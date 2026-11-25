@@ -482,12 +482,33 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   development image can carry a bootstrap that links a source under terms a release may not carry
   and nothing says so until a release build. Run the audit over every bootstrap a pack carries, or
   record its result beside the image.
-* [Medium] Release licensing, `tools/fiasco_origins.rb` and `fiasco/l4re-core/ORIGIN.md`: a file with
-  no grant of its own is recorded under the package declaration of `LICENSE.spdx` that covers its
-  path, falling back to the root package's MIT, and that fallback recorded L4Re's libpthread, which
-  `LICENSE.spdx` does not name, as MIT. Re-check every row whose evidence is the root package
-  declaration against the file's own notice and refuse the fallback for a directory the declaration
-  does not name.
+* [Medium] Fiasco inventory regeneration, `tools/fiasco_origins.rb`: `write` refuses an
+  existing `ORIGIN.md` and builds a fresh one with no `changes` rows and generic exclusion
+  reasons, so it cannot re-derive the kernel's inventory (its `kobject_rpc.h` row) or
+  `l4re-core`'s (its libgcc exclusion reasons) without losing them, and only the kernel's
+  pinned archive is cached. The re-attribution of the file-notice precedence was made by a
+  scratch script from the tree's bytes and the kernel archive; 68 rows of files erXos
+  modified in `l4re-core` (31), `bootstrap` (22), `mk` (9), `libfdt` (3) and
+  `drivers-frst` (3) keep their earlier attribution; re-deriving them from the modified
+  bytes gives the same license except for `bootstrap`'s `server/src/build.pl` and `mk`'s
+  `mk/prog.mk` and `tool/lib/L4/Image.pm`, which it leaves unrecognised. A re-attribution mode that keeps every other field is the fix.
+* [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.notice`): a
+  license word outside every notice recognised in full leaves a file
+  `LicenseRef-unrecognized-notice`. That is 37 kernel `src/lib` files, the `README.md` of
+  each part, three embedded musl files and some 10 build-tool and documentation files. None is in a link closure; a recognised form, or a reviewed rule
+  naming the file, records each one's license.
+* [High] License notices read by pattern, `tools/lib/erx/origin.rb` (`Attribution.notice`):
+  a notice is refused only for a word of `LICENSE_MARK` outside a recognised notice, so a
+  restriction worded without one (after a recognised notice, in a `HOLDER` slot, or in a
+  file with no listed word at all) is not seen, and the file takes the permissive notice's
+  license or the package rule's. A reviewed allow-list of normalised notice texts, by hash,
+  with every other text unrecognised, makes it hold by construction.
+* [Medium] Notice reading leftovers, `tools/lib/erx/origin.rb`: the MIT one-line form
+  excludes a list of following words instead of requiring the sentence to end; GNU
+  boilerplate and the GCC exception sentence match by their opening words, so a license
+  named later in the sentence is covered (the result stays non-permissive but incomplete);
+  the mark-in-span check is quadratic in a file's GNU sentences (21 s for 16,000).
+
 * [Medium] Kernel lines case, `tools/lib/erx/fiasco.rb` (`Fiasco.new(kernel:)`, `kernel_path`):
   a Fiasco object given a test kernel packs it into any medium built through it, and only
   `MediumKind.test`'s `test_programs` marks a medium as test code, so a development medium built
