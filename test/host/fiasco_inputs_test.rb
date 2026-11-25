@@ -46,9 +46,12 @@ class FiascoInputsTest < Minitest::Test
       source = File.join(root, 'fiasco/kernel/src/banner.cpp')
       File.write(source, "// Modified by erXos\nint banner;\n")
       File.write(File.join(root, 'config/fiasco/kernel.defconfig'), 'CONFIG_ARM=y')
-      FileUtils.mkdir_p([File.join(root, 'kernel/core'), File.join(root, 'include/erx/core'), File.join(root, 'liberx'),
-                         File.join(root, 'build/gen/include/erx/core'), File.join(root, 'build/gen/kernel'),
-                         File.join(root, 'build/gen/liberx')])
+      Erx::CoreArchive::READ_DIRECTORIES.each { |directory| FileUtils.mkdir_p(File.join(root, directory)) }
+      Erx::FiascoInputs::ERXOS_FILES.each do |file|
+        FileUtils.mkdir_p(File.dirname(File.join(root, file)))
+        File.write(File.join(root, file), "/* #{File.basename(file)} */\n")
+      end
+      FileUtils.mkdir_p([File.join(root, 'include/erx/core'), File.join(root, 'build/gen/include/erx/core')])
       File.write(File.join(root, 'kernel/core/watchdog.c'), "int watchdog;\n")
       File.write(File.join(root, 'liberx/elf_plan.c'), "int erx_elf_plan;\n")
       File.write(File.join(root, 'liberx/image_plan.c'), "int erx_image_plan;\n")
@@ -142,6 +145,42 @@ class FiascoInputsTest < Minitest::Test
     end
   end
 
+  # The record holds what the cores' compiles read (CoreArchive), so an include
+  # directory or source added to the recipe is captured with it, and a flag that
+  # searched a directory outside the record would make the build read a file that
+  # no record names.
+  def test_the_record_follows_what_the_core_archive_reads
+    captured = lambda do |path|
+      Erx::FiascoInputs::ERXOS_ROOTS.any? { |root| path == root || path.start_with?(root + '/') }
+    end
+    archive = Erx::CoreArchive
+    includes = archive::INCLUDE_DIRECTORIES.flat_map { |directory| ['-I', directory] }
+    # Every other flag names no path, so no other argument makes the compile read one.
+    assert_equal ['--no-default-config', *archive::TARGET_FLAGS, '-ffunction-sections', *includes], archive::FLAGS
+    assert_equal %w[-mstrict-align], archive::BOOT_FLAGS
+    [*archive::INCLUDE_DIRECTORIES, *archive::SOURCE_DIRECTORIES, *archive::BOOT_SOURCES].each do |path|
+      assert captured.call(path), path
+    end
+    with_inputs do |root, _source, inputs, _record|
+      outside = File.join(root, 'kernel/arch/aarch64/exception.c')
+      File.write(outside, "int outside;\n")
+      File.write(File.join(root, 'kernel/crypto/digest.h'), "int digest;\n")
+      inputs.prepare
+      refute File.exist?(File.join(inputs.tree, 'kernel/arch/aarch64/exception.c'))
+      assert_equal "int digest;\n", File.read(inputs.path('kernel/crypto/digest.h'))
+    end
+  end
+
+  # Provenance reads an imported file's ORIGIN.md beside it in the copy, so a
+  # lone file root beside one would be attributed to erXos.
+  def test_a_lone_input_beside_an_origin_record_is_refused
+    with_inputs do |root, _source, inputs, _record|
+      File.write(File.join(root, 'liberx/ORIGIN.md'), "# imported\n")
+      error = assert_raises(Erx::Error) { inputs.prepare }
+      assert_includes error.message, 'ORIGIN.md'
+    end
+  end
+
   # Of liberx the build reads only the sources the cores' archive compiles,
   # so instrumenting another of its files, capturing, and reverting the file
   # (git checkout) leaves the capture valid, and the private copy cannot
@@ -165,7 +204,9 @@ class FiascoInputsTest < Minitest::Test
       error = assert_raises(Erx::Error) { inputs.verify }
       assert_includes error.message, 'differ from the recorded build inputs'
       changed = inputs.prepare
-      refute_equal inputs.component_id(record, component: 'users'), inputs.component_id(changed, component: 'users')
+      refute_equal record.fetch('sha256'), changed.fetch('sha256')
+      # make relinks bootstrap after the boot archive changes, so no build is discarded.
+      %w[kernel users].each { |name| assert_equal inputs.component_id(record, component: name), inputs.component_id(changed, component: name) }
     end
   end
 

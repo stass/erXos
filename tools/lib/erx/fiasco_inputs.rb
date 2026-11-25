@@ -11,30 +11,36 @@ require_relative 'bounded_file'
 require_relative 'core_archive'
 require_relative 'json_input'
 require_relative 'output_directory'
+require_relative 'stack_proof_run'
 
 module Erx
   # One owner for the bytes consumed by kernel and user builds. The record
   # describes the private copy, never a later view of repository contents.
   class FiascoInputs
-    # The inherited parts and their configuration, and the erXos sources the
-    # Fiasco kernel and bootstrap link: the C17 cores, their headers and the stack
-    # proof's declarations (CoreArchive), with the generated C they include
-    # and compile (Generated), which the caller brings up to date. Only the
-    # generated C is captured: the tree's stamp and its other outputs would
-    # discard a build that none of them reaches. Of liberx only the sources
-    # the boot archive compiles (CoreArchive::BOOT_SOURCES) are captured, and
-    # no include path reaches the directory: its other files, which the
-    # runtimes build, are no input of this build, so editing or reverting one
-    # leaves the record valid. Each of these roots is one file; every other
-    # root is a directory.
-    GENERATED_ROOTS = %w[build/gen/include build/gen/kernel build/gen/liberx].freeze
-    BOOT_LIBERX_SOURCES = CoreArchive::BOOT_SOURCES.select { |source| source.start_with?('liberx/') }.freeze
-    ERXOS_ROOTS = (%w[kernel include] + BOOT_LIBERX_SOURCES + GENERATED_ROOTS).freeze
+    # The inherited parts and their configuration, and the erXos files the
+    # Fiasco kernel and bootstrap build reads: what CoreArchive's archives read
+    # (CoreArchive::READ_DIRECTORIES whole, CoreArchive::BOOT_ONLY_SOURCES alone)
+    # and the stack proof's declarations (StackProofRun::DECLARATIONS). The
+    # generated files among them are the caller's to bring up to date
+    # (Generated). Nothing else of the tree is captured, so editing or
+    # reverting another file, such as a liberx source the runtimes alone
+    # build, leaves the record valid. The roots in ERXOS_FILES are files
+    # outside every directory root; every other root is a directory.
+    ERXOS_FILES = (CoreArchive::BOOT_ONLY_SOURCES + StackProofRun::DECLARATIONS).reject do |file|
+      CoreArchive::READ_DIRECTORIES.any? { |directory| file.start_with?("#{directory}/") }
+    end.freeze
+    ERXOS_ROOTS = (CoreArchive::READ_DIRECTORIES + ERXOS_FILES).freeze
     ROOTS = (%w[fiasco config/fiasco] + ERXOS_ROOTS).freeze
-    # The inputs only the kernel build reads; every other input is the user
-    # build's. A change to one of them discards that build's outputs.
-    KERNEL_INPUTS = %w[fiasco/kernel config/fiasco/kernel.defconfig kernel include
-                       build/gen/include build/gen/kernel].freeze
+    # Which build a changed input discards (component_id). The kernel's inputs
+    # discard the kernel: its configuration, its sources and what the cores'
+    # archive and the stack proof read. The boot archive's own sources discard
+    # nothing: bootstrap takes that archive and its seam from make, which
+    # relinks and recompiles after CoreArchive.build_boot replaces them, as it
+    # does with freshly written files only when their bytes change (those of
+    # its sources inside the kernel's inputs discard the kernel as such). Every
+    # other input discards the users build.
+    KERNEL_INPUTS = (%w[fiasco/kernel config/fiasco/kernel.defconfig] + CoreArchive::READ_DIRECTORIES +
+                     StackProofRun::DECLARATIONS).freeze
     MAX_FILE = 64 * 1024 * 1024
     MAX_TOTAL = 1024 * 1024 * 1024
     MAX_FILES = 100_000
@@ -157,9 +163,10 @@ module Erx
     end
 
     def component_id(record, component:)
+      under = ->(relative, inputs) { inputs.any? { |input| relative == input || relative.start_with?(input + '/') } }
       selected = record.fetch('files').select do |relative, _entry|
-        kernel = KERNEL_INPUTS.any? { |input| relative == input || relative.start_with?(input + '/') }
-        component == 'kernel' ? kernel : !kernel
+        kernel = under.call(relative, KERNEL_INPUTS)
+        component == 'kernel' ? kernel : !kernel && !under.call(relative, CoreArchive::BOOT_ONLY_SOURCES)
       end
       identity(selected)
     end
@@ -208,9 +215,14 @@ module Erx
       roots = snapshot ? [''] : ROOTS
       roots.each do |relative_root|
         start = relative_root.empty? ? base : File.join(base, relative_root)
-        kind_holds = BOOT_LIBERX_SOURCES.include?(relative_root) ? File.file?(start) : File.directory?(start)
+        kind_holds = ERXOS_FILES.include?(relative_root) ? File.file?(start) : File.directory?(start)
         unless kind_holds && !File.symlink?(start) && File.realpath(start) == start
           raise Error, "missing or linked Fiasco input: #{relative_root}"
+        end
+        # Provenance reads the ORIGIN.md beside an imported file in the copy, which
+        # holds no such file beside a lone file root.
+        if ERXOS_FILES.include?(relative_root) && File.exist?(File.join(File.dirname(start), 'ORIGIN.md'))
+          raise Error, "Fiasco input #{relative_root} is captured alone beside an ORIGIN.md"
         end
         # A nested root's ancestors (config, build and build/gen) are directories
         # of the copy too, as a snapshot of it lists them.

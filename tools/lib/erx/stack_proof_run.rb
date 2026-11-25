@@ -34,6 +34,8 @@ module Erx
     LEVELS = ['-O0', CoreArchive::LEVEL].freeze
     BUDGET = 'kernel/stack_fiasco.txt'
     TARGETS = 'kernel/stack_targets.txt'
+    # The files the proof reads beside the sources it compiles.
+    DECLARATIONS = [BUDGET, TARGETS].freeze
     REPORT = 'report.txt'
 
     module_function

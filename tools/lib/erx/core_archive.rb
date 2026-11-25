@@ -57,8 +57,25 @@ module Erx
     # to a jump table, whose branch through a register it would refuse.
     TARGET_FLAGS = %w[-std=c17 -Wall -Wextra -Werror -pedantic --target=aarch64-none-elf -ffreestanding
                       -mgeneral-regs-only -mno-outline-atomics -fno-jump-tables -fstack-usage].freeze
+    # The tree's include directories, in search order: with a source's own directory,
+    # which a quoted include searches first, the only directories a compile finds a
+    # header in.
+    INCLUDE_DIRECTORIES = %w[build/gen/include include build/gen/kernel/generated kernel/crypto].freeze
     FLAGS = ['--no-default-config', *TARGET_FLAGS, '-ffunction-sections',
-             *%w[-I build/gen -I build/gen/include -I include -I build/gen/kernel/generated -I kernel/crypto]].freeze
+             *INCLUDE_DIRECTORIES.flat_map { |directory| ['-I', directory] }].freeze
+    # The directory each source pattern globs in, which a quoted include in its
+    # sources also searches: the pattern up to its first wildcard.
+    SOURCE_DIRECTORIES = PATTERNS.map { |pattern| pattern[/\A[^*?\[{]*\//].chomp('/') }.freeze
+    # What the archives read of the tree: READ_DIRECTORIES whole, the outermost
+    # of the include and source directories, and BOOT_ONLY_SOURCES alone, the
+    # boot sources outside them, which include nothing beside themselves. The
+    # Fiasco build captures these (FiascoInputs) and compiles its copy, so a new
+    # include directory or source widens the capture with it, and a header of
+    # the tree outside them is not in that copy.
+    READ_DIRECTORIES = (INCLUDE_DIRECTORIES + SOURCE_DIRECTORIES).uniq.then do |found|
+      found.reject { |directory| found.any? { |other| directory.start_with?("#{other}/") } }
+    end.freeze
+    BOOT_ONLY_SOURCES = BOOT_SOURCES.reject { |source| READ_DIRECTORIES.any? { |directory| source.start_with?("#{directory}/") } }.freeze
     LEVEL = '-O2'
     ARCHIVE = 'erx_cores.a'
     MEMBERS = '.erx-archive-inputs'

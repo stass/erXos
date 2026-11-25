@@ -95,10 +95,10 @@ class FiascoTest < Minitest::Test
     %w[kernel mk l4re-core bootstrap libfdt drivers-frst].each do |name|
       FileUtils.mkdir_p(File.join(@directory, 'fiasco', name))
     end
-    [*%w[kernel include], *Erx::FiascoInputs::GENERATED_ROOTS].each do |name|
+    Erx::CoreArchive::READ_DIRECTORIES.each do |name|
       FileUtils.mkdir_p(File.join(@directory, name))
     end
-    Erx::FiascoInputs::BOOT_LIBERX_SOURCES.each do |name|
+    Erx::FiascoInputs::ERXOS_FILES.each do |name|
       FileUtils.mkdir_p(File.dirname(File.join(@directory, name)))
       File.write(File.join(@directory, name), "/* fixture */\n")
     end

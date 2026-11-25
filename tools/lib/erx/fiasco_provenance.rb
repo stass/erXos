@@ -767,9 +767,8 @@ module Erx
       { 'license' => Attribution::ERXOS_LICENSE, 'evidence' => "erXos addition; #{ERXOS_NOTICE} in its header" }
     end
 
-    # The captured erXos source behind path: a C17 core, a boot archive's
-    # liberx source, a header or a stack-proof declaration of the private
-    # inputs, or either cores'
+    # The captured erXos source behind path: a file of the private inputs'
+    # FiascoInputs::ERXOS_ROOTS, or either cores'
     # archive's copy of the seam's headers (CoreArchive.seam_headers). nil for
     # any other path.
     def erxos_source(path)
