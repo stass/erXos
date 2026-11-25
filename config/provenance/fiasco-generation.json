@@ -173,7 +173,7 @@
       },
       "build/fiasco/kernel/.Compiler-config": {
         "mode": "text",
-        "sha256": "354ae47d5940402721a46a5e09068c00ca43494444c4eaaacb92382212e808c5"
+        "sha256": "f87d9755b0a274c151b926ac0e5ea24da6aced7883e103f4f3e315a97bbae1ec"
       },
       "build/fiasco/kernel/.Host-config": {
         "mode": "text",
@@ -209,7 +209,7 @@
       },
       "build/fiasco/kernel/bootstrap.fiasco.pre.o": {
         "mode": "binary",
-        "sha256": "caca2ab0bfd6f62f798b120019128fd072f680b22f31ad1ba2dfa4154470c9a6"
+        "sha256": "4bfa60d2f2c2f6ed9709de8c0e1f2a79557ae7410ae06deef22f7ff44af8f9de"
       },
       "build/fiasco/kernel/dump_tcboffsets": {
         "mode": "binary",

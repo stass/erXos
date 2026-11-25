@@ -1111,8 +1111,11 @@ design does not have, to be deleted so no side-by-side table can show it under s
   test that builds the Fiasco kernel twice and compares the results, and
   `make check` skips it as a standalone test, but no make target runs it,
   and `make check-reproducible` builds the kernel once and packs that one
-  build twice. Give it a gate, or make `check-reproducible` rebuild the
-  kernel.
+  build twice. Nor does any gate build Fiasco in a second checkout, so a
+  checkout path reaching an object (a compile the path maps of
+  `Fiasco#kernel_settings` and `#user_settings` miss) or a timestamp in an
+  archive would pass. Give it a gate that builds in two checkouts, or make
+  `check-reproducible` rebuild the kernel at another path.
 * [Medium] build gates, the published media and the Doom example
   (`ProductionImage::MediumKind.published`): only `tools/erx pack
   --published` (`make pack`) builds the published QEMU medium and the Pi 4
