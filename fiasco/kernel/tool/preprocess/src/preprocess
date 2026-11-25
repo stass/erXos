@@ -55,6 +55,7 @@ our $opt_i = 0;			# Doing inlines?
 our $opt_v = 0;			# Verboseness?
 our $opt_l = 0;			# Avoid generating #line directives?
 our $opt_L = 0;			# Avoid generatung #line dirs in headers only?
+our $opt_m = '';			# <old>=<new>: file name prefix to replace in #line dirs
 # Support for new style FIASCO config
 our $opt_e = '';                # List of part tags
 our $opt_s = 0;
@@ -69,7 +70,18 @@ our $opt_H = "h";		# Default extenstion for header files
 our $opt_C = "cc";		# Default extention for source files
 our $opt_t = 0;
 
-getopts('e:o:c:p:h:H:C:ivlLsdwtW');
+getopts('e:o:c:p:h:H:C:ivlLm:sdwtW');
+
+# The name a #line directive gives file: its prefix -m <old> written as <new>,
+# as a compiler's -ffile-prefix-map does, so the generated files do not depend
+# on where the source tree is.
+sub line_file
+{
+  my ($file) = @_;
+  my ($old, $new) = split /=/, $main::opt_m, 2;
+  return $file if $main::opt_m eq '' || index($file, $old) != 0;
+  return $new . substr($file, length $old);
+}
 
 sub usage
 {
@@ -92,6 +104,8 @@ OPTIONS
   -i              Do inlines, make inline functions real inline.
   -l              Avoid generating #line directives.
   -L              Avoid generating #line directives in headers only.
+  -m <old>=<new>  Write file names starting with <old> in #line directives
+                  with <new> in its place.
   -o <src_base>   Base name for generated source files (defaults to -c, and 
                   overrides -p)
   -p              Prefix for names of output files.
@@ -555,7 +569,7 @@ sub to_string
 { return $_[0]->{file}.':'.$_[0]->{line}; }
 
 sub to_line_directive
-{ return "\n#line " . ($_[0]->{line} + $_[1]) . " \"" . $_[0]->{file} . "\"\n"; }
+{ return "\n#line " . ($_[0]->{line} + $_[1]) . " \"" . main::line_file($_[0]->{file}) . "\"\n"; }
 
 sub in_implementation
 { return $_[0]->{section} eq 'IMPLEMENTATION'; }
@@ -1610,7 +1624,7 @@ sub print_lineno($)
   my $object = $_[0];
 
   print_expand '';		# print headers we accumulated
-  print OUT "#line " . $object->{line} . " \"" . $object->{file} . "\"\n";
+  print OUT "#line " . $object->{line} . " \"" . line_file($object->{file}) . "\"\n";
 }
 
 sub print_lineno_sans_empty_lines($)
@@ -1625,7 +1639,7 @@ sub print_lineno_sans_empty_lines($)
   my @startcomments = split /\n/, " $start_of_code ";
 
   print OUT "#line " . ($object->{line} + @startcomments - 1)
-    . " \"" . $object->{file} . "\"\n";
+    . " \"" . line_file($object->{file}) . "\"\n";
 }
 
 sub expand_comments($) # Expand comment references

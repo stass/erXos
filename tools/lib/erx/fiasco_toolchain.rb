@@ -47,45 +47,27 @@ module Erx
     # LLVM's binary tool of that name, beside clang: program('nm') is llvm-nm.
     def program(name) = File.join(File.dirname(compiler), "llvm-#{name}")
 
-    # The settings of the kernel's build directory, for a checkout at root. The
-    # kernel's Makeconf adds clang's --target from CROSS_COMPILE and takes an LLD
-    # linker and a named CPP as given. Its ARFLAGS end in T, which recent GNU ar
-    # reads as truncated names but llvm-ar as a thin archive, whose members the
-    # link audit cannot read (ArchiveMember), and hold U, with which llvm-ar
-    # records each member's time and owner; without both llvm-ar makes a normal,
-    # deterministic archive. SHARED_FLAGS reaches every C, C++ and assembly compile.
-    def kernel_settings(root:)
+    # The settings of the kernel's build directory. The kernel's Makeconf adds
+    # clang's --target from CROSS_COMPILE and takes an LLD linker and a named
+    # CPP as given. Its ARFLAGS end in T, which recent GNU ar reads as truncated
+    # names but llvm-ar as a thin archive, whose members the link audit cannot
+    # read (ArchiveMember), and hold U, with which llvm-ar records each member's
+    # time and owner; without both llvm-ar makes a normal, deterministic archive.
+    def kernel_settings
       { 'CC' => compiler, 'CXX' => clang('clang++'), 'CPP' => clang('clang-cpp'), 'LD' => linker,
-        'ARFLAGS' => 'crs', **binary_tools, 'SHARED_FLAGS' => path_map(root) }
+        'ARFLAGS' => 'crs', **binary_tools }
     end
 
     # Every program either build runs from the toolchain.
     def programs = [compiler, clang('clang++'), clang('clang-cpp'), linker, *binary_tools.values]
 
-    # The settings of L4Re's build directory, for a checkout at root. CLANG names
-    # clang's directory, from which mk takes clang, clang++ and clang-cpp with the
-    # target flag. CCXX_FLAGS reaches every target compile.
-    def user_settings(root:)
-      { 'CLANG' => "#{File.dirname(compiler)}/", 'LD' => "#{linker} -m $(LD_EMULATION)", **binary_tools,
-        'CCXX_FLAGS' => path_map(root) }
+    # The settings of L4Re's build directory. CLANG names clang's directory,
+    # from which mk takes clang, clang++ and clang-cpp with the target flag.
+    def user_settings
+      { 'CLANG' => "#{File.dirname(compiler)}/", 'LD' => "#{linker} -m $(LD_EMULATION)", **binary_tools }
     end
 
     private
-
-    # Flags, added to the inherited make system's own, that write every path under the
-    # checkout at root into an object (debug information, __FILE__) relative to it, so
-    # the Fiasco build's bytes do not depend on where the tree is checked out. The
-    # inherited maps cover only each build's source and object directories, and the
-    # kernel's only for GCC, while the erXos cores' headers are elsewhere under the
-    # checkout. A root reached through a link is mapped by both its names: the compiler
-    # names its working directory by the real one. Dependency files keep real paths.
-    def path_map(root)
-      check_make_word('checkout', root)
-      [root, File.realpath(root)].uniq.map do |name|
-        check_make_word('checkout', name)
-        "-ffile-prefix-map=#{name}=."
-      end
-    end
 
     def clang(name) = File.join(File.dirname(compiler), name)
 
@@ -103,6 +85,21 @@ module Erx
     # character or invalid UTF-8 is refused rather than passed on.
     MAKE_WORD = %r{\A[A-Za-z0-9._+@/-]+\z}
 
+    # The names of the checkout at root that the Fiasco build may meet in a path: as
+    # given and, when a link leads to it, the real one, by which the compiler and make
+    # name their working directories. Both go into Makeconf.local, so a name with a
+    # character make or the shell reads specially is refused, not passed on.
+    def self.checkout_names(root)
+      [root, File.realpath(check_word('checkout', root))].uniq.map { |name| check_word('checkout', name) }
+    end
+
+    def self.check_word(variable, value)
+      return value if value.b.match?(MAKE_WORD)
+
+      raise Error, "the Fiasco #{variable} path #{value.inspect} has a character other than " \
+                   'A-Z a-z 0-9 . _ + @ / -, which make cannot take'
+    end
+
     # The toolchain the environment names.
     def self.from_environment(environment = ENV)
       new(compiler: environment.fetch('ERX_CLANG', ''), linker: environment.fetch('ERX_LLD', ''))
@@ -110,11 +107,6 @@ module Erx
 
     private
 
-    def check_make_word(variable, program)
-      return if program.b.match?(MAKE_WORD)
-
-      raise Error, "the Fiasco #{variable} path #{program.inspect} has a character other than " \
-                   'A-Z a-z 0-9 . _ + @ / -, which make cannot take'
-    end
+    def check_make_word(variable, program) = self.class.check_word(variable, program)
   end
 end

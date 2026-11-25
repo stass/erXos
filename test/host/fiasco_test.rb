@@ -388,6 +388,7 @@ class FiascoTest < Minitest::Test
     # the checkout reaches an object or archive and two checkouts build the same bytes.
     map = [@directory, File.realpath(@directory)].uniq.map { |root| "-ffile-prefix-map=#{root}=." }.join(' ')
     assert_includes kernel, "SHARED_FLAGS += #{map}\n"
+    assert_includes kernel, "PREPROCESS_FLAGS += -m #{File.realpath(@directory)}=.\n"
     refute File.exist?(board), 'a toolchain change discards the board build directories'
     users = File.read(File.join(@directory, 'build/fiasco/source/Makeconf.local'))
     assert_includes users, "CROSS_COMPILE := #{Erx::FiascoToolchain::CROSS_COMPILE}\n"
@@ -428,12 +429,9 @@ class FiascoTest < Minitest::Test
   # The checkout's path goes into the flags make hands the shell, so a root with a
   # character make or the shell gives a meaning is refused, not passed on.
   def test_a_checkout_path_make_cannot_take_is_refused
-    toolchain = Erx::FiascoToolchain.new(**fixture_toolchain('roots'))
     ['/a b', '/a$(b)', "/a\nb", '/a;b'].each do |root|
-      %i[kernel_settings user_settings].each do |settings|
-        error = assert_raises(Erx::Error) { toolchain.public_send(settings, root: root) }
-        assert_includes error.message, 'checkout', root
-      end
+      error = assert_raises(Erx::Error) { Erx::FiascoToolchain.checkout_names(root) }
+      assert_includes error.message, 'checkout', root
     end
   end
 
