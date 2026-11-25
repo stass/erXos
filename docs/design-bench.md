@@ -1149,17 +1149,22 @@ P] LOG` makes the record of a walk from its log, when the walk's own
 record was not written (a history root refused, a host that died). The
 queue's file, `queue.json`, which the walk writes beside its log under
 `build/bench-board/` before it serves the queue, names each entry's
-name, its position and the set it was made from, and the found pair's
-return identity; the walk's outcomes, `walk.json`, are written beside it
-as the walk ends. A log of boots that print no names has nothing that
+name, its position, its `boot.img` SHA-256 and the set it was made from
+(the set's directory and its build record's SHA-256), and the found
+pair's return identity; the walk's outcomes, `walk.json`, are written
+beside it as the walk ends: each entry's outcome (`ended`,
+`ended_unseen`, `stopped` by the walk's ending, or `not_run`), how the
+walk ended, `restored` and `returned` (`BoardFiles`). A log of boots that print no names has nothing that
 ties a line to a boot, and is refused.
 
 The reader is `BoardLog`, a pure function of the log's bytes, the queue,
 the sets' asked cells and the walk's outcomes when it has them. It
 places each line by the rule of
 [the construction](#the-construction-the-server-hands-out-a-queue): a
-line naming an entry, and every line between two lines naming the same
-entry, belong to that entry's boot; any other line belongs to none. A
+line naming an entry, and every line between two consecutive naming
+lines of the same entry, belong to that entry's boot; any other line
+belongs to none, and a naming line that names no entry, or is broken,
+brackets nothing. A
 name is exactly thirty-two lowercase hexadecimal digits and a banner's
 build and index hash exactly 16 and 64, the handoff's sizes. Each
 entry's `BENCH`, `CLOCK` and `WINDOW` lines go to `BenchMeasurement.boot`
@@ -1168,8 +1173,11 @@ timed out when the entry printed its `deadline` line or the walk's end
 deadline passed in it. An entry that printed neither `done` nor
 `deadline` has its unreported cells `not_run` with the walk's reason
 when the walk gave one (an interruption, a closed console), and
-otherwise with `the log ends before its boot did` or `its boot's end was
-not seen`, never `timed_out`, which only a deadline someone saw says.
+otherwise with `the log ends before its boot did` or `the end of its
+boot was not seen` (a later naming line, machine end or banner shows
+it ended), never `timed_out`, which only a deadline someone saw says;
+an entry no line names has them `not_run`, `no line of the log names
+its boot`.
 An entry whose lines lie on both sides of another entry's line booted
 twice, and all its cells are `rejected`. The live run's record is the
 same function of the log it captured. Every byte the reader takes is

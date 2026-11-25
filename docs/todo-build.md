@@ -122,13 +122,17 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   (`NativeBench::BoardSets`), and the `CLOCK` line's
   `cycles_per_tick`. Test on the board: the count times the counter's frequency within 2% of `/proc/sensors`'s
   `arm_clock`, seeded with the system counter read twice. One implementer.
-* [Medium] benchmarks, the board's log and `tools/erx bench import` for erXos logs (`BoardLog`,
-  [design-bench.md](design-bench.md#importing-a-log)): the pure reader that places each line between two naming
-  lines of one entry, the queue's and the walk's files, the `pi4` record with the entry's set's firmware hashes,
-  per-boot logs, `restored` and `returned`, and board logs as seeds of the bench lines' fuzz target. Tests: three
-  entries placed, a dropout over one entry's end and the next one's start, a log cut inside an entry, seeded with
-  placement by the nearest naming line before and with the cut boot taken as timed out. Needs the boot set's item
-  first. One implementer.
+* [Medium] benchmarks, the board run's record and `tools/erx bench import` for erXos logs
+  ([design-bench.md](design-bench.md#the-record-of-a-board-run)): the reader (`BoardLog`) and the queue's and
+  walk's files (`BoardFiles`) are built; what remains is the `pi4` record made from `BoardLog.read`'s boots, with
+  the entry's set's firmware hashes (the set's build record, `inputs.firmware`'s file names, `listed_files`'
+  SHA-256), the subject's facts, per-boot logs, the sensor readings, each entry's outcome, `restored` and
+  `returned`, and the `bench import NAME --env pi4-4gb-erxos --queue FILE [--profile P] LOG` command around it.
+  Blocked on one question: `BenchRecord::Record` holds one clock group and each cell once
+  (`bench_record.rb:281-289`), and `BenchCompare` takes one record as one run, while a board run's record is "one
+  per subject" holding every boot of its set (design-bench.md, "The record of a board run"); whether a walk's N
+  boots of one set are N records or one record of N boots (and then how its cells and clocks are held) is
+  undecided, and `BenchRecord::Run` has no field for the board's run facts. One implementer once decided.
 * [Low] tooling, the HTTP form's read-back (`NetbootEntry.check`, `FatVolume`): `FatVolume` reads no long name
   and no subdirectory, so an entry's `boot.img` is checked by a reader independent of fsimg only for `kernel8.img`'s
   placement and its root files with short names; the device tree, `overlays/` and other long-named files are checked
