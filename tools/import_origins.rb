@@ -11,8 +11,10 @@ require_relative 'lib/erx/json_input'
 require_relative 'lib/erx/origin'
 
 module Erx
-  # These are reviewed rules for the pinned imports, not a license detector
-  # for arbitrary packages. Actual file SPDX notices always take precedence.
+  # Reviewed rules for the pinned imports, not a license detector for
+  # arbitrary packages. A file's SPDX line precedes them; a reviewed rule
+  # precedes the file's own license notice, and a package rule follows it
+  # (Attribution.for_file).
   module ImportOrigins
     MAX_PROFILE_BYTES = 1024 * 1024
     COMPONENTS = %w[otp musl openssl].freeze
@@ -23,29 +25,12 @@ module Erx
     ASN1_OUTPUTS = %w[erl hrl asn1db].freeze
     module_function
 
-    def musl_license_rules(root)
-      rules = Dir.glob(File.join(root, '**/*')).each_with_object([]) do |absolute, selected|
-        next unless File.file?(absolute) && !File.symlink?(absolute)
-        path = absolute.delete_prefix(root + '/')
-        next if path == 'ORIGIN.md'
-        bytes = File.binread(absolute)
-        next if bytes.include?("\0")
-        normalized = bytes.gsub(/^[ \t]*\*[ \t]?/n, '').gsub(/\s+/n, ' ')
-        licenses = []
-        if normalized.include?('software is freely granted, provided that this notice is preserved')
-          licenses << 'SunPro'
-        end
-        if normalized.include?('purpose with or without fee is hereby granted')
-          licenses << 'ISC'
-        end
-        if normalized.include?('Redistribution and use in source and binary forms')
-          licenses << (normalized.include?('Neither the name') ? 'BSD-3-Clause' : 'BSD-2-Clause')
-        end
-        next if licenses.empty?
-        selected << { 'pattern' => path, 'license' => licenses.uniq.join(' AND '),
-                      'evidence' => "reviewed license grant in #{path}; musl COPYRIGHT identifies this exception family" }
-      end
+    # The musl files whose grant no notice form states: musl's COPYRIGHT, the
+    # MIT license text with its list of exceptions, and the public-domain
+    # dedications. Every other notice Attribution reads itself.
+    def musl_license_rules
       explicit = {
+        'COPYRIGHT' => 'MIT',
         'src/crypt/crypt_blowfish.c' => 'LicenseRef-musl-Solar-Designer',
         'src/crypt/crypt_md5.c' => 'LicenseRef-musl-public-domain AND BSD-2-Clause',
         'src/crypt/crypt_sha256.c' => 'LicenseRef-musl-public-domain',
@@ -54,8 +39,8 @@ module Erx
       }
       explicit.map do |path, license|
         { 'pattern' => path, 'license' => license,
-          'evidence' => "reviewed explicit public-domain dedication or fallback grant in #{path}; full notice retained" }
-      end + rules
+          'evidence' => "reviewed grant of #{path}, which no notice form Attribution reads states; full notice retained" }
+      end
     end
 
     def write(root:, component:, dependencies: Dependencies, sources: Sources)
@@ -96,7 +81,7 @@ module Erx
 
       { 'repository' => 'https://git.musl-libc.org/musl', 'revision' => 'v1.2.6',
         'default_license' => 'MIT', 'default_evidence' => 'reviewed musl COPYRIGHT package grant and no-notice original-file clause',
-        'rules' => musl_license_rules(source), 'exclusions' => [] }
+        'rules' => musl_license_rules, 'exclusions' => [] }
     end
 
     def publish_musl_profile(profile, root:)

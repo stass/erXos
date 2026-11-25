@@ -10,8 +10,25 @@ require_relative 'import_origins'
 
 module Erx
   # Attribution for the frozen Fiasco pins. Publisher package declarations
-  # cover files without their own notice; explicit per-file grants win.
+  # are package rules, which cover files without a notice of their own;
+  # Attribution reads a file's own SPDX line or license notice first.
   module FiascoOrigins
+    # L4Re's thread library is LinuxThreads ported to L4Re: its files of
+    # LinuxThreads' names are LGPL, some of them without a notice of their
+    # own, and L4Re's glue beside them falls to L4Re's root declaration.
+    # Both rules are package rules, chosen by file name alone, so a file's
+    # own notice still records its exact license. LGPL-2.1-or-later is the
+    # license every LinuxThreads notice in the package (LGPL-2.0-or-later
+    # or LGPL-2.1-or-later) allows.
+    LIBPTHREAD_GLUE = 'libpthread/{Control,Makefile,include/{Makefile,pthread-l4.h},' \
+                      'src/{Makefile,l4.cc,l4.h,libc-api.h,libc-glue.h,pi_mutex_mem.cc,pi_mutex_mem.h,pthread-api.h,tramp-*.S}}'
+    LIBPTHREAD_RULES = [
+      { 'pattern' => LIBPTHREAD_GLUE, 'license' => 'MIT', 'kind' => 'package',
+        'evidence' => "L4Re's glue in libpthread, by file name; LICENSE.spdx root package declaration" },
+      { 'pattern' => 'libpthread/**/*', 'license' => 'LGPL-2.1-or-later', 'kind' => 'package',
+        'evidence' => "LinuxThreads in L4Re's libpthread, by file name; the LGPL its notices state" }
+    ].freeze
+
     module_function
 
     def package_rules(directory)
@@ -20,35 +37,9 @@ module Erx
         path = declaration[/^PackageFileName: \.\/(.+)$/, 1]
         license = declaration[/^PackageLicenseConcluded: (.+)$/, 1]
         next unless path && license && File.exist?(File.join(directory, path))
-        rules << { 'pattern' => "#{path}/**/*", 'license' => license,
+        rules << { 'pattern' => "#{path}/**/*", 'license' => license, 'kind' => 'package',
                    'evidence' => "reviewed LICENSE.spdx package declaration for #{path}" }
       end.sort_by { |rule| -rule.fetch('pattern').bytesize }
-    end
-
-    def explicit_grant_rules(directory)
-      Dir.glob(File.join(directory, '**/*'), File::FNM_DOTMATCH).each_with_object([]) do |absolute, rules|
-        next unless File.file?(absolute) && !File.symlink?(absolute)
-        path = absolute.delete_prefix(directory + '/')
-        next if path == 'ORIGIN.md'
-        bytes = File.binread(absolute)
-        next if bytes.include?("\0")
-        normalized = bytes.byteslice(0, 16_384).gsub(/^[ \t]*\*[ \t]?/n, '').gsub(/\s+/n, ' ')
-        license = if normalized.include?('Copying and distribution of this file') &&
-                        normalized.include?('without royalty') && normalized.include?('this notice are preserved')
-                    'FSFAP'
-                  elsif normalized.include?('This file is subject to the terms and conditions of the GNU General Public License 2.')
-                    'GPL-2.0-only'
-                  elsif normalized.include?('This file is distributed under the terms of the GNU General Public License, version 2.') &&
-                        normalized.include?('COPYING-GPL-2 file for details.')
-                    'GPL-2.0-only'
-                  elsif normalized.include?('GCC Runtime Library Exception') &&
-                        normalized.include?('GNU General Public License')
-                    'GPL-3.0-or-later WITH GCC-exception-3.1'
-                  end
-        next unless license
-        rules << { 'pattern' => path, 'license' => license,
-                   'evidence' => "reviewed explicit grant in #{path}; complete notice retained" }
-      end
     end
 
     def profile(directory, part:)
@@ -62,15 +53,15 @@ module Erx
         { 'pattern' => '**/*', 'declared_license' => declared, 'license' => selected,
           'evidence' => 'reviewed exact header declaration; standard GPL version selected; no custom grant asserted' }
       end
-      rules = corrections + explicit_grant_rules(directory)
+      rules = corrections
       if part == 'l4re-core'
-        nested = File.join(directory, 'libc/musl/contrib/musl')
-        rules.concat(ImportOrigins.musl_license_rules(nested).map do |rule|
+        rules.concat(ImportOrigins.musl_license_rules.map do |rule|
           rule.merge('pattern' => 'libc/musl/contrib/musl/' + rule.fetch('pattern'),
                      'evidence' => "reviewed musl 1.2.5 grant: #{rule.fetch('evidence')}")
         end)
-        rules << { 'pattern' => 'libc/musl/**/*', 'license' => 'MIT',
+        rules << { 'pattern' => 'libc/musl/**/*', 'license' => 'MIT', 'kind' => 'package',
                    'evidence' => 'reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule' }
+        rules.concat(LIBPTHREAD_RULES)
       end
       rules.concat(package_rules(directory))
       rules.unshift('pattern' => 'LICENSE.spdx', 'license' => 'CC0-1.0',

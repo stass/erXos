@@ -64,6 +64,178 @@ class OriginTest < Minitest::Test
     assert_raises(Erx::Error) { attribution('upstream.c', bytes: changed) }
   end
 
+  # Made-up notices in each recognised form, and forms that must stay unknown
+  # rather than fall to the reviewed default: a permissive license is read
+  # only from its notice's full wording, and any license word outside a
+  # recognised notice leaves the file unrecognised.
+  def self.comment(text, leader: ' * ') = "/*\n#{text.lines.map { |line| "#{leader}#{line}" }.join}\n */\n"
+
+  MIT_TEXT = <<~TEXT
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+  TEXT
+  MIT_DISCLAIMER = <<~TEXT
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY.
+  TEXT
+  BSD_CONDITIONS = <<~TEXT
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+    1. Redistributions of source code must retain the above copyright
+       notice, this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright
+       notice, this list of conditions and the following disclaimer in the
+       documentation and/or other materials provided with the distribution.
+  TEXT
+  BSD_ENDORSE = <<~TEXT
+    3. Neither the name of the Example Project nor the names of its
+       contributors may be used to endorse or promote products derived from
+       this software without specific prior written permission.
+  TEXT
+  BSD_DISCLAIMER = <<~TEXT
+    THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+    ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.
+  TEXT
+  LGPL_TEXT = <<~TEXT
+    This library is free software; you can redistribute it and/or modify it
+    under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation; either version 2.1 of the License, or (at
+    your option) any later version.
+
+    This library is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY.  See the GNU Lesser General Public License for more
+    details.
+  TEXT
+  GPL_LINE = "/* Licensed under the GPLv2. */\n"
+
+  NOTICES = {
+    'LGPL library' => [comment(<<~TEXT), 'LGPL-2.0-or-later'],
+      This library is free software; you can redistribute it and/or modify it
+      under the terms of the GNU Library General Public License as published by
+      the Free Software Foundation; either version 2 of the License, or (at your
+      option) any later version.  See the GNU Library General Public License for
+      more details.
+    TEXT
+    'GCC exception' => [comment(<<~TEXT, leader: '# '), 'GPL-3.0-or-later WITH GCC-exception-3.1'],
+      This file is free software; you can redistribute it and/or modify it under
+      the terms of the GNU General Public License as published by the Free
+      Software Foundation; either version 3, or (at your option) any later version.
+
+      Under Section 7 of GPL version 3, you are granted additional permissions
+      described in the GCC Runtime Library Exception, version 3.1, as published by
+      the Free Software Foundation.
+
+      You should have received a copy of the GNU General Public License and a copy
+      of the GCC Runtime Library Exception along with this program; see the files
+      COPYING3 and COPYING.RUNTIME respectively.  If not, see
+      <http://www.gnu.org/licenses/>.
+    TEXT
+    'GPL by number' => ["// This file is distributed under the terms of the GNU General Public License 2.\n" \
+                        "// Please see the COPYING-GPL-2 file for details.\n", 'GPL-2.0-only'],
+    'bare GPLv2' => [GPL_LINE, 'GPL-2.0-only'],
+    'bare GPLv2 or later' => ["/* Licensed under GPLv2 or later. */\n", 'GPL-2.0-or-later'],
+    'LGPL in %% comments' => [LGPL_TEXT.lines.map { |line| "%% #{line}" }.join, 'LGPL-2.1-or-later'],
+    'LLVM' => ["//===- Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.\n" \
+               "// See https://llvm.org/LICENSE.txt for license information.\n", 'Apache-2.0 WITH LLVM-exception'],
+    'OpenSSL Apache 2.0' => [comment(<<~TEXT), 'Apache-2.0'],
+      Licensed under the Apache License 2.0 (the "License").  You may not use
+      this file except in compliance with the License.  You can obtain a copy
+      in the file LICENSE in the source distribution or at
+      https://www.openssl.org/source/license.html
+    TEXT
+    'BSD-2-Clause' => [comment(BSD_CONDITIONS + "\n" + BSD_DISCLAIMER), 'BSD-2-Clause'],
+    'BSD-3-Clause' => [comment(BSD_CONDITIONS + BSD_ENDORSE + "\n" + BSD_DISCLAIMER), 'BSD-3-Clause'],
+    'BSD-3-Clause-Attribution' => [comment(BSD_CONDITIONS + BSD_ENDORSE + <<~TEXT + BSD_DISCLAIMER), 'BSD-3-Clause-Attribution'],
+      4. Redistributions of any form whatsoever must retain the following
+         acknowledgment: 'This product includes software developed by the
+         Example Project'.
+    TEXT
+    'MIT' => [comment(MIT_TEXT + "\n" + MIT_DISCLAIMER), 'MIT'],
+    'MIT by name' => ["/* Copyright 2011 A. Author, licensed under standard MIT license */\n", 'MIT'],
+    'MIT by name with more terms' => ["/* Licensed under the MIT License with an added restriction. */\n",
+                                      Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'LGPL in boxed lines' => [LGPL_TEXT.lines.map { |line| "/* #{line.chomp.ljust(76)} */\n" }.join, 'LGPL-2.1-or-later'],
+    'SunPro and ISC' => [comment(<<~TEXT), 'SunPro AND ISC'],
+      Developed at SunPro, a Sun Microsystems, Inc. business.
+      Permission to use, copy, modify, and distribute this
+      software is freely granted, provided that this notice
+      is preserved.
+
+      Permission to use, copy, modify, and/or distribute this software for any
+      purpose with or without fee is hereby granted, provided that the above
+      copyright notice and this permission notice appear in all copies.
+
+      THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+      WITH REGARD TO THIS SOFTWARE.
+    TEXT
+    'FSFAP' => ["# Copying and distribution of this file, with or without modification, are\n" \
+                "# permitted in any medium without royalty provided the copyright notice and\n" \
+                "# this notice are preserved.  This file is offered as-is, without any warranty.\n", 'FSFAP'],
+    'pointer to LICENSE.spdx' => ["/*\n * License: see LICENSE.spdx\n */\n", 'MIT'],
+    'MIT with an added condition' => [comment(MIT_TEXT + "\nThe Software shall be used for Good, not Evil.\n\n" +
+                                              MIT_DISCLAIMER), Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'MIT with the X11 clause' => [comment(MIT_TEXT + "\n" + MIT_DISCLAIMER + <<~TEXT), Erx::Attribution::UNRECOGNIZED_NOTICE],
+      Except as contained in this notice, the name of the author shall not be
+      used in advertising or otherwise to promote the sale of this Software.
+    TEXT
+    'BSD with an added condition' => [comment(BSD_CONDITIONS + <<~TEXT + BSD_DISCLAIMER), Erx::Attribution::UNRECOGNIZED_NOTICE],
+      3. Redistributions in any form must be accompanied by information on how
+         to obtain complete source code for the software.
+    TEXT
+    'BSD with an unknown acknowledgment' => [comment(BSD_CONDITIONS + <<~TEXT + BSD_DISCLAIMER),
+      3. Redistributions must retain the following acknowledgment: Example.
+    TEXT
+                                             Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'GPL with a special exception' => [comment(<<~TEXT), Erx::Attribution::UNRECOGNIZED_NOTICE],
+      Distributed under the terms of the GNU General Public License version 2.
+      As a special exception, you may link this file with other code.
+    TEXT
+    'two GNU licenses in one grant' => ["/* GNU Lesser General Public License version 2.1 or the GNU General Public License */\n",
+                                        Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'public domain' => ["/* This code is in the public domain. */\n", Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'lowercase gpl' => ["/* This file is released under the gpl v2. */\n", Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'proprietary' => ["/* Confidential and proprietary. Do not distribute. */\n", Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'BSD with a condition in its holder' => [comment(BSD_CONDITIONS + "\n" + BSD_DISCLAIMER.sub('THE AUTHOR',
+                                                     'THE AUTHOR, FOR NON-COMMERCIAL USE ONLY,')),
+                                             Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'license by reference' => ["/* Distributed under the terms of the license in COPYING. */\n",
+                               Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'British spelling' => ["/* Licensed under the Example Public Licence, version 1. */\n",
+                           Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'a second notice past 16 KiB' => [comment(MIT_TEXT + "\n" + MIT_DISCLAIMER) + ("int x;\n" * 4096) +
+                                      "/* Also under the Mozilla Public License 2.0. */\n",
+                                      Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'UTF-16 text' => ["\xFF\xFE".b + GPL_LINE.encode('UTF-16LE').b, Erx::Attribution::UNRECOGNIZED_NOTICE],
+    'binary without a license word' => ["\x7FELF\0\0\0code".b, 'MIT']
+  }.freeze
+
+  def test_a_files_own_notice_precedes_the_default_and_an_unknown_one_is_unknown
+    NOTICES.each do |name, (bytes, license)|
+      assert_equal license, attribution('upstream.c', bytes: bytes).fetch('license'), name
+    end
+  end
+
+  def test_a_reviewed_rule_precedes_a_notice_and_a_package_rule_follows_it
+    @review.fetch('rules') << { 'pattern' => 'package/**/*', 'license' => 'LGPL-2.1-or-later', 'kind' => 'package',
+                                'evidence' => 'package declaration' }
+    assert_equal 'BSD-2-Clause', attribution('special.c', bytes: GPL_LINE).fetch('license')
+    assert_equal 'GPL-2.0-only', attribution('package/a.c', bytes: GPL_LINE).fetch('license')
+    assert_equal 'LGPL-2.1-or-later', attribution('package/b.c', bytes: "int b;\n").fetch('license')
+    @review.fetch('rules') << { 'pattern' => 'x', 'license' => 'MIT', 'kind' => 'guess', 'evidence' => 'none' }
+    assert_raises(Erx::Error) { attribution('package/b.c', bytes: "int b;\n") }
+    @review.fetch('rules').pop
+    @review.fetch('rules') << { 'pattern' => 'lib/**/*', 'license' => 'MIT', 'evidence' => 'a tree' }
+    assert_raises(Erx::Error) { attribution('lib/a.c', bytes: GPL_LINE) }
+  end
+
   def test_unknown_permission_is_refused
     assert_raises(Erx::Error) do
       attribution('fixture', bytes: "# SPDX-License-Identifier: NOASSERTION\n")

@@ -264,17 +264,6 @@ class OracleImportsTest < Minitest::Test
     end
   end
 
-  def test_mixed_musl_grants_are_recorded_together
-    Dir.mktmpdir('erx-musl-review-') do |root|
-      FileUtils.mkdir_p(File.join(root, 'src/math'))
-      bytes = "/* software is freely granted, provided that this notice is preserved. */\n" \
-              "/* purpose with or without fee is hereby granted */\n"
-      File.write(File.join(root, 'src/math/mixed.c'), bytes)
-      rule = Erx::ImportOrigins.musl_license_rules(root).find { |entry| entry.fetch('pattern') == 'src/math/mixed.c' }
-      assert_equal 'SunPro AND ISC', rule.fetch('license')
-    end
-  end
-
   def test_target_application_selection_preserves_only_the_declared_set
     Dir.mktmpdir('erx-otp-selection-') do |root|
       %w[kernel stdlib megaco].each { |name| FileUtils.mkdir_p(File.join(root, 'lib', name)) }

@@ -4,19 +4,67 @@
 
 require 'minitest/autorun'
 require 'tmpdir'
+require 'fileutils'
 require_relative '../../tools/fiasco_origins'
 
+# A made-up Fiasco-style tree: a root LICENSE.spdx whose root package and
+# whose lib package both say MIT, and files under lib whose own text says
+# otherwise. The inventory records each file's own grant, which the package
+# declaration does not override, and a notice it cannot read as unrecognised.
 class FiascoOriginsTest < Minitest::Test
-  def test_explicit_fiasco_gpl2_prose_precedes_package_default
+  LGPL_NOTICE = <<~SOURCE
+    /*
+     * This library is free software; you can redistribute it and/or
+     * modify it under the terms of the GNU Lesser General Public
+     * License as published by the Free Software Foundation; either
+     * version 2.1 of the License, or (at your option) any later version.
+     */
+    int cancel(void);
+  SOURCE
+
+  FILES = {
+    'LICENSE.spdx' => "DataLicense: CC0-1.0\n\nPackageName: lib\nPackageFileName: ./lib\n" \
+                      "PackageLicenseConcluded: MIT\n",
+    'lib/notice.c' => LGPL_NOTICE,
+    'lib/declared.c' => "/* SPDX-License-Identifier: LGPL-2.1-only */\nint f(void);\n",
+    'lib/gpl2.cpp' => "/*\n * This file is distributed under the terms of the GNU General Public\n" \
+                      " * License, version 2. Please see the COPYING-GPL-2 file for details.\n */\n",
+    'lib/unversioned.c' => "/* Distributed under the terms of the GNU General Public License. */\n",
+    'lib/pointer.c' => "/*\n * License: see LICENSE.spdx in the top-level directory\n */\nint g(void);\n",
+    'lib/plain.c' => "int h(void);\n"
+  }.freeze
+
+  def licenses(files, part:)
     Dir.mktmpdir do |directory|
-      File.write(File.join(directory, 'source.cpp'), <<~SOURCE)
-        /*
-         * This file is distributed under the terms of the GNU General Public
-         * License, version 2. Please see the COPYING-GPL-2 file for details.
-         */
-      SOURCE
-      rules = Erx::FiascoOrigins.explicit_grant_rules(directory)
-      assert_equal 'GPL-2.0-only', rules.find { |rule| rule.fetch('pattern') == 'source.cpp' }&.fetch('license')
+      files.each do |path, text|
+        FileUtils.mkdir_p(File.dirname(File.join(directory, path)))
+        File.write(File.join(directory, path), text)
+      end
+      Erx::Origin.new(root: directory).write(repository: 'https://example.org/fixture', revision: '1',
+                                             archive_sha256: 'a' * 64,
+                                             review: Erx::FiascoOrigins.profile(directory, part: part))
+      Erx::Origin.new(root: directory).inventory.fetch('files').transform_values { |row| row.fetch('license') }
     end
+  end
+
+  def test_a_files_own_notice_precedes_the_package_declaration
+    assert_equal({ 'LICENSE.spdx' => 'CC0-1.0',
+                   'lib/notice.c' => 'LGPL-2.1-or-later',
+                   'lib/declared.c' => 'LGPL-2.1-only',
+                   'lib/gpl2.cpp' => 'GPL-2.0-only',
+                   'lib/unversioned.c' => 'LicenseRef-unrecognized-notice',
+                   'lib/pointer.c' => 'MIT',
+                   'lib/plain.c' => 'MIT' }, licenses(FILES, part: 'mk'))
+  end
+
+  # LinuxThreads' files in libpthread are LGPL with or without a notice, and
+  # L4Re's glue beside them follows L4Re's root declaration.
+  def test_libpthread_is_lgpl_but_for_l4res_glue
+    files = { 'LICENSE.spdx' => "DataLicense: CC0-1.0\n", 'libpthread/src/signals.c' => "int s;\n",
+              'libpthread/src/notice.c' => LGPL_NOTICE.sub('2.1', '2'), 'libpthread/src/l4.cc' => "int l;\n",
+              'libpthread/include/pthread-l4.h' => "int p;\n" }
+    assert_equal({ 'LICENSE.spdx' => 'CC0-1.0', 'libpthread/src/signals.c' => 'LGPL-2.1-or-later',
+                   'libpthread/src/notice.c' => 'LGPL-2.0-or-later', 'libpthread/src/l4.cc' => 'MIT',
+                   'libpthread/include/pthread-l4.h' => 'MIT' }, licenses(files, part: 'l4re-core'))
   end
 end

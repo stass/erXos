@@ -22,6 +22,96 @@ module Erx
     # other form is not read here; erxos_addition? refuses it by counting.
     SPDX_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--)[ \t]*)?SPDX-License-Identifier:[ \t]*([^\r\n]+)/n
     ERXOS_DECLARATION_LINE = /^[ \t]*(?:(?:[#%*;\/]+|--|<!--)[ \t]*)?#{ERXOS_NOTICE}[ \t]*(?:(?:\*\/|-->)[ \t]*)?\r?$/n
+    # The license recorded for a file whose own notice names a license this
+    # module does not recognise. It is not permissive, so the file enters no
+    # build until a reviewed rule names it.
+    UNRECOGNIZED_NOTICE = 'LicenseRef-unrecognized-notice'
+    # What a review rule is. A reviewed rule records a judgement about the
+    # files it names, by path or a brace list of paths but never a wildcard,
+    # and precedes their own notices; a package rule carries a package's
+    # declared license to the files of a whole tree that state none of their own.
+    RULE_KINDS = %w[reviewed package].freeze
+
+    # A notice is read from the whole file once its comment leaders (runs of
+    # them, as in `%%` or `##`), the comment closers and box characters
+    # ending its lines, and its line breaks are gone.
+    COMMENT_LEADER = %r{^[ \t]*(?:/\*+|\*+/?|//+|[#;%!]+|--+|dnl\b)?[ \t]*}n
+    COMMENT_TRAILER = %r{[ \t]*(?:\*+/|[*#]+)?[ \t]*$}n
+    # Every word that can belong to a license notice. Each occurrence must lie
+    # inside a notice recognised below, or the file's notice is unrecognised:
+    # a license is never read from part of a notice while the rest of it, or
+    # a second notice, goes unread. The permissive notices' opening phrases
+    # are marks too, since some of them hold no license word, and so is the
+    # X11 clause that follows an MIT notice.
+    LICENSE_MARK = Regexp.union(
+      /licen[cs]|public domain|copyleft|CeCILL|proprietary|confidential|commercial/in, /\b[AL]?GPL/in,
+      /\b(?:CDDL|MPL|EPL)\b|Mozilla Public|Eclipse Public|Creative Commons|\bCC BY/in,
+      /Permission is hereby granted|Permission to use, copy, modify/in,
+      /Redistribution and use in source and binary forms|Copying and distribution of this file/in,
+      /Except as contained in this notice/in
+    )
+    # A name, year or holder inside a notice: a short stretch of one clause
+    # holding no license mark, so a recognised notice never covers a second
+    # one. What it does not exclude stays a residual of reading by pattern.
+    HOLDER = /(?:(?!#{LICENSE_MARK})(?:[^.;:]|\.(?=\S)|(?<=Inc|Ltd|Co|Corp)\. )){1,160}?/n
+    # The quotation marks around "Software" or "AS IS", in any style.
+    QUOTE = /[^ A-Za-z0-9]{1,6}/n
+    # A list item's number or bullet in a BSD notice.
+    ITEM = /(?:\(?\d\)?\.? |- )?/n
+    BSD_PREAMBLE = /Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met: ?/in
+    BSD_SOURCE = /#{ITEM}Redistributions of source code must retain the above copyright notices?(?: unmodified)?,? this list of conditions,? and the following disclaimer\. ?/in
+    BSD_BINARY = /#{ITEM}Redistributions in binary form must reproduce the above copyright notices?,? this list of conditions,? and the following disclaimer in the documentation and\/or other materials provided with the distribution\. ?/in
+    BSD_ENDORSE = /#{ITEM}(?:Neither the names? of #{HOLDER} nor the names of #{HOLDER} may be used|The names? of #{HOLDER} may not be used) to endorse or promote products derived from this software without specific prior written permission\. ?/in
+    BSD_ADVERTISING = /#{ITEM}All advertising materials mentioning features or use of this software must display the following acknowledge?ment: #{HOLDER}\. ?/in
+    BSD_ATTRIBUTION = /#{ITEM}Redistributions of any form whatsoever must retain the following acknowledge?ment: #{HOLDER}\. ?/in
+    BSD_DISCLAIMER = /THIS SOFTWARE IS PROVIDED (?:BY #{HOLDER} )?#{QUOTE}AS IS#{QUOTE} AND ANY EXPRESS OR IMPLIED WARRANTIES/in
+    # The permissive notices recognised, each by its canonical wording in
+    # full, with the license it grants; nil for the pointer to the package
+    # declaration in LICENSE.spdx, which grants nothing itself. A notice that
+    # differs anywhere is not recognised, and its words leave the file
+    # unrecognised.
+    PERMISSIVE_NOTICES = [
+      ['MIT', /Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files \(the #{QUOTE}Software#{QUOTE}\), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and\/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notices? and this permission notice shall be included in all copies or substantial portions of the Software\. THE SOFTWARE IS PROVIDED #{QUOTE}AS IS#{QUOTE},? WITHOUT WARRANTY OF ANY KIND/in],
+      ['MIT', /(?:licensed|released|distributed) under (?:the )?(?:terms of the )?(?:standard )?MIT License\b(?! ?,? (?:with|except|but|and|plus|subject)\b)/in],
+      ['ISC', /Permission to use, copy, modify, and(?:\/or)? distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies\. THE SOFTWARE IS PROVIDED #{QUOTE}AS IS#{QUOTE} AND #{HOLDER} DISCLAIMS? ALL WARRANTIES/in],
+      ['SunPro', /Permission to use, copy, modify, and distribute this software is freely granted, provided that this notice is preserved\./in],
+      ['FSFAP', /Copying and distribution of this file, with or without modification, are permitted in any medium without royalty provided the copyright notice and this notice are preserved\./in],
+      ['BSD-2-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_DISCLAIMER}/n],
+      ['BSD-3-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_ENDORSE}#{BSD_DISCLAIMER}/n],
+      ['BSD-4-Clause', /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}#{BSD_ADVERTISING}#{BSD_ENDORSE}#{BSD_DISCLAIMER}/n],
+      ['BSD-3-Clause-Attribution',
+       /#{BSD_PREAMBLE}#{BSD_SOURCE}#{BSD_BINARY}(?:#{BSD_ENDORSE}#{BSD_ATTRIBUTION}|#{BSD_ATTRIBUTION}#{BSD_ENDORSE})#{BSD_DISCLAIMER}/n],
+      ['Apache-2.0', /Licensed under the Apache License,? (?:Version |v)?2\.0 \(the #{QUOTE}License#{QUOTE}\)[.;] You may not use this file except in compliance with the License\. You (?:may|can) obtain a copy (?:of the License at|in the file LICENSE in the source distribution or at) \S+(?: Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an #{QUOTE}AS IS#{QUOTE} BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\. See the License for the specific language governing permissions and limitations under the License\.)?/in],
+      ['Apache-2.0 WITH LLVM-exception', /Part of the LLVM Project, under the Apache License v2\.0 with LLVM Exceptions\. See \S+ for license information\./in],
+      [nil, /License: see (?:the )?(?:file )?LICENSE\.spdx/in]
+    ].freeze
+
+    # A GNU notice is read sentence by sentence, a period ending a sentence
+    # only before a space (not in "2.1", "gnu.org" or "Inc.,").
+    SENTENCE = /(?:[^.]|\.(?! ))+\.?/n
+    GNU_NAMES = {
+      'General' => Regexp.union(/GNU General Public License/in, /\bGPL/n),
+      'Lesser' => Regexp.union(/GNU Lesser General Public License/in, /\bLGPL/n),
+      'Library' => /GNU Library General Public License/in
+    }.freeze
+    GNU_NAME = Regexp.union(GNU_NAMES.values)
+    GNU_VERSION = /(?:\bversion|Public License,?|GPL)[ -]?v?(\d(?:\.\d)?)\b/in
+    GNU_LATER = /any later version|or later|\dv?(?:\.\d)?\+/in
+    GNU_LICENSES = {
+      ['General', '1'] => 'GPL-1.0', ['General', '2'] => 'GPL-2.0', ['General', '3'] => 'GPL-3.0',
+      ['Library', '2'] => 'LGPL-2.0', ['Lesser', '2'] => 'LGPL-2.0', ['Lesser', '2.1'] => 'LGPL-2.1',
+      ['Lesser', '3'] => 'LGPL-3.0'
+    }.freeze
+    # The sentences of a GNU notice that grant nothing beside its grant.
+    GNU_BOILERPLATE = %r{\A ?(?:See the GNU|You should have received a copy of the GNU|If not, see <?https?://www\.gnu\.org/licenses/?>?\.?\z)}in
+    # The GCC Runtime Library Exception is the one exception recognised; any
+    # other exception leaves the file unrecognised.
+    GCC_EXCEPTION = /\A ?Under Section 7 of GPL version 3, you are granted additional permissions described in the GCC Runtime Library Exception, version 3\.1/in
+    OTHER_EXCEPTION = /special exception|additional permission|Library Exception|linking exception/in
+
+    # A recognised notice: the license it grants, nil for one that grants
+    # nothing itself, and where it lies in the file's normalised text.
+    Grant = Data.define(:license, :span)
 
     module_function
 
@@ -67,19 +157,16 @@ module Erx
       expression
     end
 
-    # Corrections require an exact upstream declaration. Otherwise actual
-    # notices take precedence, followed by the first matching reviewed rule.
+    # The order of evidence: a correction of the file's exact upstream SPDX
+    # declaration, the file's SPDX line, its sidecar's, a reviewed rule, the
+    # file's own license notice, then a package rule and the default. A
+    # package declaration covers only files without a notice of their own.
     def for_file(path, bytes:, sidecar:, review:)
       explicit = spdx(bytes)
       correction = review.fetch('rules').find do |rule|
-        rule['declared_license'] && rule.fetch('declared_license') == explicit &&
-          File.fnmatch?(rule.fetch('pattern'), path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+        rule['declared_license'] && rule.fetch('declared_license') == explicit && matches_path?(rule, path)
       end
-      if correction
-        validate_expression(correction.fetch('license'))
-        return { 'license' => correction.fetch('license'),
-                 'evidence' => correction.fetch('evidence'), 'reviewed' => true }
-      end
+      return reviewed(correction) if correction
       if explicit
         validate_expression(explicit)
         return { 'license' => explicit, 'evidence' => 'file SPDX', 'reviewed' => false }
@@ -91,17 +178,121 @@ module Erx
         return { 'license' => attached, 'evidence' => "#{path}.license", 'reviewed' => false }
       end
 
-      rule = review.fetch('rules').find do |candidate|
-        !candidate.key?('declared_license') &&
-          File.fnmatch?(candidate.fetch('pattern'), path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
-      end
-      if rule
-        return { 'license' => rule.fetch('license'),
-                 'evidence' => rule.fetch('evidence'), 'reviewed' => true }
-      end
+      by_kind = review.fetch('rules').reject { |candidate| candidate.key?('declared_license') }
+                      .group_by { |candidate| candidate.fetch('kind', 'reviewed') }
+      raise Error, "unknown review rule kind #{(by_kind.keys - RULE_KINDS).first}" unless (by_kind.keys - RULE_KINDS).empty?
+
+      wildcard = by_kind.fetch('reviewed', []).find { |candidate| candidate.fetch('pattern').match?(/[*?\[]/) }
+      raise Error, "reviewed rule #{wildcard.fetch('pattern')} has a wildcard; a rule for a tree is a package rule" if wildcard
+
+      named = by_kind.fetch('reviewed', []).find { |candidate| matches_path?(candidate, path) }
+      return reviewed(named) if named
+
+      own = notice(bytes)
+      return own if own
+
+      package = by_kind.fetch('package', []).find { |candidate| matches_path?(candidate, path) }
+      return reviewed(package) if package
+
       { 'license' => review.fetch('default_license'),
         'evidence' => review.fetch('default_evidence'), 'reviewed' => true }
     end
+
+    def matches_path?(rule, path)
+      File.fnmatch?(rule.fetch('pattern'), path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+    end
+    private_class_method :matches_path?
+
+    def reviewed(rule)
+      { 'license' => validate_expression(rule.fetch('license')), 'evidence' => rule.fetch('evidence'),
+        'reviewed' => true }
+    end
+    private_class_method :reviewed
+
+    # The license a file's own notice grants: nil when the file has no notice,
+    # or only the pointer to LICENSE.spdx; UNRECOGNIZED_NOTICE when any license
+    # mark lies outside every notice recognised; otherwise every license
+    # granted, joined by AND. A file holding a NUL byte (a binary, or UTF-16
+    # text) is not read: one whose text, with its NUL bytes removed, holds a
+    # license mark is unrecognised.
+    def notice(bytes)
+      bytes = bytes.b
+      if bytes.include?("\0")
+        words = bytes.delete("\0").scan(LICENSE_MARK).size
+        return words.positive? ? unrecognized(words) : nil
+      end
+
+      text = bytes.delete("\r").gsub(COMMENT_LEADER, '').gsub(COMMENT_TRAILER, '').gsub(/\s+/n, ' ')
+      marks = matches(text, LICENSE_MARK)
+      return nil if marks.empty?
+
+      grants = PERMISSIVE_NOTICES.flat_map do |license, pattern|
+        matches(text, pattern).map { |span| Grant.new(license: license, span: span) }
+      end + gnu_grants(text)
+      outside = marks.count { |mark| grants.none? { |grant| grant.span.cover?(mark) } }
+      return unrecognized(outside) if outside.positive?
+
+      licenses = grants.sort_by { |grant| grant.span.begin }.filter_map(&:license).uniq
+      return nil if licenses.empty?
+
+      { 'license' => validate_expression(licenses.join(' AND ')), 'evidence' => 'file notice', 'reviewed' => false }
+    end
+    private_class_method :notice
+
+    def unrecognized(outside)
+      { 'license' => UNRECOGNIZED_NOTICE, 'reviewed' => false,
+        'evidence' => "unrecognized license notice (#{outside} license words outside a recognised notice); review the file" }
+    end
+    private_class_method :unrecognized
+
+    # The ranges of text where pattern matches, without overlap.
+    def matches(text, pattern)
+      text.enum_for(:scan, pattern).map { Regexp.last_match.then { |match| match.begin(0)...match.end(0) } }
+    end
+    private_class_method :matches
+
+    # The GNU notices of a text: each grant sentence names one GNU license and
+    # one version, with "any later version" or not, and is recognised with
+    # the boilerplate sentences beside it. A text with any exception but the
+    # GCC Runtime Library Exception to GPL-3.0-or-later has none recognised.
+    def gnu_grants(text)
+      return [] unless text.match?(GNU_NAME)
+
+      grants = []
+      boilerplate = []
+      exception = false
+      matches(text, SENTENCE).each do |span|
+        sentence = text[span]
+        if sentence.match?(GCC_EXCEPTION)
+          exception = true
+          boilerplate << span
+        elsif sentence.match?(GNU_BOILERPLATE)
+          boilerplate << span
+        elsif sentence.match?(OTHER_EXCEPTION)
+          return []
+        elsif sentence.match?(GNU_NAME)
+          license = gnu_license(sentence)
+          grants << Grant.new(license: license, span: span) if license
+        end
+      end
+      return [] if grants.empty? || (exception && grants.any? { |grant| grant.license != 'GPL-3.0-or-later' })
+
+      grants = grants.map { |grant| grant.with(license: "#{grant.license} WITH GCC-exception-3.1") } if exception
+      grants + boilerplate.map { |span| Grant.new(license: nil, span: span) }
+    end
+    private_class_method :gnu_grants
+
+    # The license of one GNU grant sentence, or nil when it names more than
+    # one GNU license or version, or a pair GNU_LICENSES does not hold.
+    def gnu_license(sentence)
+      names = GNU_NAMES.select { |_, name| sentence.match?(name) }.keys
+      versions = sentence.scan(GNU_VERSION).map { |(version)| version.delete_suffix('.0') }.uniq
+      return nil unless names.size == 1 && versions.size == 1
+
+      base = GNU_LICENSES[[names.first, versions.first]]
+      base && "#{base}-#{sentence.match?(GNU_LATER) ? 'or-later' : 'only'}"
+    end
+    private_class_method :gnu_license
 
     # Whether a file in an imported tree with no inventory row is erXos's own
     # code: its header holds erXos's notice, and neither a license declaration
