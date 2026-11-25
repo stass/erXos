@@ -155,19 +155,17 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   from the first. One implementer.
 * [Medium] benchmarks, the other systems on the Raspberry Pi 4
   ([design-bench.md](design-bench.md#other-systems-on-the-same-raspberry-pi-4)): `tools/erx bench import` for the
-  other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
-  landing gate, so a change to the guests' line library that breaks it fails there, and its FreeBSD
-  side's first compile; FreeBSD's way for the `wake` handshake's A to see B asleep, without which
-  `erx_peer_bench` reports both wake cells unsupported there; which operations have a Linux counterpart is
-  written in four places (the design's table, the `linux` counterparts of `benches/*.rb`, which `vm` and `sched` do not
-  declare though the program measures them, while `xdomain`'s are stock OTP's on Linux's Erlang guest and the
-  program still times a UNIX-domain socket pair for them (`xdomain_run`, `PeerBench::BOOTS`, its fixture), a row the
-  design does not have, to be deleted so no side-by-side table can show it under stock OTP's heading, the program's unsupported lines, and
+other systems' logs, with the image's build record as `--subject`, and the analyser's captures; a build of `bench/peer/erx_peer_bench.c` in a
+landing gate, so a change to the guests' line library that breaks it fails there; which operations have a Linux counterpart is
+written in four places (the design's table, the `linux` counterparts of `benches/*.rb`, which `vm` and `sched` do not
+declare though the program measures them, while `xdomain`'s are stock OTP's on Linux's Erlang guest and the
+program still times a UNIX-domain socket pair for them (`xdomain_run`, `PeerBench::BOOTS`, its fixture), a row the
+design does not have, to be deleted so no side-by-side table can show it under stock OTP's heading, the program's unsupported lines, and
   `peer_bench_test.rb`'s list), where the test should derive its list from the declarations; whether its `park-deadline` sets Linux's timer slack (unverified default 50 us);
   the reader's closed clock set has no name for its `CLOCK_MONOTONIC` fallback, which the design says is
   recorded as such; its fast-run, sweep-print and spinner loops moved into `test/guest/bench` beside
   the cell summary, so they are one implementation with the native guest's;
-  the L4Re, FreeBSD and Linux images and L4Re's IPC benchmark pinned in the fetch step; the two GPIO responders.
+  the L4Re and Linux images and L4Re's IPC benchmark pinned in the fetch step; the two GPIO responders.
   Includes the development-only Fiasco patch that stamps the interrupt entry
   ([design-bench.md](design-bench.md#the-interrupt-entrys-stamp)), the check of the Glasgow's stock applets for the
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.

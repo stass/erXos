@@ -49,13 +49,12 @@ Decisions every reader needs:
   baseline. A cell fails for a hard limit, a wrong answer or a benchmark
   that did not run in full; a passing suite says the benchmarks ran, not
   that a change brought its before and after numbers.
-* **Other systems run on the same board.** Stock L4Re, FreeBSD and Linux
-  boot on the same Raspberry Pi 4, with the same firmware settings, and run
-  the counterpart of each operation: L4Re's own IPC benchmark, and for
-  FreeBSD and Linux one portable C program, `bench/peer/erx_peer_bench.c`,
-  compiled on the board by the system's own compiler. Linux serves as the
-  best-case comparison on the board, FreeBSD as the behaviour erXos
-  matches; an operation with no counterpart says so.
+* **Other systems run on the same board.** Stock L4Re and Linux boot on
+  the same Raspberry Pi 4, with the same firmware settings, and run the
+  counterpart of each operation: L4Re's own IPC benchmark, and for Linux
+  one portable C program, `bench/peer/erx_peer_bench.c`, compiled on the
+  board by the system's own compiler. Linux serves as the best-case
+  comparison on the board; an operation with no counterpart says so.
 * **Two kinds of row, and each says which it is.** The kernel table sets
   the kernels' own paths beside each other: on erXos, Fiasco's IPC and
   the root service as the root task and its test tasks call them, with no
@@ -137,7 +136,7 @@ rather than divides by it, and why a difference is attributed to the
 root service only once the run's IPC direction, payload, statistic and
 configuration are known from the benchmark's source. No published Arm number exists for
 cross-core IPC, page faults, mapping, thread or process creation, pipes or
-the 99th percentile of a Pi 4 wake; erXos measures those on FreeBSD and
+the 99th percentile of a Pi 4 wake; erXos measures those on
 Linux itself.
 
 ## What the existing tools do
@@ -557,7 +556,7 @@ written by hand, and carries no host name:
 | the host | `host-<model>` | stock OTP natively | side by side with `qemu-hvf` |
 
 Every environment that boots a guest names the system the guest runs,
-one of `erxos`, `l4re`, `freebsd`, `linux`, and `genode-hw`,
+one of `erxos`, `l4re`, `linux`, and `genode-hw`,
 `genode-sel4` and `genode-foc`, Genode on each of its kernels
 ([Genode's guest](#genodes-guest)). The system is part of where
 a run happened, not of what ran, so two systems' records never have equal
@@ -1336,7 +1335,7 @@ reader.
 
 erXos is set beside L4Re, Linux and Genode first in QEMU's `virt`
 machine under HVF on the development host, where it is measured every
-day, and on the board after. FreeBSD runs on the board only.
+day, and on the board after.
 
 **What a row compares.** The kernel table's rows are kernel against
 kernel: erXos's cells there are the root task's and its test tasks'
@@ -1789,7 +1788,7 @@ is recorded, never corrected:
 * **The board's Linux binary.** The board's Linux row compiles
   `erx_peer_bench` on the board. Recommendation: carry the same static
   binary instead, so both forms run one file and the board needs no
-  compiler; FreeBSD keeps compiling on its board.
+  compiler.
 * **L4Re without a cycle counter.** If ipcbench cannot time under HVF,
   L4Re's VM rows are `unsupported`. Recommendation: accept that and
   compare L4Re on the board, rather than write an erXos program for
@@ -1825,7 +1824,6 @@ not corrected.
 | --- | --- | --- | --- |
 | erXos | the subject | netboot, walked by the board itself ([Running on the Raspberry Pi 4](#running-on-the-raspberry-pi-4)) | the bench images |
 | L4Re | a pinned L4Re snapshot of the Fiasco revision erXos's fork came from, built by its own build system, without virtualization support as erXos's fork is | netboot, as erXos's Fiasco does | L4Re's own IPC benchmark (`github.com/l4re/ipcbench` at `14868232`, as in [L4Re's guest](#l4res-guest)); in the configuration erXos's fork uses, which is the comparison, and in L4Re's published configuration as a diagnostic: a printed per-IPC mean, half a round trip, more than a tenth from the page's 505, 702 and 305 cycles is reported beside the comparison and looked into, and does not by itself void it |
-| FreeBSD | 15.1-RELEASE's image for the Raspberry Pi, the release erXos's commands are compared with in the oracle guest ([design.md](design.md#testing-and-the-oracle)); that it boots this board is unverified | its own SD card | `erx_peer_bench` |
 | Linux | Raspberry Pi OS Lite, 64-bit, pinned, with the vendor's stock kernel; its real-time kernel as a second row for `wake` only, if the image offers one (unverified) | its own SD card | `erx_peer_bench` |
 
 Each image is fetched by the fetch step at a pinned URL and SHA-256, and
@@ -1835,13 +1833,13 @@ configured frequency, and how each system is told so is checked on the
 board.
 
 `bench/peer/erx_peer_bench.c` is one C17 file under erXos's license that
-FreeBSD and Linux compile on the board with their own compiler; the record
+Linux compiles on the board with its own compiler; the record
 keeps the compiler's version and flags. It runs the POSIX counterpart of
 each operation and prints the same `BENCH` lines, so one reader imports
-all four systems. It reads the system counter directly where the system
-lets user mode read it (unverified on both; recorded as clock `counter`),
+every system's. It reads the system counter directly where the system
+lets user mode read it (unverified; recorded as clock `counter`),
 and otherwise `CLOCK_MONOTONIC` (clock `monotonic`). It pins threads with
-`cpuset_setaffinity` on FreeBSD and `sched_setaffinity` on Linux, and its
+`sched_setaffinity`, and its
 `wake` handshake reads the waiting thread's state from Linux's `/proc`;
 those are the places it differs by system.
 
@@ -1874,16 +1872,16 @@ under HVF every thread in the session's one-CPU form.
 
 The kernel table:
 
-| erXos operation | L4Re | FreeBSD and Linux | What differs |
+| erXos operation | L4Re | Linux | What differs |
 | --- | --- | --- | --- |
 | `nullcall.kernel` | `syscallbench`: an IPC call to the caller's own thread capability whose thread-control operation returns early | `getppid` | three entry paths, not one null call. erXos's cell is the same act on erXos's Fiasco ([`nullcall`](#3-nullcall-the-decoder-refusal-round-trip)), so those two differ by the fork's patches and compilers; `getppid` is a POSIX call doing its own small work. A program on erXos enters no kernel for `getppid` or `getpid`; what it pays for such a call is the program table's `posix.getpid` |
 | `nullcall.root-same-space` | `ipcbench`: two threads of one task; a blocking call with an empty message to a responder already waiting in reply-and-wait | two threads of one process: an 8-byte request and an 8-byte reply over a pair of pipes, each read blocking, the echo thread on CPU 0 for `service-cpu` and on the last CPU for `other-cpu`, as the next row's echo process is | erXos's round trip carries one word to the root service and adds its receive, decode and refusal in user mode; L4Re's is an empty call to a waiting thread, the best case; a pipe round trip is two writes and two blocking reads. Each row is its own endpoint: no difference of two rows isolates the root service |
 | `nullcall.root-cross-space` | `ipcclient` and `ipcserver`: the same between two tasks | the same between two processes | the same, with an address-space switch each way |
-| `wake.wake-same-cpu`, `wake.wake-cross-cpu` | none | thread B waits for a sequence word to change in `pthread_cond_timedwait`, its absolute deadline 1 s away on `CLOCK_MONOTONIC`; thread A, on B's CPU or another, takes the mutex, reads B's state in `/proc/self/task/<tid>/stat` until it is `S`, stamps, changes the word, signals, releases and blocks reading a pipe; B stamps its return and writes the pipe | B returning with the word changed is the wake, and `ETIMEDOUT` a lost wake. The blocked state is the kernel's report where erXos's is its park record; FreeBSD's way to see B blocked is settled with the board's package |
+| `wake.wake-same-cpu`, `wake.wake-cross-cpu` | none | thread B waits for a sequence word to change in `pthread_cond_timedwait`, its absolute deadline 1 s away on `CLOCK_MONOTONIC`; thread A, on B's CPU or another, takes the mutex, reads B's state in `/proc/self/task/<tid>/stat` until it is `S`, stamps, changes the word, signals, releases and blocks reading a pipe; B stamps its return and writes the pipe | B returning with the word changed is the wake, and `ETIMEDOUT` a lost wake. The blocked state is the kernel's report where erXos's is its park record |
 | `wake.park-deadline` | none | `clock_nanosleep` on `CLOCK_MONOTONIC` with `TIMER_ABSTIME` at the phase sweep's deadlines, period 1 ms | the systems' timer resolution |
-| `wake.gpio-edge` | none | a process blocked on a GPIO line's event, writing a second line (FreeBSD's `gpioc` events, Linux's GPIO character device; FreeBSD's support on this board is unverified) | all four on the analyser's clock |
+| `wake.gpio-edge` | none | a process blocked on a GPIO line's event, writing a second line (Linux's GPIO character device) | every system on the analyser's clock |
 | `vm.commit`, `vm.touch`, `vm.commit-touch` | none | anonymous private `mmap` of the same page counts; the first write to each page of a fresh mapping; both in one interval | erXos's commit may map pages at once where POSIX maps at the first touch, so commit alone and touch alone are not one act on both; `commit-touch` is the endpoint both share |
-| `vm.protect`, `vm.decommit` | none | `mprotect` to read-only and back; `madvise(MADV_DONTNEED)` of the range | after the timed loop each runs erXos's untimed checks, a decommitted page reading zero among them, so an advice that keeps the page's contents makes the cell `failed` rather than a cheaper number (FreeBSD's advice is settled with the board's package) |
+| `vm.protect`, `vm.decommit` | none | `mprotect` to read-only and back; `madvise(MADV_DONTNEED)` of the range | after the timed loop each runs erXos's untimed checks, a decommitted page reading zero among them, so an advice that keeps the page's contents makes the cell `failed` rather than a cheaper number |
 | `vm.map` | none | `shm_open` and `ftruncate` to create, `mmap` to map, `munmap` to release, `close` and `shm_unlink` to destroy, each timed | erXos's object is a capability; POSIX's has a name |
 | `sched.share-equal` | none | the same spinners of one process, pinned to the same CPU index, with the same windows, under the default policy at the default priority | the scheduler; its default policy is part of the result |
 
@@ -2274,7 +2272,7 @@ Each is new and named here; nothing else is added.
 * **`posix` in `erx_peer_bench.c`**, with an erXos build: the clock
   through `erx_fiasco_counter`, pinning through `sched_setaffinity`, and
   the probe of each call; the benchmarks that need `fork` or Linux's
-  `/proc` (`nullcall`, `vm`, `wake`) are built only for Linux and FreeBSD,
+  `/proc` (`nullcall`, `vm`, `wake`) are built only for Linux,
   since erXos runs its own guests for them. One file keeps one line
   writer, one calibration and one set of profiles for every system.
 * **Declarations** `tools/lib/erx/benches/posix.rb` and `erl.rb`, each
@@ -2540,7 +2538,7 @@ check, or a task that exits without the fault, makes the cell `failed`.
 **What it catches.** A commit or a protect whose plan walks more than it
 should (the watch list's 65,500 probes of the loader's window is one), a
 page charged or zeroed twice, and the cost the root as pager adds over a
-kernel's map. Its counterparts on FreeBSD and Linux are anonymous
+kernel's map. Its counterparts on Linux are anonymous
 `mmap`, first touch, `mprotect` and freeing.
 
 **What it needs.** The benchmark's test task in the native bench image,
@@ -2730,7 +2728,7 @@ from it, and the board's `boot.img` request would then be answered 404.
 | a record that does not parse, or of an older format | refused with the file and the reason |
 | a baseline with fewer than three boots, or none | the comparison is `inconclusive`, not an error |
 | `--paired` without two images | refused |
-| `--systems` naming a system not in `erxos`, `l4re`, `freebsd`, `linux`, or one with no guest in the environment (FreeBSD under HVF) | refused before any boot, naming it |
+| `--systems` naming a system not in `erxos`, `l4re`, `linux`, `genode-hw`, `genode-sel4`, `genode-foc`, or one with no guest in the environment | refused before any boot, naming it |
 | `--systems` for a system whose pins the fetch step has not fetched | refused before any boot, naming the missing source |
 | a comparison of two records whose environments differ only in their system | refused as any comparison of unequal environments is, naming the system; the side-by-side table is the only view across systems |
 | a record of a guest's environment without its system | refused as a record that does not parse |
@@ -2854,9 +2852,9 @@ benchmark back to its design rather than letting it land.
 * **A benchmark framework apart from the suites.** The QEMU gate already
   has cells, statuses, deadlines, reuse and discovery from files; the
   `bench` suite uses them and adds only the record.
-* **cyclictest, lmbench and stress-ng on FreeBSD and Linux.** They are
+* **cyclictest, lmbench and stress-ng on Linux.** They are
   GPL and measure their own operations; one small program of erXos's own,
-  on both systems, compares like with like and needs no clean room.
+  on every system, compares like with like and needs no clean room.
 * **Starting the board limits at the first user-mode stamp.** The
   analyser's `gpio-edge` would bound the kernel's part separately. It
   changes the accepted definition, which runs from Fiasco's interrupt
@@ -2924,11 +2922,10 @@ benchmark back to its design rather than letting it land.
   others.** Two sources would let the act drift between them; one file
   makes it the same by construction, and the per-system lines stay the
   clock and the probe.
-* **FreeBSD and QNX in the program table.** FreeBSD's rows are what
-  erXos's commands match, and QNX is the microkernel system whose
-  services in user mode are closest to erXos's; both are later
-  candidates for the program table, not in it now. FreeBSD keeps its
-  place in the board's kernel table.
+* **FreeBSD and QNX.** Later candidates for every table, on the board
+  and under HVF, not in any now: FreeBSD's numbers add nothing beyond
+  Linux's to the comparison yet, and QNX is the microkernel system whose
+  services in user mode are closest to erXos's.
 * **L4Re's POSIX layer for the program rows.** Too thin to run the
   program set; L4Re stays in the kernel table, and each program row says
   so.

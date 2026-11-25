@@ -817,14 +817,13 @@ is timed, and one that answers that it is not implemented makes its row
 unsupported, so the table shows by itself which calls erXos's programs
 do not have yet.
 
-The same Raspberry Pi 4 also boots stock L4Re, FreeBSD and Linux, with
+The same Raspberry Pi 4 also boots stock L4Re and Linux, with
 the same firmware settings, and each runs the counterpart of an
 operation where one exists; the side-by-side table says where none does.
 L4Re runs its own IPC benchmark, and its published numbers for this
 board are a diagnostic of the setup, not a condition for the
-comparison. FreeBSD and Linux run one small C program of erXos's own,
-compiled on the board. Linux serves as the best-case comparison on the
-board, and FreeBSD as the behaviour erXos matches.
+comparison. Linux runs one small C program of erXos's own, compiled on
+the board, and serves as the best-case comparison there.
 
 Nobody needs to stand at the board while erXos's own benchmarks run on
 it. A benchmark image has no shell, so it cannot be told to reboot;
