@@ -7,8 +7,9 @@ The Erlang guests' histogram, clock calibration and lines (docs/design-bench.md,
 "The histogram", "The one clock", "A benchmark"), the Erlang twin of the C
 library of test/guest/bench/. An Erlang guest reads ERTS's monotonic time in its
 native unit, which on erXos is erx_clock_ns, the system counter in nanoseconds
-(otp/erts/emulator/sys/erxos/sys_time.c), so its clock is `counter` and its ticks
-are nanoseconds.
+(otp/erts/emulator/sys/erxos/sys_time.c), so its clock is `counter`; under stock
+OTP, as on Linux's Erlang guest, it is the operating system's monotonic clock, so
+its clock is `monotonic`. Either way its ticks are nanoseconds.
 
 A histogram's buckets are powers of two split into 64 equal parts: a value under
 64 has a bucket of its own, and a larger one shares its bucket with the values
@@ -20,16 +21,33 @@ that list.
 
 run/1 is a boot's entry: one calibration, whose CLOCK line serves every
 benchmark the boot runs, then each guest module's cells (erx_xdomain_bench,
-erx_wake_bench), each module exporting cells(Arguments, Clock).
+erx_wake_bench), each module exporting cells(Arguments, Clock). main/1 is a stock
+OTP boot's entry: the same run, printed under the oracle's identity line.
 """.
--export([run/1, bucket/1, bounds/1, batch/2, cell/2, calibrate/0, clock_line/1, cell_line/1]).
+-export([main/1, run/1, bucket/1, bounds/1, batch/2, cell/2, calibrate/0, clock_line/1, cell_line/1]).
 
 %% Sub-buckets per octave, and the largest samples a line carries.
 -define(SUB, 64).
 -define(LARGEST, 16).
-%% Back-to-back reads that calibrate the clock, and the ticks a batch must span.
+%% Back-to-back reads that calibrate the clock, the clock's steps a batch must span,
+%% and the largest batch.
 -define(CALIBRATION_PAIRS, 10000).
 -define(BATCH_SPAN, 100).
+-define(BATCH_MAX, 256).
+
+-doc """
+A stock OTP boot's entry (docs/design-bench.md, "Linux's Erlang guest"): prints the
+oracle's identity line, ERX_ORACLE <version> <flavour>, then run(Guests)'s lines, a
+line each, on standard output, and halts the node. The host refuses a boot whose
+identity is not the OTP release and flavour it expects.
+""".
+-spec main([{module(), map()}]) -> no_return().
+main(Guests) ->
+    Release = erlang:system_info(otp_release),
+    {ok, Version} = file:read_file(filename:join([code:root_dir(), "releases", Release, "OTP_VERSION"])),
+    io:format("ERX_ORACLE ~s ~s~n", [string:trim(Version), erlang:system_info(emu_flavor)]),
+    [io:put_chars([Line, $\n]) || Line <- run(Guests)],
+    erlang:halt(0).
 
 -doc """
 A boot's lines from the guests it runs, each {Module, Arguments}: the CLOCK line,
@@ -78,16 +96,16 @@ top_bit(Rest, Bit) -> top_bit(Rest bsr 1, Bit + 1).
 -doc """
 The batch an operation is timed in from its warm-up median (docs/design-bench.md,
 "The one clock", short operations): 1 when the median spans 100 of the clock's
-steps, and otherwise the smallest power of two of operations that does. An Erlang
-guest's ticks are nanoseconds of a coarser counter, so a step is the calibration's
-increment, not one tick: the rule is the C guests', which count the counter's own
-ticks.
+steps, and otherwise the smallest power of two of operations that does, at most
+256. An Erlang guest's ticks are nanoseconds of a clock that may step more
+coarsely, so a step is the calibration's increment, not one tick: the rule is the
+C guests', which count the counter's own ticks.
 """.
 -spec batch(non_neg_integer(), pos_integer()) -> pos_integer().
 batch(Median, Increment) when is_integer(Median), Median >= 0, is_integer(Increment), Increment > 0 ->
-    span(max(Median, 1), ?BATCH_SPAN * Increment, 1).
+    span(Median, ?BATCH_SPAN * Increment, 1).
 
-span(Median, Span, Batch) when Median * Batch >= Span -> Batch;
+span(Median, Span, Batch) when Median * Batch >= Span; Batch >= ?BATCH_MAX -> Batch;
 span(Median, Span, Batch) -> span(Median, Span, Batch * 2).
 
 -doc """
@@ -118,7 +136,8 @@ cell(Conditions, Samples) ->
 The calibration of the clock (docs/design-bench.md, "The one clock") as the fields
 a CLOCK line carries: its frequency, the smallest increment of 10,000
 back-to-back reads, the median of their differences as the read's cost, and the
-rounding of a timed wait, whole milliseconds for ERTS's timers. An Erlang guest
+rounding of a timed wait, whole milliseconds for ERTS's timers. The clock is the
+one ERTS's monotonic time reads (clock_name/0). An Erlang guest
 reads no cycle counter and stamps no cell across CPUs, so cycles_per_tick is
 unknown and pairs is empty.
 """.
@@ -129,10 +148,18 @@ calibrate() ->
                     [Smallest | _] -> Smallest;
                     [] -> error(no_increment_observed)
                 end,
-    #{clock => <<"counter">>, frequency_hz => erlang:convert_time_unit(1, second, native),
+    #{clock => clock_name(), frequency_hz => erlang:convert_time_unit(1, second, native),
       increment => Increment, read_cost => lists:nth((length(Differences) + 1) div 2, Differences),
       wait_rounding => erlang:convert_time_unit(1, millisecond, native),
       cycles_per_tick => <<"unknown">>, pairs => []}.
+
+%% The clock ERTS's monotonic time reads: the system counter on erXos (erx_clock_ns),
+%% and under stock OTP the operating system's monotonic clock.
+clock_name() ->
+    case os:type() of
+        {unix, erxos} -> <<"counter">>;
+        _ -> <<"monotonic">>
+    end.
 
 read_pair() ->
     First = erlang:monotonic_time(),

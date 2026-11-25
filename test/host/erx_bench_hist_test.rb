@@ -12,11 +12,12 @@ require_relative '../../tools/lib/erx/xdomain_bench'
 
 # The Erlang guests' bench library and the xdomain guest on stock OTP (docs/design-bench.md,
 # "The histogram", "5. `xdomain`", "Verification"): the histogram's buckets hold their
-# samples and are at most 1/64 of their lower bound wide; the xdomain boot's lines from
-# erx_bench_hist:run/1, with a stand-in erx whose echo facet is a process of the same
-# node, are what the boot asks for, xdomain's cells and wake's erlang-timer under one
-# CLOCK line, and BenchMeasurement.boot accepts them; a facet whose reply is not its
-# request fails its cell. Seeded faults must each fail a check.
+# samples and are at most 1/64 of their lower bound wide; a batch spans 100 of the clock's
+# increments, at most 256; the xdomain boot's lines from erx_bench_hist:run/1, with a
+# stand-in erx whose echo facet is a process of the same node, are what the boot asks
+# for, xdomain's cells and wake's erlang-timer under one CLOCK line, on stock OTP's
+# clock, monotonic, and BenchMeasurement.boot accepts them; a facet whose reply is not
+# its request fails its cell. Seeded faults must each fail a check.
 class ErxBenchHistTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   MODULES = %w[erx_bench_hist erx_xdomain_bench erx_wake_bench].freeze
@@ -36,7 +37,7 @@ class ErxBenchHistTest < Minitest::Test
                'not (L=<V andalso V=<X andalso (X-L+1)*64=<max(64,L))],' \
                'io:format("~s~n",[case Bad of [] -> "hist ok"; _ -> "hist bad" end])'
   RUN = 'erx:serve(%s),[io:format("~s~n",[L])||L<-erx_bench_hist:run([{erx_xdomain_bench,' \
-        '#{warmup=>1000,samples=>10000,bytes=>64}},{erx_wake_bench,#{samples=>2000,priorities=>[normal]}}])]'
+        '#{warmup=>1000,samples=>10000,bytes=>64,echo=>facet}},{erx_wake_bench,#{samples=>2000,priorities=>[normal]}}])]'
   # erlang-timer's lateness taken against the deadline a millisecond later.
   EARLY = ['erlang:convert_time_unit(Deadline, millisecond, native)',
            'erlang:convert_time_unit(Deadline + 1, millisecond, native)'].freeze
@@ -54,6 +55,12 @@ class ErxBenchHistTest < Minitest::Test
     shifted = compiled(edit: ['erx_bench_hist', '((Value bsr Shift) band (?SUB - 1))',
                               '(((Value bsr Shift) + 1) band (?SUB - 1))'])
     assert_equal ['hist bad'], evaluate(HIST_CHECK, shifted)
+  end
+
+  # The batching rule's cases (docs/design-bench.md, "Verification"), as the C library's.
+  def test_a_batch_spans_100_increments_and_at_most_256
+    batches = 'io:format("~w~n",[[erx_bench_hist:batch(M,I)||{M,I}<-[{3,1},{30000,1000},{0,1},{0,1000}]]])'
+    assert_equal ['[64,4,256,256]'], evaluate(batches, compiled)
   end
 
   def test_the_xdomain_lines_are_what_the_boot_asks_for
@@ -82,10 +89,12 @@ class ErxBenchHistTest < Minitest::Test
 
   private
 
-  # The guest's lines under the stand-in erx, judged as the xdomain boot judges them.
+  # The guest's lines under the stand-in erx, judged as the xdomain boot judges them but
+  # on stock OTP's clock.
   def judged(expression, edit: nil)
     lines = evaluate(expression, compiled(edit: edit, stand_in: true)).grep(Erx::NativeBench::GUEST_LINE)
-    Erx::BenchMeasurement.boot(lines, Erx::XdomainBench.asked(Erx::BenchSuite.booted('xdomain')))
+    asked = Erx::XdomainBench.asked(Erx::BenchSuite.booted('xdomain')).with(clock: 'monotonic')
+    Erx::BenchMeasurement.boot(lines, asked)
   end
 
   # The bench modules compiled into a directory of their own, with edit, [module, old,

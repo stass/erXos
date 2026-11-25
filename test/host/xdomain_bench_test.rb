@@ -30,7 +30,7 @@ class XdomainBenchTest < Minitest::Test
     fast, periodic = Erx::NativeBench::LANDING_PROFILES.values_at('fast', 'periodic')
     line = Bench.run_line(asked)
     assert_includes line, 'erpc:call(peer@erxos,erx_bench_hist,run,' \
-                          "[[{erx_xdomain_bench,\#{warmup=>#{fast.warmup},samples=>#{fast.samples},bytes=>64}}," \
+                          "[[{erx_xdomain_bench,\#{warmup=>#{fast.warmup},samples=>#{fast.samples},bytes=>64,echo=>facet}}," \
                           "{erx_wake_bench,\#{samples=>#{periodic.samples},priorities=>[normal]}}]],"
     assert line.end_with?("io:format(\"#{Bench::DONE}~n\").\r")
   end

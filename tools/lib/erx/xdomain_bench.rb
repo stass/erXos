@@ -57,7 +57,7 @@ module Erx
 
     # The line that runs the cells in peer and prints its answer, a line each, then DONE:
     #   [io:put_chars([XbL,$\n])||XbL<-erpc:call(peer@erxos,erx_bench_hist,run,
-    #     [[{erx_xdomain_bench,#{warmup=>1000,samples=>10000,bytes=>64}},
+    #     [[{erx_xdomain_bench,#{warmup=>1000,samples=>10000,bytes=>64,echo=>facet}},
     #       {erx_wake_bench,#{samples=>2000,priorities=>[normal]}}]],540000)],
     #   io:format("erx: bench: done~n").
     # Each guest's arguments are its cells' profile sizes and parameters, so the guest's
@@ -81,12 +81,13 @@ module Erx
     end
 
     # The map a benchmark's guest module takes for its cells, which share profile:
-    # xdomain's one request size, and wake's erlang-timer priorities, one cell each.
+    # xdomain's one request size and its echo, the domain's echo facet, and wake's
+    # erlang-timer priorities, one cell each.
     def arguments(name, profile, cells)
       case name
       in 'xdomain'
         bytes = only(cells.map { |cell| cell.parameters.fetch('bytes') }, 'xdomain cells ask for different request sizes')
-        "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes}}"
+        "\#{warmup=>#{profile.warmup},samples=>#{profile.samples},bytes=>#{bytes},echo=>facet}"
       in 'wake'
         raise Error, 'the xdomain boot times only wake\'s erlang-timer' unless cells.all? { |cell| cell.operation == 'erlang-timer' }
 
