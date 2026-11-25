@@ -46,7 +46,8 @@ module Erx
 
     # The lock's sources over their own workspace.
     def lock(root:, runner:)
-      SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE)
+      SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE,
+                            refetch: 'ruby tools/erx fetch --linux')
     end
 
     # Fetches every source the lock pins, from cache (another checkout's

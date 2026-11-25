@@ -46,7 +46,8 @@ module Erx
     # sources are not Debian arm64 packages (PACKAGE), or that pins upstream Fiasco at
     # another commit than the fork's. Its fetched_tree(id) is the tree LAYOUT places.
     def lock(root:, runner:)
-      dependencies = SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE)
+      dependencies = SideLock.dependencies(root: root, runner: runner, lock: LOCK, workspace: WORKSPACE,
+                                           refetch: 'ruby tools/erx fetch --l4re')
       trees, others = dependencies.sources.partition { |source| source.fetch('kind') == 'git' }
       ids = trees.map { |source| source.fetch('id') }
       unless ids.sort == LAYOUT.keys.sort

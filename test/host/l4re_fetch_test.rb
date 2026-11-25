@@ -70,6 +70,15 @@ class L4ReFetchTest < Minitest::Test
     refute File.exist?(File.join(@root, 'build/third_party')), "L4Re's trees stay out of erXos's own"
   end
 
+  # A tree L4Re's lock pins but no fetch published names L4Re's own fetch, the one
+  # that reads that lock.
+  def test_an_unfetched_source_names_l4res_own_fetch
+    write_lock(Erx::L4ReFetch::LAYOUT.keys.map { |id| source(id) })
+    fetched = Erx::L4ReFetch.lock(root: @root, runner: @runner)
+    error = assert_raises(Erx::Error) { fetched.fetched_tree(Erx::L4ReFetch::LAYOUT.keys.first) }
+    assert_match(/not fetched; run `ruby tools\/erx fetch --l4re`/, error.message)
+  end
+
   def test_an_archive_that_does_not_match_its_pin_is_refused
     sources = Erx::L4ReFetch::LAYOUT.keys.map { |id| source(id) }
     write_lock(sources)

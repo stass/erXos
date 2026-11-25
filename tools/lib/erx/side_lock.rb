@@ -15,10 +15,11 @@ module Erx
   module SideLock
     module_function
 
-    # The sources lock pins (a path below root), over workspace, also below root.
-    def dependencies(root:, runner:, lock:, workspace:)
+    # The sources lock pins (a path below root), over workspace, also below root;
+    # refetch is the command that fetches them, named when one is not fetched.
+    def dependencies(root:, runner:, lock:, workspace:, refetch:)
       Dependencies.new(root: OutputDirectory.prepare(root: root, path: File.join(root, workspace)),
-                       runner: runner, lock_path: File.join(root, lock))
+                       runner: runner, lock_path: File.join(root, lock), refetch: refetch)
     end
 
     # Fetches every source of dependencies, from cache (another checkout's

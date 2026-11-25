@@ -131,12 +131,15 @@ module Erx
     # elsewhere the programs it pins for other hosts, which no step here fetches.
     attr_reader :sources, :elsewhere
 
+    # refetch is the command that fetches the sources of a lock other than deps.lock, for
+    # the refusal of a source it has not fetched.
     def initialize(root:, runner:, lock_path: File.join(root, 'deps.lock'), tar_program: 'tar', docker_context: nil,
-                   platform: RUBY_PLATFORM)
+                   platform: RUBY_PLATFORM, refetch: nil)
       @root = File.expand_path(root)
       @runner = runner
       @tar_program = tar_program
       @docker_context = docker_context
+      @refetch = refetch
       @sources, @elsewhere = DependencySchema.parse(File.binread(lock_path))
                                              .partition { |source| DependencySchema.for_host?(source, platform: platform) }
                                              .map(&:freeze)
@@ -358,7 +361,7 @@ module Erx
       raise Error, other ? "#{id} is a program for #{other.fetch('host')} only" : "deps.lock pins no source #{id}"
     end
 
-    def fetch_command(id) = "run `ruby tools/erx fetch --source #{id}`"
+    def fetch_command(id) = "run `#{@refetch || "ruby tools/erx fetch --source #{id}"}`"
 
     def stale(id) = "build/third_party/#{id} does not hold deps.lock's pin of #{id}; remove it and #{fetch_command(id)}"
 
