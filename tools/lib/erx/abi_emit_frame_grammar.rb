@@ -58,7 +58,10 @@ module Erx
 
       def exports
         checks = @frames.map { |frame| "check_#{frame.fetch(:name)}/#{reply?(frame) ? 2 : 1}" }
-        builds = @frames.map { |frame| "build_#{frame.fetch(:name)}/#{[frame.fetch(:slot), reply?(frame)].count(true) + 1}" }
+        builds = @frames.flat_map do |frame|
+          arity = [frame.fetch(:slot), reply?(frame)].count(true) + 1
+          ["frame_#{frame.fetch(:name)}/#{arity}", "build_#{frame.fetch(:name)}/#{arity}"]
+        end
         "-export([#{(checks + %w[check_from_program/1 check_to_program/2] + builds).join(', ')}])."
       end
 
@@ -155,17 +158,25 @@ module Erx
       end
 
       # A reply frame's builder takes first the request case its slot holds.
+      # frame_FRAME makes the frame and checks nothing, for a sender whose
+      # values are all its own, which the grammar would only re-validate;
+      # build_FRAME makes the same frame and checks it, for values from beyond
+      # the sender.
       def builders
         @frames.map do |frame|
           frame_name = frame.fetch(:name)
           tag = atom(frame.fetch(:tag))
-          args = [*(reply?(frame) ? ['Request'] : []), *(frame.fetch(:slot) ? ['Slot'] : []), 'Value']
+          args = [*(reply?(frame) ? ['Request'] : []), *(frame.fetch(:slot) ? ['Slot'] : []), 'Value'].join(', ')
+          spec_args = (['term()'] * args.count(',').succ).join(', ')
           term = frame.fetch(:slot) ? "{#{tag}, ?VERSION, Slot, #{sorted(frame)}}" : "{#{tag}, ?VERSION, #{sorted(frame)}}"
           check = reply?(frame) ? "check_#{frame_name}(Frame, \#{Slot => Request})" : "check_#{frame_name}(Frame)"
-          "%% The #{frame_name} frame of Value, its ascending lists sorted (a repeated key is kept, so\n" \
+          "%% The #{frame_name} frame of Value, its ascending lists sorted, unchecked.\n" \
+            "-spec frame_#{frame_name}(#{spec_args}) -> tuple().\n" \
+            "frame_#{frame_name}(#{args}) ->\n    #{term}.\n\n" \
+            "%% The #{frame_name} frame of Value, its ascending lists sorted (a repeated key is kept, so\n" \
             "%% the check refuses it), or the refusal: the check's, or size past #{literal(@frame_max)} bytes.\n" \
-            "-spec build_#{frame_name}(#{(['term()'] * args.size).join(', ')}) -> {ok, tuple()} | {error, {atom(), atom()}}.\n" \
-            "build_#{frame_name}(#{args.join(', ')}) ->\n    Frame = #{term},\n" \
+            "-spec build_#{frame_name}(#{spec_args}) -> {ok, tuple()} | {error, {atom(), atom()}}.\n" \
+            "build_#{frame_name}(#{args}) ->\n    Frame = frame_#{frame_name}(#{args}),\n" \
             "    case #{check} of\n" \
             "        ok ->\n            case byte_size(term_to_binary(Frame)) =< #{literal(@frame_max)} of\n" \
             "                true -> {ok, Frame};\n                false -> {error, {size, #{atom(frame_name)}}}\n" \

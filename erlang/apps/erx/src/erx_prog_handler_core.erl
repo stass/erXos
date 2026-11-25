@@ -976,10 +976,11 @@ reach(#core{pid = Pid}, Pid) -> self;
 reach(_C, _Target) -> none.
 
 %% The reply Value to the request of case Request on Slot, queued behind the
-%% frames already waiting. The handler builds every reply it sends, so one
-%% the grammar refuses is the handler's bug, and crashes it.
+%% frames already waiting. Every value a reply carries is the handler's own, or
+%% a server's that done/4 or file_reply/4 checked first, so the frame is made
+%% unchecked: the program checks what it receives.
 reply(C, Request, Slot, Value) ->
-    {ok, Frame} = erx_prog_grammar:build_reply(Request, Slot, Value),
+    Frame = erx_prog_grammar:frame_reply(Request, Slot, Value),
     pump(enqueue(C, {frame, Frame})).
 
 %% The next descriptor's reservation, or the start once none is left.
