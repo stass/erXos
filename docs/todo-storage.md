@@ -80,11 +80,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the ordered end's step 2 freezing the media
      service; the shell's `mount` and `umount` forms ([todo-shell.md](todo-shell.md)). The media
      domain's durability facet to the system domain in the facet table, which `check_drive_domains`'
-     list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
-     here too. QEMU virt's development manifest names its media domain, the service `media`, root's
-     session's `media` facet (rights `rw`) and the drive `disk0` on the xhci row, so its USB domain
-     serves a stick as `disk0`; the domain provides no `media` yet, so a walk of `/media` answers
-     `eio`. The quotas count no system connection
+     list then admits, lands here too. QEMU virt's and the Raspberry Pi 4's development manifests
+     each name a media domain, the service `media`, root's session's `media` facet (rights `rw`)
+     and the drive `disk0` on the xhci row, so their USB domains serve a stick as `disk0`. The quotas count no system connection
      (`life_connections` in `liberx/system/dom_life.c`), so at rest the media domain's
      `connections` of 3 hold the drive connection and root's session's `media` with its
      replacement's, and the USB domain's of 2 hold the drive connection beside the display's

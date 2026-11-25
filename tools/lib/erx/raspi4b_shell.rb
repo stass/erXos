@@ -245,8 +245,9 @@ module Erx
     STARTED_ONCE = %w[display].freeze
     # The configured domains that log nothing on the model and must never end: the USB
     # domain waits for the host controller the PCIe domain gives it, which the model, having
-    # no PCIe, never gives (docs/design-usb.md).
-    IDLE = %w[usb].freeze
+    # no PCIe, never gives (docs/design-usb.md), and the media domain waits for a drive the
+    # USB domain serves it, which it then never serves (docs/design-drives.md).
+    IDLE = %w[usb media].freeze
 
     # Configured domain NAME's line of CONFIGURED_LINES; raises for a name with no line
     # there, so a manifest row the suite does not know fails the run rather than pass
