@@ -28,8 +28,8 @@ run([Seed, Directory]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
     Volumes = [volume(Directory, Image) || Image <- filelib:wildcard("*.img", Directory)],
     Volumes =/= [] orelse error(no_seed_volumes),
-    %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_fat_read, binary, lists, maps]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Accepted = lists:sum([round_of(lists:nth(rand:uniform(length(Volumes)), Volumes))
                           || _ <- lists:seq(1, ?ROUNDS)]),
     case Accepted >= ?MIN_ACCEPTED of

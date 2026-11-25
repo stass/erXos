@@ -31,8 +31,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    %% Loaded before the atoms are counted, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(M) || M <- [erx_smp, erx_smp_core, erx_smp_crypto, crypto, lists, binary]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     erx_smp_crypto:on_curve(erx_smp_crypto:debug_key()),
     Atoms = erlang:system_info(atom_count),
     Fresh = fresh(),

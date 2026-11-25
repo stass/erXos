@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the Bluetooth Security Manager channel, erx_smp:decode/1 and the
 # responder that takes what it decodes, erx_smp_core:step/2
@@ -76,7 +77,7 @@ module ErxBtSmpFuzz
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, stdin_data: '')
+                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

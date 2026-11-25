@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of what a phone sends on an LE link: L2CAP's reassembly and LE signaling
 # (erx_l2cap:reassemble/3, signal/1) and the ATT codec with the server over it
@@ -78,7 +79,7 @@ module ErxBtAttFuzz
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, stdin_data: '')
+                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

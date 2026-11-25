@@ -25,8 +25,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_start_table, erx_ident, binary, lists, maps, re, unicode]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Read = lists:sum([round_of() || _ <- lists:seq(1, ?ROUNDS)]),
     case Read >= ?ROUNDS of
         true -> io:format("fuzz: ~p rounds ok, ~p settings read~n", [?ROUNDS, Read]);

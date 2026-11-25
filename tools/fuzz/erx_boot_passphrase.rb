@@ -11,6 +11,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/fuzz_warm'
 
 module ErxBootPassphraseFuzz
   ROOT = File.expand_path('../..', __dir__)
@@ -48,7 +49,8 @@ module ErxBootPassphraseFuzz
       paths = sources.map do |path, text|
         File.join(work, File.basename(path)).tap { |copy| File.binwrite(copy, text) }
       end
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, *paths, File.join(ROOT, FUZZ), stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, *paths, File.join(ROOT, FUZZ),
+                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

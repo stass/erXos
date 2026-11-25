@@ -33,9 +33,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(M) || M <- [erx_l2cap, erx_att, erx_gatt_db, erx_gatt_gate, erx_gatt_server,
-                                                  erx_bytes, lists, binary, queue, maps]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Server = server(),
     Kinds = [frames, signals, requests],
     {Tally, _} = lists:foldl(fun(_, {T, Bearer}) ->

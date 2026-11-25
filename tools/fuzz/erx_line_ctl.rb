@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the line tree's ctl file, erx_line_fs:parse/1
 # (test/erlang/erx_line_ctl_fuzz.erl), compiled from source and run alone on stock's
@@ -43,7 +44,7 @@ module ErxLineCtlFuzz
       File.binwrite(tree_path, tree_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, tree_path,
-                                       File.join(ROOT, FUZZ), stdin_data: '')
+                                       File.join(ROOT, FUZZ), Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

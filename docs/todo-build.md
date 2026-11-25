@@ -377,12 +377,6 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   11, `erx_bt_link` two on 6, `erx_bt_state` one on 2, `erx_boot_keys`, `erx_media_table` and `erx_bt_hci`'s too-few-accepted
   count on one each), so each target's inputs reach the guarded check on only part of the seeds. Steer or add
   rounds until each fault fails on every seed of 1..20, as `erx_login_facet` does.
-* [Medium] check-fuzz, atom-count warm-up: fifteen Erlang targets still load their modules from a hand-written
-  `code:ensure_loaded` list (`erx_fat_read`, `erx_rc_conf`, `erx_apps_ctl`, `erx_media_table`, `erx_line_ctl`,
-  `erx_bt_hci`, `erx_media_probe`, `erx_machine_ctl`, `erx_boot_passphrase`, `erx_bt_link`, `erx_boot_keys`,
-  `erx_bt_pair`, `erx_bt_smp`, `erx_bt_ctl`, `erx_bt_att` `_fuzz.erl`), so a module a round reaches that the list
-  omits makes `atoms_made` on some seeds only. Replace each list with `erx_fuzz_warm:closure(?MODULE)` and
-  compile `test/erlang/erx_fuzz_warm.erl` in its driver, as the eight converted targets do.
 * [Medium] Test media harnesses, `tools/lib/erx/native_console_ring.rb` and `tools/lib/erx/kiosk.rb`:
   both build a test program over musl's libc.a as a medium's `Added` (`program`,
   `Kiosk::Run#front_program`), splice the boot value's checkpoint after the image's identity

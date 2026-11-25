@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of erx_present:parse/2 and erx_present:parse_uri/1, the readers of a
 # presentation's text and link, compiled from the generated modules and run alone on
@@ -21,8 +22,6 @@ module ErxPresentFuzz
   PRESENT = Erx::Generated.path('erlang/apps/erx/src/generated/erx_present.erl', root: ROOT)
   SCHEMA = Erx::Generated.path('erlang/apps/erx/src/generated/erx_schema.erl', root: ROOT)
   TARGET_SOURCE = File.join(ROOT, 'test/erlang/erx_present_fuzz.erl')
-  # The atom-count warm-up every target of this kind shares.
-  WARM = File.join(ROOT, 'test/erlang/erx_fuzz_warm.erl')
   ESCAPE_CHECK = "        false ?= uri_plain(Byte),\n"
   DEADLINE_SECONDS = '120'
   # The target's own verdicts; whichever comes first catches the mutant.
@@ -46,8 +45,8 @@ module ErxPresentFuzz
     Dir.mktmpdir('erx-present-fuzz') do |work|
       module_path = File.join(work, 'erx_present.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, SCHEMA, module_path, TARGET_SOURCE, WARM,
-                                       stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, SCHEMA, module_path, TARGET_SOURCE,
+                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

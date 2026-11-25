@@ -29,8 +29,8 @@ run([Seed, Directory]) ->
     true = os:putenv("ERX_PROBE_VOLUMES", Directory),
     Seeds = [erx_media_probe_tests:fsimg(Name) || Name <- ["fat12.img", "fat16.img", "fat32.img"]]
         ++ [erx_media_probe_tests:signed(Overlay, 1024) || Overlay <- signatures()],
-    [{module, _} = code:ensure_loaded(Module)
-     || Module <- [erx_media_probe, erx_fat_read, erx_media_probe_tests, binary, lists, maps]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Selected = lists:sum([round_of(lists:nth(rand:uniform(length(Seeds)), Seeds)) || _ <- lists:seq(1, ?ROUNDS)]),
     io:format("fuzz: ~p rounds ok, ~p selected a format~n", [?ROUNDS, Selected]).
 

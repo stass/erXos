@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of a Bluetooth link's ACL input, erx_bt_link_core:step/3 over the
 # packets a radio peer sends and what the link's other parties send
@@ -83,7 +84,7 @@ module ErxBtLinkFuzz
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, stdin_data: '')
+                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

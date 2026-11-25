@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 require_relative '../../test/fixtures/fat_record_volume'
 
 # The fuzz target of the record volume's reader, erx_fat_read:root_file/3
@@ -49,7 +50,7 @@ module ErxFatReadFuzz
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, core_path,
-                                       File.join(ROOT, FUZZ), stdin_data: '')
+                                       File.join(ROOT, FUZZ), Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

@@ -17,7 +17,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    [{module, _} = code:ensure_loaded(M) || M <- [erx_boot_passphrase, erx_passphrase_hash, binary, lists]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Accepted = lists:sum([round_of() || _ <- lists:seq(1, ?ROUNDS)]),
     case Accepted >= ?MIN_ACCEPTED of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Accepted]);

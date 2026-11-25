@@ -6,6 +6,7 @@
 require 'open3'
 require 'optparse'
 require 'tmpdir'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the code_objects facet's request decoder,
 # erx_code_objects_facet:decode/1 (test/erlang/erx_code_objects_facet_fuzz.erl),
@@ -18,8 +19,6 @@ module ErxCodeObjectsFacetFuzz
   ROOT = File.expand_path('../..', __dir__)
   DECODER = 'erlang/apps/erx_domain/src/erx_code_objects_facet.erl'
   TARGET = 'test/erlang/erx_code_objects_facet_fuzz.erl'
-  # The atom-count warm-up every target of this kind shares.
-  WARM = File.join(ROOT, 'test/erlang/erx_fuzz_warm.erl')
   # Each seeded fault: the decoder's text, which occurs in it once, and its replacement
   # without the bound. test/host/erx_code_objects_facet_test.rb checks at every landing
   # that each text still occurs once, so an edit of the decoder cannot leave this target
@@ -55,8 +54,8 @@ module ErxCodeObjectsFacetFuzz
     Dir.mktmpdir('erx-code-objects-facet-fuzz') do |work|
       decoder_path = File.join(work, 'erx_code_objects_facet.erl')
       File.binwrite(decoder_path, decoder_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, decoder_path, File.join(ROOT, TARGET), WARM,
-                                       stdin_data: '')
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, decoder_path, File.join(ROOT, TARGET),
+                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

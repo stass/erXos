@@ -17,7 +17,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_machine_fs, binary, lists, maps]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Accepted = length([ok || _ <- lists:seq(1, ?ROUNDS), round_of(write()) =:= accepted]),
     case Accepted >= ?ROUNDS div 20 of
         true -> io:format("fuzz: ~p rounds ok, ~p accepted~n", [?ROUNDS, Accepted]);

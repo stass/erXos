@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the Bluetooth controller's line, erx_h4:split/1, erx_hci:event/2
 # and erx_hci:return/2, and of the patch file, erx_bt_patch:parse/1
@@ -108,7 +109,7 @@ module ErxBtHciFuzz
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, stdin_data: '')
+                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the Bluetooth domain's stored state, erx_bt_state:decode/1, and of the
 # development store's file names, erx_bt_state_file:generation/1
@@ -20,8 +21,6 @@ module ErxBtStateFuzz
   STATE_FILE = 'erlang/apps/erx_bt/src/erx_bt_state_file.erl'
   # The module the decoder calls to read an identity address.
   SMP_CRYPTO = 'erlang/apps/erx_bt/src/erx_smp_crypto.erl'
-  # The atom-count warm-up of a target of this kind.
-  WARM = 'test/erlang/erx_fuzz_warm.erl'
   FUZZ = 'test/erlang/erx_bt_state_fuzz.erl'
   # Each compile and run is under this deadline, and tools/erx gives the whole runner 300.
   DEADLINE_SECONDS = '60'
@@ -69,14 +68,14 @@ module ErxBtStateFuzz
   # replaced module is compiled from its copy there.
   def fuzz(replaced, seed:)
     Dir.mktmpdir('erx-bt-state-fuzz') do |work|
-      sources = [STATE, STATE_FILE, SMP_CRYPTO, WARM, FUZZ].map do |source|
+      sources = [STATE, STATE_FILE, SMP_CRYPTO, FUZZ].map do |source|
         next File.join(ROOT, source) unless replaced.key?(source)
 
         File.join(work, File.basename(source)).tap { |path| File.binwrite(path, replaced.fetch(source)) }
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
       output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, stdin_data: '')
+                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

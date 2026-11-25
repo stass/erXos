@@ -7,6 +7,7 @@ require 'open3'
 require 'optparse'
 require 'tmpdir'
 require_relative '../lib/erx/generated'
+require_relative '../lib/erx/fuzz_warm'
 
 # The fuzz target of the ble facet's admission, erx_ble_facet:admit/3
 # (test/erlang/erx_ble_facet_fuzz.erl), compiled from source and run alone on stock's
@@ -21,8 +22,6 @@ module ErxBleFacetFuzz
   ROOT = File.expand_path('../..', __dir__)
   FACET = 'erlang/apps/erx_bt/src/erx_ble_facet.erl'
   TARGET = 'test/erlang/erx_ble_facet_fuzz.erl'
-  # The atom-count warm-up every target of this kind shares.
-  WARM = File.join(ROOT, 'test/erlang/erx_fuzz_warm.erl')
   # The generated header named here is in build/gen.
   Erx::Generated.ensure(root: ROOT)
   INCLUDE = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
@@ -66,7 +65,7 @@ module ErxBleFacetFuzz
       facet_path = File.join(work, 'erx_ble_facet.erl')
       File.binwrite(facet_path, facet_text)
       output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, facet_path,
-                                       File.join(ROOT, TARGET), WARM, stdin_data: '')
+                                       File.join(ROOT, TARGET), Erx::FuzzWarm::SOURCE, stdin_data: '')
       raise output unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

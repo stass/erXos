@@ -8,7 +8,8 @@
 %% a module calls is read from the imports of its compiled file, so the set follows the
 %% code and the target keeps no list of its own. A module with no file to load (one the
 %% fuzz driver did not compile) is left to fail with undef in the round that calls it,
-%% which names it.
+%% which names it. A module reached only through a literal fun M:F/A is not in the
+%% imports and is not followed.
 
 -module(erx_fuzz_warm).
 -export([closure/1]).

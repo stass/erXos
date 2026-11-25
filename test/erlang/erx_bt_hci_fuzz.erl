@@ -60,8 +60,8 @@
 
 run([Seed]) ->
     rand:seed(exsss, {20, 26, list_to_integer(Seed)}),
-    %% Loaded before the first round counts atoms, since loading a module makes its atoms.
-    [{module, _} = code:ensure_loaded(Module) || Module <- [erx_h4, erx_hci, erx_bt_patch, lists, binary]],
+    %% Loading a module makes atoms; a round must not, so every module the rounds reach is loaded first.
+    ok = erx_fuzz_warm:closure(?MODULE),
     Readers = [split, event, return, patch],
     Outcomes = lists:foldl(fun(_, Tally) -> maps:update_with(round_of(pick(Readers)), fun(N) -> N + 1 end, 1, Tally) end,
                            #{}, lists:seq(1, ?ROUNDS)),
