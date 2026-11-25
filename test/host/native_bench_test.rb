@@ -89,6 +89,22 @@ class NativeBenchTest < Minitest::Test
     assert_equal native.sort, Erx::NativeBench::GUESTS.keys.sort
   end
 
+  # Every image packs test/guest/native_task's program, which the root's cycle probe
+  # launches before the cells (docs/design-bench.md, "The cycle counter"), beside the
+  # guest's own timing task where it has one.
+  def test_every_image_packs_the_cycle_probes_program
+    native = Class.new do
+      def build_task(name:, **) = "#{name}.elf"
+    end.new
+    run = Erx::NativeBench::Run.allocate
+    packed = Erx::NativeBench::GUESTS.transform_values { |guest| run.send(:programs, native, guest, '/build', nil) }
+    packed.each do |name, programs|
+      assert_equal 'native-task.elf', programs[Erx::NativeTask::PROGRAM_PATH], name
+      own = Erx::NativeBench::GUESTS.fetch(name).task.empty? ? [] : [Erx::NativeBench::TASK_PATH]
+      assert_equal [Erx::NativeTask::PROGRAM_PATH, *own].sort, programs.keys.sort, name
+    end
+  end
+
   # The guest's sample counts are the landing profiles' (one source): the root is built
   # with them, and a seeded build adds only its fault.
   def test_the_root_is_built_with_the_landing_profiles_sizes

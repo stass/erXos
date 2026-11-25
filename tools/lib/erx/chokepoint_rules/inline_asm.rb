@@ -44,7 +44,7 @@ module Erx
             Chokepoints::Site.new(glob: SysregHeaders::READS),
             # erx_fiasco_cache_make_coherent, erx_fiasco_cache_clean and erx_fiasco_cache_clean_invalidate.
             Chokepoints::Site.new(glob: 'liberx/backend/fiasco/arch/aarch64/cache.c'),
-            # erx_fiasco_counter_hz and erx_fiasco_counter.
+            # erx_fiasco_counter_hz, erx_fiasco_counter and erx_fiasco_cycles.
             Chokepoints::Site.new(glob: 'liberx/backend/fiasco/arch/aarch64/clock.c'),
             # counter_fence.
             Chokepoints::Site.new(glob: 'liberx/backend/hosted/log.c'),
@@ -87,7 +87,7 @@ module Erx
         Chokepoints::Forbidden.new(
           name: 'sysreg-read',
           rule: "generated system-register reads only in the listed files: the reader of the boot CPU's " \
-                "identification registers, which bootstrap calls, and the header probe's counter reads",
+                "identification registers, which bootstrap calls, the header probe's counter reads and the cycle counter's read",
           design: "#{KERNEL}#chokepoint-checks",
           scope: Chokepoints::Scope.new(own: true, extra: [*INLINE_ASM_SCOPE.extra, 'fiasco/bootstrap/server/src/erx_*']),
           pattern: Regexp.union(/\berx_sysreg_\w+_read\b/, include_of(SysregHeaders::READS)),
@@ -96,6 +96,11 @@ module Erx
             Chokepoints::Site.new(glob: SysregHeaders::READS),
             # erx_boot_cpu_id_read, which bootstrap calls in kernel mode, and its include.
             Chokepoints::Site.new(glob: 'kernel/arch/aarch64/cpu_id.c'),
+            # erx_fiasco_cycles, the cycle counter's one read (docs/design-bench.md, "The
+            # cycle counter"), and its include.
+            Chokepoints::Site.new(glob: 'liberx/backend/fiasco/arch/aarch64/clock.c',
+                                  permits: Regexp.union(/\Aerx_sysreg_pmccntr_el0_read\z/,
+                                                        /\A#{include_of(SysregHeaders::READS)}\z/)),
             # The header probe's reads of the generic timer's counter and frequency, which time
             # its phases on its own card, where no kernel runs, and its include of their header.
             Chokepoints::Site.new(glob: 'test/raspi4b/header_probe.c',

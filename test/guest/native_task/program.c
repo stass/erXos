@@ -330,6 +330,27 @@ mode_spin(void)
 }
 
 /*
+ * MODE_CYCLES, the benchmarks' cycle probe (docs/design-bench.md, "The cycle counter"): the
+ * cycle counter's advance over one second of the system counter, in thousandths of a cycle
+ * per tick. 0 says the cycle counter did not advance; a read user mode may not make faults
+ * and ends the task. The spin also waits for one tick, so a frequency register reading 0
+ * never divides by zero.
+ */
+static int64_t
+mode_cycles(void)
+{
+	const uint64_t hz = erx_fiasco_counter_hz();
+	const uint64_t cycles_start = erx_fiasco_cycles();
+	const uint64_t ticks_start = erx_fiasco_counter();
+	uint64_t ticks;
+
+	do
+		ticks = erx_fiasco_counter() - ticks_start;
+	while (ticks < hz || ticks == 0);
+	return ((int64_t)((erx_fiasco_cycles() - cycles_start) * 1000 / ticks));
+}
+
+/*
  * The quantum case's load (docs/design-fiasco.md, "Bands"): this thread and one spinner, both
  * at the task's level on CPU 0, alone there while the root waits in its join, take the CPU a
  * quantum each in turn. A sample is the clock read between two reads of the spinner's count
@@ -751,6 +772,8 @@ erx_task_main(const uint64_t args[ERX_FIASCO_START_ARGS])
 		return (mode_spin());
 	case MODE_TURNS:
 		return (mode_turns());
+	case MODE_CYCLES:
+		return (mode_cycles());
 	case MODE_RACE:
 		return (mode_race());
 	case MODE_LOG:

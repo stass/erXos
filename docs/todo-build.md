@@ -118,12 +118,16 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   positional `[wanted, declared]` pairs, which a named value would read better as; a boot that timed out before
   its `CLOCK` line also notes that line's absence as a refusal; `test/host/erx_bench_hist_test.rb` writes its own `erx` stand-in beside
   `test/erlang/stand_in/erx.erl`. `xdomain-throughput` and `xdomain-stall` wait for their own design with G5's runs.
-* [Medium] benchmarks, the cycle counter's probe (`test/guest/native_task/program.c`,
-  `liberx/backend/fiasco/arch/aarch64/clock.c`, [design-bench.md](design-bench.md#the-cycle-counter)):
-  `MODE_CYCLES`, the cycle read beside `erx_fiasco_counter`, the root's probe on board sets, which then pack `native_task`'s program
-  (`NativeBench::BoardSets`), and the `CLOCK` line's
-  `cycles_per_tick`. Test on the board: the count times the counter's frequency within 2% of `/proc/sensors`'s
-  `arm_clock`, seeded with the system counter read twice. One implementer.
+* [Medium] benchmarks, the cycle probe on the board (`test/guest/native_bench/cycles.c`,
+  [design-bench.md](design-bench.md#the-cycle-counter)): the probe runs on every image, QEMU's included; its
+  board test is not run: the count times the counter's frequency within 2% of `/proc/sensors`'s `arm_clock`,
+  seeded with the system counter read twice, and whether the firmware's levels above the kernel leave the
+  read untrapped there. The probe takes any fault of kind `undefined` as the read refused (the backend maps every
+  exception but SError to it, `arch/aarch64/exception.c`); tying it to the read by the record's syndrome, and
+  whether Fiasco forwards a trapped read from user mode as an exception at all, are open. From review: the
+  disposable task's gate, start, stop and join are written twice (`cycles.c`, `vm.c`'s `protect_faults`) and
+  want one helper in `guest.c`; the fault branch has no seed (a trapping read in `MODE_CYCLES`), nor does the
+  design's "system counter read twice" seed run on QEMU, where it would give exactly 1.000.
 * [Medium] benchmarks, the board run's record and `tools/erx bench import` for erXos logs
   ([design-bench.md](design-bench.md#the-record-of-a-board-run)): the reader (`BoardLog`) and the queue's and
   walk's files (`BoardFiles`) are built; what remains is the `pi4` record made from `BoardLog.read`'s boots, with

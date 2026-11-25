@@ -630,6 +630,37 @@
         "schema": "2.9.6",
         "timestamp": "2026-09-21 13:58:23"
       }
+    },
+    {
+      "name": "PMCCNTR_EL0",
+      "read": true,
+      "write": false,
+      "read_side_effect": "none",
+      "read_barrier": "isb",
+      "width": 64,
+      "encoding": {
+        "op0": 3,
+        "op1": 3,
+        "CRn": 9,
+        "CRm": 13,
+        "op2": 0
+      },
+      "fields": [
+        {
+          "name": "CCNT",
+          "offset": 0,
+          "width": 64
+        }
+      ],
+      "copyright": "Copyright (c) 2010-2026 Arm Limited or its affiliates. All rights reserved.",
+      "license": "BSD-3-Clause",
+      "source_version": {
+        "architecture": "vFATAp2-A",
+        "build": "868",
+        "ref": "2026-09_rel",
+        "schema": "2.9.6",
+        "timestamp": "2026-09-21 13:58:23"
+      }
     }
   ]
 }

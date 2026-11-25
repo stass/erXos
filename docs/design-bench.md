@@ -359,11 +359,13 @@ in under a second, and records:
 * the rounding of a timed wait (`erx_fiasco_time_wait_us` rounds a
   deadline up to the microsecond, `liberx/backend/fiasco/time_table.c`),
   so lateness under a microsecond is recorded as unresolvable;
-* on the Raspberry Pi 4, the CPU's cycles per counter tick over one second,
+* the CPU's cycle counter's advance per counter tick over one second,
   which a disposable test task measures where its cycle counter is
   readable in user mode ([The cycle counter](#the-cycle-counter)), and
   otherwise `unknown`; the `CLOCK` line carries it as a number or
-  `unknown`.
+  `unknown`. On the Raspberry Pi 4 it is the CPU's cycles per tick; under
+  HVF it is what the virtual machine's cycle counter makes of a tick,
+  which is not the host core's cycles.
 
 The rule applies to a cell whose start and end stamps are read on
 different CPUs; a round trip stamped on one CPU needs no calibration,
@@ -887,8 +889,8 @@ host serves over HTTP
   and `:76-84`), whatever the file is.
   `Netboot`'s HTTP form and `tools/erx netboot serve` replace both
   ([The network boot the stager drives](#the-network-boot-the-stager-drives)).
-* **Cycles are never measured.** The guest prints `cycles_per_tick` as
-  `unknown` on every boot (`bench_print_clock`, `guest.c:205`). The Fiasco
+* **The cycle probe is untried on the board.** The root runs it on every
+  boot (`bench_cycles_probe`, `test/guest/native_bench/cycles.c`). The Fiasco
   build sets `CONFIG_PERF_CNT_USER` (`config/fiasco/kernel.defconfig:17`),
   under which Fiasco turns the cycle counter on and opens the performance
   monitor to user mode on every CPU it starts (`Perf_cnt::init_cpu`,
@@ -987,8 +989,9 @@ out as the production image's boot partition is:
   production image's is. For QEMU `virt` the first stage is the main
   build's, so QEMU's bench images do not change. The root is linked at
   the development place, as on QEMU, and with the profile form's sizes.
-  Every board set also packs `native_task`'s program, which the cycle
-  probe runs ([The cycle counter](#the-cycle-counter)).
+  Every bench image, a board set's as QEMU's, packs `native_task`'s
+  program, which the cycle probe runs
+  ([The cycle counter](#the-cycle-counter)).
 * **The set.** `BootPartition` writes the partition's files and their
   build record into `build/bench-board/<benchmark>/` and nothing more:
   `write_set`, which places the files and writes the record through the
@@ -1058,15 +1061,18 @@ and never runs while they do.
 
 ### The cycle counter
 
-The run tests the read rather than assume it. On a board set, before its
+The run tests the read rather than assume it. On every boot, before its
 cells, the root launches `native_task`'s program as a disposable test task
 in a mode of its own, `MODE_CYCLES`, on the root's CPU: the task reads the
 cycle counter and the system counter, spins one second by the system
 counter, reads both again, and exits with the cycles per tick in
 thousandths, as `MODE_TURNS` exits with its median. The read is one
-accessor beside `erx_fiasco_counter` in the backend's architecture layer
-(`liberx/backend/fiasco/arch/aarch64/clock.c`, the file the inline
-assembly chokepoint already lists for the counter).
+accessor beside `erx_fiasco_counter` in the backend's architecture layer,
+`erx_fiasco_cycles` (`liberx/backend/fiasco/arch/aarch64/clock.c`), over
+the generated read of `PMCCNTR_EL0` from `hw/sysreg/aarch64.json`, which
+the `sysreg-read` chokepoint permits in that file alone. The task's
+records come to a gate of the root's, as `vm`'s disposable task's do, so
+a fault on the read is an answer, not a lost boot.
 
 | What the task does | What the `CLOCK` line carries |
 | --- | --- |
@@ -1075,9 +1081,29 @@ assembly chokepoint already lists for the counter).
 | exits with 0: the counter did not advance | `unknown`; the root prints `erx: bench: cycle counter: did not advance` |
 
 The root's line is for a person reading the log; the host reads only the
-`CLOCK` line. QEMU's sets do not run the probe: a cycle counter under an
-emulator or a hypervisor counts what QEMU or the host makes of it, not
-the host CPU's cycles, so their `CLOCK` lines stay `unknown`.
+`CLOCK` line. QEMU's boots run the probe too, since ipcbench's totals
+under HVF are read from the same register and only the probe says what
+that register counts there. A cycle counter under an emulator or a
+hypervisor counts what QEMU or the host makes of it, not the host CPU's
+cycles, so a QEMU boot's count is a fact about that virtual machine.
+The probe adds about a second to every boot, inside the guest's
+deadline. The count never converts an interval: an erXos cell stays in its
+counter's ticks and a `cycles` cell in cycles; a reader puts the two on
+one clock by the boot's count, by hand, and says so.
+
+What the probe found under HVF (QEMU 11.1.3, `-accel hvf -cpu host`, the
+primary host, an Apple M4 Max; one boot of each benchmark of `--suite bench`
+on 2026-11-24, HVF only): the cycle counter is readable in user mode
+under erXos's Fiasco and advances, at 128.000 counts per tick of the
+24 MHz counter, 3.072 GHz, in seven of the eight native boots and 128.001
+in the eighth. A ratio exact to a thousandth over one second is not a
+core's clock, whose frequency moves
+with its load and its performance state: under HVF the guest's cycle
+counter is the system counter scaled by 128, so it resolves no more than
+the counter does, unless its step is finer than 128, which ipcbench's
+totals, every one a multiple of 64, suggest and no read has measured.
+Under HVF a `cycles` total is therefore a time, 1/3.072 ns per count, and
+erXos's ticks times 128 are counts of the same clock. TCG was not run.
 
 ### The walk
 

@@ -177,7 +177,7 @@ class SysregTest < Minitest::Test
   def test_checked_in_specification_parses_with_counter_facts
     bytes = File.binread(File.join(REPOSITORY, Erx::Sysreg::SPECIFICATION))
     specification = Erx::Sysreg.specification(bytes)
-    assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0 ID_AA64ISAR0_EL1 ID_AA64ISAR1_EL1 ID_AA64ISAR2_EL1 ID_AA64PFR0_EL1 ID_AA64PFR1_EL1],
+    assert_equal %w[CNTFRQ_EL0 CNTPCT_EL0 CNTVCT_EL0 ID_AA64ISAR0_EL1 ID_AA64ISAR1_EL1 ID_AA64ISAR2_EL1 ID_AA64PFR0_EL1 ID_AA64PFR1_EL1 PMCCNTR_EL0],
                  specification.fetch('registers').map { |register| register.fetch('name') }
     rows = specification.fetch('registers').to_h { |register| [register.fetch('name'), register] }
     assert_equal({ 'op0' => 3, 'op1' => 3, 'CRn' => 14, 'CRm' => 0, 'op2' => 1 }, rows.fetch('CNTPCT_EL0').fetch('encoding'))

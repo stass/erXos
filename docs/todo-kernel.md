@@ -36,7 +36,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   performance counters directly, and they count every thread and kernel
   mode too: one domain can observe another's activity. erXos's kernel
   leaves user-mode counters disabled
-  ([design-kernel.md](design-kernel.md#security)). Fiasco keeps
+  ([design-kernel.md](design-kernel.md#security)). The benchmarks'
+  cycle probe reads the cycle counter through it and reports `unknown`
+  without it ([design-bench.md](design-bench.md#the-cycle-counter)). Fiasco keeps
   them for profiling while development builds run trusted code only; they
   go with Fiasco at M7, or earlier once the profiling feature under
   Planned features gives a confined way to count.

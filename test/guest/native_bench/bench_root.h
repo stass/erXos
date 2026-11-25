@@ -12,9 +12,11 @@
 #ifndef ERX_NATIVE_BENCH_ROOT_H
 #define ERX_NATIVE_BENCH_ROOT_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
 #include "erx/pack.h"
 #include "test/guest/bench/bench_clock.h"
 #include "test/guest/bench/bench_hist.h"
@@ -66,6 +68,11 @@ erx_bench_offset_t	bench_calibrate_a(void);
 void	bench_calibrate_b(void);
 /* One calibration of CPU 0 against cpu, whose B is a new thread of the root at stack index, asleep for good after. */
 erx_bench_offset_t	bench_calibrate_on(uint32_t index, uint32_t cpu);
+/* The CLOCK line, its cycles per tick the cycle probe's. */
 void	bench_print_clock(const erx_bench_pair_t *pair, size_t npairs);
+/* The next record at the gates bound to the root's thread, with its label; false past deadline or for any other message. */
+bool	bench_record_wait(uint64_t deadline, erx_fault_t *record, uint64_t *label);
+/* The cycle probe's cycles per tick in thousandths, or 0 for unknown, having said why (cycles.c). */
+uint64_t	bench_cycles_probe(const erx_pack_view_t *pack);
 
 #endif /* ERX_NATIVE_BENCH_ROOT_H */

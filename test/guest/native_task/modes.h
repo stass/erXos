@@ -27,6 +27,7 @@
 #define MODE_SPIN	16	/* SPIN_THREADS threads spinning on CPU 0 until the root stops the task */
 #define MODE_TURNS	17	/* two threads spin on CPU 0: ends with the median turn of one, in us, or a negative status */
 #define MODE_SHARE	18	/* recording spinners on one CPU write each window through the task's write: ends with 0 */
+#define MODE_CYCLES	19	/* the cycle counter over one second of the system counter: ends with its cycles per tick in thousandths */
 
 /*
  * The argument names its mode in its low byte; only MODE_SHARE reads the rest, which

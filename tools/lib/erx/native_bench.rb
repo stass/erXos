@@ -31,7 +31,7 @@ module Erx
     GUEST = 'test/guest/native_bench'
     BENCH_LIBRARY = %w[bench_clock bench_hist bench_line bench_periodic].map { |name| "test/guest/bench/#{name}.c" }.freeze
     ROOT_SOURCES = [*NativeRoot::RUNTIME, *NativeRoot::VM, *NativeRoot::SERVICE, *NativeRoot::LAUNCH, *BENCH_LIBRARY,
-                    "#{GUEST}/guest.c"].freeze
+                    "#{GUEST}/guest.c", "#{GUEST}/cycles.c"].freeze
     TASK_SOURCES = [*NativeRoot::TASK, 'test/guest/bench/bench_hist.c'].freeze
     TASK_PATH = 'boot/native-bench-task'
     SEED_EMPTY_SLOT = '-DERX_BENCH_SEED_EMPTY_SLOT'
@@ -51,11 +51,8 @@ module Erx
     Seed = Data.define(:name, :root_flags, :task_flags, :caught, :deadline_seconds) do
       def initialize(name:, root_flags:, task_flags:, caught:, deadline_seconds: nil) = super
     end
-    # A benchmark's guest: the files of GUEST its root and its task add, its seeds, and
-    # whether its image packs test/guest/native_task's program, which its cells launch.
-    Guest = Data.define(:root, :task, :seeds, :native_task) do
-      def initialize(root:, task:, seeds:, native_task: false) = super
-    end
+    # A benchmark's guest: the files of GUEST its root and its task add, and its seeds.
+    Guest = Data.define(:root, :task, :seeds)
 
     # The cells of operation that came back failed.
     def self.failed(cells, operation) = cells.select { |cell| cell.operation == operation && cell.status == 'failed' }
@@ -72,7 +69,7 @@ module Erx
 
     GUESTS = {
       # share-equal's spinners are native_task's MODE_SHARE.
-      'sched' => Guest.new(root: %w[sched.c], task: [], seeds: [].freeze, native_task: true),
+      'sched' => Guest.new(root: %w[sched.c], task: [], seeds: [].freeze),
       # The root skips one wake: wake-same-cpu fails with a lost wake.
       'wake' => Guest.new(root: %w[wake.c], task: [], seeds: [
         Seed.new(name: 'lost wake', root_flags: ['-DERX_BENCH_SEED_LOST_WAKE'], task_flags: [],
@@ -297,17 +294,19 @@ module Erx
         raise e
       end
 
-      # The test task's program, for a guest whose cells launch one.
+      # The test task's program, which the root's cycle probe launches on every image
+      # (docs/design-bench.md, "The cycle counter") and sched's cells launch too, and
+      # the guest's own timing task, where it has one.
       def programs(native, guest, build, seed)
-        if guest.native_task
-          return { NativeTask::PROGRAM_PATH => native.build_task(name: 'native-task', sources: NativeTask::PROGRAM_SOURCES,
-                                                                 directory: File.join(build, 'task'),
-                                                                 flags: ['-DERX_FIASCO_TEST_HOOKS']) }
-        end
-        return {} if guest.task.empty?
+        native_task = { NativeTask::PROGRAM_PATH => native.build_task(name: 'native-task', sources: NativeTask::PROGRAM_SOURCES,
+                                                                      directory: File.join(build, 'native-task'),
+                                                                      flags: ['-DERX_FIASCO_TEST_HOOKS']) }
+        return native_task if guest.task.empty?
 
-        { TASK_PATH => native.build_task(name: 'native-bench-task', sources: [*TASK_SOURCES, *guest.task.map { |file| "#{GUEST}/#{file}" }],
-                                         directory: File.join(build, 'task'), flags: NativeBench.flags(seeded: seed ? seed.task_flags : [])) }
+        native_task.merge(TASK_PATH => native.build_task(name: 'native-bench-task',
+                                                         sources: [*TASK_SOURCES, *guest.task.map { |file| "#{GUEST}/#{file}" }],
+                                                         directory: File.join(build, 'task'),
+                                                         flags: NativeBench.flags(seeded: seed ? seed.task_flags : [])))
       end
     end
 

@@ -132,24 +132,6 @@ timed_wait(uint64_t task)
 	}
 }
 
-/* The next record at the gates bound to the root's thread, with its label: a record's words and no items. */
-static bool
-record_wait(uint64_t deadline, erx_fault_t *record, uint64_t *label)
-{
-	const erx_utcb_t *const utcb = erx_utcb_self();
-	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
-	erx_msgtag_t tag;
-
-	if (erx_ipc_wait(deadline, &tag, label) != ERX_OK ||
-	    erx_msgtag_raw_words_get(tag.raw) != sizeof(words) / sizeof(words[0]) ||
-	    erx_msgtag_raw_items_get(tag.raw) != 0)
-		return (false);
-	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
-		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
-	__builtin_memcpy(record, words, sizeof(words));
-	return (true);
-}
-
 /*
  * Whether the disposable task's write to its read-only page faulted at that page. The
  * task's records come to a gate bound to the root's thread: a faulted task stays blocked
@@ -171,14 +153,14 @@ protect_faults(void)
 	    erx_vm_reserve(space, VM_FAULT_ADDR, PAGE, ERX_VM_FIXED | ERX_VM_NOREPLACE, NULL) != ERX_OK ||
 	    erx_fiasco_launch_start(space, pc, VM_FAULT_ADDR) != ERX_OK)
 		bench_fail("erx: bench: the disposable task did not start FAILED\n");
-	if (!record_wait(erx_fiasco_clock_ns() + PATIENCE_NS, &record, &label) || label != FAULT_LABEL)
+	if (!bench_record_wait(erx_fiasco_clock_ns() + PATIENCE_NS, &record, &label) || label != FAULT_LABEL)
 		bench_fail("erx: bench: the disposable task sent no record FAILED\n");
 	faulted = record.kind == ERX_FAULT_MEMORY && record.addr == VM_FAULT_ADDR;
 	written = record.kind == ERX_FAULT_EXIT && record.status == VM_STATUS_WRITTEN;
 	if (!faulted && !written)
 		bench_fail("erx: bench: the disposable task neither faulted at its page nor wrote it FAILED\n");
 	ended = written || (erx_space_stop(space, FAULT_STATUS) == ERX_OK &&
-	    record_wait(erx_fiasco_clock_ns() + PATIENCE_NS, &record, &label) && label == FAULT_LABEL &&
+	    bench_record_wait(erx_fiasco_clock_ns() + PATIENCE_NS, &record, &label) && label == FAULT_LABEL &&
 	    record.kind == ERX_FAULT_EXIT && record.status == FAULT_STATUS);
 	if (!ended || erx_fiasco_task_join_until(space, erx_fiasco_clock_ns() + PATIENCE_NS, &status) != ERX_OK ||
 	    status != record.status || erx_object_destroy(gate) != ERX_OK || handle_close(gate) != ERX_OK)

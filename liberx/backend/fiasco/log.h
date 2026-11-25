@@ -35,5 +35,7 @@ uint64_t erx_fiasco_clock_ns(void);
 /* The counter itself and its frequency, which the time page scales. */
 uint64_t erx_fiasco_counter(void);
 uint64_t erx_fiasco_counter_hz(void);
+/* The CPU's cycle counter, which the benchmarks' cycle probe reads; it faults where user mode may not read it. */
+uint64_t erx_fiasco_cycles(void);
 
 #endif /* ERX_FIASCO_LOG_H */

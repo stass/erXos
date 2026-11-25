@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "erx/abi.h"
 #include "erx/pack.h"
 #include "liberx/backend/api.h"
 #include "liberx/backend/fiasco/boot_args.h"
@@ -85,6 +86,8 @@ static erx_bench_token_t token;
 static erx_bench_round_t rounds[ROUNDS];
 static erx_bench_reads_t pairs[READ_PAIRS];
 static char line[LINE_BYTES];
+/* The cycle probe's answer, which the CLOCK line carries: 0 for unknown. */
+static uint64_t cycles_per_tick_milli;
 
 static size_t
 length_of(const char *text)
@@ -306,13 +309,31 @@ bench_calibrate_on(uint32_t index, uint32_t cpu)
 	return (bench_calibrate_a());
 }
 
+/* The next record at the gates bound to the root's thread, with its label: a record's words and no items. */
+bool
+bench_record_wait(uint64_t deadline, erx_fault_t *record, uint64_t *label)
+{
+	const erx_utcb_t *const utcb = erx_utcb_self();
+	uint64_t words[sizeof(*record) / sizeof(uint64_t)];
+	erx_msgtag_t tag;
+
+	if (erx_ipc_wait(deadline, &tag, label) != ERX_OK ||
+	    erx_msgtag_raw_words_get(tag.raw) != sizeof(words) / sizeof(words[0]) ||
+	    erx_msgtag_raw_items_get(tag.raw) != 0)
+		return (false);
+	for (size_t word = 0; word < sizeof(words) / sizeof(words[0]); word++)
+		words[word] = atomic_load_explicit(&utcb->mr[word], memory_order_relaxed);
+	__builtin_memcpy(record, words, sizeof(words));
+	return (true);
+}
+
 void
 bench_print_clock(const erx_bench_pair_t *pair, size_t npairs)
 {
 	const uint64_t hz = erx_fiasco_counter_hz();
 	const erx_bench_read_cal_t reads = erx_bench_read_calibration(pairs, READ_PAIRS, &bench_hist);
 	const erx_bench_calibration_t clock = { .clock = "counter", .frequency_hz = hz, .increment = reads.increment,
-	    .read_cost = reads.read_cost, .wait_rounding = (hz + 999999) / 1000000, .cycles_per_tick_milli = 0,
+	    .read_cost = reads.read_cost, .wait_rounding = (hz + 999999) / 1000000, .cycles_per_tick_milli = cycles_per_tick_milli,
 	    .pairs = pair, .npairs = npairs };
 
 	print_line(erx_bench_line_clock(line, sizeof(line), &clock));
@@ -360,6 +381,7 @@ erx_fiasco_root_main(void)
 #else
 	bench_thread_start(DEADLINE_THREAD, 0, ERX_THREAD_CLASS_WORKER, deadline_main);
 #endif
+	cycles_per_tick_milli = bench_cycles_probe(&pack);
 	bench_say("erx: bench: timing\n");
 	bench_cells(erx_fiasco_test_cpu_count(), &pack);
 	bench_end("done");

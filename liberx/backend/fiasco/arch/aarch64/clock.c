@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 
+#include "erx/arch/aarch64/sysreg.h"
 #include "liberx/backend/fiasco/log.h"
 
 #define ERX_NS_PER_SECOND	UINT64_C(1000000000)
@@ -43,6 +44,18 @@ erx_fiasco_counter(void)
 
 	__asm__ volatile("isb\n\tmrs %0, cntvct_el0\n\tisb" : "=r"(ticks) : : "memory");
 	return (ticks);
+}
+
+/*
+ * The CPU's cycle counter, which Fiasco turns on and opens to user mode where its
+ * build sets CONFIG_PERF_CNT_USER. The benchmarks' cycle probe reads it
+ * (docs/design-bench.md, "The cycle counter"); where user mode may not read it, the
+ * read faults and ends the caller.
+ */
+uint64_t
+erx_fiasco_cycles(void)
+{
+	return (erx_sysreg_pmccntr_el0_read());
 }
 
 uint64_t
