@@ -342,6 +342,7 @@ module Erx
         selected << path.delete_prefix(root + '/')
       end.sort
     end
+    private_class_method :payload_paths
 
     def verify_original_files(root, original:)
       paths = payload_paths(root)

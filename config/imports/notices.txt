@@ -10,7 +10,7 @@
 # names (bootstrap, kernel, l4re-core, ...), so the same pointer text
 # reviewed in two imports has one row for each, and a pointer listed for
 # one import leaves a file of another unrecognised. Rows other than
-# POINTER rows also serve blocks that another import still holds, such as
+# POINTER rows also serve blocks that another import holds, such as
 # erXos's own musl; such a row names that import's file by its path from
 # the repository root (musl/...). List the blocks to
 # review with `ruby tools/fiasco_origins.rb --notices`. Rows are sorted by

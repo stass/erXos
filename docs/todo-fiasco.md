@@ -504,9 +504,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   file an inventory excludes, and `Origin#check_addition` (`tools/lib/erx/origin.rb`)
   refuses a file under an excluded path. A build that comes to need one takes three
   steps by hand: drop or narrow the exclusion that covers it, restore the file from the
-  commit that imported it, and re-add its `files` row (path, SHA-256, license as
-  Attribution reads it). Write them down where an import's maintainer finds them, or give
-  the inventory tool a restore command that does all three.
+  commit that imported it, and copy its `files` row back from the part's `ORIGIN.md` at
+  the commit before the trim. Write them down where an import's maintainer finds them,
+  or give `tools/fiasco_origins.rb` a restore command that does all three.
 * [Medium] Notice-form coverage, `tools/lib/erx/origin.rb` (`Attribution.for_file`): a
   read block that `config/imports/notices.txt` does not list, that is not a stock GNU
   notice and that holds a legal word leaves a file `LicenseRef-unrecognized-notice`, and

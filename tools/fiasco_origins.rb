@@ -5,12 +5,15 @@
 
 require 'optparse'
 require_relative 'lib/erx/origin'
+require_relative 'lib/erx/fiasco_parts'
 require_relative 'import_origins'
 
 module Erx
-  # Attribution for the frozen Fiasco pins. Publisher package declarations
-  # are package rules, which cover files without a notice of their own;
-  # Attribution reads a file's own SPDX line or license notice first.
+  # The Fiasco parts' license review profile and the listing of the notice
+  # blocks their inventories (each part's ORIGIN.md) leave unread. Publisher
+  # package declarations are package rules, which cover files without a
+  # notice of their own; Attribution reads a file's own SPDX line or
+  # license notice first.
   module FiascoOrigins
     # The SHA-256 of the imported jdb_object.cpp the debugger row names.
     JDB_OBJECT = '6a1359080661ea097fae1a9228dc6448c87b95dcaa6e9974c5e5c6ffc87ec3a2'
@@ -24,8 +27,8 @@ module Erx
       'mk' => '5b801397513b4b8ae49f154dfe25064116bc25233853ef9c38203f80f49da5e2'
     }.freeze
 
-    # The parts of the frozen pins, each with its own inventory.
-    PARTS = %w[kernel l4re-core mk bootstrap libfdt drivers-frst].freeze
+    # The Fiasco parts, each with its own inventory.
+    PARTS = FiascoParts::NAMES
 
     module_function
 
