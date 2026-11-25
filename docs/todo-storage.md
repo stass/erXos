@@ -144,6 +144,8 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   * [Medium] `erx_lfs` lies in `erx_storage`, which the media domain's release may not name, so
     step 4's littlefs volumes need it moved to an application of its own, as `erx_fat_read` moved to
     `erx_fat`, before the release check of step 4 can pass with littlefs in a development build.
+  * [Medium] `erx_media_volume` shows a clean FAT volume that flushes as `rw`, though `erx_fat` has
+    no write path yet, so a write through the media tree fails until that path lands.
 * [Low] Step 4's medium reader refuses the table on a failed read of any sector `erx_media_table`
   asks for, and hands it only 512-byte sectors: `read/2` has no way to be told a sector is
   unreadable, so a read answered as zeros would make a failed sector 0 read as no table.
