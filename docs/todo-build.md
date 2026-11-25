@@ -165,8 +165,8 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   stimulus ([design-bench.md](design-bench.md#the-analysers-stimulus)) and GPIO 20 and 21 as the two pins.
   L4Re's pins, its build and its importer come from the L4Re guest package below, built for the board's platform.
 * [Low] benchmarks, the comparison session's gaps (`tools/lib/erx/bench_session.rb`,
-  [design-bench.md](design-bench.md#a-comparison-session)): erXos's native guest offers only the landing
-  profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'
+  [design-bench.md](design-bench.md#a-comparison-session)): erXos's native guest and Linux's offer only the
+  landing profiles, so `--profile full` is refused before any boot until the bench root is built with the full profiles'
   sizes; and a boot whose guest raises (a QEMU or transcript timeout) is a note and no record, where the design's
   `timed_out` status would record its unreported cells, which needs `BenchMeasurement.boot` to mark them
   `timed_out` from a partial serial log.
@@ -188,7 +188,10 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   module and the Linux guest's boot step landed. Tests: Linux's Erlang guest, with its record read back.
 * [Medium] benchmarks, L4Re's guest under HVF ([design-bench.md](design-bench.md#l4res-guest)): the build
   (`tools/erx build l4re --docker-context NAME` on an arm64 engine), the importer and the session run, and
-  `tools/erx bench nullcall --systems erxos,l4re` measures all three of L4Re's 1-CPU rows. Remaining: what
+  `tools/erx bench nullcall --systems erxos,l4re` measures all three of L4Re's 1-CPU rows. Remaining: L4Re's lock pins upstream Fiasco at
+  `50bbe8a9` while the fork moved to `07ea18e1` (`fiasco/kernel/ORIGIN.md`), so `L4ReFetch.lock` refuses it
+  and `test_the_checked_in_lock_is_l4res_own` fails; re-pinning moves L4Re's repositories to that revision's
+  commit date, re-checks ipcbench, and needs a new build and its facts; what
   ipcbench's cycle counter counts under HVF, the core's cycles or QEMU's model of them, is unverified (every
   total read so far is a multiple of 64), and the image's identity is taken from the engine's cache by its
   pinned reference without the oracle's `image inspect` check of platform and digests; L4Re's build is not
