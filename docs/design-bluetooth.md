@@ -2398,8 +2398,8 @@ operation of its login grant, `root_line`
   ```
 
   Its release, `bleuart`, ships `kernel`, `stdlib`, `erx`,
-  `erx_bt_client` and `erx_bleuart`, whose one process, `erx_bleuart`,
-  is the release's permanent application: its end ends the session, and
+  `erx_bt_client` and `erx_bleuart`, whose process `erx_bleuart`, the
+  owner of the `nus` handler, is the release's permanent application: its end ends the session, and
   the start row's supervisor starts it again within the row's
   intensity ([design-apps.md](design-apps.md#keeping-a-session)). The
   session holds no device, no file grant and no line of its own.
@@ -2412,21 +2412,36 @@ operation of its login grant, `root_line`
   `erx_bleuart`, so the next session asks for the line of whatever
   session the console holds then. An `unavailable` leaves no row in the
   login service, so the process asks again at the next connection; the
-  client it was asked for is sent the one line `bleuart: root's session
-  is not running` and nothing else.
-* **A tty for each connection.** At each `connected`, `erx_bleuart` calls
-  `open_tty(Self, shell, <<>>, 0, 0)` through the line: a tty of root's
-  session, 24 rows of 80 columns, with `abi/terminal.txt`'s default
-  `TERM` and the command shell on it
-  ([design-ssh.md](design-ssh.md#sessions-ttys-and-shells)). From then
-  `erx_bleuart` is the tty's master and speaks the tty's messages
-  ([design-live.md](design-live.md#the-tty), "Between domains") through
-  the console's own master core, `erx_tty_master`, which checks every
-  message from the tty:
-  * **Input.** Each `{serial, Conn, Bytes}` is a `{tty_input, N,
-    Bytes}`, in order; each `{serial_lost, Conn}` is a `{tty_lost, N}`,
-    so a command line that lost bytes is damaged and never runs, as at
-    the UART ([design-live.md](design-live.md#lost-input)).
+  client it was asked for is sent, once it subscribes to `tx` and so can
+  hear it, the one line `bleuart: root's session is not running` and
+  nothing else.
+* **A tty for each connection.** At each `connected`, `erx_bleuart`
+  starts the connection's master, `erx_bleuart_channel`, linked, and
+  calls `open_tty(Master, shell, <<>>, 0, 0)` through the line: a tty of
+  root's session, 24 rows of 80 columns, with `abi/terminal.txt`'s
+  default `TERM` and the command shell on it
+  ([design-ssh.md](design-ssh.md#sessions-ttys-and-shells)). A tty's
+  messages do not name the tty, so each tty has a master process of its
+  own, as each SSH channel has. `erx_bleuart` keeps the connection's
+  stream and hands its master each event; the master speaks the tty's
+  messages ([design-live.md](design-live.md#the-tty), "Between domains")
+  through the console's own master core, `erx_tty_master`, which checks
+  every message from the tty. An event reaches the master only while the
+  master's queue holds fewer than twice `bt_write_queue` messages; past it
+  the event is a `serial_lost`, so no queue a phone fills grows past that
+  bound. The headroom is for the writes `erx_gatt_serial` holds when a
+  master's send reaches it, at most the `bt_write_queue` the link keeps
+  unanswered, which it forwards while the master waits on that send:
+  * **Input.** Each `{serial, Conn, Bytes}` is a `{tty_input, Bytes}`,
+    in order. A `{serial_lost, Conn}` ends the relay, as does a write
+    before the tty names itself, which has no tty to go to: the master
+    sends `tty_hangup`, which ends the shell, and takes nothing more of
+    the connection, so for every drop `bleuart` and the Bluetooth domain
+    see, the bytes after a gap never complete a command line the bytes
+    before it began. The client's link stays until the phone
+    disconnects, its writes reaching no tty, and the master sends it one
+    constant line saying the shell has ended, as it does at the shell's
+    own end and at a tty that fails a check.
   * **Output.** Each `{tty_output, N, Bytes}` is sent with
     `erx_gatt_serial:send(Conn, Bytes)` and answered `{tty_taken, N}`
     once `send/2` returns, `ok` or `{error, busy}`, so a phone that
@@ -2436,12 +2451,15 @@ operation of its login grant, `root_line`
     is held unanswered, so the shell waits and its first prompt reaches
     the client; the tty's resend each second changes nothing meanwhile.
   * **Size.** A client of the UART service has no way to report its
-    size, so `erx_bleuart` sends none, and `stty` changes the tty's, as
+    size, so the master sends none, and `stty` changes the tty's, as
     at the UART.
-  * **Hangup.** At `disconnected` `erx_bleuart` sends `tty_hangup`,
+  * **Hangup.** At `disconnected` the master sends `tty_hangup`,
     which ends the shell and its jobs, as a hangup ends a UNIX login's.
-    Its own end, its domain's included, hangs every tty it masters up,
-    since a tty's relay watches its master. A link that ends for
+    The shell's own end ends the relay too: the line's report of how it
+    ended, `{exited, Status}` or `{signaled, Signal}`, stops the master,
+    and the connection's later writes reach no tty. A master's end, and
+    so `erx_bleuart`'s, its domain's included, hangs its tty up, since a
+    tty's relay watches its master. A link that ends for
     passing a bound, `bt_write_queue` among them, is a disconnect, so a
     gap the radio stack makes in the stream ends the shell rather than
     completing a different command
@@ -2463,7 +2481,8 @@ line at `root_line` and never carries or parses a byte of the stream
 writes reaches the phone unchanged, as it reaches the UART (V1 of
 [design-live.md](design-live.md#invariants)): `bleuart` escapes and
 filters nothing, since what shows the text is the phone's terminal app,
-the operator's own terminal. Its one line of its own is constant ASCII.
+the operator's own terminal. Its lines of its own, the unavailable line
+and the notices at a relay's end, are constant ASCII.
 
 **Off means not advertised.** `bleuart`'s handler is attached while its
 session runs, and the Bluetooth domain advertises `nus` only while it
@@ -2530,8 +2549,7 @@ ships it off, and a release build has none.
 
 | Test | Passing case | Seeded fault |
 | --- | --- | --- |
-| relay (host) | `erx_bleuart` over a stub line and a stub `erx_gatt_serial`: a connection opens one tty with `shell`; serial bytes become `tty_input` in order and a `serial_lost` a `tty_lost` between them; output before `subscribed` is held and taken after it; `disconnected` sends `tty_hangup`; `unavailable` sends the one line and opens no tty | `serial_lost` ignored, so the bytes after the gap continue the line |
-| lost input end to end (host) | a `serial_lost` between `cd /tmp` and a CR reaches the shell's group as a loss: the line is damaged and runs nothing | the loss turned into no message, which runs `cd` |
+| relay (host) | `erx_bleuart` over a stub line and a stub `erx_gatt_serial`: a connection opens one tty with `shell`; each connection's bytes become its own tty's `tty_input` in order and its tty's output reaches its own client; a `serial_lost` sends `tty_hangup` and the bytes after it reach no tty; a burst of `bt_write_queue` writes while a send is pending reaches the tty whole and a master past twice that loses the shell, with a notice; output before `subscribed` is held and taken after it; `disconnected` sends `tty_hangup`; the shell's `exited` ends the relay; `unavailable` sends the one line at the subscription and opens no tty; a refused `open_tty` leaves no tty; the line's end ends `erx_bleuart` | `serial_lost` ignored, so the bytes after the gap continue the line; every event forwarded, so the master's queue grows past the bound |
 | `serial_lost` (host) | `erx_gatt_serial` with an owner whose queue holds `bt_write_queue` messages answers the next write `0x80` and sends one `serial_lost` for a run of three such writes | the bytes dropped with no message |
 | the link's queue (host) | `erx_bt_link_core` holding `bt_write_queue` write commands for a handler ends the link at the next and the registry sends `disconnected` | the command discarded and the link kept |
 | advertising (host) | the registry sends `{advertised, [nus]}` at `nus`'s attach and `{advertised, []}` at its handler's end, and nothing for a service that does not say `advertise`; `erx_bt_hci_core`, in its exhaustive exploration, writes LE Set Advertising Data with `{advertising_data, D}`'s bytes at its next free command slot while advertising, and two inputs before the slot frees write only the later; a controller process started after `nus`'s attach writes data with `nus` before it enables advertising | the registry's message sent at attach only, which keeps the UUID after the handler's end; the controller's ask at its start dropped (the restarted controller advertises without `nus`) |

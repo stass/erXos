@@ -5,9 +5,10 @@
 -moduledoc """
 The relay of one client of bleuart (docs/design-bluetooth.md, "The console"),
 erx_bleuart_core: a phone's bytes reach root's tty as tty input in order, a
-serial_lost as one NUL between them, output is held until the client subscribes
-to tx and taken after, a disconnect hangs the tty up, and messages of any other
-domain, or a tty that names a process of another domain, never reach the master.
+serial_lost ends the relay with a hangup, output is held until the client
+subscribes to tx and taken after, a disconnect hangs the tty up, the shell's end
+ends the relay, and messages of any other domain, or a tty that names a process
+of another domain, never reach the master.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -15,6 +16,10 @@ domain, or a tty that names a process of another domain, never reach the master.
 %% Root's session's domain, the one the line was minted of, and another.
 -define(ROOT, 7).
 -define(OTHER, 9).
+%% The client's notices at an end it did not cause.
+-define(LOST, {notice, <<"\r\nbleuart: input was lost; the shell has ended\r\n">>}).
+-define(ENDED, {notice, <<"\r\nbleuart: the shell has ended\r\n">>}).
+-define(REFUSED, {notice, <<"\r\nbleuart: root's tty failed a check; the shell has ended\r\n">>}).
 
 %% A pid stands for root's tty; owner/1 says which domain a pid is of.
 tty() -> list_to_pid("<0.4242.0>").
@@ -42,18 +47,26 @@ opened() ->
 %% The tty input actions, the bytes root's tty is sent, in order.
 input(Actions) -> [Bytes || {to_tty, _, {tty_input, Bytes}} <- Actions].
 
-input_in_order_with_a_loss_between_test() ->
-    {Actions, _} = run([{serial, <<"cd /t">>}, serial_lost, {serial, <<"mp\r">>}], opened()),
-    ?assertEqual([<<"cd /t">>, <<0>>, <<"mp\r">>], input(Actions)),
-    ?assert(lists:all(fun({to_tty, Tty, _}) -> Tty =:= tty() end, Actions)).
+input_in_order_test() ->
+    {Actions, _} = run([{serial, <<"cd /t">>}, {serial, <<"mp\r">>}], opened()),
+    ?assertEqual([{to_tty, tty(), {tty_input, <<"cd /t">>}}, {to_tty, tty(), {tty_input, <<"mp\r">>}}],
+                 Actions).
 
-%% Bytes before the tty names itself have nowhere to go: they are one loss, which
-%% reaches the tty first, so they never become the start of a line.
-bytes_before_the_tty_are_one_loss_test() ->
-    {Before, C} = run([{serial, <<"rm -rf /">>}, serial_lost, {serial, <<"x">>}], new()),
-    ?assertEqual([], Before),
-    {After, _} = run([{tty, ?ROOT, {tty_open, tty()}}, {serial, <<"tmp\r">>}], C),
-    ?assertEqual([<<0>>, <<"tmp\r">>], input(After)).
+%% A gap ends the relay, so the bytes after it never complete the line before it.
+a_loss_hangs_the_tty_up_test() ->
+    ?assertEqual({[{to_tty, tty(), {tty_input, <<"cd /t">>}}, {to_tty, tty(), tty_hangup}, ?LOST, stop], ended},
+                 status(run([{serial, <<"cd /t">>}, serial_lost, {serial, <<"mp\r">>}], opened()))).
+
+%% Bytes before the tty names itself have nowhere to go: they are a loss.
+bytes_before_the_tty_end_the_relay_test() ->
+    ?assertEqual({[?LOST, stop], ended}, status(run([{serial, <<"rm -rf /">>}], new()))),
+    ?assertEqual({[?LOST, stop], ended}, status(run([serial_lost], new()))).
+
+%% The line reports the shell's end once the shell has ended: no hangup, a notice.
+the_shells_end_ends_the_relay_test() ->
+    ?assertEqual({[?ENDED, stop], ended}, status(run([{tty, ?ROOT, {exited, 0}}], opened()))),
+    ?assertEqual({[?ENDED, stop], ended}, status(run([{tty, ?ROOT, {signaled, sigint}}], opened()))),
+    ?assertEqual({[], open}, status(run([{tty, ?OTHER, {exited, 0}}], opened()))).
 
 output_is_held_until_subscribed_test() ->
     {Held, C1} = run([{tty, ?ROOT, {tty_output, 0, <<"% ">>}}], opened()),
@@ -83,10 +96,10 @@ disconnect_hangs_the_tty_up_test() ->
 other_domains_and_bad_ttys_test() ->
     ?assertEqual({[], open}, status(run([{tty, ?OTHER, {tty_open, tty()}}], new()))),
     ?assertEqual({[], open}, status(run([{tty, ?OTHER, {tty_output, 0, <<"x">>}}], opened()))),
-    ?assertEqual({[stop], ended}, status(run([{tty, ?ROOT, {tty_open, stranger()}}], new()))),
-    ?assertEqual({[{to_tty, tty(), tty_hangup}, stop], ended},
+    ?assertEqual({[?REFUSED, stop], ended}, status(run([{tty, ?ROOT, {tty_open, stranger()}}], new()))),
+    ?assertEqual({[{to_tty, tty(), tty_hangup}, ?REFUSED, stop], ended},
                  status(run([{tty, ?ROOT, {tty_open, stranger()}}], opened()))),
-    ?assertEqual({[{to_tty, tty(), tty_hangup}, stop], ended},
+    ?assertEqual({[{to_tty, tty(), tty_hangup}, ?REFUSED, stop], ended},
                  status(run([{tty, ?ROOT, {tty_output, 5, <<"x">>}}], opened()))),
     ?assertEqual({[], open}, status(run([{tty, ?ROOT, {tty_open, tty()}}], opened()))).
 

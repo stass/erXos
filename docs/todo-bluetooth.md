@@ -154,13 +154,17 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 ## Planned features
 
 * [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The console";
-  docs/design-login.md, build order 7): build the `bleuart` app (its principal, session template, `ble` and `login`
-  rows and `start` row in the Raspberry Pi 4's development manifest, the published medium's packing of
-  `published_enable` in `enable`'s place, the `bleuart` release with `erx_bleuart`), with their tests, the Bumble cell and probe B-P7. The login facet's
+  docs/design-login.md, build order 7): the `bleuart` release and `erx_bleuart` with its relay test, the login facet's
   `root_line`, `bleuart`'s holder row, the release-manifest refusal and `ble_grant`'s admission of a `start` row's
-  template whose principal's `domains` quota is 1 are built. `serial_lost`'s `{tty_lost, N}`
-  waits on step 3 of the input-loss event (todo-shell.md), and the Bluetooth suite's manifest drops root's session
-  template (`MediumBoot.manifest`), so the cell needs root's session and `bleuart`'s room beside the echo's.
+  template whose principal's `domains` quota is 1 are built. Left: its rows in the Raspberry Pi 4's and QEMU's
+  development manifests, the published medium's packing of `published_enable` in `enable`'s place, the Bumble cell
+  and probe B-P7; the Bluetooth suite's manifest drops root's session template (`MediumBoot.manifest`), so the cell
+  needs root's session and `bleuart`'s room beside the echo's. After a loss of input or the shell's end the phone stays
+  connected to no tty until it disconnects: the `ble` facet has no operation by which a handler ends a link.
+  bleuart's "a gap ends the shell" holds for the drops it and the Bluetooth domain see; numbered input checked at the
+  tty (todo-shell.md, the input-loss event, step 3) would make it hold by construction. erx_gatt_serial drops a
+  `subscribed` while its owner is behind, silently: a dropped `notify` leaves bleuart's output held while input still
+  reaches root's shell; it should be a `serial_lost` too.
   The unlanded branch `login-8`, the phone console, is superseded and does not land. CLAUDE.md's
   fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
 * [Medium] bluetooth, inspection (docs/design-bluetooth.md, "Inspection"): `/proc/bt` (the controller, each

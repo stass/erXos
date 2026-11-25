@@ -215,8 +215,8 @@ app gets the command shell, and never the console's `Ctrl-G` menu or
 the system shell. Its bytes reach root's session as terminal input,
 through the tty's line discipline; the system domain only hands over
 the line and parses none of them. Input the radio stack drops ends the
-phone's link, and input `bleuart` itself has to drop is reported to the
-tty as lost, so a partly lost command line never runs. One phone is
+phone's link, and input `bleuart` itself has to drop hangs the shell up,
+so a partly lost command line never runs. One phone is
 connected at a time, since the Bluetooth domain's connection limit is
 one, and a disconnect hangs its tty up. There is no login and no
 pairing, so anyone in range gets a root shell, a limitation published
