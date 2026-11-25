@@ -1991,7 +1991,7 @@ systems; the table sets them beside each other.
 What runs on erXos is derived, not declared. Before its timed loop each
 cell makes its calls once, untimed; a call that answers `ENOSYS` or
 `ENOTSUP` makes the cell `unsupported` with that call and its `errno`
-named as the reason (`unsupported: newfstatat answered ENOSYS`), the
+named as the reason (`unsupported: stat answered ENOSYS`), the
 status the record already has for an operation the environment lacks.
 The rows that wait on an unbuilt part therefore report so from the
 system itself, a row measures once its part exists, and no list of
@@ -2391,7 +2391,7 @@ Each is new and named here; nothing else is added.
 
 | Test | Passing case | Seeded failure that must fail it |
 | --- | --- | --- |
-| the probe of a call | on erXos, `stat` comes back `unsupported: newfstatat answered ENOSYS` and `read` `measured` | the probe dropped: `stat`'s timed loop counts failed calls and the cell is `failed`, never a number |
+| the probe of a call | on erXos, `stat` comes back `unsupported: stat answered ENOSYS` and `read` `measured` | the probe dropped: `stat`'s timed loop counts failed calls and the cell is `failed`, never a number |
 | erXos's build of the program | it links and passes `CounterReads` | the Linux branch's own counter read compiled into the erXos build: `CounterReads` refuses the program, so the erXos build is shown to take its own clock |
 | `open` and `close` | the lowest-number check holds after the loop | a seeded build that skips one `close` in a hundred: the next `open` returns a higher number and the cell is `failed` |
 | `munmap` | the `mprotect` afterwards answers `ENOMEM` on both systems | a seeded build whose `munmap` does nothing: `mprotect` succeeds and the cell is `failed` |
@@ -2401,7 +2401,7 @@ Each is new and named here; nothing else is added.
 | the program table | an erXos and a Linux boot of `posix` print one row per cell with both columns and the declaration's line | a declaration without its line: the declaration is refused before any boot |
 | Genode's importer | a fixture erXos writes in the labelled form gives `measured` cells | the label left on: every line is `rejected` |
 | the batching rule (C and Erlang, on the host) | at an increment of one tick a median of 3 ticks gives a batch of 64; at an increment of 1,000 ticks a median of 30,000 gives 4, and a median of 0 gives 256, from both libraries alike | the increment ignored in the C library: the 30,000-tick median gets a batch of 1 and a histogram of steps of 1,000 |
-| the CPU count | a four-CPU erXos boot's `posix` run calibrates the pair of CPU 0 and CPU 3 and runs its cross-CPU cells | the count taken from `sysconf` instead: the run sees one CPU, calibrates no pair and reports its cross-CPU cells `unsupported` |
+| the CPU count | a four-CPU erXos boot's `posix` run calibrates the pair of CPU 0 and CPU 3 and runs its cross-CPU cells | the count taken from `sysconf` instead: the run sees one CPU, calibrates no pair and reports its cross-CPU cells `unsupported`, and its `CLOCK` line, which does not calibrate the pair the boot asked, makes every cell of the boot `rejected` |
 
 Sensitivity run, as [Verification](#verification) defines them: a
 100 us busy wait in `erx_prog_handler`'s answer to a file read, which

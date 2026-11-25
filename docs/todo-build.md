@@ -188,6 +188,23 @@ design does not have, to be deleted so no side-by-side table can show it under s
   the guest's refusal does not name `ERX_CLANG`, `ERX_LLD` or the compiler-rt pin its build needs; the QEMU
   environment map, the per-boot directory name and the compiler's version line are each written by more than
   one guest (`linux_guest.rb`, `l4re_bench.rb`, `bench_landing.rb`, `bench_g3.rb`, `bench_g5.rb`).
+* [Medium] benchmarks, the `posix` program table's cell parameters (`tools/lib/erx/benches/posix.rb`,
+  `bench/peer/erx_peer_bench.c` `posix_cells`): each cell's operation, placement and parameters (the byte
+  counts, the 16 MiB files, the pipe and poll peers) are written in both, and a change to one shows only as a
+  cell the boot asks and the program never prints, or the reverse. A header generated from the declarations
+  into the build tree, as `PeerBench.flags` passes the profiles' sizes, should make `posix.rb` the one source.
+* [Medium] benchmarks, the `posix` program's checks (`bench/peer/erx_peer_bench.c`, from the review of its first
+  slice): `page_blank` reads only a page's first and last 8 bytes where the row says every page reads zero, and
+  `page_zero` already scans the whole page (a recycled page with old data elsewhere passes as `measured`); the
+  `write` cells write the pattern the file already holds into a buffer that already holds it, so a `pwrite` that
+  writes nothing passes (write a distinct pattern and clear the buffer before the check's read); a `begin` that
+  fails with an errno other than `ENOSYS` or `ENOTSUP` (`ENOSPC` from a too-small `/tmp`) is reported "wrong
+  result", blaming the system, where its reason should name the call and errno; `pipe-stream`'s timed interval
+  includes B's checksum of all 64 MiB through `memcpy` calls that `-ffreestanding` keeps out of line, so the
+  row may time the checksum more than the pipe (unmeasured); `munmap` is declared "same act" while erXos frees
+  64 committed pages and Linux unmaps pages never touched (fault them in during prepare, or call it the nearest
+  counterpart); and the non-erXos build opens fixed `/tmp` names with `O_CREAT|O_TRUNC`, so on a shared host a
+  planted symlink is truncated and written (`mkdtemp` one directory per run).
 * [Medium] benchmarks, Linux's Erlang guest under HVF ([design-bench.md](design-bench.md#linuxs-erlang-guest)): a
   guest export of the Linux oracle (the installed stock OTP 29.1.2 tree and the libraries its programs load, listed
   in the workload phase and copied by the exporter, [design-host-oracle.md](design-host-oracle.md#native-workspace-and-artifact-export));

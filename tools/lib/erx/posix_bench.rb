@@ -80,6 +80,7 @@ module Erx
     # built image, its machine and manifest, and the program's flags, SHA-256 and compiler
     # (PeerBench.compiler_version, as Linux's record names it).
     def build(root:, runner:, compiler:, linker:, platform:, seeded: [])
+      named = PeerBench.compiler_version(runner, compiler)
       on = machine(platform)
       source = manifest(platform.manifest_source(root))
       built, programs = Programs.test_image(root: root, runner: runner, compiler: compiler, linker: linker, machine: on,
@@ -88,7 +89,7 @@ module Erx
                                             manifest_source: source, flags: flags(seeded: seeded))
       { built: built, machine: on, manifest: source, flags: flags(seeded: seeded),
         program_sha256: Digest::SHA256.file(programs.fetch(PROGRAM).fetch(:program)).hexdigest,
-        compiler: PeerBench.compiler_version(runner, compiler) }.freeze
+        compiler: named }.freeze
     end
 
     # One boot of the built image (build's answer) at cpus CPUs under accel, its serial
