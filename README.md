@@ -263,6 +263,13 @@ Eshell V17.1.1 (type help(). for help)
   the running system and read its files; `tools/erx web` shows the
   machine's records in a browser.
 * Hosted mode runs the runtime as a macOS process for fast iteration.
+* `tools/erx bench NAME --systems erxos,l4re,linux` boots erXos, L4Re and
+  Linux's stock virt kernel side by side under HVF on QEMU `virt` and prints
+  each system's counterpart cells in one table. A run's record holds each
+  boot of the system it measured, every boot is one side of a comparison,
+  the cycle probe reads the cycle counter per tick on every boot, and a cell
+  timed in batches keeps its total and shows its mean. The comparison is
+  QEMU only.
 * The book, `docs/book`, renders to HTML with diagrams drawn in the manual's
   style: `ruby tools/build_book.rb`. The website serves xterm.js itself.
 * In every domain but the system domain, `erx_report` filters OTP's crash
@@ -365,9 +372,12 @@ Eshell V17.1.1 (type help(). for help)
   QEMU `virt` the `usb` suite serves a `usb-storage` stick beside the
   keyboard, reads its sectors, writes, reads back and flushes them through
   the medium's transport, ejects its medium and unplugs it; host tests
-  check the function against a model stick on a fake controller. Drive
-  numbers (`disk0` upward) and the window above a medium are designed but
-  not built, so no file system mounts a USB stick yet.
+  check the function against a model stick on a fake controller.
+* On QEMU `virt` a USB stick's FAT volume is read from root's session: the
+  media domain gives the stick the drive `disk0`, mounts its first
+  partition, and the `usb` suite lists `/media/disk0/s1` and reads its
+  file there with `file:list_dir` and `file:read_file`. It has not run on
+  the Pi 4 yet.
 
 **Networking**
 
@@ -400,9 +410,18 @@ Eshell V17.1.1 (type help(). for help)
   macOS's log shows an ATT MTU of 185 and the GAP and GATT services; the
   Mac's `blew` discovers Nordic's UART service and has a read of its
   write-only characteristic refused, which `tools/ble_board_check.rb`
-  scripts. The UART service on the card waits for the planned `bleuart`
-  service, so a write to it is answered Unlikely Error and no echo can be checked; pairing has
-  not run on the board.
+  scripts. Pairing has not run on the board.
+* `bleuart` gives a BLE client root's `rc` over Nordic's UART service: each
+  connected client gets a tty of root's session with the command shell, as
+  an SSH channel does. It is a row of the start table, so
+  `service bleuart enable|disable|start|stop` turns it on and off, and the
+  UART service is not advertised while it is off. It is on for
+  the Pi 4's development manifest and off for the published card. On QEMU
+  `virt` the Bluetooth suite's `bleuart` cell, with a Bumble central,
+  scans for the service, connects without pairing, gets `rc`'s prompt,
+  runs `echo` and `ps`, and after `service bleuart stop` scans again and
+  finds no service. The cell does not yet run Ctrl-C, a reconnect or
+  `service bleuart start`, and no Pi 4 run of `bleuart` has been made.
 
 **Display and input**
 
