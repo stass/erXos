@@ -1119,6 +1119,17 @@ design does not have, to be deleted so no side-by-side table can show it under s
   and `make check-reproducible` builds the kernel once and packs that one
   build twice. Give it a gate, or make `check-reproducible` rebuild the
   kernel.
+* [Low] Fiasco kernel builds, `FiascoToolchain#kernel_settings`
+  (`tools/lib/erx/fiasco_toolchain.rb`): the eight archives each kernel build leaves
+  under `build/fiasco/kernel` and `build/fiasco/kernel-release`
+  (`libabi.a`, `libc.a`, `libcxx.a`, `libdrivers.a`, `libfdt.a`,
+  `libgluedriverslibc.a`, `libjabi.a`, `libk.a`) differ between two builds
+  of the same sources although every member and the linked kernel are
+  byte-identical: their member headers carry timestamps and owners, because
+  the kernel builds' `ARFLAGS` are `crsU` and llvm-ar's `U` asks for them.
+  Drop the `U` (llvm-ar's default is `D`), updating the test that pins the flags
+  (`test/host/fiasco_test.rb`), so a reproducibility check can compare the
+  archives whole.
 * [Medium] build gates, the published media and the Doom example
   (`ProductionImage::MediumKind.published`): only `tools/erx pack
   --published` (`make pack`) builds the published QEMU medium and the Pi 4
