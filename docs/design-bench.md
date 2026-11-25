@@ -1339,8 +1339,8 @@ offline without a disk image. Its configuration
 `PREEMPT_NONE` by default with `PREEMPT_DYNAMIC`, 4 KiB pages, an
 initramfs with gzip support, PSCI, and `EFI_ZBOOT`. The kernel file is
 an EFI zboot image: its first bytes are `MZ`, `zimg` and the compression
-name `gzip`. QEMU's `-kernel` loads such an image as it is (QEMU 11.1.3
-under HVF, the first boot), so the boot step inflates nothing.
+name `gzip`. QEMU's `-kernel` loads such an image as it is, so the boot
+step inflates nothing.
 
 **User mode.** No distribution user mode at all: the initramfs holds
 `erx_peer_bench` as `/init`, the directories `/dev` and `/dev/shm`
@@ -1367,7 +1367,7 @@ arithmetic, which erXos's compiler-rt builtins archive supplies. The profile siz
 as they reach the erXos guest it is set beside, so a cell's profile is
 equal on both sides. One static binary runs on any AArch64 Linux, so the
 board's Linux row can carry the same file ([open decision](#open-decisions-of-the-comparison)).
-Nothing of Alpine runs on the host: `musl-dev`'s headers and `libc.a` are
+Nothing of Alpine runs on the host: `musl-dev`'s headers, start files and `libc.a` are
 input files to erXos's clang and `ld.lld`, and the kernel runs only
 inside QEMU, whose guest has no network device.
 

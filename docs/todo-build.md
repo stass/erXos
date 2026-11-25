@@ -173,7 +173,11 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   the kernel likely does not deliver to process 1, and its power-off on every end passing through `exit`
   (a small `/init` that forks the program and powers off when it ends would make both hold by construction);
   `NewcArchive.member` builds the header from positional fields; whether `shm_open` under `/dev/shm` needs no
-  mount and what `panic=-1` does are still unverified.
+  mount and what `panic=-1` does are still unverified. From the review: the record's `flags` are the compile
+  step's alone, with `MUSL_DEV` standing for the package's path, and miss the link step and `ld.lld`'s version;
+  the guest's refusal does not name `ERX_CLANG`, `ERX_LLD` or the compiler-rt pin its build needs; the QEMU
+  environment map, the per-boot directory name and the compiler's version line are each written by more than
+  one guest (`linux_guest.rb`, `l4re_bench.rb`, `bench_landing.rb`, `bench_g3.rb`, `bench_g5.rb`).
 * [Medium] benchmarks, Linux's Erlang guest under HVF ([design-bench.md](design-bench.md#linuxs-erlang-guest)): a
   guest export of the Linux oracle (the installed stock OTP 29.1.2 tree and the libraries its programs load, listed
   in the workload phase and copied by the exporter, [design-host-oracle.md](design-host-oracle.md#native-workspace-and-artifact-export));

@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'tmpdir'
 require_relative 'bench_measurement'
 require_relative 'bench_system'
 require_relative 'compiler_rt'
@@ -54,11 +55,13 @@ module Erx
                          NewcArchive::Entry.directory('proc'), NewcArchive::Entry.file('init', init, mode: 0o755)])
     end
 
-    # Builds the guest's kernel path, initramfs and their facts under build/linux-guest.
-    # Answers the files and the subject facts a record keeps.
+    # Builds the guest's initramfs in a directory of its own under build/linux-guest, so
+    # no other build replaces what a session boots. Answers the kernel's path, the
+    # initramfs and the subject facts a record keeps.
     def build(root:, runner:)
       dependencies = lock(root: root, runner: runner)
-      output = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
+      parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
+      output = Dir.mktmpdir("build-#{Process.pid}-", parent)
       peer = compile_peer(root: root, usr: dependencies.fetched_tree(MUSL_DEV), output: output, runner: runner)
       initrd = File.join(output, 'initramfs.cpio')
       File.binwrite(initrd, initramfs(File.binread(peer)))
@@ -150,6 +153,10 @@ module Erx
         directory = File.join(@root, 'build/qemu', "linux-bench-#{accel}-#{cpus}cpu-#{Process.pid}-#{Random.bytes(8).unpack1('H*')}")
         report = LinuxGuest.boot(root: @root, runner: @runner, built: @built, benchmark: benchmark.name, cpus: cpus,
                                  accel: accel, directory: directory)
+        # The kernel QEMU booted is the pinned one, as the record says.
+        unless report.fetch('image_sha256') == @built.fetch(:subject).fetch('kernel').fetch('sha256')
+          raise Error, "#{@built.fetch(:kernel)} is not the kernel Linux's lock pins: run `tools/erx fetch --linux`"
+        end
         serial = report.fetch('serial_log')
         lines = NativeBench.guest_lines(File.binread(serial))
         answer = BenchMeasurement.boot(lines, PeerBench.asked(benchmark.name, cpus: cpus, clock: 'counter'))

@@ -1136,13 +1136,13 @@ module Erx
       side = nil
       sets = package_sets
       parser = OptionParser.new do |options|
-        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re or --linux, its build/l4re-sources or build/linux-sources/build/downloads) as the source cache") { |value| cache = value }
+        options.on('--cache DIRECTORY', "Use only another checkout's build/downloads (with --l4re or --linux, its build/l4re-sources/build/downloads or build/linux-sources/build/downloads) as the source cache") { |value| cache = value }
         options.on('--source ID', 'Fetch this pinned source; repeatable') { |value| source_ids << value }
         options.on('--packages NAME', "Install this package set (#{sets.keys.join(', ')}); repeatable") { |value| package_names << value }
         options.on('--docker-context NAME', 'Use this local Docker context for image fetch') { |value| docker_context = value }
         options.on('--example NAME', 'Fetch only this example and its downloads (doom), which no other fetch obtains') { |value| example = value }
-        options.on('--l4re', "Fetch only L4Re's guest's sources (bench/l4re/deps.lock), which no other fetch obtains") { side = L4ReFetch }
-        options.on('--linux', "Fetch only Linux's guest's sources (bench/linux/deps.lock), which no other fetch obtains") { side = LinuxGuest }
+        options.on('--l4re', "Fetch only L4Re's guest's sources (bench/l4re/deps.lock), which no other fetch obtains") { side = side ? :both : L4ReFetch }
+        options.on('--linux', "Fetch only Linux's guest's sources (bench/linux/deps.lock), which no other fetch obtains") { side = side ? :both : LinuxGuest }
       end
       parser.parse!(arguments)
       raise OptionParser::InvalidArgument, 'unexpected arguments' unless arguments.empty?
@@ -1152,7 +1152,7 @@ module Erx
       if (example || side) && !(source_ids.empty? && package_names.empty? && docker_context.nil?)
         raise OptionParser::InvalidArgument, '--example, --l4re and --linux take no --source, --packages or --docker-context'
       end
-      raise OptionParser::InvalidArgument, '--example, --l4re and --linux are separate fetches' if example && side
+      raise OptionParser::InvalidArgument, '--example, --l4re and --linux are separate fetches' if (example && side) || side == :both
 
       runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
       return fetch_example(example, cache: cache, runner: runner) if example
