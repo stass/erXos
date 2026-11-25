@@ -460,27 +460,32 @@ module Erx
     end
 
     # Lays the partition's files for bootable out into directory with their build record,
-    # as lay_out does, without the card: a bench set (write_set).
+    # as lay_out does, without the card: a bench set (write_set). With boot_cpu_only, the
+    # board's tree keeps only the boot CPU (BoardTree.boot_cpu_only), and the record says so.
     def lay_out_set(root:, runner:, platform:, build_kind:, bootable:, directory:, compiler:, linker:,
-                    revision: SourceRevision.read(root: root, runner: runner))
+                    revision: SourceRevision.read(root: root, runner: runner), boot_cpu_only: false)
       plan, record = layout(root: root, runner: runner, platform: platform, build_kind: build_kind, bootable: bootable,
-                            compiler: compiler, linker: linker, revision: revision, bootable_record: nil)
+                            compiler: compiler, linker: linker, revision: revision, bootable_record: nil,
+                            boot_cpu_only: boot_cpu_only)
       # A set has no card, so its record names no card's tool.
-      write_set(root: root, directory: directory, plan: plan, record: record.merge('inputs' => record.fetch('inputs').except('card')))
+      record = record.merge('inputs' => record.fetch('inputs').except('card'))
+      record = record.merge('board_tree_cpus' => 'boot CPU only') if boot_cpu_only
+      write_set(root: root, directory: directory, plan: plan, record: record)
     end
 
     # The plan and the build record of bootable's partition on platform: BL31 and the
     # board's tree built, the firmware as deps.lock pins it, verified against its pinned
     # hashes.
-    def layout(root:, runner:, platform:, build_kind:, bootable:, compiler:, linker:, revision:, bootable_record:)
+    def layout(root:, runner:, platform:, build_kind:, bootable:, compiler:, linker:, revision:, bootable_record:,
+               boot_cpu_only: false)
       dependencies = Dependencies.new(root: root, runner: runner)
       pinned = FIRMWARE.map { |id| dependencies.archive_for(id) }
       plan = plan(platform: platform, build_kind: build_kind, bootable: bootable,
                   firmware: pinned.to_h { |source, archive| [source.fetch('filename'), archive] },
                   bl31_license: Bl31.license(root: root, runner: runner),
                   bl31: Bl31.ensure(root: root, runner: runner, compiler: compiler, linker: linker),
-                  tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler,
-                                        revision: revision))
+                  tree: BoardTree.build(root: root, runner: runner, platform: platform, compiler: compiler, revision: revision)
+                                 .then { |built| boot_cpu_only ? BoardTree.boot_cpu_only(built, runner: runner) : built })
       [plan, record(root: root, runner: runner, revision: revision, platform: platform,
                     firmware: pinned.map(&:first), compiler: compiler, linker: linker, bootable_record: bootable_record)]
     end

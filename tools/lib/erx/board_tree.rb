@@ -71,6 +71,9 @@ module Erx
     LICENSE = 'LICENSES/preferred/GPL-2.0'
     # The name it ships by, beside the board's tree and source.
     LICENSE_FILE = 'LICENSE.linux-dts'
+    # The boot CPU's node under /cpus, the one a one-CPU tree keeps, and any CPU's.
+    BOOT_CPU = 'cpu@0'
+    CPU_NODE = /\Acpu@\h+\z/
 
     module_function
 
@@ -224,6 +227,29 @@ module Erx
                 overlays: board.overlays.keys.to_h { |name| [name, File.join(destination, 'overlays', "#{name}.dtbo")] })
     end
 
+    # The CPU nodes of /cpus that a one-CPU tree removes, from the names fdtget -l prints
+    # there: every cpu@N but the boot CPU's, which must be among them. Pure.
+    def other_cpus(names)
+      raise Error, "the board's tree has no #{BOOT_CPU} under /cpus" unless names.include?(BOOT_CPU)
+
+      names.grep(CPU_NODE) - [BOOT_CPU]
+    end
+
+    # built with its board tree replaced by a copy in one-cpu/ beside it that keeps only
+    # the boot CPU's node, so a kernel that starts the CPUs its tree lists starts one
+    # (docs/design-bench.md, "L4Re on the board"). The source shipped beside it is the
+    # whole board's; the set's record says the tree was cut.
+    def boot_cpu_only(built, runner:)
+      directory = File.join(File.dirname(built.board), 'one-cpu')
+      FileUtils.mkdir_p(directory)
+      tree = File.join(directory, File.basename(built.board))
+      FileUtils.cp(built.board, tree)
+      compile = Compile.new(runner: runner)
+      others = other_cpus(compile.subnodes(tree, '/cpus'))
+      compile.run(['fdtput', '-r', tree, *others.map { |name| "/cpus/#{name}" }], 'fdtput-cpus') unless others.empty?
+      built.with(board: tree)
+    end
+
     # The preprocessed source shipped beside the board's tree: its name with .dts.
     def source_file(board) = "#{File.basename(board.file, '.dtb')}.dts"
 
@@ -266,6 +292,15 @@ module Erx
         raise Error, "#{node} #{property} is not one number" unless text.match?(/\A\d{1,10}\n?\z/)
 
         Integer(text, 10)
+      end
+
+      # The names of node's subnodes, as fdtget -l prints them.
+      def subnodes(tree, node)
+        log = run(['fdtget', '-l', tree, node], 'fdtget-list').fetch('log')
+        names = BoundedFile.read(log, maximum: 4096).split("\n")
+        raise Error, "#{node}'s subnodes are not node names" unless names.all? { |name| name.match?(/\A[A-Za-z0-9,._+@-]{1,64}\z/) }
+
+        names
       end
 
       def run(argv, name) = runner.run(argv, name: "board-tree-#{name}", deadline: DEADLINE)

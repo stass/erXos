@@ -47,13 +47,16 @@ module Erx
     module_function
 
     # The tables of benchmark's landing boots from runs, with a column for each of systems.
-    def tables(benchmark, runs, systems:)
+    # Each row reads the runs of its cell's CPU form; with forms false, as on the board,
+    # where each system boots in its own form, every run, and the row names no form.
+    def tables(benchmark, runs, systems:, forms: true)
       BenchSuite::BOOTS.filter_map do |boot, entry|
         cells = benchmark.landing[boot] or next
         rows = cells.map do |cell|
-          cpus = cell.cpus == 1 ? 1 : entry.cpus
+          cpus = (cell.cpus == 1 ? 1 : entry.cpus if forms)
+          read = forms ? runs.select { |run| run.record.environment.cpus == cpus } : runs
           Row.new(benchmark: benchmark.name, cell: cell, cpus: cpus, act: benchmark.operations.fetch(cell.operation).act,
-                  columns: columns(benchmark, cell, runs.select { |run| run.record.environment.cpus == cpus }, systems))
+                  columns: columns(benchmark, cell, read, systems))
         end
         Table.new(layer: entry.layer, benchmark: benchmark.name, rows: rows)
       end
@@ -144,7 +147,7 @@ module Erx
     def render_row(row)
       cell = row.cell
       ["#{row.benchmark}.#{cell.operation} #{cell.load} #{cell.placement}#{parameters(cell.parameters)}, " \
-       "#{row.cpus}-CPU form",
+       "#{row.cpus ? "#{row.cpus}-CPU form" : 'on the board'}",
        *(row.act ? ["  act: #{row.act}"] : []),
        *row.columns.flat_map { |column| render_column(column) }]
     end

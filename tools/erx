@@ -830,7 +830,7 @@ module Erx
     end
 
     def self.help(_arguments)
-      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
+      Terminal.puts('usage: tools/erx boot [--accel tcg|hvf] [--cpus N] [--jobs N] [--hostlink] [--without-web] [--medium PATH [--print]] | build fiasco | build release-kernel | build runtime | build rc-oracle | build glyphs | build fsimg | build herd7 | build lvgl | build web | build l4re --docker-context NAME [--jobs N] | qemu | oracle build|run|probe|install | oracle hosted [--suites LIST] | oracle qemu [--suites LIST] | bench WORKLOAD | bench NAME --systems LIST [--profile landing|full] | bench g3 --accel tcg|hvf | bench g5 --accel tcg|hvf | bench boot --accel tcg|hvf [--runs N] [--image PATH] | bench bytes --accel hvf [--image PATH] | bench web --accel hvf | bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR]... | bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG | bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR] | bench import NAME --env pi4-4gb-l4re --subject FILE LOG | bench net-freebsd --host H [--runs N] [--only LIST] [--require-fast-path] | conformance | check-boot-image | check-debug-log | check-qemu [--suite NAME] [--fresh] [--one-at-a-time] [--remote DEST] [--busy-load LOAD] | fetch | generate | check | check-reproducible [--platform NAME] | check-runtime-seam | check-fuzz | check-sanitizers | check-stack-proof | check-oracle | check-libc-test ACCEL CPUS | check-tla | check-cbmc [--filter TEXT] | check-litmus | sysreg refresh [--verify] [--root PATH] | gates | pack [--medium | --published] [--platform NAME] [--app DIR|FILE]... [--enable NAME]... [--signer FILE]... | pack --probe header --platform raspi4b | sdk export DIR | load (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) FILE... | watch (--socket PATH [--build HEX] | --ssh DEST) (--system | --domain D) [--interval S] DIR | files --socket PATH --listen SOCK [--build HEX] [--once] | netboot [--tftp DIR] [--platform NAME] | web --socket PATH [--build HEX] [--port N] | status | setup [--bootstrap] [--jobs N] | ssh [--port N] [COMMAND ...]')
       0
     end
 
@@ -1525,6 +1525,10 @@ module Erx
     # the walk (BoardRun). The environment is the board's for a benchmark with a native
     # bench guest, whose set BoardSets lays out.
     def self.bench_board(name, arguments)
+      require_relative 'lib/erx/l4re_board'
+      return bench_board_l4re(name, arguments) if arguments.each_cons(2).include?(['--env', L4ReBoard::ENVIRONMENT]) ||
+                                                 arguments.include?("--env=#{L4ReBoard::ENVIRONMENT}")
+
       require_relative 'lib/erx/bench_suite'
       require_relative 'lib/erx/board_run'
       require_relative 'lib/erx/fsimg'
@@ -1590,18 +1594,73 @@ module Erx
       raise
     end
 
+    # tools/erx bench NAME --env pi4-4gb-l4re --console DEVICE|tcp:HOST:PORT --ssh DEST --key FILE [--http DIR]
+    # (docs/design-bench.md, "L4Re on the board"): L4Re's board build laid out as a one-CPU
+    # bench set, netbooted, its run walked to the board's return, and its log imported and
+    # set beside erXos's newest board record of NAME. Exit status 0 only when Benchmarks
+    # done. came and the board came back.
+    def self.bench_board_l4re(name, arguments)
+      require_relative 'lib/erx/fsimg'
+      options = { http: Netboot::DEFAULT_HTTP_ROOT }
+      OptionParser.new do |flags|
+        flags.on('--env NAME') { |value| options[:env] = value }
+        flags.on('--console DEVICE') { |value| options[:console] = value }
+        flags.on('--http DIR') { |value| options[:http] = value }
+        flags.on('--ssh DEST') { |value| options[:ssh] = value }
+        flags.on('--key FILE') { |value| options[:key] = value }
+      end.parse!(arguments)
+      no_arguments(arguments)
+      benchmark = BenchSuite.benchmark(name)
+      raise Error, "bench #{name} has no cell with an l4re counterpart" if L4ReBoard.asked(benchmark).empty?
+
+      missing = %i[console ssh key].reject { |option| options[option] }
+      raise Error, "bench --env #{L4ReBoard::ENVIRONMENT} needs #{missing.map { |option| "--#{option}" }.join(', ')}" unless missing.empty?
+
+      history = BenchRecord.history
+      BenchRecord::Destination.new(history: history, erxos_root: ROOT)
+      NetbootEntry.signing_key(options[:key])
+      runner = Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
+      revision = SourceRevision.read(root: ROOT, runner: runner) || raise(Error, "bench: #{ROOT} is not a git checkout")
+      set = L4ReBoard.lay_out(root: ROOT, runner: runner, platform: Platform.load(root: ROOT, name: Netboot::PLATFORM),
+                              compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
+      clock = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+      fsimg = Fsimg.locate(root: ROOT)
+      ran = L4ReBoard::Run.new(
+        root: ROOT, www: options[:http], shell: BoardRun::Ssh.new(options[:ssh]),
+        prepare: ->(**queue) { Netboot.prepare(**queue, runner: runner, fsimg: fsimg) },
+        console: ->(log:, classify:) { BoardConsole.open(options[:console], log: log, clock: clock, classify: classify) },
+        clock: clock, out: Terminal.method(:puts)
+      ).call(set: set, key: options[:key])
+      if ran.done
+        bench_l4re_record(benchmark, subject: L4ReBench::Build.new(directory: File.join(ROOT, L4ReBoard::BUILD),
+                                                                   bootable: L4ReBoard::BOOTABLE).record_path,
+                                     log: ran.log, history: history, revision: revision)
+      end
+      ran.done && ran.ending == 'returned' ? 0 : 1
+    end
+
+    # Writes L4Re's board record of benchmark and prints the board's side-by-side table.
+    def self.bench_l4re_record(benchmark, subject:, log:, history:, revision:)
+      run, record = L4ReBoard.import(benchmark.name, subject: subject, log: log, root: ROOT, history: history, revision: revision)
+      Terminal.puts("bench: recorded #{run}")
+      L4ReBoard.table(benchmark, record, history: history).each { |line| Terminal.puts(LineEscape.escape(line)) }
+    end
+
     # tools/erx bench import NAME --env pi4-4gb-erxos --queue FILE [--profile landing] LOG
     # (docs/design-bench.md, "Importing a log"): the records of a board walk made from its
     # console log, its queue file and the walk.json beside it when there is one.
     def self.bench_import(arguments)
       require_relative 'lib/erx/board_record'
+      require_relative 'lib/erx/l4re_board'
       require_relative 'lib/erx/board_run'
       options = {}
       OptionParser.new do |flags|
         flags.on('--env NAME') { |value| options[:env] = value }
         flags.on('--queue FILE') { |value| options[:queue] = value }
+        flags.on('--subject FILE') { |value| options[:subject] = value }
         flags.on('--profile NAME', %w[landing full]) { |value| options[:profile] = value }
       end.parse!(arguments)
+      return bench_import_l4re(arguments, options) if options[:env] == L4ReBoard::ENVIRONMENT
       raise OptionParser::InvalidArgument, 'usage: tools/erx bench import NAME --env ENV --queue FILE [--profile landing] LOG' unless
         arguments.size == 2 && options[:queue]
       raise Error, "bench import: --env #{options[:env]} is not #{BoardRun::ENVIRONMENT}, the one environment a board log is imported into" unless
@@ -1612,6 +1671,20 @@ module Erx
       BenchSuite.benchmark(name)
       BoardRecord.import(name, queue: options[:queue], log: log, root: ROOT, history: BenchRecord.history)
                  .each { |run| Terminal.puts("bench: recorded #{run}") }
+      0
+    end
+
+    # tools/erx bench import NAME --env pi4-4gb-l4re --subject FILE LOG (docs/design-bench.md,
+    # "L4Re on the board"): L4Re's board record of NAME from its console log and the build
+    # record at FILE, set beside erXos's newest board record of NAME.
+    def self.bench_import_l4re(arguments, options)
+      raise OptionParser::InvalidArgument, "usage: tools/erx bench import NAME --env #{L4ReBoard::ENVIRONMENT} --subject FILE LOG" unless
+        arguments.size == 2 && options[:subject] && !options[:queue] && !options[:profile]
+
+      name, log = arguments
+      revision = SourceRevision.read(root: ROOT, runner: Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))) ||
+                 raise(Error, "bench import: #{ROOT} is not a git checkout")
+      bench_l4re_record(BenchSuite.benchmark(name), subject: options[:subject], log: log, history: BenchRecord.history, revision: revision)
       0
     end
 

@@ -92,6 +92,17 @@ class BenchSideBySideTest < Minitest::Test
     assert_equal [3 / 2r, nil], linux.entries.map(&:ratio)
   end
 
+# On the board each system boots in its own form, erXos on four CPUs and L4Re on one,
+# so the board table sets every run beside each cell and names no CPU form.
+def test_the_board_table_sets_each_systems_own_form_on_one_row
+  board = [boot("erxos", 4, [histogram("same", "counter", 30)], clock: ERXOS_CLOCK), boot("l4re", 1, [mean("same")], clock: nil)]
+  same, = Tables.tables(BENCHMARK, board, systems: %w[erxos l4re], forms: false).first.rows
+  assert_nil same.cpus
+  assert_equal [1, 1], %w[erxos l4re].map { |system| column(same, system).entries.size }
+  assert_includes Tables.render(Tables.tables(BENCHMARK, board, systems: %w[erxos l4re], forms: false)),
+                  "probe.same idle same-cpu, on the board"
+end
+
   def test_a_cross_cpu_cell_is_read_from_the_four_cpu_form
     cross = table.rows.last
     assert_equal [['measured', ns(2000)]], column(cross, 'erxos').entries.map { |entry| [entry.status, entry.values['p50']] }

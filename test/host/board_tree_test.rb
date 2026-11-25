@@ -43,6 +43,29 @@ class BoardTreeTest < Minitest::Test
     assert_raises(Erx::Error) { Erx::BoardTree.build(root: ROOT, runner: runner, platform: pl011, compiler: 'clang', revision: REVISION) }
   end
 
+# L4Re's board set boots a tree with only the boot CPU's node (docs/design-bench.md,
+# "L4Re on the board"); the tree it copies keeps every CPU.
+def test_a_one_cpu_tree_keeps_only_the_boot_cpus_node
+  assert_equal %w[cpu@1 cpu@2], Erx::BoardTree.other_cpus(%w[cpu@0 cpu@1 cpu@2 cpu-map l2-cache0])
+  assert_raises(Erx::Error) { Erx::BoardTree.other_cpus(%w[cpu@1 cpu-map]) }
+  Dir.mktmpdir do |directory|
+    source = File.join(directory, 'board.dts')
+    File.write(source, "/dts-v1/;\n/ { cpus { #address-cells = <1>; #size-cells = <0>; " \
+                       "cpu@0 { reg = <0>; }; cpu@1 { reg = <1>; }; cpu@2 { reg = <2>; }; cpu-map { }; }; };\n")
+    board = File.join(directory, 'board.dtb')
+    _, error, status = Open3.capture3('dtc', '-q', '-I', 'dts', '-O', 'dtb', '-o', board, source)
+    assert status.success?, error
+    runner = Erx::Runner.new(owner_root: directory, log_dir: File.join(directory, 'logs'))
+    built = Erx::BoardTree::Built.new(board: board, source: source, license: nil, overlays: {}, model: nil)
+    one = Erx::BoardTree.boot_cpu_only(built, runner: runner)
+    refute_equal board, one.board
+    assert_equal %w[cpu-map cpu@0], fdtget_list(one.board, '/cpus').sort
+    assert_equal %w[cpu-map cpu@0 cpu@1 cpu@2], fdtget_list(board, '/cpus').sort
+  end
+end
+
+def fdtget_list(tree, node) = Open3.capture2('fdtget', '-l', tree, node).first.split
+
   def test_builds_the_board_and_model_trees
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     built = Erx::BoardTree.build(root: ROOT, runner: runner, platform: PI, compiler: ENV.fetch('ERX_CLANG', 'clang'),

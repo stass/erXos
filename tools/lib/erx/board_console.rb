@@ -37,10 +37,11 @@ module Erx
     # stand-in); clock gives the monotonic seconds the events carry. A console that cannot
     # be opened or reached, or a device another run holds, is refused before anything is
     # served.
-    def self.open(console, log:, clock:, line: method(:set_line))
+    def self.open(console, log:, clock:, line: method(:set_line), classify: BoardLog.method(:classify))
       io = console.start_with?('tcp:') ? connect(console) : device(console, line: line)
       begin
-        new(io, log: File.open(log, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644), clock: clock)
+        new(io, log: File.open(log, File::WRONLY | File::CREAT | File::EXCL | File::BINARY, 0o644), clock: clock,
+                classify: classify)
       rescue StandardError
         io.close
         raise
@@ -90,8 +91,11 @@ module Erx
       io.iflush
     end
 
-    def initialize(io, log:, clock:, line_bytes: BenchMeasurement::LINE_BYTES)
+    # classify turns a line into what the walk keeps of it (BoardLog.classify, or L4Re's
+    # run's L4ReBoard.classify), or nil for a line it does not keep.
+    def initialize(io, log:, clock:, line_bytes: BenchMeasurement::LINE_BYTES, classify: BoardLog.method(:classify))
       @io = io
+      @classify = classify
       @log = log
       @clock = clock
       @line_bytes = line_bytes
@@ -155,7 +159,7 @@ module Erx
       text = raw.delete_suffix("\n")
       return BoardWalk::Bytes.new(bytes: raw.bytesize, at: at) if text.bytesize > @line_bytes
 
-      BoardWalk::Line.new(kept: BoardLog.classify(text.sub(/\r+\z/n, ''), @offset), bytes: raw.bytesize, at: at)
+      BoardWalk::Line.new(kept: @classify.call(text.sub(/\r+\z/n, ''), @offset), bytes: raw.bytesize, at: at)
     end
 
     # Bytes of a line past its limit: the walk counts them, and the line's rest, to its
