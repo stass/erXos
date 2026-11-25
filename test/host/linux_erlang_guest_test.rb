@@ -100,6 +100,75 @@ class LinuxErlangGuestTest < Minitest::Test
                  Erx::LinuxErlangGuest.identity_refusal("ERX_ORACLE 29.1.2 jit\e]0;x\a\n")
   end
 
+  # A start boot as systools writes it: release vsn, and one {path, Dirs} instruction.
+  def boot(dirs, vsn: '29')
+    etf = Erx::Etf
+    atom = ->(name) { etf::Atom.new(name: name) }
+    tuple = ->(*elements) { etf::Tuple.new(elements: elements) }
+    etf.encode(tuple.call(atom.call('script'), tuple.call('Erlang/OTP'.bytes, vsn.bytes),
+                          [tuple.call(atom.call('progress'), atom.call('preloaded')),
+                           tuple.call(atom.call('path'), dirs.map(&:bytes))]))
+  end
+
+  def inventory(paths) = paths.map { |path| { 'path' => path } }
+
+  # Only what the two nodes load is packed: the ERTS directory's five programs, the start
+  # boot, its release's OTP_VERSION, the code path the boot sets and the libraries; the
+  # other programs, the applications the boot does not name and the sources stay out.
+  def test_only_the_boot_its_code_path_and_the_programs_are_packed
+    root = 'install/lib/erlang'
+    kept = [*Erx::OracleExport::INSTALL_PROGRAMS.map { |program| "#{ERTS}/#{program}" }, "#{root}/bin/start.boot",
+            "#{root}/releases/29/OTP_VERSION", "#{root}/lib/kernel-11.0.4/ebin/kernel.app",
+            "#{root}/lib/stdlib-8.1.1/ebin/lists.beam", "libraries#{LOADER}"]
+    left = ["#{ERTS}/escript", "#{root}/bin/start_sasl.boot", "#{root}/releases/29/start.script",
+            "#{root}/lib/kernel-11.0.4/src/code.erl", "#{root}/lib/kernel-11.0.4/include/file.hrl",
+            "#{root}/lib/crypto-6.0/ebin/crypto.beam", "#{root}/lib/kernel-11.0.40/ebin/x.beam",
+            "#{root}/usr/include/erl_nif.h"]
+    start = boot(['$ROOT/lib/kernel-11.0.4/ebin', '$ROOT/lib/stdlib-8.1.1/ebin'])
+    packed = Erx::LinuxErlangGuest.packed(inventory(kept + left), boot: start).map { |file| file.fetch('path') }
+    assert_equal kept.sort, packed.sort
+  end
+
+  # A boot the export lacks, or one that names what the tree cannot hold, refuses the build.
+  def test_a_boot_that_cannot_be_packed_is_refused
+    guest = Erx::LinuxErlangGuest
+    files = inventory(['install/lib/erlang/bin/start.boot', 'install/lib/erlang/releases/29/OTP_VERSION'])
+    assert_match(/OTP_VERSION/, assert_raises(Erx::Error) { guest.packed(files, boot: boot([], vsn: '30')) }.message)
+    assert_match(/start\.boot/, assert_raises(Erx::Error) { guest.packed(files.drop(1), boot: boot([])) }.message)
+    ['/usr/lib/erlang/ebin', '$ROOT/../x', '$ROOT/lib/./x', "$ROOT/lib/\e]0;x"].each do |dir|
+      assert_raises(Erx::Error) { guest.packed(files, boot: boot([dir])) }
+    end
+    [boot(['$ROOT/lib']).dup.tap { |data| data[1] = "\x00" }, Erx::Etf.encode(Erx::Etf::Atom.new(name: 'script'))].each do |data|
+      assert_raises(Erx::Error) { guest.packed(files, boot: data) }
+    end
+  end
+
+  # The seeded /init gives the echo node another cookie: the fault is caught only when the
+  # cross cell failed while the same-node cell was measured.
+  def test_the_seeded_boot_is_caught_only_by_a_failed_cross_cell_beside_a_measured_local_one
+    cell = Struct.new(:operation, :status)
+    caught = lambda do |local, cross|
+      Erx::LinuxErlangGuest.seed_caught?([cell.new('local-rtt', local), cell.new('xdomain-pingpong', cross)])
+    end
+    assert caught.call('measured', 'failed')
+    refute caught.call('measured', 'measured')
+    refute caught.call('failed', 'failed')
+    refute caught.call('measured', 'timed_out')
+    refute Erx::LinuxErlangGuest.seed_caught?([cell.new('local-rtt', 'measured')])
+  end
+
+  # Without the install export the landing reports its cell not run, naming the command
+  # that makes the export, and boots nothing.
+  def test_the_landing_without_an_export_is_not_run
+    refusing = Struct.new(:refused) do
+      def refusal(_profile) = refused
+      def call(*) = raise('booted without an export')
+    end.new("linux's Erlang guest needs the oracle's install export: run `x`")
+    landing = Erx::LinuxErlangGuest::Landing.new(root: '/nonexistent', runner: nil, guest: refusing, seeded: refusing)
+    assert_equal({ not_run: refusing.refused },
+                 landing.call(Erx::BenchSuite.benchmark('xdomain'), history: '/nonexistent'))
+  end
+
   # The client's argument reaches it through the kernel's command line, which splits on
   # spaces and treats double quotes as its own.
   def test_the_clients_argument_is_one_command_line_word

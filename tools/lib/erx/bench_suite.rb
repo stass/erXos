@@ -109,6 +109,9 @@ module Erx
     }.freeze
     # Suite cell statuses from worst to best.
     WORST_FIRST = %w[failed timed_out not_run partial passed].freeze
+    # The suite cell of Linux's Erlang guest's boot: the xdomain benchmark on stock OTP at
+    # one CPU (docs/design-bench.md, "Linux's Erlang guest"), named as the boots' cells are.
+    LINUX_ERLANG_CELL = "hvf-1cpu-linux-erlang-xdomain"
 
     BENCHMARK_FILES = DeclarationFiles.new('benchmarks')
 
@@ -130,7 +133,10 @@ module Erx
 
     # The suite's cells: each boot's benchmarks, named as a QEMU cell that carries its
     # case (Erx::QemuCells::CELL_CASE_NAME): "hvf-4cpu-native-wake".
-    def suite_cells = BOOTS.select { |_, entry| entry.gate }.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
+    def suite_cells
+      erxos = BOOTS.select { |_, entry| entry.gate }.keys.flat_map { |boot| booted(boot).map { |declared| suite_cell_name(boot, declared.name) } }
+      [*erxos, LINUX_ERLANG_CELL]
+    end
 
     def suite_cell_name(boot, benchmark)
       entry = BOOTS.fetch(boot)
@@ -167,30 +173,34 @@ module Erx
       suite_cell(judged + (refused.empty? ? [] : [['rejected', false]]))
     end
 
-    # One landing of the suite's run: the boot, the label its notes carry, the benchmarks
-    # whose cells its record holds, and its outcome (Landing#call's answer, or { error: }).
-    Landed = Data.define(:boot, :label, :benchmarks, :outcome)
+    # One landing of the suite's run: the label its notes carry, its suite cells, each
+    # naming the benchmark whose cells its record holds, and its outcome (Landing#call's
+    # answer, { not_run: } for a landing that could not boot, or { error: }).
+    Landed = Data.define(:label, :cells, :outcome)
 
     # The suite's run, one landing after another, each recorded in history: every
     # benchmark's native boot and its seeded runs (native, a NativeBench::Landing), then
     # the xdomain boot's cells of every benchmark it runs (xdomain, an
-    # XdomainBench::Landing). Each landing is given, for a test, or made for context's
-    # tree. A landing that fails is a failed cell for each of its benchmarks, so the
+    # XdomainBench::Landing), then Linux's Erlang guest's boot of the xdomain benchmark
+    # and its seeded run (linux_erlang, a LinuxErlangGuest::Landing), not run without the
+    # oracle's install export. Each landing is given, for a test, or made for context's
+    # tree, except Linux's, which the suite's file makes (LinuxErlangGuest loads the peer
+    # benchmark, which loads this module). A landing that fails is a failed cell for each of its benchmarks, so the
     # others' cells stand; an xdomain boot that ends at a QEMU deadline is recorded with
     # its unreported cells timed_out, while a native boot at its deadline raises, so its
     # benchmark's cell is failed with no record.
     def run(context, history: BenchRecord.history, native: NativeBench::Landing.new(root: context.root),
-            xdomain: XdomainBench::Landing.new(root: context.root))
+            xdomain: XdomainBench::Landing.new(root: context.root), linux_erlang:)
       landed = booted('native').map do |declared|
-        Landed.new(boot: 'native', label: "native: #{declared.name}", benchmarks: [declared],
-                   outcome: outcome(native, declared, boot: 'native', history: history))
+        Landed.new(label: "native: #{declared.name}", cells: boot_cells('native', [declared]),
+                   outcome: outcome { native.call(declared, boot: BOOTS.fetch('native'), history: history) })
       end
-      landed << Landed.new(boot: 'xdomain', label: 'xdomain', benchmarks: booted('xdomain'),
-                           outcome: outcome(xdomain, booted('xdomain'), boot: 'xdomain', history: history))
+      landed << Landed.new(label: 'xdomain', cells: boot_cells('xdomain', booted('xdomain')),
+                           outcome: outcome { xdomain.call(booted('xdomain'), boot: BOOTS.fetch('xdomain'), history: history) })
+      landed << Landed.new(label: "linux's Erlang guest", cells: { LINUX_ERLANG_CELL => XdomainBench::BOOT },
+                           outcome: outcome { linux_erlang.call(benchmark(XdomainBench::BOOT), history: history) })
       cells = landed.flat_map do |landing|
-        landing.benchmarks.map do |declared|
-          [suite_cell_name(landing.boot, declared.name), outcome_cell(landing.outcome, benchmark: declared.name)]
-        end
+        landing.cells.map { |cell, name| [cell, outcome_cell(landing.outcome, benchmark: name)] }
       end
       { cells: suite_cells.to_h { |cell| [cell, 'pending'] }.merge(cells.to_h),
         notes: landed.flat_map { |landing| landing_notes(landing.label, landing.outcome) } }
@@ -199,20 +209,24 @@ module Erx
     # The benchmarks with landing cells in boot, in the suite's order.
     def booted(boot) = benchmarks.values.select { |declared| declared.landing.key?(boot) }
 
-    # A landing's outcome for what (a benchmark, or the boot's benchmarks) in boot, or
-    # { error: } with the message of the failure that ended it.
-    def outcome(landing, what, boot:, history:)
-      landing.call(what, boot: BOOTS.fetch(boot), history: history)
+    # boot's suite cells of benchmarks, each naming its benchmark.
+    def boot_cells(boot, benchmarks) = benchmarks.to_h { |declared| [suite_cell_name(boot, declared.name), declared.name] }
+
+    # A landing's outcome, the block's answer, or { error: } with the message of the
+    # failure that ended it.
+    def outcome
+      yield
     rescue Error => e
       { error: e.message }
     end
-    private_class_method :outcome
+    private_class_method :boot_cells, :outcome
 
     # benchmark's suite cell from its landing's outcome. A landing without seeded runs
     # has no seeds_missed.
     def outcome_cell(outcome, benchmark:)
       case outcome
       in { error: String } then 'failed'
+      in { not_run: String } then 'not_run'
       in { record:, refused: }
         boot_cell(record, benchmark: benchmark, refused: refused, seed_caught: outcome.fetch(:seeds_missed, []).empty?)
       end
@@ -226,6 +240,7 @@ module Erx
     def landing_notes(label, outcome)
       notes = case outcome
               in { error: String => error } then ["failed: #{error}"]
+              in { not_run: String => why } then ["not run: #{why}"]
               in { record:, written:, refused: }
                 kept = written ? "recorded #{written}" : "replayed the stored log #{record.run.reused_from}, no record added"
                 cells = record.boot.cells.reject { |cell| cell.status == 'measured' }

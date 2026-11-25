@@ -14,6 +14,8 @@ require_relative '../../tools/lib/erx/qemu_gate'
 # (docs/design-bench.md, "The gates", "Cells and suite cells").
 class BenchSuiteTest < Minitest::Test
   Suite = Erx::BenchSuite
+  # Linux's Erlang guest's landing on a host without the oracle's install export.
+  NOT_RUN = ->(*, **) { { not_run: "linux's Erlang guest needs the oracle's install export" } }
 
   def test_each_status_maps_to_its_suite_cell
     expected = { 'measured' => 'passed', 'unsupported' => 'partial', 'partial' => 'partial', 'rejected' => 'partial',
@@ -48,7 +50,7 @@ class BenchSuiteTest < Minitest::Test
 
   def test_the_suite_cells_are_each_boots_benchmarks
     assert_equal %w[hvf-4cpu-native-nullcall hvf-4cpu-native-sched hvf-4cpu-native-vm hvf-4cpu-native-wake
-                    hvf-4cpu-xdomain-wake hvf-4cpu-xdomain-xdomain], Suite.suite_cells.sort
+                    hvf-4cpu-xdomain-wake hvf-4cpu-xdomain-xdomain hvf-1cpu-linux-erlang-xdomain].sort, Suite.suite_cells.sort
     declared = Erx::QemuGate.suites.find { |suite| suite.name == 'bench' }
     assert_equal Suite.suite_cells, declared.cells
     refute declared.offload
@@ -89,11 +91,39 @@ class BenchSuiteTest < Minitest::Test
       { record: record, written: nil, refused: [], seeds_missed: declared.name == 'wake' ? ['lost wake'] : [] }
     end
     xdomain = ->(*, **) { { record: record, written: nil, refused: [] } }
-    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: native, xdomain: xdomain)
+    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: native, xdomain: xdomain,
+                                                                                         linux_erlang: NOT_RUN)
     assert_equal 'failed', answer.fetch(:cells).fetch('hvf-4cpu-native-wake')
     assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-native-nullcall')
     assert_equal 'passed', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
     assert_includes answer.fetch(:notes), 'bench: native: wake: the seeded lost wake was not caught'
+  end
+
+  # Linux's Erlang guest's cell is not run, never passed, without the install export; its
+  # missed seed fails it; and a boot that measured its cells with the seed caught passes.
+  def test_the_linux_erlang_cell_is_not_run_without_the_export_and_failed_by_a_missed_seed
+    stub = ->(*, **) { { record: wake_record(1, 'cross-cpu', 'unsupported'), written: nil, refused: [], seeds_missed: [] } }
+    ran = lambda do |linux|
+      answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: stub, xdomain: stub,
+                                                                  linux_erlang: linux)
+      [answer.fetch(:cells).fetch('hvf-1cpu-linux-erlang-xdomain'), answer.fetch(:notes).grep(/linux's Erlang guest/)]
+    end
+    cell, notes = ran.call(NOT_RUN)
+    assert_equal 'not_run', cell
+    assert_equal ["bench: linux's Erlang guest: not run: linux's Erlang guest needs the oracle's install export"], notes
+    measured = wake_record(1, 'cross-cpu', 'unsupported').then do |kept|
+      kept.with(boots: kept.boots.map { |boot| boot.with(cells: boot.cells.map { |cell| cell.with(benchmark: 'xdomain') }) })
+    end
+    missed = lambda do |declared, history:|
+      raise 'the Linux guest runs the xdomain benchmark' unless declared.name == 'xdomain' && history == '/nonexistent'
+
+      { record: measured, written: nil, refused: [], seeds_missed: ['echo cookie'] }
+    end
+    cell, notes = ran.call(missed)
+    assert_equal 'failed', cell
+    assert_includes notes, "bench: linux's Erlang guest: the seeded echo cookie was not caught"
+    caught = ->(declared, **kept) { missed.call(declared, **kept).merge(seeds_missed: []) }
+    assert_equal 'passed', ran.call(caught).first
   end
 
   # A benchmark whose landing raises is a failed cell with its message as a note, and the
@@ -106,7 +136,8 @@ class BenchSuiteTest < Minitest::Test
       { record: record, written: nil, refused: [], seeds_missed: [] }
     end
     xdomain = ->(*, **) { { record: record, written: nil, refused: [] } }
-    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: landing, xdomain: xdomain)
+    answer = Suite.run(Struct.new(:root).new('/nonexistent'), history: '/nonexistent', native: landing, xdomain: xdomain,
+                                                                                         linux_erlang: NOT_RUN)
     assert_equal 'failed', answer.fetch(:cells).fetch('hvf-4cpu-native-nullcall')
     assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-native-wake')
     assert_equal 'not_run', answer.fetch(:cells).fetch('hvf-4cpu-xdomain-wake')
@@ -166,11 +197,13 @@ class BenchSuiteTest < Minitest::Test
       git(erxos, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'x')
       serial = File.join(scratch, 'serial.log').tap { |path| File.write(path, "booted\n") }
       xdomain = Erx::XdomainBench::Landing.new(root: erxos, run: TimedOutRun.new(serial))
-      ran = Suite.run(Struct.new(:root).new(erxos), history: history, native: NativeLanding.new, xdomain: xdomain)
+      ran = Suite.run(Struct.new(:root).new(erxos), history: history, native: NativeLanding.new, xdomain: xdomain,
+                                                          linux_erlang: NOT_RUN)
       assert_equal({ 'hvf-4cpu-native-nullcall' => 'not_run', 'hvf-4cpu-native-sched' => 'not_run',
                      'hvf-4cpu-native-vm' => 'not_run', 'hvf-4cpu-native-wake' => 'not_run',
                      'hvf-4cpu-xdomain-wake' => 'timed_out',
-                     'hvf-4cpu-xdomain-xdomain' => 'timed_out' }, ran.fetch(:cells))
+                     'hvf-4cpu-xdomain-xdomain' => 'timed_out', 'hvf-1cpu-linux-erlang-xdomain' => 'not_run' },
+                   ran.fetch(:cells))
       notes = ran.fetch(:notes).grep(/\Abench: xdomain: /)
       assert_includes notes, 'bench: xdomain: QEMU checkpoint timed out: cells<U+001B>]8;;x'
       assert_includes notes, 'bench: xdomain: erlang-timer runtime: timed_out (the boot timed out before its line)'
