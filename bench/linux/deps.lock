@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "alpine-kernel-config",
+      "kind": "file",
+      "version": "3.24.4",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/netboot-3.24.4/config-6.18.60-0-virt",
+      "sha256": "b7643cddcd3ba109183a2aaafa3c911d91e7d89485fd7b2caf5ede9396bf78ca",
+      "filename": "config-6.18.60-0-virt",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    },
+    {
+      "id": "alpine-musl-dev",
+      "kind": "file",
+      "version": "1.2.6-r3",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/musl-dev-1.2.6-r3.apk",
+      "sha256": "45afe0a9f78de3402b6b5d11f5153ed955bf59d59b45344d9c3fed9f4bbf2f66",
+      "filename": "musl-dev-1.2.6-r3.apk",
+      "license": "MIT",
+      "status": "permanent"
+    },
+    {
+      "id": "alpine-vmlinuz-virt",
+      "kind": "file",
+      "version": "3.24.4",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/netboot-3.24.4/vmlinuz-virt",
+      "sha256": "cd05fed9e617b5df93dc62ece9b78c422fd94e9b432a2f7c092714b139d5eef4",
+      "filename": "vmlinuz-virt",
+      "license": "GPL-2.0-only",
+      "status": "permanent"
+    }
+  ]
+}

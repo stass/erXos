@@ -57,6 +57,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#if defined(__linux__)
+#include <sys/mount.h>
+#include <sys/reboot.h>
+#include <termios.h>
+#endif
+
 #if defined(__FreeBSD__)
 #include <sys/param.h>
 #include <sys/cpuset.h>
@@ -136,6 +142,36 @@ peer_fail(const char *what)
 	fflush(stdout);
 	exit(1);
 }
+
+#if defined(__linux__)
+/*
+ * Process 1 may not exit, so as /init of Linux's guest (docs/design-bench.md, "Linux's
+ * guest") every end of the run, a return from main or a peer_fail, powers the machine
+ * off once stdio is flushed, which exit does only after this handler, and the console has
+ * sent it; QEMU then exits. A forked child that exits leaves the machine running.
+ */
+static void
+init_power_off(void)
+{
+	if (getpid() != 1)
+		return;
+	fflush(NULL);
+	tcdrain(STDOUT_FILENO);
+	sync();
+	reboot(RB_POWER_OFF);
+}
+
+/* As process 1, mount /proc, which the wake handshake reads; anywhere else, nothing. */
+static void
+init_setup(void)
+{
+	if (getpid() != 1)
+		return;
+	atexit(init_power_off);
+	if (mount("proc", "/proc", "proc", 0, NULL) != 0)
+		peer_fail("/proc did not mount");
+}
+#endif
 
 static void
 peer_say(const char *text)
@@ -1173,6 +1209,9 @@ main(int argc, char **argv)
 			benchmark = benchmarks[at].name;
 			run = benchmarks[at].run;
 		}
+#if defined(__linux__)
+	init_setup();
+#endif
 	if (run == NULL) {
 		fputs("usage: erx_peer_bench nullcall|vm|wake|sched|xdomain\n", stderr);
 		return (2);
