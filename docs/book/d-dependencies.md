@@ -177,8 +177,9 @@ Most rows never reach an image. They build the system or check it:
   terminal, 9front's `libdraw` for the display, a FreeBSD guest for the commands
   that share FreeBSD's names, and a FreeBSD test host for the network
   stack. Some are GPL, such as the Linux guests
-  that test erXos's F2FS; they run only as black boxes in a guest and
-  are never linked.
+  that test erXos's F2FS, and Genode, under AGPL-3.0, which runs the
+  benchmark comparison's program rows; they run only as black boxes in
+  a guest and are never linked.
 * **A demo program**, never part of the system: doomgeneric under GPL-2.0-or-later with Freedoom's
   data file under BSD-3-Clause, as `/bin/doom` on the images the
   website offers. Its source is erXos's fork, a submodule that no file

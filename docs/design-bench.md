@@ -56,6 +56,15 @@ Decisions every reader needs:
   compiled on the board by the system's own compiler. Linux serves as the
   best-case comparison on the board, FreeBSD as the behaviour erXos
   matches; an operation with no counterpart says so.
+* **Two kinds of row, and each says which it is.** The kernel table sets
+  the kernels' own paths beside each other: on erXos, Fiasco's IPC and
+  the root service as the root task and its test tasks call them, with no
+  program and no Erlang on the path. The program table sets beside each
+  other what a POSIX program pays for a call, the same C program on every
+  system: on erXos through musl, `liberx`'s program layer and the
+  services of the program's session, mostly Erlang
+  ([What a program sees](#what-a-program-sees-posix-and-erl)). The
+  Erlang table sets the runtimes beside each other.
 * **On the board, the board walks its own boots.** The host's boot
   server hands the n-th download the n-th entry of a queue of signed
   boot images, each naming its boot with a name the host chose, and
@@ -548,7 +557,9 @@ written by hand, and carries no host name:
 | the host | `host-<model>` | stock OTP natively | side by side with `qemu-hvf` |
 
 Every environment that boots a guest names the system the guest runs,
-one of `erxos`, `l4re`, `freebsd` and `linux`. The system is part of where
+one of `erxos`, `l4re`, `freebsd`, `linux`, and `genode-hw`,
+`genode-sel4` and `genode-foc`, Genode on each of its kernels
+([Genode's guest](#genodes-guest)). The system is part of where
 a run happened, not of what ran, so two systems' records never have equal
 environments, and no comparison can give one system's number as a
 verdict on another's: setting systems beside each other is only ever the
@@ -1323,9 +1334,22 @@ through `LineEscape`, and the reader is fuzzed with the bench lines'
 reader.
 ## Other systems in QEMU under HVF
 
-erXos is set beside L4Re and Linux first in QEMU's `virt` machine under
-HVF on the development host, where it is measured every day, and on the
-board after. FreeBSD runs on the board only.
+erXos is set beside L4Re, Linux and Genode first in QEMU's `virt`
+machine under HVF on the development host, where it is measured every
+day, and on the board after. FreeBSD runs on the board only.
+
+**What a row compares.** The kernel table's rows are kernel against
+kernel: erXos's cells there are the root task's and its test tasks'
+calls of `liberx`, a request to the root service or a call of Fiasco,
+beside a Linux system call or an L4Re IPC, and no program on erXos makes
+them as such. The program table's rows are what a program sees: one C
+program's POSIX calls, on erXos through musl and `liberx` to the
+service that owns each call, mostly Erlang in the program's session,
+and on Linux and Genode through their own C libraries
+([What a program sees](#what-a-program-sees-posix-and-erl)). The Erlang
+table's rows are ERTS against stock OTP. A reader asking what Doom pays
+for a `read` on erXos reads the program table; one asking what erXos's
+kernel and root service add to every request reads the kernel table.
 
 **The construction.** A comparison is one environment with only its
 system varied. Each system's guest boots through the one QEMU plan the
@@ -1346,7 +1370,7 @@ in place of QEMU's.
 
 ### A comparison session
 
-`tools/erx bench NAME --systems erxos,l4re,linux` boots, on one host in
+`tools/erx bench NAME --systems erxos,l4re,linux,genode-hw` boots, on one host in
 one session, each listed system's guest for the cells of NAME that system
 has a counterpart for, one system after another and never two at once,
 in rounds: one round in the landing form, three in the full form
@@ -1366,8 +1390,10 @@ on with the next, and then prints the side-by-side tables of its runs. It
 runs by hand and at the plan gates that ask for it, never at the landing
 gate, which keeps its one system.
 
-The side-by-side table is two tables, the C table and the Erlang table
-of [Counterparts](#other-systems-on-the-same-raspberry-pi-4), each with a
+The side-by-side table is three tables, the kernel table and the Erlang
+table of [Counterparts](#other-systems-on-the-same-raspberry-pi-4) and
+the program table of
+[What a program sees](#what-a-program-sees-posix-and-erl), each with a
 row per erXos cell and a column per system: each run's status, its
 clock, its summary's form, the median, 99th percentile and maximum of a
 `histogram` where its profile allows them, with its operation count and
@@ -1386,6 +1412,7 @@ the guest was built from:
 | System | `subject` details beyond erXos's |
 | --- | --- |
 | `linux` | the kernel's pin (`deps.lock` id, version, SHA-256) and its command line, the initramfs's SHA-256, `erx_peer_bench`'s SHA-256, the compiler's version and complete flags, the C library's pin; for an Erlang boot, also the exported OTP tree's SHA-256, the OTP version and flavour the guest reported, the toolchain image's digest, and each packed library's SHA-256 |
+| `genode-hw`, `genode-sel4`, `genode-foc` | Genode's release and its SHA-256, the tool chain's version and SHA-256, the kernel and board the build named, the resolved run configuration's SHA-256, the boot image's SHA-256 |
 | `l4re` | each L4Re repository's pinned commit, the resolved Fiasco configuration's SHA-256 and its difference from erXos's, the compiler's version and flags, the toolchain image's digest, `bootstrap.elf`'s SHA-256 |
 
 Each boot's serial log is kept in its run directory as every boot's is;
@@ -1411,7 +1438,10 @@ Under HVF:
 erXos's alone: `wake.trigger-take`, `wake.erlang-timer`,
 `sched.share-tasks`, `sched.band-work`, `vm.reserve`, `vm.release` and
 `vm.mem-child`. `wake.gpio-edge` and the three limits are the board's
-alone; QEMU's `virt` has no pins to time.
+alone; QEMU's `virt` has no pins to time. The program table's rows,
+under HVF as on the board, are those of
+[What a program sees](#what-a-program-sees-posix-and-erl); what HVF adds
+to them is what it adds to the kernel rows beneath them.
 
 ### Linux's guest
 
@@ -1828,19 +1858,25 @@ through the importer of [L4Re's guest](#l4res-guest), as `mean` cells.
 
 **Counterparts.** Each declaration names, per operation, what the other
 systems run, and the side-by-side table prints that line with the numbers.
-The two tables below are the one list for the board and for
+The two tables below and the program table of
+[What a program sees](#what-a-program-sees-posix-and-erl) are the one
+list for the board and for
 [QEMU under HVF](#other-systems-in-qemu-under-hvf) alike, one for each
-layer: the C table sets the kernels' own paths beside each other, the
-Erlang table the runtimes' messages. What ipcbench's programs measure
+layer. The kernel table sets the kernels' own paths beside each other:
+its erXos cells are the root task's and its test tasks' calls of
+`liberx`, beneath any program, with no Erlang on the path, so a row of
+it is kernel against kernel, not what a program on erXos pays for the
+POSIX call in its Linux column. The Erlang table sets the runtimes'
+messages beside each other, and the program table a program's calls. What ipcbench's programs measure
 comes from its facts record ([L4Re's guest](#l4res-guest)), not from
 their names. On the same CPU means both threads pinned to one CPU, and
 under HVF every thread in the session's one-CPU form.
 
-The C table:
+The kernel table:
 
 | erXos operation | L4Re | FreeBSD and Linux | What differs |
 | --- | --- | --- | --- |
-| `nullcall.kernel` | `syscallbench`: an IPC call to the caller's own thread capability whose thread-control operation returns early | `getppid` | three entry paths, not one null call. erXos's cell is the same act on erXos's Fiasco ([`nullcall`](#3-nullcall-the-decoder-refusal-round-trip)), so those two differ by the fork's patches and compilers; `getppid` is a POSIX call doing its own small work |
+| `nullcall.kernel` | `syscallbench`: an IPC call to the caller's own thread capability whose thread-control operation returns early | `getppid` | three entry paths, not one null call. erXos's cell is the same act on erXos's Fiasco ([`nullcall`](#3-nullcall-the-decoder-refusal-round-trip)), so those two differ by the fork's patches and compilers; `getppid` is a POSIX call doing its own small work. A program on erXos enters no kernel for `getppid` or `getpid`; what it pays for such a call is the program table's `posix.getpid` |
 | `nullcall.root-same-space` | `ipcbench`: two threads of one task; a blocking call with an empty message to a responder already waiting in reply-and-wait | two threads of one process: an 8-byte request and an 8-byte reply over a pair of pipes, each read blocking, the echo thread on CPU 0 for `service-cpu` and on the last CPU for `other-cpu`, as the next row's echo process is | erXos's round trip carries one word to the root service and adds its receive, decode and refusal in user mode; L4Re's is an empty call to a waiting thread, the best case; a pipe round trip is two writes and two blocking reads. Each row is its own endpoint: no difference of two rows isolates the root service |
 | `nullcall.root-cross-space` | `ipcclient` and `ipcserver`: the same between two tasks | the same between two processes | the same, with an address-space switch each way |
 | `wake.wake-same-cpu`, `wake.wake-cross-cpu` | none | thread B waits for a sequence word to change in `pthread_cond_timedwait`, its absolute deadline 1 s away on `CLOCK_MONOTONIC`; thread A, on B's CPU or another, takes the mutex, reads B's state in `/proc/self/task/<tid>/stat` until it is `S`, stamps, changes the word, signals, releases and blocks reading a pipe; B stamps its return and writes the pipe | B returning with the word changed is the wake, and `ETIMEDOUT` a lost wake. The blocked state is the kernel's report where erXos's is its park record; FreeBSD's way to see B blocked is settled with the board's package |
@@ -1913,6 +1949,401 @@ for the GPIO driver. Each of the Fiasco design's six load cells runs
 with each responder. The bench images are marked as test images and
 checked by the manifest's own authority checks; the probe needs no
 privilege of its own.
+
+## What a program sees: `posix` and `erl`
+
+The kernel table sets erXos's root task and test tasks, calling `liberx`
+directly, beside Linux's system calls and L4Re's IPC: on erXos it is
+Fiasco's IPC and the root service's decoder, nothing a program crosses
+on its way to a file or a pipe, and no Erlang. A POSIX program such as
+Doom never makes those calls. It calls `open`, `read`, `pipe`,
+`posix_spawn` and `mmap`, and on erXos each goes from musl through
+`liberx`'s program layer to the service that owns it, mostly Erlang in
+the program's own session: its handler, the open-file description, the
+file server of the path's grant, the session's pipe server. Linux
+answers the same calls in its kernel. Setting `nullcall.kernel` beside
+`getppid` says what erXos's kernel costs, not what a program on erXos
+pays for `getppid`. This section measures the second thing: ordinary
+UNIX system calls and UNIX IPC as a program issues them, the same
+program on erXos and on the other systems, compared row by row.
+
+### The construction: one program, every system
+
+`erx_peer_bench` gains one benchmark, `posix`, whose operations are POSIX
+calls and nothing else, and on erXos it runs as a program of a session,
+built against erXos's musl. The same C file, compiled by the same
+compiler with the same code-generation flags, runs on every system that
+has the call, so a row's act is the program's act by construction and
+only the system beneath it differs. Everything after the program's line
+is the existing construction: its `BENCH` and `CLOCK` lines go through
+`BenchMeasurement`, each boot is a run written by `BenchRecord.write`, a
+comparison session boots each system in turn in its rounds, and the
+side-by-side table prints a third table, the **program table**, beside
+the kernel table and the Erlang table. Nothing is compared across
+systems; the table sets them beside each other.
+
+What runs on erXos is derived, not declared. Before its timed loop each
+cell makes its calls once, untimed; a call that answers `ENOSYS` or
+`ENOTSUP` makes the cell `unsupported` with that call and its `errno`
+named as the reason (`unsupported: newfstatat answered ENOSYS`), the
+status the record already has for an operation the environment lacks.
+The rows that wait on an unbuilt part therefore report so from the
+system itself, a row measures once its part exists, and no list of
+which rows run is kept anywhere to fall out of date. The statuses below
+are read from the code and are the expected output of that first probe.
+
+The Erlang twin is `erl`, a module of its own beside `erx_xdomain_bench`
+(`bench/erx_erl_bench.erl`), which runs on erXos's ERTS in the
+`xdomain` bench image and on stock OTP 29.1.2 in Linux's Erlang guest
+([Linux's Erlang guest](#linuxs-erlang-guest)), through
+`bench/erx_bench_hist.erl` and the same lines.
+
+### Which systems, and what each compares
+
+| System | What runs | Which table |
+| --- | --- | --- |
+| erXos | `erx_peer_bench posix` as a program of root's session; `erl` in the `xdomain` bench image | all three |
+| Linux | the Alpine guest of [Linux's guest](#linuxs-guest), with `erx_peer_bench` linked statically against Alpine's musl, as erXos's program links erXos's musl, so the C library's own code is the same on both and only the system beneath it differs; stock OTP in its Erlang guest | all three |
+| L4Re | ipcbench only | the kernel table only: L4Re's POSIX layer is too thin to run the program set, so every program row says `kernel rows only` and names the kernel row nearest it, if any |
+| Genode | `erx_peer_bench posix` built against Genode's C library, on each kernel Genode's guest is built for ([Genode's guest](#genodes-guest)) | the program table: the microkernel operating system whose programs, like erXos's, reach their files and pipes through services in user mode |
+
+### Fairness
+
+* **The same source, compiler and flags.** erXos's program and Linux's
+  binary are one C file, compiled by erXos's clang (`ERX_CLANG`) with one
+  list of code-generation flags, `NativeRoot::CODE_FLAGS` without its
+  target, which is the list erXos's program build already uses; only the
+  target, its headers and its C library differ, musl on both. Genode's
+  build uses Genode's own tool chain, GCC, which its documentation
+  requires (References), so its rows differ by compiler too, which the
+  record keeps.
+* **The same machine.** The same QEMU, accelerator, CPU count and memory
+  in a session, as [A comparison session](#a-comparison-session) gives
+  every system; on the board, the same Raspberry Pi 4 under the rules of
+  [Other systems on the same Raspberry Pi 4](#other-systems-on-the-same-raspberry-pi-4).
+  HVF and board numbers are never in one table, since their environments
+  differ in kind.
+* **Distributions, not one number.** Medians, 99th percentiles and
+  maxima over the session's boots, in the records every run already
+  writes; the side-by-side table shows each boot's summary.
+* **Every row says what it is.** Each operation's declaration states
+  `same act`, when both systems do the same work for the call, or
+  `nearest counterpart`, with the one line of what differs, and the
+  program table prints it; a declaration without one is refused.
+
+### The program's clock and placement
+
+On erXos the program reads the counter through `erx_fiasco_counter`, the
+one read of the counter a linked erXos program may make, which the
+build's check of every program enforces
+(`liberx/backend/fiasco/arch/aarch64/clock.c`, `CounterReads`,
+`tools/lib/erx/counter_reads.rb`), and its frequency through
+`erx_fiasco_counter_hz`. It does not probe: the probe catches the trap a
+refused read raises, and a program on Fiasco catches no signal
+(`liberx/backend/fiasco/program_task.c:87-92`). Linux keeps the probe it
+has; Genode reads `CLOCK_MONOTONIC`, clock `monotonic`, whose resolution
+there is unverified, and the batching rule of
+[the one clock](#the-one-clock) takes care of a coarse one. Threads are
+pinned with `sched_setaffinity` on erXos as on Linux: musl's erXos seam
+offers it, a mask's first word (`musl/src/internal/erxos/syscall.c:295-301`,
+`:499-500`). A cell whose stamps are taken by two processes (`spawn-main`)
+runs in the one-CPU form only; every other cell stamps in one thread,
+same-CPU cells come from the one-CPU form and cross-CPU cells from the
+four-CPU form, as in a session.
+
+### The operations and their paths
+
+Each table gives the act, its correct result, its profile, erXos's path
+as the code has it, whether erXos runs it, the Linux counterpart and
+whether it is the same act, and L4Re's entry. Genode runs every row
+through its C library and its own services; each Genode entry is
+unverified until its guest runs, and its first probe reports it.
+
+**Trivial calls.** Both `fast` and batched.
+
+| Operation | Act and correct result | erXos's path | erXos runs it | Linux | Same act? | L4Re |
+| --- | --- | --- | --- | --- | --- | --- |
+| `getpid` | `getpid()`; the same positive value every call | musl's `getpid` (`musl/src/unistd/getpid.c`) reaches `__erx_syscall`, whose seam hands the call back (`program_task.c:165`) to a row that returns a constant (`syscall.c:485-486`): no kernel call and no `liberx` call. By design the value is the startup message's `pid` from `liberx`'s record ([design-fiasco.md](design-fiasco.md#musl-over-the-backend)); the code answers 1 in every program ([todo-shell.md](todo-shell.md)) | yes | musl's `getpid`, a system call | nearest counterpart: erXos reads a value in user mode where Linux enters its kernel; the row is what a program pays, not what a system call costs on erXos | kernel rows only; `nullcall.kernel` beside `syscallbench` is the nearest |
+| `clock-gettime` | `clock_gettime(CLOCK_MONOTONIC)`; returns 0, never decreasing | handed back by the seam (`program_task.c:160`) to `clock_gettime_call` (`syscall.c:231-245`), which reads the counter and scales it in user mode | yes | musl's aarch64 port looks up the kernel's user-mode `clock_gettime` (`musl/arch/aarch64/syscall_arch.h:74-76`) and falls back to a system call; that the static binary finds it is unverified | same act where Linux's user-mode path is taken: a counter read and a scaling on both | kernel rows only; none |
+
+**Files.** On erXos every file call is a request on the program's
+channel to its handler (`liberx/program/file.h`): a frame and the
+handler's doorbell, `erx_prog_handler` and the open-file description's
+process, a request to the server of the path's grant, the reply, the
+program's doorbell and the event executor's wake of the worker, the
+bytes crossing the 64 KiB slots of the data area
+([design-programs.md](design-programs.md#performance)). The files are
+in `/tmp`, which on erXos is the domain's `erx_ramfs` tree process,
+Erlang ([design-tmp.md](design-tmp.md)), and on Linux the initramfs's
+root, both in memory. A 64 KiB file of a known pattern is made untimed
+before the cells. Reads and writes are timed as `pread` and `pwrite` at
+offset 0, the same call with the offset given, so that every sample is
+the same act and a batch needs no `lseek` between its samples.
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it | Same act? |
+| --- | --- | --- | --- | --- | --- |
+| `open`, `close` | `open` of the file read-only, then `close`, each timed; every `open` returns the same number, the lowest free, and after the loop one more `open` still returns it, so no `close` left a descriptor behind | fast | `erx_prog_file_openat` (`program_task.c:203-205`): the handler walks to the file, clones the fid and opens the clone with `lopen` ([design-programs.md](design-programs.md#descriptors-and-files)); `close` ends the open with `{file, clunk, Open}` | yes: the programs suite's `fileio` case makes these calls (`tools/lib/erx/programs.rb:79-82`) | same act; Linux resolves the path in its kernel |
+| `fstat` | `fstat` of the open file; size 65,536 and a regular file | fast | `{file, getattr, Open}` (`liberx/program/file.h:94-104`) | yes | same act |
+| `stat` | `stat` of the path; as `fstat` | fast | musl's `stat` is `fstatat` (`musl/src/stat/stat.c`), which on this port calls `newfstatat` (`musl/src/stat/fstatat.c:104`, `musl/src/internal/syscall.h:166-168`); the seam answers `ENOSYS` for it with `AT_FDCWD` (`program_task.c:313-318`) | waits on the program layer's path calls, `stat` as a file request ([design-programs.md](design-programs.md#the-program-protocol)) | same act |
+| `read`, `write` | `pread` and `pwrite` of 4 KiB and of 64 KiB at offset 0; the count asked for, the read's bytes the pattern (checked after the loop) and the written bytes read back | fast | `erx_prog_fd_pread` and `erx_prog_fd_pwrite` (`program_task.c:239-244`): one request per 64 KiB slot (`liberx/program/file.h:68-80`), so both sizes are one request | yes | same act |
+| `read-seq`, `write-seq` | a 16 MiB file read, and written, from start to end in 64 KiB calls, one interval each; every count full | expensive | as `read` and `write`, 256 requests | yes; whether `/tmp` holds 16 MiB under its domain's budget is unverified | same act |
+| `copy` | the 16 MiB file read in 64 KiB parts and each written to a second file opened with `O_WRONLY`, `O_CREAT` and `O_TRUNC`, both closed, one interval; the copy reads back equal | expensive | as above; `O_TRUNC` reaches `lopen` (`liberx/program/file.c:92-93`). Neither side syncs: `fsync` answers `ENOSYS` on a held descriptor (`program_task.c:249`, `:301`) | yes | same act |
+| `create-unlink` | in a fresh directory, 1,000 empty files created and then unlinked, one interval; every call 0 | expensive | creation is `lcreate`; `mkdirat` and `unlinkat` answer `ENOSYS` (`program_task.c:304-306`, `:318`) | waits on the program layer's path calls (`mkdirat`, `unlinkat`) | same act |
+| `readdir` | `opendir`, `readdir` to the end of a directory of 1,000 entries, `closedir`, one interval; 1,000 names besides `.` and `..` | expensive | `O_DIRECTORY` is `EINVAL` (`liberx/program/file.h:56-58`) and `getdents64` `ENOSYS` (`program_task.c:257`, `:301`) | waits on the program layer's directory opens and reads ([design-programs.md](design-programs.md#descriptors-and-files)) | same act |
+
+L4Re, for every file row: kernel rows only; none.
+
+**UNIX IPC.** A peer process is the program itself, started with
+`posix_spawn` and the descriptors it needs placed by its file actions,
+in a mode given by its arguments, so peer and parent are one file on
+every system; the peer pins itself on its own first line. A pipe on
+erXos is made by the session's pipe server at the program's `pipe2`
+request, untimed, and its bytes move through `liberx`'s ring in memory
+the two programs share, one copy in and one out, with a doorbell only
+when the other side sleeps ([design-pipes.md](design-pipes.md#performance));
+Linux copies through a buffer in its kernel. Every round trip is stamped
+by A alone.
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it | Same act? | L4Re |
+| --- | --- | --- | --- | --- | --- | --- |
+| `pipe-rtt` | A writes n bytes to pipe 1, B reads them and writes them to pipe 2, A reads them; n = 1 and 65,536, same CPU and across CPUs; every reply equals its request, whose first bytes carry its sequence number | fast | `pipe2` through the handler (the programs suite's `pipe` case, `programs.rb:76-78`); `read` and `write` on the ring; the peer through `posix_spawn`, which plans and then answers `ENOSYS`, since the program protocol has no `{spawn}` request (`liberx/program/spawn.c:44-50`) | waits on `posix_spawn`'s request | same act | kernel rows only; `nullcall.root-cross-space` beside `ipcclient` and `ipcserver` is the nearest, a kernel IPC, not a pipe |
+| `poll-rtt` | as `pipe-rtt` with n = 1, each side blocking in `poll` for `POLLIN` before it reads; the same replies, and every `poll` reports `POLLIN` | fast | `ppoll_call` (`program_task.c:93-105`): a wait on the caller's wake word, which the event executor bumps when the end's doorbell rings ([design-programs.md](design-programs.md#the-posix-lite-personality)) | waits on `posix_spawn`'s request | same act | kernel rows only; none |
+| `ctx-ring` | a one-byte token passed around a ring of N = 2 and 8 processes joined by pipes, each writing 0 or 16 KiB of its own memory before passing it on, all on one CPU; a sample is one round, and every process sees the token once per round | fast | as `pipe-rtt`, every pass a doorbell and a switch between address spaces | waits on `posix_spawn`'s request | same act: each system's pipe, scheduler and switch | kernel rows only; none |
+| `pipe-stream` | A writes 64 MiB to B in 64 KiB writes, B reads it all and answers one byte; A's interval, same CPU and across CPUs; B's count and a checksum of the bytes equal A's | expensive | as `pipe-rtt`; the ring holds 64 KiB ([design-programs.md](design-programs.md#the-posix-lite-personality)) | waits on `posix_spawn`'s request | same act | kernel rows only; none |
+| `socketpair-rtt` | as `pipe-rtt` with n = 1 over `socketpair(AF_UNIX, SOCK_STREAM, 0)` | fast | a socketpair end is the read end of one pipe and the write end of another, made by the pipe server, in the second tier ([design-programs.md](design-programs.md#passing-descriptors)); `socketpair` answers `ENOSYS` (`program_task.c:328-331`) | waits on the second tier's socketpair and on `posix_spawn`'s request | nearest counterpart: two pipes on erXos, a UNIX-domain socket on Linux | kernel rows only; none |
+| `tcp-rtt`, `udp-rtt` | 64 bytes and back over `127.0.0.1`, one connected TCP socket or one UDP socket a side; every reply equals its request | fast | a socket is an open of the handler's table naming a socket's open-file description, the socket's owner at the network service, whose loopback interface is Erlang (`erx_net_loop`) ([design-network-stack.md](design-network-stack.md#the-interface-towards-posix-programs)); `socket` answers `ENOSYS` (`program_task.c:328-331`) | waits on programs' sockets and on `posix_spawn`'s request | same act | kernel rows only; none |
+| `tcp-stream` | 64 MiB over one loopback TCP connection in 64 KiB writes, the reader answering one byte at the end; A's interval; the reader's count and checksum equal | expensive | as `tcp-rtt` | waits as `tcp-rtt` | same act | kernel rows only; none |
+
+The other UNIX forms of IPC get no row. A named UNIX-domain socket, POSIX
+shared memory objects (`shm_open`), POSIX message queues and System V's
+IPC are named by no design document for programs; memory shared between
+programs is the second tier's `MAP_SHARED` across `fork`
+([design-programs.md](design-programs.md#the-posix-lite-personality)),
+which is no round trip of its own. A design that adds one adds its row.
+
+**Threads and time.** Two threads of the program.
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it | Same act? | L4Re |
+| --- | --- | --- | --- | --- | --- | --- |
+| `mutex-handoff` | B says it is about to lock a mutex A holds; A waits 100 us, stamps and unlocks; B stamps when its lock returns; across CPUs, under the cross-CPU rule of [the one clock](#the-one-clock); B always gets the lock | fast | musl's mutex over `futex`, which the seam hands back (`program_task.c:158`) to `erx_umtx_wait` and `erx_umtx_wake` (`syscall.c:90-104`): `liberx`'s wait table and the waiter's semaphore in the kernel (`liberx/backend/fiasco/umtx.c`) | yes; that a program's `pthread_create` runs is unverified, settled by the cell's probe | same act; whether B spins or sleeps is each system's own choice and part of its result | kernel rows only; none |
+| `cond-pingpong` | A and B take turns through one mutex and two condition variables; a sample is A's turn to B and back, same CPU and across CPUs; every turn seen in order | fast | as `mutex-handoff` | yes, as `mutex-handoff` | same act | kernel rows only; `nullcall.root-same-space` beside `ipcbench` is the nearest |
+| `thread-create-join` | `pthread_create` of a thread that returns at once, then `pthread_join`; both 0 and the thread's value returned | fast | `__clone` over `erx_thread_create`, `erx_fiasco_thread_set_clear_word` and `erx_thread_start` ([design-fiasco.md](design-fiasco.md#musl-over-the-backend)), the stack an anonymous `mmap`; the join a `futex` wait on the clear word | yes, as `mutex-handoff` | same act | kernel rows only; none |
+| `nanosleep` | `nanosleep` of 1 ms; a sample is the interval less 1 ms, and an interval under 1 ms is an early return, a wrong answer | expensive | `sleep_call` (`syscall.c:247-262`): a timed wait on a word nothing wakes | yes | same act; [`wake.park-deadline`](#1-wake-how-late-a-waiting-thread-runs) is the kernel table's absolute form of it | kernel rows only; none |
+
+**Processes.**
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it | Same act? |
+| --- | --- | --- | --- | --- | --- |
+| `spawn-main` | the parent stamps and calls `posix_spawn` of the program in a mode whose first statement stamps and writes the stamp to an inherited pipe; one CPU; the child's `getpid` equals the process id `posix_spawn` returned | expensive | the planner in `liberx` and then `ENOSYS` (`liberx/program/spawn.c:44-50`); by design, the handler's request, the command server's process id, the port driver's sub-space of about 23 kernel calls, `liberx`'s start-up and the startup message ([design-programs.md](design-programs.md#the-cost-of-a-program)) | waits on `posix_spawn`'s request | same call; Linux's musl clones with `CLONE_VM` and `CLONE_VFORK` and `execve`s an ELF file of the initramfs (`musl/src/process/posix_spawn.c:152`, `:198-199`), erXos maps the program from its release |
+| `spawn-wait` | `posix_spawn` of a child that exits at once and `waitpid` for it, one interval: the program itself, exiting 7, and toybox's `true`, exiting 0; `waitpid` returns the child's id and its status | expensive | as `spawn-main`; `wait4` answers `ENOSYS` (`program_task.c:328-331`), and by design reads the child table that the handler's reports fill ([design-programs.md](design-programs.md#the-posix-lite-personality)) | waits on `posix_spawn`'s request and the child table | as `spawn-main` |
+
+L4Re, for both: kernel rows only; none. Starting a program to its exit,
+end to end, is `spawn-wait` of `true`. There is no `fork` row: the first
+tier has no `fork`.
+
+**Memory.** The program-level form of [`vm`](#4-vm-what-memory-costs).
+Anonymous private mappings of 1 and 64 pages, read and write.
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it | Same act? |
+| --- | --- | --- | --- | --- | --- |
+| `mmap` | `mmap`; every page reads zero | fast | the seam hands an anonymous mapping back (`program_task.c:80-81`) to musl's row, `erx_vm_reserve` and then `erx_space_protect`, which commits (`syscall.c:141-169`), each a request to the root service, as every `vm` call on Fiasco is | yes | nearest counterpart: erXos commits at `mmap`, Linux at the first touch |
+| `touch` | the first write to each page of a fresh 64-page mapping, a sample a page; each reads back | fast | a plain write: the commit has mapped the pages (FD7) | yes | nearest counterpart, as `mmap` |
+| `munmap` | `munmap`; afterwards `mprotect` of the range fails with `ENOMEM`, POSIX's answer for an unmapped page, so a `munmap` that did nothing fails the cell | fast | `erx_prog_fd_munmap`'s checks and `erx_vm_release` (`liberx/program/fd.c:940-959`); `mprotect` over a hole is `ENOMEM` ([design-programs.md](design-programs.md#the-posix-lite-personality)) | yes | same act |
+| `map-cycle` | `mmap` of 64 pages, the first write to each, `munmap`, one interval; the checks above, untimed | fast | the three above | yes | same act: the endpoint both systems share, as `vm.commit-touch` is |
+
+L4Re, for every memory row: kernel rows only; the kernel table's `vm`
+rows have no L4Re counterpart. The `vm` cells are the parts beneath
+erXos's rows: `vm.reserve`, `vm.protect` and `vm.release` from a test
+task, which the program table prints beside `mmap` and `munmap` and
+never subtracts from them.
+
+**Whole workloads.** Each started by the program with `posix_spawn`,
+its pipes and file actions, as a shell would start it, so no shell is
+on either system's path; every command is toybox's applet of that name,
+built from the tree's toybox for each system, so the commands are the
+same code too.
+
+| Operation | Act and correct result | Profile | erXos runs it |
+| --- | --- | --- | --- |
+| `pipeline` | three stages joined by pipes: `find` over a generated tree of 1,000 files in 50 directories, its names to `xargs grep -l KEY`, and that to `wc -l`, from the first spawn to the last `waitpid`; the count equals the generator's | expensive | waits on `posix_spawn`'s request, the child table and directory reads (`find` reads directories) |
+| `untar` | toybox's `tar xf` of a generated archive of 1,000 files in 50 directories into a fresh directory of `/tmp`, then `rm -r` of it untimed; every file's bytes equal the archive's | expensive | waits on `posix_spawn`'s request, the child table, `mkdirat` and `unlinkat` |
+
+Same act on both systems, and L4Re: kernel rows only; none. The tree and
+the archive are made by one Ruby generator from a fixed seed, so every
+system reads the same bytes; on erXos they are files of the image's
+release, on Linux of the initramfs, each system's own read-only file
+service.
+
+**Erlang.** `erl`, in clock `counter` as `xdomain`'s modules use it, and
+placement `runtime`. L4Re: none.
+
+| Operation | Act and correct result | Profile | erXos's path | erXos runs it |
+| --- | --- | --- | --- | --- |
+| `spawn-down` | `spawn_monitor` of a process that returns at once, to its `'DOWN'`; reason `normal` | fast | ERTS's process creation, as stock's | yes |
+| `ets-insert`, `ets-lookup` | `ets:insert` and `ets:lookup` of integer keys with 64-byte binary values in a `set` of 10,000; the value read is the value written | fast | ERTS's ETS | yes |
+| `read-file` | `file:read_file` of 4 KiB and 64 KiB; the bytes equal | fast | `prim_file` through the domain's file service: one round trip to the server of the path's grant and three copies ([design-programs.md](design-programs.md#performance)) | yes, where the image's domain holds a writable `/tmp`, which for the `xdomain` bench image is unverified |
+| `tcp-rtt` | 64 bytes and back over a `gen_tcp` loopback connection; the reply equals the request | fast | the domain's network service, `erx_net`, on its loopback interface | waits on an image that runs `erx_net` on its loopback interface; whether the `xdomain` bench image does is unverified |
+
+A local message round trip is `xdomain.local-rtt`, which the Erlang
+table already holds; `erl` does not time it again. Stock OTP's
+counterpart of each is the same call on Linux, where `read-file` and
+`tcp-rtt` reach Linux's kernel through ERTS's drivers.
+
+### Genode's guest
+
+Genode is the second microkernel operating system in the comparison: its
+programs, as erXos's do, reach files and other programs through
+components in user mode. It runs the program table's rows, and nothing
+of the kernel table.
+
+**Kernels.** Genode runs on several kernels; each is a system of its
+own, `genode-hw`, `genode-sel4` and `genode-foc`, so the record never
+sets two of them in one environment. Proposed: Genode's own `base-hw`
+kernel, which its documentation says runs on ARM without a separate
+kernel; seL4, whose 64-bit ARM support Genode's 25.11 release notes say
+was added, developed on QEMU's `virt` machine and run daily on the
+i.MX8Q EVK board; and Fiasco.OC, which would hold the kernel family
+constant against erXos's Fiasco, if Genode supports it on 64-bit ARM.
+Genode's platform page says it supports seL4 on 32-bit ARM and that
+Fiasco.OC runs on many ARM platforms, without saying which Genode
+supports on 64-bit ARM (References). So `base-hw` on QEMU's `virt` and
+on the Raspberry Pi 4, seL4 on the Raspberry Pi 4, and Fiasco.OC
+anywhere on 64-bit ARM are unverified, each until Genode's own
+documentation at the pinned release says so; a kernel it does not
+support there has no row.
+
+**License and clean room.** Genode is under the GNU Affero General
+Public License version 3 (References). It is a test oracle: fetched at
+a pinned release and SHA-256, built out of the tree, run in a guest as a
+black box, never shipped and never redistributed, as L4Re is. No agent
+reads its source; its documentation and release notes are read, and
+where a fact needs its source, a facts record by a separate agent, as
+for ipcbench, is the route.
+
+**Build.** Genode's own build system, run as its documentation
+describes, inside an offline container on the x86-64 host that runs the
+remote QEMU cells, under the oracle's confinement flags
+(`OracleContainer::CONFINEMENT`), as L4Re's build runs in the
+development host's container; only L4Re's build uses the development
+host's Docker. The tool chain is Genode's pre-compiled one, published
+for Debian 12.10 and Ubuntu 24.04 with its SHA-256 and installed at
+`/usr/local/genode/tool/<version>` with the prefix `genode-aarch64-`
+(References), fetched by the fetch step and copied into the container,
+never fetched by the build. `erx_peer_bench` is built as a Genode
+component from a target description of erXos's (`bench/genode/`), with
+Genode's C library, a VFS that gives the program `/tmp` as a file
+system in memory, and the program's `posix_spawn` where Genode's C
+library offers it (unverified). That Genode's C library derives from
+FreeBSD's is unverified in the documents read. What comes back is the
+boot image and the resolved configuration, as L4Re's build returns its
+files, bounded and read only as data.
+
+**Boot and lines.** `QemuPlan.argv` with Genode's boot image as
+`-kernel`, Genode's own QEMU start is not used, so its QEMU arguments are
+erXos's. Genode prints a component's log behind its label; the importer
+of its boot drops the label, as L4Re's drops ned's tag, and nothing else.
+Whether Genode's log carries a 64 KiB line whole is unverified; a cut
+line is `rejected`, which is visible and fails safe, and if lines are
+cut the program writes its lines through Genode's terminal path instead,
+settled when the guest is built. The boot ends at the program's `CLOCK`
+line, and QEMU is ended as at a checkpoint.
+
+### How erXos runs the program
+
+The `posix` image is the programs suite's test image
+(`tools/lib/erx/programs.rb:600-627`): the production image with
+`erx_peer_bench`, built as a program from `NativeRoot::PROGRAM` and the
+file as the suite builds its programs, and toybox's `true`, `find`,
+`xargs`, `grep`, `wc`, `tar` and `rm`, the generated tree and archive in
+the domain release. At root's session the console types
+`/bin/erx_peer_bench posix` at the command shell, as the suite types its
+`rc` cases (`programs.rb:536-556`); the program's standard output is an
+open on the session's terminal, so its lines reach the console as it
+wrote them and the serial log is read as every guest's is. Whether the
+terminal's output processing ends a line in a carriage return the
+reader must drop is unverified; the reader drops a final carriage
+return and nothing else. The boot ends at the program's `CLOCK` line and
+QEMU is ended as at a checkpoint. The `erl` cells run in the `xdomain`
+bench image, typed into its shell as `xdomain`'s module is, under that
+boot's one `CLOCK` line.
+
+### What it needs
+
+Each is new and named here; nothing else is added.
+
+* **`posix` in `erx_peer_bench.c`**, with an erXos build: the clock
+  through `erx_fiasco_counter`, pinning through `sched_setaffinity`, and
+  the probe of each call; the benchmarks that need `fork` or Linux's
+  `/proc` (`nullcall`, `vm`, `wake`) are built only for Linux and FreeBSD,
+  since erXos runs its own guests for them. One file keeps one line
+  writer, one calibration and one set of profiles for every system.
+* **Declarations** `tools/lib/erx/benches/posix.rb` and `erl.rb`, each
+  operation with its `same act` or `nearest counterpart` line and its
+  per-system entries, from which the program table is printed.
+* **The program table** in `Erx::BenchSideBySide`: one row per cell,
+  a column per system, and the declaration's line. The kernel table is
+  the one `tools/lib/erx/bench_side_by_side.rb` calls the C table, a
+  name that does not tell it from the program table.
+* **The images**: the `posix` image above; Linux's initramfs gains
+  toybox's applets, built static against Alpine's musl by the same
+  compiler, the generated tree and archive, a `/tmp` directory, and in
+  `/init` the loopback interface brought up, which the network rows
+  need and which the Erlang guest's `/init` already does.
+* **The generator** of the tree and the archive, a Ruby function of a
+  seed, whose consumer is `pipeline` and `untar`.
+* **Genode's guest**: its lock (`bench/genode/deps.lock`, read only by
+  `tools/erx fetch --genode`), its container build on that x86-64 host, its
+  target description and its line importer.
+
+### Their tests
+
+| Test | Passing case | Seeded failure that must fail it |
+| --- | --- | --- |
+| the probe of a call | on erXos, `stat` comes back `unsupported: newfstatat answered ENOSYS` and `read` `measured` | the probe dropped: `stat`'s timed loop counts failed calls and the cell is `failed`, never a number |
+| erXos's build of the program | it links and passes `CounterReads` | the Linux branch's own counter read compiled into the erXos build: `CounterReads` refuses the program, so the erXos build is shown to take its own clock |
+| `open` and `close` | the lowest-number check holds after the loop | a seeded build that skips one `close` in a hundred: the next `open` returns a higher number and the cell is `failed` |
+| `munmap` | the `mprotect` afterwards answers `ENOMEM` on both systems | a seeded build whose `munmap` does nothing: `mprotect` succeeds and the cell is `failed` |
+| `pipe-rtt` | every reply equals its request | the peer flipping one byte in a hundred replies: the cell is `failed` |
+| `spawn-main` | the child's `getpid` equals the spawn's id | a child reporting its id plus one: the cell is `failed`; on erXos, until a program's `getpid` reads its startup record, this cell fails the same way, which is the check working |
+| `nanosleep` | no early return | a seeded build sleeping 0.5 ms: every sample is early and the cell is `failed` |
+| the program table | an erXos and a Linux boot of `posix` print one row per cell with both columns and the declaration's line | a declaration without its line: the declaration is refused before any boot |
+| Genode's importer | a fixture erXos writes in the labelled form gives `measured` cells | the label left on: every line is `rejected` |
+
+Sensitivity run, as [Verification](#verification) defines them: a
+100 us busy wait in `erx_prog_handler`'s answer to a file read, which
+reports its executions, must raise `posix.read`'s median by about
+100 us and leave `posix.getpid`'s and `posix.mmap`'s where they were,
+which shows the row went through the session's Erlang handler.
+
+### Open decisions of the program benchmarks
+
+* **Thread forms of the round trips.** `pipe-rtt`, `poll-rtt` and
+  `pipe-stream` can also run between two threads of one program, which
+  erXos runs before `posix_spawn` has its request and which separates a
+  pipe's cost from a switch between address spaces.
+  Recommendation: add them as the parameter `peer`, `process` or
+  `thread`, since they are the program table's only IPC numbers until
+  then and cost no code beyond what the process form needs.
+* **Toybox or erXos's own commands in the workloads.** erXos's command
+  shell runs Erlang commands under several of these names, which is what
+  an erXos user runs. Recommendation: toybox on both, so the row is one
+  act; the commands a user meets are a later row of their own.
+* **The benchmarks the owning designs name.** [design-pipes.md](design-pipes.md#performance)
+  names `tools/erx bench pipe` with a one-byte latency, and
+  [design-programs.md](design-programs.md#performance) names `spawn` and
+  `fs`, set against the host, with reads of 4 and 64 KiB from a program.
+  Recommendation: those cells are `posix`'s, read by those benchmarks
+  rather than defined again, and those documents cite these rows; their
+  other cells (500 polled ends, many writers, the handler against an
+  Erlang process) stay theirs.
+* **The landing matrix.** Recommendation: `posix` and `erl` run in
+  comparison sessions and on demand, never at the landing gate, which
+  keeps its three boots; a session's numbers are the evidence a change
+  to a program's paths brings.
+* **Genode's kernels.** Recommendation: `base-hw` and seL4 under HVF
+  first, Fiasco.OC only where Genode's documentation at the pin names
+  64-bit ARM support, and the board once Genode's documentation names
+  the Raspberry Pi 4.
 
 ## The first five benchmarks
 
@@ -2175,7 +2606,10 @@ pool's pages back, stamped by the trace ring's `space_start` and
 fixture lacks: frames far over 512 bytes, a sink that acknowledges
 batches, a bound on the data outstanding, and for head-of-line blocking
 small and large frames sent together. They are designed with G5's runs.
-File and pipe I/O come with their owning gates.
+`lifecycle`'s `spawn_monitor` to `DOWN` is `erl.spawn-down` and a
+program's spawn to its `main` is `posix.spawn-main`
+([What a program sees](#what-a-program-sees-posix-and-erl)); it times
+them from there rather than again.
 
 ## Fixing the existing tools
 
@@ -2482,6 +2916,22 @@ benchmark back to its design rather than letting it land.
 * **Arming the hardware watchdog in the bench root,** so that a hang below
   it resets the board by itself: an open decision
   ([Open decisions](#open-decisions)).
+* **Kernel rows alone, with a note that erXos's programs pay more.** The
+  kernel table answers what erXos's kernel costs and nothing about what a
+  program pays, which is mostly the session's Erlang services; a note
+  cannot be compared, and the program table can.
+* **A program of erXos's own for erXos and a POSIX twin for the
+  others.** Two sources would let the act drift between them; one file
+  makes it the same by construction, and the per-system lines stay the
+  clock and the probe.
+* **FreeBSD and QNX in the program table.** FreeBSD's rows are what
+  erXos's commands match, and QNX is the microkernel system whose
+  services in user mode are closest to erXos's; both are later
+  candidates for the program table, not in it now. FreeBSD keeps its
+  place in the board's kernel table.
+* **L4Re's POSIX layer for the program rows.** Too thin to run the
+  program set; L4Re stays in the kernel table, and each program row says
+  so.
 
 ## Decisions
 
@@ -2701,6 +3151,30 @@ read as data; nothing fetched was run. A URL that moves (a `latest` list, a page
 | Alpine Linux 3.24, the community repository's aarch64 package index, `https://dl-cdn.alpinelinux.org/alpine/v3.24/community/aarch64/APKINDEX.tar.gz`, fetched on 2026-11-24 into `~/erxos-scratch/src-benchvm-otp/`; its `erlang27` is 27.3.4.19-r0 and `erlang28` 28.5.0.8-r0, and it has no OTP 29 | `APKINDEX-community-aarch64.tar.gz`, and its `APKINDEX` | `5ec81c2e76ccd4ad5dfdc086097be0076340799cd406427b4b04ae350f141c71`, `444363bc845796ad75f3409962a011c8d276243682d6276ea207c658408e4a42` |
 
 ipcbench's source, `https://github.com/l4re/ipcbench` at `148682322103a984ddf84eb1a28e67a3d50c0b28` ("Add missing headers when using musl"), was read only by the separate agent that wrote its facts record, `~/erxos-scratch/reports/ipcbench-facts.md` (SHA-256 `84ba07081538052073641078c6e3c04dac4c0165cfd982e1a4a3c6963718f784`), which lists the SHA-256 of each of the fifteen files it read; this document and the importer rely on that record alone.
+
+For [Genode's guest](#genodes-guest), fetched on 2026-11-25 into
+`~/erxos-scratch/genode-docs/` over HTTPS from `genode.org` and read as
+data; documentation only, no source, and nothing fetched was run. The
+pages carry no release of their own but the notes' numbers:
+
+| Source | File | SHA-256 |
+| --- | --- | --- |
+| "Overview of the different kernels supported by Genode", `https://genode.org/documentation/platforms/index` | `platforms.html` | `618742c54445eb7709cdd1497efbbdcc4895c9d2b63d52557bc7eec35d6191f1` |
+| Release notes 25.11, `https://genode.org/documentation/release-notes/25.11`: "seL4 kernel", 64-bit ARM support on QEMU's `virt` and the i.MX8Q EVK | `rn-25.11.html` | `e04012eab1bb94c3d0c95c790dc5e8e30481aabc437767816e67620b4a9ee552` |
+| Release notes 25.05, `.../release-notes/25.05`: the tool chain on GCC 14.2.0 and its `install-toolchain` command | `rn-25.05.html` | `951ed637bbcf98fc0c9ba125cd7eb9f43b29a12c459ce3759747454cc0702bfe` |
+| Release notes 26.08, the latest on the index, `.../release-notes/26.08` | `rn-26.08.html` | `ad22beef337d293cf8fd58ff7309c8cfabe2345ad86a13958252782e5a74e402` |
+| Release notes 24.11, 25.08, 26.02 and 26.05, searched for 64-bit ARM kernels and for the Raspberry Pi 4, which none of them names | `rn-24.11.html`, `rn-25.08.html`, `rn-26.02.html`, `rn-26.05.html` | `4dae3bb7d9bcee137f6d3f5491b0705ce1983c02847814c19f68a3a1a3ba040d`, `374541cf54cf40b0d2f97c57d20986c6d7143874561039485b7cf43ab4e0ef08`, `4b7bb68a5cdccc61fbc8d4fd224253438b5bb90809468518edfea1de061fb8f2`, `8734e4a0b2c5488ec7d07fb964079fcb8de8f5ed54de712ff2de11394a167284` |
+| The release-notes index, `.../release-notes/index` | `release-notes-index.html` | `2806f84d793adba46729b67bee9d8f3f7f1177c97243148f938b35e2e25fb23e` |
+| "Licensing", `https://genode.org/about/licenses`: the GNU Affero General Public License version 3 | `licenses.html` | `527600fdd9a3bd85ab1759afa26e73d7d23cb097e671423870d1c4e2ec1efea7` |
+| "Tool chain", `https://genode.org/download/tool-chain`: GNU tools, pre-compiled for Debian 12.10 and Ubuntu 24.04, installed at `/usr/local/genode/tool/<version>`, prefixed `genode-aarch64-` | `tool-chain.html` | `e5e177232496fcef8cdb739b0123e8cea3a9a33e5cfd7f59ac01ec60ce7c2677` |
+
+In the tree, for [What a program sees](#what-a-program-sees-posix-and-erl):
+`musl/src/internal/erxos/syscall.c`, `liberx/backend/fiasco/program_task.c`,
+`liberx/program/file.h`, `file.c`, `fd.c` and `spawn.c`,
+`musl/src/process/posix_spawn.c` and its `erxos` replacement,
+`musl/src/stat/stat.c` and `fstatat.c`, `musl/src/unistd/getpid.c`,
+`musl/arch/aarch64/syscall_arch.h`, `liberx/backend/fiasco/arch/aarch64/clock.c`,
+`tools/lib/erx/counter_reads.rb` and `tools/lib/erx/programs.rb`.
 
 In the tree: [design-fiasco.md](design-fiasco.md) (Urgency, Bands, The
 trace ring, Measurements, Verification), [design-build.md](design-build.md)

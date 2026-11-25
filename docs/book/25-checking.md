@@ -779,14 +779,16 @@ ran and answered correctly; whether a change made the system slower is
 the comparison's question, and an inconclusive comparison leaves it open.
 
 Other systems are measured beside erXos in two places. Under HVF on the
-development host, L4Re and Linux boot in the same QEMU machine as
+development host, L4Re, Linux and Genode boot in the same QEMU machine as
 erXos's bench images, with the same processors and memory, each in turn
 over several rounds of one session. The system is part of where a run
 happened, so no comparison can turn one system's number into a verdict
 on another's; the systems meet only in side-by-side tables, one for each
-layer. The C table sets the kernels' own paths beside each other: a
+layer. The kernel table sets the kernels' own paths beside each other: a
 system call, a round trip between two threads and between two address
-spaces, a wake, memory calls and a shared CPU. There Linux is a
+spaces, a wake, memory calls and a shared CPU. Its erXos side is the
+root task calling the kernel and the root service directly, so it is
+kernel against kernel, and says nothing of what a program pays. There Linux is a
 distribution's stock kernel with erXos's small benchmark program as its
 only user program, and L4Re is built by its own build system from the
 revision erXos's kernel came from, running its own IPC benchmark, whose
@@ -794,7 +796,26 @@ cycle counts stay cycles and are never converted. The Erlang table sets
 erXos's message between two domains beside stock OTP on the same Linux:
 two nodes, two operating-system processes, exchanging the same 64-byte
 message over Erlang distribution, and two processes within one node
-beside erXos's exchange within one domain.
+beside erXos's exchange within one domain, and Erlang's own spawns,
+tables, file reads and loopback sockets beside stock's.
+
+The program table answers the question the kernel table cannot: what a
+program such as Doom pays for its calls. One small C program, built by
+the same compiler with the same flags against musl on both erXos and
+Linux, times ordinary UNIX calls and UNIX IPC: `getpid` and
+`clock_gettime`, opening, reading and writing files, pipes and sockets
+between two processes, threads, sleeps, starting a program and waiting
+for it, memory, and whole small workloads such as a pipeline of
+toybox's commands. On Linux each call goes to its kernel; on erXos it
+goes from musl through `liberx`'s program layer to the service that
+owns it, mostly Erlang in the program's own session, so a file read
+pays the program's handler and the file server and a `getpid` pays no
+kernel at all. Genode, a microkernel system whose programs also reach
+their services in user mode, runs the same program on the kernels it
+supports, its own among them; L4Re has no row there. Each call is tried once before it
+is timed, and one that answers that it is not implemented makes its row
+unsupported, so the table shows by itself which calls erXos's programs
+do not have yet.
 
 The same Raspberry Pi 4 also boots stock L4Re, FreeBSD and Linux, with
 the same firmware settings, and each runs the counterpart of an
