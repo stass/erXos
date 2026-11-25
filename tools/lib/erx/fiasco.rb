@@ -68,7 +68,7 @@ module Erx
     }.freeze
     KERNEL_EXCLUSIONS = %w[
       src/lib/regex src/lib/simple_malloc src/lib/gcov src/lib/perfctr
-      src/kern/arm/bsp/qcom
+      src/kern/arm/bsp/qcom src/test src/jdb/jdb_cov_module.cpp src/drivers/stream_crc32.cpp
     ].freeze
     CORE_PACKAGES = %w[
       compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io

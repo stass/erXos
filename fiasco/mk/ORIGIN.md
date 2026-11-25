@@ -14,7 +14,14 @@ Third-party notices remain in their original files.
   "revision": "22cc26e5c971f65a1425d8cae87d793c2573528a",
   "archive_sha256": "98c8b2b81391cfee4797586e150fc74bd5ba48a2decdcb18e7daa5ccc3db3097",
   "exclusions": [
-
+    {
+      "path": "tool/bin/tap-wrapper-plugins",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "conf/test/lib_test.lua",
+      "reason": "not used by any erXos build"
+    }
   ],
   "removed": [],
   "files": {
@@ -293,16 +300,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "0a7150bfccfd1fd5c47fa76acba01136835912c7d17ce9566c5a6efbb64fe502",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "conf/test/lib_test.lua": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "4a7b526c055f24a04dc2414a8d6b90e1e009e89cfc0bcf9c6125f4d457075271",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -2356,56 +2353,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "a540bf4443306fe6e2882bb37e075d78e3321246998f662b1278073e3731d374"
-      ]
-    },
-    "tool/bin/tap-wrapper-plugins/README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "88fdc33ffee7b7b8274575bfc49960586312c532fbb8415852ca0fde2948ca83",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "tool/bin/tap-wrapper-plugins/helper.lua": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "6e901cede96a12f7f2aa34dc78c0bb64cece4ea27c2f27e96864f066b24741dd",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "tool/bin/tap-wrapper-plugins/introspection-testing.lua": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "8618eedebdc9f5a15f2f282ed37c65a0bb4fcc39e31509d9eb21c16fe94df775",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "tool/bin/tap-wrapper-plugins/model-based-testing.lua": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "7beb0ce7273eba89b2baf336b520a1a8e4df09fc7107dda906ea6257514bf5ab",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "tool/bin/tap-wrapper-plugins/tap.lua": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "8cabe0fd6034fb981d5dfa31f4360bf2fff5bd79254c591d905862c7faeca883",
-      "kind": "file",
-      "non_ascii_lines": [
-        "b80fb4e22afeaeb3bd1273983aef04149d3bfacf5b3a0c0e9b098fc9b07d6bbd"
       ]
     },
     "tool/bin/tapper-wrapper": {

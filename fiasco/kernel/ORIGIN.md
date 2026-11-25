@@ -423,6 +423,18 @@ is under `changes`.
     {
       "path": "src/lib/simple_malloc/simple_malloc.h",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
+    },
+    {
+      "path": "src/test",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/jdb/jdb_cov_module.cpp",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/drivers/stream_crc32.cpp",
+      "reason": "not used by any erXos build"
     }
   ],
   "removed": [
@@ -1842,16 +1854,6 @@ is under `changes`.
 
       ]
     },
-    "src/drivers/stream_crc32.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "c74ef60354af0ba016ec7b5dba81075090e6c307f1717518d125474027dc1a84",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "src/drivers/uart-libuart.cpp": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -2440,16 +2442,6 @@ is under `changes`.
       "kind": "file",
       "non_ascii_lines": [
 
-      ]
-    },
-    "src/jdb/jdb_cov_module.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "5a405e10590d366cf130fe365b56ebbc54737703c6a1c83709b32b5345b91a3e",
-      "kind": "file",
-      "non_ascii_lines": [
-        "749da954a61d0aefe96b14bb642e4c1972f01131fbf0d10fadee84c62d9110a5"
       ]
     },
     "src/jdb/jdb_cpu_call.cpp": {
@@ -17282,226 +17274,6 @@ is under `changes`.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "be6e160541b7b8e0bcccff6a01712a16e0857f16810038fe28a8c22c9f1b7d48",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/coderules/Modules.crtest": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "963cf2244cae5722049972408599a79591e3eb0cdd8bb0b86fc23781a6105b75",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/Modules.utest": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "81f82b882eabdafda5d00202a3f8d93a2a4dbf5647d238fd3103e04ccc4a86ed",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/framework/README.md": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1350b5eeaa2ed40ed2c1df8fa66e3eeab43a4865e32df115042e17b53cdc16be",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/framework/utest_fw.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "1f16760e200b5f0149195b7de01344955bc0e1b701ff8b64934bffb8b68540d7",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/Modules.utest": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d96d6d5a2ee383fdd71c8973ce44244cefef53c3d44ac055bc826d89d9fa93ab",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/common_test_mapdb.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "693f5360d37fd68af8e50f8e08c9c4bde441038b929bd5d24e99f3e9d348e2e9",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/config_map_util": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "9eb2087fb14fa8bac036f8b00d3529910efa35c495718297070c200d08c6d8ef",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/config_mapdb": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d87e0fb1244913d515eb252592a72be8e4dfa7707c15bde61a9037c3809e7c1b",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "b9832a1e170fa02c395fe84d053e9be71ed7de524d1d1abff8f8e40ae0e9bb8d",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-arm-nolpae": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "d086f4d219d718b801a18e26989e64faa35846d60653551d0974e7b99a5078d0",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-ia32": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c91d7be18bde856e01b1eb3d87f42871105d49fff93428f3779c03b9879ac5b4",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-mips-32": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "3d0e44685a74f7eaf79742b8770727716ccdaecf434139d08f980be38bbd4efd",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-mips-64": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "19b9cb41edcdac09dad860747357bef7c3cba1c676b1d087192c889354ff486f",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-riscv-32": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "c91d7be18bde856e01b1eb3d87f42871105d49fff93428f3779c03b9879ac5b4",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_map_util-riscv-64": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "b9832a1e170fa02c395fe84d053e9be71ed7de524d1d1abff8f8e40ae0e9bb8d",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_mapdb": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1c75883f4bfa64e9a4cd1f5d57dcacfae24415aee74a98ac8655da189a3eaf6e",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_mapdb-arm-nolpae": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1c75883f4bfa64e9a4cd1f5d57dcacfae24415aee74a98ac8655da189a3eaf6e",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_mapdb-ia32": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1c75883f4bfa64e9a4cd1f5d57dcacfae24415aee74a98ac8655da189a3eaf6e",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_mapdb-mips": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "e708df91b8fff6ff1bee26fd4b5b1c372fd994ad994957954926b3d5fd2319f4",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/expected_mapdb-riscv": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1c75883f4bfa64e9a4cd1f5d57dcacfae24415aee74a98ac8655da189a3eaf6e",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/test_map_util.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "4e372d3c469aeb738dd0da6b31d2d3295e628c9af6d0dd73328fabf346d7f9f2",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/test/utest/mapdb/test_mapdb.cpp": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed exact header declaration; standard GPL version selected; no custom grant asserted",
-      "reviewed": true,
-      "sha256": "e9a44c8d494e1141db1262df0a52d1f32979113cc4461f66ed847402ddf39b7c",
       "kind": "file",
       "non_ascii_lines": [
 

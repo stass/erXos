@@ -14,7 +14,22 @@ Third-party notices remain in their original files.
   "revision": "a4f4ad182c78a97a1c50098511092dd32f05c63d",
   "archive_sha256": "e6ec5fa08e6ae44ef88263428c2f5936ce0bd804b99626858a330b141e7043dc",
   "exclusions": [
-
+    {
+      "path": "server/src/ARCH-mips/bootstrap.ld.in",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/ARCH-mips/crt0.S",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/rcar4_r52.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/rcar4_r52_crt0_init.h",
+      "reason": "not used by any erXos build"
+    }
   ],
   "removed": [],
   "files": {
@@ -798,31 +813,11 @@ Third-party notices remain in their original files.
         "6050106764b7b845f8ba2434ce3972797ff4d0eb85d3352f8bce3a17749acafe"
       ]
     },
-    "server/src/ARCH-mips/bootstrap.ld.in": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed explicit grant in server/src/ARCH-mips/bootstrap.ld.in; complete notice retained",
-      "reviewed": true,
-      "sha256": "4253492923a16c73d1f56b004165ce8c7ee6aba6440c24100c08e1dc364c18d2",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "server/src/ARCH-mips/cpu.cc": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "bd01728f007177e1767ed7a82eaf62a416fd75b0a5d5528ad0c4439d56015b37",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/ARCH-mips/crt0.S": {
-      "license": "GPL-2.0-only",
-      "evidence": "reviewed explicit grant in server/src/ARCH-mips/crt0.S; complete notice retained",
-      "reviewed": true,
-      "sha256": "726330a6b87d29e7ddb584d69de0d23f9c5f9cc19bb3f6de1f56152ad6e16449",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -1726,26 +1721,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "46104e6a96da380a17a0d0265505baf63458bbeceb0a4a862100e4c0122ef862"
-      ]
-    },
-    "server/src/platform/rcar4_r52.cc": {
-      "license": "GPL-2.0-only",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "161655e7def801efb67cd856d2b134d0b7942b605d9bdce2cbe60856d777fe12",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
-      ]
-    },
-    "server/src/platform/rcar4_r52_crt0_init.h": {
-      "license": "GPL-2.0-only",
-      "evidence": "file SPDX",
-      "reviewed": false,
-      "sha256": "5c2950b9d5647afc9f1b8ea0ca51d6b879d3993d85f798a3257dcb87535f39df",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
       ]
     },
     "server/src/platform/riscv_virt.cc": {

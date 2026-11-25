@@ -1,13 +1,9 @@
 # Modified by erXos: it boots from erXos's boot image (docs/design-fiasco.md, "Boot handoff").
 # Modified by erXos: the glue module of erx/ joins the kernel.
 # Modified by erXos: jdb_object is built only into a kernel with the debugger.
+# Modified by erXos: the unit and code rules tests of src/test are not imported.
 # -*- makefile -*-
 # vi:se ft=make:
-
-# Include for unit tests, enable by including UTEST in SUBSYSTEMS.
-include $(srcdir)/test/utest/Modules.utest
-# Include for code rules tests, enable by including CODERULES in SUBSYSTEMS.
-include $(srcdir)/test/coderules/Modules.crtest
 
 SUBSYSTEMS += ABI JABI KERNEL DRIVERS CRT0 VERSION TCBOFFSET STDWORKLOAD
 SUBSYSTEMS += CXXLIB LIBC LIBK
