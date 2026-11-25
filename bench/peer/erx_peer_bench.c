@@ -276,9 +276,9 @@ clock_choose(void)
 #endif
 
 /*
- * The probe (docs/design-bench.md, "What a program sees"): the call that last failed and
- * its error, which a cell's untimed first run reads to tell a call the system does not
- * offer from a wrong answer.
+ * The probe (docs/design-bench.md, "What a program sees: `posix` and `erl`"): the call
+ * that last failed and its error, which a cell's untimed first run reads to tell a call the
+ * system does not offer from a wrong answer.
  */
 static struct {
 	const char *call;

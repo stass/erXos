@@ -77,8 +77,8 @@ module Erx
     # "Counterparts"): the native boot's cells set the kernels' own paths beside each
     # other, the xdomain boot's Erlang cells the runtimes' messages, and the posix boot's
     # cells what a program pays for its POSIX calls (docs/design-bench.md, "What a program
-    # sees"). gate says whether the landing gate boots it: the program table's boots run in
-    # comparison sessions and on demand only.
+    # sees: `posix` and `erl`"). gate says whether the landing gate boots it: the program
+    # table's boots run in comparison sessions and on demand only.
     Boot = Data.define(:kind, :cpus, :layer, :gate)
     BOOTS = {
       'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'kernel', gate: true),
