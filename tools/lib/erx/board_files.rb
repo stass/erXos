@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'time'
 require_relative 'bench_record'
 require_relative 'bounded_file'
 require_relative 'error'
@@ -16,7 +17,7 @@ module Erx
   # alike. Each type's constructor refuses what is not one, so a file read back is
   # either a whole queue or walk or an Erx::Error naming the file and the field.
   module BoardFiles
-    FORMAT = 1
+    FORMAT = 2
     QUEUE = 'queue.json'
     WALK = 'walk.json'
     # A boot name (docs/design-bench.md, "The construction: the server hands out a queue")
@@ -27,6 +28,14 @@ module Erx
     DATE = /\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\z/
 
     def self.need(valid, what) = valid || raise(Error, "board files: #{what}")
+
+    # Whether text, in DATE's shape, names a time.
+    def self.time?(text)
+      Time.iso8601(text)
+      true
+    rescue ArgumentError
+      false
+    end
 
     # What a banner names: the archive header's build and index hash.
     Identity = Data.define(:build, :index) do
@@ -69,7 +78,7 @@ module Erx
     Queue = Data.define(:benchmark, :date, :sets, :entries, :return_identity) do
       def initialize(benchmark:, date:, sets:, entries:, return_identity:)
         BoardFiles.need(benchmark.is_a?(String) && BenchRecord::NAME.match?(benchmark), 'the benchmark is not a name')
-        BoardFiles.need(date.is_a?(String) && DATE.match?(date), 'the date is not a UTC time to the second')
+        BoardFiles.need(date.is_a?(String) && DATE.match?(date) && BoardFiles.time?(date), 'the date is not a UTC time to the second')
         BoardFiles.need(sets.is_a?(Array) && !sets.empty? && sets.all?(BootSet), 'the queue holds no sets')
         BoardFiles.need(entries.is_a?(Array) && !entries.empty? && entries.all?(Entry), 'the queue holds no entries')
         BoardFiles.need(entries.map(&:position) == (1..entries.size).to_a, 'the entries are not numbered from 1 in order')

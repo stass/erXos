@@ -70,8 +70,8 @@ make pack PLATFORM=raspi4b
 
 This builds the card the website offers, the kiosk and the Doom example
 on it, so it needs `tools/erx fetch --example doom` first. The
-development card, which takes your own apps and is the one to netboot,
-is
+development card is the same card without the Doom example, so it needs
+no such fetch; build it, the one to netboot, with
 
 ```sh
 tools/erx pack --platform raspi4b --medium

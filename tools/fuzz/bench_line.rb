@@ -50,7 +50,7 @@ module Erx
                       'HTTP: GET boot.img', 'MESS:00:00:05.012712:0: arasan: arasan_emmc_open'].freeze
 
     # The record facts of board_queue's one set, as BoardRecord.set reads them.
-    BOARD_SET = BoardRecord::Set.new(
+    BOARD_SET = BoardRecord::SetFacts.new(
       environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}),
       subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {})
     )
@@ -188,8 +188,9 @@ module Erx
       raise "a board log's slices are not the log" unless read.boots.map(&:log).join == text.b
 
       run = BoardRecord.run(queue: queue, walk: nil, read: read, readings: { 'before' => text, 'after' => nil }, started_by: 'manual')
-      made = BoardRecord.records(read, queue: queue, sets: [BOARD_SET], run: run)
+      made = BoardRecord.records(read, sets: [BOARD_SET], run: run)
       raise "a board log's record dropped a boot" unless made.sum { |recorded| recorded.record.boots.size } == queue.entries.size
+
     rescue Erx::Error
       nil
     end

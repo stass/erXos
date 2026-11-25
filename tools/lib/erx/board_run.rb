@@ -10,6 +10,7 @@ require 'time'
 require_relative 'bench_record'
 require_relative 'board_console'
 require_relative 'board_files'
+require_relative 'board_log'
 require_relative 'board_walk'
 require_relative 'boot_file'
 require_relative 'boot_partition'
@@ -293,7 +294,7 @@ module Erx
                           deadlines: BoardWalk::Deadlines.new(boot_seconds: BOOT_SECONDS,
                                                               end_seconds: guest + NativeBench::DEADLINE_MARGIN_SECONDS,
                                                               return_seconds: BOOT_SECONDS),
-                          byte_limit: BenchRecord::LOG_BYTES)
+                          byte_limit: BoardLog.boot_bytes(names.size))
     end
 
     def reading(taken) = reading_of(taken, @shell.sensors)

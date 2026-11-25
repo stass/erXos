@@ -1313,8 +1313,10 @@ an entry no line names has them `not_run`, `no line of the log names
 its boot`.
 An entry whose naming lines lie on both sides of another entry's
 naming line or of a banner booted twice, and all its cells are
-`rejected`; a boot's slice of the log that is over a boot's 64 MiB is
-refused. The live run's record is the
+`rejected`; a boot's slice of the log that is over a boot's bound is
+refused: 64 MiB, or less in a walk so long that its whole log would
+pass 512 MiB, so any walk's log is read at once, and the walk holds each
+boot to the same bound. The live run's record is the
 same function of the log it captured. Every byte the reader takes is
 the board's, untrusted: nothing it reads reaches the terminal but
 through `LineEscape`, and the reader is fuzzed with the bench lines'

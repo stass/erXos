@@ -64,9 +64,16 @@ module Erx
 
     module_function
 
-    # The most bytes a log of queue holds: a boot's bound for each entry and the return
-    # (BenchRecord::LOG_BYTES, which the walk holds each boot to).
-    def max_bytes(queue) = (queue.entries.size + 1) * BenchRecord::LOG_BYTES
+    # The most bytes a whole console log holds, so a walk of any length is read at once.
+    CONSOLE_BYTES = 512 << 20
+
+    # The most bytes one boot of a walk of entries entries holds, which the walk holds
+    # each boot to: a boot log's bound (BenchRecord::LOG_BYTES), or less, so that every
+    # entry's and the return's together stay within CONSOLE_BYTES.
+    def boot_bytes(entries) = [BenchRecord::LOG_BYTES, CONSOLE_BYTES / (entries + 1)].min
+
+    # The most bytes a log of queue holds: a boot's bound for each entry and the return.
+    def max_bytes(queue) = (queue.entries.size + 1) * boot_bytes(queue.entries.size)
 
     def read(log, queue:, asked:, walk: nil)
       raise Error, 'board log: the log is larger than its queue allows' if log.bytesize > max_bytes(queue)
@@ -82,7 +89,7 @@ module Erx
       ends[-1] = bytes.bytesize
       boots = queue.entries.zip([0, *ends], ends).map do |entry, start, stop|
         slice = bytes.byteslice(start, stop - start)
-        raise Error, "board log: boot #{entry.position} is larger than a boot's log may be" if slice.bytesize > BenchRecord::LOG_BYTES
+        raise Error, "board log: boot #{entry.position} is larger than a boot's log may be" if slice.bytesize > boot_bytes(queue.entries.size)
 
         boot(entry, slice, kept: kept, named: of.(entry), asked: asked.fetch(entry.set), walk: walk)
       end

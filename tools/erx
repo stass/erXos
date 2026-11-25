@@ -1528,7 +1528,7 @@ module Erx
         flags.on('--key FILE') { |value| options[:key] = value }
         flags.on('--runs N', Integer) { |value| options[:runs] = value }
         flags.on('--profile NAME', %w[landing full]) { |value| options[:profile] = value }
-        flags.on('--set DIR') { |value| options[:sets] << value }
+        flags.on('--set DIR') { |value| options[:sets] << File.expand_path(value) }
       end.parse!(arguments)
       no_arguments(arguments)
       BenchSuite.benchmark(name)
@@ -1566,17 +1566,18 @@ module Erx
     end
 
     # The records of a board walk that ended (BoardRecord), one per set, written under
-    # history; when they cannot be, the walk's files stay for `tools/erx bench import`.
+    # history; when they cannot be, the walk's files stay for `tools/erx bench import`,
+    # whose command line is printed before the failure is raised.
     def self.bench_board_record(name, ran, history)
       require_relative 'lib/erx/board_record'
       log = BoundedFile.read(File.join(ran.directory, BoardRun::LOG), maximum: BoardLog.max_bytes(ran.queue))
       made = BoardRecord.recorded(log, queue: ran.queue, walk: ran.walk, readings: { 'before' => ran.before&.text, 'after' => ran.after.text },
-                                       started_by: 'manual', root: ROOT)
+                                       started_by: 'manual')
       BoardRecord.write(made, history: history, root: ROOT).each { |run| Terminal.puts("bench: recorded #{run}") }
-    rescue Error => e
-      Terminal.puts("bench: the board run's record was not written (#{LineEscape.escape(e.message)}); import it with: " \
-                    "tools/erx bench import #{name} --env #{BoardRun::ENVIRONMENT} --queue #{File.join(ran.directory, BoardFiles::QUEUE)} " \
-                    "#{File.join(ran.directory, BoardRun::LOG)}")
+    rescue Error, SystemCallError
+      import = ['tools/erx', 'bench', 'import', name, '--env', BoardRun::ENVIRONMENT, '--queue', File.join(ran.directory, BoardFiles::QUEUE),
+                File.join(ran.directory, BoardRun::LOG)]
+      Terminal.puts("bench: the board run's record was not written; once the cause below is fixed, import it with: #{Netboot.shell_line(import)}")
       raise
     end
 

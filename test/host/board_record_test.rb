@@ -65,7 +65,7 @@ class BoardRecordTest < Minitest::Test
 
   def recorded(queue, walk: walk(), log: Fuzz.board_log, readings: { 'before' => "cpu_temp 41.2\n", 'after' => nil })
     read = Erx::BoardLog.read(log, queue: queue, asked: Fuzz.board_asked * queue.sets.size, walk: walk)
-    Erx::BoardRecord.records(read, queue: queue, sets: queue.sets.map { |set| Erx::BoardRecord.set(set) },
+    Erx::BoardRecord.records(read, sets: queue.sets.map { |set| Erx::BoardRecord.set(set) },
                                    run: Erx::BoardRecord.run(queue: queue, walk: walk, read: read, readings: readings,
                                                              started_by: 'manual'))
   end
@@ -145,6 +145,30 @@ class BoardRecordTest < Minitest::Test
       Erx::BoardRecord.import('vm', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
     end
     assert_match(/is a walk of wake/, other.message)
+  end
+
+  # A walk of ten runs, the design's count for a build, is read whole: its log's bound
+  # stays within what one bounded read takes.
+  def test_a_walk_of_ten_entries_is_read_whole
+    one = set_directory('wake', kernel: '11' * 32)
+    entries = (1..10).map { |position| Erx::BoardFiles::Entry.new(position: position, name: format('%032x', position), set: 0, image_sha256: format('%064x', position)) }
+    walked = Erx::BoardFiles::Queue.new(benchmark: 'wake', date: '2026-11-25T00:15:00Z', sets: [one], entries: entries, return_identity: nil)
+    directory = File.join(@scratch, 'walk')
+    FileUtils.mkdir_p(directory)
+    Erx::BoardFiles.write_queue(directory, walked)
+    log = File.join(directory, 'console.log')
+    File.write(log, Fuzz.board_log(Fuzz::FIRMWARE_LINES))
+    error = assert_raises(Erx::Error) do
+      Erx::BoardRecord.import('wake', queue: File.join(directory, 'queue.json'), log: log, root: @scratch, history: @scratch)
+    end
+    assert_match(/names no boot/, error.message)
+  end
+
+  def test_a_queue_with_a_date_that_is_no_time_is_refused
+    assert_raises(Erx::Error) do
+      Erx::BoardFiles::Queue.new(benchmark: 'wake', date: '2026-13-45T99:99:99Z', sets: queue([set_directory('w', kernel: '11' * 32)], [0, 0, 0]).sets,
+                                 entries: queue([set_directory('v', kernel: '11' * 32)], [0, 0, 0]).entries, return_identity: nil)
+    end
   end
 
   # The live run's record and an import's are one function of the log: both write

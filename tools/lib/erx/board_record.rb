@@ -21,8 +21,10 @@ module Erx
   # BenchRecord::Record per set the walk booted, holding that set's boots (BoardLog::Boot,
   # each at its entry's queue position) with the set's environment and subject, read from
   # its build record, and the run's facts. The live walk's record (BoardRun's seam) and
-  # `tools/erx bench import`'s are the same function of the console's log, the queue and
-  # the walk's outcomes when there are any, and both are written by BenchRecord.write.
+  # `tools/erx bench import`'s are the same function (recorded) of the console's log, the
+  # queue and the walk's outcomes when there are any, and both are written by
+  # BenchRecord.write. Only the import refuses a log that names no boot: the live walk
+  # saw its own boots not begin, and records them not_run.
   #
   # The board's bytes reach a record only as BoardLog judged them, as each boot's slice of
   # the log, kept as its serial log, and as sensor readings, kept line by line through
@@ -33,17 +35,21 @@ module Erx
     MEMORY_MIB = 4096
 
     # What a set's record holds of the set: its environment and its subject.
-    Set = Data.define(:environment, :subject)
+    SetFacts = Data.define(:environment, :subject)
 
     module_function
 
     # The set of the queue boot_set as its records name it, from its build record, which
     # must still be the one the walk's entries were made from: the firmware files' SHA-256
     # as the record lists them, its source revision, its kernel8.img's SHA-256 and the
-    # compiler that built it (BL31's, the set's one compiler). A relative directory is the
-    # tree's at root.
-    def set(boot_set, root: Dir.pwd)
-      path = File.join(File.expand_path(boot_set.directory, root), BootPartition::SET_RECORD)
+    # compiler that built it (BL31's, the set's one compiler). The walk names every set
+    # by its absolute directory, so the record reads the set the walk booted wherever the
+    # import runs.
+    def set(boot_set)
+      raise Error, "board record: the set #{boot_set.directory} is not named by an absolute directory" unless
+        File.absolute_path?(boot_set.directory)
+
+      path = File.join(boot_set.directory, BootPartition::SET_RECORD)
       bytes = BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES)
       raise Error, "board record: #{path} is not the one the walk's entries were made from" unless
         Digest::SHA256.hexdigest(bytes) == boot_set.record_sha256
@@ -52,7 +58,7 @@ module Erx
       files = BootPartition.listed_files(receipt)
       receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
       receipt.fetch('inputs').fetch('firmware') => Array => firmware
-      Set.new(
+      SetFacts.new(
         environment: BenchRecord::Environment.new(
           kind: 'pi4', model: nil, cpus: CPUS, system: 'erxos',
           details: { 'memory_mib' => MEMORY_MIB,
@@ -84,7 +90,7 @@ module Erx
     # One record per set of the queue, in the queue's order of sets: the set's boots of
     # read in position order, each with its slice of the log as its serial log, and what
     # its lines refused.
-    def records(read, queue:, sets:, run:)
+    def records(read, sets:, run:)
       read.boots.group_by { |boot| boot.entry.set }.sort.map do |index, boots|
         set = sets.fetch(index)
         BenchSystem::Recorded.new(
@@ -98,10 +104,10 @@ module Erx
     # The records of the walk whose console log is log, of queue, with the walk's
     # outcomes (or nil) and the sensor readings; read is BoardLog's read of it, against
     # what the queue's benchmark asks at the landing profile on the board.
-    def recorded(log, queue:, walk:, readings:, started_by:, root:)
+    def recorded(log, queue:, walk:, readings:, started_by:)
       read = BoardLog.read(log, queue: queue, asked: Array.new(queue.sets.size, asked(queue.benchmark)), walk: walk)
       yield read if block_given?
-      records(read, queue: queue, sets: queue.sets.map { |boot_set| set(boot_set, root: root) },
+      records(read, sets: queue.sets.map { |boot_set| set(boot_set) },
                     run: run(queue: queue, walk: walk, read: read, readings: readings, started_by: started_by))
     end
 
@@ -122,7 +128,7 @@ module Erx
       walk = File.file?(walk_path) ? BoardFiles.read_walk(walk_path) : nil
       bytes = BoundedFile.read(log, maximum: BoardLog.max_bytes(walked))
       made = recorded(bytes, queue: walked, walk: walk, readings: { 'before' => nil, 'after' => nil },
-                             started_by: 'manual', root: root) do |read|
+                             started_by: 'manual') do |read|
         raise Error, "board record: #{log} names no boot of the queue, so no line of it is tied to a boot" if
           read.boots.all? { |boot| boot.cells.all? { |cell| cell.reason == BoardLog::UNNAMED } }
       end

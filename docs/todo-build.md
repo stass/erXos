@@ -131,6 +131,18 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
 * [Low] benchmarks, a paired board walk's comparison ([design-bench.md](design-bench.md#the-record-of-a-board-run)):
   a walk writes one record per set (`BoardRecord`), but not the comparison the design puts beside a paired walk's
   records, and no command compares two run directories by hand.
+* [Medium] benchmarks, the board record's reader (`BoardLog.read`, `BoardWalk`): the walk counts a boot's bytes
+  its own way, while the reader cuts slices by naming lines, so one boot that floods the console past its bound
+  (an unnamed last entry takes everything after the previous one's last naming line) refuses the whole log and no
+  set gets a record; the walk and the reader should count one way, or the reader keep an oversized slice cut to
+  the bound with its cells marked.
+* [Low] benchmarks, the board record (`BoardRecord`, from review): a failed write of a paired walk's second set
+  leaves the first's run directory, so an import then refuses as "already exists"; an import works only until
+  the next walk of the benchmark replaces `build/bench-board/<benchmark>/`'s build record (copying the record into
+  the walk's directory would keep it); the refused lines' reasons are not printed as `bench_session` prints them;
+  the board environment (`pi4`, four CPUs, 4,096 MiB) is written in `BoardRun::ENVIRONMENT`, `BoardRecord` and the
+  fuzz target's `BOARD_SET`; the fuzz target builds records but never serializes one; and every QEMU boot's
+  serial log is read into memory when its `Booted` is made, replayed boots' included.
 * [Low] tooling, the HTTP form's read-back (`NetbootEntry.check`, `FatVolume`): `FatVolume` reads no long name
   and no subdirectory, so an entry's `boot.img` is checked by a reader independent of fsimg only for `kernel8.img`'s
   placement and its root files with short names; the device tree, `overlays/` and other long-named files are checked
