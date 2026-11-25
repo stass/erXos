@@ -34,6 +34,7 @@
 #define PING_ROUNDS	2000u
 #define RACE_ROUNDS	2000u
 #define JOIN_ROUNDS	10000u
+#define JOIN_PROGRESS_ROUNDS	1000u
 #define DETACHED_ROUNDS	500u
 #define DETACHED_PAGES	4u
 #define PARK_ROUNDS	2000u
@@ -696,6 +697,12 @@ case_join_loop(void)
 		if (seen_index[thread] != 0)
 			reused++;
 		seen_index[thread] = 1;
+		/* A progress line, so a stall in this long case shows its round. */
+		if ((round + 1) % JOIN_PROGRESS_ROUNDS == 0) {
+			say("erx: threads: join rounds done ");
+			say_number(round + 1);
+			say("\n");
+		}
 	}
 	say("erx: threads: join rounds reusing an index ");
 	say_number(reused);
