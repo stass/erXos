@@ -328,8 +328,12 @@ erx_fiasco_semaphore_down(uint64_t semaphore, uint64_t deadline)
 	for (;;) {
 		if (deadline != ERX_FIASCO_UMTX_FOREVER) {
 			wait_us = erx_fiasco_time_wait_us(erx_fiasco_clock_ns(), deadline, L4_TIMEOUT_US_MAX);
-			if (wait_us == 0)
+			if (wait_us == 0) {
+				/* Under a microsecond to go: spun out, never early. */
+				while (erx_fiasco_clock_ns() < deadline)
+					;
 				return (false);
+			}
 			timeout = l4_timeout(L4_IPC_TIMEOUT_NEVER, l4_timeout_from_us(wait_us));
 		}
 		if (l4_ipc_error(l4_semaphore_down((l4_cap_idx_t)semaphore, timeout), l4_utcb()) == 0)

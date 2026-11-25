@@ -23,6 +23,7 @@ class FiascoTimeTest < Minitest::Test
     'the scale rounded down' => ["\tif (remainder != 0)\n\t\tscale.mult++;\n", '', 'gives'],
     'a shift too small' => ['scale.mult >> 62 == 0', 'scale.mult >> 40 == 0', 'gives'],
     'a wait rounded down' => ['(deadline_ns - now_ns - 1) / TIME_NS_PER_US + 1', '(deadline_ns - now_ns) / TIME_NS_PER_US', 'a wait of'],
+    'a sub-microsecond wait asked of the kernel' => ['now_ns >= deadline_ns || deadline_ns - now_ns < TIME_NS_PER_US', 'now_ns >= deadline_ns', 'a wait of'],
     'a wait past the maximum' => ['wait_us < max_us ? wait_us : max_us', 'wait_us + 0 * max_us', 'a long wait'],
     'a zero frequency divides' => ["if (hz == 0 || hz >> 63 != 0)\n\t\treturn (scale);\n", "if (hz == 0)\n\t\thz = 1;\n", 'time zero']
   }.freeze

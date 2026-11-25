@@ -98,7 +98,10 @@ check_edges(void)
 	return (true);
 }
 
-/* Around each microsecond boundary: never short, at most a microsecond long, within the cap. */
+/*
+ * Around each microsecond boundary: never short, at most a microsecond long, within the cap; and
+ * nothing asked of the kernel for less than a microsecond, which the caller spins out.
+ */
 static bool
 check_wait(uint64_t *checked)
 {
@@ -109,7 +112,7 @@ check_wait(uint64_t *checked)
 			const uint64_t now = starts[start], deadline = now + distance;
 			const uint64_t wait = erx_fiasco_time_wait_us(now, deadline, WAIT_MAX_US);
 
-			if ((distance == 0) != (wait == 0) || wait * 1000 < distance || wait * 1000 >= distance + 1000 + (distance == 0)) {
+			if ((distance < 1000) != (wait == 0) || (wait != 0 && (wait * 1000 < distance || wait * 1000 >= distance + 1000))) {
 				printf("time: a wait of %llu ns asked for %llu us\n", (unsigned long long)distance,
 				    (unsigned long long)wait);
 				return (false);

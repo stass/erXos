@@ -54,7 +54,7 @@ erx_fiasco_time_wait_us(uint64_t now_ns, uint64_t deadline_ns, uint64_t max_us)
 {
 	uint64_t wait_us;
 
-	if (now_ns >= deadline_ns)
+	if (now_ns >= deadline_ns || deadline_ns - now_ns < TIME_NS_PER_US)
 		return (0);
 	wait_us = (deadline_ns - now_ns - 1) / TIME_NS_PER_US + 1;
 	return (wait_us < max_us ? wait_us : max_us);
