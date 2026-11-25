@@ -931,24 +931,21 @@ service_thread_reap(uint32_t caller, uint64_t thread)
 }
 
 /*
- * A deletion the root cannot perform leaves a thread it cannot account for: the machine
- * ends. Once Fiasco has deleted the thread and its semaphore, their pair is free again.
+ * The thread and its semaphore go in one kernel call, behind one grace period. Once it
+ * returns the thread never reaches user mode again and their pair is free.
  */
 static void
 service_thread_delete(uint32_t task, uint32_t index)
 {
-	static const char line[] = "erx: service: the kernel refused a deletion\n";
 	erx_fiasco_task_t *const row = erx_fiasco_task(task);
+	const uint64_t caps[] = { erx_fiasco_task_thread_cap(task, index), erx_fiasco_task_semaphore_cap(task, index) };
 
 	row->threads[index] = ERX_FIASCO_TASK_THREAD_ABSENT;
 	row->affinity[index] = 0;
 	erx_fiasco_gate_thread_gone(task, index);
 	if (task == ERX_FIASCO_TASK_ROOT)
 		erx_fiasco_trace_set_mask(index, 0);
-	if (service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_task_thread_cap(task, index))) ||
-	    service_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, erx_fiasco_task_semaphore_cap(task, index)))) {
-		erx_fiasco_end_refused(line);
-	}
+	erx_fiasco_caps_delete(caps, sizeof(caps) / sizeof(caps[0]));
 	erx_fiasco_task_thread_pair_free(task, index);
 }
 

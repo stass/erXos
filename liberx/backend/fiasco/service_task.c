@@ -667,36 +667,65 @@ erx_fiasco_task_image_map_body(uint32_t caller, uint64_t space, uint64_t image, 
 	return (ERX_OK);
 }
 
-static void
-task_delete(uint64_t cap)
-{
-	static const char line[] = "erx: service: the kernel refused a task's deletion\n";
+/*
+ * One kernel call deletes at most what its message holds: the operation word and the map
+ * mask, then one flexpage per object.
+ */
+#define CAPS_DELETE_BATCH	(L4_UTCB_GENERIC_DATA_SIZE - 2u)
 
-	if (task_failed(l4_task_delete_obj(L4_BASE_TASK_CAP, cap))) {
-		erx_fiasco_end_refused(line);
+void
+erx_fiasco_caps_delete(const uint64_t *caps, size_t count)
+{
+	static const char line[] = "erx: service: the kernel refused a deletion\n";
+	l4_fpage_t fpages[CAPS_DELETE_BATCH];
+
+	for (size_t done = 0; done < count;) {
+		const size_t batch = count - done < CAPS_DELETE_BATCH ? count - done : CAPS_DELETE_BATCH;
+
+		for (size_t item = 0; item < batch; item++)
+			fpages[item] = l4_obj_fpage(caps[done + item], 0, L4_CAP_FPAGE_RWSD);
+		if (task_failed(l4_task_unmap_batch(L4_BASE_TASK_CAP, fpages, (unsigned)batch, L4_FP_DELETE_OBJ)))
+			erx_fiasco_end_refused(line);
+		done += batch;
 	}
 }
 
+static void
+task_delete(uint64_t cap)
+{
+	erx_fiasco_caps_delete(&cap, 1);
+}
+
 /*
- * Step 1 of the design: nothing of the task runs again. Deleting a thread leaves its
- * slots empty and its IPC gone, so a thread blocked on the gate is no request any more.
- * Deleting what a failed create never made is a no-op to the kernel. A group goes with
- * its home, whose threads are gone.
+ * Step 1 of the design: nothing of the task runs again. Its threads go first, newest first,
+ * and only once every one is dead its semaphores and gate: Fiasco's unmap removes all of a
+ * call's capabilities before it kills that call's threads, so a thread still running on
+ * another CPU would otherwise find its pager gate gone and fault. Each half takes as few
+ * calls as erx_fiasco_caps_delete needs, so a stop waits for a grace period per batch, not
+ * per object. Deleting a thread leaves its slots empty and its IPC gone, so a thread blocked
+ * on the gate is no request any more. Deleting what a failed create never made is a no-op to
+ * the kernel. A group goes with its home, whose threads are gone.
  */
 static void
 task_unrun(uint32_t task)
 {
 	const erx_fiasco_task_t *const row = erx_fiasco_task(task);
+	uint64_t caps[ERX_FIASCO_THREADS_MAX + 1];
+	size_t count = 0;
 
 	for (uint32_t index = ERX_FIASCO_THREADS_MAX; index-- > 0;)
 		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT)
-			task_delete(erx_fiasco_task_thread_cap(task, index));
+			caps[count++] = erx_fiasco_task_thread_cap(task, index);
+	erx_fiasco_caps_delete(caps, count);
+	count = 0;
 	for (uint32_t index = ERX_FIASCO_THREADS_MAX; index-- > 0;)
-		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT) {
-			task_delete(erx_fiasco_task_semaphore_cap(task, index));
+		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT)
+			caps[count++] = erx_fiasco_task_semaphore_cap(task, index);
+	caps[count++] = erx_fiasco_task_gate_cap(task);
+	erx_fiasco_caps_delete(caps, count);
+	for (uint32_t index = 0; index < ERX_FIASCO_THREADS_MAX; index++)
+		if (row->threads[index] != ERX_FIASCO_TASK_THREAD_ABSENT)
 			erx_fiasco_task_thread_pair_free(task, index);
-		}
-	task_delete(erx_fiasco_task_gate_cap(task));
 	erx_fiasco_gate_task_gone(task);
 	if (row->group != 0)
 		erx_fiasco_object_end(row->group - 1);

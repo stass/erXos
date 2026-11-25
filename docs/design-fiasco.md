@@ -2504,7 +2504,8 @@ is refused untouched, since a 1 written over the kernel's 0 would lose the index
 
 Starting a thread twice is `ERX_EINVAL`.
 
-**A failed start.** If any step fails, the service deletes the thread and its semaphore with `l4_task_delete_obj`,
+**A failed start.** If any step fails, the service deletes the thread and its semaphore in one call, as the reaper's
+[Delete](#thread-exit) does,
 drops the handle, and only then replies with the failure. So the thread cannot run on a stack the caller now
 frees (`pthread_create.c:384`): it was never runnable, or the deletion's return means it never reaches user mode
 again (`thread_object.cpp:157-161`, `thread.cpp:670-754`). The stub frees the record and leaves the marker, which
@@ -2596,8 +2597,11 @@ an exiting thread runs on the stack to be freed and musl's lock word must outlas
 
 **The reaper's steps, in this order, for each record.**
 
-1. **Delete.** A private `reap(handle)` request runs `l4_task_delete_obj` on the thread and its semaphore. When it
-   returns the thread never reaches user mode again, so its stack is free. A refusal ends the machine.
+1. **Delete.** A private `reap(handle)` request deletes the thread and its semaphore in one `l4_task_unmap_batch`
+   with `L4_FP_DELETE_OBJ`: Fiasco puts both on one reap list, kills the thread before the list's one RCU grace
+   period, and returns once both are gone (`Task::sys_unmap`, `src/kern/task.cpp:801-833`;
+   `Kobject::Reap_list`, `src/kern/kobject.cpp:224-232` and `:408-411`). When it returns the thread never reaches
+   user mode again, so its stack is free. A refusal ends the machine.
 2. **Release.** If the record names a range (a detached thread), `erx_vm_release` it.
 3. **Clear.** Store 0 in the record's word to clear and call `erx_umtx_wake(word, 1)`.
 4. **Recycle.** Give back the executor's slot, if it has one, and mark the record free. The index is claimed again once
@@ -2636,9 +2640,14 @@ teardown runs steps 2 to 4 for each stopping task in the order of their stops, w
 the service's stops, so a child's end finishes before its parent's and the loop posts exit records in the order of
 the stops (a space's release finishes its own tree first, and withdraws the records that posts):
 
-1. **The threads.** `l4_task_delete_obj` on each thread of the task, newest first, reaper and dispatcher included.
-   Each return means that thread never reaches user mode again (`thread_object.cpp:157-161`). Then its semaphores
-   and gate, and its home group, as [Budgets and groups as records](#budgets-and-groups-as-records) deletes one, its
+1. **The threads.** Every thread of the task, newest first, reaper and dispatcher included, deleted as
+   [Thread exit](#thread-exit) deletes one thread's: one `l4_task_unmap_batch` per 61 capabilities, the most a
+   message holds (`Utcb::Max_words`, `src/abi/l4_types.cpp:789`). Each return means every thread of its batch
+   never reaches user mode again (`thread_object.cpp:157-161`). Only then go the semaphores and the gate, in
+   batches of their own: an unmap removes all of its capabilities before it kills its threads
+   (`Task::sys_unmap`, `src/kern/task.cpp:819-826`), so a thread still running on another CPU would otherwise find
+   its pager gate gone and fault. A task of N threads so waits for one RCU grace period per batch, two when N is
+   below 61, not one per object. Then its home group goes, as [Budgets and groups as records](#budgets-and-groups-as-records) deletes one, its
    bind records with it, so each IRQ object bound to it is detached, and one that outlives the task, a
    connection's bell that the domain library created, is left unbound, and a trigger of it waits at the object.
    The row keeps only its place in the tree, the status, the stopper and its stop's count.
@@ -2934,7 +2943,7 @@ through the object's window addresses. The caller's task can write its public UT
 copies what a request takes from it, the length first and then at most that many bytes, into the service's own buffer once, and
 every check and the body read only that copy; nothing is read from the public UTCB a second time for the same request.
 
-**The loop.** `l4_ipc_wait_ext` into one of the service's reply slots; decode; run the body; run one piece of a pending teardown; end what the body and the piece marked; empty the reply slot of every fault whose task has stopped; `l4_ipc_reply_and_wait_ext` from the slot the message came in and into the same slot, with `L4_IPC_SEND_TIMEOUT_0`, or with `L4_IPC_BOTH_TIMEOUT_0` while a teardown is pending. A body never calls a stub, and never hashes an image entry: the root's caller checks one in its own thread first ([The call table](#the-call-table), `erx_image_map`), because a hash a whole image long would hold every other call of every task and of the root behind it. For the same reason a stopped task's teardown is no body but pieces ([Task exit](#task-exit)): the stopping tasks are the service's pending work, taken in the order of their stops, and while any is pending every receive has a zero timeout, and one that finds no message yields the CPU to the ready threads of the service's priority, the base level, which the configured domains' ordinary work shares ([Bands](#bands)), before the next piece. So a call waits behind at most one piece, the longest of which is the task object's deletion, unless it comes behind a space's release or a budget's destroy, which finish the teardown of the spaces they delete in their own body. A body that stays long holds every call all the same, and a root thread that waits on it holds what it runs: on the root's normal scheduler, the watchdog pet ([The watchdog](#the-watchdog)). So the NIFs a runtime calls all through its life whose call is a service round trip, `erx_log`'s three calls, `erx_object_info`'s report and `erx_clock_nif`'s setter, are dirty I/O NIFs in every domain's runtime, and the domain library's entries are dirty CPU NIFs.
+**The loop.** `l4_ipc_wait_ext` into one of the service's reply slots; decode; run the body; run one piece of a pending teardown; end what the body and the piece marked; empty the reply slot of every fault whose task has stopped; `l4_ipc_reply_and_wait_ext` from the slot the message came in and into the same slot, with `L4_IPC_SEND_TIMEOUT_0`, or with `L4_IPC_BOTH_TIMEOUT_0` while a teardown is pending. A body never calls a stub, and never hashes an image entry: the root's caller checks one in its own thread first ([The call table](#the-call-table), `erx_image_map`), because a hash a whole image long would hold every other call of every task and of the root behind it. For the same reason a stopped task's teardown is no body but pieces ([Task exit](#task-exit)): the stopping tasks are the service's pending work, taken in the order of their stops, and while any is pending every receive has a zero timeout, and one that finds no message yields the CPU to the ready threads of the service's priority, the base level, which the configured domains' ordinary work shares ([Bands](#bands)), before the next piece. So a call waits behind at most one piece, the longest of which is the task object's deletion, unless it comes behind a space's release or a budget's destroy, which finish the teardown of the spaces they delete in their own body, or behind a stop, whose body runs step 1 of [Task exit](#task-exit) for each task of its tree, one RCU grace period per batch of a task's threads, semaphores and gate. A body that stays long holds every call all the same, and a root thread that waits on it holds what it runs: on the root's normal scheduler, the watchdog pet ([The watchdog](#the-watchdog)). So the NIFs a runtime calls all through its life whose call is a service round trip, `erx_log`'s three calls, `erx_object_info`'s report and `erx_clock_nif`'s setter, are dirty I/O NIFs in every domain's runtime, and the domain library's entries are dirty CPU NIFs.
 
 **Reply slots.** The service receives into Fiasco's explicit reply slots (`EXPLICIT_REPLY_CAPS`, a reply space charged to the
 root's quota), so that no receive fills a slot that still holds a caller: Fiasco answers such a receive by emptying the slot and

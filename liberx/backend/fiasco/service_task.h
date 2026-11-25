@@ -8,6 +8,7 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "erx/abi.h"
@@ -124,6 +125,17 @@ void		erx_fiasco_task_thread_pair_free(uint32_t task, uint32_t index);
 uint64_t	erx_fiasco_task_thread_cap(uint32_t task, uint32_t index);
 uint64_t	erx_fiasco_task_semaphore_cap(uint32_t task, uint32_t index);
 uint64_t	erx_fiasco_task_gate_cap(uint32_t task);
+
+/*
+ * Deletes the kernel objects that the root's capabilities caps[0..count) name, in as few
+ * kernel calls as a message holds (docs/design-fiasco.md, "Thread exit"). Fiasco's unmap
+ * removes every capability of one call, puts its objects on one reap list, kills each listed
+ * thread, and waits for the one RCU grace period the list needs before it returns. So on
+ * return the capabilities are gone, no listed thread reaches user mode again, and every slot
+ * is free for the caller to reuse. A capability that names nothing is a no-op to the kernel.
+ * A refusal ends the machine.
+ */
+void		erx_fiasco_caps_delete(const uint64_t *caps, size_t count);
 
 /* Sets bit n of map for each thread n the task has created and not reaped, from the table alone. */
 void		erx_fiasco_task_thread_map(uint32_t task, uint64_t map[2]);
