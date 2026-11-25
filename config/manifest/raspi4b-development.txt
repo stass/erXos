@@ -85,8 +85,8 @@ limits display
 # and 36 KiB; the PCIe domain, 25 MiB and outer 1 MiB; the USB domain, 32 MiB and outer
 # 1 MiB; and the Bluetooth domain, 32 MiB and outer 1 MiB: 311 MiB and 36 KiB in all.
 # The system baseline is QEMU virt's 46 MiB.
-# root_memory, 432 MiB and 36 KiB before ntpd's principal adds its own (its comment),
-# admits the baseline, the principal's 311 MiB and 36 KiB, the apps row's 66 MiB, the SD
+# root_memory, 432 MiB and 36 KiB before ntpd's and bleuart's principals add their own
+# (their comments), admits the baseline, the principal's 311 MiB and 36 KiB, the apps row's 66 MiB, the SD
 # controller's 1 MiB of DMA memory, GENET's 1 MiB of device memory and the VL805's 1 MiB
 # of contiguous memory with 6 MiB no one is promised, and lies well below what the
 # smallest Pi 4 the record names leaves the root: RAM less fiasco_reserve is 890 MiB there.
@@ -102,8 +102,8 @@ principal system
 # the card's one app, the dashboard, so the display domain's outer budget pays for one
 # pixel area; and the display and net, which the build grants the app template. The app
 # is a principal with a domains quota of one, so max_domains is the system principal's
-# eight and the one app. max_connections, 22 with ntpd's session's, holds the 15 of the
-# network domain's comment and the app's session's four: its system connection, packages,
+# eight, the one app, ntpd and bleuart. max_connections, 26, holds ntpd's session's two
+# connections and bleuart's three (their comments), the 15 of the network domain's comment and the app's session's four: its system connection, packages,
 # the display and net, and two more for root's session's display connection and its
 # replacement's.
 apps
@@ -116,13 +116,13 @@ machine
   console "/soc/serial@7e215040"
   hostlink "/soc/serial@7e201600"
   platform "raspi4b"
-  root_memory 491819008
+  root_memory 531664896
   system_baseline 48234496
   system_share @share.system
   users_share @share.users
   system_principal @principal.system
-  max_domains 10
-  max_connections 22
+  max_domains 11
+  max_connections 26
   system_lane 4096
   system_queue 16384
   peer_held 4096
@@ -226,7 +226,8 @@ domain network
 # ntpd with pool.ntp.org, whose first sample the clock service steps to from the
 # approximate start. Principal ntpd holds one session of the common part's session
 # limits, its memory and its outer budget, on the users share, so root_memory, max_domains
-# and max_connections each grow by that session (its net connection). The template's
+# and max_connections each grow by that session (its system connection and its net
+# connection). The template's
 # release is ntpd's (ReleaseFiles::RELEASE_SCRIPTS), its -eval starts erx_ntpd, and its
 # environment sets ERX_START_FLAGS, standing in for the start row's flags until the start
 # table carries them (docs/todo-runtime.md, "time, ntpd"). ntpd_net grants the network stack with small
@@ -272,6 +273,62 @@ facet ntpd_clock
   max_heap_size 8192
 start ntpd
   enable YES
+# bleuart, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The
+# console"): any phone that connects to the board's UART service gets a tty of root's
+# session running the command shell, with no login, a development-build limitation
+# published with the development images. Principal bleuart holds one session of the
+# common part's session limits, its memory and its outer budget, and 1 MiB more, on the
+# users share: the 1 MiB is the outer budget of a session that has ended while the
+# Bluetooth domain still holds its ble connection, so a restart's successor is admitted.
+# root_memory and max_domains grow by the principal, and max_connections by the session's
+# three: its system connection, its ble connection and the line root_line mints, which
+# introduces it to root's session. Its domains quota of
+# one, with the start row, is what lets ble_grant grant ble to its template: one session,
+# and so one handler of nus, at a time. The template's release is bleuart's
+# (ReleaseFiles::RELEASE_SCRIPTS), whose -eval starts erx_bleuart, the handler of nus.
+# bleuart_ble grants the Bluetooth domain's service nus alone, with the Bumble echo's
+# limits (tools/lib/erx/bt_domain.rb); bleuart_login grants the login service's
+# root_line alone, on root's session's tty_line, with room for one row in the login
+# service's table, at the login interface's own limits; the manifest check refuses root_line in a release manifest. The start row runs it at boot on a builder's own card
+# and packs it off on the published card (published_enable NO).
+principal bleuart
+  memory 39845888
+  grant @share.users
+  domains 1
+  names 1
+  default_limits @limits.native
+  ceiling_limits @limits.native
+session bleuart
+  limits @limits.session
+  runtime @artifact.emu
+  release @artifact.bleuart
+  args "-- -root / -bindir /bin -progname erl -home / -nouser -nocookie -no_epmd -proto_dist erx -eval {ok,_}=application:ensure_all_started(erx_bleuart,permanent)"
+facet bleuart_ble
+  name "ble"
+  grantee @session.bleuart
+  service @service.ble
+  operations none
+  max_request 1024
+  in_flight 16
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 262144
+  parameter services "nus"
+facet bleuart_login
+  name "login"
+  grantee @session.bleuart
+  service @service.login
+  operations root_line
+  max_request 131072
+  in_flight 8
+  reductions 100000
+  period_ns 1000000000
+  max_heap_size 65536
+  parameter line "tty_line"
+  parameter logins 1
+start bleuart
+  enable YES
+  published_enable NO
 # The USB domain's rows, QEMU virt's row for row (config/manifest/qemu-virt-development.txt,
 # whose comment explains their figures): nothing in them differs on the Pi 4, whose
 # controller's driver takes its INTx line as it takes an MSI (erx_xhci_core, "Events").
@@ -354,8 +411,11 @@ facet usb_input
 # domain whose release's boot script, bt, starts crypto and erx_bt, so the mint of ble
 # exists before init's ready report, and whose -eval (erx_bt_top:start_stack/0) starts the
 # rest of the stack once init holds the ready answer's facets, the line grant among them.
-# The service ble, which the domain serves, has no grant here, so no domain holds ble on
-# this board: its row makes the domain service accept the mint the domain names. They are
+# The service ble, which the domain serves, has one grant here, bleuart_ble, so bleuart's
+# session is the one domain that holds ble on this board; its row makes the domain
+# service accept the mint the domain names. The domain's connections quota of 2 is that
+# session's ble connection and its successor's, admitted while the Bluetooth domain still
+# answers the end of the one before. They are
 # the rows of QEMU virt's Bluetooth suite (tools/lib/erx/bt_domain.rb, whose comment
 # explains the runtime limits, the share and the limits) with four differences:
 #
@@ -405,7 +465,7 @@ limits bt
   grant @share.bt
   spaces none
   lane 4096
-  connections 1
+  connections 2
   crash 0
   flags none
   runtime_limits @runtime_limits.bt

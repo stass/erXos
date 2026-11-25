@@ -52,12 +52,13 @@ module ManifestContextFixture
   # names, the app boot script of the app template the build derives from its apps row
   # (which domain_source's domains also name), the display, storage, network and web
   # boot scripts its domain rows name, the ntpd boot script of the ntpd session template
-  # the raspi4b manifest and the net_device suite add, the pcie boot script of the pcie
+  # the raspi4b manifest and the net_device suite add, the bleuart boot script of the
+  # raspi4b manifest's bleuart session template, the pcie boot script of the pcie
   # suite's PCIe domain, the usb boot script of the USB domain, the media boot script of
   # the media domain, the bt boot script of the raspi4b manifest's Bluetooth domain, the
   # domain runtime images, runtimes/emu and runtimes/jit, and the system release's
   # generated files and root.
-  def arguments(codec) = archive_arguments(codec, boots: %w[app bt display media network ntpd pcie session storage usb web])
+  def arguments(codec) = archive_arguments(codec, boots: %w[app bleuart bt display media network ntpd pcie session storage usb web])
 
   # The archive of source's own releases, a boot script for each release its domain rows,
   # session templates and apps row name (Manifest.release_names, as the image carries
