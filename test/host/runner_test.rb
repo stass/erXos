@@ -217,6 +217,13 @@ class RunnerTest < Minitest::Test
   def test_invalid_deadline_and_name
     assert_raises(Erx::Error) { ruby('exit', deadline: 0) }
     assert_raises(Erx::Error) { ruby('exit', name: '../escape') }
+    assert_raises(Erx::Error) { ruby('exit', name: '.hidden') }
+  end
+
+  # A fetch names its run after the source's id, and an id may hold a dot, as a Debian
+  # package's name does (genode-tool-tcl8.6).
+  def test_a_run_may_be_named_after_a_dotted_source_id
+    assert_equal 'succeeded', ruby('exit', name: 'fetch-genode-tool-tcl8.6').fetch('state')
   end
 
   def test_terminal_escapes_controls_and_unicode

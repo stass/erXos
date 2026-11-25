@@ -2583,11 +2583,20 @@ hexadecimal digits, places the archive there under its file name and
 runs `prepare_port` again; Genode's own hash check then confirms the pin
 inside the container. The tools the image lacks
 are Debian bookworm amd64 packages pinned as `genode-tool-<name>` by
-their `snapshot.debian.org` URL and SHA-256, unpacked as L4Re's are:
-flex and its library `libfl2`, which the tool chain's `ar` loads,
-bison, and the interpreters of Genode's run tool and its ABI check
-(`tool/check_abi`), which do not start in the image ("required file not
-found") and which are unverified. `erx_peer_bench` is built as a Genode
+their `snapshot.debian.org` URL and the SHA-256 Debian's bookworm
+package index lists for each: flex and its library `libfl2`, which the
+tool chain's `ar` loads, bison, Tcl's `tclsh` (`tcl`, `tcl8.6` and
+`libtcl8.6`), which runs `tool/check_abi`, and `expect` (with
+`tcl-expect`), which runs Genode's run tool. The probe ran each of the
+two with no arguments before and after each set of packages: neither
+starts in the image ("required file not found"), the ABI check starts
+once Tcl's packages are in, and the run tool only once `expect`'s are
+too. A script that does not start while its file is present names an
+interpreter that is missing at the path it gives, so these packages
+cannot sit under a prefix as L4Re's do: each one's data archive is taken
+out of the verified package on the host and extracted by the engine into
+the container's root (`docker cp -`) before the build starts, owned by
+root as the tree is. `erx_peer_bench` is built as a Genode
 component from a target description of erXos's (`bench/genode/`), with
 Genode's C library, a VFS that gives the program `/tmp` as a file
 system in memory, and the program's `posix_spawn` where Genode's C

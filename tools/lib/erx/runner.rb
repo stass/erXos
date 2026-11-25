@@ -44,7 +44,7 @@ module Erx
     POLL_SECONDS = 0.05
     PROGRESS_SECONDS = 30
     # A command's name, which names its log and report files.
-    COMMAND_NAME = /\A[a-z0-9][a-z0-9_-]*\z/.freeze
+    COMMAND_NAME = /\A[a-z0-9][a-z0-9_.-]*\z/.freeze
 
     # The located deadline tool, for a caller that spawns its own child (BenchBoot) and
     # wraps it the same way.
