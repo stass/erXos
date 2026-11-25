@@ -1133,8 +1133,10 @@ hypervisor counts what QEMU or the host makes of it, not the host CPU's
 cycles, so a QEMU boot's count is a fact about that virtual machine.
 The probe adds about a second to every boot, inside the guest's
 deadline. The count never converts an interval: an erXos cell stays in its
-counter's ticks and a `cycles` cell in cycles; a reader puts the two on
-one clock by the boot's count, by hand, and says so.
+counter's ticks and a `cycles` cell in cycles. On the board a `cycles`
+cell is converted by its own run's ARM clock instead
+([The board's ARM clock](#the-boards-arm-clock)), and the probe's count,
+times the counter's frequency, is that boot's measure of the same clock.
 
 What the probe found under HVF (QEMU 11.1.3, `-accel hvf -cpu host`, the
 primary host, an Apple M3 Max, model `Mac15,9`, as the records name it;
@@ -1879,8 +1881,9 @@ is recorded, never corrected:
 
 A comparison across systems is only as fair as its board. Every system
 runs on the same 4 GB Raspberry Pi 4, in the same case and cooling, from
-the same power supply, with the same `config.txt` frequency settings, and
-starts each run after a minute idle. Each record keeps the firmware files'
+the same power supply, with the same `config.txt`, and so the same ARM
+clock ([The board's ARM clock](#the-boards-arm-clock)), and starts each
+run after a minute idle. Each record keeps the firmware files'
 SHA-256 (each system's image ships its own copy), and the temperature and
 throttle state where the system can read them; a difference is recorded,
 not corrected.
@@ -1893,9 +1896,56 @@ not corrected.
 
 Each image is fetched by the fetch step at a pinned URL and SHA-256, and
 written to its own card; nothing from it enters the tree, and nothing of
-it runs on the host. A system's frequency governor is set to hold the
-configured frequency, and how each system is told so is checked on the
-board.
+it runs on the host. The clock is held by `config.txt` for every
+system, whatever its own frequency driver does; no system's governor is
+relied on.
+
+### The board's ARM clock
+
+Every system benchmarked on the board runs at one known ARM clock, held
+the same way for each, by the firmware rather than by the system. The
+platform record names the clock (`config/platforms/raspi4b.json`,
+`arm_clock_hz`, 1500 MHz, which every Raspberry Pi 4 Model B revision
+runs by default), and `BootPartition.config_txt`, which writes the
+`config.txt` of erXos's cards, of every bench set and of L4Re's set,
+writes it as `arm_freq=1500` and holds it with `force_turbo=1`. Raspberry
+Pi's `config.txt` documentation (`overclocking.adoc` of
+`github.com/raspberrypi/documentation` at `20d5b6f5`, SHA-256
+`b19ff813...a5b9c`, "Overclocking options") says `arm_freq` is the ARM's
+frequency in MHz; that without `force_turbo` the frequency follows load
+between `arm_freq_min` (600 MHz on the Pi 4) and `arm_freq`, through
+Linux's frequency driver, with the firmware running `initial_turbo`
+seconds at the top from boot or until a driver sets a frequency (the page
+gives the default as 0 in its table and as 60 since the November 2024
+firmware in its text); that `force_turbo=1` disables that dynamic
+clocking and forces the maximum even when the cores are idle; that it
+sets the warranty bit only together with an `over_voltage` above 0,
+which no card writes; and that the firmware still throttles the ARM at
+80 to 85 C and under low voltage. `arm_boost` only raises an unset
+`arm_freq` on a board revision that allows 1800 MHz, so an explicit
+`arm_freq` makes it moot. So erXos and L4Re, which ask the firmware for
+no clock, and Linux, whatever governor it runs, run at 1500 MHz unless
+the firmware throttles; the Linux set takes the same
+`config.txt` as erXos's.
+
+How each system's clock is known:
+
+| System | What says the clock | What says it was not throttled |
+| --- | --- | --- |
+| erXos | the cycle-counter probe of each boot ([The cycle counter](#the-cycle-counter)): its count times the counter's frequency, measured in that boot | `/proc/sensors/status` read over ssh before and after the walk, where the found target serves it |
+| L4Re | the clock its `config.txt` held, recorded as the run's `arm_clock_hz`; nothing in L4Re's boot measures it | nothing from L4Re's boot; the readings before and after, on erXos, bound the time around it |
+| Linux | the same `config.txt`; the governor is not relied on | Linux's own report, where the set reads it, else none |
+
+Every board run's record keeps `arm_clock_hz` in its run's details, the
+clock its cards held, from the harness tree's platform record, the one
+source `config.txt` is written from. The side-by-side table converts a
+`cycles` cell to nanoseconds at its own run's `arm_clock_hz`, never at
+another run's or another boot's count, and its row says so (`cycles,
+shown in ns at the 1500 MHz ARM clock its config.txt held`); a `cycles`
+cell of a run with no such clock, as under QEMU, stays in cycles. An
+erXos boot's probe that disagrees with its run's clock by more than 2%
+says the clock was not held, which the reader of the record sees beside
+the table; the table does not correct for it.
 
 `bench/peer/erx_peer_bench.c` is one C17 file under erXos's license that
 Linux compiles on the board with its own compiler; the record

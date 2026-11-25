@@ -158,6 +158,15 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   255 as the board drops the connection, or the 30 s deadline) is typed again on the console, so the walk then types
   only on a failure before ssh connected; (3) a bad `--http` link is refused only under the lock, after
   the set is built, though the command's comment says every refusal comes before the build.
+* [Medium] benchmarks, the desk Pi 4's SD card holds a build without a working Ethernet, so a board that falls
+  back to its card cannot be reached over ssh. The card boots `0.1.0 n2027-76462641d06e` (built 2026-11-22 02:16
+  UTC from commit `76462641d`), which predates `erx_genet_core`'s fix that holds the MAC until link-up
+  (`ddfddec61`): before it, on this board, transmit put frames on the wire 5 or 6 bytes short and receive delivered
+  each frame some 30 times. On the card's boot `ifconfig` shows `genet0` up and `status: active` with no address,
+  so the DHCP exchange fails; that the short frames are the cause is inferred, not traced. Its `/proc` has no
+  `sensors` either, so a walk's sensor readings from the card are `unknown`. A netbooted current build binds
+  `genet0` by DHCP on the same board and cable (`dhcp: genet0 bound to`, the walks' return boots). The walks
+  survive it (they type `reboot` on the console when ssh fails); the fix is writing a current image to the card.
 * [Medium] benchmarks, re-run on the Pi 4 the cells whose `BENCH` lines the console cut: `nullcall`'s two `other-cpu`
   cells (wide histograms, about 2-3 KiB a line) and `wake`'s `park-deadline` were `rejected` (`nullcall`'s record
   `~/erxos-history/bench/pi4-4gb-erxos/20261125T200107Z-af9b3afc3c2c-dirty-8206ee98ebba`) because each line ended after
