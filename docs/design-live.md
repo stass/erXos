@@ -4035,7 +4035,12 @@ unasked. The manifest gives the device to the **host-tree domain**, a
 domain of its own, whose Erlang driver runs the virtio queue over the
 device NIF and whose 9P bridge serves the host's tree to erXos's clients:
 each domain the manifest names gets a grant of the bridge, mounted at
-`/host`, read-only unless the manifest says otherwise. The bridge asks
+`/host`, read-only unless the manifest says otherwise. Its grants are
+attached from the moment they are made, as every grant inside the
+machine is: the bridge attaches once to QEMU's server when it opens its
+9P session there, and an erXos client's walk from `NOFID` walks from
+that root fid, so QEMU receives `NOFID` only as an `attach`'s `Afid`
+([design-files.md](design-files.md#version-and-attach)). The bridge asks
 QEMU for an `msize` of 65,560, so a read carries at most the 65,536 bytes
 a read carries inside the machine, and decodes every reply with `erx_9p`,
 since bytes from the host are untrusted input like any other; a reply that
@@ -4082,7 +4087,11 @@ clunks them all ([design-files.md](design-files.md#fid-owners)). It
 answers some messages without a grant: `version`, with the smaller
 `msize`; anything but `version` before a session is open, and an
 `attach` whose `Afid` is not `NOFID`, with `einval`; `auth` with
-`enotsup`; a request on a fid it does not hold with `ebadf`; one that
+`enotsup`; a request on a fid it does not hold with `ebadf`, a walk from
+`NOFID` among them, since a host's fid names a tree only once an
+`attach` has made it and the walk from a grant's root is a difference
+inside the machine alone
+([design-files.md](design-files.md#version-and-attach)); one that
 names fids of two trees with `exdev`. It holds at most 256 fids, as many
 as a session's program holds on a grant
 ([design-files.md](design-files.md#bounds)), and a fid beyond them fails

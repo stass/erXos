@@ -145,7 +145,7 @@ the name of in between ([Fids and nodes](#fids-and-nodes)).
   +--------------------------------------------------------------------+
   | file:write_file("/tmp/a", Bin)                                     |
   |   prim_file: erx_path -> mount /tmp, grant G, "a"                  |
-  |   erx_file_remote: attach, walk, lcreate, write (64 KiB a          |
+  |   erx_file_remote: walk from NOFID, lcreate, write (64 KiB a       |
   |     request), clunk; the caller owns the fid                       |
   |         | local messages, to aliases                               |
   |         v                                                          |

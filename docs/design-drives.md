@@ -1356,9 +1356,9 @@ link itself acts on it
 ([design-app-trees.md](design-app-trees.md#links)). The rule belongs to
 the tree: the mark is derived where the table is resolved, at each
 resolution, by `erx_facets:table/1`, from names alone: every entry
-whose provider names the facet `media`, whatever tree it asks, and
-every entry on a grant's tree named `media`, the tree of the facet's
-name, carries it, whether or not the registry holds the facet. It is
+whose provider names the facet `media`, and every entry on a grant
+whose tree, which comes with the grant from its server, is named
+`media`, carries it, whether or not the registry holds the facet. It is
 stored in no table and taken from no option a mount names, so it is
 not one of the options `place/1` gives `media` with its mount point,
 and no writer of a table has to keep it. Every mount of a `media`

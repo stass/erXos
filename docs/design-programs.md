@@ -1179,8 +1179,11 @@ A **file object** is a sealed memory object
 that holds one file's bytes, read-only, for the programs of one session.
 Its key is the file's identity and version, as
 [design-files.md](design-files.md#identity-and-version) defines them, and
-its use, `code` or `data`: the server's domain and the tree, the attach
-name, of the grant the file was read through, the file's qid path, its
+its use, `code` or `data`: the server's domain and the tree that the
+grant the file was read through roots in, which came with the grant from
+the server
+([design-files.md](design-files.md#building-binding-and-mounting), "The
+tree beneath an entry"), the file's qid path, its
 `data_version`, and the use. The grant the file was read through is the
 one the entry's own provider names, never a grant beneath it: a file of
 an EROFS mount, which a program reaches through the session's export,

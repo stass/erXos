@@ -2412,9 +2412,12 @@ target as its grantee ([design-domains.md](design-domains.md#facets)), and
 sends its pid under `Name` to the target's capability registry on the
 target's lane from the system domain. A facet that serves a file tree, a
 storage domain's or a session's file server reached through a facet grant
-included, goes with its rights and its tree's name, the attach name its
-grant roots, and the namespace the domain builds from it keeps the three
-together ([design-files.md](design-files.md#namespaces)). The registry
+included, goes with its rights, from its facet row, and the name of the
+tree its grant roots in, which the server names when it starts the
+grant (below, "the mint's reply"), and the namespace the domain builds
+from it keeps the three together
+([design-files.md](design-files.md#building-binding-and-mounting), "The
+tree beneath an entry"). The registry
 installs a name only from that lane, so no other domain can install one,
 and acknowledges; the call returns `{ok, Facet}` at the acknowledgement,
 or `{error, Reason}` when the target has ended or refused the name. A
@@ -2643,14 +2646,20 @@ The record moves on these events, and on nothing else:
   lacks. The reply is untrusted. It
   counts only from the pair's server, for an operation in `minting` with
   that tag. `{ok, Facet}` with `Facet` a pid the server's incarnation
-  owns, node and creation both, moves the operation to `installing` and
+  owns, node and creation both, or, for a service of an interface
+  `abi/services` declares `served_as tree`, `{ok, Facet, Tree}`, which
+  also names the tree the grant roots in, a plain name of 1 to 255
+  bytes, moves the operation to `installing` and
   sends the grantee
   `{erx_facets_install, Tag, Name, Facet}`, where `Name` is the record's
   installed name and `Facet` is the pid, or
-  for a files service `{Pid, Rights}` with the rights of the grant's
+  for a service served as a tree `{Pid, Tree, Rights}`, with the reply's
+  tree and the rights of the grant's
   facet row, which the manifest states and no reply sets
   ([design-files.md](design-files.md#building-binding-and-mounting),
-  "Rights beneath an entry"); any other reply fails it. A
+  "Rights beneath an entry" and "The tree beneath an entry"); any other
+  reply fails it. A tree's name counts only for the server's own files,
+  so the reply may state it. A
   reply with an unknown or finished tag, a second reply, or one from
   any other domain is dropped and counted;
 * **the acknowledgement**, `{erx_facets_installed, Tag}` from the
@@ -2740,7 +2749,8 @@ property 18 makes a configured domain, never the system domain, the server of
 every `windows` service) the process
 behind it is the supervisor of its tree's grants (`erx_fs_grants`), and
 the domain service asks it for an `erx_fs` grant bound to the grantee and
-ending with its domain pid, in place of a facet in front of it, as a
+ending with its domain pid, whose start answers the grant's tree with
+its pid, in place of a facet in front of it, as a
 files service's mint does for its grantees (`start`, served by the start
 service, and `apps`, served by the package process, are such). A
 service that has named no living process by then is left out and logged; the domain finds the name absent, as it
@@ -4397,10 +4407,11 @@ a session that hands it on shares the facet's control with the receiver
 serves the tree from a process linked to it, so revoking the facet ends
 the tree and every fid on it, and no grant of the tree outlives the facet.
 Like every facet that serves a file tree, each of the two installs as its
-pid with the rights of its facet row; a namespace entry names the facet
-and the tree its mount's options give, and resolves with the lesser of
-its own rights and the facet's, and the grant answers `enoent` to an attach that names any other tree
-([design-files.md](design-files.md#namespaces)).
+pid with the tree its grant roots in and the rights of its facet row; a
+namespace entry names only the facet, and resolves on that tree with the
+lesser of its own rights and the facet's
+([design-files.md](design-files.md#building-binding-and-mounting), "The
+tree beneath an entry").
 
 #### The holder's driver-control facet
 

@@ -141,7 +141,7 @@ any one app's commands, which is that app's design.
  system domain: domain service                                      |
    accepts: the session runs ntpd's row (a keeper's start), its plan serves svc
    pairs: (the row's current session) x (each live session whose template holds start)
-   introduces, asks erx_svc to mint, installs {Pid, Rights} under {svc, <<"ntpd">>} -+
+   introduces, asks erx_svc to mint, installs {Pid, Tree, Rights} under {svc, <<"ntpd">>} -+
              Rights: rw if the grantee's start grant is rw, else ro
 
  service ntpd status:  /proc/apps/ntpd (run state)  then  /svc/ntpd/status (ntpd's words)
@@ -461,7 +461,11 @@ Each record then runs the existing operation: introduce, mint, install,
 under one deadline of 10 s, with a fresh tag, failing once for the pair
 and logging. The mint's request carries the grantee's principal and the
 record's rights, so `erx_svc` knows who holds each facet; it binds no
-tree differently by principal. The installation sends `{Pid, Rights}`.
+tree differently by principal. Its reply names the tree its grant roots
+in, as every mint's reply for a file tree does, and the installation
+sends `{Pid, Tree, Rights}`
+([design-files.md](design-files.md#building-binding-and-mounting), "The
+tree beneath an entry").
 
 The system domain holds no `svc` grant, so the trusted base reads no
 bytes an app serves, and its command shell shows an app's run state from
@@ -509,7 +513,7 @@ either copies a provider or cannot name an app's grant
 * a facet's mount, `erx_ns:mount({facet, Name}, To, Options)`, names a
   facet by an atom and refuses any other term with `einval`, and every
   `svc` facet's name is the pair `{svc, NAME}`;
-* a grant's mount, `erx_ns:mount({Pid, Rights}, To, Options)`, takes
+* a grant's mount, `erx_ns:mount({Pid, Tree, Rights}, To, Options)`, takes
   only a process of the domain's own runtime and refuses any other pid
   with `einval`, and every `svc` grant is a process of the app's domain.
 

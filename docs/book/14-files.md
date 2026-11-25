@@ -8,7 +8,9 @@
 > on a RAM file system in Erlang; `/proc` as a read-only view of the
 > inspector; the host link's 9P bridge; and the session's export, a
 > file server of `/bin`, `/dev` and `/etc` that every session starts.
-> Designed: entries on the export in a program's table, and the
+> Designed: walks from a grant's root without an `attach`, and every
+> grant's tree named by its server; entries on the export in a
+> program's table, and the
 > export serving the session's local files; shared mappings of files;
 > a `sysctl(3)` reader for programs; and an app's own tree at
 > `/svc/NAME`.
@@ -87,11 +89,12 @@ entry starts, as plain names (`/data` is the one name `data`). The
   [chapter 16](16-storage.md#162-read-only-system-images), held in a file and read by the
   domain's own runtime;
 * a file grant at a file server, named by its pid and the tree it
-  serves;
-* a facet's file grant, named by the facet's name and a tree: the
+  serves, which came with the pid from the code that started the grant;
+* a facet's file grant, named by the facet's name alone: the
   file grant that the domain's **facet registry** (`erx_facets`, the
   table of every facet the domain holds, by name) has under that name,
-  looked up afresh at each resolution;
+  with the tree its server said the grant roots in, looked up afresh at
+  each resolution;
 * `ended`, a file grant that has gone, on which every request answers
   `eio`.
 
@@ -238,7 +241,7 @@ whose fields are the message's fields in 9P2000.L's order. A request
 to a grant is
 
 ```erlang
-{erx_9p, Alias, Owner, Request}      % e.g. Request = {walk, 0, 1, [<<"notes.txt">>]}
+{erx_9p, Alias, Owner, Request}      % e.g. Request = {walk, ?NOFID, 1, [<<"notes.txt">>]}
 ```
 
 and the reply comes back to `Alias` as `{erx_9p, Alias, Reply}`,
@@ -254,9 +257,12 @@ The terms already pass the funnel's grammar, so a server needs no
 binary parser. 9P2000.L's bytes exist only at the machine's edges, where a codec turns
 terms into wire messages and back. One edge is built: the host link's
 9P bridge, through which `tools/erx files` reads the machine's files. The codec has a fuzz
-target. Two details matter to a server's author: `version` resets
-nothing, and a `write` reply also names the offset the bytes landed
-at, which an append needs.
+target. Three details matter to a server's author. A grant is already
+attached when the server makes it, so `version` resets nothing, and a
+`walk` from `NOFID`, the number 9P reserves for "no fid", starts at
+the grant's root, so a client inside the machine never sends `attach`.
+And a `write` reply also names the offset the bytes landed at, which
+an append needs.
 
 ### 14.2.2 A read, end to end
 
@@ -267,9 +273,8 @@ root's session, traced to the bytes. Figure 14.2 shows the messages.
    The longest matching mount point is `/data`, a facet's entry, so the
    resolver takes the grant the facet registry has under `data`.
 2. `erx_file_remote`, the one client every Erlang caller uses, sends
-   four requests together: `attach` for fid 0 on the grant's root, a
-   `walk` of `notes.txt` from fid 0 to a new fid 1, an `lopen` of fid
-   1, and a `clunk` of fid 0, which the open no longer needs. Each is
+   two requests together: a `walk` of `notes.txt` from `NOFID`, the
+   grant's root, to a new fid 1, and an `lopen` of fid 1. Each is
    a frame on the session's connection to the storage domain,
    addressed to the grant's pid, each with its own alias.
 3. The storage domain's funnel admits the frames, since its runtime
@@ -285,13 +290,11 @@ sequenceDiagram
   participant C as caller (root's session)
   participant G as data grant (storage domain)
   participant T as storage tree
-  C->>G: attach, fid 0 on the tree's root
-  C->>G: walk 0 to 1, notes.txt
+  C->>G: walk NOFID to 1, notes.txt
   C->>G: lopen 1, read only
-  C->>G: clunk 0
   G->>T: root, walk, open callbacks
   T-->>G: node, node, handle
-  G-->>C: qid, then qids, then qid and iounit, then ok
+  G-->>C: qids, then qid and iounit
   C->>G: getattr 1, size
   G-->>C: attributes
   C->>G: read 1, offset 0
@@ -301,15 +304,19 @@ sequenceDiagram
 ```
 
 *Figure 14.2. A 9P2000.L walk, open and read between domains. The
-client sends the attach, walk, open and first clunk together, without
-waiting for any reply; the grant's checks run before any callback of
-the tree.*
+client sends the walk and the open together, without waiting for
+either reply; the grant's checks run before any callback of the tree.*
 
 A **qid** in the replies is the server's identity for a file, and an
 **iounit** is the most bytes one read or write may carry. Sending the
-first four requests together saves three round trips across the wall.
+walk and the open together saves a round trip across the wall, and
+walking from the grant's root rather than from a fid that an `attach`
+made spares the server an `attach` and a `clunk` on every open.
 If the walk fails, fid 1 was never made, so the `lopen` fails too,
-with `ebadf`, and changes nothing. Every step above is built.
+with `ebadf`, and changes nothing. Every step above is built but the
+walk from `NOFID`, which is designed: the built client sends an
+`attach` for a fid on the root first and clunks that fid with the
+open.
 
 ### 14.2.3 The file grant: one client, one tree, one process
 
