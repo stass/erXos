@@ -59,7 +59,7 @@ module Erx
       def exports
         checks = @frames.map { |frame| "check_#{frame.fetch(:name)}/#{reply?(frame) ? 2 : 1}" }
         builds = @frames.flat_map do |frame|
-          arity = [frame.fetch(:slot), reply?(frame)].count(true) + 1
+          arity = builder_args(frame).size
           ["frame_#{frame.fetch(:name)}/#{arity}", "build_#{frame.fetch(:name)}/#{arity}"]
         end
         "-export([#{(checks + %w[check_from_program/1 check_to_program/2] + builds).join(', ')}])."
@@ -166,8 +166,8 @@ module Erx
         @frames.map do |frame|
           frame_name = frame.fetch(:name)
           tag = atom(frame.fetch(:tag))
-          args = [*(reply?(frame) ? ['Request'] : []), *(frame.fetch(:slot) ? ['Slot'] : []), 'Value'].join(', ')
-          spec_args = (['term()'] * args.count(',').succ).join(', ')
+          args = builder_args(frame).join(', ')
+          spec_args = (['term()'] * builder_args(frame).size).join(', ')
           term = frame.fetch(:slot) ? "{#{tag}, ?VERSION, Slot, #{sorted(frame)}}" : "{#{tag}, ?VERSION, #{sorted(frame)}}"
           check = reply?(frame) ? "check_#{frame_name}(Frame, \#{Slot => Request})" : "check_#{frame_name}(Frame)"
           "%% The #{frame_name} frame of Value, its ascending lists sorted, unchecked.\n" \
@@ -183,6 +183,10 @@ module Erx
             "            end;\n        Error ->\n            Error\n    end."
         end.join("\n\n")
       end
+
+      # A builder's arguments: the request case for a reply frame, the slot for a
+      # frame that has one, and the value.
+      def builder_args(frame) = [*(reply?(frame) ? ['Request'] : []), *(frame.fetch(:slot) ? ['Slot'] : []), 'Value']
 
       # Value with the ascending lists of the frame's kind sorted; for a reply
       # frame, of the reply kind its request case takes.

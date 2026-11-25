@@ -217,9 +217,9 @@ The frame's bytes and what it gives the program's credit come from the same
 term (`grants/1`), so they cannot disagree. A term whose grants it cannot read,
 one of no frame to the program or one carrying a descriptor or report of a
 kind the protocol lacks or a pipe number outside 1..2^32-1, raises
-`function_clause`: the handler builds every frame with the protocol's grammar,
-so such a term is the handler's bug. The program checks the rest of the
-frame's form.
+`function_clause`: the handler builds every frame with the protocol's grammar
+module and checks each value from beyond it there, so such a term is the
+handler's bug. The program checks every frame's form.
 """.
 -spec send(port(), term()) -> ok | busy | {error, atom()}.
 send(Port, Frame) ->

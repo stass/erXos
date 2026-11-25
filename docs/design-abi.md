@@ -1303,7 +1303,11 @@ only BIFs: a check per direction and frame, total over any term, making
 no atom and walking no list past its maximum, the reply check taking a
 map from each busy slot to the request case it holds; and a builder per
 frame, which sorts each `ascending` list, keeping a repeated key so the
-check still refuses it, then checks the frame and its encoded size. A
+check still refuses it, then checks the frame and its encoded size, and
+beside each builder the same frame unchecked (`frame_FRAME`), for a sender
+whose values are all its own: the program handler sends its own replies
+that way, and checks once, with the builder, a reply carrying a file
+server's errno or attributes or the pipe server's descriptors. A
 spawn's planner answers `E2BIG` for every refusal of a startup message
 that the strings' size causes (`size`; `length` of an `arg`, an
 `env_var` or a list of them; `total` of `args`), and builds the startup message with every capability value

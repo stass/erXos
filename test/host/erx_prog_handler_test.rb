@@ -105,8 +105,8 @@ class ErxProgHandlerTest < Minitest::Test
                  replacement: 'maps:map(fun(_, Value) -> if is_integer(Value) -> Value; true -> 0 end end,',
                  caught_by: 'getattr_answers_the_attributes_given'),
     'a getattr nlink past its field sent' =>
-      Mutant.new(file: CORE, original: "        {error, {range, _}} -> reply(C, file_getattr, Slot, {error, eoverflow})\n",
-                 replacement: "        {error, {range, _}} -> reply(C, file_getattr, Slot, {ok, \#{}})\n",
+      Mutant.new(file: CORE, original: "    checked_reply(C, file_getattr, Slot, {ok, stat(Info)}, {error, eoverflow});\n",
+                 replacement: "    checked_reply(C, file_getattr, Slot, {ok, stat(Info)}, {ok, \#{}});\n",
                  caught_by: 'getattr_past_a_field_is_eoverflow'),
     'a data slot past the program slots admitted' =>
       Mutant.new(file: CORE, original: 'true when Data >= Slots ->', replacement: 'true when Data > Slots ->',

@@ -909,11 +909,7 @@ done(C, Slot, local_seek, {ok, Offset}) when Offset >= 0, Offset =< ?ERX_OFF_MAX
 done(C, Slot, local_seek, {ok, _Past}) ->
     file_reply(C, local_seek, Slot, {error, eio});
 done(C, Slot, file_getattr, {ok, #file_info{} = Info}) ->
-    Stat = {ok, stat(Info)},
-    case erx_prog_grammar:build_reply(file_getattr, Slot, Stat) of
-        {ok, _} -> reply(C, file_getattr, Slot, Stat);
-        {error, {range, _}} -> reply(C, file_getattr, Slot, {error, eoverflow})
-    end;
+    checked_reply(C, file_getattr, Slot, {ok, stat(Info)}, {error, eoverflow});
 done(C, Slot, file_clunk, ok) ->
     file_reply(C, file_clunk, Slot, ok);
 done(C, Slot, Waiting, {error, Errno}) ->
@@ -936,10 +932,7 @@ case_of(Case) -> Case.
 %% A file request's reply. Its error comes from a file server or the
 %% release, whose names the protocol may lack; one it lacks is eio.
 file_reply(C, Case, Slot, {error, Errno}) ->
-    case erx_prog_grammar:build_reply(Case, Slot, {error, Errno}) of
-        {ok, _} -> reply(C, Case, Slot, {error, Errno});
-        {error, _} -> reply(C, Case, Slot, {error, eio})
-    end;
+    checked_reply(C, Case, Slot, {error, Errno}, {error, eio});
 file_reply(C, Case, Slot, Value) ->
     reply(C, Case, Slot, Value).
 
@@ -958,12 +951,15 @@ kill_self(C, Slot, Signal) ->
     end.
 
 %% The install of a pipe's next hand-off, or once both are installed the
-%% reply that names the values they gave, the read end's first.
+%% reply that names the values they gave, the read end's first. Those come
+%% from the pipe server and the driver, so the reply is checked; one the
+%% grammar refuses is their bug, and crashes the handler with it.
 install_end(#core{piping = {_Slot, [Hand | _], _Done}} = C) ->
     {C, [{install_end, Hand}]};
 install_end(#core{piping = {Slot, [], Done}} = C) ->
     [Read, Write] = lists:reverse(Done),
-    reply(C#core{piping = none}, pipe, Slot, {ok, Read, Write}).
+    {ok, Frame} = erx_prog_grammar:build_reply(pipe, Slot, {ok, Read, Write}),
+    queued(C#core{piping = none}, Frame).
 
 %% The errno of a pipe's refusal: the quota's as given, and enomem for the
 %% budget's and every other.
@@ -976,11 +972,23 @@ reach(#core{pid = Pid}, Pid) -> self;
 reach(_C, _Target) -> none.
 
 %% The reply Value to the request of case Request on Slot, queued behind the
-%% frames already waiting. Every value a reply carries is the handler's own, or
-%% a server's that done/4 or file_reply/4 checked first, so the frame is made
-%% unchecked: the program checks what it receives.
+%% frames already waiting. Value is the handler's own, a constant or a value
+%% it bounded itself, so the frame is made unchecked: the grammar would only
+%% re-validate it, and the program checks every frame it receives.
 reply(C, Request, Slot, Value) ->
-    Frame = erx_prog_grammar:frame_reply(Request, Slot, Value),
+    queued(C, erx_prog_grammar:frame_reply(Request, Slot, Value)).
+
+%% A reply whose Value came from beyond the handler (a file server's errno or
+%% attributes), checked once against the grammar; one it refuses is answered
+%% with Refused, the handler's own.
+checked_reply(C, Request, Slot, Value, Refused) ->
+    case erx_prog_grammar:build_reply(Request, Slot, Value) of
+        {ok, Frame} -> queued(C, Frame);
+        {error, _} -> reply(C, Request, Slot, Refused)
+    end.
+
+%% Frame, queued behind the frames already waiting.
+queued(C, Frame) ->
     pump(enqueue(C, {frame, Frame})).
 
 %% The next descriptor's reservation, or the start once none is left.
