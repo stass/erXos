@@ -8625,7 +8625,9 @@ switch at parity: M7 replaces Fiasco only once erXos's kernel runs
 every test and benchmark Phase 1's system ran on it ([plan.md](plan.md)).
 The license is not a reason for the new kernel. Fiasco's kernel package
 is MIT, as `fiasco/kernel/LICENSE.spdx` declares; its GPL and LGPL parts
-are excluded from the import, and of Fiasco's code in the Fiasco build
+are excluded from the import, apart from the configuration tool
+(`tool/kconfig`), which runs on the host and is compiled into no
+executable a boot image carries, and of Fiasco's code in the Fiasco build
 only two files are GPL-2.0 upstream, by their own notices:
 `src/kern/kobject_rpc.h`, whose place in the tree an erXos-authored, MIT
 clean-room header takes, and the kernel debugger's `jdb_object.cpp`, which a development kernel

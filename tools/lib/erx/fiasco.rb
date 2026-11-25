@@ -91,6 +91,8 @@ module Erx
     # Fiasco's generic platform, linked static at 2 MiB, with RAM at 0 and the mini UART's
     # 16550 driver; QEMU virt's is the main build's (user.defconfig).
     BOARD_BOOTSTRAPS = { 'raspi4b' => 'user-raspi4b.defconfig' }.freeze
+    # The directory under build/fiasco a board's own bootstrap is built in.
+    def self.board_users(name) = "users-#{name}"
     # Fiasco's own options, which bootstrap passes to the kernel. None: without
     # -serial_esc or -serial_input the kernel leaves the UART's interrupt free
     # for the console driver (docs/design-fiasco.md, "The console").
@@ -205,9 +207,11 @@ module Erx
     # The release kernel (docs/design-fiasco.md, "The kernel"): the same sources and cores,
     # configured from the release defconfig (FiascoConfig.release_defconfig) and checked
     # with the release rules, in Fiasco.kernel_directory. No image packs it:
-    # every image is a development build (ProductionImage::BUILD_KIND). The kernel's
-    # link audit (FiascoProvenance#certify) must find every source it links under terms a
-    # release may carry, or the build fails naming each source that is not. The kernel stays
+    # every image is a development build (ProductionImage::BUILD_KIND). The release's
+    # link audit (FiascoProvenance#certify) reads every executable a boot image carries,
+    # each board's own bootstrap among them, which is built here first, and must find
+    # every source they link under terms a release may carry, or the build fails naming
+    # each source that is not. The kernel stays
     # only beside the audit's pass record: an earlier record goes before the build, and a
     # build that fails anywhere after it removes the kernel and any record.
     def build_release_kernel(jobs: 4)
@@ -219,6 +223,7 @@ module Erx
         FileUtils.rm_f(record)
         passed = false
         build_kernel_beside(directory: directory, kind: BuildKind::RELEASE, defines: [], jobs: jobs)
+        BOARD_BOOTSTRAPS.each_key { |name| build_board_users(name, jobs: jobs) }
         provenance_auditor(kind: BuildKind::RELEASE).certify
         passed = true
         kernel
@@ -239,14 +244,11 @@ module Erx
     # images/bootstrap-NAME.raw. The kernel and sigma0 stay the main build's, which
     # must have run.
     def build_board_bootstrap(name, jobs: 4)
-      config = BOARD_BOOTSTRAPS.fetch(name) { raise Error, "platform #{name} has no bootstrap build of its own" }
+      raise Error, "platform #{name} has no bootstrap build of its own" unless BOARD_BOOTSTRAPS.key?(name)
       raise Error, 'jobs must be between 1 and 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
 
       with_tree_lock do
-        prepare_source_cache
-        users = build_users(jobs: jobs, boot_cores: build_boot_cores,
-                            directory: File.join(@build, "users-#{name}"), config: config)
-        build_image(users: users, output: board_image_path(name))
+        build_image(users: build_board_users(name, jobs: jobs), output: board_image_path(name))
       end
     end
 
@@ -269,7 +271,7 @@ module Erx
     # there (docs/design-platforms.md, "Boot"), so the single file
     # starts there.
     def first_stage_address(platform)
-      users = BOARD_BOOTSTRAPS.key?(platform.name) ? "users-#{platform.name}" : 'users'
+      users = BOARD_BOOTSTRAPS.key?(platform.name) ? self.class.board_users(platform.name) : 'users'
       self.class.elf_entry(File.binread(File.join(@build, users, BOOTSTRAP_OBJECTS, 'bootstrap.elf'), 64) || '')
     rescue SystemCallError => error
       raise Error, "cannot read the first stage's link address: #{error.message}"
@@ -472,7 +474,7 @@ module Erx
       end
       changed = expected.keys.select { |name| previous[name] != expected.fetch(name) }
       # The users' inputs build every L4Re directory: the main one and each board's.
-      discarded = changed.flat_map { |name| name == 'users' ? ['users', *BOARD_BOOTSTRAPS.keys.map { |board| "users-#{board}" }] : [name] }
+      discarded = changed.flat_map { |name| name == 'users' ? ['users', *BOARD_BOOTSTRAPS.keys.map { |board| self.class.board_users(board) }] : [name] }
       discarded.each do |name|
         path = File.join(@build, name)
         FileUtils.remove_entry(path) if File.exist?(path)
@@ -663,6 +665,13 @@ module Erx
     def build_boot_cores
       CoreArchive.build_boot(root: @inputs.tree, compiler: @compiler, runner: @runner, project: @root,
                              output: File.join(@build, 'boot-cores'))
+    end
+
+    # The users' build of a board's own bootstrap (BOARD_BOOTSTRAPS), in board_users(name).
+    def build_board_users(name, jobs:)
+      prepare_source_cache
+      build_users(jobs: jobs, boot_cores: build_boot_cores,
+                  directory: File.join(@build, self.class.board_users(name)), config: BOARD_BOOTSTRAPS.fetch(name))
     end
 
     def build_users(jobs:, boot_cores:, directory: File.join(@build, 'users'), config: 'user.defconfig')

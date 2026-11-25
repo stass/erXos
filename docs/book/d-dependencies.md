@@ -104,14 +104,22 @@ GPL-2.0 too. Only a kernel built with the debugger compiles it, and
 the license rule takes it only in development builds. The images the
 website offers carry it and go out with a link to their source.
 
-Fiasco's imported tree does hold other GPL and LGPL files: about 150
-in its kernel, `bootstrap` and build-system directories, and, beside
-`sigma0` in `l4re-core`, one LGPL file and some 9,000 files of GCC's
-C++ library, libstdc++, under GPL-3.0 with the GCC exception. No
-build compiles them. A build check fails if any file compiled or
-linked into the kernel, `bootstrap` or `sigma0`, headers included,
-has a license that is not permissive, apart from `jdb_object.cpp` in a
-kernel with the debugger.
+Fiasco's imported tree leaves out the copyleft parts no build uses: Fiasco's own
+tests, a coverage module and a checksumming console stream that erXos
+never configures, the start code of boards and processors erXos does
+not run on, the build system's test plug-ins, and GCC's C++ library,
+libstdc++. Each tree's import record lists every part left out and
+why. What `l4re-core` keeps is `sigma0` and the libraries it and
+`bootstrap` are built from. The GPL files that remain are
+`jdb_object.cpp` and the configuration tool of the kernel and the
+build system, which runs on the development host while a build is
+configured and is compiled into nothing a boot image carries. The
+release build's check reads every executable a boot image carries,
+for every board: the kernel,
+`bootstrap`, `sigma0`, and the Raspberry Pi 4's own `bootstrap`. It
+fails if any file compiled or linked into one of them, headers
+included, has a license that is not permissive, apart from
+`jdb_object.cpp` in a kernel with the debugger.
 
 ### D.3.3 Storage, cryptography and small cores
 

@@ -25,8 +25,8 @@ module Erx
   # missing source records prevent a successful build record.
   class FiascoProvenance
     PARTS = FiascoParts::NAMES
-    # The executables every boot image packs beside its kernel, under build/fiasco:
-    # a development and a release image carry the same two. Each link's inputs are the
+    # The executables QEMU virt's boot image packs beside its kernel, under build/fiasco;
+    # a board with a bootstrap of its own (Fiasco::BOARD_BOOTSTRAPS) carries that one instead. Each link's inputs are the
     # list LLD's --trace printed for it, which the link rule keeps beside the
     # executable as NAME.inputs (Makerules.KERNEL, mk/prog.mk).
     USER_EXECUTABLES = {
@@ -60,16 +60,20 @@ module Erx
     # its image, or :permissive, a release kernel's license gate
     # (check_permissive). distribution is the report's statement of where the
     # build may go, nil for a release kernel, whose gate decides that.
-    Plan = Data.define(:kind, :kernel, :image, :pinned, :check, :distribution)
+    # boards are the boards whose own bootstrap (Fiasco::BOARD_BOOTSTRAPS) the audit
+    # also reads: a release's gate reads every one, which build_release_kernel builds
+    # first; a development build makes them only when an image for the board is packed.
+    Plan = Data.define(:kind, :kernel, :image, :pinned, :check, :distribution, :boards)
 
     def self.plan(root:, kind:)
       require_relative 'fiasco'
       kernel = Fiasco.kernel_directory(root: root, kind: kind)
       if BuildKind.development?(kind)
         Plan.new(kind: kind, kernel: kernel, image: true, pinned: true, check: :receipt,
-                 distribution: 'project-only: Fiasco with parts that are not permissive')
+                 distribution: 'project-only: Fiasco with parts that are not permissive', boards: [])
       else
-        Plan.new(kind: kind, kernel: kernel, image: false, pinned: false, check: :permissive, distribution: nil)
+        Plan.new(kind: kind, kernel: kernel, image: false, pinned: false, check: :permissive, distribution: nil,
+                 boards: Fiasco::BOARD_BOOTSTRAPS.keys)
       end
     end
 
@@ -136,22 +140,35 @@ module Erx
       @archive_listings = {}
       @snapshot_bytes = 0
       @differences = {}
-      @objects = image_objects
+      @objects = build_objects
     end
 
-    # The objects of the build the image is made of, by name. A board's own bootstrap,
-    # built in users-NAME (Fiasco::BOARD_BOOTSTRAPS), is not part of it.
-    def image_objects
+    # The objects of the build, by the tree they are in (board_tree) and then by name.
+    # A board's own bootstrap is a build of its own (Fiasco::BOARD_BOOTSTRAPS), whose
+    # objects may share names and bytes with the main build's.
+    def build_objects
       Dir.glob(File.join(@build, '**/*.o'))
-         .reject { |path| path.start_with?(File.join(@build, 'users-')) }
-         .group_by { |path| File.basename(path) }
+         .group_by { |path| board_tree(path) }
+         .transform_values { |paths| paths.group_by { |path| File.basename(path) } }
+    end
+
+    # The board whose own bootstrap build holds path, or nil for the main build.
+    def board_tree(path)
+      Fiasco::BOARD_BOOTSTRAPS.keys.find do |board|
+        path.start_with?(File.join(@build, Fiasco.board_users(board)) + '/')
+      end
     end
 
     # Each executable the audit reads, by name: its artifact and the list of its
-    # link's inputs: the build kind's kernel and the users every image carries.
+    # link's inputs: the build kind's kernel, the users every image carries and
+    # the bootstrap of each board the plan names, built in that board's own tree.
     def executable_links
       executables = { 'kernel' => File.join(@kernel, 'fiasco') }
       executables.merge!(USER_EXECUTABLES.transform_values { |path| File.join(@build, path) })
+      @plan.boards.each do |board|
+        bootstrap = USER_EXECUTABLES.fetch('bootstrap').delete_prefix('users/')
+        executables["bootstrap-#{board}"] = File.join(@build, Fiasco.board_users(board), bootstrap)
+      end
       executables.transform_values { |artifact| [artifact, "#{artifact}.inputs"] }
     end
 
@@ -167,7 +184,7 @@ module Erx
       @archive_listings = {}
       @snapshot_bytes = 0
       @differences = {}
-      @objects = image_objects
+      @objects = build_objects
       load_build_inputs
       load_generation_profiles
       archive_tool = tool_identity(@archive_requested || toolchain.program('ar'), role: 'archive')
@@ -286,18 +303,18 @@ module Erx
       receipt_path
     end
 
-    # Writes PASS_RECORD, naming the build kind and the kernel bytes the audit
-    # read, once the kernel passes check_permissive. The release build
+    # Writes PASS_RECORD, naming the build kind and the bytes of every executable
+    # the audit read (the kernel, the bootstraps and sigma0), once the kernel passes check_permissive. The release build
     # (Fiasco#build_release_kernel) removes the kernel and any record unless
     # this returns.
     def certify_release
       capture_construction
       report = audit
       check_permissive(report)
-      artifact = report.fetch('executables').find { |executable| executable.fetch('name') == 'kernel' }.fetch('artifact')
+      executables = report.fetch('executables').to_h { |executable| [executable.fetch('name'), executable.fetch('artifact')] }
       record = File.join(@kernel, PASS_RECORD)
       write_record(record, JSON.generate({ 'version' => 1, 'kind' => 'fiasco-license-check', 'build_kind' => @plan.kind,
-                                           'kernel' => artifact, 'state' => 'passed' }) + "\n")
+                                           'executables' => executables, 'state' => 'passed' }) + "\n")
       record
     end
 
@@ -427,7 +444,7 @@ module Erx
       end
       generation = generation.merge('recipes' => profile.fetch('recipes'))
       check_generation_shape(generation)
-      @generation = @plan.pinned ? generation : kernel_generation(generation)
+      @generation = @plan.pinned ? generation : unpinned_generation(generation)
       check_recipes
       check_generation_pins if @plan.pinned
     end
@@ -510,18 +527,33 @@ module Erx
     # The development section's entries, those for the development kernel's
     # generated files moved into this plan's kernel directory: every kernel's are
     # made by the same rules, from its own build's files, and the users' are the
-    # shared build's own. The recipes stay for the recipe check; no hash of the
+    # shared build's own. Each board the plan names has the users' entries too,
+    # moved into its own users build, which makes them by the same rules from its
+    # own configuration. The recipes stay for the recipe check; no hash of the
     # development build holds them.
-    def kernel_generation(generation)
-      from = Fiasco.kernel_directory(root: @root, kind: BuildKind::DEVELOPMENT).delete_prefix(@build + '/') + '/'
+    def unpinned_generation(generation)
+      kernel = Fiasco.kernel_directory(root: @root, kind: BuildKind::DEVELOPMENT).delete_prefix(@build + '/') + '/'
+      profiles = generation.fetch('profiles')
+      users = profiles.select { |relative, _| relative.start_with?('users/') }
+      boards = @plan.boards.map { |board| moved_profiles(users, from: 'users/', to: Fiasco.board_users(board) + '/') }
       to = @kernel.delete_prefix(@build + '/') + '/'
-      move = ->(relative) { relative.start_with?(from) ? to + relative.delete_prefix(from) : relative }
-      move_input = ->(input) { input.start_with?('build/fiasco/') ? 'build/fiasco/' + move.call(input.delete_prefix('build/fiasco/')) : input }
       { 'recipes' => generation.fetch('recipes'),
-        'compile_dependencies' => generation.fetch('compile_dependencies').to_h { |object, dependency| [move.call(object), move.call(dependency)] },
-        'profiles' => generation.fetch('profiles').to_h do |relative, profile|
-          [move.call(relative), profile.to_h { |role, value| [role, value.is_a?(Array) ? value.map(&move_input) : value] }]
-        end }
+        'compile_dependencies' => generation.fetch('compile_dependencies').to_h do |object, dependency|
+          [moved(object, from: kernel, to: to), moved(dependency, from: kernel, to: to)]
+        end,
+        'profiles' => moved_profiles(profiles, from: kernel, to: to).merge(*boards) }
+    end
+
+    # A build-relative path under directory from, moved under directory to.
+    def moved(relative, from:, to:) = relative.start_with?(from) ? to + relative.delete_prefix(from) : relative
+
+    # Generation profiles, and the build inputs they name, moved from one build
+    # directory to another; a project input outside the build stays.
+    def moved_profiles(profiles, from:, to:)
+      input = ->(path) { path.start_with?('build/fiasco/') ? 'build/fiasco/' + moved(path.delete_prefix('build/fiasco/'), from:, to:) : path }
+      profiles.to_h do |relative, profile|
+        [moved(relative, from:, to:), profile.to_h { |role, value| [role, value.is_a?(Array) ? value.map(&input) : value] }]
+      end
     end
 
     def project_input(relative)
@@ -602,7 +634,7 @@ module Erx
           archive_path = File.realpath(File.expand_path(input.file, directory))
           member_hash = archive_member_hash(archive_path, member: member)
           manifest = File.join(File.dirname(archive_path), '.erx-archive-inputs')
-          candidates = File.file?(manifest) ? archive_objects(manifest) : @objects.fetch(member, [])
+          candidates = File.file?(manifest) ? archive_objects(manifest) : @objects.fetch(board_tree(archive_path), {}).fetch(member, [])
           candidates = candidates.select { |path| File.basename(path) == member && digest(path) == member_hash }.uniq
           # Equal output bytes do not prove equal source/flag ancestry.
           if candidates.size > 1

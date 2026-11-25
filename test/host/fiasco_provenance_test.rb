@@ -210,13 +210,44 @@ class FiascoProvenanceTest < Minitest::Test
     end
   end
 
+  # A board's own bootstrap build makes the users' generated files by the
+  # users' rules from its own configuration, so a release audit reads the
+  # users' entries in each board's tree as well, unpinned.
+  def test_a_release_audit_reads_the_users_entries_in_each_boards_tree
+    generation_fixture do |root, _auditor, _recipe|
+      path = File.join(root, 'config/provenance/fiasco-generation.json')
+      profile = JSON.parse(File.read(path))
+      %w[users users-raspi4b].each do |tree|
+        FileUtils.mkdir_p(File.join(root, 'build/fiasco', tree, 'include'))
+        File.write(File.join(root, 'build/fiasco', tree, '.config'), "CONFIG_#{tree.tr('-', '_').upcase}=y")
+        File.write(File.join(root, 'build/fiasco', tree, 'include/bid_config.h'), 'generated configuration')
+      end
+      profile.fetch(Erx::BuildKind::DEVELOPMENT).fetch('profiles')['users/include/bid_config.h'] =
+        { 'role' => 'configuration', 'output_sha256' => Digest::SHA256.hexdigest('generated configuration'),
+          'code' => [], 'configuration' => ['build/fiasco/users/.config'], 'metadata' => [],
+          'object_list' => [], 'objects' => [], 'tools' => ['fiasco/kernel/tool/generator'] }
+      profile.fetch(Erx::BuildKind::DEVELOPMENT).fetch('inputs')['build/fiasco/users/.config'] =
+        { 'mode' => 'text', 'sha256' => Digest::SHA256.hexdigest('CONFIG_USERS=y') }
+      File.write(path, JSON.generate(profile))
+      release = Erx::FiascoProvenance.new(root: root, runner: nil, kind: Erx::BuildKind::RELEASE)
+      release.instance_variable_set(:@sources, {})
+      release.send(:load_generation_profiles)
+      %w[users users-raspi4b].each do |tree|
+        record = release.send(:fixed_generation, File.join(root, 'build/fiasco', tree, 'include/bid_config.h'))
+        assert_equal ["build/fiasco/#{tree}/.config"], record.fetch('configuration').map { |input| input.fetch('path') }, tree
+      end
+    end
+  end
+
   def test_an_audit_has_no_default_build_kind
     assert_raises(ArgumentError) { Erx::FiascoProvenance.new(root: __dir__, runner: nil) }
   end
 
   # Every build kind's audit reads every executable a boot image carries: its
   # own kernel, from the kind's kernel directory, and the bootstrap and sigma0
-  # both kinds' images share. Only a development build's audit also reads the
+  # both kinds' images share. A release's audit also reads each board's own
+  # bootstrap (the Raspberry Pi 4's, built in users-raspi4b), which the
+  # release build makes first. Only a development build's audit also reads the
   # image the build packed.
   def test_every_audit_reads_each_executable_a_boot_image_carries
     Dir.mktmpdir do |temporary|
@@ -224,11 +255,47 @@ class FiascoProvenanceTest < Minitest::Test
       users = Erx::FiascoProvenance::USER_EXECUTABLES.transform_values do |path|
         [File.join(root, 'build/fiasco', path), File.join(root, 'build/fiasco', "#{path}.inputs")]
       end
-      { Erx::BuildKind::RELEASE => 'kernel-release', Erx::BuildKind::DEVELOPMENT => 'kernel' }.each do |kind, directory|
+      board = 'build/fiasco/users-raspi4b/pkg/bootstrap/server/src/OBJ-arm64_armv8a-nofpu-plain/bootstrap.elf'
+      boards = { 'bootstrap-raspi4b' => [File.join(root, board), File.join(root, "#{board}.inputs")] }
+      { Erx::BuildKind::RELEASE => ['kernel-release', boards],
+        Erx::BuildKind::DEVELOPMENT => ['kernel', {}] }.each do |kind, (directory, own)|
         auditor = Erx::FiascoProvenance.new(root: root, runner: nil, kind: kind)
         kernel = %w[fiasco fiasco.inputs].map { |name| File.join(root, 'build/fiasco', directory, name) }
-        assert_equal({ 'kernel' => kernel }.merge(users), auditor.executable_links, kind)
+        assert_equal({ 'kernel' => kernel }.merge(users).merge(own), auditor.executable_links, kind)
         assert_equal Erx::BuildKind.development?(kind), auditor.instance_variable_get(:@plan).image, kind
+      end
+    end
+  end
+
+  # A board's bootstrap is a build of its own, whose objects may have the same
+  # names and bytes as the main build's. An archive member resolves only among
+  # the objects of the build tree its archive is in, so the board's bootstrap
+  # is attributed to its own compiles and the main build's members stay
+  # unambiguous beside them.
+  def test_an_archive_member_resolves_in_its_own_build_tree
+    Dir.mktmpdir do |temporary|
+      root = File.realpath(temporary)
+      build = File.join(root, 'build/fiasco')
+      %w[users users-raspi4b].each do |tree|
+        FileUtils.mkdir_p(File.join(build, tree, 'lib'))
+        File.binwrite(File.join(build, tree, 'lib/member.o'), 'same object')
+        File.binwrite(File.join(build, tree, 'lib.a'), "!<arch>\narchive")
+        File.write(File.join(build, tree, 'image.inputs'), LinkInputsFixture.text('lib.a(member.o)'))
+      end
+      listing = File.join(build, 'archive-list.log')
+      File.write(listing, "member.o\n")
+      %w[users users-raspi4b].each do |tree|
+        extracted = File.join(build, tree, 'lib/member.o')
+        runner = Object.new
+        runner.define_singleton_method(:run) { |argv, **_options| { 'log' => argv[1] == 't' ? listing : extracted } }
+        auditor = Erx::FiascoProvenance.new(root: root, kind: Erx::BuildKind::RELEASE, runner: runner)
+        auditor.instance_variable_set(:@unresolved, [])
+        auditor.instance_variable_set(:@sources, {})
+        auditor.define_singleton_method(:audit_object) { |path, **| { 'object' => send(:reference, path) } }
+        result = auditor.send(:audit_executable, tree, File.join(build, tree, 'lib.a'), File.join(build, tree, 'image.inputs'))
+        assert_empty auditor.instance_variable_get(:@unresolved), tree
+        compiles = result.fetch('contributions').first.fetch('compiles')
+        assert_equal ["build/fiasco/#{tree}/lib/member.o"], compiles.map { |compile| compile.fetch('object').fetch('path') }, tree
       end
     end
   end
@@ -347,8 +414,8 @@ class FiascoProvenanceTest < Minitest::Test
       assert_equal record, certify.call([{ 'path' => 'kip.cpp', 'license' => 'MIT' }])
       passed = JSON.parse(File.read(record))
       assert_equal Erx::BuildKind::RELEASE, passed.fetch('build_kind')
-      assert_equal({ 'path' => 'build/fiasco/kernel-release/fiasco', 'sha256' => Digest::SHA256.hexdigest('kernel bytes') },
-                   passed.fetch('kernel'))
+      assert_equal({ 'kernel' => { 'path' => 'build/fiasco/kernel-release/fiasco', 'sha256' => Digest::SHA256.hexdigest('kernel bytes') } },
+                   passed.fetch('executables'))
       error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'jdb_object.cpp', 'license' => 'GPL-2.0-only' }]) }
       FileUtils.rm_f(record)
       error = assert_raises(Erx::Error) { certify.call([{ 'path' => 'jdb_object.cpp', 'license' => 'GPL-2.0-only' }]) }

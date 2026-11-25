@@ -102,6 +102,7 @@ class FiascoTest < Minitest::Test
     FileUtils.mkdir_p(File.join(@directory, 'config/fiasco'))
     File.write(kernel_config, KERNEL_CONFIG)
     File.write(user_config, "CONFIG_BUILD_ARCH_arm64=y\n")
+    File.write(File.join(@directory, 'config/fiasco/user-raspi4b.defconfig'), "CONFIG_BUILD_ARCH_arm64=y\n")
     File.write(File.join(@directory, 'config/fiasco/modules.list'), 'fixture')
     File.write(File.join(@directory, 'fiasco/erx_glue_imports.txt'), "# no glue in this fixture\n")
   end
@@ -178,7 +179,8 @@ class FiascoTest < Minitest::Test
 
   # The release kernel is configured from the development defconfig with the
   # debugger and console input written as not set, in a directory of its own,
-  # and leaves the development kernel alone.
+  # and leaves the development kernel alone. Each board's own bootstrap is built
+  # first, since the release's audit reads it.
   def test_release_kernel_is_configured_from_the_development_defconfig_without_the_debugger
     path = @fiasco.build_release_kernel(jobs: 2)
     directory = Erx::Fiasco.kernel_directory(root: @directory, kind: Erx::BuildKind::RELEASE)
@@ -187,6 +189,7 @@ class FiascoTest < Minitest::Test
                  File.read(File.join(directory, 'globalconfig.out'))
     names = @runner.commands.map { |command| command.fetch(:options).fetch(:name) }
     assert_includes names, 'fiasco-kernel-release-build'
+    assert_includes names, 'fiasco-users-raspi4b-config'
     refute_includes names, 'fiasco-kernel-build'
     refute File.exist?(File.join(@directory, 'build/fiasco/kernel'))
   end
