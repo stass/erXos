@@ -63,7 +63,9 @@ class LinuxGuestTest < Minitest::Test
     File.write(File.join(@root, Erx::LinuxGuest::LOCK), JSON.generate('version' => 1, 'sources' => sources))
   end
 
-  def guest = Erx::LinuxGuest::Guest.new(root: @root, runner: @runner)
+  # The scratch root holds no platform records, so the guest takes the tree's own.
+  def guest = Erx::LinuxGuest::Guest.new(root: @root, runner: @runner,
+                                         platform: Erx::Platform.development(ROOT))
 
   def test_musl_dev_is_published_as_the_members_its_pin_names_and_nothing_else
     write_lock
