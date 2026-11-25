@@ -1001,7 +1001,10 @@ within about 20 percent of the length, write plain code.
   grammar, the terminal emulator's control sequences and OSC 8 links, the
   widget tree validator and every `ui.txt` reader, the input event
   validator, virtio-gpu responses and virtio-input events, the touch,
-  keypad and encoder parsers, the web protocol codecs (Erlang and
+  keypad and encoder parsers, Bluetooth's HCI events, ACL and L2CAP
+  frames, ATT and SMP PDUs, its bonding store and the `ble` facet's
+  requests, USB descriptors and the hub's and bulk-only transport's
+  replies, the web protocol codecs (Erlang and
   TypeScript), the host tool's HTTP and WebSocket reader, the QEMU
   harness's QMP reader and screenshot (PPM) decoder, the benchmark
   harness's reader of guests' `BENCH`, `CLOCK` and `WINDOW` lines, and the HTTP and

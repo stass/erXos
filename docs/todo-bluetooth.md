@@ -165,8 +165,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   then it holds for the drops bleuart and the Bluetooth domain see. erx_gatt_serial drops a `subscribed` while its
   owner is behind, silently: a dropped `notify` leaves bleuart's output held while input still reaches root's shell;
   it should be a `serial_lost` too.
-  The unlanded branch `login-8`, the phone console, is superseded and does not land. CLAUDE.md's
-  fuzz-target list still names the phone console's prompt (`erx_bt_prompt`).
+  The unlanded branch `login-8`, the phone console, is superseded and does not land.
 * [Low] bluetooth, `bleuart` (`erx_bleuart_core`, the `ble` facet): after a loss of input or the shell's end the phone
   stays connected to no tty until it disconnects; a handler's `{disconnect, Conn}` on the `ble` facet would let
   `bleuart` drop the link.
