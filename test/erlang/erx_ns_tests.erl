@@ -210,7 +210,7 @@ app_package(Bytes) ->
     {ok, Grant} = erx_fs:start_link(erx_fs_test_tree, [{observer, self()}, {name, <<"packages">>},
                                                       {file, <<"clock.app">>, Bytes}], rx),
     unlink(Grant),
-    persistent_term:put({erx, facets}, {1, #{packages => {Grant, rx}}}),
+    persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, rx}}}}),
     {_, Layout} = package(),
     persistent_term:put(erx_connections_app, {ok, #{place => {packages, [<<"clock.app">>]}, layout => Layout,
                                                    start => {applications, [<<"clock">>]}}}),
@@ -254,7 +254,7 @@ an_rx_app_mount_needs_an_rx_grant() ->
     {Bytes, _} = package(),
     Grant = app_package(Bytes),
     [begin
-         persistent_term:put({erx, facets}, {1, #{packages => {Grant, Rights}}}),
+         persistent_term:put({erx, facets}, {1, #{packages => {?ERX_SERVICE_FILES, {Grant, Rights}}}}),
          ?assertEqual({error, eacces}, erx_ns:mount({erofs, app}, <<"/app">>, [rx])),
          ?assertEqual(undefined, persistent_term:get(erx_ns, undefined)),
          ?assertEqual([], tree_calls())
@@ -326,17 +326,18 @@ a_facet_mount_reads_the_registry_at_use() ->
                  table()),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
     [First, Second] = [grant(), grant()],
-    persistent_term:put({erx, facets}, {1, #{data => {First, rw}}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {First, rw}}}}),
     ?assertMatch([_, #{provider := {grant, First, <<"data">>}, rights := rw},
                   #{provider := {grant, First, <<"data">>}, root := [<<"sub">>], rights := ro}], at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => {Second, rw}, other => {First, rw}}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Second, rw}},
+                                             other => {?ERX_SERVICE_FILES, {First, rw}}}}),
     ?assertMatch([_, #{provider := {grant, Second, _}}, #{provider := {grant, Second, _}}], at_use()),
     Remote = remote_pid(),
-    persistent_term:put({erx, facets}, {1, #{data => {Remote, rw}}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Remote, rw}}}}),
     ?assertMatch([_, #{provider := {grant, Remote, _}}, #{provider := {grant, Remote, _}}], at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => {not_a_pid, rw}}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {not_a_pid, rw}}}}),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
-    persistent_term:put({erx, facets}, {1, #{data => First}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, First}}}),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}], at_use()),
     ?assertEqual(#{}, maps:get(monitors, sys:get_state(erx_ns))).
 
@@ -351,13 +352,13 @@ a_facet_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
     ok = erx_ns:bind(<<"/x">>, <<"/b">>),
     Grant = grant(),
     Rights = fun(GrantRights) ->
-                     persistent_term:put({erx, facets}, {1, #{data => {Grant, GrantRights}}}),
+                     persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Grant, GrantRights}}}}),
                      [Of || #{provider := {grant, Pid, <<"data">>}, rights := Of} <- at_use(), Pid =:= Grant]
              end,
     ?assertEqual([rw, ro, ro, ro], Rights(rw)),
     ?assertEqual([ro, ro, ro, ro], Rights(ro)),
     ?assertEqual([ro, rx, ro, rx], Rights(rx)),
-    persistent_term:put({erx, facets}, {1, #{data => Grant}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, Grant}}}),
     ?assertMatch([_, #{provider := ended}, #{provider := ended}, #{provider := ended}, #{provider := ended}],
                  at_use()).
 
@@ -367,7 +368,7 @@ a_facet_entry_takes_the_lesser_of_its_rights_and_its_grants() ->
 a_facet_grant_that_ends_leaves_the_table_and_survives_a_restart() ->
     ok = erx_ns:mount({facet, data}, <<"/data">>, [{tree, <<"data">>}, rw]),
     Grant = grant(),
-    persistent_term:put({erx, facets}, {1, #{data => {Grant, rw}}}),
+    persistent_term:put({erx, facets}, {1, #{data => {?ERX_SERVICE_FILES, {Grant, rw}}}}),
     Grant ! stop,
     wait_down(Grant),
     Before = settled(),
@@ -480,7 +481,8 @@ a_media_facet_entry_follows_no_link() ->
     ?assertEqual({[], []}, {Marked(table()), Marked(Program)}),
     Expected = [[<<"media">>], [<<"elsewhere">>], [<<"stick">>], [<<"m">>], [<<"own">>]],
     ?assertEqual(Expected, Marked(at_use())),
-    persistent_term:put({erx, facets}, {1, #{media => {Granted, rw}, data => {grant(), rw}}}),
+    persistent_term:put({erx, facets}, {1, #{media => {?ERX_SERVICE_FILES, {Granted, rw}},
+                                             data => {?ERX_SERVICE_FILES, {grant(), rw}}}}),
     ?assertEqual(Expected, Marked(at_use())),
     ?assertMatch([#{provider := {grant, Granted, <<"media">>}, nofollow := true}],
                  [Entry || #{point := [<<"media">>]} = Entry <- at_use()]),
@@ -528,6 +530,6 @@ every_pair_of_the_abis_rights_is_ordered_test() ->
     Pid = self(),
     Entry = fun(Asked) -> #{point => [<<"d">>], provider => {facet, data, <<"data">>}, root => [], rights => Asked} end,
     [?assertMatch([#{provider := {grant, Pid, <<"data">>}}],
-                  with_registry([Entry(Asked)], #{data => {Pid, Granted}}))
+                  with_registry([Entry(Asked)], #{data => {?ERX_SERVICE_FILES, {Pid, Granted}}}))
      || Asked <- Members, Granted <- Members],
-    ?assertMatch([#{provider := ended}], with_registry([Entry(rw)], #{data => {Pid, bogus}})).
+    ?assertMatch([#{provider := ended}], with_registry([Entry(rw)], #{data => {?ERX_SERVICE_FILES, {Pid, bogus}}})).

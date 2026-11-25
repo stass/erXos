@@ -198,6 +198,7 @@ from one counter, so a tag names one of them at most.
                     files => [name()],
                     windows => [name()],
                     inputs => [name()],
+                    interfaces => #{{Server :: row(), name()} => pos_integer()},
                     drives => [{Server :: row(), Grantee :: row(), Drive :: non_neg_integer()}],
                     deadline => pos_integer()}.
 %% ready carries the incarnation's node, which the service knows; the rest of the
@@ -213,7 +214,7 @@ from one counter, so a tag names one of them at most.
                | {deadline, tag()}.
 -type action() :: {introduce, tag(), ServerId :: id(), GranteeId :: id()}
                 | {mint, tag(), Mint :: pid(), name(), GranteeId :: id(), Limits :: map()}
-                | {install, tag(), GranteeId :: id(), installed(), Facet :: erx_facets:facet()}
+                | {install, tag(), GranteeId :: id(), installed(), Interface :: pos_integer(), Facet :: erx_facets:facet()}
                 | {arm, tag(), Milliseconds :: pos_integer()}
                 | {disarm, tag()}
                 | {refused, atom(), Detail :: tuple()}
@@ -237,6 +238,7 @@ from one counter, so a tag names one of them at most.
                      files := [name()],
                      windows := [name()],
                      inputs := [name()],
+                     interfaces := #{{row(), name()} => pos_integer()},
                      areas := #{row() => [area()]},
                      deadline := pos_integer()}.
 %% A party of a pair as the domain service records it: its id and what it holds, a
@@ -256,7 +258,10 @@ rows its plan gave it, in its ready report and as a party. Files names the
 services of the files interface, whose grants a namespace mounts, and
 Windows those of the windows interface, whose grants size their pairs'
 pixel areas (pair_area/3), and Inputs those of the input interface, whose
-grants are read-only (grant_limits/2); none of any by default. Drives are
+grants are read-only (grant_limits/2); none of any by default. Interfaces
+gives each service row's interface number by its server row and name, the
+manifest's, which each installation carries (interface/2); a grant
+installed of a service it does not name is a bug of the caller. Drives are
 the manifest's drive window rows, each its serving row, the configured row
 whose units hold the drive's device, the media domain's row and the drive's
 number: each is a grant of the drive interface under {drive, N}, whose
@@ -293,7 +298,7 @@ new(#{services := Services, grants := Grants, owner := Owner} = Config) when is_
     #{declared => Declared, grants => Entries, rows => #{}, sessions => sets:new([{version, 2}]),
           lines => #{}, line_ops => #{},
           next_tag => 1, owner => Owner, files => maps:get(files, Config, []), windows => Windows,
-          inputs => maps:get(inputs, Config, []),
+          inputs => maps:get(inputs, Config, []), interfaces => maps:get(interfaces, Config, #{}),
           areas => areas(Windows, Grants), deadline => maps:get(deadline, Config, ?DEADLINE)}.
 
 %% A drive window row's grant, {Server, Grantee, N}: two distinct configured rows and a
@@ -524,7 +529,7 @@ on_event({minted, Origin, Tag, Reply}, State) ->
                 true ->
                     {ok, Facet} = Reply,
                     {_, Installed} = Key,
-                    {[{install, Tag, GranteeId, Installed, installed_facet(Facet, Key, State)}],
+                    {[{install, Tag, GranteeId, Installed, interface(Key, State), installed_facet(Facet, Key, State)}],
                      set_grant(Key, {installing, Pair, Tag, Facet}, State)};
                 false ->
                     fail_pending(Key, Pair, Tag, bad_reply, State)
@@ -844,6 +849,16 @@ installed_facet(Pid, Key, #{files := Files, inputs := Inputs} = State) ->
     case lists:member(Service, Files ++ Inputs) of
         true -> erx_fs_grants:facet(Pid, grant_limits(Key, State));
         false -> Pid
+    end.
+
+%% The interface number of the grant Key's service, which its installation carries and
+%% the grantee's registry keeps (erx_facets:program_table/1): the drive interface for a
+%% drive window's grant, else its service row's, which the manifest states and no reply
+%% of the server's sets (docs/design-system.md, "Facets a configured domain serves").
+interface(Key, #{interfaces := Interfaces} = State) ->
+    case grant_entry(Key, State) of
+        #{service := drive} -> ?ERX_SERVICE_DRIVE;
+        #{server := Server, service := Service} -> maps:get({Server, Service}, Interfaces)
     end.
 
 cancel(Grant) ->

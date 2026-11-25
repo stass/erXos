@@ -15,7 +15,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   check refusing a facet row of `svc`; the limits `svc_wait_max`, `svc_status_max` and `svc_ctl_max` in
   `abi/services/files.txt`; the domain service's session providers (a keeper's `Start` with `row`, the plan's `serves=svc`) and derived `svc` grants, with their connections counted by the manifest check
   ([design-system.md](design-system.md#facets-a-configured-domain-serves)); the namespace's
-  `{facets, svc}` provider, under which the resolver follows no link (`eacces`), the `/svc` point in
+  `{facets, svc}` provider, under which the resolver follows no link (`eacces`) and a program's listing
+  leaves out every facet of the `windows` interface, as `erx_facets:program_table/1` does for its paths
+  ([design-files.md](design-files.md#narrowing-for-a-program)), the `/svc` point in
   `erx_ns`'s table and an empty `/svc` in the release slice; `service NAME status` showing the app's words;
   ntpd serving `/svc/ntpd/status` and `ntpctl -s` reading it; and deleting the `ntp` kind, its path and the
   types `ntp_servers`, `ntp_last` and `net_addresses` from `abi/inspection.txt` (ntpd's denied-address bound

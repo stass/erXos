@@ -16,7 +16,8 @@ require_relative '../lib/erx/generated'
 # it is, then each copy with a fault the target exists to catch: report, an owner check
 # that reads only a mint's creation, so a pid with the server's creation and another
 # domain's node is accepted; reply, a reply check that takes any pid as the server's
-# facet, and one that refuses the server's honest reply.
+# facet, one that refuses the server's honest reply, and an installation that carries the
+# files interface whatever the grant's service row states.
 module ErxDomainMintsFuzz
   ROOT = File.expand_path('../..', __dir__)
   CORE = 'erlang/apps/erx_domain/src/erx_domain_mints.erl'
@@ -36,7 +37,10 @@ module ErxDomainMintsFuzz
                           replacement: 'is_atom(Node) orelse State =:= ServerId'),
                 Fault.new(what: 'a reply check that refuses the server\'s own facet',
                           anchor: 'is_owned(Facet, {ServerId, Node}, State)',
-                          replacement: 'not is_owned(Facet, {ServerId, Node}, State)')]
+                          replacement: 'not is_owned(Facet, {ServerId, Node}, State)'),
+                Fault.new(what: 'an installation that carries the files interface for every service',
+                          anchor: 'maps:get({Server, Service}, Interfaces)',
+                          replacement: 'maps:get({Server, Service}, maps:map(fun(_, _) -> ?ERX_SERVICE_FILES end, Interfaces))')]
   }.freeze
   DEADLINE_SECONDS = '300'
 

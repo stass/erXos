@@ -23,7 +23,8 @@
 %%   accepted for the name, and the grantee's newest ready incarnation;
 %% * a mint request goes only to the mint the oracle accepted for that incarnation;
 %% * an installation names only a facet the pair's server owns, from that server's
-%%   reply to the operation's tag, for the pair's grantee;
+%%   reply to the operation's tag, for the pair's grantee, with the interface the
+%%   configuration gives the grant's service row;
 %% * every pending operation has exactly one armed deadline, a tag is armed once, and
 %%   only an armed tag is disarmed;
 %% * every refusal and drop carries only atoms and integers, at most three of them;
@@ -48,6 +49,8 @@
 -define(SYSTEM, 4).
 -define(THIRD, 99).
 -define(DECLARED, #{?S => [data, log], ?T => [other]}).
+%% Each service row's interface number, distinct, as the manifest would state them.
+-define(INTERFACES, #{{?S, data} => 5, {?S, log} => 13, {?T, other} => 8}).
 -define(GRANTS, [{?G, data, ?S}, {system, data, ?S}, {?G, other, ?T}, {system, log, ?S}]).
 %% Every grant's facet row limits, naming session, as no facet row may; and the limits
 %% every mint must carry.
@@ -78,7 +81,7 @@ owner(Pid) ->
 sequence(Kind, Tally) ->
     Config = #{services => [{Row, Name} || Row := Names <- ?DECLARED, Name <- Names],
                grants => [{Grantee, Name, Server, ?ROW_LIMITS} || {Grantee, Name, Server} <- ?GRANTS],
-               owner => fun ?MODULE:owner/1, deadline => 10000},
+               interfaces => ?INTERFACES, owner => fun ?MODULE:owner/1, deadline => 10000},
     Shell = #shell{core = ?CORE:new(Config), tally = Tally},
     %% The reply target starts with every row ready and serving, so its steps reach
     %% minting and installing.
@@ -230,12 +233,13 @@ act({mint, Tag, Mint, Name, GranteeId, Limits}, _Event, Core, #shell{mints = Min
         #{} -> fail(mint_not_accepted, {Server, ServerId, Name})
     end,
     Shell#shell{mints = Mints#{Tag => {ServerId, Name}}};
-act({install, Tag, GranteeId, Name, Facet}, Event, Core, Shell) ->
+act({install, Tag, GranteeId, Name, Interface, Facet}, Event, Core, Shell) ->
     {{_, Name} = Key, {installing, {ServerId, GranteeId}, Tag, Facet}} = pending(Tag, Core),
     {Server, _} = grant_of(Key),
     #{Server := {ServerId, ready, Node, _}} = Shell#shell.rows,
     Event =:= {minted, ServerId, Tag, {ok, Facet}} orelse fail(install_without_reply, Tag),
     (node(Facet) =:= Node andalso owner(Facet) =:= ServerId) orelse fail(install_of_foreign_facet, Tag),
+    Interface =:= map_get({Server, Name}, ?INTERFACES) orelse fail(install_of_another_interface, Tag),
     case GranteeId of
         %% erx_domain_srv installs in the system domain's own registry and feeds the
         %% acknowledgement back at once.

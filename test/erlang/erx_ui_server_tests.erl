@@ -11,6 +11,7 @@
 -behaviour(erx_ui_renderer).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -export([start/3, apply/2, stop/1]).
 
@@ -161,7 +162,7 @@ open_without_a_display_test() ->
 %% A display the domain holds: the Erlang renderer is not built, so it is
 %% refused.
 the_erlang_renderer_on_a_held_display_is_refused_test() ->
-    persistent_term:put({erx, facets}, {1, #{erx_ui_server_tests_display => self()}}),
+    persistent_term:put({erx, facets}, {1, #{erx_ui_server_tests_display => {?ERX_SERVICE_WINDOWS, self()}}}),
     try
         ?assertEqual({error, enotsup},
                      erx_ui:open(#{display => erx_ui_server_tests_display, renderer => erlang})),

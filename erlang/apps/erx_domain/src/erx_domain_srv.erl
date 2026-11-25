@@ -410,9 +410,11 @@ booted(#{lib := Lib} = State) ->
             %% reaches the media domain"): {ServingRow, Holder, N}, both of the
             %% window the manifest's.
             Drives = [{Serving, Holder, N} || #{row := Serving, drives := Ds} <- Rows, {N, Holder} <- Ds],
+            Interfaces = maps:from_list([{{Server, Name}, Interface}
+                                         || {Server, Name, Interface} <- maps:get(services, Boot, [])]),
             Mints = erx_domain_mints:new((maps:get(mint_config, State))#{services => Services,
                                            grants => Minted, files => Files, windows => Windows,
-                                           inputs => Inputs, drives => Drives}),
+                                           inputs => Inputs, interfaces => Interfaces, drives => Drives}),
             %% Only configured rows, each its index, read Served: a {template, T}
             %% grant reaches each session through the session's own facet rows, and
             %% a grant to the system domain is planned by no ready answer.
@@ -428,8 +430,7 @@ booted(#{lib := Lib} = State) ->
             State#{core := erx_domain_core:new(Host), boot_timeout := Seconds * 1000, configured := Configured,
                    mints := Mints, served := Served,
                    facet_rows := lists:enumerate(0, maps:get(grants, Boot, [])), trees := Trees,
-                   interfaces := maps:from_list([{{Server, Name}, Interface}
-                                                 || {Server, Name, Interface} <- maps:get(services, Boot, [])]),
+                   interfaces := Interfaces,
                    templates := maps:from_list([{P, T} || #{principal := P} = T <- Templates])};
         {{error, _}, _} ->
             State#{core := erx_domain_core:new(<<>>)};
@@ -890,14 +891,14 @@ facets(_Facets, _State) ->
     invalid.
 
 %% Whether a spec may hand Name on with its grant, and as what. One name, console, stands
-%% outside the table as a stopgap, a literal here that goes with its TODO.md item; the
+%% outside the table as a stopgap, a literal here; the
 %% spec hands it on with a process of the system domain, live or dead, as its pid (local/1).
 %% Every other name must be in the table of facet names (declared/2) and is handed on
 %% only as an attenuating facet (attenuated/2).
 facet(_Name, invalid, _State) ->
     false;
-%% Stopgap: console is of no declared interface. TODO.md, Bugs by subsystem, "two facets
-%% of no declared interface", declares it and deletes this clause.
+%% Stopgap: console, of the console interface (facet_interface/2), is handed on with the
+%% system domain's process unattenuated, not as a facet of its table's name.
 facet(console, {ok, Grant}, _State) ->
     local(Grant);
 facet(Name, {ok, Grant}, State) ->
@@ -1219,7 +1220,8 @@ marked(#{}) -> none.
 %% waits for it, so every domain that reported is answered, with no facets too. Granted,
 %% the names and interfaces of the facets of configured domains the manifest grants the
 %% domain (granted/3), goes with it, so the domain mounts what it is granted before the grants
-%% are installed (docs/design-system.md, "Facets a configured domain serves").
+%% are installed (docs/design-system.md, "Facets a configured domain serves"). Each facet goes
+%% with its service's interface number (facet_interface/2).
 grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) ->
     {ok, #{pid := Pid, ref := Ref, facets := Facets} = Domain} = erx_domain_core:fetch(Id, Core),
     Specs = maps:map(fun(_Name, {Behind, Limits}) -> {facet, erx_domain_facet, Behind, Limits#{behind => Behind}} end,
@@ -1230,8 +1232,19 @@ grant_facets(Id, Served, Granted, #{core := Core, exports := Exports} = State) -
     Minted = maps:filtermap(fun(Name, Facet) -> mint(Id, Pid, Name, Facet, Exports) end, maps:merge(Specs, Systems)),
     %% An app's record comes later, once the session's namespace is in place
     %% (answer_sessions/2), so the app's code never starts before its grants exist.
-    Pid ! {Ref, facets, Minted, Granted},
+    Answer = #{Name => {facet_interface(Name, State), Facet} || Name := Facet <- Minted},
+    Pid ! {Ref, facets, Answer, Granted},
     State.
+
+%% The interface number the ready answer gives its facet Name, which the domain's registry
+%% keeps and no server sets (erx_facets:program_table/1). A spec's one facet, console
+%% (facet/3), stands in front of the console, the master of the session's tty, so it is
+%% of the console interface; code_objects, which every session holds by the service's own
+%% policy and no row (code_objects_row/0), is of its own; every other facet is of a
+%% service the system domain serves, whose interface is its manifest row's.
+facet_interface(console, _State) -> ?ERX_SERVICE_CONSOLE;
+facet_interface(code_objects, _State) -> ?ERX_SERVICE_CODE_OBJECTS;
+facet_interface(Name, #{interfaces := Interfaces}) -> map_get({system, Name}, Interfaces).
 
 %% The facet of a service the system domain serves, for Domain, the domain service's
 %% entry of the grantee: the inspect facet, whose scope erx_domain_core:inspect_scope/3
@@ -1930,21 +1943,21 @@ mint_act({mint, Tag, Mint, Name, GranteeId, Limits}, #{core := Core, mint_config
     {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(Owner(Mint), Core),
     Pid ! {Ref, mint, Mint, {erx_facet_mint, Tag, Name, GranteeId, principal_name(GranteeId, State), Limits}},
     State;
-mint_act({install, Tag, ?ERX_SYSTEM_DOMAIN_ID, Name, Facet}, #{agent := Agent} = State) ->
+mint_act({install, Tag, ?ERX_SYSTEM_DOMAIN_ID, Name, Interface, Facet}, #{agent := Agent} = State) ->
     %% The system domain's agent writes its registry, as every domain's does, and answers
     %% the processes waiting for an installation before it answers here, so the
     %% installation is acknowledged only once its waiters have heard of it. A grant to
     %% the system domain comes from a configured server, so the runtime is a node and
     %% runs the agent.
-    case Agent:grant(#{Name => Facet}) of
+    case Agent:grant(#{Name => {Interface, Facet}}) of
         ok -> ok;
         {error, Reason} -> error({connection_agent, Reason})
     end,
     mints({installed, ?ERX_SYSTEM_DOMAIN_ID, Tag}, State);
-mint_act({install, Tag, GranteeId, Name, Facet}, #{core := Core} = State) ->
+mint_act({install, Tag, GranteeId, Name, Interface, Facet}, #{core := Core} = State) ->
     %% The core installs only in a grantee that is ready and has not ended.
     {ok, #{pid := Pid, ref := Ref}} = erx_domain_core:fetch(GranteeId, Core),
-    Pid ! {Ref, install, Tag, Name, Facet},
+    Pid ! {Ref, install, Tag, Name, Interface, Facet},
     State;
 mint_act({arm, Tag, Milliseconds}, #{mint_timers := Timers} = State) ->
     State#{mint_timers := Timers#{Tag => erlang:start_timer(Milliseconds, self(), {mint_deadline, Tag})}};

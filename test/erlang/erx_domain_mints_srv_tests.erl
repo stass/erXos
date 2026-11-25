@@ -217,7 +217,9 @@ installs() ->
     #{{0, echo} := {minting, {5, 6}, Tag}} = grants(),
     ?assertMatch(#{{dropped, wrong_domain} := 1}, counts()),
     PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
-    ?assertEqual(Facet, receive {trace, PidB, 'receive', {_, install, Tag, echo, F}} -> F after 2000 -> none end),
+    %% The installation carries echo's interface as the manifest states it, 1 in setup/0.
+    ?assertEqual({1, Facet}, receive {trace, PidB, 'receive', {_, install, Tag, echo, I, F}} -> {I, F}
+                             after 2000 -> none end),
     PidA ! {erx_origin, 5, {erx_facets_installed, Tag}},
     wait_counts(fun(#{{dropped, wrong_domain} := N}) -> N =:= 2 end),
     PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
@@ -226,7 +228,7 @@ installs() ->
     PidA ! {erx_origin, 5, {erx_facet_minted, SystemTag, {ok, SystemFacet}}},
     wait(fun(#{{system, echo} := {installed, {5, 4}, F}}) -> F =:= SystemFacet end),
     {_Generation, SystemRegistry} = persistent_term:get({erx, facets}),
-    ?assertEqual(#{echo => SystemFacet}, SystemRegistry),
+    ?assertEqual(#{echo => {1, SystemFacet}}, SystemRegistry),
     erlang:trace(PidA, false, ['receive']),
     erlang:trace(PidB, false, ['receive']).
 
@@ -337,7 +339,7 @@ grantee_restart() ->
                  receive {trace, PidA, 'receive', {_, mint, Mint, Request}} -> Request after 2000 -> none end),
     Facet = pid('a@erxos', 7, 6),
     PidA ! {erx_origin, 7, {erx_facet_minted, Tag, {ok, Facet}}},
-    ?assertEqual(Facet, receive {trace, PidB, 'receive', {_, install, Tag, echo, F}} -> F after 2000 -> none end),
+    ?assertEqual(Facet, receive {trace, PidB, 'receive', {_, install, Tag, echo, _, F}} -> F after 2000 -> none end),
     Counts = counts(),
     PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
     receive after 100 -> ok end,
@@ -378,8 +380,9 @@ last_end() ->
 %% the service starts, and a (row 1) is granted clock, which no service names, and log
 %% by a row that lists its write operation, which erx_log_facet has no operation/1 to
 %% check (erx_facet:start/3). b's ready answer carries a facet in front of log's
-%% process, bound to b and within the row's max_request; a's carries none, and no grant
-%% reaches the mint core.
+%% process, bound to b and within the row's max_request, with the interface the
+%% manifest's {system, log} row states; a's carries none, and no grant reaches the mint
+%% core.
 %% It starts the service itself: the trace of the domain pids goes to the process that
 %% asks for it, and EUnit runs a fixture's setup in another process than its test.
 served_test() ->
@@ -390,7 +393,8 @@ served_setup() ->
     Row = fun(Row, Place, Name) -> #{row => Row, place => Place, name => Name, principal => 1, kind => service,
                                      restarts => 0, restart_period_s => 60, drives => []} end,
     persistent_term:put({erx_domain_fake_lib, boot},
-                        #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)], services => [],
+                        #{domains => [Row(0, 1, <<"b">>), Row(1, 0, <<"a">>)],
+                          services => [{system, log, ?ERX_SERVICE_LOG}, {system, clock, ?ERX_SERVICE_CLOCK}],
                           grants => [{0, log, system, #{max_request => 64, in_flight => 2, queue => 4096}},
                                      {1, clock, system, #{max_request => 1}},
                                      {1, log, system, #{max_request => 64, operations => [write]}}]}),
@@ -399,11 +403,7 @@ served_setup() ->
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
     Fake = erx_domain_fake_lib:start_log(),
-    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
-                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
-    unlink(Service),
-    {Fake, Service, Log}.
+    {Fake, start_service(#{}), Log}.
 
 served_cleanup({Fake, Service, Log}) ->
     erlang:trace(new_processes, false, ['receive']),
@@ -415,7 +415,7 @@ served() ->
     [PidA, PidB] = [domain_pid(Id) || Id <- [5, 6]],
     Answers = answers([PidA, PidB], #{}),
     ?assertEqual(#{}, maps:get(PidA, Answers)),
-    #{log := Facet} = maps:get(PidB, Answers),
+    #{log := {?ERX_SERVICE_LOG, Facet}} = maps:get(PidB, Answers),
     ?assertEqual([log], maps:keys(maps:get(PidB, Answers))),
     ?assertMatch(#{grantee := 6, max_request := 64, in_flight := 2}, erx_facet:info(Facet)),
     ?assertEqual(#{}, grants()).
@@ -568,7 +568,7 @@ session_inspect_test() ->
     Started = inspect_setup([{{template, 0}, inspect, system, #{in_flight => 2}}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{inspect := Facet} = Facets = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{inspect := {?ERX_SERVICE_INSPECT, Facet}} = Facets = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([code_objects, inspect], lists:sort(maps:keys(Facets))),
         ?assertMatch(#{grantee := Id, in_flight := 2}, erx_facet:info(Facet))
     after
@@ -583,7 +583,7 @@ session_code_objects_test() ->
     Started = inspect_setup([]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{code_objects := Facet} = Facets = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{code_objects := {?ERX_SERVICE_CODE_OBJECTS, Facet}} = Facets = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([code_objects], maps:keys(Facets)),
         ?assertMatch(#{grantee := Id, max_request := ?ERX_CODE_OBJECTS_MAX_REQUEST, in_flight := 4},
                      erx_facet:info(Facet)),
@@ -596,17 +596,13 @@ session_code_objects_test() ->
 %% No configured domain, the system domain's inspect service behind every facet, and a
 %% trace of the domain pids' receives to this process, with Grants the manifest's.
 inspect_setup(Grants) ->
-    persistent_term:put({erx_domain_fake_lib, boot}, #{domains => [], services => [], grants => Grants}),
+    persistent_term:put({erx_domain_fake_lib, boot},
+                        #{domains => [], services => [{system, inspect, ?ERX_SERVICE_INSPECT}], grants => Grants}),
     Inspect = spawn(fun() -> receive stop -> ok end end),
     ok = erx_facet:serve(inspect, Inspect),
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
     Fake = erx_domain_fake_lib:start_log(),
-    {ok, Service} = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                                 exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
-                                                 inspect_policy => #{roots => [1], development => false},
-                                                 mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
-    unlink(Service),
-    {Fake, Service, Inspect}.
+    {Fake, start_service(#{inspect_policy => #{roots => [1], development => false}}), Inspect}.
 
 inspect_cleanup(Started) ->
     served_cleanup(Started).
@@ -621,7 +617,7 @@ session_files_grant_test() ->
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
         DomainPid = domain_pid(Id),
-        #{start := {Grant, rw}} = Facets = maps:get(DomainPid, answers([DomainPid], #{})),
+        #{start := {?ERX_SERVICE_FILES, {Grant, rw}}} = Facets = maps:get(DomainPid, answers([DomainPid], #{})),
         ?assertEqual([code_objects, start], lists:sort(maps:keys(Facets))),
         ?assertEqual([Grant], [Child || {_, Child, _, _} <- supervisor:which_children(Grants)]),
         %% The grant exports itself to the session, after the session's start.
@@ -657,7 +653,7 @@ session_line_grant_test() ->
                                           [{{template, 0}, line, system, #{max_request => 131072}}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{line := {Grant, rw}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{line := {?ERX_SERVICE_LINE, {Grant, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([Grant], [Child || {_, Child, _, _} <- supervisor:which_children(Grants)])
     after
         files_cleanup(Started)
@@ -674,7 +670,7 @@ session_machine_grant_test() ->
     erlang:trace(all, true, [call, {tracer, self()}]),
     try
         {ok, {erx_domain, Id, _, _}} = erx_domain:start_session(1, #{}),
-        #{machine := {_Grant, rw}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
+        #{machine := {?ERX_SERVICE_FILES, {_Grant, rw}}} = maps:get(domain_pid(Id), answers([domain_pid(Id)], #{})),
         ?assertEqual([<<"root">>], [Arg || {trace, _, call, {erx_machine_fs, init, [Arg]}} <- flush_traces()])
     after
         erlang:trace(all, false, [call]),
@@ -708,17 +704,21 @@ tree_setup(Name, Interface, Grants, Start) ->
     ok = erx_facet:serve(Name, Tree),
     erlang:trace(new_processes, true, ['receive', {tracer, self()}]),
     Fake = erx_domain_fake_lib:start_log(),
-    %% The service reads the manifest in its init, so a boot it refuses is start_link's
-    %% error, which this case's match fails on, rather than an exit that ends the case
-    %% unreported.
+    {Fake, start_service(#{}), Tree}.
+
+%% The service started unlinked with Opts merged into the fake library's options. The
+%% service reads the manifest in its init, so a boot it refuses is start_link's error,
+%% which the caller's match fails on, rather than an exit that ends the case unreported
+%% and cancels every case after it.
+start_service(Opts) ->
     Trap = process_flag(trap_exit, true),
-    Result = erx_domain_srv:start_link(#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
-                                         exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
-                                         mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
+    Result = erx_domain_srv:start_link(Opts#{lib => erx_domain_fake_lib, agent => erx_domain_fake_lib,
+                                             exports => erx_domain_fake_lib, principals => ?PRINCIPALS,
+                                             mints => #{owner => fun erx_domain_mints_tests:owner/1}}),
     process_flag(trap_exit, Trap),
     {ok, Service} = Result,
     unlink(Service),
-    {Fake, Service, Tree}.
+    Service.
 
 files_cleanup(Started) ->
     served_cleanup(Started).
@@ -763,7 +763,7 @@ sessions() ->
                  after 2000 -> none end),
     Facet = pid('a@erxos', 5, 7),
     PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, Facet}}},
-    ?assertEqual(Facet, receive {trace, Pid7, 'receive', {_, install, Tag, echo, F}} -> F after 2000 -> none end),
+    ?assertEqual(Facet, receive {trace, Pid7, 'receive', {_, install, Tag, echo, _, F}} -> F after 2000 -> none end),
     PidB ! {erx_origin, 6, {erx_facets_installed, Tag}},
     wait_counts(fun(#{{dropped, wrong_domain} := N}) -> N =:= 1 end),
     Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
@@ -819,7 +819,7 @@ namespace() ->
     Pid7 ! {erx_origin, 7, {erx_connection_mapped, 5}},
     #{Key := {minting, {5, 7}, Tag}} = wait(fun(#{Key := {minting, _, _}}) -> true end),
     PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7)}}},
-    receive {trace, Pid7, 'receive', {_, install, Tag, echo, _}} -> ok after 2000 -> error(no_install) end,
+    receive {trace, Pid7, 'receive', {_, install, Tag, echo, _, _}} -> ok after 2000 -> error(no_install) end,
     ?assertEqual(none, answer(Started, 200)),
     Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},
     ?assertMatch({ok, {erx_domain, 7, _, Pid7}}, answer(Started, 2000)),
@@ -1041,10 +1041,11 @@ app_session() ->
                      receive {trace, PidA, 'receive', {_, mint, _, {erx_facet_mint, Tag, _, _, _, _} = R}} -> R
                      after 2000 -> none end),
         PidA ! {erx_origin, 5, {erx_facet_minted, Tag, {ok, pid('a@erxos', 5, 7)}}},
-        {Before, {_, install, Tag, clip, _}} = received(Pid7, fun({_, install, _, _, _}) -> true end, []),
+        Installation = fun({_, install, _, _, _, _}) -> true end,
+        {Before, {_, install, Tag, clip, ?ERX_SERVICE_FILES, _}} = received(Pid7, Installation, []),
         ?assertEqual([[{clip, ?ERX_SERVICE_FILES}]], [Granted || {_, facets, _, Granted} <- Before]),
         %% An app's session holds the code_objects facet too, bound to itself.
-        [#{code_objects := CodeObjects}] = [Facets || {_, facets, Facets, _} <- Before],
+        [#{code_objects := {?ERX_SERVICE_CODE_OBJECTS, CodeObjects}}] = [Facets || {_, facets, Facets, _} <- Before],
         ?assertMatch(#{grantee := 7}, erx_facet:info(CodeObjects)),
         ?assertEqual(none, answer(Ref, 200)),
         Pid7 ! {erx_origin, 7, {erx_facets_installed, Tag}},

@@ -524,7 +524,8 @@ with_model_agent(Case) ->
 
 %% Installs a facet of a process of its own under Name, through the agent.
 model_install(Agent, Name) ->
-    Agent ! {install, #{Name => spawn(fun() -> receive after infinity -> ok end end)}, self()},
+    Facet = spawn(fun() -> receive after infinity -> ok end end),
+    Agent ! {install, #{Name => {?ERX_SERVICE_FILES, Facet}}, self()},
     receive {installed, Agent} -> ok end.
 
 model_agent(Waiting) ->

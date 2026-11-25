@@ -11,6 +11,7 @@ to a third domain, is built here without that domain.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 %% The stack's runtime seam and the export table, stood in for by the mint cases.
 -export([serve/1, start_grant/2, export/3]).
@@ -498,15 +499,18 @@ dropped(Grant, Left) ->
 
 client_grant_test() ->
     Grant = pid_of(?OTHER),
-    with_erx(#{net => Grant}, fun() -> ?assertEqual({ok, Grant, ?OTHER}, erx_net_client_erxos:grant()) end),
-    with_erx(#{echo => Grant}, fun() -> ?assertEqual({error, eacces}, erx_net_client_erxos:grant()) end).
+    Net = {?ERX_SERVICE_NET, Grant},
+    with_erx(#{net => Net}, fun() -> ?assertEqual({ok, Grant, ?OTHER}, erx_net_client_erxos:grant()) end),
+    with_erx(#{echo => Net}, fun() -> ?assertEqual({error, eacces}, erx_net_client_erxos:grant()) end).
 
 %% Runs Fun with a stand-in of erx loaded: the facets this domain holds, read from the
 %% registry's persistent term as erx:cap/1 reads it, and owner/1, the domain id a name's
 %% creation carries, as erx_dist:owner/1 answers it.
 with_erx(Facets, Fun) ->
     Text = ["-module(erx).", "-export([cap/1, owner/1]).",
-            "cap(Name) -> maps:get(Name, element(2, persistent_term:get({erx, facets}, {0, #{}})), undefined).",
+            "cap(Name) ->"
+            " case maps:get(Name, element(2, persistent_term:get({erx, facets}, {0, #{}})), undefined) of"
+            " {_Interface, Facet} -> Facet; undefined -> undefined end.",
             "owner(Name) -> erx_net_admit:domain(Name)."],
     Forms = [begin {ok, Tokens, _} = erl_scan:string(Form), {ok, Parsed} = erl_parse:parse_form(Tokens), Parsed end
              || Form <- Text],

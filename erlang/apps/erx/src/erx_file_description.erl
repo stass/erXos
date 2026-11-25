@@ -37,7 +37,8 @@ the file.
 The namespace a starter hands its program, before any narrowing: the
 runtime's mounts as they stand now (prim_file:erx_mounts/0). A facet's
 mount names the facet, never a pid, so each open reaches the grant the
-facet registry holds then (erx_facets:table/1).
+facet registry holds then, less every display's facet
+(erx_facets:program_table/1).
 """.
 -spec table() -> erx_path:table().
 table() ->
@@ -104,7 +105,7 @@ clunk(Description, Slot) ->
 
 init(Handler, Slot, Path, Flags, Mode, Table, Cwd) ->
     process_flag(trap_exit, true),
-    Granted = erx_facets:table(Table),
+    Granted = erx_facets:program_table(Table),
     case prim_file:erx_open_at(Path, Flags, Mode, Granted, Cwd) of
         {ok, File} ->
             Handler ! {erx_file_opened, Slot, {ok, self()}},

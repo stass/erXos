@@ -27,7 +27,9 @@ The readers read the registry at use:
 
 * find/1 and pids/0 answer `erx:cap/1` and `erx:caps/0`;
 * table/1 puts the grant beneath each facet's entry of a namespace table at
-  each resolution, so a re-grant serves the next lookup;
+  each resolution, so a re-grant serves the next lookup, and program_table/1
+  does the same for a program's table, less every facet of the `windows`
+  interface;
 * file_grant/2,3 is the one maker of a file client's handle on a files facet's
   grant. A caller that keeps the handle, as an image mount keeps the grant
   it opened its file on, keeps that grant until it lets it go.
@@ -39,14 +41,14 @@ It is preloaded beside prim_file and erx_path, since every resolution of a
 path reads it, the code loader's included.
 """.
 
--export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_facet/1, files/2, table/1,
-         file_grant/2, file_grant/3]).
--export_type([name/0, facet/0]).
+-export([find/1, pids/0, install/1, generation/0, await/3, changed/1, is_name/1, is_interface/1, is_facet/1,
+         files/2, table/1, program_table/1, file_grant/2, file_grant/3]).
+-export_type([name/0, interface/0, facet/0]).
 
 -include("generated/erx_abi.hrl").
 
 %% The registry's persistent term, which no other module names: {Generation, Facets},
-%% the count of installations and each facet by name.
+%% the count of installations and each facet by name as {Interface, Facet}.
 -define(REGISTRY, {erx, facets}).
 
 -doc """
@@ -66,6 +68,15 @@ several drives of one serving domain are held apart.
 -type name() :: atom() | {drive, non_neg_integer()}.
 
 -doc """
+The interface number of a facet's service (abi/services), which the system
+domain sets with the facet, from the manifest's row or from a re-grant's
+source, and which no server's reply sets: what keeps a facet of the
+`windows` interface from the domain's programs (program_table/1;
+docs/design-files.md, "Narrowing for a program").
+""".
+-type interface() :: pos_integer().
+
+-doc """
 The pid of the facet named `Name` that the domain holds, or `undefined` when
 it holds none of that name. A facet whose server ended is a dead pid until
 the server's next incarnation installs another.
@@ -73,22 +84,22 @@ the server's next incarnation installs another.
 -spec find(name()) -> pid() | undefined.
 find(Name) ->
     case registry() of
-        #{Name := Facet} -> pid(Facet);
+        #{Name := {_Interface, Facet}} -> pid(Facet);
         #{} -> undefined
     end.
 
 -doc "The pid of every facet the domain holds, by name, each as find/1 answers it.".
 -spec pids() -> #{name() => pid()}.
 pids() ->
-    #{Name => pid(Facet) || Name := Facet <- registry()}.
+    #{Name => pid(Facet) || Name := {_Interface, Facet} <- registry()}.
 
 -doc """
-Installs each of `Facets` under its name, replacing an older facet of the
-name and keeping every other. The caller is the registry's writer in its
+Installs each of `Facets` under its name with its service's interface number,
+replacing an older facet of the name and keeping every other. The caller is the registry's writer in its
 domain, the one process whose installations are serialized, so none is lost
 to another write that read the registry before it.
 """.
--spec install(#{name() => facet()}) -> ok.
+-spec install(#{name() => {interface(), facet()}}) -> ok.
 install(Facets) ->
     {Generation, Held} = value(),
     persistent_term:put(?REGISTRY, {Generation + 1, maps:merge(Held, Facets)}).
@@ -164,6 +175,10 @@ changed(Generation) ->
 is_name({drive, N}) -> is_integer(N) andalso N >= 0;
 is_name(Name) -> is_atom(Name).
 
+-doc "Whether `Term` is an interface as the system domain sends one, interface/0's.".
+-spec is_interface(term()) -> boolean().
+is_interface(Interface) -> is_integer(Interface) andalso Interface > 0.
+
 -doc """
 Whether `Term` is a facet as the system domain sends it: a pid, or a pid with
 a member of `files_rights`. The connection agent installs nothing else.
@@ -212,9 +227,36 @@ table(Mounts) ->
     Registry = registry(),
     [marked(Provider, resolved(Entry, Registry)) || #{provider := Provider} = Entry <- Mounts].
 
+-doc """
+The table a resolution of a program's path walks, made from `Mounts`, the
+program's table, as it starts (docs/design-files.md, "Narrowing for a
+program"): table/1's, less every entry on a facet the registry holds as one
+of the `windows` interface, as if `Mounts` had no entry there. The handler
+calls it at every resolution, so a display's facet installed after the
+program started, a display's facet that replaced a files facet of the same
+name, and a display under any name or bound anywhere are left out as soon
+as the registry holds them: a bind keeps its source's facet name, and the
+interface comes with the facet from the system domain, never from a server
+or a tree's name.
+""".
+-spec program_table(erx_path:table()) -> erx_path:table().
+program_table(Mounts) ->
+    Registry = registry(),
+    [marked(Provider, resolved(Entry, Registry))
+     || #{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].
+
+%% Whether Provider names a facet the registry holds as one of the windows interface.
+on_display({facet, Name, _Tree}, Registry) ->
+    case Registry of
+        #{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;
+        #{} -> false
+    end;
+on_display(_Provider, _Registry) ->
+    false.
+
 resolved(#{provider := {facet, Name, Tree}, rights := Asked} = Entry, Registry) ->
     case Registry of
-        #{Name := {Pid, Rights}} when is_pid(Pid) ->
+        #{Name := {_Interface, {Pid, Rights}}} when is_pid(Pid) ->
             on_grant(Entry, Pid, Tree, erx_path:lesser(Asked, Rights));
         _ ->
             Entry#{provider := ended}
@@ -254,10 +296,10 @@ the service is called, as an input tree's is `input_tree`
 -spec file_grant(atom(), ro | rx, binary()) -> {ok, {pid(), binary(), ro}} | {error, eacces | enoent}.
 file_grant(Name, Rights, Tree) ->
     case registry() of
-        #{Name := {Pid, Granted}}
+        #{Name := {_Interface, {Pid, Granted}}}
           when is_pid(Pid), (Rights =:= ro orelse (Rights =:= rx andalso Granted =:= rx)) ->
             {ok, {Pid, Tree, ro}};
-        #{Name := {Pid, _Granted}} when is_pid(Pid) ->
+        #{Name := {_Interface, {Pid, _Granted}}} when is_pid(Pid) ->
             {error, eacces};
         #{} ->
             {error, enoent}

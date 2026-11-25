@@ -67,9 +67,10 @@ An app's session's record, {Ref, app, App} (docs/design-packaging.md, "An app's
 session"), which the service sends once the session's namespace is in place, the pid
 sends its agent as {erx_app, App}, never suspended either, as the answer is.
 
-An installation, {Ref, install, Tag, Name, Facet}, a facet a configured
-domain minted for this one, the pid sends its agent as {erx_facets_install,
-Tag, Name, Facet}, an ordinary message, which follows the answer, never
+An installation, {Ref, install, Tag, Name, Interface, Facet}, a facet a
+configured domain minted for this one with its service's interface number,
+the pid sends its agent as {erx_facets_install, Tag, Name, Interface,
+Facet}, an ordinary message, which follows the answer, never
 suspended either: one the lane cannot take is dropped, and the service's
 deadline for the installation fails it. The agent's acknowledgement,
 {erx_facets_installed, Tag}, is an answer the pid passes on.
@@ -129,8 +130,8 @@ loop(#{service := Service, id := Id, ref := Ref} = State) ->
         {Ref, app, App} when is_pid(map_get(agent, State)) ->
             send_or_stop(map_get(agent, State), {erx_app, App}, Service, Ref, Id),
             loop(State);
-        {Ref, install, Tag, Name, Facet} when is_pid(map_get(agent, State)) ->
-            _ = erlang:send(map_get(agent, State), {erx_facets_install, Tag, Name, Facet}, [nosuspend]),
+        {Ref, install, Tag, Name, Interface, Facet} when is_pid(map_get(agent, State)) ->
+            _ = erlang:send(map_get(agent, State), {erx_facets_install, Tag, Name, Interface, Facet}, [nosuspend]),
             loop(State);
         {Ref, mint, Mint, Request} when is_pid(Mint), node(Mint) =:= map_get(node, State) ->
             %% Never suspended behind the domain's lane: a request that does not go

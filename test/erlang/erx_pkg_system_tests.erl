@@ -13,6 +13,7 @@ The package files come from test/host/erx_pkg_test.rb, in ERX_PKG_FILES, as
 for erx_pkg_tests.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -define(MIB, 1048576).
 
@@ -71,7 +72,7 @@ reads_through_the_system_grant_test() ->
     persistent_term:put({erx, facets}, {0, #{}}),
     ?assertEqual({error, enoent}, erx_pkg_medium:size(system, <<"dashboard.app">>)),
     ?assertEqual({error, enoent}, erx_pkg_medium:pread(system, <<"dashboard.app">>, 0, 16)),
-    persistent_term:put({erx, facets}, {1, #{system => system_grant(Dashboard)}}),
+    persistent_term:put({erx, facets}, {1, #{system => {?ERX_SERVICE_FILES, system_grant(Dashboard)}}}),
     Size = byte_size(Dashboard),
     ?assertEqual({ok, Size}, erx_pkg_medium:size(system, <<"dashboard.app">>)),
     ?assertEqual({ok, binary:part(Dashboard, 100, 4096)},
@@ -97,7 +98,8 @@ image_packages_wait_for_the_namespace_test() ->
                                 receive {'$gen_call', From, {settled, namespace}} ->
                                         receive release ->
                                                 persistent_term:put({erx, facets},
-                                                                    {1, #{system => system_grant(Dashboard)}}),
+                                                                    {1, #{system => {?ERX_SERVICE_FILES,
+                                                                                     system_grant(Dashboard)}}}),
                                                 gen:reply(From, ok)
                                         end
                                 end

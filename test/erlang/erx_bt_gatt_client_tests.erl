@@ -11,6 +11,7 @@
 %% whose owner/1 answers ?BT for every name.
 -module(erx_bt_gatt_client_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 -export([log/2]).
 
@@ -74,7 +75,7 @@ an_answer_of_no_shape_is_badarg_test() ->
 %% A facet whose server ended is a dead pid until the next incarnation installs another:
 %% the call exits the caller, as a call to any server that ended does.
 an_ended_facet_exits_the_caller_test() ->
-    erx_facets:install(#{ble => ended_pid()}),
+    erx_facets:install(#{ble => {?ERX_SERVICE_BLE, ended_pid()}}),
     ?assertExit({noproc, _}, erx_gatt:attach(nus)).
 
 %% ---- the serial service against the registry ----
@@ -298,7 +299,7 @@ start_waits_for_the_facet() ->
     Test = self(),
     Starter = spawn(fun() -> Test ! {started, erx_echo:start_link()}, receive stop -> ok end end),
     receive {started, {ok, _}} -> ok after ?WAIT_MS -> error(no_start) end,
-    erx_facets:install(#{ble => Facet}),
+    erx_facets:install(#{ble => {?ERX_SERVICE_BLE, Facet}}),
     _ = sys:get_state(erx_gatt_serial),
     {Link, _Conn} = joined_link(),
     echoed(Link, 9, <<"late">>),
@@ -333,7 +334,7 @@ echoed(Link, Id, Bytes) ->
 start_registry() ->
     persistent_term:put(erx_dist_owner, ?BT),
     {_Registry, Facet} = Started = start_registry_only(),
-    erx_facets:install(#{ble => Facet}),
+    erx_facets:install(#{ble => {?ERX_SERVICE_BLE, Facet}}),
     Started.
 
 %% The registry and the relaying facet, not yet installed.
@@ -373,7 +374,7 @@ relay(Handler) ->
 with_scripted_facet(Answers, Test) ->
     persistent_term:put(erx_dist_owner, ?BT),
     Facet = spawn(fun() -> scripted(Answers) end),
-    erx_facets:install(#{ble => Facet}),
+    erx_facets:install(#{ble => {?ERX_SERVICE_BLE, Facet}}),
     try Test() after exit(Facet, kill) end.
 
 scripted([]) ->

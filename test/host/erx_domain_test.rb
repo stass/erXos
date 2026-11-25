@@ -164,6 +164,22 @@ class ErxDomainTest < Minitest::Test
               to: %q{reconcile(State#{rows := Rows#{Row => {Id, ended}},
                                       grants := maps:map(fun(_, E) -> E#{mark := false} end, maps:get(grants, State))})},
               tests: 'erx_domain_mints_tests', caught_by: 'session_mark_test'),
+    # A facet's interface number comes from the manifest, never from a server's reply or
+    # a facet's name (docs/design-files.md, "Narrowing for a program"): an installation
+    # that carries the files interface whatever its grant's service would put a display's
+    # facet into a domain's programs' tables; a ready answer that gives every facet the
+    # files interface would do the same for a display the system domain serves.
+    Fault.new(name: 'an installation that carries the files interface for every service', file: MINTS,
+              from: "        \#{service := drive} -> ?ERX_SERVICE_DRIVE;\n" \
+                    '        #{server := Server, service := Service} -> maps:get({Server, Service}, Interfaces)',
+              to: '        #{service := _} when is_map(Interfaces) -> ?ERX_SERVICE_FILES',
+              tests: 'erx_domain_mints_tests', caught_by: 'an_install_carries_its_service_rows_interface_test'),
+    Fault.new(name: 'a ready answer that gives every facet the files interface', file: SERVICE,
+              from: "facet_interface(console, _State) -> ?ERX_SERVICE_CONSOLE;\n" \
+                    "facet_interface(code_objects, _State) -> ?ERX_SERVICE_CODE_OBJECTS;\n" \
+                    'facet_interface(Name, #{interfaces := Interfaces}) -> map_get({system, Name}, Interfaces).',
+              to: 'facet_interface(_Name, #{interfaces := _}) -> ?ERX_SERVICE_FILES.',
+              tests: 'erx_domain_mints_srv_tests', caught_by: 'served_test'),
     # A facet that drops a forward whose service ended without replying leaves the
     # grantee waiting out its own timeout, where an inspect worker OTP killed at its heap
     # limit must answer {error, failed}.

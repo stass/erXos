@@ -375,24 +375,19 @@ narrowing_test_() ->
      ?_assertEqual({error, einval}, Narrow([{<<"/data">>, ro}, {<<"/data">>, ro}])),
      ?_assertEqual({error, enoent}, files_of(erx_prog_handler_core:new(?PID, [], (files())#{table := [], within := [{<<"/x">>, ro}]})))].
 
-%% No display in a program's table (docs/design-files.md, "Narrowing for a
-%% program"): a display's facet mounted at /n/display and a bind of its
-%% client directory at /mnt/w, an alias that keeps the facet's provider,
-%% pass to no program, whole or narrowed, while the data grant passes.
-no_window_tree_test_() ->
-    Data = #{point => [<<"data">>], provider => {grant, self(), <<"t">>}, root => [], rights => rw},
+%% A display's facet in a program's table (docs/design-files.md, "Narrowing for a
+%% program"): the core keeps its entry, and a bind of it, as any facet's, since
+%% erx_facets:program_table/1 leaves it out at each resolution; so a narrowing to a
+%% place on it is not refused.
+display_facet_entries_pass_the_core_test_() ->
     Display = #{point => [<<"n">>, <<"display">>], provider => {facet, display, ?ERX_WINDOWS_TREE_BYTES},
                 root => [], rights => rw},
     Alias = Display#{point := [<<"mnt">>, <<"w">>], root := [<<"client">>]},
-    Granted = Display#{point := [<<"n">>, <<"d2">>], provider := {grant, self(), ?ERX_WINDOWS_TREE_BYTES}},
-    Table = ?TABLE ++ [Data, Display, Alias, Granted],
+    Table = ?TABLE ++ [Display, Alias],
     Narrow = fun(Within) -> files_of(erx_prog_handler_core:new(?PID, [], (files())#{table := Table, within := Within})) end,
-    [?_assertEqual(?TABLE ++ [Data], Narrow(all)),
-     ?_assertEqual([#{point => [<<"n">>], provider => release, root => [<<"n">>], rights => ro},
-                    #{point => [<<"mnt">>], provider => release, root => [<<"mnt">>], rights => ro}],
-                   Narrow([{<<"/n">>, ro}, {<<"/mnt">>, ro}])),
-     %% A narrowing to a place on the window tree leaves no entry there.
-     ?_assertEqual([], Narrow([{<<"/mnt/w/w1">>, rw}]))].
+    [?_assertEqual(Table, Narrow(all)),
+     ?_assertMatch([#{provider := {facet, display, _}, root := [<<"client">>, <<"w1">>]}],
+                   Narrow([{<<"/mnt/w/w1">>, rw}]))].
 
 %% The names the export serves at /dev and /etc: a start whose table holds an
 %% entry at or below one is refused, since the entry would hide the name or
@@ -459,11 +454,7 @@ window_test_() ->
      ?_assertMatch({ok, _, [holder]}, New([Bind([<<"dev">>])], [])),
      ?_assertEqual({error, eacces}, New([(Bind([<<"dev">>]))#{rights := ro}], [])),
      ?_assertEqual({error, eacces}, New([(Bind([<<"dev">>]))#{rights := rx}], [])),
-     %% An entry on a window tree passes to no program, so it caps nothing; and
-     %% an entry that hides one of the window's names refuses with einval first.
-     ?_assertMatch({ok, _, [holder]},
-                   New([(Bind([<<"dev">>]))#{provider := {grant, self(), ?ERX_WINDOWS_TREE_BYTES}, rights := ro}],
-                       [])),
+     %% An entry that hides one of the window's names refuses with einval first.
      ?_assertEqual({error, einval}, New([(Bind([<<"dev">>]))#{rights := ro}, Bind([<<"dev">>, <<"kbd">>])], [])),
      ?_assertEqual({error, eacces}, Narrowed([{<<"/dev">>, ro}])),
      ?_assertEqual({error, eacces}, Narrowed([{<<"/">>, ro}])),

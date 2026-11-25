@@ -48,9 +48,9 @@ class FacetRegistryChokepointsTest < Minitest::Test
 
   def test_the_owner_the_writers_and_the_readers_pass
     assert_empty found(OWNER => "registry() -> persistent_term:get({erx, facets}, \#{}).\n")
-    assert_empty found(WRITER => "f(F) -> ok = erx_facets:install(\#{data => F}).\n")
+    assert_empty found(WRITER => "f(F) -> ok = erx_facets:install(\#{data => {5, F}}).\n")
     assert_empty found(OTHER => "%% {erx, facets} and erx_facets:install/1 in a comment are not code\n" \
                                 "f() -> erx_facets:find(data), erx_facets:table([]), \"{erx, facets}\",\n" \
-                                "       {erx_facets, \#{}, []}, {erx_facets_install, 1, data, self()}.\n")
+                                "       {erx_facets, \#{data => {5, F}}, []}, {erx_facets_install, 1, data, 5, self()}.\n")
   end
 end

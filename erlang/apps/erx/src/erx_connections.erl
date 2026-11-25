@@ -79,7 +79,7 @@ close_side(Id, Reason) when Reason =/= normal ->
 %% for a grant"). The agent takes it only from its installer (become_installer/0);
 %% {error, badarg} asked by any other process, and asked of a domain's agent, whose
 %% installations come from the system domain over its connection.
--spec grant(#{atom() => erx_facets:facet()}) -> ok | {error, noproc | badarg}.
+-spec grant(#{atom() => {erx_facets:interface(), erx_facets:facet()}}) -> ok | {error, noproc | badarg}.
 grant(Facets) when is_map(Facets) ->
     call({grant, Facets}).
 
@@ -439,8 +439,11 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
         {erx_origin, SystemId, {erx_connection_down, Peer, Reason}} when is_integer(Peer) ->
             records(Env, connection_down(Env, Peer, Reason, Held), Dropped);
         {erx_origin, SystemId, {erx_facets, Facets, Granted}} when is_map(Facets) ->
-            Valid = #{Name => Facet || Name := Facet <- Facets,
-                                       is_atom(Name), erx_facets:is_facet(Facet)},
+            %% Each facet comes with its service's interface number, which the system
+            %% domain takes from the manifest (erx_facets:program_table/1).
+            Valid = #{Name => {Interface, Facet} || Name := {Interface, Facet} <- Facets,
+                                                    is_atom(Name), erx_facets:is_interface(Interface),
+                                                    erx_facets:is_facet(Facet)},
             %% One installation, an empty one included: the granted names first, which
             %% erx:granted/0,1 read, then the facets, whose installation raises the
             %% generation, so a waiter that finds it past the one it read finds the names
@@ -452,10 +455,11 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Next, Held, Dropped);
         {erx_origin, SystemId, {erx_app, App}} when is_map(App), element(1, map_get(app, Env)) =:= waiting ->
             records(app_came(App, Env), Held, Dropped);
-        {erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}} when is_integer(Tag) ->
-            case erx_facets:is_name(Name) andalso erx_facets:is_facet(Facet) of
+        {erx_origin, SystemId, {erx_facets_install, Tag, Name, Interface, Facet}} when is_integer(Tag) ->
+            case erx_facets:is_name(Name) andalso erx_facets:is_interface(Interface)
+                andalso erx_facets:is_facet(Facet) of
                 true ->
-                    records(minted_install(Env, Tag, Name, Facet), Held, Dropped);
+                    records(minted_install(Env, Tag, Name, {Interface, Facet}), Held, Dropped);
                 false ->
                     records(Env, Held, Dropped + 1)
             end;
@@ -506,8 +510,10 @@ records(#{kernel := Kernel, system := SystemId} = Env, Held, Dropped) ->
             records(Env, Held, Dropped + 1)
     end.
 
-%% A facet a configured domain minted for this domain, installed under Name in the
-%% domain's registry, replacing an older pid of that name, and acknowledged to the domain
+%% A facet a configured domain minted for this domain, {Interface, Facet}, installed under
+%% Name in the domain's registry with its service's interface number, which the system
+%% domain took from the manifest, replacing an older facet of that name, and acknowledged
+%% to the domain
 %% pid with the installation's tag (docs/design-system.md, "Facets a configured domain
 %% serves").
 minted_install(#{domain_pid := DomainPid} = Env, Tag, Name, Facet) ->

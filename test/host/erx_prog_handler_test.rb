@@ -13,8 +13,9 @@ require_relative '../fixtures/erlang_build'
 # and stand-ins (test/erlang/stand_in) for the program driver, the pixel allocator
 # and the NIF calls the handler makes, by
 # test/erlang/erx_prog_handler_tests.erl. The core's resolve of an executable file
-# walks the EROFS reader's fixture images (erx_erofs_tests). Each seeded fault must
-# fail the EUnit case named beside it.
+# walks the EROFS reader's fixture images (erx_erofs_tests), and the table a program's
+# resolution walks, erx_facets:program_table/1, is read over the real facet registry
+# by the same suite. Each seeded fault must fail the EUnit case named beside it.
 class ErxProgHandlerTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATIONS = %w[erx erx_files].freeze
@@ -35,6 +36,7 @@ class ErxProgHandlerTest < Minitest::Test
   CORE = 'erlang/apps/erx/src/erx_prog_handler_core.erl'
   HANDLER = 'erlang/apps/erx/src/erx_prog_handler.erl'
   EXPORT = 'erlang/apps/erx_session/src/erx_session_export.erl'
+  FACETS = 'otp/erts/preloaded/src/erx_facets.erl'
 
   def test_the_handler_starts_forwards_and_ends
     text, ok = run_eunit({})
@@ -168,11 +170,21 @@ class ErxProgHandlerTest < Minitest::Test
     'a refused start that keeps the program\'s holder entry, so its ends are never gone' =>
       Mutant.new(file: CORE, original: "        [holder_drop].\n", replacement: "        [].\n",
                  caught_by: 'an_end_of_another_process_is_refused'),
-    'a builder that drops a display by its mount point, which keeps the bind of it' =>
-      Mutant.new(file: CORE,
-                 original: "on_window_tree(\#{provider := {Kind, _, ?ERX_WINDOWS_TREE_BYTES}})\n  when Kind =:= grant; Kind =:= facet ->",
-                 replacement: 'on_window_tree(#{point := [<<"n">>, <<"display">>]}) ->',
-                 caught_by: 'no_window_tree_test_'),
+    'a program table that knows a display by its name, which keeps one installed as notes' =>
+      Mutant.new(file: FACETS, original: '        #{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;',
+                 replacement: '        #{Name := {_Interface, _Facet}} -> Name =:= display;',
+                 caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
+    'a program table that knows a display by the tree its server names' =>
+      Mutant.new(file: FACETS,
+                 original: "on_display({facet, Name, _Tree}, Registry) ->\n    case Registry of\n" \
+                           "        \#{Name := {?ERX_SERVICE_WINDOWS, _Facet}} -> true;\n        \#{} -> false\n    end;",
+                 replacement: "on_display({facet, _Name, Tree}, _Registry) ->\n    Tree =:= ?ERX_WINDOWS_TREE_BYTES;",
+                 caught_by: 'a_display_under_another_name_and_its_bind_are_left_out'),
+    'a program table that is table/1\'s, which a display installed after the start reaches' =>
+      Mutant.new(file: FACETS,
+                 original: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, Registry)].",
+                 replacement: "     || \#{provider := Provider} = Entry <- Mounts, not on_display(Provider, \#{})].",
+                 caught_by: 'a_display_installed_after_the_start_is_left_out'),
     'a first draw that takes an entry at /dev for the shared /dev, which opens a window on its grant' =>
       Mutant.new(file: CORE, original: '#{point := Point} -> Point =:= []',
                  replacement: '#{point := Point} -> length(Point) =< 1', caught_by: 'first_window_test_'),

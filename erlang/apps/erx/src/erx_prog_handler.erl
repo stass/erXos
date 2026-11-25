@@ -287,8 +287,9 @@ perform([Action | Rest], H) ->
     end.
 
 act({resolve, Image, Table}, H) ->
-    %% Each facet's mount is read as the grant the registry holds now, as an open reads it.
-    Granted = erx_facets:table(Table),
+    %% Each facet's mount is read as the grant the registry holds now, as an open reads it,
+    %% with no display's facet (erx_facets:program_table/1).
+    Granted = erx_facets:program_table(Table),
     {event, {resolved, erx_prog_handler_core:resolve_image(Image, Granted, fun prim_file:erx_walk/2)}, H};
 act(holder, #h{spec = #{pid := Pid}} = H) ->
     {event, {holder, erx_pipe_nif:program_holder(Pid)}, H};

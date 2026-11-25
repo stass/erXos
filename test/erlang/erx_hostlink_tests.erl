@@ -8,6 +8,7 @@
 -module(erx_hostlink_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 %% The root passes the build identifier in decimal, which init can parse as a term; the
 %% hello reports it in hexadecimal, as the root's identity line prints it. 2255e43fb7866bb3
@@ -122,7 +123,7 @@ web_facet_needs_the_relay_test() ->
                  erx_hostlink_web:open(self(), undefined, {ok, <<"00">>}, true, fun no_line/2)),
     ?assertEqual({{error, unsupported}, []},
                  erx_hostlink_web:open(self(), Relay, {error, {no_build, "none"}}, true, fun no_line/2)),
-    persistent_term:put({erx, facets}, {1, #{web => Relay}}),
+    persistent_term:put({erx, facets}, {1, #{web => {?ERX_SERVICE_WEB, Relay}}}),
     try ?assertEqual({{error, unsupported}, []}, erx_hostlink:root({open, web}, self()))
     after persistent_term:erase({erx, facets})
     end,

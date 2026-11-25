@@ -24,8 +24,8 @@ module ErxConnectionsInstallFuzz
   FUZZ = 'test/erlang/erx_connections_install_fuzz.erl'
   # Where the ABI's generated Erlang header, which the registry includes, lies.
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
-  ENVELOPE = '{erx_origin, SystemId, {erx_facets_install, Tag, Name, Facet}}'
-  ANY_ENVELOPE = '{erx_origin, _AnyDomain, {erx_facets_install, Tag, Name, Facet}}'
+  ENVELOPE = '{erx_origin, SystemId, {erx_facets_install, Tag, Name, Interface, Facet}}'
+  ANY_ENVELOPE = '{erx_origin, _AnyDomain, {erx_facets_install, Tag, Name, Interface, Facet}}'
   DEADLINE_SECONDS = '300'
 
   module_function

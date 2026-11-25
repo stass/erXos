@@ -25,10 +25,13 @@ the status as its reason: an exit, a stop, and an exit that a report and
 a stop taken after it meet at the port the driver closed; a port closed
 with no status ends the handler program_lost and a killed handler ends
 killed, each with the program gone; the starter's exit stops the
-program; and the pipe server's loss reaches the program.
+program; and the pipe server's loss reaches the program. A program's table,
+read at each resolution over the real facet registry, leaves out every
+display's facet (erx_facets:program_table/1).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 %% The logger handler a case adds to see what the handler logs.
 -export([log/2]).
@@ -428,7 +431,7 @@ a_first_draw_without_a_display_is_enodev_and_retried(_) ->
                        H ! {erx_channel, Port, ?OPEN(4, <<"/dev/draw">>)},
                        NoDisplay = fake(send),
                        Alive = is_process_alive(H) andalso not closed(Port, 5),
-                       persistent_term:put({erx, facets}, {1, #{display => self()}}),
+                       persistent_term:put({erx, facets}, {1, #{display => {?ERX_SERVICE_WINDOWS, self()}}}),
                        H ! {erx_channel, Port, ?OPEN(5, <<"/dev/draw">>)},
                        Windows = told(opened),
                        Relayed = told(open),
@@ -444,7 +447,7 @@ a_first_draw_without_a_display_is_enodev_and_retried(_) ->
 %% once, with its errno.
 a_first_draw_the_connection_refuses_ends_the_program(_) ->
     first_draw(fun() ->
-                       persistent_term:put({erx, facets}, {1, #{display => self()}}),
+                       persistent_term:put({erx, facets}, {1, #{display => {?ERX_SERVICE_WINDOWS, self()}}}),
                        persistent_term:put(erx_draw_conn, true),
                        ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{to => self()}}),
                        {H, Port, []} = started([]),
@@ -469,7 +472,7 @@ a_first_draw_the_connection_refuses_ends_the_program(_) ->
 %% window.
 window_names_before_draw_are_enoent(_) ->
     first_draw(fun() ->
-                       persistent_term:put({erx, facets}, {1, #{display => self()}}),
+                       persistent_term:put({erx, facets}, {1, #{display => {?ERX_SERVICE_WINDOWS, self()}}}),
                        {H, Port, []} = started([]),
                        H ! {erx_channel, Port, ?OPEN(4, <<"/dev/ctl">>)},
                        Ctl = fake(send),
@@ -486,7 +489,7 @@ window_names_before_draw_are_enoent(_) ->
 %% no second window.
 opens_behind_the_first_draw_meet_its_tree(_) ->
     first_draw(fun() ->
-                       persistent_term:put({erx, facets}, {1, #{display => self()}}),
+                       persistent_term:put({erx, facets}, {1, #{display => {?ERX_SERVICE_WINDOWS, self()}}}),
                        {H, Port, []} = started([]),
                        [H ! {erx_channel, Port, ?OPEN(Slot, Path)}
                         || {Slot, Path} <- [{4, <<"/dev/draw">>}, {5, <<"/dev/ctl">>}, {6, <<"/dev/kbd">>},
@@ -498,6 +501,56 @@ opens_behind_the_first_draw_meet_its_tree(_) ->
                                        {<<"/dev/draw">>, [_]}], Relayed),
                         ?_assertEqual(1, length(lists:usort([Dev || {_, Dev} <- Relayed])))]
                end).
+
+%% A program's table at each resolution, the handler's image resolve and every open
+%% of the program's (docs/design-files.md, "Narrowing for a program"), over the real
+%% registry: an entry whose facet the registry holds as one of the windows interface
+%% is left out, whenever it was installed and whatever its name, tree or point, while
+%% a files facet's entry resolves to its grant.
+program_table_test_() ->
+    Clear = fun(_) -> persistent_term:erase({erx, facets}) end,
+    {foreach, fun() -> Clear(none) end, Clear,
+     [fun a_display_installed_after_the_start_is_left_out/1,
+      fun a_files_facet_replaced_by_a_display_is_left_out/1,
+      fun a_display_under_another_name_and_its_bind_are_left_out/1]}.
+
+-define(FACET_ENTRY(Point, Name, Tree), #{point => Point, provider => {facet, Name, Tree}, root => [], rights => rw}).
+
+%% The program's table is taken while the registry holds nothing under display: a
+%% resolution then finds the entry ended, as the session's does, and once the
+%% display's facet is installed no entry at all, from the same table.
+a_display_installed_after_the_start_is_left_out(_) ->
+    Table = [?FACET_ENTRY([<<"n">>, <<"display">>], display, ?ERX_WINDOWS_TREE_BYTES)],
+    Before = erx_facets:program_table(Table),
+    ok = erx_facets:install(#{display => {?ERX_SERVICE_WINDOWS, {self(), rw}}}),
+    After = erx_facets:program_table(Table),
+    [?_assertMatch([#{provider := ended}], Before),
+     ?_assertEqual([], After)].
+
+%% A files facet under data, which the program's entry reaches on its grant, replaced
+%% under the same name by a display's: the next resolution has no entry there.
+a_files_facet_replaced_by_a_display_is_left_out(_) ->
+    Server = self(),
+    Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
+    ok = erx_facets:install(#{data => {?ERX_SERVICE_FILES, {Server, rw}}}),
+    Files = erx_facets:program_table([Data]),
+    ok = erx_facets:install(#{data => {?ERX_SERVICE_WINDOWS, {Server, rw}}}),
+    Display = erx_facets:program_table([Data]),
+    [?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Files),
+     ?_assertEqual([], Display)].
+
+%% A display installed as notes, whose server names its tree notes, not the windows
+%% tree, mounted at /n/notes and bound at /mnt/w: neither entry passes, and the files
+%% facet beside it does.
+a_display_under_another_name_and_its_bind_are_left_out(_) ->
+    Server = self(),
+    Notes = ?FACET_ENTRY([<<"n">>, <<"notes">>], notes, <<"notes">>),
+    Bind = Notes#{point := [<<"mnt">>, <<"w">>], root := [<<"client">>]},
+    Data = ?FACET_ENTRY([<<"data">>], data, <<"data">>),
+    ok = erx_facets:install(#{notes => {?ERX_SERVICE_WINDOWS, {Server, rw}},
+                              data => {?ERX_SERVICE_FILES, {Server, rw}}}),
+    Granted = erx_facets:program_table([Notes, Bind, Data]),
+    ?_assertEqual([Data#{provider := {grant, Server, <<"data">>}}], Granted).
 
 %% Case with the stand-ins telling the test, and the registry and the connection's
 %% refusal cleared after it.

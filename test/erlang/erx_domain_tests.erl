@@ -1260,7 +1260,8 @@ facets() ->
     %% The service mints a facet in front of each, bound to the domain, which exports
     %% itself to the domain, and answers the domain's report, through its domain pid,
     %% with the facets by name, only once the report has come: the pid's first message
-    %% from the service after the report is the answer.
+    %% from the service after the report is the answer. Each facet comes with its
+    %% service's interface number, console's that of the console interface.
     Self = self(),
     erlang:trace(new_processes, true, ['receive', {tracer, Self}]),
     {ok, Domain} = erx_domain:create(#{boot => <<"base">>, name => <<"facets">>, memory => 4096,
@@ -1276,7 +1277,7 @@ facets() ->
     ?assertEqual({export, Id, [send]}, next_call()),
     Received = [Message || {trace, P, 'receive', Message} <- trace_messages(), P =:= Pid],
     ?assertMatch([{_, port, _}, {erx_origin, Id, {erx_ready, _}}, {_, facets, #{console := _}, []}], Received),
-    [#{console := Facet}] = [Facets || {_, facets, Facets, _Granted} <- Received],
+    [#{console := {?ERX_SERVICE_CONSOLE, Facet}}] = [Facets || {_, facets, Facets, _Granted} <- Received],
     _ = [erlang:trace(Traced, false, ['receive']) || Traced <- [Pid, Facet]],
     _ = trace_messages(),
     ?assertMatch(#{grantee := Id, dropped := 0, max_request := 5000}, erx_facet:info(Facet)),

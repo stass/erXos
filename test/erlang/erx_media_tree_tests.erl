@@ -38,7 +38,7 @@ start(Medium) ->
     {ok, Sup} = supervisor:start_link({local, erx_media_sup}, ?MODULE, stand_in),
     Proxy = proxy(Medium, ok),
     Facet = spawn_link(fun() -> facet(Proxy) end),
-    ok = erx_facets:install(#{{drive, 0} => Facet}),
+    ok = erx_facets:install(#{{drive, 0} => {?ERX_SERVICE_DRIVE, Facet}}),
     {ok, Grant} = erx_fs:start_link(erx_media_tree, media, rw),
     [unlink(Pid) || Pid <- [Sup, Proxy, Facet, Grant]],
     {ok, _} = call(Grant, {attach, 1, ?NOFID, <<"root">>, <<"media">>, 0}),
@@ -208,7 +208,7 @@ two_mounts_are_distinct_test() ->
         Again = proxy(two_volumes(), ok),
         unlink(Again),
         Facet = spawn(fun() -> facet(Again) end),
-        ok = erx_facets:install(#{{drive, 0} => Facet}),
+        ok = erx_facets:install(#{{drive, 0} => {?ERX_SERVICE_DRIVE, Facet}}),
         Remounted = qid_path(Grant, [<<"disk0">>, <<"s1">>, <<"hello.txt">>], 5),
         ?assert(mount_number(Remounted) > max(One, Two)),
         [kill_and_wait(Pid) || Pid <- [Facet, Again]]

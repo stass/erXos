@@ -2713,7 +2713,8 @@ it one ([design-files.md](design-files.md#building-binding-and-mounting),
 interfaces for `erx:granted/0`, which answers the names, and
 `erx:granted/1`, which answers those of one interface. The ready
 answer's own facets, of the system domain's services, come each with
-its service's interface number too, so every facet the registry holds
+its service's interface number too, and the console stopgap's facet with
+the console interface's, so every facet the registry holds
 carries the interface the manifest gives it, from the ready answer, an
 installation or a `grant/4`, and none from a server
 ([design-files.md](design-files.md#narrowing-for-a-program)). The system domain, which holds the manifest, takes its

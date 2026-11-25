@@ -43,7 +43,7 @@
 %%   current incarnation, never to another domain's;
 %% * authentic_install: every install goes to a current grantee, a row
 %%   grantee only after its introduction, and names a facet of the server's
-%%   current incarnation;
+%%   current incarnation with the interface of data's service row;
 %% * acknowledged: a grant becomes installed only on its grantee's
 %%   acknowledgement of the install sent for that operation;
 %% * session_entries: the core holds a session's grant exactly while the
@@ -78,6 +78,8 @@
 -define(ROWS, [{data, ?S, ?LIMITS}]).
 %% A marked grant's limits as its mint carries them: the session mark added.
 -define(MARKED_LIMITS, #{max_request => 4096, session => true}).
+%% The interface of each service row, as the manifest states it: both of the files interface.
+-define(INTERFACES, #{{?S, data} => ?ERX_SERVICE_FILES, {?T, other} => ?ERX_SERVICE_FILES}).
 
 owner(Pid) ->
     <<131, 88, 119, Length, _Node:Length/binary, _Id:32, _Serial:32, Creation:32>> = term_to_binary(Pid),
@@ -97,7 +99,7 @@ ready(Row, Id, Provides) -> {ready, Row, Id, node_of(Id), Provides}.
 
 config(Grantees) ->
     #{services => [{?S, data}, {?T, other}], grants => [{Grantee, data, ?S, ?LIMITS} || Grantee <- Grantees],
-      owner => fun ?MODULE:owner/1, deadline => 10000}.
+      interfaces => ?INTERFACES, owner => fun ?MODULE:owner/1, deadline => 10000}.
 
 new() -> erx_domain_mints:new(config([?G])).
 
@@ -129,10 +131,10 @@ a_files_install_carries_its_rows_rights_test() ->
                                           {minted, 5, 1, {ok, facet(5)}}], erx_domain_mints:new(Config)),
                       lists:last(Actions)
               end,
-    ?assertEqual([{install, 1, 6, data, {facet(5), rx}}], Install([data], #{rights => rx})),
-    ?assertEqual([{install, 1, 6, data, {facet(5), ro}}], Install([data], #{rights => ro, max_request => 4096})),
-    ?assertEqual([{install, 1, 6, data, {facet(5), rw}}], Install([data], #{})),
-    ?assertEqual([{install, 1, 6, data, facet(5)}], Install([], #{rights => ro})).
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), rx}}], Install([data], #{rights => rx})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ro}}], Install([data], #{rights => ro, max_request => 4096})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), rw}}], Install([data], #{})),
+    ?assertEqual([{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}], Install([], #{rights => ro})).
 
 %% A grant of an input service is read-only by construction (abi/services/input.txt): its
 %% server is asked to mint it with rights ro and its grantee holds it with ro, whatever its
@@ -144,7 +146,7 @@ an_input_grant_is_minted_and_held_read_only_test() ->
                                        {minted, 5, 1, {ok, facet(5)}}], erx_domain_mints:new(Config)),
                    lists:nthtail(2, Actions)
            end,
-    [?assertEqual([[{mint, 1, mint(5), data, 6, maps:put(rights, ro, ?LIMITS)}], [{install, 1, 6, data, {facet(5), ro}}]],
+    [?assertEqual([[{mint, 1, mint(5), data, 6, maps:put(rights, ro, ?LIMITS)}], [{install, 1, 6, data, ?ERX_SERVICE_FILES, {facet(5), ro}}]],
                   Mint(Limits)) || Limits <- [?LIMITS, maps:put(rights, rw, ?LIMITS)]].
 
 in_order_test() ->
@@ -153,7 +155,7 @@ in_order_test() ->
     ?assertEqual([[],
                   [{arm, 1, 10000}, {introduce, 1, 5, 6}],
                   [{mint, 1, mint(5), data, 6, ?LIMITS}],
-                  [{install, 1, 6, data, facet(5)}],
+                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}],
                   [{disarm, 1}]], Actions),
     ?assertEqual({installed, {5, 6}, facet(5)}, grant(State)).
 
@@ -164,6 +166,7 @@ in_order_test() ->
 %% other pair, a grant of another service's or a request's domain, has none.
 windows(Grants) ->
     erx_domain_mints:new(#{services => [{?S, display}, {?S, data}], grants => Grants,
+                           interfaces => #{{?S, display} => ?ERX_SERVICE_WINDOWS, {?S, data} => ?ERX_SERVICE_FILES},
                            owner => fun ?MODULE:owner/1, windows => [display]}).
 
 windows_pair_has_the_grants_pixels_test() ->
@@ -209,6 +212,18 @@ windows_grant_introduces_the_pair_test() ->
                        windows([{?G, display, ?S, #{pixels => 8 * 4096}}])),
     ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 5, 6}]], Actions).
 
+%% An installation carries the interface of its grant's service row, which the manifest
+%% states and no reply of the server's sets, so the grantee's registry tells a display's
+%% facet from a files facet (docs/design-files.md, "Narrowing for a program"): row S's
+%% display that of windows, its data that of files.
+an_install_carries_its_service_rows_interface_test() ->
+    {Actions, Stepped} = run([ready(?S, 5, #{display => mint(5), data => mint(5)}), ready(?G, 6, #{})],
+                             windows([{?G, display, ?S, #{}}, {?G, data, ?S, ?LIMITS}])),
+    {Mints, Minting} = run([{introduced, Tag, ok} || {introduce, Tag, _, _} <- lists:append(Actions)], Stepped),
+    {Installs, _} = run([{minted, 5, Tag, {ok, facet(5)}} || {mint, Tag, _, _, _, _} <- lists:append(Mints)], Minting),
+    ?assertEqual([{data, ?ERX_SERVICE_FILES}, {display, ?ERX_SERVICE_WINDOWS}],
+                 lists:sort([{Name, Interface} || {install, _, 6, Name, Interface, _} <- lists:append(Installs)])).
+
 grantee_first_test() ->
     {Actions, _} = run([ready(?G, 6, #{}), ready(?S, 7, #{data => mint(7)})], new()),
     ?assertEqual([[], [{arm, 1, 10000}, {introduce, 1, 7, 6}]], Actions).
@@ -217,7 +232,7 @@ system_grantee_skips_the_introduction_test() ->
     {Actions, State} = run([ready(?S, 5, #{data => mint(5)}), {minted, 5, 1, {ok, facet(5)}},
                             {installed, 4, 1}], erx_domain_mints:new(config([system]))),
     ?assertEqual([[{arm, 1, 10000}, {mint, 1, mint(5), data, 4, ?LIMITS}],
-                  [{install, 1, 4, data, facet(5)}],
+                  [{install, 1, 4, data, ?ERX_SERVICE_FILES, facet(5)}],
                   [{disarm, 1}]], Actions),
     ?assertEqual(#{{system, data} => {installed, {5, 4}, facet(5)}}, erx_domain_mints:grants(State)).
 
@@ -286,7 +301,7 @@ restart_installs_the_new_facet_test() ->
     {Actions, State} = run([{ended, ?S, 5}, ready(?S, 8, #{data => mint(8)}), {introduced, 2, ok},
                             {minted, 8, 2, {ok, facet(8)}}, {installed, 6, 2}], Installed),
     ?assertEqual([[], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
-                  [{install, 2, 6, data, facet(8)}], [{disarm, 2}]], Actions),
+                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, facet(8)}], [{disarm, 2}]], Actions),
     ?assertEqual({installed, {8, 6}, facet(8)}, grant(State)).
 
 reply_with_a_facet_of_another_domain_fails_test() ->
@@ -360,7 +375,7 @@ old_reply_after_a_new_grant_is_dropped_test() ->
                            minting()),
     ?assertEqual([[{disarm, 1}], [{arm, 2, 10000}, {introduce, 2, 8, 6}], [{mint, 2, mint(8), data, 6, ?LIMITS}],
                   [{dropped, unknown_tag, {minted, 5}}], [{dropped, wrong_domain, {minted, 5}}],
-                  [{install, 2, 6, data, facet(8)}], [{disarm, 2}]],
+                  [{install, 2, 6, data, ?ERX_SERVICE_FILES, facet(8)}], [{disarm, 2}]],
                  Actions),
     ?assertEqual({installed, {8, 6}, facet(8)}, grant(State)).
 
@@ -380,7 +395,7 @@ replies_from_the_wrong_domain_or_step_are_dropped_test() ->
                         {installed, ?THIRD, 1}, {installed, 5, 1}, {installed, 6, 1}, {installed, 6, 1}], minting()),
     ?assertEqual([[{dropped, wrong_domain, {minted, ?THIRD}}], [{dropped, wrong_domain, {minted, 6}}],
                   [{dropped, unexpected, {installed, 6}}], [{dropped, unknown_tag, {minted, 5}}],
-                  [{install, 1, 6, data, facet(5)}], [{dropped, unexpected, {minted, 5}}],
+                  [{install, 1, 6, data, ?ERX_SERVICE_FILES, facet(5)}], [{dropped, unexpected, {minted, 5}}],
                   [{dropped, wrong_domain, {installed, ?THIRD}}], [{dropped, wrong_domain, {installed, 5}}],
                   [{disarm, 1}], [{dropped, unknown_tag, {installed, 6}}]], Actions).
 
@@ -435,7 +450,7 @@ session_ready_installs_test() ->
     ?assertEqual([[],
                   [{arm, 1, 10000}, {introduce, 1, 5, 9}],
                   [{mint, 1, mint(5), data, 9, ?LIMITS}],
-                  [{install, 1, 9, data, facet(5)}],
+                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, facet(5)}],
                   [{disarm, 1}]], Actions),
     ?assertEqual(#{{{session, 9}, data} => {installed, {5, 9}, facet(5)}}, session_grants(State)).
 
@@ -489,8 +504,8 @@ two_sessions_get_two_grants_test() ->
                             {installed, 9, 1}, {installed, 10, 2}], session_minting()),
     ?assertEqual([[{arm, 2, 10000}, {introduce, 2, 5, 10}],
                   [{mint, 2, mint(5), data, 10, ?LIMITS}],
-                  [{install, 1, 9, data, facet(5)}],
-                  [{install, 2, 10, data, facet(5)}],
+                  [{install, 1, 9, data, ?ERX_SERVICE_FILES, facet(5)}],
+                  [{install, 2, 10, data, ?ERX_SERVICE_FILES, facet(5)}],
                   [{dropped, wrong_domain, {installed, 10}}],
                   [{dropped, wrong_domain, {installed, 9}}],
                   [{disarm, 1}],
@@ -541,7 +556,8 @@ marked() ->
     erx_domain_mints:new(#{services => [{?S, data}, {?T, other}],
                            grants => [{{template, 0}, data, ?S, ?LIMITS}, {{template, 0}, other, ?T, ?LIMITS},
                                       {?G, data, ?S, ?MARKED_LIMITS}],
-                           owner => fun ?MODULE:owner/1, deadline => 10000, windows => [data]}).
+                           interfaces => ?INTERFACES, owner => fun ?MODULE:owner/1, deadline => 10000,
+                           windows => [data]}).
 
 %% The limits of every mint the core asks for once Events are stepped and each
 %% introduction they start succeeds, by grantee id and name; and the last state.
@@ -699,9 +715,9 @@ apply_action({mint, Tag, Mint, data, GranteeId, Limits}, #{reqs := Reqs} = Env, 
         orelse violation(authentic_mint, Node, Label, Seen),
     Limits =:= session_limits(GranteeId, Env) orelse violation(session_mark, Node, Label, Seen),
     Env#{reqs := lists:sort([{mint, Tag, ServerId} | Reqs])};
-apply_action({install, Tag, GranteeId, data, Facet}, #{reqs := Reqs, introduced := Introduced, installs := Installs} = Env,
-             Node, Label, Seen) ->
-    (is_grantee(GranteeId, Env) andalso Facet =:= facet(ready_id(?S, Env))
+apply_action({install, Tag, GranteeId, data, Interface, Facet},
+             #{reqs := Reqs, introduced := Introduced, installs := Installs} = Env, Node, Label, Seen) ->
+    (is_grantee(GranteeId, Env) andalso Interface =:= ?ERX_SERVICE_FILES andalso Facet =:= facet(ready_id(?S, Env))
      andalso (GranteeId =:= 4 orelse lists:member(Tag, Introduced)))
         orelse violation(authentic_install, Node, Label, Seen),
     Env#{reqs := lists:sort([{install, Tag, GranteeId} | Reqs]), installs := [{Tag, GranteeId} | Installs]};
@@ -1018,9 +1034,10 @@ permutations(List) -> [[X | Rest] || X <- List, Rest <- permutations(List -- [X]
 %% record's service is drive, which its serving row's ready report provides a mint for
 %% and the mint request names, and its installed name {drive, N}, which keys it and names
 %% the facet in the grantee's registry, so one mint serves the serving row's every drive,
-%% each minted with drive => N and the interface's limits.
+%% each minted with drive => N and the interface's limits, and installed with the drive
+%% interface's number, which no service row of the manifest states.
 drive_config() ->
-    #{services => [{?S, data}], grants => [], drives => [{?S, ?G, 0}, {?S, ?G, 1}],
+    #{services => [{?S, data}], grants => [], drives => [{?S, ?G, 0}, {?S, ?G, 1}], interfaces => ?INTERFACES,
       owner => fun ?MODULE:owner/1, deadline => 10000}.
 
 a_drive_grant_mints_under_its_service_and_installs_under_its_number_test() ->
@@ -1034,7 +1051,7 @@ a_drive_grant_mints_under_its_service_and_installs_under_its_number_test() ->
     ?assertEqual([window], maps:get(operations, Window)),
     ?assertEqual(8, maps:get(in_flight, Window)),
     {Installs, _} = run([{minted, 5, 2, {ok, facet(5)}}], State),
-    ?assertEqual([[{install, 2, 6, {drive, 1}, facet(5)}]], Installs).
+    ?assertEqual([[{install, 2, 6, {drive, 1}, ?ERX_SERVICE_DRIVE, facet(5)}]], Installs).
 
 %% Only a row with drives declares drive: a ready report of any other row that names it
 %% is refused as a name no row declares, and no drive grant follows that row.
@@ -1081,7 +1098,7 @@ a_drive_grant_is_minted_again_for_a_new_server_test() ->
     Mint = mint(9),
     Facet = facet(9),
     ?assertMatch([{mint, 2, Mint, drive, 6, #{drive := 3}}], [M || Step <- Actions, {mint, _, _, _, _, _} = M <- Step]),
-    ?assertMatch([{install, 2, 6, {drive, 3}, Facet}], [I || Step <- Actions, {install, _, _, _, _} = I <- Step]),
+    ?assertMatch([{install, 2, 6, {drive, 3}, ?ERX_SERVICE_DRIVE, Facet}], [I || Step <- Actions, {install, _, _, _, _, _} = I <- Step]),
     ?assertMatch(#{{?G, {drive, 3}} := {installing, {9, 6}, 2, Facet}}, erx_domain_mints:grants(State)).
 
 %% A serving row's ready report that provides no drive mint mints nothing for its drives:

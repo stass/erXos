@@ -348,7 +348,8 @@ new(_Pid, _Fds, _Files) ->
 -doc """
 Resolve, step 4 of "Starting a program", for an executable file: the
 absolute `Path` through `Table`, the starter's namespace with each
-facet's grant in place (erx_facets:table/1), each provider walked by
+facet's grant in place and no display's facet (erx_facets:program_table/1),
+each provider walked by
 `Walk`, erx_path's `walk` callback. It answers `{ok, Entry, Names}`: the
 entry the file lies on, whose provider is the grant it is read through,
 and the file's names from the provider's root, which the filler opens.
@@ -465,15 +466,15 @@ drawn_once(none, _Fds) -> true;
 drawn_once({window, _}, Fds) -> [Buffer || {_, {buffer, _, _}} = Buffer <- Fds] =:= [].
 
 %% The program's table (docs/design-files.md, "Narrowing for a program"):
-%% the narrowed table less every entry on a window tree, which passes to no
-%% program whatever its point, as a bind of one keeps its source's provider,
-%% unless refusal/2 finds a reason the program cannot be started on it.
+%% the narrowed table, unless refusal/2 finds a reason the program cannot be
+%% started on it. A display's facet is left out at each resolution of the
+%% program's paths (erx_facets:program_table/1), not here, so one installed
+%% or re-granted after the program starts stays out too.
 program_table(Table, Within, Window) ->
     case narrowed(Table, Within) of
         {ok, Narrowed} ->
-            Kept = [Entry || Entry <- Narrowed, not on_window_tree(Entry)],
-            case refusal(Window, Kept) of
-                none -> {ok, Kept};
+            case refusal(Window, Narrowed) of
+                none -> {ok, Narrowed};
                 Errno -> {error, Errno}
             end;
         {error, _} = Refused ->
@@ -526,13 +527,6 @@ window_dev(Table, DevGrant) ->
                              root => [<<"dev">>], rights => rw}].
 
 without_dev(Table) -> [Entry || #{point := Point} = Entry <- Table, Point =/= [<<"dev">>]].
-
-%% An entry on a window tree names the tree in its provider, a grant's or a
-%% facet's (docs/design-files.md, "Namespaces").
-on_window_tree(#{provider := {Kind, _, ?ERX_WINDOWS_TREE_BYTES}})
-  when Kind =:= grant; Kind =:= facet ->
-    true;
-on_window_tree(_Entry) -> false.
 
 %% The starter's table narrowed: the whole table, or for each path the starter names
 %% an entry at that path, on the provider of the starter's entry that holds

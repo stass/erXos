@@ -14,6 +14,7 @@
 %% (erx_connections:finish/2); the lane driver's finish is the QEMU suites'.
 -module(erx_connections_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("generated/erx_abi.hrl").
 
 %% The system domain's id, the peer an introduction names and the peer's node.
 -define(SYSTEM, 4).
@@ -32,6 +33,7 @@ agent_test_() ->
                          {owner_ended, fun owner_ended/1}, {refused_hand_over, fun refused_hand_over/1},
                          {refused_open, fun refused_open/1}, {down, fun down/1}, {forged, fun forged/1},
                          {facets, fun facets/1}, {app, fun app/1}, {installs, fun installs/1},
+                         {untyped_facets_are_dropped, fun untyped_facets_are_dropped/1},
                          {drive_installs, fun drive_installs/1}, {connection, fun connection/1},
                          {area_down, fun area_down/1}, {area_lost, fun area_lost/1},
                          {area_lost_then_down, fun area_lost_then_down/1}, {area_refused, fun area_refused/1},
@@ -279,7 +281,8 @@ forged(Agent) ->
 facets(Agent) ->
     %% The domain service's facets answer reaches init only in the system connection's
     %% envelope, and as a map, of which init gets the entries naming a facet's pid by an
-    %% atom, a files facet's as the pid with its grant's rights, ro, rw or rx. One a peer
+    %% atom, a files facet's as the pid with its grant's rights, ro, rw or rx, each with
+    %% its service's interface number. One a peer
     %% sends, one sent bare, one that is not a map and one wrapped twice are dropped and
     %% counted, so no domain but the system domain names init's facets.
     %% The answer's names of the facets the manifest grants the domain, which come later
@@ -294,13 +297,16 @@ facets(Agent) ->
         Agent ! {erx_facets, #{forged => Facet}, [forged]},
         Agent ! {erx_origin, ?SYSTEM, {erx_facets, [forged], [forged]}},
         Agent ! {erx_origin, ?SYSTEM, {erx_origin, ?PEER, {erx_facets, #{forged => Facet}, [forged]}}},
-        record(Agent, {erx_facets, #{echo => Facet, tree => {Facet, ro}, <<"bin">> => Facet, bad => 3,
-                                     wide => {Facet, rwx}, nopid => {3, rw}},
+        record(Agent, {erx_facets, #{echo => {?ERX_SERVICE_CONSOLE, Facet}, tree => {?ERX_SERVICE_FILES, {Facet, ro}},
+                                     <<"bin">> => {?ERX_SERVICE_CONSOLE, Facet}, bad => {?ERX_SERVICE_CONSOLE, 3},
+                                     wide => {?ERX_SERVICE_FILES, {Facet, rwx}},
+                                     nopid => {?ERX_SERVICE_FILES, {3, rw}}},
                        [{data, 5}, data, {<<"bin">>, 5}, {data, files}, 3 | tail]}),
         ?assertEqual(4, erx_connections:dropped()),
         First = init_facets(2000),
         erlang:trace(Init, false, ['receive']),
-        ?assertEqual([#{echo => Facet, tree => {Facet, ro}}], First ++ init_facets(100)),
+        ?assertEqual([#{echo => {?ERX_SERVICE_CONSOLE, Facet}, tree => {?ERX_SERVICE_FILES, {Facet, ro}}}],
+                     First ++ init_facets(100)),
         ?assertEqual(Facet, erx:cap(tree)),
         ?assertEqual(#{echo => Facet, tree => Facet}, erx:caps()),
         ?assertEqual([data], erx:granted()),
@@ -356,22 +362,47 @@ installs(Agent) ->
     Answer = spawn(fun() -> receive stop -> ok end end),
     [Old, New] = [spawn(fun() -> receive stop -> ok end end) || _ <- [1, 2]],
     try
-        record(Agent, {erx_facets, #{echo => Answer}, []}),
-        Agent ! {erx_origin, ?PEER, {erx_facets_install, 1, data, {Old, rx}}},
-        Agent ! {erx_facets_install, 2, data, {Old, rx}},
-        record(Agent, {erx_facets_install, 3, <<"data">>, {Old, rw}}),
-        record(Agent, {erx_facets_install, 6, data, {Old, rwx}}),
-        record(Agent, {erx_facets_install, 4, data, {Old, rw}}),
+        record(Agent, {erx_facets, #{echo => {?ERX_SERVICE_CONSOLE, Answer}}, []}),
+        Agent ! {erx_origin, ?PEER, {erx_facets_install, 1, data, ?ERX_SERVICE_FILES, {Old, rx}}},
+        Agent ! {erx_facets_install, 2, data, ?ERX_SERVICE_FILES, {Old, rx}},
+        record(Agent, {erx_facets_install, 3, <<"data">>, ?ERX_SERVICE_FILES, {Old, rw}}),
+        record(Agent, {erx_facets_install, 6, data, ?ERX_SERVICE_FILES, {Old, rwx}}),
+        record(Agent, {erx_facets_install, 4, data, ?ERX_SERVICE_FILES, {Old, rw}}),
         ?assertEqual({erx_facets_installed, 4}, answer()),
         ?assertEqual(4, erx_connections:dropped()),
-        ?assertEqual({2, #{echo => Answer, data => {Old, rw}}}, persistent_term:get({erx, facets})),
+        ?assertEqual({2, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {Old, rw}}}},
+                     persistent_term:get({erx, facets})),
         ?assertEqual(Old, erx:cap(data)),
-        record(Agent, {erx_facets_install, 5, data, {New, ro}}),
+        record(Agent, {erx_facets_install, 5, data, ?ERX_SERVICE_FILES, {New, ro}}),
         ?assertEqual({erx_facets_installed, 5}, answer()),
-        ?assertEqual({3, #{echo => Answer, data => {New, ro}}}, persistent_term:get({erx, facets}))
+        ?assertEqual({3, #{echo => {?ERX_SERVICE_CONSOLE, Answer}, data => {?ERX_SERVICE_FILES, {New, ro}}}},
+                     persistent_term:get({erx, facets}))
     after
         persistent_term:erase({erx, facets}),
         [Pid ! stop || Pid <- [Answer, Old, New]]
+    end.
+
+untyped_facets_are_dropped(Agent) ->
+    %% An installation that names no interface number, sent as {Tag, Name, Facet}, or
+    %% that names none or 0, is dropped and counted and installs nothing; an entry of the
+    %% ready answer that is a facet alone, a files facet's included, or whose interface
+    %% is none or 0, is left out of the registry: every facet the registry holds carries the
+    %% interface that keeps a display from the domain's programs
+    %% (erx_facets:program_table/1).
+    Facet = spawn(fun() -> receive stop -> ok end end),
+    try
+        record(Agent, {erx_facets, #{bare => Facet, files => {Facet, rw}, untyped => {none, Facet},
+                                     zero => {0, {Facet, rw}}}, []}),
+        [record(Agent, Install) || Install <- [{erx_facets_install, 1, data, {Facet, rw}},
+                                               {erx_facets_install, 2, data, none, {Facet, rw}},
+                                               {erx_facets_install, 3, data, 0, {Facet, rw}}]],
+        record(Agent, {erx_facets_install, 4, echo, ?ERX_SERVICE_FILES, {Facet, rw}}),
+        ?assertEqual({erx_facets_installed, 4}, answer()),
+        ?assertEqual(3, erx_connections:dropped()),
+        ?assertEqual({2, #{echo => {?ERX_SERVICE_FILES, {Facet, rw}}}}, persistent_term:get({erx, facets}))
+    after
+        persistent_term:erase({erx, facets}),
+        Facet ! stop
     end.
 
 drive_installs(Agent) ->
@@ -382,12 +413,12 @@ drive_installs(Agent) ->
     Facet = spawn(fun() -> receive stop -> ok end end),
     try
         record(Agent, {erx_facets, #{}, []}),
-        [record(Agent, {erx_facets_install, 1, Name, Facet})
+        [record(Agent, {erx_facets_install, 1, Name, ?ERX_SERVICE_FILES, Facet})
          || Name <- [{drive, -1}, {drive, x}, {drive, 1.0}, {disk, 0}, {drive, 0, 1}, {0, drive}]],
-        record(Agent, {erx_facets_install, 2, {drive, 3}, Facet}),
+        record(Agent, {erx_facets_install, 2, {drive, 3}, ?ERX_SERVICE_DRIVE, Facet}),
         ?assertEqual({erx_facets_installed, 2}, answer()),
         ?assertEqual(6, erx_connections:dropped()),
-        ?assertEqual({2, #{{drive, 3} => Facet}}, persistent_term:get({erx, facets})),
+        ?assertEqual({2, #{{drive, 3} => {?ERX_SERVICE_DRIVE, Facet}}}, persistent_term:get({erx, facets})),
         ?assertEqual(Facet, erx:cap({drive, 3})),
         ?assertEqual(undefined, erx:cap({drive, 4}))
     after
@@ -649,13 +680,13 @@ with_registry(Case) ->
 domain_install(Agent) ->
     fun(Name, Facet) ->
             Tag = erlang:unique_integer([positive]),
-            record(Agent, {erx_facets_install, Tag, Name, Facet}),
+            record(Agent, {erx_facets_install, Tag, Name, ?ERX_SERVICE_FILES, Facet}),
             ?assertEqual({erx_facets_installed, Tag}, answer())
     end.
 
 %% An installation of Facet under Name as the domain service asks the system domain's agent.
 system_install(Name, Facet) ->
-    ?assertEqual(ok, erx_connections:grant(#{Name => Facet})).
+    ?assertEqual(ok, erx_connections:grant(#{Name => {?ERX_SERVICE_FILES, Facet}})).
 
 %% A process that stands for a facet's server until the case kills it.
 facet() ->
@@ -819,7 +850,7 @@ install_enveloped_refused(Agent) ->
     %% envelope are no calls it takes: dropped and counted, installing and answering
     %% nothing. A generation that is no non-negative integer is answered badarg.
     Facet = facet(),
-    ?assertEqual(ok, erx_connections:grant(#{echo => Facet})),
+    ?assertEqual(ok, erx_connections:grant(#{echo => {?ERX_SERVICE_FILES, Facet}})),
     ?assertEqual(Facet, erx_facets:find(echo)),
     Dropped = erx_connections:dropped(),
     Agent ! {erx_origin, ?PEER, {'$gen_call', {self(), make_ref()}, {install, #{forged => Facet}}}},
@@ -851,7 +882,7 @@ install_only_from_service(Agent) ->
     {Service, Ended} = spawn_monitor(fun() ->
                                              ok = erx_connections:become_installer(),
                                              Test ! {service, self()},
-                                             receive install -> Test ! {installed, erx_connections:grant(#{echo => Facet})} end
+                                             receive install -> Test ! {installed, erx_connections:grant(#{echo => {?ERX_SERVICE_FILES, Facet}})} end
                                      end),
     receive {service, Service} -> ok end,
     ?assertEqual({error, badarg}, erx_connections:become_installer()),

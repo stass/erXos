@@ -3,9 +3,10 @@
 
 %% Random sequences of messages to a domain's connection agent, erx_connections, as its
 %% registry's installer (docs/design-system.md, "Facets a configured domain serves"):
-%% installations {erx_facets_install, Tag, Name, Facet} in the system connection's
-%% envelope, in another domain's envelope and bare, with tags, names and facets of every
-%% shape (no integer, no atom, no pid, another domain's pid), tuples of the wrong size,
+%% installations {erx_facets_install, Tag, Name, Interface, Facet} in the system connection's
+%% envelope, in another domain's envelope and bare, with tags, names, interfaces and facets
+%% of every shape (no integer, no atom, no pid, another domain's pid, an interface that is no
+%% positive integer), tuples of the wrong size,
 %% the facets answer in another domain's envelope, and arbitrary terms. The test process
 %% plays the agent's kernel and its domain pid, as erx_connections_tests does.
 %%
@@ -13,7 +14,8 @@
 %% * the registry, the persistent term {erx, facets}, holds the count of the installations
 %%   and exactly the installations a
 %%   model took: those in the system connection's envelope with an integer tag, a name
-%%   (an atom, or a drive's {drive, N}, N a non-negative integer) and a pid, each replacing an older pid of its name;
+%%   (an atom, or a drive's {drive, N}, N a non-negative integer), a positive integer
+%%   interface and a pid, each replacing an older {Interface, Pid} of its name;
 %% * each such installation, and nothing else, is acknowledged to the domain pid with
 %%   its tag, in order;
 %% * every other message is dropped and counted.
@@ -55,13 +57,13 @@ message(Agent, {Model, Dropped, Tally}) ->
     Count = gen_server:call(Agent, dropped),
     is_process_alive(Agent) orelse fail(agent_ended, Message),
     case accepted(Message) of
-        {yes, Tag, Name, Facet} ->
+        {yes, Tag, Name, Entry} ->
             receive
                 {erx_facets_installed, Tag} -> ok
             after 1000 -> fail(not_acknowledged, Tag)
             end,
             {Generation, Facets} = Model,
-            Next = {Generation + 1, Facets#{Name => Facet}},
+            Next = {Generation + 1, Facets#{Name => Entry}},
             Count =:= Dropped orelse fail(counted_an_installation, Message),
             Next =:= persistent_term:get({erx, facets}, {0, #{}}) orelse fail(registry_differs, Message),
             nothing_else(),
@@ -75,12 +77,13 @@ message(Agent, {Model, Dropped, Tally}) ->
 
 %% The model: what the agent may install.
 %% A name is an atom or a drive's {drive, N}, N a non-negative integer.
-accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Facet}})
-  when is_integer(Tag), is_pid(Facet) ->
-    named(Tag, Name, Facet);
-accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, {Pid, Rights} = Facet}})
-  when is_integer(Tag), is_pid(Pid), (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
-    named(Tag, Name, Facet);
+accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, Facet}})
+  when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Facet) ->
+    named(Tag, Name, {Interface, Facet});
+accepted({erx_origin, ?SYSTEM, {erx_facets_install, Tag, Name, Interface, {Pid, Rights} = Facet}})
+  when is_integer(Tag), is_integer(Interface), Interface > 0, is_pid(Pid),
+       (Rights =:= ro orelse Rights =:= rw orelse Rights =:= rx) ->
+    named(Tag, Name, {Interface, Facet});
 accepted(_Message) ->
     no.
 
@@ -97,9 +100,9 @@ nothing_else() ->
 random_message() ->
     Body = case rand:uniform(8) of
                1 -> random_term();
-               2 -> {erx_facets, #{data => pid(5)}, [{data, 5}]};
-               3 -> list_to_tuple([erx_facets_install | [field() || _ <- lists:seq(1, pick([0, 1, 2, 4, 5]))]]);
-               _ -> {erx_facets_install, tag(), name(), facet()}
+               2 -> {erx_facets, #{data => {5, pid(5)}}, [{data, 5}]};
+               3 -> list_to_tuple([erx_facets_install | [field() || _ <- lists:seq(1, pick([0, 1, 2, 3, 5, 6]))]]);
+               _ -> {erx_facets_install, tag(), name(), interface(), facet()}
            end,
     case rand:uniform(6) of
         1 -> Body;
@@ -112,9 +115,10 @@ random_message() ->
 tag() -> pick([1, 2, 7, 1 bsl 70, -3, 0, 1.0, tag, <<1>>, make_ref()]).
 name() -> pick([data, echo, log, data, '', <<"data">>, 1, {data}, "data", {drive, 0}, {drive, 7}, {drive, -1},
                  {drive, x}, {drive, 1.0}, {disk, 0}, {drive, 0, 1}]).
+interface() -> pick([5, 3, 8, 23, 1, 5, 3, 0, -1, 1.0, files, <<5>>, {5}, 1 bsl 70]).
 facet() -> pick([pid(5), pid(5), pid(99), self(), data, fun() -> ok end, make_ref(), {pid(5)}, [pid(5)],
                   {pid(5), rx}, {pid(5), rw}, {pid(99), ro}, {pid(5), rwx}, {data, rw}, {pid(5), ro, x}]).
-field() -> pick([tag(), name(), facet()]).
+field() -> pick([tag(), name(), interface(), facet()]).
 
 random_term() ->
     pick([[], <<0, 255>>, {}, lists:duplicate(1000, x), #{a => b}, 3.5, {ok}, erx_facets_install,
