@@ -25,8 +25,8 @@ module Erx
   # missing source records prevent a successful build record.
   class FiascoProvenance
     PARTS = FiascoParts::NAMES
-    # The executables a development build's image packs beside its kernel, under
-    # build/fiasco. A release kernel is audited alone. Each link's inputs are the
+    # The executables every boot image packs beside its kernel, under build/fiasco:
+    # a development and a release image carry the same two. Each link's inputs are the
     # list LLD's --trace printed for it, which the link rule keeps beside the
     # executable as NAME.inputs (Makerules.KERNEL, mk/prog.mk).
     USER_EXECUTABLES = {
@@ -48,9 +48,10 @@ module Erx
     GENERATION_KEYS = %w[compile_dependencies image inputs profiles].freeze
 
     # How the audit of one build kind runs. kernel is the kernel directory it
-    # reads (Fiasco.kernel_directory). users is whether it also reads what a
-    # development image packs beside the kernel: the users' executables, their
-    # staged sources and archive record, and the image itself. pinned is
+    # reads (Fiasco.kernel_directory); every kind also reads the users' executables
+    # (USER_EXECUTABLES), their staged sources and archive record, so a release's
+    # gate covers every executable its boot image carries. image is whether it also
+    # reads the image the development build packed. pinned is
     # whether the audit compares the generated files, and the host tools and
     # configuration that made them, with the generation profile's hashes. Those
     # bytes come from the host's tools, so a difference is recorded in the
@@ -59,16 +60,16 @@ module Erx
     # its image, or :permissive, a release kernel's license gate
     # (check_permissive). distribution is the report's statement of where the
     # build may go, nil for a release kernel, whose gate decides that.
-    Plan = Data.define(:kind, :kernel, :users, :pinned, :check, :distribution)
+    Plan = Data.define(:kind, :kernel, :image, :pinned, :check, :distribution)
 
     def self.plan(root:, kind:)
       require_relative 'fiasco'
       kernel = Fiasco.kernel_directory(root: root, kind: kind)
       if BuildKind.development?(kind)
-        Plan.new(kind: kind, kernel: kernel, users: true, pinned: true, check: :receipt,
+        Plan.new(kind: kind, kernel: kernel, image: true, pinned: true, check: :receipt,
                  distribution: 'project-only: Fiasco with parts that are not permissive')
       else
-        Plan.new(kind: kind, kernel: kernel, users: false, pinned: false, check: :permissive, distribution: nil)
+        Plan.new(kind: kind, kernel: kernel, image: false, pinned: false, check: :permissive, distribution: nil)
       end
     end
 
@@ -147,11 +148,10 @@ module Erx
     end
 
     # Each executable the audit reads, by name: its artifact and the list of its
-    # link's inputs. The kernel is the build kind's; a development build adds its
-    # image's users.
+    # link's inputs: the build kind's kernel and the users every image carries.
     def executable_links
       executables = { 'kernel' => File.join(@kernel, 'fiasco') }
-      executables.merge!(USER_EXECUTABLES.transform_values { |path| File.join(@build, path) }) if @plan.users
+      executables.merge!(USER_EXECUTABLES.transform_values { |path| File.join(@build, path) })
       executables.transform_values { |artifact| [artifact, "#{artifact}.inputs"] }
     end
 
@@ -183,7 +183,7 @@ module Erx
         programs = tools.to_h { |tool| [tool.fetch('program'), tool.fetch('path')] }
         @image_objcopy = programs.fetch(File.basename(toolchain.program('objcopy')))
         @image_perl = programs.fetch('perl')
-        image = audit_image(executables) if @plan.users
+        image = audit_image(executables) if @plan.image
         @bytes.each do |path, snapshot|
           unless BoundedFile.read(path, maximum: PackProvenance::MAX_METADATA) == snapshot
             raise Error, "Fiasco audit input changed: #{label(path)}"
@@ -252,8 +252,6 @@ module Erx
       emit.call(kernel, '.erx-bootstrap-inputs', 'OBJ_BOOTSTRAP',
                 ['-f', File.join(source, 'src/Makefile.sub2'),
                  "srcdir=#{source}/src", "objbase=#{kernel}"])
-      return unless @plan.users
-
       emit.call(File.join(@build, 'users/pkg/l4re-core/minimal_l4re/OBJ-arm64_armv8a-std-l4f'),
                 '.erx-archive-inputs', 'OBJS_libc_minimal_l4re.a', [])
     end
@@ -466,12 +464,12 @@ module Erx
 
     # Each recipe's bytes, a fact about the tree that ties the profile's account
     # of a generated file to the rule that makes it, for every kind; and, when
-    # the audit reads the users, the copy their build staged.
+    # the copy the users' build staged.
     def check_recipes
       @generation.fetch('recipes').each do |relative, expected|
         path = project_input(relative)
         raise Error, "stale Fiasco generation recipe: #{relative}" unless digest(path) == expected
-        if @plan.users && relative.start_with?('fiasco/') && !relative.start_with?('fiasco/kernel/')
+        if relative.start_with?('fiasco/') && !relative.start_with?('fiasco/kernel/')
           part, suffix = relative.delete_prefix('fiasco/').split('/', 2)
           staged = part == 'mk' ? File.join(@build, 'source', suffix) : File.join(@build, 'source/pkg', part, suffix)
           raise Error, "stale staged Fiasco recipe: #{relative}" unless digest(staged) == expected
@@ -509,20 +507,19 @@ module Erx
     # What differs from the pins, by path. Only a pinned audit's report holds it.
     def host_generated = @differences.values.sort_by { |difference| difference.fetch('path') }
 
-    # The development section's entries for the development kernel's generated
-    # files, moved into this plan's kernel directory: every kernel's are made by
-    # the same rules, from its own build's files. The recipes stay for the
-    # recipe check; no hash of the development build holds them.
+    # The development section's entries, those for the development kernel's
+    # generated files moved into this plan's kernel directory: every kernel's are
+    # made by the same rules, from its own build's files, and the users' are the
+    # shared build's own. The recipes stay for the recipe check; no hash of the
+    # development build holds them.
     def kernel_generation(generation)
       from = Fiasco.kernel_directory(root: @root, kind: BuildKind::DEVELOPMENT).delete_prefix(@build + '/') + '/'
       to = @kernel.delete_prefix(@build + '/') + '/'
       move = ->(relative) { relative.start_with?(from) ? to + relative.delete_prefix(from) : relative }
       move_input = ->(input) { input.start_with?('build/fiasco/') ? 'build/fiasco/' + move.call(input.delete_prefix('build/fiasco/')) : input }
-      in_kernel = ->(entries) { entries.select { |relative, _| relative.start_with?(from) } }
       { 'recipes' => generation.fetch('recipes'),
-        'compile_dependencies' => in_kernel.call(generation.fetch('compile_dependencies'))
-                                           .to_h { |object, dependency| [move.call(object), move.call(dependency)] },
-        'profiles' => in_kernel.call(generation.fetch('profiles')).to_h do |relative, profile|
+        'compile_dependencies' => generation.fetch('compile_dependencies').to_h { |object, dependency| [move.call(object), move.call(dependency)] },
+        'profiles' => generation.fetch('profiles').to_h do |relative, profile|
           [move.call(relative), profile.to_h { |role, value| [role, value.is_a?(Array) ? value.map(&move_input) : value] }]
         end }
     end

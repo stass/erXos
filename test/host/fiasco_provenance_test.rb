@@ -214,16 +214,50 @@ class FiascoProvenanceTest < Minitest::Test
     assert_raises(ArgumentError) { Erx::FiascoProvenance.new(root: __dir__, runner: nil) }
   end
 
-  # A release kernel is audited alone, from its own directory; a development
-  # build's audit reads its kernel and the users its image packs.
-  def test_a_release_audit_reads_only_the_release_kernel
+  # Every build kind's audit reads every executable a boot image carries: its
+  # own kernel, from the kind's kernel directory, and the bootstrap and sigma0
+  # both kinds' images share. Only a development build's audit also reads the
+  # image the build packed.
+  def test_every_audit_reads_each_executable_a_boot_image_carries
     Dir.mktmpdir do |temporary|
       root = File.realpath(temporary)
-      release = Erx::FiascoProvenance.new(root: root, runner: nil, kind: Erx::BuildKind::RELEASE).executable_links
-      assert_equal({ 'kernel' => %w[fiasco fiasco.inputs].map { |name| File.join(root, 'build/fiasco/kernel-release', name) } }, release)
-      development = Erx::FiascoProvenance.new(root: root, kind: Erx::BuildKind::DEVELOPMENT, runner: nil).executable_links
-      assert_equal %w[kernel bootstrap sigma0], development.keys
-      assert_equal File.join(root, 'build/fiasco/kernel/fiasco'), development.fetch('kernel').first
+      users = Erx::FiascoProvenance::USER_EXECUTABLES.transform_values do |path|
+        [File.join(root, 'build/fiasco', path), File.join(root, 'build/fiasco', "#{path}.inputs")]
+      end
+      { Erx::BuildKind::RELEASE => 'kernel-release', Erx::BuildKind::DEVELOPMENT => 'kernel' }.each do |kind, directory|
+        auditor = Erx::FiascoProvenance.new(root: root, runner: nil, kind: kind)
+        kernel = %w[fiasco fiasco.inputs].map { |name| File.join(root, 'build/fiasco', directory, name) }
+        assert_equal({ 'kernel' => kernel }.merge(users), auditor.executable_links, kind)
+        assert_equal Erx::BuildKind.development?(kind), auditor.instance_variable_get(:@plan).image, kind
+      end
+    end
+  end
+
+
+  # The seeded fault the release audit of the users exists for: a source under
+  # the LGPL in bootstrap's link closure. A fixture closure (a bootstrap whose
+  # one object compiles a header an import inventory records as LGPL-2.1-only)
+  # is audited as a release; the gate refuses the release and names the header.
+  def test_a_release_refuses_a_non_permissive_source_in_bootstraps_closure
+    Dir.mktmpdir do |temporary|
+      root = File.realpath(temporary)
+      header = 'build/fiasco/inputs/fiasco/l4re-core/fixture/include/lgpl.h'
+      sources = [{ 'path' => header, 'license' => 'LGPL-2.1-only', 'status' => 'release', 'source' => header,
+                   'original_source' => 'fiasco/l4re-core/fixture/include/lgpl.h' },
+                 { 'path' => 'kip.cpp', 'license' => 'MIT' }]
+      directory = File.join(root, 'build/fiasco/kernel-release')
+      FileUtils.mkdir_p(directory)
+      File.write(File.join(directory, 'fiasco'), 'kernel bytes')
+      auditor = Erx::FiascoProvenance.new(root: root, runner: nil, kind: Erx::BuildKind::RELEASE)
+      auditor.define_singleton_method(:capture_construction) {}
+      read = auditor.executable_links.keys
+      auditor.define_singleton_method(:audit) do
+        { 'state' => 'complete', 'unresolved' => [], 'sources' => read.include?('bootstrap') ? sources : sources.drop(1),
+          'executables' => read.map { |name| { 'name' => name, 'artifact' => send(:reference, File.join(directory, 'fiasco')) } } }
+      end
+      error = assert_raises(Erx::Error) { auditor.certify }
+      assert_includes error.message, "#{header} (LGPL-2.1-only)"
+      refute File.exist?(File.join(directory, Erx::FiascoProvenance::PASS_RECORD))
     end
   end
 
