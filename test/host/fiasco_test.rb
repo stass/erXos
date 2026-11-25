@@ -381,13 +381,19 @@ class FiascoTest < Minitest::Test
     assert_includes kernel, "CC = #{other}/llvm/bin/clang\nCXX = #{other}/llvm/bin/clang++\nCPP = #{other}/llvm/bin/clang-cpp\n"
     assert_includes kernel, "LD = #{other}/lld/bin/ld.lld\n"
     assert_includes kernel, "OBJCOPY = #{other}/llvm/bin/llvm-objcopy\n"
-    # llvm-ar reads the inherited crsUT as a thin archive, which the link audit refuses.
-    assert_includes kernel, "ARFLAGS = crsU\n"
+    # llvm-ar reads the inherited crsUT as a thin archive, which the link audit refuses,
+    # and U as a request for member timestamps and owners, which differ between builds.
+    assert_includes kernel, "ARFLAGS = crs\n"
+    # Every compile maps the checkout, by each of its spellings, to '.', so no path of
+    # the checkout reaches an object or archive and two checkouts build the same bytes.
+    map = [@directory, File.realpath(@directory)].uniq.map { |root| "-ffile-prefix-map=#{root}=." }.join(' ')
+    assert_includes kernel, "SHARED_FLAGS += #{map}\n"
     refute File.exist?(board), 'a toolchain change discards the board build directories'
     users = File.read(File.join(@directory, 'build/fiasco/source/Makeconf.local'))
     assert_includes users, "CROSS_COMPILE := #{Erx::FiascoToolchain::CROSS_COMPILE}\n"
     assert_includes users, "HOST_CC := #{Erx::HostOs::HOST_CC}\nHOST_CXX := #{Erx::HostOs::HOST_CXX}\n"
     assert_includes users, "CLANG = #{other}/llvm/bin/\nLD = #{other}/lld/bin/ld.lld -m $(LD_EMULATION)\n"
+    assert_includes users, "CCXX_FLAGS += #{map}\n"
     refute_includes users, 'LIBGCC'
     makes = @runner.commands.select { |command| command.fetch(:argv).first == 'gmake' }
     refute(makes.any? { |command| command.fetch(:argv).any? { |argument| argument.start_with?('CC=', 'LD=', 'CLANG=') } })
@@ -417,6 +423,18 @@ class FiascoTest < Minitest::Test
   def test_a_toolchain_needs_clang_and_lld
     error = assert_raises(Erx::Error) { Erx::FiascoToolchain.new(compiler: '/llvm/bin/clang', linker: '') }
     assert_includes error.message, 'ERX_LLD'
+  end
+
+  # The checkout's path goes into the flags make hands the shell, so a root with a
+  # character make or the shell gives a meaning is refused, not passed on.
+  def test_a_checkout_path_make_cannot_take_is_refused
+    toolchain = Erx::FiascoToolchain.new(**fixture_toolchain('roots'))
+    ['/a b', '/a$(b)', "/a\nb", '/a;b'].each do |root|
+      %i[kernel_settings user_settings].each do |settings|
+        error = assert_raises(Erx::Error) { toolchain.public_send(settings, root: root) }
+        assert_includes error.message, 'checkout', root
+      end
+    end
   end
 
   # A bare ERX_LLD is found as every other build finds it: beside clang, then on PATH.
