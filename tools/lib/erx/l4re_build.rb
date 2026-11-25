@@ -5,12 +5,12 @@
 require 'digest'
 require 'fileutils'
 require 'json'
-require 'rubygems/package'
 require 'securerandom'
 require 'tmpdir'
 require_relative 'bounded_file'
 require_relative 'dependencies'
 require_relative 'error'
+require_relative 'guest_build'
 require_relative 'json_input'
 require_relative 'l4re_bench'
 require_relative 'l4re_fetch'
@@ -63,15 +63,9 @@ module Erx
     # their bounds with room for the archive's headers.
     RUN_LOG_BYTES = 64 << 20
     ARCHIVE_BYTES = OUTPUTS.values.sum + BOOTABLE_BYTES + (64 << 10)
-    USER = '1000:1000'
+    USER = GuestBuild::USER
     # The script's whole environment: the container's entry starts it under env -i.
     ENVIRONMENT = ['HOME=/tmp', 'PATH=/usr/local/bin:/usr/bin:/bin', 'LANG=C'].freeze
-
-    # One docker command of a build: its run name, arguments, deadline, the most bytes it
-    # may write (Runner's output_limit) and the path its standard output goes to.
-    Step = Data.define(:name, :argv, :deadline, :limit, :stdout) do
-      def initialize(name:, argv:, deadline: 600, limit: nil, stdout: nil) = super
-    end
 
     module_function
 
@@ -120,7 +114,7 @@ module Erx
       copies = [[inputs, '/tmp/inputs'], *trees.sort_by { |path, _| path.count('/') }
                                                .map { |path, tree| [tree, File.join(SOURCE_ROOT, path)] }]
       {
-        create: Step.new(name: 'l4re-build-create', argv: [
+        create: GuestBuild::Step.new(name: 'l4re-build-create', argv: [
           *docker, 'create', '--pull', 'never', '--platform', PLATFORM, '--name', name,
           *OracleContainer::CONFINEMENT, '--user', USER, '--workdir', '/tmp', '--pids-limit', '4096',
           '--cpus', jobs.to_s, '--memory', memory, '--memory-swap', memory,
@@ -128,28 +122,17 @@ module Erx
           '/usr/bin/timeout', '-k', '10', DEADLINE.to_s, '/bin/sh', '/tmp/inputs/build.sh', jobs.to_s,
           target.platform_type, target.image_target, File.extname(target.bootable).delete_prefix('.')
         ]),
-        inspect: Step.new(name: 'l4re-build-inspect', argv: [*docker, 'inspect', '--type', 'container', name,
+        inspect: GuestBuild::Step.new(name: 'l4re-build-inspect', argv: [*docker, 'inspect', '--type', 'container', name,
                                                              '--format', '{{json .}}'], limit: 1 << 20),
-        copies: copies.map { |from, to| Step.new(name: 'l4re-build-copy', argv: [*docker, 'cp', from, "#{name}:#{to}"]) },
-        start: Step.new(name: 'l4re-build-run', argv: [*docker, 'start', '--attach', name],
+        copies: copies.map { |from, to| GuestBuild::Step.new(name: 'l4re-build-copy', argv: [*docker, 'cp', from, "#{name}:#{to}"]) },
+        start: GuestBuild::Step.new(name: 'l4re-build-run', argv: [*docker, 'start', '--attach', name],
                         deadline: DEADLINE + 60, limit: RUN_LOG_BYTES),
-        export: Step.new(name: 'l4re-build-export', argv: [*docker, 'cp', "#{name}:/tmp/out", '-'],
+        export: GuestBuild::Step.new(name: 'l4re-build-export', argv: [*docker, 'cp', "#{name}:/tmp/out", '-'],
                          limit: ARCHIVE_BYTES, stdout: archive)
       }
     end
 
-    # Refuses the created container unless the engine holds it as plan created it:
-    # offline, with an init, no capability, privilege or mount, as the non-root user. An
-    # engine or daemon setting that dropped a flag would otherwise go unseen.
-    def check_container(value)
-      host = value.is_a?(Hash) ? value['HostConfig'] : nil
-      config = value.is_a?(Hash) ? value['Config'] : nil
-      confined = host.is_a?(Hash) && config.is_a?(Hash) && host['NetworkMode'] == 'none' &&
-                 host['Init'] == true && host['Privileged'] == false && host['CapDrop'] == ['ALL'] &&
-                 [nil, []].include?(host['CapAdd']) && host['SecurityOpt'] == ['no-new-privileges'] &&
-                 [nil, []].include?(host['Binds']) && value['Mounts'] == [] && config['User'] == USER
-      raise Error, "the engine does not hold L4Re's build container as created (offline, unprivileged, unmounted)" unless confined
-    end
+    def check_container(value) = GuestBuild.check_container(value, label: "L4Re's build")
 
     # The build record of the exported outputs in out: the pins of every source and
     # package, the image, the compiler, the resolved configurations and the difference of
@@ -175,59 +158,15 @@ module Erx
       }
     end
 
-    # The text output name of out, refused unless it is printable ASCII lines: the
-    # container wrote it, and the record and the terminal show it.
-    def text(out, name)
-      bytes = File.binread(File.join(out, name))
-      raise Error, "L4Re's build exported #{name} with bytes other than printable ASCII lines" unless
-        bytes.match?(/\A[\t\n -~]*\z/n)
-
-      bytes.force_encoding(Encoding::US_ASCII)
-    end
+    def text(out, name) = GuestBuild.text(out, name, label: "L4Re's build")
     private_class_method :text
 
     # Writes target's outputs (outputs_of) from archive, the tar docker cp streamed of
-    # /tmp/out, into the new directory out, once the whole archive is read and checked.
+    # /tmp/out, into the new directory out, once the whole archive is read and checked
+    # (GuestBuild.unpack).
     def unpack(archive:, out:, target: TARGETS.fetch('virt'))
-      files = outputs(archive, outputs_of(target))
-      Dir.mkdir(out, 0o700)
-      files.each { |name, bytes| File.binwrite(File.join(out, name), bytes) }
+      GuestBuild.unpack(archive: archive, out: out, outputs: outputs_of(target), label: "L4Re's build")
     end
-
-    # The outputs archive holds, as name => bytes. The container wrote it, so it is refused
-    # unless it holds the directory out and exactly expected in it, each a regular file
-    # within its bound with all its bytes present, and ends in tar's zero block: no link,
-    # device, extended header, other name or truncated archive is accepted.
-    def outputs(archive, expected)
-      File.open(archive, 'rb') do |io|
-        files = Gem::Package::TarReader.new(io).filter_map do |entry|
-          path = entry.full_name
-          next if entry.directory? && path.delete_suffix('/') == 'out'
-
-          name = path.delete_prefix('out/')
-          bound = entry.header.typeflag == '0' && path == "out/#{name}" && expected[name]
-          raise Error, "L4Re's build exported an entry other than out/ and its regular files within their bounds" unless
-            bound && entry.header.size <= bound
-
-          bytes = entry.read.to_s
-          raise Error, "L4Re's build exported a truncated archive" unless bytes.bytesize == entry.header.size
-
-          [name, bytes]
-        end
-        raise Error, "L4Re's build exported an archive without tar's end" unless ended?(io)
-        raise Error, "L4Re's build exported #{files.size} outputs, not once each of #{expected.keys.join(', ')}" unless
-          files.map(&:first).sort == expected.keys.sort
-
-        files.to_h
-      end
-    rescue Gem::Package::Error
-      raise Error, "L4Re's build exported an archive that is not a tar"
-    end
-    private_class_method :outputs
-
-    # Whether the reader stopped at tar's zero block, not at the end of a cut archive.
-    def ended?(io) = io.pos >= 512 && io.pread(512, io.pos - 512) == "\0".b * 512
-    private_class_method :ended?
 
     # Builds L4Re's guest for target on the engine of the docker context, leaving its
     # bootable file, globalconfig.out and the build record in target's output directory.
@@ -247,10 +186,7 @@ module Erx
       trees = L4ReFetch::LAYOUT.to_h { |id, path| [path, fetched.fetched_tree(id)] }
       archive = File.join(directory, 'out.tar')
       steps = plan(endpoint: endpoint, name: name, image: image, inputs: inputs, trees: trees, archive: archive, jobs: jobs, target: target)
-      run = lambda do |step|
-        runner.run(step.argv, name: step.name, deadline: step.deadline, env: Dependencies::DOCKER_ENVIRONMENT,
-                              output_limit: step.limit, stdout: step.stdout)
-      end
+      run = ->(step) { GuestBuild.run(runner, step) }
       begin
         run.call(steps.fetch(:create))
         check_container(JsonInput.parse(File.binread(run.call(steps.fetch(:inspect)).fetch('log')),
@@ -260,7 +196,7 @@ module Erx
         run.call(steps.fetch(:export))
       ensure
         # Also on an interrupt; a failed removal raises only when nothing else propagates.
-        remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
+        GuestBuild.remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
       end
       out = File.join(directory, 'out')
       unpack(archive: archive, out: out, target: target)
@@ -270,16 +206,6 @@ module Erx
     ensure
       FileUtils.rm_rf(directory) if directory
     end
-
-    # Removes the build's container; raising is false while another failure propagates,
-    # which a failed removal must not replace.
-    def remove(runner:, endpoint:, name:, raising:)
-      runner.run(['docker', '--host', endpoint, 'rm', '--force', name], name: 'l4re-build-remove', deadline: 120,
-                                                                         env: Dependencies::DOCKER_ENVIRONMENT)
-    rescue Error
-      raise if raising
-    end
-    private_class_method :remove
 
     # The container's /tmp/inputs: the script, Fiasco's and target's L4Re defconfigs and the
     # tool packages.
