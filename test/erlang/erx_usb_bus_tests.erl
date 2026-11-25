@@ -480,9 +480,9 @@ the_application_runs_one_bus_group_per_controller_test() ->
         flush()
     end.
 
-%% The places start with the application, from the boot script, and their mint names
-%% itself usb_input's mint before init's ready report; the row's -eval starts the
-%% controllers after it, when erx_facet:provide/2 answers {error, reported}.
+%% The places start with the application, from the boot script, and their mints name
+%% themselves usb_input's and drive's mints before init's ready report; the row's
+%% -eval starts the controllers after it, when erx_facet:provide/2 answers {error, reported}.
 the_mint_provides_before_the_report_and_the_controllers_start_after_test() ->
     register(erx_usb_bus_tests, self()),
     process_flag(trap_exit, true),
@@ -490,8 +490,10 @@ the_mint_provides_before_the_report_and_the_controllers_start_after_test() ->
     {ok, Top} = erx_usb:start_link(),
     try
         {places, Places, _, _} = lists:keyfind(places, 1, supervisor:which_children(Top)),
-        [Mint] = [Pid || {mint, Pid, _, _} <- supervisor:which_children(Places)],
-        ?assertEqual(#{usb_input => Mint}, persistent_term:get({erx, provides})),
+        Children = supervisor:which_children(Places),
+        [Mint] = [Pid || {mint, Pid, _, _} <- Children],
+        [DriveMint] = [Pid || {drive_mint, Pid, _, _} <- Children],
+        ?assertEqual(#{usb_input => Mint, drive => DriveMint}, persistent_term:get({erx, provides})),
         persistent_term:put({erx, provides}, reported),
         ok = erx_usb:start_controllers([{erx_usb_fake_xhci, start_link, [{?FAKE, 2, #{[1] => keyboard}}]}]),
         _ = configured([1]),
