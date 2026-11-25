@@ -65,4 +65,13 @@ class BenchClockLineTest < Minitest::Test
     assert_match(/backslash/, refusal('CLOCK {"clock":"\u001b[31m"}'))
     refute_includes refusal(Fuzz.clock_line(clock: 'zz-secret')), 'zz-secret'
   end
+
+  # docs/design-bench.md, "The one clock": a POSIX guest's CLOCK_MONOTONIC ticks in
+  # nanoseconds, so its CLOCK line says so or is refused.
+  def test_a_monotonic_clock_ticks_in_nanoseconds
+    line = Fuzz.clock_line(clock: 'monotonic', frequency_hz: 1_000_000_000)
+    assert_equal 'monotonic', Erx::BenchMeasurement.clock(line).fetch('clock')
+    assert_match(/frequency_hz/, refusal(Fuzz.clock_line(clock: 'monotonic')))
+    assert_match(/guest clock/, refusal(Fuzz.clock_line(clock: 'cycles')))
+  end
 end

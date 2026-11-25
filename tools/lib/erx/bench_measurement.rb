@@ -56,7 +56,9 @@ module Erx
     # NOT_RUN is a cell's reason when its boot ended and printed no line for it.
     NOT_RUN = 'the guest printed no line for it'
     GUEST_STATUSES = %w[measured partial unsupported failed].freeze
-    GUEST_CLOCKS = %w[counter virtual].freeze
+    # The clocks a guest's lines read; a POSIX guest's monotonic clock ticks in nanoseconds.
+    GUEST_CLOCKS = %w[counter virtual monotonic].freeze
+    MONOTONIC_HZ = 1_000_000_000
     REQUIRED = %w[benchmark operation conditions frequency_hz status samples counts].freeze
     # The tick statistics: every profile's line but a sustained one's carries the first two.
     TICKED = %w[histogram largest].freeze
@@ -340,6 +342,8 @@ module Erx
       fields = decode(text, kind: 'CLOCK', required: CLOCK_FIELDS, known: CLOCK_FIELDS, max_bytes: LINE_BYTES)
       need(GUEST_CLOCKS.include?(fields['clock']), 'field clock is not a guest clock')
       need(frequency?(fields['frequency_hz']), 'field frequency_hz is not a frequency')
+      need(fields['clock'] != 'monotonic' || fields['frequency_hz'] == MONOTONIC_HZ,
+           'field frequency_hz is not nanoseconds on the monotonic clock')
       need(tick?(fields['increment']) && fields['increment'].positive?, 'field increment is not a positive tick count')
       %w[read_cost wait_rounding].each { |name| need(tick?(fields[name]), "field #{name} is not a tick count") }
       cycles = fields['cycles_per_tick']

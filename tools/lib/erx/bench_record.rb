@@ -22,9 +22,9 @@ module Erx
   # declaration names and the run's own facts, never from a guest's line.
   module BenchRecord
     # The format a record is written in; a record of any other is refused, never read.
-    FORMAT = 1
+    FORMAT = 2
     STATUSES = %w[measured partial timed_out unsupported failed rejected not_run].freeze
-    CLOCKS = %w[counter host analyser virtual].freeze
+    CLOCKS = %w[counter host analyser virtual monotonic cycles].freeze
     PROFILES = %w[fast expensive periodic sustained].freeze
     SYSTEMS = %w[erxos l4re freebsd linux].freeze
     # A benchmark, operation, load cell or placement name, as a declaration gives it.
@@ -40,6 +40,10 @@ module Erx
     NO_SUMMARY = %w[timed_out unsupported rejected not_run].freeze
     BOOT_LOGS = %i[serial qemu].freeze
     KINDS = %w[qemu-hvf qemu-tcg qemu-det pi4 host].freeze
+    # A cell's summary form: a histogram of samples, or another system's own program's
+    # operation count, total and printed mean (docs/design-bench.md, "A mean").
+    FORMS = %w[histogram mean].freeze
+    MEAN_FIELDS = %w[count total mean].freeze
 
     # The percentiles a summary reports, exact so that ceil(p * n) has no rounding error.
     P50 = 1 / 2r
@@ -150,22 +154,23 @@ module Erx
         BenchRecord.check(KINDS.include?(kind), 'environment kind is not one of the kinds')
         BenchRecord.check(model.nil? || (model.is_a?(String) && MODEL.match?(model)), 'machine model is not plain')
         BenchRecord.check(cpus.nil? || (cpus.is_a?(Integer) && cpus.between?(1, 1024)), 'CPU count is not positive')
-        BenchRecord.check(system.nil? || SYSTEMS.include?(system), 'system is not one of the board systems')
+        BenchRecord.check(system.nil? || SYSTEMS.include?(system), 'system is not one of the systems')
+        BenchRecord.check(kind == 'host' ? system.nil? : !system.nil?,
+                          kind == 'host' ? 'a host environment runs no guest system' : "a #{kind} environment needs its system")
         BenchRecord.check(BenchRecord.plain_hash?(details), 'environment details are not a map')
         super(kind: kind, model: model, cpus: cpus, system: system, details: BenchRecord.frozen(details))
         name
       end
 
-      # docs/design-bench.md, "Environments": the name carries no host name.
+      # docs/design-bench.md, "Environments": the name carries no host name, and every
+      # environment that boots a guest names its system, so two systems never share one.
       def name
         case kind
         when 'qemu-hvf', 'qemu-tcg'
           BenchRecord.check(model && cpus, "#{kind} needs a machine model and a CPU count")
-          "#{kind}-#{model}-#{cpus}cpu"
-        when 'qemu-det' then 'qemu-det'
-        when 'pi4'
-          BenchRecord.check(system, 'a board environment needs its system')
-          "pi4-4gb-#{system}"
+          "#{kind}-#{model}-#{cpus}cpu-#{system}"
+        when 'qemu-det' then "qemu-det-#{system}"
+        when 'pi4' then "pi4-4gb-#{system}"
         else
           BenchRecord.check(model, 'a host environment needs its machine model')
           "host-#{model}"
@@ -230,43 +235,37 @@ module Erx
 
     # One operation under one set of conditions. Every status but measured carries its
     # reason, so an unknown, partial, unsupported or timed-out result says why. detail is
-    # the histogram, extremes, largest and raw samples (the operation's file); the summary
-    # run.json shows is derived from it, never supplied beside it.
-    Cell = Data.define(:benchmark, :operation, :conditions, :profile, :status, :reason, :counts, :detail) do
-      def initialize(benchmark:, operation:, conditions:, profile:, status:, reason:, counts:, detail:)
+    # what the cell's form holds (the operation's file): a histogram's buckets, extremes,
+    # largest and raw samples, with its profile and lost, early and missed counts; or a
+    # mean's count, total and printed mean, with no profile and no counts, which its
+    # program never gave. The summary run.json shows is derived from detail, never
+    # supplied beside it.
+    Cell = Data.define(:benchmark, :operation, :conditions, :form, :profile, :status, :reason, :counts, :detail) do
+      def initialize(benchmark:, operation:, conditions:, profile:, status:, reason:, counts:, detail:, form: 'histogram')
         BenchRecord.check([benchmark, operation].all? { |name| name.is_a?(String) && NAME.match?(name) },
                           'benchmark or operation is not a declaration name')
-        BenchRecord.check(conditions.is_a?(Conditions) && profile.is_a?(Profile), 'cell conditions are not typed')
+        BenchRecord.check(conditions.is_a?(Conditions), 'cell conditions are not typed')
+        BenchRecord.check(FORMS.include?(form), 'summary form is not histogram or mean')
         BenchRecord.check(STATUSES.include?(status), 'status is not one of the cell statuses')
         BenchRecord.check(status == 'measured' ? reason.nil? : (reason.is_a?(String) && REASON.match?(reason)),
                           'a cell that is not measured needs its reason, in plain words')
-        BenchRecord.check(counts.is_a?(Hash) && counts.keys.sort == %w[early lost missed] &&
-                          counts.values.all? { |count| count.is_a?(Integer) && !count.negative? },
-                          'counts are not lost, early and missed')
         BenchRecord.check(BenchRecord.plain_hash?(detail), 'detail is not a map')
-        BenchRecord.check(BenchRecord.histogram?(detail.fetch('histogram', [])),
-                          'histogram is not ascending [low, last, count] buckets')
-        BenchRecord.check(BenchRecord.windows?(detail.fetch('windows', [])),
-                          'windows are not counts by window and thread, the same threads in every window')
-        BenchRecord.check(profile.name == 'sustained' || !detail.key?('windows'), 'a cell that is not sustained has windows')
-        BenchRecord.check(status != 'measured' || BenchRecord.samples(profile, detail) == profile.samples,
-                          'a measured cell lacks samples its profile asked for: it holds every sample or is partial')
-        BenchRecord.extremes(detail)
-        BenchRecord.check(status != 'measured' || (counts['lost'].zero? && counts['early'].zero?),
-                          'a cell with a lost wake or an early return is failed, not measured')
-        BenchRecord.check(!NO_SUMMARY.include?(status) || BenchRecord.samples(profile, detail).zero?,
-                          "a #{status} cell has no samples")
-        BenchRecord.check(status != 'measured' || BenchRecord.uncertainty_bounded?(detail),
-                          'a measured cell has an uncertainty above a tenth of its median')
-        super(benchmark: benchmark, operation: operation, conditions: conditions, profile: profile, status: status,
-              reason: reason, counts: BenchRecord.frozen(counts), detail: BenchRecord.frozen(detail))
+        if form == 'mean'
+          BenchRecord.mean!(status: status, profile: profile, counts: counts, detail: detail)
+        else
+          BenchRecord.histogram!(status: status, profile: profile, counts: counts, detail: detail)
+        end
+        super(benchmark: benchmark, operation: operation, conditions: conditions, form: form, profile: profile,
+              status: status, reason: reason, counts: counts && BenchRecord.frozen(counts),
+              detail: BenchRecord.frozen(detail))
       end
 
-      # What the profile lets the cell claim, from its histogram: the sample count, the
-      # extremes, the percentiles the count allows, and whether the samples are partial.
-      # A cell whose status has no summary claims nothing.
+      # What the cell claims, from its detail; a cell whose status has no summary claims
+      # nothing. A histogram claims its sample count, extremes, the percentiles the count
+      # allows, and whether the samples are partial; a mean its count, total and mean.
       def summary
         return {} if NO_SUMMARY.include?(status)
+        return detail.slice(*MEAN_FIELDS) if form == 'mean'
         return BenchRecord.sustained_summary(self) if profile.name == 'sustained'
 
         histogram = detail.fetch('histogram', [])
@@ -278,12 +277,54 @@ module Erx
       def file = "#{benchmark}/#{operation}.json"
     end
 
+    # A histogram cell's shape: its profile, its counts, and buckets that hold every
+    # sample a measured cell's profile asked for, none where its status has no summary.
+    def self.histogram!(status:, profile:, counts:, detail:)
+      check(profile.is_a?(Profile), 'a histogram cell has no profile')
+      check(counts.is_a?(Hash) && counts.keys.sort == %w[early lost missed] &&
+            counts.values.all? { |count| count.is_a?(Integer) && !count.negative? },
+            'counts are not lost, early and missed')
+      check(histogram?(detail.fetch('histogram', [])), 'histogram is not ascending [low, last, count] buckets')
+      check(windows?(detail.fetch('windows', [])),
+            'windows are not counts by window and thread, the same threads in every window')
+      check(profile.name == 'sustained' || !detail.key?('windows'), 'a cell that is not sustained has windows')
+      check(status != 'measured' || samples(profile, detail) == profile.samples,
+            'a measured cell lacks samples its profile asked for: it holds every sample or is partial')
+      extremes(detail)
+      check(status != 'measured' || (counts['lost'].zero? && counts['early'].zero?),
+            'a cell with a lost wake or an early return is failed, not measured')
+      check(!NO_SUMMARY.include?(status) || samples(profile, detail).zero?, "a #{status} cell has no samples")
+      check(status != 'measured' || uncertainty_bounded?(detail), 'a measured cell has an uncertainty above a tenth of its median')
+    end
+
+    # A mean cell's shape (docs/design-bench.md, "A mean"): no profile and no counts; a
+    # measured one holds exactly its operation count, the total over them and the mean
+    # its program printed, and any other holds nothing. A total has no samples to be
+    # partial of.
+    def self.mean!(status:, profile:, counts:, detail:)
+      check(profile.nil? && counts.nil?, 'a mean has no profile and no lost, early or missed counts')
+      check(status != 'partial', 'a mean is never partial')
+      return check(detail.empty?, "a #{status} mean holds no count, total or mean") unless status == 'measured'
+
+      count, total, mean = detail.values_at(*MEAN_FIELDS)
+      check(detail.keys.sort == MEAN_FIELDS.sort && count.is_a?(Integer) && count.positive? &&
+            total.is_a?(Integer) && !total.negative? && mean.is_a?(Numeric) && !mean.negative?,
+            'a measured mean is not a positive count, a total and a mean')
+    end
+
+    # Where a run happened, what ran, when, its boot's calibration and its cells. A run
+    # whose cells are all means has no clock group, since their program measures no
+    # calibration; any other has its boot's, empty when the boot gave no valid CLOCK line.
     Record = Data.define(:environment, :subject, :run, :clock, :cells) do
       def initialize(environment:, subject:, run:, clock:, cells:)
         BenchRecord.check(environment.is_a?(Environment) && subject.is_a?(Subject) && run.is_a?(Run),
                           'record parts are not typed')
-        BenchRecord.check(BenchRecord.plain_hash?(clock), 'clock calibration is not a map')
         BenchRecord.check(cells.is_a?(Array) && !cells.empty? && cells.all?(Cell), 'record holds no cells')
+        if cells.all? { |cell| cell.form == 'mean' }
+          BenchRecord.check(clock.nil?, 'a record of means has no clock group')
+        else
+          BenchRecord.check(BenchRecord.plain_hash?(clock), 'clock calibration is not a map')
+        end
         BenchRecord.check(cells.map(&:key).uniq.size == cells.size, 'record holds one cell twice')
         super(environment: environment, subject: subject, run: run, clock: BenchRecord.frozen(clock), cells: cells.freeze)
       end
@@ -426,7 +467,7 @@ module Erx
         'cells' => record.cells.map do |cell|
           cell.to_h.except(:detail).transform_keys(&:to_s)
               .merge('conditions' => cell.conditions.to_h.transform_keys(&:to_s),
-                     'profile' => cell.profile.to_h.transform_keys(&:to_s), 'summary' => cell.summary,
+                     'profile' => cell.profile&.to_h&.transform_keys(&:to_s), 'summary' => cell.summary,
                      'file' => cell.file)
         end }
     end
@@ -437,9 +478,9 @@ module Erx
         conditions = Conditions.new(**keyword.call(cell.fetch('conditions')))
         detail = details.fetch(cell.fetch('file')).find { |entry| entry.fetch('conditions') == cell.fetch('conditions') }
         check(detail, 'an operation file lacks a cell the manifest lists')
+        profile = cell.fetch('profile')&.then { |sizes| Profile.new(**keyword.call(sizes)) }
         Cell.new(**keyword.call(cell, 'conditions', 'profile', 'summary', 'file'), conditions: conditions,
-                                                                   profile: Profile.new(**keyword.call(cell.fetch('profile'))),
-                                                                   detail: detail.fetch('detail'))
+                                                                   profile: profile, detail: detail.fetch('detail'))
       end
       run = manifest.fetch('run')
       Record.new(environment: Environment.new(**keyword.call(manifest.fetch('environment'), 'name')),

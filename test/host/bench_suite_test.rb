@@ -37,8 +37,8 @@ class BenchSuiteTest < Minitest::Test
   end
 
   def test_unsupported_is_expected_only_where_the_environment_lacks_the_cpus
-    four = Erx::BenchRecord::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: nil, details: {})
-    deterministic = Erx::BenchRecord::Environment.new(kind: 'qemu-det', model: nil, cpus: 1, system: nil, details: {})
+    four = Erx::BenchRecord::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {})
+    deterministic = Erx::BenchRecord::Environment.new(kind: 'qemu-det', model: nil, cpus: 1, system: 'erxos', details: {})
     cell = ->(placement) { Suite::LandingCell.new(operation: 'wake-same-cpu', load: 'idle', placement: placement, parameters: {}) }
     refute Suite.expected_unsupported?(cell.call('cross-cpu'), four)
     assert Suite.expected_unsupported?(cell.call('cross-cpu'), deterministic)
@@ -145,7 +145,7 @@ class BenchSuiteTest < Minitest::Test
                                         status: 'not_run', reason: 'the guest printed no line for it',
                                         counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 }, detail: {})
       record = Erx::BenchRecord::Record.new(
-        environment: Erx::BenchRecord::Environment.new(kind: boot.kind, model: 'Mac16,10', cpus: boot.cpus, system: nil, details: {}),
+        environment: Erx::BenchRecord::Environment.new(kind: boot.kind, model: 'Mac16,10', cpus: boot.cpus, system: 'erxos', details: {}),
         subject: Erx::BenchRecord::Subject.new(revision: '0' * 40, dirty: false, details: {}),
         run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
         clock: {}, cells: [cell]
@@ -193,7 +193,7 @@ class BenchSuiteTest < Minitest::Test
                                       status: status, reason: 'the machine has one CPU',
                                       counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 }, detail: {})
     Erx::BenchRecord::Record.new(
-      environment: Erx::BenchRecord::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: cpus, system: nil, details: {}),
+      environment: Erx::BenchRecord::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: cpus, system: 'erxos', details: {}),
       subject: Erx::BenchRecord::Subject.new(revision: '0' * 40, dirty: false, details: {}),
       run: Erx::BenchRecord::Run.new(date: Time.at(0).utc, started_by: 'landing', load: nil, host_cpus: nil, reused_from: nil),
       clock: {}, cells: [cell]
@@ -204,5 +204,29 @@ class BenchSuiteTest < Minitest::Test
     FileUtils.mkdir_p(path)
     _, error, status = Open3.capture3('git', '-C', path, *arguments, stdin_data: '')
     raise "git #{arguments.first} failed: #{error}" unless status.success?
+  end
+
+  # docs/design-bench.md, "Counterparts": an operation names what each other system runs
+  # for it; a cell no other system has a counterpart for is not asked of that system.
+  def test_a_counterpart_names_another_system_and_what_it_runs
+    operation = ->(counterparts) { Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok', counterparts: counterparts) }
+    assert_equal({ 'linux' => 'a condition wait' }, operation.call('linux' => 'a condition wait').counterparts)
+    [{ 'erxos' => 'itself' }, { 'plan9' => 'x' }, { 'linux' => '' }, { 'linux' => "a\ttab" }].each do |counterparts|
+      assert_raises(Erx::Error, counterparts.inspect) { operation.call(counterparts) }
+    end
+    assert_empty Suite::Operation.new(name: 'x', profile: 'fast', result: 'ok').counterparts
+  end
+
+  def test_wake_sets_posix_beside_its_wakes_and_deadline_and_nothing_beside_its_own
+    operations = Suite.benchmark('wake').operations
+    beside = operations.select { |_, operation| operation.counterparts.key?('linux') }.keys.sort
+    assert_equal %w[park-deadline wake-cross-cpu wake-same-cpu], beside
+    assert(operations.values.none? { |operation| operation.counterparts.key?('l4re') })
+  end
+
+  # The side-by-side tables are one per layer: the native boot's cells set the kernels'
+  # paths beside each other, the xdomain boot's the runtimes' messages.
+  def test_each_boot_is_one_layer
+    assert_equal({ 'native' => 'C', 'xdomain' => 'Erlang' }, Suite::BOOTS.transform_values(&:layer))
   end
 end

@@ -108,7 +108,7 @@ class BenchSustainedTest < Minitest::Test
       longest = [[72_000] * 4, [72_000, 96_000, 72_000, 72_000], [72_000, 72_000, 72_000, late]]
       cell = boot([*window_lines(longest: longest, iterations: every_pass), bench_line]).fetch(:cells).first
       record = Record::Record.new(
-        environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: nil, details: {}),
+        environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {}),
         subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
         run: Record::Run.new(date: Time.utc(2026, 11, 23), started_by: 'manual', load: [0.5, 0.5], host_cpus: 12,
                              reused_from: nil),

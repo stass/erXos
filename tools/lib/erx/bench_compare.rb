@@ -10,7 +10,8 @@ module Erx
   # function of records that compares one statistic of one cell between a baseline of at
   # least three runs and a candidate of one run or three. Records are compared only when
   # their environments and cells are equal; a TCG or deterministic record is compared only
-  # with its own kind. Inconclusive is never a pass, and a replayed boot is never a side.
+  # with its own kind, two systems never, and a mean, which has one number per run, with
+  # nothing. Inconclusive is never a pass, and a replayed boot is never a side.
   module BenchCompare
     # One run's cell, with the record that holds it.
     Side = Data.define(:record, :cell)
@@ -57,8 +58,12 @@ module Erx
 
     def refusal(a, b)
       first, second = a.record.environment, b.record.environment
-      if (first.isolated? || second.isolated?) && first.kind != second.kind
+      if [a, b].any? { |side| side.cell.form == 'mean' }
+        'a mean has no distribution to compare'
+      elsif (first.isolated? || second.isolated?) && first.kind != second.kind
         'TCG numbers are not compared with HVF or native numbers'
+      elsif first.system != second.system
+        "systems differ: #{first.system} against #{second.system}; systems are only set side by side"
       elsif first.name != second.name
         "environments differ: #{first.name} against #{second.name}"
       else

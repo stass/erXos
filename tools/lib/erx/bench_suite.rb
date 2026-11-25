@@ -17,21 +17,32 @@ module Erx
   # suite's cells are each boot's benchmarks, and each takes the worst of its benchmark
   # cells' statuses through SUITE_STATUS.
   module BenchSuite
+    # The systems an operation's counterpart can name, and the plain words of its line.
+    OTHER_SYSTEMS = (BenchRecord::SYSTEMS - ['erxos']).freeze
+    COUNTERPART = /\A[A-Za-z0-9_][ -~]{0,159}\z/
+
     # An operation: an exact act with a start and an end on one clock, the profile it is
     # sampled by, and what a correct result of the act is. A handshake (one thread acts,
     # another answers before the first acts again) cannot be batched, so it is exempt
     # from the short operations' batches and reports batch 1 (docs/design-bench.md, "The
     # one clock"). A periodic operation whose timer rounds its own deadlines is declared
     # sweep: false, and its lines carry no sweep phases (docs/design-bench.md, "A benchmark").
-    Operation = Data.define(:name, :profile, :result, :handshake, :sweep) do
-      def initialize(name:, profile:, result:, handshake: false, sweep: true)
+    # counterparts maps each other system that runs a counterpart of the operation to
+    # what it runs, the line the side-by-side table prints; a system it does not name is
+    # not asked for the operation (docs/design-bench.md, "Counterparts").
+    Operation = Data.define(:name, :profile, :result, :handshake, :sweep, :counterparts) do
+      def initialize(name:, profile:, result:, handshake: false, sweep: true, counterparts: {})
         BenchRecord.check(name.is_a?(String) && BenchRecord::NAME.match?(name), 'operation is not a plain name')
         BenchRecord.check(BenchRecord::PROFILES.include?(profile), 'profile is not one of the profiles')
         BenchRecord.check(result.is_a?(String) && !result.empty?, "#{name} does not say what a correct result is")
         BenchRecord.check([true, false].include?(handshake), "#{name}'s handshake is neither true nor false")
         BenchRecord.check([true, false].include?(sweep), "#{name}'s sweep is neither true nor false")
         BenchRecord.check(sweep || profile == 'periodic', "#{name} is not periodic, so it has no sweep to decline")
-        super
+        BenchRecord.check(counterparts.is_a?(Hash) &&
+                          counterparts.all? { |system, line| OTHER_SYSTEMS.include?(system) && COUNTERPART.match?(line) },
+                          "#{name}'s counterparts are not other systems' lines in plain words")
+        super(name: name, profile: profile, result: result, handshake: handshake, sweep: sweep,
+              counterparts: counterparts.freeze)
       end
     end
 
@@ -55,11 +66,14 @@ module Erx
       def cpus = PLACEMENTS.fetch(placement)
     end
 
-    # A landing boot: the environment kind and CPU count it boots at.
-    Boot = Data.define(:kind, :cpus)
+    # A landing boot: the environment kind and CPU count it boots at, and the layer its
+    # cells measure, which names its side-by-side table (docs/design-bench.md,
+    # "Counterparts"): the native boot's C cells set the kernels' own paths beside each
+    # other, the xdomain boot's Erlang cells the runtimes' messages.
+    Boot = Data.define(:kind, :cpus, :layer)
     BOOTS = {
-      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4),
-      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4)
+      'native' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'C'),
+      'xdomain' => Boot.new(kind: 'qemu-hvf', cpus: 4, layer: 'Erlang')
     }.freeze
 
     # A benchmark: its operations by name and its landing cells per boot, each naming a

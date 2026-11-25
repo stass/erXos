@@ -10,7 +10,7 @@ class BenchCompareTest < Minitest::Test
   Record = Erx::BenchRecord
   Compare = Erx::BenchCompare
 
-  def environment(kind) = Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: 4, system: nil, details: {})
+  def environment(kind, system: 'erxos') = Record::Environment.new(kind: kind, model: 'Mac16,10', cpus: 4, system: system, details: {})
 
   def cell(median: 100, bucket: 2, batch: 1, status: 'measured')
     Record::Cell.new(
@@ -24,15 +24,37 @@ class BenchCompareTest < Minitest::Test
     )
   end
 
-  def side(kind: 'qemu-hvf', load: [0.5, 0.5], reused_from: nil, **cell_options)
+  def side(kind: 'qemu-hvf', system: 'erxos', load: [0.5, 0.5], reused_from: nil, cell: nil, **cell_options)
     record = Record::Record.new(
-      environment: environment(kind),
+      environment: environment(kind, system: system),
       subject: Record::Subject.new(revision: 'a' * 40, dirty: false, details: {}),
       run: Record::Run.new(date: Time.utc(2026, 11, 23), started_by: 'manual', load: load, host_cpus: 12,
                            reused_from: reused_from),
-      clock: {}, cells: [cell(**cell_options)]
+      clock: cell ? nil : {}, cells: [cell || cell(**cell_options)]
     )
     Compare::Side.new(record: record, cell: record.cells.first)
+  end
+
+  # docs/design-bench.md, "Comparison": two systems' records differ in their environment,
+  # so a comparison of them is refused naming the system; only the side-by-side table
+  # sets them beside each other.
+  def test_two_systems_are_never_compared
+    error = assert_raises(Erx::Error) { Compare.comparable!(side(system: 'linux'), side) }
+    assert_match(/system/, error.message)
+    assert_match(/linux against erxos/, error.message)
+    assert_raises(Erx::Error) { verdict([side, side, side], [side(system: 'linux')]) }
+  end
+
+  def test_a_mean_has_no_distribution_to_compare
+    mean = Record::Cell.new(
+      benchmark: 'wake', operation: 'wake-same-cpu', form: 'mean',
+      conditions: Record::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'counter', batch: 1),
+      profile: nil, status: 'measured', reason: nil, counts: nil,
+      detail: { 'count' => 20, 'total' => 2000, 'mean' => 100 }
+    )
+    [[side(cell: mean), side], [side, side(cell: mean)], [side(cell: mean), side(cell: mean)]].each do |a, b|
+      assert_equal 'a mean has no distribution to compare', assert_raises(Erx::Error) { Compare.comparable!(a, b) }.message
+    end
   end
 
   def verdict(baseline, candidate) =

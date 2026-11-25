@@ -57,7 +57,7 @@ class BenchRecordTest < Minitest::Test
 
   def record(cells: [cell], date: Time.utc(2026, 11, 23, 12, 0, 0))
     Record::Record.new(
-      environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: nil, details: {}),
+      environment: Record::Environment.new(kind: 'qemu-hvf', model: 'Mac16,10', cpus: 4, system: 'erxos', details: {}),
       subject: Record::Subject.new(revision: REVISION, dirty: false, details: {}),
       run: Record::Run.new(date: date, started_by: 'manual', load: [0.5, 0.6], host_cpus: 12, reused_from: nil),
       clock: { 'frequency_hz' => 24_000_000 }, cells: cells
@@ -68,7 +68,7 @@ class BenchRecordTest < Minitest::Test
 
   def test_a_record_under_a_separate_repository_is_written
     run = write(@history)
-    assert_equal File.join(@history, 'bench', 'qemu-hvf-Mac16,10-4cpu', '20261123T120000Z-abcdef012345'), run
+    assert_equal File.join(@history, 'bench', 'qemu-hvf-Mac16,10-4cpu-erxos', '20261123T120000Z-abcdef012345'), run
     assert File.file?(File.join(run, 'run.json'))
     assert File.file?(File.join(run, 'wake', 'park-deadline.json'))
     assert_equal Record::FORMAT, JSON.parse(File.read(File.join(run, 'run.json'))).fetch('format')
@@ -269,5 +269,97 @@ class BenchRecordTest < Minitest::Test
 
   def test_a_percentile_is_its_buckets_upper_bound
     assert_equal({ 'value' => 1063, 'bucket' => 64 }, Record.percentile([[1000, 1063, 40]], Record::P50))
+  end
+
+  def environment(kind, system:, model: 'Mac16,10', cpus: 4) =
+    Record::Environment.new(kind: kind, model: model, cpus: cpus, system: system, details: {})
+
+  # docs/design-bench.md, "Environments": every environment that boots a guest names its
+  # system, so two systems' records never share one; the host runs stock OTP and none.
+  def test_every_guests_environment_names_its_system
+    assert_equal 'qemu-hvf-Mac16,10-4cpu-erxos', environment('qemu-hvf', system: 'erxos').name
+    assert_equal 'qemu-hvf-Mac16,10-4cpu-linux', environment('qemu-hvf', system: 'linux').name
+    assert_equal 'qemu-tcg-Mac16,10-1cpu-l4re', environment('qemu-tcg', system: 'l4re', cpus: 1).name
+    assert_equal 'qemu-det-erxos', environment('qemu-det', system: 'erxos', model: nil, cpus: 1).name
+    assert_equal 'pi4-4gb-freebsd', environment('pi4', system: 'freebsd', model: nil).name
+    assert_equal 'host-Mac16,10', environment('host', system: nil).name
+    %w[qemu-hvf qemu-tcg qemu-det pi4].each do |kind|
+      assert_match(/needs its system/, assert_raises(Erx::Error) { environment(kind, system: nil) }.message, kind)
+    end
+    assert_raises(Erx::Error) { environment('host', system: 'erxos') }
+  end
+
+  def test_a_record_of_a_guests_environment_without_its_system_does_not_parse
+    run = write(@history)
+    path = File.join(run, 'run.json')
+    manifest = JSON.parse(File.read(path))
+    manifest.fetch('environment')['system'] = nil
+    File.write(path, JSON.generate(manifest))
+    assert_raises(Erx::Error) { Record.read(run) }
+  end
+
+  def test_the_other_systems_clocks_are_clocks
+    %w[monotonic cycles].each do |clock|
+      Record::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: clock, batch: 1)
+    end
+    assert_raises(Erx::Error) do
+      Record::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'tsc', batch: 1)
+    end
+  end
+
+  MEAN = { 'count' => 10_000, 'total' => 4_213_000, 'mean' => 421.3 }.freeze
+
+  def mean_cell(status: 'measured', detail: status == 'measured' ? MEAN : {}, counts: nil, profile: nil)
+    Record::Cell.new(
+      benchmark: 'nullcall', operation: 'root-same-space', form: 'mean',
+      conditions: Record::Conditions.new(load: 'idle', placement: 'same-cpu', parameters: {}, clock: 'cycles', batch: 1),
+      profile: profile, status: status, reason: status == 'measured' ? nil : 'test', counts: counts, detail: detail
+    )
+  end
+
+  def mean_record(cells: [mean_cell], clock: nil)
+    Record::Record.new(
+      environment: environment('qemu-hvf', system: 'l4re', cpus: 1),
+      subject: Record::Subject.new(revision: REVISION, dirty: false, details: {}),
+      run: Record::Run.new(date: Time.utc(2026, 11, 23, 12, 0, 0), started_by: 'manual', load: [0.5, 0.6], host_cpus: 12,
+                           reused_from: nil),
+      clock: clock, cells: cells
+    )
+  end
+
+  # docs/design-bench.md, "A mean": a cell another system's own program reports holds its
+  # operation count, total and printed mean, and its samples, percentiles, extremes and
+  # event counts are absent, never zero.
+  def test_a_mean_through_the_record_keeps_only_its_count_total_and_mean
+    run = Record.write(mean_record, history: @history, erxos_root: @erxos)
+    back = Record.read(run)
+    assert_equal mean_record, back
+    cell = back.cells.first
+    assert_equal ['mean', MEAN, nil, nil], [cell.form, cell.summary, cell.counts, cell.profile]
+    assert_nil back.clock
+    listed = JSON.parse(File.read(File.join(run, 'run.json'))).fetch('cells').first
+    assert_equal MEAN, listed.fetch('summary')
+    assert_nil listed.fetch('counts')
+  end
+
+  def test_a_mean_holds_nothing_but_its_mean
+    assert_raises(Erx::Error) { mean_cell(detail: MEAN.merge('histogram' => [[1, 1, 1]])) }
+    assert_raises(Erx::Error) { mean_cell(detail: MEAN.except('total')) }
+    assert_raises(Erx::Error) { mean_cell(detail: MEAN.merge('count' => 0)) }
+    assert_raises(Erx::Error) { mean_cell(counts: { 'lost' => 0, 'early' => 0, 'missed' => 0 }) }
+    assert_raises(Erx::Error) { mean_cell(profile: Record::Profile.new(name: 'fast', warmup: 0, samples: 1, runs: 1)) }
+    assert_raises(Erx::Error) { mean_cell(status: 'partial') }
+    assert_raises(Erx::Error) { mean_cell(status: 'failed', detail: MEAN) }
+    assert_empty mean_cell(status: 'failed').summary
+    assert_empty mean_cell(status: 'not_run').summary
+    assert_raises(Erx::Error) { cell.with(form: 'median') }
+  end
+
+  # A record whose cells are all means has no clock group, since their program measures
+  # no calibration; a record with a histogram cell keeps its boot's.
+  def test_only_a_record_of_means_has_no_clock_group
+    assert_raises(Erx::Error) { mean_record(clock: { 'frequency_hz' => 24_000_000 }) }
+    assert_raises(Erx::Error) { record.with(clock: nil) }
+    mean_record(cells: [mean_cell, cell], clock: {})
   end
 end

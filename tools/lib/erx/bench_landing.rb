@@ -61,7 +61,7 @@ module Erx
 
     def environment(boot, accel:, model:, memory_mib:, measured:)
       BenchRecord::Environment.new(
-        kind: boot.kind, model: model, cpus: boot.cpus, system: nil,
+        kind: boot.kind, model: model, cpus: boot.cpus, system: 'erxos',
         details: { 'memory_mib' => memory_mib, 'accelerator' => accel, 'machine' => 'virt',
                    'qemu' => measured.fetch(:qemu_version), 'host_os' => RbConfig::CONFIG['host_os'] }.compact
       )
