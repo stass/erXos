@@ -1157,7 +1157,7 @@ erXos's ticks times 128 are counts of the same clock. TCG was not run.
 
 ### The walk
 
-`tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE --ssh DEST
+`tools/erx bench NAME --env pi4-4gb-erxos --console DEVICE|tcp:HOST:PORT --ssh DEST
 --key FILE [--http DIR] [--runs N] [--profile landing|full] [--set DIR ...]` runs it,
 with `--http DIR` the served link that `tools/erx netboot --http` stages and
 `tools/erx netboot serve --http` serves (`~/erxos-http` when not given):
@@ -1176,7 +1176,9 @@ with `--http DIR` the served link that `tools/erx netboot --http` stages and
    found target is only read. Its **return identity**, the build and
    index hash of its set's `kernel8.img`, is read when the found target is
    a stage `Netboot` made, and is unknown otherwise.
-2. It opens the console device, 115,200 baud, and starts the log. Over
+2. It opens the console, a serial device set to 115,200 baud or a TCP
+   port that serves it, such as a Glasgow UART applet's, which it reads
+   directly, and starts the log. Over
    ssh it reads `/proc/sensors/status`
    ([design-board-sensors.md](design-board-sensors.md#procsensors-and-the-inspector)):
    the SoC temperature, the throttle state and the ARM clock before the
@@ -1243,7 +1245,8 @@ The boot server's decision is pure: the request `Web::Http.read` gives,
 the link's target, the cursor and the download in progress, to the
 answer and the next state ([design-platforms.md, The HTTP form](design-platforms.md#the-http-form)).
 `BoardWalk` and `BoardLog` are pure and tested on the host;
-`BoardConsole` opens the device, sets its line, and appends what it reads
+`BoardConsole` opens the device and sets its line, or connects to the
+console's TCP port, and appends what it reads
 to the log, yielding each line, at most a `BENCH` line's 64 KiB and its
 end, to the walk. `BoardRun` is the walk's effects around them: under
 the lock it reads the found target and its return identity, prepares
@@ -2800,8 +2803,10 @@ is then refused, and the cell is `rejected`.
 **On the board.** A board run holds the stager's lock from before it
 reads the found target to its last `point`, so `tools/erx netboot` and a
 second run wait for it, and nothing it prepared or reads changes under
-it; it holds the console device exclusively, so a second run's open is
-refused. `pi4_http_stage.rb` takes no part in the lock and writes into
+it; it holds a console device exclusively, so a second run's open is
+refused. A console's TCP port is its server's to share: the Glasgow UART
+applet's serves one connection and closes the walk's when another opens,
+which ends the walk with its console closed. `pi4_http_stage.rb` takes no part in the lock and writes into
 whatever directory its `--www` names, a queue's included, so `Netboot`'s
 HTTP form replaces it ([Decisions](#the-network-boot-the-stager-drives)).
 The walk is one thread over one console; its decisions are `BoardWalk`'s,
@@ -2875,8 +2880,8 @@ from it, and the board's `boot.img` request would then be answered 404.
 | a sustained cell whose `WINDOW` lines are not exactly one for each of its windows and threads, in order | the cell is `rejected`, naming the first missing or misplaced line |
 | `WINDOW` lines followed by a `BENCH` line of another profile, or by none | the lines are refused |
 | a `measured` sustained cell with a thread that made no pass in a window | the cell is `failed`, naming the thread and the window |
-| `--env pi4-4gb-erxos` without `--console DEVICE`, `--ssh DEST` or `--key FILE` | refused before anything is built, naming what is missing |
-| a console device that cannot be opened, or that another run holds | refused before anything is served |
+| `--env pi4-4gb-erxos` without `--console`, `--ssh DEST` or `--key FILE` | refused before anything is built, naming what is missing |
+| a console device that cannot be opened, or that another run holds; a console `tcp:HOST:PORT` that is malformed or cannot be reached | refused before anything is served |
 | a served path that is neither a symbolic link nor absent, such as the directory `pi4_http_stage.rb` writes | refused, as `tools/erx netboot` refuses it, naming the path |
 | a found target that is a queue of more than one entry | refused: `the served link names a queue an earlier run left; stage a build first` |
 | a signing key that is not a regular file when opened without following a link, is not the user's own, grants any permission to group or others, or is not RSA-2048 | refused, naming which; no byte of the file is shown |

@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # frozen_string_literal: true
 
+require 'io/console'
 require 'minitest/autorun'
+require 'pty'
+require 'socket'
 require 'stringio'
 require 'tmpdir'
 require_relative '../../tools/lib/erx/board_console'
 
 # The board's console for a walk (docs/design-bench.md, "The walk"): every byte to the log,
 # each line of at most its limit to the walk, a longer one only as bytes, and the device
-# held by one run at a time.
+# held by one run at a time, or a TCP port read directly.
 class BoardConsoleTest < Minitest::Test
   NAME = '0123456789abcdef0123456789abcdef'
 
@@ -92,6 +95,71 @@ class BoardConsoleTest < Minitest::Test
       opened.close
       missing = assert_raises(Erx::Error) { Erx::BoardConsole.open(File.join(directory, 'none'), log: File.join(directory, 'x.log'), clock: -> { 0 }) }
       assert_match(/cannot be opened: ENOENT/, missing.message)
+    end
+  end
+  # count 4 KiB lines, as a board's wide BENCH lines come.
+  def wide(count) = Array.new(count) { |index| "BENCH #{(index % 10).to_s * 4090}\n" }.join.b
+
+  # The events of console read slowly: the reader waits until everything has been sent
+  # before its first read, then reads until the console is quiet, and closes it.
+  def slowly_read(console, log:)
+    sleep 0.3
+    events = []
+    loop do
+      read = console.read(Process.clock_gettime(Process::CLOCK_MONOTONIC) + 0.5)
+      break if read.first.is_a?(Erx::BoardWalk::Quiet) || read.first.is_a?(Erx::BoardWalk::Stop)
+
+      events.concat(read)
+    end
+    console.close
+    [events.map { |event| [event.class, event.bytes] }, File.binread(log)]
+  end
+
+  def whole?(read, sent)
+    read == [Array.new(sent.bytesize / 4097) { [Erx::BoardWalk::Line, 4097] }, sent]
+  end
+
+  def test_a_console_served_as_a_tcp_port_is_read_directly_and_every_byte_arrives_whole
+    server = TCPServer.new('127.0.0.1', 0)
+    board = Thread.new do
+      server.accept.tap { |client| client.write(wide(3)) }
+    rescue IOError
+      nil
+    end
+    Dir.mktmpdir do |directory|
+      log = File.join(directory, 'tcp.log')
+      console = Erx::BoardConsole.open("tcp:127.0.0.1:#{server.addr[1]}", log: log,
+                                                                          clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
+      assert whole?(slowly_read(console, log: log), wide(3))
+    end
+  ensure
+    server&.close
+    board&.value&.close
+  end
+
+  # The seeded fault: a relay that copies the port's bytes into a pty and drops what a
+  # write to its master does not take, the out-of-tree relay's bug, fails the same check.
+  # 128 KiB is more than any host's pty queue takes in one write: about 1 KiB on macOS.
+  def test_a_relay_that_drops_what_a_pty_does_not_take_cuts_the_lines
+    PTY.open do |master, slave|
+      slave.raw!
+      master.write_nonblock(wide(32), exception: false)
+      Dir.mktmpdir do |directory|
+        log = File.join(directory, 'pty.log')
+        console = Erx::BoardConsole.new(slave, log: File.open(log, 'wb'), clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
+        refute whole?(slowly_read(console, log: log), wide(32))
+      end
+    end
+  end
+
+  def test_a_malformed_or_unreachable_tcp_console_is_refused
+    Dir.mktmpdir do |directory|
+      malformed = assert_raises(Erx::Error) { Erx::BoardConsole.open('tcp:localhost', log: File.join(directory, 'a.log'), clock: -> { 0 }) }
+      assert_match(/tcp:HOST:PORT/, malformed.message)
+      closed = TCPServer.new('127.0.0.1', 0).then { |server| server.addr[1].tap { server.close } }
+      refused = assert_raises(Erx::Error) { Erx::BoardConsole.open("tcp:127.0.0.1:#{closed}", log: File.join(directory, 'b.log'), clock: -> { 0 }) }
+      assert_match(/cannot be reached: ECONNREFUSED/, refused.message)
+      refute File.exist?(File.join(directory, 'b.log'))
     end
   end
 end
