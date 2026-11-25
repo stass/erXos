@@ -1,5 +1,12 @@
 # Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
 # SPDX-License-Identifier: BSD-2-Clause
+# The media domain's bounds on a drive's volumes, erXos's choices: the volumes one
+# medium serves at most, the first in entry order (docs/design-drives.md, "The table"),
+# and the memory each volume's process and the medium's reader may hold, 2 MiB, the
+# max_heap_size of each in bytes ("Time and memory").
+limit media_volumes_max u32 8
+limit media_volume_bytes u32 2097152
+
 # The signatures of the drives' probe (docs/design-drives.md, "The probe"), in the
 # probe's order: for each format the byte offset in the volume where its signature
 # lies and the bytes it holds there. EROFS's and F2FS's are their own formats' magic

@@ -12,7 +12,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   1. `abi/manifest.txt` and the manifest check: the window role `fat` becomes `drive`, which names no
      partition and is held only by the media domain; the rules of design-drives.md's "Manifest rows",
      each with a seeded manifest; the 9P statfs type `media` in `abi/protocols/9p.txt`; the `media`
-     service and its mount point in `erx_ns`. The two limits are step 3's.
+     service and its mount point in `erx_ns`.
   2. The whole-medium window. `erx_blk_drive`, the drive grant, and USB's block service (the transport
      and its one window over the medium, ended through the engine when a grant is asked again) are
      built. What remains, as three packages in this order:
@@ -51,8 +51,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
         that reads the table beside the drive; the QEMU case of a second virtio disk waits for step 4.
   3. `erx_media_table` (MBR, GPT with both copies and the metadata rule, none, whole-table refusal,
      `place/3`) and `erx_media_probe` with `abi/formats/probe.txt`, pure, with their fuzz targets and
-     seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name;
-     `media_volumes_max` and `media_volume_bytes` as limits beside `erx_media_table`.
+     seeds; FAT's row through the FAT server's boot-sector decoder, FAT12 refused by name.
   4. The `erx_media` application (`erx_media_app` and `erx_media_sup` are built, and of the drive
      process, `erx_media_drive`, its ask through the registry's facet and its proxy's end): the
      drive process's medium supervisor, eject and finish, the medium supervisor and reader, the volume
@@ -78,18 +77,14 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
      `max_connections` for each pair of media and serving domain, however many drives it carries;
      with the host tests and QEMU cases those sections' tables name;
      the release check that `erx_media` lies only in the media domain's release, which names
-     no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the resolver's no-follow rule
-     as a `nofollow` mark a provider carries, the provider `{facet, media}` marked by `erx_ns` by the
-     facet's name (design-drives.md, "Links and rights"); the ordered end's step 2 freezing the media
+     no `erx_storage` or `erx_blk`, and in a release build no `erx_lfs`; the ordered end's step 2 freezing the media
      service; the shell's `mount` and `umount` forms ([todo-shell.md](todo-shell.md)). The media
      domain's durability facet to the system domain in the facet table, which `check_drive_domains`'
      list then admits, and the Raspberry Pi 4 manifest's media domain, service and drive rows land
      here too. QEMU virt's development manifest names its media domain, the service `media`, root's
      session's `media` facet (rights `rw`) and the drive `disk0` on the xhci row, so its USB domain
      serves a stick as `disk0`; the domain provides no `media` yet, so a walk of `/media` answers
-     `eio`. Security: the `nofollow` mark lands in `erx_ns` before `erx_media_app` provides
-     `media`, or root's rw session follows a stick's links (a link to `/root/.ssh/authorized_keys`
-     makes a copy onto the stick write root's keys). The quotas count no system connection
+     `eio`. The quotas count no system connection
      (`life_connections` in `liberx/system/dom_life.c`), so at rest the media domain's
      `connections` of 3 hold the drive connection and root's session's `media` with its
      replacement's, and the USB domain's of 2 hold the drive connection beside the display's
@@ -149,8 +144,6 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   * [Medium] `erx_lfs` lies in `erx_storage`, which the media domain's release may not name, so
     step 4's littlefs volumes need it moved to an application of its own, as `erx_fat_read` moved to
     `erx_fat`, before the release check of step 4 can pass with littlefs in a development build.
-  * [Low] `erx_media_table`'s `VOLUMES_MAX` is a local macro of 8 until step 1's `media_volumes_max`
-    limit exists in `abi/manifest.txt`; then the reader takes the generated macro.
 * [Low] Step 4's medium reader refuses the table on a failed read of any sector `erx_media_table`
   asks for, and hands it only 512-byte sectors: `read/2` has no way to be told a sector is
   unreadable, so a read answered as zeros would make a failed sector 0 read as no table.

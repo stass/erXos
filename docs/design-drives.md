@@ -353,8 +353,8 @@ updating or loading code from a drive.
   domain](#how-the-grant-reaches-the-media-domain)); one service, `media`,
   with its durability facet, and its mount point and `nofollow` mark in
   `erx_ns`'s table of facets; the decoder's source entry, `erx_erofs:mount_source/2`; the
-  probe's table, `abi/formats/probe.txt`; two limits, `media_volumes_max`
-  and `media_volume_bytes`; one statfs type, `media`; the
+  probe's table, `abi/formats/probe.txt`, and beside it two limits,
+  `media_volumes_max`, 8, and `media_volume_bytes`, 2 MiB; one statfs type, `media`; the
   argument forms of the shell's `mount` and `umount`; and the modules of
   `erx_media`.
 * **DR-R8.** A session reaches `/media` only through a `media` facet
@@ -890,7 +890,8 @@ crafted field wraps.
    entries. So no two volumes share a sector, whatever order the entries
    come in, no volume covers sector 0, and no GPT volume covers a header
    or a known array.
-7. **A bound**: at most `media_volumes_max` volumes are served, 8, the
+7. **A bound**: at most `media_volumes_max` volumes are served, 8
+   (`abi/formats/probe.txt`), the
    first in entry order; the `status` file counts the rest as not
    served.
 
@@ -1162,7 +1163,7 @@ and refuses it. Joining takes:
   (F2-R5), and read-write once F2-R1 to F2-R3 hold, under the writable
   rule, since F2FS was made for flash media and the rule is the only
   gate;
-* **its mount allowance** taken from `media_volume_bytes`, so a volume
+* **its mount allowance** taken from `media_volume_bytes`, 2 MiB, so a volume
   larger than the allowance admits answers `enomem`, refused by name;
 * **qid paths drawn per mount**, as FAT's and littlefs's are, since its
   own 64-bit path does not fit beside the mount's number
@@ -1225,7 +1226,7 @@ Two things finish volumes:
 ### Time and memory
 
 * **Memory.** Each volume's process, and the medium's reader, runs with
-  a `max_heap_size` whose `size` is `media_volume_bytes` in words, with
+  a `max_heap_size` whose `size` is `media_volume_bytes` (2 MiB) converted to words, with
   `kill` and `include_shared_binaries` set, so a volume whose heap,
   stack and the binaries it holds pass that at a garbage collection is
   ended alone (`erlang.erl:8120-8165`, `process_flag(max_heap_size,

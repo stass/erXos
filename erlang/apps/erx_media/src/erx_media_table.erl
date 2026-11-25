@@ -33,7 +33,7 @@ The rules, in the order they are tried:
 6. **Integrity**: every listed entry runs forward, starts at or after the first
    usable sector, ends within the medium (a GPT: its usable area) and overlaps no
    other, or the table is refused whole (`g_part.c:325-436`).
-7. **A bound**: the first `?VOLUMES_MAX` served entries in entry order are served;
+7. **A bound**: the first `media_volumes_max` served entries in entry order are served;
    the rest are listed as `over_bound`.
 
 place/3 is the one function that turns a volume's sector into a medium's sector.
@@ -53,8 +53,6 @@ read/2; it makes no atom from the medium's bytes.
 -define(EXTENDED, [?ERX_MBR_TYPE_EXTENDED, ?ERX_MBR_TYPE_EXTENDED_LBA, ?ERX_MBR_TYPE_EXTENDED_LINUX]).
 -define(GUID_BYTES, 16).
 -define(NAME_BYTES, (?ERX_GPT_ENTRY_SIZE - ?ERX_GPT_ENTRY_OFF_NAME)).
-%% The volumes a medium serves at most (docs/design-drives.md, "The table").
--define(VOLUMES_MAX, 8).
 
 -type lba() :: non_neg_integer().
 -type sectors() :: #{lba() => <<_:4096>>}.
@@ -300,7 +298,7 @@ served(Listed) ->
 
 volume(#entry{serve = extended} = Entry, Served) ->
     {volume_map(Entry, extended), Served};
-volume(Entry, Served) when Served < ?VOLUMES_MAX ->
+volume(Entry, Served) when Served < ?ERX_MEDIA_VOLUMES_MAX ->
     {volume_map(Entry, yes), Served + 1};
 volume(Entry, Served) ->
     {volume_map(Entry, over_bound), Served}.
