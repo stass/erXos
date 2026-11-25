@@ -1024,7 +1024,7 @@ The files and lines are in [Read in source, never run](#read-in-source-never-run
 to the root service. The root records the thread's level in its thread row, the band's ceiling when
 `urgency` is above its group's base and the band's base otherwise, and runs the thread at it with
 `l4_scheduler_run_thread`, which changes a started thread's priority on its own CPU
-(`Thread::start_migration` and `Thread::set_sched_params`, `thread.cpp:852-868`, `:757-773`). One
+(`Thread::start_migration` and `Thread::set_sched_params`, `thread.cpp:854-870`, `:759-775`). One
 function builds every scheduling parameter the root hands Fiasco from the thread's row, so an
 affinity change passes the same level again and a thread's level has one owner, the root. In a band
 whose ceiling is its base the call succeeds and changes nothing. On any other thread it is
@@ -2347,7 +2347,7 @@ mask share one CPU of its set rather than spread across it, until an affinity re
 and after it moves the thread at once, through the same call; a mask whose intersection is empty is
 `ERX_EINVAL` and changes nothing. An affinity change keeps the thread's level, which the root passes
 again from the thread's row ([Urgency](#urgency)), and refills its quantum
-(`Thread::set_sched_params`, `thread.cpp:766`), so a thread that asks for one every slice keeps its
+(`Thread::set_sched_params`, `thread.cpp:768`), so a thread that asks for one every slice keeps its
 CPU from the others of its level; only an app is hostile, and it shares only the app level (FD15).
 
 **The quantum.** A thread's quantum is the `slice_us` of its domain's grant, 1 ms in the development manifests, in
@@ -2500,7 +2500,7 @@ Starting a thread twice is `ERX_EINVAL`.
 **A failed start.** If any step fails, the service deletes the thread and its semaphore with `l4_task_delete_obj`,
 drops the handle, and only then replies with the failure. So the thread cannot run on a stack the caller now
 frees (`pthread_create.c:384`): it was never runnable, or the deletion's return means it never reaches user mode
-again (`thread_object.cpp:157-161`, `thread.cpp:670-752`). The stub frees the record and leaves the marker, which
+again (`thread_object.cpp:157-161`, `thread.cpp:670-754`). The stub frees the record and leaves the marker, which
 is safe either way: if Fiasco completes its kill path it writes 0 and the index returns; if the kill does not
 complete the marker stays 1 and the index is lost until the task ends. Fiasco completes the kill of a thread that
 never started on the deleting thread's CPU, but a thread deleted after `ex_regs` and before the scheduler ran it
@@ -3736,7 +3736,7 @@ leaves the ring only whole, and the route closes before a stop prints its first 
   calls neither rests on `sigma0` being the boot's own trusted code, not on a check. The kernel also closes the route
   itself, at the head of each of the four functions a stop's report begins in on AArch64, before the report's first byte:
   `panic` (`kern/kernel_panic.cc:13`) and `assert_fail` (`kern/assertion.cpp:12`), the only callers of
-  `Thread::system_abort` and so of `terminate` (`kern/thread.cpp:1574-1580,1644-1645`); `Trap_state::dump`
+  `Thread::system_abort` and so of `terminate` (`kern/thread.cpp:1576-1582,1646-1647`); `Trap_state::dump`
   (`kern/arm/64/trap_state-arm.cpp:83`), which every trap report ahead of a panic calls (`kern/arm/64/thread-arm-64.cpp:91,104`,
   `kern/thread-ipc.cpp:1092`, and the release kernel's trap handler, `kern/arm/thread-jdb.cpp:122-125`); and the
   development kernel's `Jdb::open_debug_console` (`jdb/jdb.cpp:751-757`), where the debugger takes the console on every
@@ -4233,11 +4233,13 @@ no test can drive the change:
 * **The semaphore's wake.** A semaphore's down waits for the activation of the up that dequeued it
   (`semaphore.cpp`, [A semaphore's wake across CPUs](#thread-creation)). Its test is the case of
   that name in [The backend's cases](#the-backends-cases).
-* **Test kernels' seeds.** Three defines, set only for a test kernel, compile seeds into the fork:
+* **Test kernels' seeds.** Four defines, set only for a test kernel, compile seeds into the fork:
   `ERX_TEST_KERNEL_TRAP` a kernel-mode load from an unmapped address once boot is done
   (`kernel_thread.cpp`, for `native_kernel_trap.rb`), `ERX_TEST_SEMAPHORE_WAKE_HOLD_US` a hold
   of an up between its dequeue and its activation (`semaphore.cpp`, for
-  `native_semaphore_race.rb`), and `ERX_TEST_KERNEL_WARN` a `WARN` at the console ring's marked receive, the
+  `native_semaphore_race.rb`), `ERX_TEST_KILL_UNMIGRATED` the kill of a
+  thread that never started left pending on the offline CPU it sits on (`thread.cpp`, for
+  `native_seeds_test.rb`'s run of `native_threads`), and `ERX_TEST_KERNEL_WARN` a `WARN` at the console ring's marked receive, the
   second of which instead prints 256 warnings, more than three times the ring, and then makes `ERX_TEST_KERNEL_TRAP`'s load
   (`thread-ipc.cpp`, for `native_console_ring.rb`). The marked receive is a yield, a receive from the thread
   itself whose zero timeout hits before it would wait ([A yield](#scheduling)), whose message tag carries a
@@ -4296,7 +4298,7 @@ defect found by erXos is fixed in the fork and reported to the address in
 ## Verification
 
 Each increment is a QEMU transcript test under HVF, one and four CPUs, kept in the suite (TCG runs only the production image's deterministic transcript and one boot smoke at one CPU). A case has a seeded failure, a test-only patch that makes it fail, where it could otherwise pass vacuously, which shows the case
-ran the code it claims to; `make check-native-seeds` keeps the suites' seeds and the test kernels of the semaphore race and the kernel trap. Exhaustive models are written for permanent cores only; a row of the call table is tested by a QEMU case for each call it offers, with AddressSanitizer on the host build, and TSan where it adds a lock. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
+ran the code it claims to; `make check-native-seeds` keeps the suites' seeds and the test kernels of the semaphore race, the kernel trap and the never-started thread's kill. Exhaustive models are written for permanent cores only; a row of the call table is tested by a QEMU case for each call it offers, with AddressSanitizer on the host build, and TSan where it adds a lock. Host tests and TSan models run the pure cores. M7's parity gate runs the `erx` backend differentially against this one over the test corpus. Fuller recipes live with
 the tests.
 
 **One test set, two kernels.** The function-API set, `test/guest/function_api`, and Track K's
@@ -4336,6 +4338,7 @@ ran the code it claims to:
 | **musl**, `native_musl`: the C library's interface as the root, threads, TLS, condition variables, timed waits, `malloc` across threads, `mprotect` under a running thread, cancellation, `exit` | `FUTEX_REQUEUE` restored: a broadcast stalls; `__unmapself` not releasing: the pool's count stays down; `mprotect` committing first: the running thread faults |
 | **Range table**, `fiasco_vm_test.rb`, exhaustive over page states, ranges and calls against a fake memory unit that adds rights as Fiasco does | write and execute admitted together; a page given back still mapped; each memory seed of this table |
 | **Thread start and failed start**, `native_threads` and a test-hook image: TLS equals the value given; a start failing at each step leaves no capability and an untouched stack | the trampoline omitting the thread pointer; the deletion skipped: the capability stays valid |
+| **A never-started thread's deletion**, `native_threads` and a test-hook image: twice as many starts as there are thread indices fail at their second step, and each deleted thread's kill clears its index's marker, so every create finds an index | `ERX_TEST_KILL_UNMIGRATED`, the kill left on the offline CPU: no marker clears and the indices run out |
 | **Claim**, `fiasco_park_test.rb`, a fake kernel writing the marker late over every order of exit and create | the claim ignoring the marker: the fake's write lands on a live thread |
 | **Umtx**, host model and TSan: a timed wait never early, a wake between compare and sleep, a timeout racing a wake | the deadline rounded down; the compare outside the lock: a lost wake; absorb removed: a stale count |
 | **Join and detached loops**, `native_threads`: 10,000 joins reuse stack and index and leave no capability; detached exits return range, index and pool; a broadcast over 64 waiters | the reaper's steps 1 and 3 swapped: a live capability; step 3 removed: the case times out; the range omitted: the count falls; the next waiter's barrier left locked: the deadline fires |
@@ -4584,7 +4587,7 @@ Apple cores an HVF guest runs on are unverified.
   `irq.cpp:925-1009`; `Ipc_sender::send_msg`, `ipc_sender.cpp:183-188`; `Thread::do_ipc_receive`, `thread-ipc.cpp:776-788`.
 * An edge-triggered line is acknowledged at its firing and masked only by a second edge before the first is received,
   and the receipt unmasks it: `irq.cpp:1044-1090`, `:751-776`.
-* `l4_scheduler_run_thread` on a started thread changes its priority on its own CPU: `thread.cpp:757-773`, `:852-868`; not
+* `l4_scheduler_run_thread` on a started thread changes its priority on its own CPU: `thread.cpp:759-775`, `:854-870`; not
   run for a thread whose scheduling context the root service is running on.
 * ERTS's enqueue chooses a run queue in `select_enqueue_run_queue`, `erl_process.c:6500-6553`, for a wake, a spawn and a
   schedule-out (`:6886`, `:13013`, `:6675`, through `:6743`), and immigration, evacuation and the return of bound processes

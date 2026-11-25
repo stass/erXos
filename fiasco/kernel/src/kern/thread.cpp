@@ -1,5 +1,5 @@
-// Modified by erXos: lazy FP switching is deleted; FP state is switched
-// eagerly (docs/design-fiasco.md, "Eager FP switching").
+// Modified by erXos: lazy FP switching is deleted, FP state is switched eagerly
+// (docs/design-fiasco.md, "Eager FP switching"); a test kernel's seed, ERX_TEST_KILL_UNMIGRATED.
 INTERFACE:
 
 #include "l4_types.h"
@@ -688,6 +688,7 @@ Thread::prepare_kill(Cpu_number *migrate_to_cpu)
 
       // To ensure the kill operation eventually completes, we migrate the
       // killed thread to current CPU if it is on an offline CPU.
+#ifndef ERX_TEST_KILL_UNMIGRATED // native_seeds_test.rb's seed: the kill left on the offline CPU
       if (!Cpu::online(home_cpu()))
         {
           Migration migration;
@@ -713,6 +714,7 @@ Thread::prepare_kill(Cpu_number *migrate_to_cpu)
           assert(migrate_to_cpu != nullptr);
           *migrate_to_cpu = migration.cpu;
         }
+#endif
     }
 
   inc_ref();

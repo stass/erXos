@@ -30,6 +30,7 @@
 #define STACK_BYTES	16384u
 #define MANY_THREADS	32u
 #define START_STEPS	3u
+#define UNSTARTED_ROUNDS	(2u * ERX_FIASCO_THREADS_MAX)
 #define PING_ROUNDS	2000u
 #define RACE_ROUNDS	2000u
 #define JOIN_ROUNDS	10000u
@@ -488,6 +489,45 @@ case_failed_start(void)
 			return (false);
 		atomic_store(&done, 0);
 		if (!spawn(idle_helper, step, step) || !wait_for(&done, 1))
+			return (false);
+	}
+	return (atomic_load(&failed_start_ran) == 0);
+}
+
+/* The stack the unstarted case's threads are made on: none of them ever runs. */
+static uint8_t unstarted_stack[STACK_BYTES] __attribute__((aligned(16)));
+
+/*
+ * A start that fails at its second step leaves a thread bound to its task but never
+ * started, on no CPU, and deleting it must still complete its kill: Fiasco moves the
+ * kill to the deleting CPU. Only a completed kill clears the UTCB marker that keeps an
+ * index from being claimed again, so twice as many such deletions as there are
+ * indices each find room for their create, within the patience every case shares, or
+ * the indices run out.
+ */
+static bool
+case_unstarted_deleted(void)
+{
+	const uint64_t top = (uint64_t)(uintptr_t)(unstarted_stack + STACK_BYTES);
+	const uint64_t deadline = erx_fiasco_clock_ns() + PATIENCE_NS;
+
+	for (uint32_t round = 0; round < UNSTARTED_ROUNDS; round++) {
+		uint64_t thread;
+		int status;
+
+		while ((status = create_on(top, never_helper, round, 0, ERX_THREAD_CLASS_WORKER, &thread)) == ERX_ENOMEM &&
+		    erx_fiasco_clock_ns() < deadline)
+			settle(NS_PER_MS);
+		if (status != ERX_OK) {
+			say("erx: threads: unstarted_deleted: no index after round ");
+			say_number(round);
+			say("\n");
+			return (false);
+		}
+		atomic_store(&erx_fiasco_test_start_fails, 2);
+		status = erx_thread_start(thread);
+		atomic_store(&erx_fiasco_test_start_fails, 0);
+		if (status != ERX_ENOMEM || !erx_fiasco_test_thread_caps_gone((uint32_t)thread))
 			return (false);
 	}
 	return (atomic_load(&failed_start_ran) == 0);
@@ -1001,6 +1041,7 @@ erx_fiasco_root_main(void)
 	report("umtx_no_stale_wake", case_umtx_no_stale_wake());
 	report("memory_from_threads", case_memory_from_threads());
 	report("failed_start", case_failed_start());
+	report("unstarted_deleted", case_unstarted_deleted());
 	report("affinity_each_cpu", case_affinity_each_cpu());
 	report("affinity_refused", case_affinity_refused());
 	report("join_loop", case_join_loop());

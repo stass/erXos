@@ -112,6 +112,16 @@ class NativeSeedsTest < Minitest::Test
     assert_equal %w[hvf-4cpu], ran.keys
   end
 
+  # A seed of the kernel's own: the kill of a thread that never started stays pending
+  # on the offline CPU it sits on, so no deletion of the unstarted case clears its
+  # index's marker and the indices run out.
+  def test_an_unstarted_threads_kill_left_on_no_cpu
+    error = assert_raises(Erx::Error) do
+      Erx::NativeThreads::Run.new(root: ROOT, kernel_seed: 'ERX_TEST_KILL_UNMIGRATED').call(accels: %w[hvf], cpus: [1], build: true)
+    end
+    assert_match(/unstarted_deleted FAILED/, error.message)
+  end
+
   # A seed of the kernel's own: a release-configuration kernel that loads from an
   # unmapped address in kernel mode must panic once and end the machine through PSCI,
   # which a kernel that kills the faulting thread and returns never does.

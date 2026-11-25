@@ -869,17 +869,26 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Security residuals
 
-* [High] Fiasco kernel, upstream fixes taken at 07ea18e1 without regression tests: none of upstream's commits
-  carries one, as [design-fiasco.md](design-fiasco.md#upstream-security-fixes) asks of a reachable fix. Native guest
-  cases, each with a seed that reverts its fix: repeated grants of a mapping that has a submap, then the receiving
-  factory's exhaustion point (`mapdb.cpp`, `Treemap_ops::mem_size`, upstream 8bded60d, the quota accounting FD14
-  rests on); a map over an existing mapping in the sender's own tree (`map_util.cpp`, 4be34cdc); a partial unmap of
-  a nested submap (`mapdb.cpp`, `Treemap_ops::flush`, d7cbdc42); and the deletion of a never-started thread, whose
-  index the next create claims again (`thread.cpp`, `Thread::prepare_kill`, 70d3a306 and 09be8ba9).
+* [Low] Fiasco kernel, upstream fixes taken at 07ea18e1 that no erXos call reaches, so no case tests them
+  ([design-fiasco.md](design-fiasco.md#upstream-security-fixes) asks a test of a reachable fix). The root alone
+  maps memory, each map from the page's one window mapping and none a grant (`vm.c`, `vm_map`); a domain holds no
+  task, factory or thread capability, and the root's receive window takes no map item (`vm.c`, `device_map`); only
+  the service controls threads, and it runs each after its `ex_regs` (`service.c`, `service_thread_steps`). So:
+  8bded60d's grant of a mapping that has a submap (`mapdb.cpp`, `Treemap_ops::mem_size`) is never made, and no
+  factory of the backend has a quota of its own, so every submap is charged to the root's one quota; 4be34cdc's
+  flush of a receiver mapping that precedes the sender's in one tree (`map_util.cpp`, `map`) never runs, since
+  every other mapping of a page is a child of its window mapping, which a map over it updates in place; d7cbdc42's
+  frame partly covered by a flush range that runs past its end (`mapdb.cpp`, `Treemap_ops::flush`) no caller
+  makes, since every flush range is a naturally aligned flexpage, which a frame either holds whole or lies within;
+  and 70d3a306's restart of a killed thread and kill of a never-started thread on an online CPU need a run before
+  `ex_regs` or a second controller. A change that makes one reachable (a grant, a domain's own task capability, a
+  run before `ex_regs`) brings that fix's case and seed with it. 09be8ba9 has its case, `native_threads`'
+  `unstarted_deleted`, seeded by `ERX_TEST_KILL_UNMIGRATED`.
 * [Low] Fiasco backend, a failed start after `ex_regs` (`liberx/backend/fiasco/service.c`, `service_thread_steps`):
   the thread is deleted with no CPU to complete its kill on, so its index stays lost until the task ends and the
   reference the kill takes stays held. Running `l4_scheduler_run_thread` before `ex_regs` would leave every failed
-  start a never-started thread, whose kill Fiasco completes; unverified until a step-3 seed checks the index returns.
+  start a never-started thread, whose kill Fiasco completes; unverified until `unstarted_deleted` with its starts
+  failing at step 3 shows whether the indices come back.
 * [Medium] Fiasco backend, the on-board pin window (`liberx/backend/fiasco/bcm2711_pins.c`, `vm.c`): the root maps
   the pin controller's page with `erx_fiasco_vm_device_page`, whose mappings last the root's life, so GPFSEL0 to
   GPFSEL5 stay writable in the system domain after boot. That no second writer exists then rests on the root calling

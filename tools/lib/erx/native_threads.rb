@@ -21,7 +21,7 @@ module Erx
     CASES = %w[
       tls_and_arg double_start_refused bad_handle_refused wire_refusals umtx_word_differs umtx_past_deadline
       umtx_timeout_not_early umtx_wake_in_order umtx_ping_pong umtx_timeout_races_wake umtx_no_stale_wake memory_from_threads
-      failed_start affinity_each_cpu affinity_refused join_loop detached_loop park_refusals park_alone
+      failed_start unstarted_deleted affinity_each_cpu affinity_refused join_loop detached_loop park_refusals park_alone
       park_trigger_in_window park_ping park_timeout_races_wake umtx_no_stale_wake_after many_threads indices_run_out
       first_thread_exit
     ].freeze
@@ -45,12 +45,16 @@ module Erx
     end
 
     class Run
-      # source is the tree the root's C comes from, which a test may seed with a fault.
+      # source is the tree the root's C comes from, which a test may seed with a fault;
+      # kernel_seed names a seeded fault of the kernel's own, a define of
+      # Fiasco#build_test_kernel, whose kernel the image then boots.
       def initialize(root:, source: root, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
-                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root))
+                     compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''), platform: Platform.development(root),
+                     kernel_seed: nil)
         @root = File.expand_path(root)
         @platform = platform
         @source = File.expand_path(source)
+        @kernel_seed = kernel_seed
         @runner = runner
         @compiler = compiler
         @linker = linker
@@ -62,7 +66,7 @@ module Erx
       def call(accels:, cpus: [1, 4], jobs: 4, build: true, placement: QemuCells::HERE)
         fiasco = Fiasco.new(root: @root, runner: @runner, compiler: @compiler)
         fiasco.build(jobs: jobs) if build
-        built = image(fiasco)
+        built = image(fiasco, kernel(fiasco, jobs))
         placement.each(accels: accels, cpus: cpus) do |accel, count, remote|
           report = Qemu.new(root: @root, runner: @runner).run(platform: @platform, accel: accel, cpus: count, remote: remote, image: built.single, memory_mib: MEMORY_MIB,
                                                               checkpoints: NativeThreads.checkpoints, machine_end: true)
@@ -72,12 +76,18 @@ module Erx
 
       private
 
-      def image(fiasco)
+      def kernel(fiasco, jobs)
+        return nil if @kernel_seed.nil?
+
+        fiasco.build_test_kernel(name: "threads-#{@kernel_seed.downcase.tr('_', '-')}", defines: ["-D#{@kernel_seed}"], jobs: jobs)
+      end
+
+      def image(fiasco, kernel)
         root_task = NativeRoot.new(root: @root, source: @source, runner: @runner, compiler: @compiler, linker: @linker, platform: @platform,
                                    fiasco: fiasco)
                               .build(name: 'threads-root', sources: SOURCES, directory: File.join(@build, 'root'),
                                      flags: ['-DERX_FIASCO_TEST_HOOKS'])
-        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker)
+        BootImage.new(root: @root, runner: @runner, compiler: @compiler, linker: @linker, kernel: kernel)
                  .build(directory: File.join(@build, 'image'), stand_in_root: root_task)
       end
     end

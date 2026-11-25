@@ -63,7 +63,7 @@ _Static_assert(L4_PROTO_EXCEPTION == ERX_FIASCO_WIRE_EXCEPTION, "Fiasco's except
 _Static_assert(L4_UTCB_EXCEPTION_REGS_SIZE == ERX_FIASCO_WIRE_EXCEPTION_WORDS, "Fiasco's exception length");
 
 /*
- * Only the threads and semaphore race suites' images are built with this hook: the step of
+ * Only the test suites' images, built with ERX_FIASCO_TEST_HOOKS, have this hook: the step of
  * a start to fail, 1 to 3 in the order they run, with 0 failing none.
  */
 #ifdef ERX_FIASCO_TEST_HOOKS
