@@ -156,9 +156,9 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 * [Medium] bluetooth, `bleuart`, root's shell over Nordic's UART service (docs/design-bluetooth.md, "The console";
   docs/design-login.md, build order 7): build the `bleuart` app (its principal, session template, `ble` and `login`
   rows and `start` row in the Raspberry Pi 4's development manifest, the published medium's packing of
-  `published_enable` in `enable`'s place, the `bleuart` release with `erx_bleuart`), `ble_grant`'s admission of a `start` row's template whose principal's
-  `domains` quota is 1, by kind and identity, with their tests, the Bumble cell and probe B-P7. The login facet's
-  `root_line`, `bleuart`'s holder row and the release-manifest refusal are built. `serial_lost`'s `{tty_lost, N}`
+  `published_enable` in `enable`'s place, the `bleuart` release with `erx_bleuart`), with their tests, the Bumble cell and probe B-P7. The login facet's
+  `root_line`, `bleuart`'s holder row, the release-manifest refusal and `ble_grant`'s admission of a `start` row's
+  template whose principal's `domains` quota is 1 are built. `serial_lost`'s `{tty_lost, N}`
   waits on step 3 of the input-loss event (todo-shell.md), and the Bluetooth suite's manifest drops root's session
   template (`MediumBoot.manifest`), so the cell needs root's session and `bleuart`'s room beside the echo's.
   The unlanded branch `login-8`, the phone console, is superseded and does not land. CLAUDE.md's

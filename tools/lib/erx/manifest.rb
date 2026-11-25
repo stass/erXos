@@ -2659,8 +2659,9 @@ module Erx
       # domain, and no grant of one goes to the system domain, whose handler would take a
       # phone's bytes into the trusted base (B8), or to a session template, which every
       # session made from it would hold, so two sessions would contend for one service's
-      # handler, as line_grant refuses one. The one template row it takes is the app
-      # template's, which the build derives from the apps row's gatt and no source row
+      # handler, as line_grant refuses one. It takes two kinds of template row: a start
+      # row's template's (start_template?), one session of which lives at a time, and the
+      # app template's, which the build derives from the apps row's gatt and no source row
       # can name (the template names no principal), and which a session of an app keeps
       # only when admission kept its package's gatt, narrowed to those services, an app
       # running one session at a time
@@ -2686,8 +2687,9 @@ module Erx
           named = ble_grant_named(row, tables)
           invalid("#{named} is granted to the system domain, which takes no phone's bytes", 'facet.grantee') if
             row.fetch('grantee_kind') == grantee_kind('system')
-          invalid("#{named} is granted to a session template, whose every session would hold it", 'facet.grantee') if
-            row.fetch('grantee_kind') == grantee_kind('session') && !app_template?(row, tables)
+          invalid("#{named} is granted to a session template that is neither the app template nor a start row's " \
+                  'template with a domains quota of 1, so two of its sessions could hold it', 'facet.grantee') if
+            row.fetch('grantee_kind') == grantee_kind('session') && !app_template?(row, tables) && !start_template?(row, tables)
           undeclared = given.fetch('services', []).reject { |name| declared.include?(name) }
           invalid("#{named} names #{undeclared.map(&:inspect).join(', ')}, which abi/gatt does not declare", 'facet.parameter') unless
             undeclared.empty?
@@ -2696,6 +2698,21 @@ module Erx
         name, shared = holders.find { |_name, held| held.size > 1 }
         invalid("#{shared.map { |_name, row| ble_grant_named(row, tables) }.join(' and ')} both name #{name.inspect}",
                 'facet.parameter') if shared
+      end
+
+      # Whether a facet row is granted to a start row's template: a session template of
+      # which one session lives at a time (grant_instances, its principal's domains quota)
+      # and whose principal has a start row (docs/design-bluetooth.md, "Who holds `ble`").
+      # The start row's principal is resolved as start_row resolves it and compared with the
+      # template's own principal index; a configured domain is never a session grantee. The
+      # start rows are read from their records, since the facets are checked before the
+      # start table is made.
+      def start_template?(facet, tables)
+        return false unless facet.fetch('grantee_kind') == grantee_kind('session') && !app_template?(facet, tables)
+
+        principal = tables.fetch('sessions').fetch(facet.fetch('grantee')).fetch('principal')
+        grant_instances(facet, tables) == 1 &&
+          records('start').any? { |record| @indices.fetch('principal')[record.name] == principal }
       end
 
       # A ble grant as a refusal names it: the app template's row by the apps row's gatt,

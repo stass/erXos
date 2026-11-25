@@ -1675,6 +1675,24 @@ class ManifestDomainsTest < Minitest::Test
     assert_match(/names "nus", which abi\/gatt does not declare/, error.message)
   end
 
+  # A start row's template (docs/design-bluetooth.md, "Who holds `ble`"): a ble grant to
+  # the session template of principal other, which has a start row and a domains quota
+  # of 1, packs, since one session of it lives at a time. Each seed differs from it in
+  # one thing and is refused as a grant to a session template: other with no start row,
+  # other with a quota of 2, and the start row the system principal's, not other's.
+  def test_a_start_rows_template_with_one_domain_holds_ble
+    source = lambda do |start: self.class.start('other'), domains: 1|
+      with_display(start, served: '', grants: [ble_grant(%w[nus], grantee: '@session.other')])
+        .sub("principal other\n  memory 1048576\n  grant @share.half\n  domains 0\n",
+             "principal other\n  memory 1048576\n  grant @share.half\n  domains #{domains}\n")
+        .sub(ManifestContextFixture::MAX_DOMAINS) { |line| line.sub(/\d+$/) { |count| (count.to_i + domains).to_s } }
+    end
+    admit(source.call)
+    [source.call(start: ''), source.call(domains: 2), source.call(start: self.class.start)].each do |seeded|
+      refused(Erx::Manifest::Invalid, 'facet.grantee', seeded, message: /ble grant nm is granted to a session template/)
+    end
+  end
+
   # The app template's ble row (docs/design-bluetooth.md, "Who holds `ble`";
   # docs/design-packaging.md, "The apps row", property 19's first clause, PK13): an apps
   # row naming ble with gatt nus derives the template's row of the ble service, whose
