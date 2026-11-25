@@ -94,8 +94,14 @@ module Erx
     # end line; stopped, running when the walk ended for the walk's ending; not_run, never
     # begun.
     ENDINGS = %w[returned booted_again halted end_deadline boot_deadline byte_limit console_closed interrupted].freeze
-    # The endings that can stop an entry while it runs.
-    STOPPING = %w[booted_again halted end_deadline byte_limit console_closed interrupted].freeze
+    # The endings that can stop an entry while it runs: the end deadline, whose entry's
+    # unreported cells are timed_out, and these, whose entry's are not_run for the reason.
+    STOPPED_BY = { 'booted_again' => 'the walk ended: the board booted an entry again',
+                   'halted' => 'the walk ended: the board halted',
+                   'byte_limit' => 'the walk ended: the boot passed its byte limit',
+                   'console_closed' => 'the walk ended: the console closed',
+                   'interrupted' => 'the walk ended: the run was interrupted' }.freeze
+    STOPPING = ['end_deadline', *STOPPED_BY.keys].freeze
     OUTCOMES = %w[ended ended_unseen stopped not_run].freeze
 
     # A walk's outcomes: one per bench entry in position order, its ending, restored
@@ -154,7 +160,7 @@ module Erx
     def parsed(path)
       value = JsonInput.parse(BoundedFile.read(path, maximum: BenchRecord::FILE_BYTES), max_bytes: BenchRecord::FILE_BYTES,
                                                                                          label: path)
-      need(value.is_a?(Hash) && value['format'] == FORMAT, "#{path} is not of format #{FORMAT}")
+      need(value.is_a?(Hash) && value['format'].eql?(FORMAT), "#{path} is not of format #{FORMAT}")
       value.except('format')
     end
 

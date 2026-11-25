@@ -1161,10 +1161,12 @@ The reader is `BoardLog`, a pure function of the log's bytes, the queue,
 the sets' asked cells and the walk's outcomes when it has them. It
 places each line by the rule of
 [the construction](#the-construction-the-server-hands-out-a-queue): a
-line naming an entry, and every line between two consecutive naming
-lines of the same entry, belong to that entry's boot; any other line
-belongs to none, and a naming line that names no entry, or is broken,
-brackets nothing. A
+line naming an entry, and every line between two consecutive edges
+that both name that entry, belong to that entry's boot, where an edge
+is a naming line, a banner or an `erx: end` line; any other line
+belongs to none. A banner or an end line starts or ends a boot, so no
+bracket spans two boots, and a naming line that names no entry, or is
+broken, brackets nothing. A
 name is exactly thirty-two lowercase hexadecimal digits and a banner's
 build and index hash exactly 16 and 64, the handoff's sizes. Each
 entry's `BENCH`, `CLOCK` and `WINDOW` lines go to `BenchMeasurement.boot`
@@ -1178,8 +1180,10 @@ boot was not seen` (a later naming line, machine end or banner shows
 it ended), never `timed_out`, which only a deadline someone saw says;
 an entry no line names has them `not_run`, `no line of the log names
 its boot`.
-An entry whose lines lie on both sides of another entry's line booted
-twice, and all its cells are `rejected`. The live run's record is the
+An entry whose naming lines lie on both sides of another entry's
+naming line or of a banner booted twice, and all its cells are
+`rejected`; a boot's slice of the log that is over a boot's 64 MiB is
+refused. The live run's record is the
 same function of the log it captured. Every byte the reader takes is
 the board's, untrusted: nothing it reads reaches the terminal but
 through `LineEscape`, and the reader is fuzzed with the bench lines'

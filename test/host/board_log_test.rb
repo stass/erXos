@@ -93,6 +93,29 @@ class BoardLogTest < Minitest::Test
     assert_equal measured, statuses(read.boots[1])
   end
 
+  # A WINDOW line placed in entry 2 joins its next BENCH line, which a non-sustained
+  # cell then refuses; one in the firmware's lines between two boots belongs to none.
+  def test_a_window_line_between_one_entrys_names_is_that_entrys
+    window = Fuzz.window_line
+    lines = Fuzz.board_lines.dup
+    lines.insert(lines.index("erx: bench: boot #{SECOND}") + 2, window)
+    lines.insert(lines.index("erx: bench: boot #{THIRD}") - 3, window)
+    read = read(lines)
+    assert_equal 'rejected', statuses(read.boots[1]).first[1]
+    assert_equal measured, statuses(read.boots[2])
+    assert_equal measured, statuses(read.boots[0])
+  end
+
+  # A restarted server boots an entry again; a banner between its naming lines ends
+  # the bracket, so the two boots' lines are never judged as one.
+  def test_an_entry_booted_twice_in_a_row_has_every_cell_rejected
+    lines = Fuzz.board_lines
+    second = lines.index("erx: bench: boot #{SECOND}")
+    read = read(lines[0...second] + Fuzz.entry_lines(FIRST) + lines[second..])
+    assert_equal [['rejected', 'its entry booted twice']] * 3, statuses(read.boots[0]).map { |cell| cell.drop(1) }
+    assert_equal measured, statuses(read.boots[1])
+  end
+
   def test_the_return_is_the_first_banner_after_the_last_entry
     lines = Fuzz.board_lines
     other = Fuzz.banner(build: 'feedfacefeedface', index: '01' * 32)

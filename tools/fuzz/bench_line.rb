@@ -203,5 +203,5 @@ if $PROGRAM_NAME == __FILE__
   end.parse!(ARGV)
   raise OptionParser::InvalidArgument, 'budget of 1..60 seconds' unless options[:seconds].between?(1, 60)
 
-  puts "BENCH, CLOCK and WINDOW line validators: #{Erx::BenchLineFuzz.run(**options)} inputs"
+  puts "BENCH, CLOCK and WINDOW line validators and the board log reader: #{Erx::BenchLineFuzz.run(**options)} inputs"
 end
