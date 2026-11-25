@@ -11,21 +11,25 @@ require_relative '../../tools/lib/erx/runner'
 # guest gives measured cells through BenchMeasurement and a CLOCK line, and erx_peer_bench
 # built with the native bench root's seeded lost wake makes wake-same-cpu come back
 # failed with one lost wake, which only the binary in that initramfs can have produced.
+# The plain boot also ends long before /init's deadline, so /init woke on SIGCHLD.
 # Each boots QEMU under HVF and the seeded one waits out B's second of patience, so
 # `make check` excuses this file (STANDALONE_INTEGRATION_TESTS in tools/erx). Needs
 # ERX_CLANG, ERX_LLD and `tools/erx fetch --linux`; a missing one is a failure, not a skip.
 class LinuxGuestSeedTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
 
-  def wake_cells(seeded)
+  # The wake cells of a one-CPU boot, and how long the boot took.
+  def wake_boot(seeded)
     runner = Erx::Runner.new(owner_root: ROOT, log_dir: File.join(ROOT, 'build/logs'))
     built = Erx::LinuxGuest.build(root: ROOT, runner: runner, seeded: seeded)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     report = Dir.mktmpdir('linux-guest-seed-', File.join(ROOT, 'build')) do |directory|
       Erx::LinuxGuest.boot(root: ROOT, runner: runner, built: built, benchmark: 'wake', cpus: 1,
                            directory: directory).then { |booted| File.binread(booted.fetch('serial_log')) }
     end
     lines = Erx::NativeBench.guest_lines(report)
-    Erx::BenchMeasurement.boot(lines, Erx::PeerBench.asked('wake', cpus: 1, clock: 'counter'))
+    [Erx::BenchMeasurement.boot(lines, Erx::PeerBench.asked('wake', cpus: 1, clock: 'counter')),
+     Process.clock_gettime(Process::CLOCK_MONOTONIC) - started]
   end
 
   def cell(answer, operation)
@@ -34,16 +38,18 @@ class LinuxGuestSeedTest < Minitest::Test
   end
 
   def test_a_plain_boot_measures_the_same_cpu_wake
-    answer = wake_cells([])
+    answer, seconds = wake_boot([])
     assert_empty answer.fetch(:refused)
     refute_nil answer.fetch(:clock)
     assert_equal 'measured', cell(answer, 'wake-same-cpu').status
+    # /init woke on the program's end and powered off, long before its deadline.
+    assert_operator seconds, :<, Erx::LinuxGuest::DEADLINE_SECONDS / 2
   end
 
   def test_the_seeded_lost_wake_fails_the_same_cpu_wake
     seed = Erx::NativeBench::GUESTS.fetch('wake').seeds.find { |kept| kept.name == 'lost wake' }
     refute_nil seed, 'the native wake guest has no lost wake seed'
-    wake = cell(wake_cells(seed.root_flags), 'wake-same-cpu')
+    wake = cell(wake_boot(seed.root_flags).first, 'wake-same-cpu')
     assert_equal 'failed', wake.status
     assert_equal 1, wake.counts.fetch('lost')
   end

@@ -1343,20 +1343,34 @@ name `gzip`. QEMU's `-kernel` loads such an image as it is, so the boot
 step inflates nothing.
 
 **User mode.** No distribution user mode at all: the initramfs holds
-`erx_peer_bench` as `/init`, the directories `/dev` and `/dev/shm`
-with `/dev/console` as a character device, and `/proc`, the directory
-it mounts `/proc` on. A Ruby writer of the `newc` format
+`/init`, a small C17 program of the tree (`bench/linux/init.c`),
+`erx_peer_bench` beside it, the directories `/dev` and `/dev/shm` with
+`/dev/console` as a character device, and `/proc`, the directory `/init`
+mounts `/proc` on. A Ruby writer of the `newc` format
 (`tools/lib/erx/newc_archive.rb`) makes it, so the host needs no `mknod`
-and no `cpio`. The kernel runs `/init` as process 1, so nothing else
+and no `cpio`. The kernel runs `/init` as process 1. It mounts `/proc`,
+which the `wake` handshake reads, starts `erx_peer_bench` with the
+arguments the kernel gave it, and waits for the program under the
+guest's deadline, which the build passes it from
+`LinuxGuest::DEADLINE_SECONDS`: ten seconds after the program's own
+`SIGALRM` deadline, which `PeerBench` passes the program, so the kill
+is only a backstop. QEMU's deadline for the program's `done` line is
+that and the margin an erXos boot's has, so `/init` ends a hung boot
+first; the boot then has no `done` line and fails, with what `/init`
+printed in its serial log, and records nothing (erXos's guest instead
+marks the cells it did not report `timed_out`). However the program ends, by its exit, a signal or
+that kill, `/init` prints how unless it exited with 0, drains the
+console and powers the machine off with `reboot(2)`, and QEMU exits;
+should the power-off fail, `/init` returns and `panic=-1` ends the boot.
+It waits in `sigtimedwait` on `SIGCHLD` with the time left as its
+timeout, so it wakes only when a child ends, and nothing else
 runs in user mode, as nothing else runs beside erXos's bench root and
-its test tasks. The initramfs's root file system is in memory,
-so `shm_open` under `/dev/shm` needs no mount (unverified). When
-`erx_peer_bench` is process 1 it mounts `/proc`, which the `wake`
-handshake reads, and ends by powering the machine off with `reboot(2)`,
-and QEMU exits; anywhere else it exits. That and its CPU pinning are its
-only differences by system.
+its test tasks. The initramfs's root file system is in memory, so
+`shm_open` under `/dev/shm` needs no mount (unverified).
+`erx_peer_bench` is the same program on every system but for its CPU
+pinning and its `wake` handshake's reading of `/proc`.
 
-**Build.** `erx_peer_bench` is compiled on the host by erXos's own clang
+**Build.** `erx_peer_bench` and `/init` are compiled on the host by erXos's own clang
 (`ERX_CLANG`) and linked by `ld.lld` for `aarch64-linux-musl`, static,
 against the headers, start files and `libc.a` of Alpine 3.24.4's
 `musl-dev` package, pinned in Linux's lock as a `tar` source whose
@@ -1374,7 +1388,7 @@ inside QEMU, whose guest has no network device.
 **Boot.** `QemuPlan.argv` with `-kernel` the kernel, `-initrd` the
 initramfs, and `-append "console=ttyAMA0 panic=-1 -- NAME"`, without the
 host link: the kernel hands what follows `--` to `/init` as its
-arguments, so the benchmark's name reaches `erx_peer_bench` as its one
+arguments, which it passes on, so the benchmark's name reaches `erx_peer_bench` as its one
 argument. The generic timer's counter is readable from user mode, and
 the `CLOCK` line reads it at 24 MHz under HVF, so Linux's cells are on
 the `counter` clock as erXos's are. The serial log is read as erXos's is (`NativeBench.guest_lines`).
@@ -1422,8 +1436,7 @@ repository for aarch64 offers `erlang27` 27.3.4.19 and `erlang28`
 
 **The initramfs.** The exported tree at its own prefix, so nothing is
 relocated; the libraries at the paths the loader listed; `/etc/hosts`
-with the IPv4 loopback line; and `erx_peer_bench` as `/init` in its
-launcher role. Process 1 brings the loopback interface up, mounts
+with the IPv4 loopback line; and a launcher of its own as `/init`. Process 1 brings the loopback interface up, mounts
 `/proc` and `/sys`, starts `epmd -daemon`, then starts two nodes by
 executing `erlexec` directly with the environment the `erl` script would
 give it (`ROOTDIR`, `BINDIR`, `EMU`, `PROGNAME`), since the guest has no

@@ -18,13 +18,13 @@ require_relative 'side_lock'
 
 module Erx
   # Linux's guest in the comparison under HVF (docs/design-bench.md, "Linux's guest"):
-  # Alpine's stock virt kernel, unmodified, with an initramfs whose /init is
-  # erx_peer_bench, built static on the host by erXos's clang and ld.lld against
-  # Alpine's musl-dev. Its pins are Linux's own lock (SideLock), bench/linux/deps.lock,
-  # fetched on demand (`tools/erx fetch --linux`) into build/linux-sources. Nothing of
-  # Alpine runs on the host: musl-dev's headers, start files and libc.a, the members its
-  # pin names, are inputs to the compiler and linker, and the kernel runs only in QEMU,
-  # whose guest has no network device and no disk.
+  # Alpine's stock virt kernel, unmodified, with an initramfs whose /init
+  # (bench/linux/init.c) runs erx_peer_bench, both built static on the host by erXos's
+  # clang and ld.lld against Alpine's musl-dev. Its pins are Linux's own lock (SideLock),
+  # bench/linux/deps.lock, fetched on demand (`tools/erx fetch --linux`) into
+  # build/linux-sources. Nothing of Alpine runs on the host: musl-dev's headers, start
+  # files and libc.a, the members its pin names, are inputs to the compiler and linker, and
+  # the kernel runs only in QEMU, whose guest has no network device and no disk.
   module LinuxGuest
     LOCK = 'bench/linux/deps.lock'
     WORKSPACE = 'build/linux-sources'
@@ -34,6 +34,13 @@ module Erx
     TARGET = 'aarch64-linux-musl'
     # The kernel's own defaults, plus its console and an immediate end on a panic.
     COMMAND_LINE = 'console=ttyAMA0 panic=-1'
+    PEER = 'bench/peer/erx_peer_bench.c'
+    INIT = 'bench/linux/init.c'
+    # The guest's deadline: /init kills the program this long after starting it, later
+    # than the program's own deadline, so the kill is only the backstop for a program its
+    # alarm did not end. QEMU's deadline for the program's end is
+    # NativeBench::DEADLINE_MARGIN_SECONDS more, so /init powers the machine off first.
+    DEADLINE_SECONDS = PeerBench::RUN_DEADLINE_SECONDS + 10
 
     module_function
 
@@ -48,11 +55,13 @@ module Erx
       SideLock.fetch(lock(root: root, runner: runner), root: root, label: 'linux', cache: cache)
     end
 
-    # The initramfs: /init, and the directories and console the kernel and /init need.
-    def initramfs(init)
+    # The initramfs: /init, the program it runs, and the directories and console the
+    # kernel and both need.
+    def initramfs(init:, peer:)
       NewcArchive.write([NewcArchive::Entry.directory('dev'), NewcArchive::Entry.directory('dev/shm'),
                          NewcArchive::Entry.character('dev/console', major: 5, minor: 1),
-                         NewcArchive::Entry.directory('proc'), NewcArchive::Entry.file('init', init, mode: 0o755)])
+                         NewcArchive::Entry.directory('proc'), NewcArchive::Entry.file('init', init, mode: 0o755),
+                         NewcArchive::Entry.file('erx_peer_bench', peer, mode: 0o755)])
     end
 
     # Builds the guest's initramfs in a directory of its own under build/linux-guest, so
@@ -63,22 +72,27 @@ module Erx
       dependencies = lock(root: root, runner: runner)
       parent = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
       output = Dir.mktmpdir("build-#{Process.pid}-", parent)
-      peer = compile_peer(root: root, usr: dependencies.fetched_tree(MUSL_DEV), output: output, runner: runner,
-                          seeded: seeded)
+      usr = dependencies.fetched_tree(MUSL_DEV)
+      peer_flags = [*PeerBench.flags, *seeded]
+      peer = compile(root: root, usr: usr, output: output, runner: runner, source: PEER, flags: peer_flags)
+      init = compile(root: root, usr: usr, output: output, runner: runner, source: INIT,
+                     flags: ["-DERX_INIT_DEADLINE_S=#{DEADLINE_SECONDS}u"])
       initrd = File.join(output, 'initramfs.cpio')
-      File.binwrite(initrd, initramfs(File.binread(peer)))
+      File.binwrite(initrd, initramfs(init: File.binread(init), peer: File.binread(peer)))
       kernel = dependencies.fetched_file(KERNEL)
       { kernel: kernel, initrd: initrd,
         subject: { 'kernel' => pin_of(dependencies, KERNEL), 'c_library' => pin_of(dependencies, MUSL_DEV),
                    'command_line' => COMMAND_LINE, 'initramfs_sha256' => Digest::SHA256.file(initrd).hexdigest,
-                   'peer_sha256' => Digest::SHA256.file(peer).hexdigest, 'compiler' => compiler_version(runner),
-                   'flags' => peer_flags('MUSL_DEV', seeded).join(' ') } }
+                   'peer_sha256' => Digest::SHA256.file(peer).hexdigest,
+                   'init_sha256' => Digest::SHA256.file(init).hexdigest, 'compiler' => compiler_version(runner),
+                   'peer_flags' => c_flags('MUSL_DEV', peer_flags).join(' ') } }
     end
 
     # One boot of the guest for benchmark at cpus CPUs, its serial log in directory.
-    def boot(root:, runner:, built:, benchmark:, cpus:, accel: 'hvf', directory:, deadline_seconds: 300)
+    def boot(root:, runner:, built:, benchmark:, cpus:, accel: 'hvf', directory:)
       checkpoints = [{ name: 'bench-timing', pattern: /\Aerx: bench: timing/n, seconds: 60 },
-                     { name: 'bench-done', pattern: /\Aerx: bench: done/n, seconds: deadline_seconds }]
+                     { name: 'bench-done', pattern: /\Aerx: bench: done/n,
+                       seconds: DEADLINE_SECONDS + NativeBench::DEADLINE_MARGIN_SECONDS }]
       Qemu.new(root: root, runner: runner).run(
         platform: Platform.development(root), accel: accel, cpus: cpus, memory_mib: NativeBench::MEMORY_MIB,
         image: built.fetch(:kernel), initrd: built.fetch(:initrd), hostlink: QemuPlan::NO_HOSTLINK,
@@ -90,29 +104,31 @@ module Erx
       dependencies.sources.find { |source| source.fetch('id') == id }.slice('id', 'version', 'sha256')
     end
 
-    # The compiler's flags; usr is musl-dev's usr tree.
-    def peer_flags(usr, seeded)
+    # The compiler's flags for a program of the guest; usr is musl-dev's usr tree.
+    def c_flags(usr, flags)
       ["--target=#{TARGET}", '-std=c17', '-O2', '-pthread', '-mno-outline-atomics', '-nostdinc',
-       '-isystem', File.join(usr, 'include'), *PeerBench.flags, *seeded]
+       '-isystem', File.join(usr, 'include'), *flags]
     end
 
-    # erx_peer_bench compiled by ERX_CLANG and linked static by ERX_LLD against the
-    # start files and libc.a of musl-dev's usr tree, and erXos's compiler-rt builtins archive, whose
-    # binary128 helpers musl's long double printf reaches.
-    def compile_peer(root:, usr:, output:, runner:, seeded:)
+    # source, a C file of the tree, compiled by ERX_CLANG with flags and linked static by
+    # ERX_LLD against the start files and libc.a of musl-dev's usr tree and erXos's
+    # compiler-rt builtins archive, whose binary128 helpers musl's long double printf
+    # reaches. Answers the program's path in output, named as source is.
+    def compile(root:, usr:, output:, runner:, source:, flags:)
       clang = compiler
       lld = ENV.fetch('ERX_LLD') { raise Error, 'linux guest: set ERX_LLD to ld.lld' }
       resource = File.join(File.binread(runner.run([clang, '-print-resource-dir'], name: 'linux-guest-resource-dir',
                                                                                    deadline: 30).fetch('log')).strip, 'include')
-      object = File.join(output, 'erx_peer_bench.o')
-      peer = File.join(output, 'erx_peer_bench')
-      runner.run([clang, *peer_flags(usr, seeded), '-isystem', resource, '-I', root, '-c',
-                  File.join(root, 'bench/peer/erx_peer_bench.c'), '-o', object], name: 'linux-guest-cc', deadline: 300)
+      name = File.basename(source, '.c')
+      object = File.join(output, "#{name}.o")
+      program = File.join(output, name)
+      runner.run([clang, *c_flags(usr, flags), '-isystem', resource, '-I', root, '-c', File.join(root, source),
+                  '-o', object], name: "linux-guest-cc-#{name}", deadline: 300)
       lib = File.join(usr, 'lib')
-      runner.run([lld, '-static', '-o', peer, *%w[crt1.o crti.o].map { |name| File.join(lib, name) }, object,
+      runner.run([lld, '-static', '-o', program, *%w[crt1.o crti.o].map { |crt| File.join(lib, crt) }, object,
                   File.join(lib, 'libc.a'), CompilerRt.archive(root: root, runner: runner, compiler: clang),
-                  File.join(lib, 'crtn.o')], name: 'linux-guest-ld', deadline: 120)
-      peer
+                  File.join(lib, 'crtn.o')], name: "linux-guest-ld-#{name}", deadline: 120)
+      program
     end
 
     def compiler = ENV.fetch('ERX_CLANG') { raise Error, 'linux guest: set ERX_CLANG to the LLVM clang' }
@@ -122,7 +138,7 @@ module Erx
       log = runner.run([compiler, '--version'], name: 'linux-guest-cc-version', deadline: 30).fetch('log')
       File.binread(log, 4096).lines.first.to_s.strip
     end
-    private_class_method :pin_of, :peer_flags, :compile_peer, :compiler, :compiler_version
+    private_class_method :pin_of, :c_flags, :compile, :compiler, :compiler_version
 
     # Linux's guest for the native boot (BenchSystem): one boot of the kernel and its
     # initramfs, whose erx_peer_bench prints a BENCH line for every cell of the boot, a

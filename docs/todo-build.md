@@ -171,10 +171,8 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   `timed_out` from a partial serial log.
 * [Medium] benchmarks, Linux's guest under HVF ([design-bench.md](design-bench.md#linuxs-guest)),
   `tools/lib/erx/linux_guest.rb`, `bench/peer/erx_peer_bench.c`: the guest boots in a session; what remains is
-  that as process 1 its own deadline rests on `SIGALRM`, which
-  the kernel likely does not deliver to process 1, and its power-off on every end passing through `exit`
-  (a small `/init` that forks the program and powers off when it ends would make both hold by construction);
-  `NewcArchive.member` builds the header from positional fields; whether `shm_open` under `/dev/shm` needs no
+  that no seeded hang shows `/init`'s deadline killing the program and powering off, and nothing in `make check`
+  compiles `bench/linux/init.c` (it builds only with the fetched lock); that `NewcArchive.member` builds the header from positional fields; whether `shm_open` under `/dev/shm` needs no
   mount and what `panic=-1` does are still unverified. From the review: the record's `flags` are the compile
   step's alone, with `MUSL_DEV` standing for the package's path, and miss the link step and `ld.lld`'s version;
   the guest's refusal does not name `ERX_CLANG`, `ERX_LLD` or the compiler-rt pin its build needs; the QEMU

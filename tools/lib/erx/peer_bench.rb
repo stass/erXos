@@ -16,15 +16,17 @@ module Erx
     # A run of one of these times the benchmark's cells of the boot named.
     BOOTS = { 'nullcall' => 'native', 'vm' => 'native', 'wake' => 'native', 'sched' => 'native',
               'xdomain' => 'xdomain' }.freeze
+    # A run ends by SIGALRM this long after it starts, so a stalled side ends it.
+    RUN_DEADLINE_SECONDS = 300
 
     module_function
 
     # The -D flags of the source's build: the landing profiles' sizes and the xdomain
-    # cells' parameters, as their declarations give them.
+    # cells' parameters, as their declarations give them, and the run's deadline.
     def flags
       bytes, encoded = xdomain_parameters.values_at('bytes', 'encoded')
       [*NativeBench.profile_flags, "-DERX_PEER_XDOMAIN_BYTES=#{bytes}u",
-       "-DERX_PEER_XDOMAIN_ENCODED=#{encoded}u"].freeze
+       "-DERX_PEER_XDOMAIN_ENCODED=#{encoded}u", "-DERX_PEER_RUN_DEADLINE_S=#{RUN_DEADLINE_SECONDS}u"].freeze
     end
 
     # What a run of benchmark name on a machine of cpus CPUs, reading clock, asks: the
