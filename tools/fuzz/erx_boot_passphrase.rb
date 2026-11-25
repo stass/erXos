@@ -49,9 +49,7 @@ module ErxBootPassphraseFuzz
       paths = sources.map do |path, text|
         File.join(work, File.basename(path)).tap { |copy| File.binwrite(copy, text) }
       end
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, *paths, File.join(ROOT, FUZZ),
-                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: [*paths, File.join(ROOT, FUZZ)])
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_boot_passphrase_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

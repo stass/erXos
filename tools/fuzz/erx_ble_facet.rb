@@ -64,9 +64,7 @@ module ErxBleFacetFuzz
     Dir.mktmpdir('erx-ble-facet-fuzz') do |work|
       facet_path = File.join(work, 'erx_ble_facet.erl')
       File.binwrite(facet_path, facet_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', INCLUDE, '-o', work, facet_path,
-                                       File.join(ROOT, TARGET), Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: [facet_path, File.join(ROOT, TARGET)], include: INCLUDE)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_ble_facet_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

@@ -54,9 +54,7 @@ module ErxCodeObjectsFacetFuzz
     Dir.mktmpdir('erx-code-objects-facet-fuzz') do |work|
       decoder_path = File.join(work, 'erx_code_objects_facet.erl')
       File.binwrite(decoder_path, decoder_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, decoder_path, File.join(ROOT, TARGET),
-                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: [decoder_path, File.join(ROOT, TARGET)])
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_code_objects_facet_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

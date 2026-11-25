@@ -44,10 +44,9 @@ module ErxRcConfFuzz
     Dir.mktmpdir('erx-rc-conf-fuzz') do |work|
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
-      sources = [core_path, *[IDENT, FUZZ].map { |source| File.join(ROOT, source) }, Erx::FuzzWarm::SOURCE]
+      sources = [core_path, *[IDENT, FUZZ].map { |source| File.join(ROOT, source) }]
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, *sources, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: sources, include: include)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_rc_conf_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

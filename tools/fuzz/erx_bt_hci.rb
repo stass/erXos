@@ -21,7 +21,7 @@ module ErxBtHciFuzz
   HCI = 'erlang/apps/erx_bt/src/erx_hci.erl'
   PATCH = 'erlang/apps/erx_bt/src/erx_bt_patch.erl'
   FUZZ = 'test/erlang/erx_bt_hci_fuzz.erl'
-  # Each of the four runs takes about two seconds; each compile and run is under this
+  # Each of the four runs takes about two seconds; each run is under this
   # deadline, and tools/erx gives the whole runner 300.
   DEADLINE_SECONDS = '60'
 
@@ -108,9 +108,7 @@ module ErxBtHciFuzz
         File.join(work, File.basename(source)).tap { |path| File.binwrite(path, replaced.fetch(source)) }
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: sources, include: include)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_bt_hci_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

@@ -49,9 +49,7 @@ module ErxFatReadFuzz
       core_path = File.join(work, File.basename(CORE))
       File.binwrite(core_path, core_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, core_path,
-                                       File.join(ROOT, FUZZ), Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: [core_path, File.join(ROOT, FUZZ)], include: include)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_fat_read_fuzz', 'run', seed.to_s, volumes, '-s', 'init', 'stop',

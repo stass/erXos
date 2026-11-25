@@ -45,9 +45,7 @@ module ErxPresentFuzz
     Dir.mktmpdir('erx-present-fuzz') do |work|
       module_path = File.join(work, 'erx_present.erl')
       File.binwrite(module_path, module_text)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-o', work, SCHEMA, module_path, TARGET_SOURCE,
-                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: [SCHEMA, module_path, TARGET_SOURCE])
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_present_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',

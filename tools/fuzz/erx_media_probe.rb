@@ -51,10 +51,8 @@ module ErxMediaProbeFuzz
       decoder_path = File.join(work, File.basename(DECODER))
       File.binwrite(decoder_path, decoder_text)
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-I', include, '-o', work, decoder_path,
-                                       *SOURCES.map { |source| File.join(ROOT, source) },
-                                       Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work,
+                            sources: [decoder_path, *SOURCES.map { |source| File.join(ROOT, source) }], include: include)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_media_probe_fuzz', 'run', seed.to_s, volumes, '-s', 'init', 'stop',

@@ -23,7 +23,7 @@ module ErxBtAttFuzz
   SERVER = 'erlang/apps/erx_bt/src/erx_gatt_server.erl'
   SOURCES = [L2CAP, ATT, 'erlang/apps/erx_bt/src/erx_gatt_db.erl', 'erlang/apps/erx_bt/src/erx_gatt_gate.erl', SERVER,
              'test/erlang/host_bytes/erx_bytes.erl', 'test/erlang/erx_bt_att_fuzz.erl'].freeze
-  # Each compile and run is under this deadline, and tools/erx gives the whole runner 300.
+  # Each run is under this deadline, and tools/erx gives the whole runner 300.
   DEADLINE_SECONDS = '60'
 
   # A seeded fault: the module's anchor replaced, and the error term the run must fail
@@ -78,9 +78,7 @@ module ErxBtAttFuzz
         File.join(work, File.basename(source)).tap { |path| File.binwrite(path, replaced.fetch(source)) }
       end
       include = Erx::Generated.path('erlang/apps/erx/include', root: ROOT)
-      output, status = Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERLC'), '-I', include,
-                                       '-o', work, *sources, Erx::FuzzWarm::SOURCE, stdin_data: '')
-      raise output unless status.success?
+      Erx::FuzzWarm.compile(work: work, sources: sources, include: include)
 
       Open3.capture2e('gtimeout', '-k', '10', DEADLINE_SECONDS, ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,
                       '-run', 'erx_bt_att_fuzz', 'run', seed.to_s, '-s', 'init', 'stop',
