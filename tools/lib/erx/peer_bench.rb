@@ -19,6 +19,8 @@ module Erx
     # The boots whose runs calibrate CPU 0 against the last on more than one CPU; an
     # xdomain run is not pinned.
     CALIBRATED = %w[native posix].freeze
+    # The program's one C file, which every system's build compiles.
+    SOURCE = 'bench/peer/erx_peer_bench.c'
     # A run ends by SIGALRM this long after it starts, so a stalled side ends it.
     RUN_DEADLINE_SECONDS = 300
 

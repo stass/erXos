@@ -171,13 +171,15 @@ module Erx
                       build/gen/liberx/generated/prog_profile.c test/guest/programs/args.c
                       test/guest/programs/bigargs.c test/guest/programs/note.c test/guest/programs/pipeio.c
                       test/guest/programs/uiprobe.c test/guest/programs/fileio.c test/guest/programs/rcio.c
-                      test/guest/programs/frontfill.c
+                      test/guest/programs/frontfill.c bench/peer/erx_peer_bench.c
                       display/lvgl/erx_lvgl.c build/gen/display/generated/erx_ui_wire.c].freeze
     # The native runtime's sysroot (NativeRuntime), whose header tree LIBC_SOURCES compile with.
     LIBC_SYSROOT = 'build/runtime/native/sysroot'
     # The sources that use the FP registers, which a task may (only the kernel runs no FP
-    # instruction): erx_etf.c reads and writes floats.
-    FP_SOURCES = %w[liberx/erx_etf.c].freeze
+    # instruction): erx_etf.c reads and writes floats, and erx_peer_bench.c, built for
+    # erXos as for Linux (docs/design-bench.md, "Fairness"), is denied no register Linux's
+    # build may use.
+    FP_SOURCES = %w[liberx/erx_etf.c bench/peer/erx_peer_bench.c].freeze
     # The sources that include LVGL's headers (Lvgl::Program), and their view of it:
     # lv_conf.h beside them, and LVGL's headers as system headers, so -pedantic and
     # -Werror judge erXos's code alone.

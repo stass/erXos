@@ -53,6 +53,7 @@ begin
   require_relative 'lib/erx/l4re_bench'
   require_relative 'lib/erx/l4re_fetch'
   require_relative 'lib/erx/linux_guest'
+  require_relative 'lib/erx/posix_bench'
   require_relative 'lib/erx/bench_web'
   require_relative 'lib/erx/net_bench_freebsd'
   require_relative 'lib/erx/toolchain_provenance'
@@ -1624,7 +1625,8 @@ module Erx
                 XdomainBench::Guest.new(run: XdomainBench::Run.new(root: ROOT, runner: runner)),
                 L4ReBench::Guest.new(build: L4ReBench::Build.new(directory: File.join(ROOT, 'build/l4re')),
                                      qemu: Qemu.new(root: ROOT, runner: runner), platform: Platform.development(ROOT)),
-                LinuxGuest::Guest.new(root: ROOT, runner: runner)]
+                LinuxGuest::Guest.new(root: ROOT, runner: runner),
+                PosixBench::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, logs: logs) }
       session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
                                       write: write, load: -> { QemuGate.one_minute_load })
