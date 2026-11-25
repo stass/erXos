@@ -154,7 +154,9 @@ configured; and `NativeBench` builds native_task's program beside `NativeTask`'s
   is (1) `--profile full`, refused because `NativeBench::BoardSets` builds only the landing form; (2) the ssh calls never succeed on the board: its development host key is new on every boot, so
   `ssh -o BatchMode=yes` against the user's known_hosts fails, the walk types the reboot on its console and both
   sensor readings are `unknown`; the walk needs a per-boot known-hosts file as `DevKey` keeps for QEMU guests, and its
-  own key, which is a security choice to settle first; (3) a bad `--http` link is refused only under the lock, after
+  own key, which is a security choice to settle first; once ssh works, a reboot ssh ran but reports as failed (exit
+  255 as the board drops the connection, or the 30 s deadline) is typed again on the console, so the walk then types
+  only on a failure before ssh connected; (3) a bad `--http` link is refused only under the lock, after
   the set is built, though the command's comment says every refusal comes before the build.
 * [Medium] benchmarks, re-run on the Pi 4 the cells whose `BENCH` lines the console cut: `nullcall`'s two `other-cpu`
   cells (wide histograms, about 2-3 KiB a line) and `wake`'s `park-deadline` were `rejected` (`nullcall`'s record

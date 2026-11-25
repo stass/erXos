@@ -1190,8 +1190,10 @@ with `--http DIR` the served link that `tools/erx netboot --http` stages and
    is checked as `CodeSsh` checks it, and batch mode makes a password or
    host-key prompt fail at once. If ssh fails, the run types `reboot`
    and a carriage return on the console it holds, as root's console
-   session takes it, and says so; if that write fails too, it asks for a
-   reset by hand. Either way it then waits the boot deadline.
+   session takes it, says so, and asks for a reset by hand if the board
+   does not restart within the boot deadline, which runs from the request.
+   A console that cannot be written is closed, and the walk ends with its
+   console closed.
 4. **Each line it reads** goes to `BoardWalk`, a pure function of the
    queue's names, the found pair's return identity, the walk's state and
    the line's kind, which answers what the line means for the walk:

@@ -175,13 +175,14 @@ class BoardRunTest < Minitest::Test
     @shell = Shell.new([], true)
     assert_equal 'returned', walk_board.ending
     assert_equal ["reboot\r"], @console.typed
-    assert_includes @out, 'bench: ssh could not ask the board to reboot; the walk typed reboot on its console'
+    assert_includes @out, 'bench: ssh could not ask the board to reboot; the walk typed reboot on its console; ' \
+                          'if the board does not restart, reset it by hand within the boot deadline'
   end
 
-  def test_a_reboot_neither_ssh_nor_the_console_can_ask_for_is_left_to_a_hand_reset
+  def test_a_console_that_cannot_be_written_when_ssh_cannot_ask_for_the_reboot_ends_the_walk
     @shell = Shell.new([], true)
-    assert_equal 'returned', walk_board(takes: false).ending
-    assert_includes @out, 'bench: neither ssh nor the console could ask the board to reboot; reset it by hand, and the walk waits the boot deadline'
+    assert_equal 'console_closed', walk_board(takes: false).ending
+    assert_includes @out, 'bench: ssh could not ask the board to reboot, and the console could not be written; the walk ends with its console closed'
   end
 
   def test_the_boards_bytes_reach_the_output_only_escaped

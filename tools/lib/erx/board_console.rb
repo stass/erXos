@@ -118,10 +118,9 @@ module Erx
       [BoardWalk::Stop.new(ending: 'console_closed', at: @clock.call)]
     end
 
-    # Writes bytes to the board whole; whether it could.
+    # Writes bytes, a few, to the board whole without waiting; whether it could.
     def type(bytes)
-      @io.write(bytes)
-      true
+      @io.write_nonblock(bytes, exception: false) == bytes.bytesize
     rescue SystemCallError, IOError
       false
     end

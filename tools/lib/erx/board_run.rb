@@ -209,8 +209,9 @@ module Erx
     # ends; a signal, from the reboot request on, is the walk's interruption, returned to be
     # raised once the link is back and walk.json written.
     def walk(plan, console)
+      asked = reboot(console)
       state = BoardWalk.start(plan, at: @clock.call)
-      reboot(console)
+      state = BoardWalk.step(plan, state, BoardWalk::Stop.new(ending: 'console_closed', at: @clock.call)) unless asked
 
       until state.ended?
         console.read(state.deadline).each do |event|
@@ -225,15 +226,15 @@ module Erx
     end
 
     # Asks the board to reboot over ssh, or, when ssh cannot, by typing reboot on the
-    # console, as root's console session takes it; says when neither could.
+    # console, as root's console session takes it; false when the console could not be
+    # written, which leaves it closed for the walk.
     def reboot(console)
-      return if @shell.reboot
+      return true if @shell.reboot
 
-      if console.type(CONSOLE_REBOOT)
-        say('bench: ssh could not ask the board to reboot; the walk typed reboot on its console')
-      else
-        say('bench: neither ssh nor the console could ask the board to reboot; reset it by hand, and the walk waits the boot deadline')
-      end
+      typed = console.type(CONSOLE_REBOOT)
+      say(typed ? 'bench: ssh could not ask the board to reboot; the walk typed reboot on its console; if the board does not restart, reset it by hand within the boot deadline' :
+                  'bench: ssh could not ask the board to reboot, and the console could not be written; the walk ends with its console closed')
+      typed
     end
 
     def ended(directory, queue, walk)

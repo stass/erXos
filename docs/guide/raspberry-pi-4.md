@@ -35,7 +35,7 @@ connection: a new one, such as `nc`'s, closes the one before, so close
 `nc` before the walk starts, and do not open it while the walk runs,
 which would end the walk with its console closed. The walk asks the
 board to reboot over ssh; where ssh cannot, it types `reboot` on the
-console itself. The port
+console it is given, so give it only this board's console. The port
 has no authentication, so serve it on localhost, or reach a Glasgow on
 another host through an ssh tunnel.
 A second adapter on UART3, the host link, is optional:
