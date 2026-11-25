@@ -45,7 +45,7 @@ class GenodeFetchTest < Minitest::Test
       'status' => 'permanent' }
   end
 
-  def toolchain(filename: 'genode-toolchain-25.05-ubuntu-24.04.tar.xz')
+  def toolchain(filename: 'genode-toolchain-25.05-debian-12.10.tar.xz')
     bytes = "tool chain\n"
     sha256 = Digest::SHA256.hexdigest(bytes)
     File.write(File.join(@cache, "genode-toolchain-#{sha256}.xz"), bytes)
@@ -77,26 +77,26 @@ class GenodeFetchTest < Minitest::Test
     pinned = toolchain
     write_lock([release, pinned])
     File.write(File.join(@cache, "genode-toolchain-#{pinned.fetch('sha256')}.xz"), 'tampered')
-    assert_raises(Erx::Error) { fetch }
+    assert_match(/SHA-256 mismatch: genode-toolchain/, assert_raises(Erx::Error) { fetch }.message)
     refute File.exist?(File.join(@root, Erx::GenodeFetch::WORKSPACE, 'build/third_party/genode-toolchain'))
   end
 
-  # The lock holds the release as a git source and the tool chain as Genode's
-  # pre-compiled archive, and nothing else the build would not use.
+  # The lock holds the release as a git source and the tool chain as a file, and
+  # nothing else.
   def test_a_lock_without_exactly_the_release_and_the_tool_chain_is_refused
     write_lock([release])
     assert_match(/pins genode \(git\); Genode's lock pins/, assert_raises(Erx::Error) { fetch }.message)
     write_lock([release.merge('kind' => 'tar').except('commit'), toolchain])
-    assert_match(/Genode's lock pins/, assert_raises(Erx::Error) { fetch }.message)
-    write_lock([release, toolchain(filename: 'genode-toolchain-25.05-debian-12.10.tar.xz')])
-    assert_match(/not Genode's pre-compiled tool chain for Ubuntu 24.04/, assert_raises(Erx::Error) { fetch }.message)
+    assert_match(/pins genode \(tar\), genode-toolchain \(file\); Genode's lock pins/, assert_raises(Erx::Error) { fetch }.message)
   end
 
-  # The checked-in lock is Genode's own: the release and the tool chain, at real pins.
+  # The checked-in lock passes Genode's own rules and the lock schema, and erXos's own
+  # lock pins nothing of Genode.
   def test_the_checked_in_lock_is_genodes_own
     root = File.expand_path('../..', __dir__)
-    sources = JSON.parse(File.read(File.join(root, Erx::GenodeFetch::LOCK))).fetch('sources')
-    assert_equal({ 'genode' => 'git', 'genode-toolchain' => 'file' }, sources.to_h { |source| [source['id'], source['kind']] })
+    FileUtils.cp(File.join(root, Erx::GenodeFetch::LOCK), File.join(@root, Erx::GenodeFetch::LOCK))
+    pinned = Erx::GenodeFetch.lock(root: @root, runner: @runner).sources
+    assert_equal Erx::GenodeFetch::SOURCES, pinned.to_h { |source| [source.fetch('id'), source.fetch('kind')] }
     refute JSON.parse(File.read(File.join(root, 'deps.lock'))).fetch('sources').any? { |source| source['id'].start_with?('genode') },
            "erXos's own lock pins nothing of Genode"
   end

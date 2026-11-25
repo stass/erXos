@@ -1493,9 +1493,9 @@ release's netboot directory
 pinned with its configuration file beside it in Linux's own lock,
 `bench/linux/deps.lock`, in `deps.lock`'s form, and read as data. Only
 `tools/erx fetch --linux` reads that lock, as only `--l4re` reads
-L4Re's: a default fetch does not download Linux, and a `--cache` fetch
+L4Re's and only `--genode` Genode's: a default fetch does not download Linux, and a `--cache` fetch
 does not need it. It publishes each pin under `build/linux-sources`, a
-root of its own (`tools/lib/erx/side_lock.rb`, which both locks share),
+root of its own (`tools/lib/erx/side_lock.rb`, which the three locks share),
 so no id it names can replace a source of erXos's lock. It is the distribution's
 stock kernel for virtual machines, built by the distribution, unmodified,
 and booted with its own defaults: no option that changes mitigations or
@@ -2690,25 +2690,36 @@ which shows the row went through the session's Erlang handler.
   first, Fiasco.OC only where Genode's documentation at the pin names
   64-bit ARM support, and the board once Genode's documentation names
   the Raspberry Pi 4.
-* **Genode's third-party sources.** Genode's build obtains third-party
-  code by itself: its documentation says `tool/ports/prepare_port`
-  downloads the archives a port description names into `contrib/`, and
-  that `tool/depot/download` fetches signed archives, a source archive
-  such as `libc`'s carrying that library's source, from the web server
-  a file of the tree names ("Integration of 3rd-party software",
-  "Package management", References). Which of them `posix` needs, the C
-  library's presumably among them, is unverified until the offline
-  build names what it lacks. Both download through Genode's own tools,
-  from addresses no erXos lock pins, so neither fits the offline
-  container as written, and the addresses live in Genode's port and
-  recipe files, which no agent reads. Recommendation: list the
-  archives the build needs by running Genode's depot tools offline in
-  the container as a black-box probe, pin each archive's URL and
-  SHA-256 in `bench/genode/deps.lock`, and copy them into the
-  container's depot, so the build stays offline and every byte it uses
-  is pinned. The alternative, one networked container that runs
-  `prepare_port` and whose exported `contrib/` is pinned by its
-  SHA-256, puts a network-enabled run of Genode's scripts on the host.
+* **Genode's third-party sources.** Genode's documentation, read at
+  Foundations 26.05 while the pin is 26.08, names two ways third-party
+  code reaches a build, each a tool the user runs, never the build
+  itself: `tool/ports/prepare_port` downloads the archives a port
+  description names into `contrib/<port>-<fingerprint>`, where a
+  build that uses the port looks for it and stops with an error when
+  it is missing, and a microkernel's build needs its port prepared
+  first (NOVA is the documented example); and `tool/depot/download`
+  fetches signed archives into the depot, `libc`'s source archive
+  carrying that library's source, from the web server a file of the
+  tree names ("Integration of 3rd-party software", "Build system",
+  "Package management", "A simple system scenario", References).
+  Which ports and archives `posix` on `base-hw` needs, and whether
+  seL4 and Fiasco.OC are ports, is unverified. Both tools download
+  from addresses that live in Genode's port and recipe files, which
+  no agent reads, and no erXos lock pins them, so neither fits the
+  offline container as written. The open question is how the
+  addresses are learned: whether a missing port's error, or Genode's
+  depot tools run offline as a black-box probe, prints each archive's
+  address is unverified. Recommendation: probe that first; if it
+  does, pin each port archive and each depot archive by URL and
+  SHA-256 in `bench/genode/deps.lock`, which then pins more than the
+  release and the tool chain (`GenodeFetch::SOURCES` grows with it),
+  and copy them into the container, port archives under the
+  fingerprint the error names and depot archives into the depot, so
+  the build stays offline and every byte it uses is pinned. If it
+  does not, the alternative is one networked container that runs
+  `prepare_port` and the depot download and whose exported `contrib/`
+  and depot are pinned by their SHA-256, which puts a
+  network-enabled run of Genode's scripts on the host.
 
 ## The first five benchmarks
 
@@ -3535,6 +3546,7 @@ pages carry no release of their own but the notes' numbers:
 | "Licensing", `https://genode.org/about/licenses`: the GNU Affero General Public License version 3 | `licenses.html` | `527600fdd9a3bd85ab1759afa26e73d7d23cb097e671423870d1c4e2ec1efea7` |
 | "Tool chain", `https://genode.org/download/tool-chain`: GNU tools, pre-compiled for Debian 12.10 and Ubuntu 24.04, installed at `/usr/local/genode/tool/<version>`, prefixed `genode-aarch64-` | `tool-chain.html` | `e5e177232496fcef8cdb739b0123e8cea3a9a33e5cfd7f59ac01ec60ce7c2677` |
 | "Genode Foundations" 26.05, "Integration of 3rd-party software", `https://genode.org/documentation/genode-foundations/26.05/development/Integration_of_3rd-party_software.html`: `tool/ports/prepare_port` downloads a port's archives into `contrib/` (fetched on 2026-11-25 into `~/erxos-scratch/genode-docs/foundations-26.05/`, as are the next two) | `Integration_of_3rd-party_software.html` | `fa5280487a2093c952640450a29c4177d7184966ffc77c18022cb3d38e1447c1` |
+| The same, "Build system", `.../26.05/development/Build_system.html`: a build that uses a port looks for it under `contrib/` and stops with an error when it is missing | `Build_system.html` | `fe190dc932ab19d2079f0642af03de603acf0466e6492429e1662003964a72f8` |
 | The same, "Package management", `.../26.05/development/Package_management.html`: `tool/depot/download` and signed source archives, `libc`'s carrying the library's source | `Package_management.html` | `175ee3be78ddeb690efdeb1061a1ba0c223d2869a5161ccff2416af988efeeaa` |
 | The same, "A simple system scenario", `.../26.05/getting_started/A_simple_system_scenario.html`: `prepare_port` before a kernel's build | `A_simple_system_scenario.html` | `9ba536a4ac7e0e0aff3cb2c1fbc93402869112f66b823081efe88262fa8cb775` |
 

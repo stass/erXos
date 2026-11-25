@@ -469,6 +469,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
 
 ## Bugs by subsystem
 
+* [Low] Side locks' stale-tree refusal, `Dependencies#stale` (`tools/lib/erx/dependencies.rb`): a side lock's
+  stale tree (`fetch --l4re`, `--linux`, `--genode`) is reported as `build/third_party/ID` not holding
+  `deps.lock`'s pin, while the tree is under the guest's workspace (`build/genode-sources/build/third_party/ID`)
+  and the pin is the side lock's, so "remove it" names the wrong path. Build the path from `destination_of`
+  relative to the root and name the lock it reads.
+* [Low] Side locks' exact-source rules, `SideLock` (`tools/lib/erx/side_lock.rb`): `L4ReFetch.lock` and
+  `GenodeFetch.lock` compare only the sources of the running host, so a source pinned for another host
+  (`host:`) passes their refusal unseen; nothing is fetched for it. Refuse any host-bound entry in a side lock.
 * [Low] Oracle image fetch, `Dependencies#fetch_image` (`tools/lib/erx/dependencies.rb`): `make fetch` pulls
   every OCI image `deps.lock` pins, so a host pulls the oracle toolchain of each platform although its engine
   runs only its own. Fetch only the image whose platform is the local engine's architecture
