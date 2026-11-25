@@ -11,6 +11,7 @@ require_relative 'dom_planner'
 require_relative 'build_inputs'
 require_relative 'build_kind'
 require_relative 'error'
+require_relative 'generated'
 require_relative 'json_input'
 require_relative 'manifest'
 require_relative 'oracle'
@@ -83,6 +84,8 @@ module Erx
     # runtime build, so it holds the runtime tree's lock exclusively, as a
     # build does.
     def build(output: @archive)
+      # The pack tools and the root compile against the generated tree.
+      Generated.ensure(root: @root)
       Runtime.hold_tree(@root, mode: :exclusive) do
         FileUtils.rm_f(output)
         FileUtils.rm_rf(@directory)

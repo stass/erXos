@@ -8,6 +8,7 @@ require 'tmpdir'
 require_relative 'abi'
 require_relative 'boot_file'
 require_relative 'fiasco'
+require_relative 'generated'
 require_relative 'output_directory'
 require_relative 'pack_tools'
 require_relative 'platform'
@@ -45,6 +46,8 @@ module Erx
     # executables packed as image entries, as a domain runtime is, and jit names those of
     # them whose manifest marks ERX_IMAGE_JIT, as the BeamAsm runtime's does.
     def build(directory:, stand_in_root: nil, programs: {}, images: {}, jit: [])
+      # The pack tools and the root compile against the generated tree.
+      Generated.ensure(root: @root)
       OutputDirectory.fresh(root: @root, path: directory)
       recipe = File.join(directory, 'recipe')
       fixture = StructuralPack.build(root: @root, directory: recipe, codec: @codec, runner: @runner, tools: tools,

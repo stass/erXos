@@ -7,6 +7,7 @@ require 'minitest/autorun'
 require 'open3'
 require 'tmpdir'
 require 'fileutils'
+require_relative '../fixtures/sanitizer_environment'
 require_relative '../../tools/fuzz/bench_line'
 
 # The guest library's BENCH and CLOCK lines (test/guest/bench/bench_line.c, docs/design-bench.md,

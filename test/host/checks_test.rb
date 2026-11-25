@@ -180,6 +180,8 @@ class ChecksTest < Minitest::Test
       'tools/lib/erx/deferred.rb' => ["def call\n  require_relative('../../../test/x')\nend\n", 'require_relative test/x'],
       'tools/lib/erx/rooted.rb' => ["load 'test/fixtures/x.rb'\n", 'load test/fixtures/x.rb'],
       'tools/lib/erx/joined.rb' => ["require File.join(ROOT, 'test/fixtures/x')\n", 'require of a path naming test/'],
+      'tools/lib/erx/parts.rb' => ["require File.join(ROOT, 'test', 'x')\n", 'require of a path naming test/'],
+      'tools/lib/erx/kernel.rb' => ["Kernel.load('test/x.rb')\n", 'load test/x.rb'],
       'tools/lib/erx/computed.rb' => ["require_relative File.join('../../..', FIXTURE)\n",
                                       'require_relative of a computed path'] }.each do |relative, (source, wrong)|
       path = write(relative, source)

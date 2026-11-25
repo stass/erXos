@@ -19,7 +19,7 @@ module Erx
   # A fixed native-root recipe, the archive of the QEMU suites' boot images (BootImage)
   # and of the structural pack tests. This produces a structural wire fixture,
   # never boot admission. The executable, source closure and full archive receive
-  # their real checks; M1's root-startup and policy obligations remain unsupported.
+  # their real checks; the root's startup and policy obligations are not checked.
   module StructuralPack
     # The native_domain image carries both ERTS images and a release, and the boot_image
     # suite's large image a filler that carries it past the native root's place.

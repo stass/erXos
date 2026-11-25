@@ -91,14 +91,17 @@ module Erx
     # environment, the generated tree), which no command may inherit, so what
     # tooling needs from a fixture lives in tools/lib/erx. The check parses each
     # source (Prism), so it finds every require, require_relative and load call,
-    # deferred ones included. A literal path is resolved as the call resolves it; a
-    # computed one is refused for require_relative, whose path is fixed by nature,
-    # and for require or load when a literal in it names test/. A computed path that
-    # names test/ only through a constant is beyond it; tools/fuzz, whose targets
-    # load their seed fixtures, is outside it.
+    # deferred ones included, called bare or on Kernel. A literal path is resolved
+    # against the calling file's directory for require_relative and against the
+    # tree's top for require and load; a computed one is refused for
+    # require_relative, whose path is fixed by nature, and for require or load when a
+    # literal in it names a test directory. A computed path that names test/ only
+    # through a constant is beyond it, and so is what a loaded file loads in turn:
+    # FuzzDrivers loads the drivers of tools/fuzz, whose targets load their seed
+    # fixtures (TODO.md).
     TOOL_CODE = %r{\Atools/(?:erx\z|lib/erx/)}
     LOAD_CALLS = %i[require require_relative load].freeze
-    TEST_TREE = %r{(?:\A|/)test/}
+    TEST_TREE = %r{(?:\A|/)test(?:/|\z)}
 
     # ProductionImage#build adds nothing to the system release; its test entry point adds
     # test code and marks the archive (ERX_PACK_TEST_CODE). This check enforces two things
@@ -367,16 +370,22 @@ module Erx
         next unless ruby_source?(path)
 
         descendants(Prism.parse_file(path).value).each do |node|
-          next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && LOAD_CALLS.include?(node.name)
+          next unless load_call?(node)
 
-          wrong = test_load(node, File.dirname(relative))
+          wrong = test_tree_load(node, File.dirname(relative))
           raise Error, "host tooling loads test code: #{relative}:#{node.location.start_line} #{wrong}" if wrong
         end
       end
     end
 
-    # What is wrong with call, a require, require_relative or load in directory, or nil.
-    def test_load(call, directory)
+    def load_call?(node)
+      node.is_a?(Prism::CallNode) && LOAD_CALLS.include?(node.name) &&
+        (node.receiver.nil? || (node.receiver.is_a?(Prism::ConstantReadNode) && node.receiver.name == :Kernel))
+    end
+
+    # How call, a require, require_relative or load in directory, reaches test/, or nil
+    # when it does not.
+    def test_tree_load(call, directory)
       argument = call.arguments&.arguments&.first
       case argument
       in nil then nil
@@ -384,12 +393,12 @@ module Erx
         base = call.name == :require_relative ? File.join('/', directory) : '/'
         target = File.expand_path(argument.unescaped, base).delete_prefix('/')
         "#{call.name} #{target}" if target.start_with?('test/')
+      in _ if call.name == :require_relative
+        'require_relative of a computed path'
+      in _ if descendants(argument).any? { |node| node.is_a?(Prism::StringNode) && TEST_TREE.match?(node.unescaped) }
+        "#{call.name} of a path naming test/"
       else
-        return 'require_relative of a computed path' if call.name == :require_relative
-
-        "#{call.name} of a path naming test/" if descendants(argument).any? do |node|
-          node.is_a?(Prism::StringNode) && TEST_TREE.match?(node.unescaped)
-        end
+        nil
       end
     end
 

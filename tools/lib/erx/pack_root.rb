@@ -7,7 +7,6 @@ require 'json'
 require 'fileutils'
 require_relative 'build_inputs'
 require_relative 'error'
-require_relative 'generated'
 require_relative 'output_directory'
 require_relative 'pack_provenance'
 
@@ -19,10 +18,9 @@ module Erx
   module PackRoot
     module_function
 
-    # The root compiles against the generated headers, so build brings that tree up
-    # to date first (a no-op when it is fresh).
+    # The root compiles against the generated headers, which the caller has brought
+    # up to date (Erx::Generated.ensure).
     def build(root:, directory:, codec:, runner:, compiler:, linker:)
-      Erx::Generated.ensure(root: root)
       directory = Erx::OutputDirectory.prepare(root: root, path: directory)
       source = File.join(root, 'test/fixtures/pack_root/root.c')
       template = File.join(root, 'test/fixtures/pack_root/aarch64.ld.in')
