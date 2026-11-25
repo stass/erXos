@@ -1,5 +1,6 @@
 # Modified by erXos: images contain no ambient identity or build counter, and the
 # include cleanup finds dangling links with POSIX find.
+# Modified by erXos: no sysroot target; the full libc it installs is not imported.
 #
 # GLOBAL Makefile for the whole L4 tree
 #
@@ -11,8 +12,8 @@ include $(L4DIR)/mk/util.mk
 PRJ_SUBDIRS   := pkg tests $(wildcard l4linux)
 BUILD_DIRS    := tool
 install-dirs  := tool pkg
-clean-dirs    := tool pkg tests doc sysroot
-cleanall-dirs := tool pkg tests doc sysroot
+clean-dirs    := tool pkg tests doc
+cleanall-dirs := tool pkg tests doc
 
 BUILD_TOOLS    = bash bison flex gawk perl tput \
                  $(foreach v,CC CXX LD HOST_CC HOST_CXX HOST_LD, \
@@ -21,7 +22,7 @@ BUILD_TOOLS    = bash bison flex gawk perl tput \
 BUILD_TOOLS_pkg/uvmm  := dtc
 
 CMDS_WITHOUT_OBJDIR := help checkbuild checkbuild.% check_build_tools
-CMDS_PROJECT_MK     := all clean cleanall install scrub cont doc help sysroot \
+CMDS_PROJECT_MK     := all clean cleanall install scrub cont doc help \
                        $(wildcard $(MAKECMDGOALS))
 
 export MAKE
@@ -237,7 +238,7 @@ cleanfast:
 	          fi
 	$(VERBOSE)$(RM) -r $(addprefix $(OBJ_BASE)/,bin include pkg tests    \
 	                               doc ext-pkg pc lib test               \
-	                               .Makeconf.phys_reloc sysroot )        \
+	                               .Makeconf.phys_reloc )                \
 	                               $(L4DEFS_FILES)                       \
 	                               $(IMAGES_DIR)
 	$(VERBOSE)if [ -f $(OBJ_BASE)/.tmp.bid_config.h ]; then  \
@@ -323,35 +324,6 @@ cleanup_include_dir:
 	$(VERBOSE)$(FIND) $(or $(INSTALLDIR_INC_LOCAL),$(OBJ_BASE)/include) \
 	                  -type l -exec sh -c 'for l; do [ -e "$$l" ] || $(RM) "$$l" || exit 1; done' sh {} +
 
-# Build a typical sysroot for use with external tooling such as a
-# L4Re-specific cross-compiler
-SYSROOT_LIB_DIRS  = $(addprefix libc/$(CONFIG_L4_LIBC)/,libc libm librt) \
-                    ldscripts ldso libgcc-crt libgcc_eh
-
-OUTPUT_FORMAT = $(CC) $(CFLAGS) -Wl,--verbose 2>&1 | $(SED) -n '/OUTPUT_FORMAT/,/)/p'
-SYSROOT_PACKAGES = $(addprefix pkg/l4re-core/,ldso libc_backends libc)
-.PHONY: sysroot
-sysroot: $(SYSROOT_PACKAGES)
-	@$(GEN_MESSAGE)
-	$(VERBOSE)$(RM) -r $(OBJ_DIR)/sysroot
-	$(VERBOSE)$(MKDIR) $(OBJ_DIR)/sysroot/usr/include/l4
-	$(VERBOSE)$(MKDIR) $(OBJ_DIR)/sysroot/usr/lib
-	$(VERBOSE)$(CP) -Lr $(OBJ_DIR)/include/generated \
-	                    $(OBJ_DIR)/sysroot/usr/include/
-	$(VERBOSE)$(CP) -Lr $(OBJ_DIR)/include/$(BUILD_ARCH)/l4/sys \
-	                    $(OBJ_DIR)/include/$(BUILD_ARCH)/l4/util \
-	                    $(OBJ_DIR)/sysroot/usr/include/l4/
-	$(VERBOSE)$(CP) -Lr $(OBJ_DIR)/include/l4/{crtn,cxx,l4re_vfs,libc_backends,re,sys,util,bid_config.h} \
-	                    $(OBJ_DIR)/sysroot/usr/include/l4/
-	$(VERBOSE)$(CP) -Lr $(OBJ_DIR)/include/$(CONFIG_L4_LIBC)/* $(OBJ_DIR)/sysroot/usr/include/
-	$(VERBOSE)$(MAKE) S='$(addprefix pkg/l4re-core/,$(SYSROOT_LIB_DIRS))' LD_SCRIPTS='' install \
-	                    INSTALLDIR_LIB=$(OBJ_DIR)/sysroot/usr/lib INSTALLDIR_INC=$(OBJ_DIR)/sysroot/usr/include
-	$(VERBOSE)$(MAKE) S=pkg/l4re-core/libpthread/src TARGET=libpthread.a install \
-	                    INSTALLDIR_LIB=$(OBJ_DIR)/sysroot/usr/lib INSTALLDIR_INC=$(OBJ_DIR)/sysroot/usr/include
-	$(VERBOSE)mv $(OBJ_DIR)/sysroot/usr/lib/libc_nonshared.p.a  $(OBJ_DIR)/sysroot/usr/lib/libc_nonshared.a
-	$(if $(filter uclibc-ng,$(CONFIG_L4_LIBC)),$(VERBOSE)$(RM) $(OBJ_DIR)/sysroot/usr/lib/libc.so)
-	$(if $(filter uclibc-ng,$(CONFIG_L4_LIBC)),$(VERBOSE)$(OUTPUT_FORMAT) > $(OBJ_DIR)/sysroot/usr/lib/libc.so)
-	$(if $(filter uclibc-ng,$(CONFIG_L4_LIBC)),$(VERBOSE)echo "GROUP ( libc.so.1 libc_nonshared.a AS_NEEDED ( libld-l4.so.1 ) )" >> $(OBJ_DIR)/sysroot/usr/lib/libc.so)
 
 
 endif # empty $(S)

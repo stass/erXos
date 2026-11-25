@@ -1,3 +1,5 @@
+/* Modified by erXos: only the minimal libc is built, and no libpthread takes
+ * the exit code. */
 #include <stdlib.h>
 #include <stdint.h>
 #include "libc.h"
@@ -27,9 +29,6 @@ static void libc_exit_fini(void)
 
 weak_alias(libc_exit_fini, __libc_exit_fini);
 
-// L4: From pthread library
-extern weak int __pthread_atexit_retcode;
-
 _Noreturn void exit(int code)
 {
 	/* Handle potentially concurrent or recursive calls to exit,
@@ -45,9 +44,6 @@ _Noreturn void exit(int code)
 	if (prev == tid) a_crash();
 	else if (prev) for (;;) __sys_pause();
 	*/
-
-        if (&__pthread_atexit_retcode)
-          __pthread_atexit_retcode = code;
 
 	__funcs_on_exit();
 	__libc_exit_fini();

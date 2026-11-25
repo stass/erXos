@@ -1,4 +1,5 @@
 #!/usr/bin/env perl
+# Modified by erXos: ned tests load no lib_test.lua; it is not imported.
 #
 # Execute a test on the configured architecture.
 #
@@ -441,7 +442,7 @@ if ($ned_cfg and $modlist_info->{roottask}{name} eq 'moe')
     # Now set up boot for use with ned.
     (my $ned_cfg_name = $ned_cfg) =~ s/.*\///;
     $modlist_info->{roottask}{args} = " $moe_args rom/$ned_cfg_name";
-    add_mods( map { parse_mod $_ } ("ned", "test_env.lua", "lib_test.lua", $ned_cfg) );
+    add_mods( map { parse_mod $_ } ("ned", "test_env.lua", $ned_cfg) );
   }
 elsif ($modlist_info->{roottask}{name} eq 'moe')
   {

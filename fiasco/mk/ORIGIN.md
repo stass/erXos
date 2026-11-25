@@ -15,11 +15,15 @@ Third-party notices remain in their original files.
   "archive_sha256": "98c8b2b81391cfee4797586e150fc74bd5ba48a2decdcb18e7daa5ccc3db3097",
   "exclusions": [
     {
-      "path": "tool/bin/tap-wrapper-plugins",
+      "path": "conf/test/lib_test.lua",
       "reason": "not used by any erXos build"
     },
     {
-      "path": "conf/test/lib_test.lua",
+      "path": "doc/source/pthreads.dox",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "tool/bin/tap-wrapper-plugins",
       "reason": "not used by any erXos build"
     }
   ],
@@ -650,16 +654,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "bf6f915112fce114e6ed72c3347286517852e3220b08ea878869c9f6f9b87284",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "doc/source/pthreads.dox": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6365ede968e3b0af2c4ba7a127d961fde704952a9e612a879014594fca691361",
       "kind": "file",
       "non_ascii_lines": [
 

@@ -15,11 +15,31 @@ Third-party notices remain in their original files.
   "archive_sha256": "e6ec5fa08e6ae44ef88263428c2f5936ce0bd804b99626858a330b141e7043dc",
   "exclusions": [
     {
-      "path": "server/src/ARCH-mips/bootstrap.ld.in",
+      "path": "server/src/ARCH-mips",
       "reason": "not used by any erXos build"
     },
     {
-      "path": "server/src/ARCH-mips/crt0.S",
+      "path": "server/src/platform-mips.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/baikal.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/boston.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/ci20.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/ci40.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/malta.cc",
       "reason": "not used by any erXos build"
     },
     {
@@ -28,6 +48,10 @@ Third-party notices remain in their original files.
     },
     {
       "path": "server/src/platform/rcar4_r52_crt0_init.h",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "server/src/platform/sead3.cc",
       "reason": "not used by any erXos build"
     }
   ],
@@ -813,46 +837,6 @@ Third-party notices remain in their original files.
         "6050106764b7b845f8ba2434ce3972797ff4d0eb85d3352f8bce3a17749acafe"
       ]
     },
-    "server/src/ARCH-mips/cpu.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "bd01728f007177e1767ed7a82eaf62a416fd75b0a5d5528ad0c4439d56015b37",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/ARCH-mips/head.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "358b851b1aa24162d6800fc4e370dd001eed429bdd7cad718cdb97f029d637b1",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/ARCH-mips/mips-defs.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "6075af8f70bed71a38b65b3c4a06f90fde5597ff17ef7bbd74b45c4e3d26fb55",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/ARCH-mips/reboot.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "98a5f2ff5c8b21e49bc4e6d9f9a4d15efd564d54240e9e95e594a7e66eabcfe3",
-      "kind": "file",
-      "non_ascii_lines": [
-        "46104e6a96da380a17a0d0265505baf63458bbeceb0a4a862100e4c0122ef862"
-      ]
-    },
     "server/src/ARCH-riscv/bootstrap.ld.in": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -1413,16 +1397,6 @@ Third-party notices remain in their original files.
         "46104e6a96da380a17a0d0265505baf63458bbeceb0a4a862100e4c0122ef862"
       ]
     },
-    "server/src/platform-mips.h": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "793be057165f5a381de4d1a93baa12e62e0539fdc5e78beb705676efa06c5123",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "server/src/platform.h": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -1543,46 +1517,6 @@ Third-party notices remain in their original files.
 
       ]
     },
-    "server/src/platform/baikal.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "f56223911165cb065ce7c0c97c5a15c077be916ffcbfe940fda8e14b3b8379fb",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/platform/boston.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "1b19a24a76fe64682d13202f657bdbea31fb262fd97f5eb28ae53b501e3a17a5",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/platform/ci20.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "793bec0ade8b592a59994051d20b3dd35d19405cd2c17960ce3d4763384d4e6d",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/platform/ci40.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "479be014be2c4e0e486094add922f37a474177ccaa25873739a172c231b06dc8",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "server/src/platform/exynos.cc": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -1638,16 +1572,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "d77325e42b1867494adc10a04e84ae87442b7ddf7e18f32048342a53e1d65c1c",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "server/src/platform/malta.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "a4b5b809fa55c91e8ef57f984536e152546cb3b296b2e5b946aac4fa02aa0815",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -1841,16 +1765,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "f51fffb20d9ac64388cbb0bfcbd982a0b3d0ca86e9fb8e59ff8ada1bb7994cd9"
-      ]
-    },
-    "server/src/platform/sead3.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "0e4a658eb17583d703e3d1307dfcb887414c39c32c408401c17a3b25e651498c",
-      "kind": "file",
-      "non_ascii_lines": [
-
       ]
     },
     "server/src/platform/sifive_u.cc": {

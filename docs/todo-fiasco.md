@@ -102,7 +102,7 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
   ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
 * [High] 0.2 on Fiasco, `tools/lib/erx/fiasco_config.rb`: the release configuration as an exact allowlist, as
   the development one is (the debugger off; the fixed-priority scheduler, `EXPLICIT_REPLY_CAPS` and `IOMMU`
-  kept; `PAGEFAULT_TRAMPOLINE`, `ALIEN`, `IRQ_DIRECT_INJECT`, `UART_CHECKSUM` and every other option without a
+  kept; `PAGEFAULT_TRAMPOLINE`, `ALIEN`, `IRQ_DIRECT_INJECT` and every other option without a
   consumer off), and its check, which fails an option off the list and a release build with the debugger on;
   the landing gate boots the release configuration once, a smoke test, and the milestone gate runs the QEMU
   suites on it ([design-fiasco.md](design-fiasco.md#the-releases-fiasco-build)).
@@ -476,6 +476,12 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
 
 ## Bugs by subsystem
 
+* [Medium] Release licensing, `tools/lib/erx/fiasco.rb` (`build_board_bootstrap`): a development
+  medium for the Raspberry Pi 4 packs `images/bootstrap-raspi4b.raw` without any link audit; only
+  `build release-kernel` runs `FiascoProvenance#certify` over the board's own bootstrap, so a
+  development image can carry a bootstrap that links a source under terms a release may not carry
+  and nothing says so until a release build. Run the audit over every bootstrap a pack carries, or
+  record its result beside the image.
 * [Medium] Release licensing, `tools/fiasco_origins.rb` and `fiasco/l4re-core/ORIGIN.md`: a file with
   no grant of its own is recorded under the package declaration of `LICENSE.spdx` that covers its
   path, falling back to the root package's MIT, and that fallback recorded L4Re's libpthread, which

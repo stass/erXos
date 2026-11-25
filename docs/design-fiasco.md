@@ -4092,7 +4092,7 @@ upstream's `Modules.generic` lists for every kernel, the patch below takes out o
 [the pause](#threads-bands-and-stops) needs, and `IOMMU`, for a platform that puts a device behind
 one; turns off `PAGEFAULT_TRAMPOLINE`, `ALIEN` and `IRQ_DIRECT_INJECT`, which no consumer needs
 and which widen what a thread can do with itself ([Who holds what](#who-holds-what)); and turns off
-`UART_CHECKSUM` and every other option with no consumer. A release build that turns the debugger on
+every other option with no consumer. A release build that turns the debugger on
 fails the check. Development builds keep the debugger.
 
 **Toolchain.** Fiasco (kernel and `bootstrap`) and L4Re (`sigma0` and `l4re-core`) are built with
@@ -4325,8 +4325,8 @@ third-party component's ([design.md](design.md#licenses-and-notices)).
 
 The imported trees leave out the copyleft parts no erXos build uses, and each tree's `ORIGIN.md`
 records every part left out as an exclusion row with its reason: among them Fiasco's own unit and code-rule
-tests (`src/test`), the coverage debugger module and the UART checksum stream, which only
-`CONFIG_COV` and `CONFIG_UART_CHECKSUM` build and erXos sets neither, bootstrap's MIPS linker
+tests (`src/test`), the coverage debugger module, which only `CONFIG_COV` builds and erXos does not set,
+the UART checksum stream with its option and the unit-test and code-rule options, bootstrap's MIPS linker
 script and start code and its R-Car R52 platform, `mk`'s test plug-ins, and libstdc++ with `cxx`'s
 start library. `l4re-core` keeps `sigma0`, the libraries and linker scripts it and `bootstrap`
 build from, and four package directories (`compiler-rt`, `compiler-rt-crt`, `compiler-rt-pure`, `crtn`) that compile nothing

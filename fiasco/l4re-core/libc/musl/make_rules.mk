@@ -1,5 +1,6 @@
 # vi:ft=make
-# Modified by erXos: no libpthread headers on the include path.
+# Modified by erXos: no libpthread headers on the include path, and no full
+# libc (vfs.cc) is built.
 CPPFLAGS  += -nostdinc -ffreestanding
 CFLAGS    += -fno-builtin -std=c99 $(GCCNOSTACKPROTOPT)
 CXXFLAGS  += -fno-builtin $(GCCNOSTACKPROTOPT)
@@ -19,8 +20,6 @@ PRIVATE_INCDIR += $(CONTRIB_DIR)/src/internal
 #OBJ_INCLUDE?
 #PRIVATE_INCDIR +=
 PRIVATE_INCDIR += $(CONTRIB_DIR)/include
-
-PRIVATE_INCDIR_vfs.cc += $(CONTRIB_DIR)/include
 
 BID_ASM_FILE_EXTENSIONS += .s
 

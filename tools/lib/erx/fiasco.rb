@@ -66,10 +66,36 @@ module Erx
         'sha256' => '3eb24fe67cf4eb7968ba5379016befd3fb72977066a3708468290e9a9ca9f4ff'
       }.freeze
     }.freeze
-    KERNEL_EXCLUSIONS = %w[
-      src/lib/regex src/lib/simple_malloc src/lib/gcov src/lib/perfctr
-      src/kern/arm/bsp/qcom src/test src/jdb/jdb_cov_module.cpp src/drivers/stream_crc32.cpp
-    ].freeze
+    # The paths of each imported part that no erXos build uses, which the import
+    # removes; each part's ORIGIN.md records them as exclusions. l4re-core keeps
+    # only CORE_PACKAGES besides.
+    UNUSED_PATHS = {
+      'kernel' => %w[
+        src/lib/regex src/lib/simple_malloc src/lib/gcov src/lib/perfctr
+        src/kern/arm/bsp/qcom src/test src/jdb/jdb_cov_module.cpp src/drivers/stream_crc32.cpp
+        src/Makerules.UTEST src/Makerules.CODERULES
+      ],
+      'l4re-core' => %w[
+        libc/uclibc-ng libc/musl/libpthread cxx/lib/start
+        libc/musl/Makefile libc/musl/libm libc/musl/librt libc/musl/libpthread_vars.mk
+        libc/musl/libc/Makefile libc/musl/libc/Make.rules libc/musl/libc/includes
+        libc/musl/libc/impl-libc-api.c libc/musl/libc/mman-utcb-safe.c libc/musl/libc/musl-pthread-impl.c
+        libc/musl/libc/ssp-local.c libc/musl/libc/vfs.cc
+        libc/musl/libc/ARCH-aarch64 libc/musl/libc/ARCH-arm libc/musl/libc/ARCH-i386 libc/musl/libc/ARCH-x86_64
+        libc/musl/libc/ARCH-mips/impl-libc-api-arch.c libc/musl/libc/ARCH-riscv/impl-libc-api-arch.c
+        libc/musl/libc/ARCH-all/src/exit/abort.c libc/musl/libc/ARCH-all/src/network
+        libc/musl/libc/ARCH-all/src/passwd libc/musl/libc/ARCH-all/src/signal/raise.c
+        libc/musl/libc/ARCH-all/src/stdio/__lockfile.c libc/musl/libc/ARCH-all/src/thread
+        libc/musl/libc/ARCH-all/src/unistd libc_backends/lib/sig
+      ],
+      'bootstrap' => %w[
+        server/src/ARCH-mips server/src/platform-mips.h server/src/platform/baikal.cc
+        server/src/platform/boston.cc server/src/platform/ci20.cc server/src/platform/ci40.cc
+        server/src/platform/malta.cc server/src/platform/sead3.cc
+        server/src/platform/rcar4_r52.cc server/src/platform/rcar4_r52_crt0_init.h
+      ],
+      'mk' => %w[conf/test/lib_test.lua doc/source/pthreads.dox tool/bin/tap-wrapper-plugins]
+    }.transform_values(&:freeze).freeze
     CORE_PACKAGES = %w[
       compiler-rt compiler-rt-crt compiler-rt-pure crtn cxx cxx_libc_io
       l4re l4re_c l4sys l4util ldscripts libc libc-headers libc-minimal
@@ -207,29 +233,33 @@ module Erx
     # The release kernel (docs/design-fiasco.md, "The kernel"): the same sources and cores,
     # configured from the release defconfig (FiascoConfig.release_defconfig) and checked
     # with the release rules, in Fiasco.kernel_directory. No image packs it:
-    # every image is a development build (ProductionImage::BUILD_KIND). The release's
-    # link audit (FiascoProvenance#certify) reads every executable a boot image carries,
-    # each board's own bootstrap among them, which is built here first, and must find
-    # every source they link under terms a release may carry, or the build fails naming
-    # each source that is not. The kernel stays
-    # only beside the audit's pass record: an earlier record goes before the build, and a
-    # build that fails anywhere after it removes the kernel and any record.
+    # every image is a development build (ProductionImage::BUILD_KIND).
+    #
+    # The release's link audit (FiascoProvenance#certify) reads every executable a boot
+    # image carries and must find every source they link under terms a release may carry,
+    # or the build fails naming each source that is not. Those executables are the
+    # development build's and each board's own bootstrap, so both are built here first;
+    # build does nothing when its inputs are unchanged.
+    #
+    # The kernel stays only beside the audit's pass record: an earlier record goes before
+    # any build, and a build that fails anywhere removes the kernel and any record.
     def build_release_kernel(jobs: 4)
       require_relative 'fiasco_provenance'
       directory = self.class.kernel_directory(root: @root, kind: BuildKind::RELEASE)
       kernel = File.join(directory, 'fiasco')
       record = File.join(directory, FiascoProvenance::PASS_RECORD)
+      FileUtils.rm_f(record)
+      passed = false
+      build(jobs: jobs)
       with_tree_lock do
-        FileUtils.rm_f(record)
-        passed = false
         build_kernel_beside(directory: directory, kind: BuildKind::RELEASE, defines: [], jobs: jobs)
         BOARD_BOOTSTRAPS.each_key { |name| build_board_users(name, jobs: jobs) }
         provenance_auditor(kind: BuildKind::RELEASE).certify
-        passed = true
-        kernel
-      ensure
-        FileUtils.rm_f([kernel, record]) unless passed
       end
+      passed = true
+      kernel
+    ensure
+      FileUtils.rm_f([kernel, record]) unless passed
     end
 
     # Where the tree at root builds the kernel of build kind kind: build's own kernel for
@@ -514,15 +544,13 @@ module Erx
     end
 
     def trim_sources(stage)
-      kernel = File.join(stage, 'kernel')
-      KERNEL_EXCLUSIONS.each { |path| FileUtils.remove_entry(File.join(kernel, path)) }
       core = File.join(stage, 'l4re-core')
       keep = CORE_PACKAGES + %w[LICENSE.spdx Makefile README.md SECURITY.md]
       Dir.children(core).reject { |path| keep.include?(path) }.each do |path|
         FileUtils.remove_entry(File.join(core, path))
       end
-      %w[libc/uclibc-ng libc/musl/libpthread cxx/lib/start].each do |path|
-        FileUtils.remove_entry(File.join(core, path))
+      UNUSED_PATHS.each do |part, paths|
+        paths.each { |path| FileUtils.remove_entry(File.join(stage, part, path)) }
       end
       retain_uart(File.join(stage, 'drivers-frst'))
     end

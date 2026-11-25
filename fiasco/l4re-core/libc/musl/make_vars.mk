@@ -1,5 +1,5 @@
-# Modified by erXos: L4Re's libpthread is not imported, so its internal
-# headers are on no include path.
+# Modified by erXos: L4Re's libpthread and full libc are not imported, so
+# neither their internal headers nor libc/includes are on any include path.
 include $(L4DIR)/mk/Makeconf
 
 LIBCSRC_DIR ?= $(SRC_DIR)
@@ -11,8 +11,6 @@ CONTRIB_DIR := $(LIBCSRC_DIR_ABS)/contrib/musl
 
 LIBC_SRC_DIRS := $(CONTRIB_DIR)/ldso $(CONTRIB_DIR)/src $(LIBCSRC_DIR_ABS)/libc/ARCH-all/src
 LIBC_DST_DIR  := $(OBJ_DIR)/src
-
-PRIVATE_INCDIR += $(LIBCSRC_DIR)/libc/includes
 
 LIBC_DYNLINKER = /rom/libc.so.1
 

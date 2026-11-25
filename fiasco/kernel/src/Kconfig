@@ -1,5 +1,7 @@
 # Modified by erXos: lazy FP switching is not an option; FP state is
 # switched eagerly (docs/design-fiasco.md, "Eager FP switching").
+# Modified by erXos: the unit test, code rules test and UART checksum
+# options are gone with the sources they built.
 
 mainmenu "Fiasco configuration"
 
@@ -729,29 +731,10 @@ config SERIAL
 	help
 	  This option enables support for input/output over serial interface.
 
-config UNIT_TEST
-	bool "Compile unit tests"
-	select TEST_SUPPORT_CODE
-	help
-	  Compile fiasco unit tests.
-
 config TEST_SUPPORT_CODE
 	bool "Compile test support code"
 	help
 	  Include test support code when compiling Fiasco.
-
-config CODE_RULES_TEST
-	bool "Build tests checking coding rules"
-	help
-	  Builds files that are expected to generate warnings to check that
-	  the coding rules are adhered to in a warning-free build. The
-	  warnings are stored and can be evaluated by scripts generated into
-	  the selftest directory inside the build directory. These scripts
-	  then generate TAP output usable by prove.
-
-	  The tests currently only work when using clang. When building with
-	  gcc the test sources are not built and a test script that always
-	  generates a SKIP is created.
 
 config RT_DBG
 	bool "Runtime debug information"
@@ -857,37 +840,6 @@ config WARN_ANY
 	bool "Show all kernel warnings"
 
 endchoice # warn levels
-
-config UART_CHECKSUM
-	bool "UART checksumming"
-	help
-	  Ensure serial output integrity by adding checksums to it. This
-	  ensures that the output transmitted over a serial line is not
-	  accidentally altered, thus potentially turning a failing test
-	  into a passing test, etc.
-
-	  If enabled, the UART output is checksummed continously using
-	  a CRC32 algorithm and the current checksum is printed periodically
-	  with each newline using a checksum tag. A counterpart decoding
-	  filter that checks the consistency of the checksums and removes
-	  the checksum tags from the output is available.
-
-	  The checksum tag size is 12 characters and it has the following
-	  format:
-
-	    "\n{hhhhhhhh} "
-
-	  In this template, the 'h' characters represent lower-case
-	  hexadecimal characters that encode the CRC32 checksum of all the
-	  previous characters in the output (including newline characters,
-	  but excluding the actual checksum tag, i.e. the curly brackets,
-	  the hexadecimal characters in between them and the tailing space
-	  character).
-
-	  The checksumming starts only after the first checksum tag which
-	  is:
-
-	    "\n{00000000} "
 
 config FB_CONSOLE
 	bool "Enable kernel framebuffer console"

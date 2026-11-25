@@ -179,19 +179,22 @@ class FiascoTest < Minitest::Test
 
   # The release kernel is configured from the development defconfig with the
   # debugger and console input written as not set, in a directory of its own,
-  # and leaves the development kernel alone. Each board's own bootstrap is built
-  # first, since the release's audit reads it.
+  # beside the development kernel's. The development build and each board's own
+  # bootstrap are built first, since the release's audit reads them: after a
+  # source change the development build's outputs are gone until it runs again.
   def test_release_kernel_is_configured_from_the_development_defconfig_without_the_debugger
     path = @fiasco.build_release_kernel(jobs: 2)
     directory = Erx::Fiasco.kernel_directory(root: @directory, kind: Erx::BuildKind::RELEASE)
     assert_equal File.join(directory, 'fiasco'), path
     assert_equal "#{KERNEL_CONFIG}# CONFIG_JDB is not set\n# CONFIG_INPUT is not set\n",
                  File.read(File.join(directory, 'globalconfig.out'))
+    development = Erx::Fiasco.kernel_directory(root: @directory, kind: Erx::BuildKind::DEVELOPMENT)
+    assert_equal KERNEL_CONFIG, File.read(File.join(development, 'globalconfig.out'))
     names = @runner.commands.map { |command| command.fetch(:options).fetch(:name) }
+    assert_includes names, 'fiasco-users-build'
     assert_includes names, 'fiasco-kernel-release-build'
+    assert_operator names.index('fiasco-users-build'), :<, names.index('fiasco-kernel-release-build')
     assert_includes names, 'fiasco-users-raspi4b-config'
-    refute_includes names, 'fiasco-kernel-build'
-    refute File.exist?(File.join(@directory, 'build/fiasco/kernel'))
   end
 
   # A release kernel stays only beside its pass record: an earlier record goes
@@ -207,7 +210,10 @@ class FiascoTest < Minitest::Test
     File.write(record, 'an earlier pass')
     refusing = Object.new
     refusing.define_singleton_method(:certify) { raise Erx::Error, 'the kernel links sources a release may not carry' }
-    @fiasco.define_singleton_method(:provenance_auditor) { |kind:| refusing }
+    original = @fiasco.method(:provenance_auditor)
+    @fiasco.define_singleton_method(:provenance_auditor) do |kind:|
+      Erx::BuildKind.development?(kind) ? original.call(kind: kind) : refusing
+    end
     assert_raises(Erx::Error) { @fiasco.build_release_kernel(jobs: 2) }
     refute File.exist?(File.join(directory, 'fiasco'))
     refute File.exist?(record)

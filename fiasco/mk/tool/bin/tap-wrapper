@@ -1,4 +1,5 @@
 #! /usr/bin/env perl
+# Modified by erXos: no introspection plugin; its tool is not imported.
 use strict;
 use warnings;
 use IO::Select;
@@ -173,14 +174,6 @@ if ($ENV{TAP_FILTERS})
         L4::TapWrapper::load_filter($name, \%harg)
           unless $filter_excludes{$name};
       }
-  }
-
-if ($ENV{INTROSPECTION_TESTS})
-  {
-    L4::TapWrapper::load_plugin("External", {
-      tag => "IntrospectionTesting;KernelObjects",
-      tool => "tool/bin/tap-wrapper-plugins/introspection-testing.lua"
-    });
   }
 
 if (defined $ENV{TEST_TAP_PLUGINS})

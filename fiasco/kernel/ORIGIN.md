@@ -29,6 +29,22 @@ is under `changes`.
   "archive_sha256": "e2f96d3ba1c15d4981d42b2f37258a082220e8e10cf72361c208519d4cd6f8ee",
   "exclusions": [
     {
+      "path": "src/Makerules.CODERULES",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/Makerules.UTEST",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/drivers/stream_crc32.cpp",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "src/jdb/jdb_cov_module.cpp",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "src/kern/arm/bsp/qcom/Kconfig",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -427,14 +443,6 @@ is under `changes`.
     {
       "path": "src/test",
       "reason": "not used by any erXos build"
-    },
-    {
-      "path": "src/jdb/jdb_cov_module.cpp",
-      "reason": "not used by any erXos build"
-    },
-    {
-      "path": "src/drivers/stream_crc32.cpp",
-      "reason": "not used by any erXos build"
     }
   ],
   "removed": [
@@ -751,16 +759,6 @@ is under `changes`.
 
       ]
     },
-    "src/Makerules.CODERULES": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "790a6a4e44cfd4a62fe7c3d198b2af4988692a33e8e18f28373e71eafd3ad143",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "src/Makerules.CRT0": {
       "license": "MIT",
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
@@ -956,16 +954,6 @@ is under `changes`.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "bd5f6f8f4fca2754c4650be3b83f58eda41c4709c8a754242ea6e240487c7f91",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "src/Makerules.UTEST": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
-      "reviewed": true,
-      "sha256": "014c54b60af9837cc61d8aa4e36d0bd178f407c5d36de65929587018e3283e16",
       "kind": "file",
       "non_ascii_lines": [
 

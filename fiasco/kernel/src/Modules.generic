@@ -1,21 +1,13 @@
 # Modified by erXos: it boots from erXos's boot image (docs/design-fiasco.md, "Boot handoff").
 # Modified by erXos: the glue module of erx/ joins the kernel.
 # Modified by erXos: jdb_object is built only into a kernel with the debugger.
-# Modified by erXos: the unit and code rules tests of src/test are not imported.
+# Modified by erXos: the unit and code rules tests of src/test, and the UART
+# checksum stream, are not imported.
 # -*- makefile -*-
 # vi:se ft=make:
 
 SUBSYSTEMS += ABI JABI KERNEL DRIVERS CRT0 VERSION TCBOFFSET STDWORKLOAD
 SUBSYSTEMS += CXXLIB LIBC LIBK
-
-ifeq ($(CONFIG_UNIT_TEST),y)
-  # UTEST depends on KERNEL and CHECKSUM, must be listed after them
-  SUBSYSTEMS += UTEST
-endif
-
-ifeq ($(CONFIG_CODE_RULES_TEST),y)
-  SUBSYSTEMS += CODERULES
-endif
 
 # - do not profile all of LIBC, because it is used in the BOOT subsystem
 # - save some space for debugger, disassembler, ...
@@ -148,7 +140,6 @@ PRIVATE_INCDIR	+= drivers/$(CONFIG_XARCH)/$(BITS)
 PRIVATE_INCDIR	+= drivers/$(CONFIG_XARCH) drivers
 INTERFACES_DRIVERS := delayloop console filter_console mux_console mem reset \
 		      uart
-INTERFACES_DRIVERS += $(if $(CONFIG_UART_CHECKSUM),stream_crc32)
 mem_IMPL	:= mem mem-$(CONFIG_XARCH)
 reset_IMPL	:= reset-$(CONFIG_XARCH)
 uart_IMPL	:= uart uart-libuart

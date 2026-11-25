@@ -15,6 +15,10 @@ Third-party notices remain in their original files.
   "archive_sha256": "6c55c02804ecd86de2b103163341b6f911d3945108b611fa9d7f38a99a2e1f3f",
   "exclusions": [
     {
+      "path": "cxx/lib/start",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "l4re_itas/Control",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -557,6 +561,110 @@ Third-party notices remain in their original files.
     {
       "path": "libatomic/lib/Makefile",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
+    },
+    {
+      "path": "libc/musl/Makefile",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-aarch64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/exit/abort.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/network",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/passwd",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/signal/raise.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/stdio/__lockfile.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/thread",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-all/src/unistd",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-arm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-i386",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-mips/impl-libc-api-arch.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-riscv/impl-libc-api-arch.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ARCH-x86_64",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/Make.rules",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/Makefile",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/impl-libc-api.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/includes",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/mman-utcb-safe.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/musl-pthread-impl.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/ssp-local.c",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libc/vfs.cc",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libm",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libpthread",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/libpthread_vars.mk",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libc/musl/librt",
+      "reason": "not used by any erXos build"
     },
     {
       "path": "libc/uclibc-ng/Makefile",
@@ -21263,6 +21371,10 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
+      "path": "libc_backends/lib/sig",
+      "reason": "not used by any erXos build"
+    },
+    {
       "path": "libclang_rt-crt/Control",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -31295,6 +31407,34 @@ Third-party notices remain in their original files.
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
     {
+      "path": "libgcc",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc-crt",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc-headers",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc-pure",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc_eh",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc_eh-headers",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
+      "path": "libgcc_eh-pure",
+      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
+    },
+    {
       "path": "libgcc_s/Control",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
     },
@@ -31441,6 +31581,18 @@ Third-party notices remain in their original files.
     {
       "path": "libloader/lib/src/remote_mem.cc",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
+    },
+    {
+      "path": "libpthread",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libstdc++-headers",
+      "reason": "not used by any erXos build"
+    },
+    {
+      "path": "libstdc++-v3",
+      "reason": "not used by any erXos build"
     },
     {
       "path": "libstdc++-v3-minimal/Control",
@@ -32609,54 +32761,6 @@ Third-party notices remain in their original files.
     {
       "path": "prj-config/aliases.d/10-stdlibs",
       "reason": "outside the frozen bootstrap, sigma0 and kernel source selection"
-    },
-    {
-      "path": "libgcc",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc-crt",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc-headers",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc-pure",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc_eh",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc_eh-headers",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libgcc_eh-pure",
-      "reason": "the user programs built from this tree link no compiler runtime library or object, and libgcc is GPL-3.0-only WITH GCC-exception-3.1"
-    },
-    {
-      "path": "libstdc++-v3",
-      "reason": "not used by any erXos build"
-    },
-    {
-      "path": "libstdc++-headers",
-      "reason": "not used by any erXos build"
-    },
-    {
-      "path": "cxx/lib/start",
-      "reason": "not used by any erXos build"
-    },
-    {
-      "path": "libpthread",
-      "reason": "not used by any erXos build"
-    },
-    {
-      "path": "libc/musl/libpthread",
-      "reason": "not used by any erXos build"
     }
   ],
   "removed": [
@@ -38479,16 +38583,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed LICENSE.spdx root package declaration; specific file and package grants take precedence",
       "reviewed": true,
       "sha256": "19794bda49fbc5852a2c831170798a1ff1f0235ac5b060694c9954d8fd5dbe65",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "fa8e6665d9843ac5ceb0f80b0a5c002056e326aba8c51efd01fdd91972a324dd",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -65095,16 +65189,6 @@ Third-party notices remain in their original files.
 
       ]
     },
-    "libc/musl/libc/ARCH-aarch64/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ac6eff4cd82bc0d5d0dbc128a92e6797db6214b026b07c3e5a1da0b0bff4dacf",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "libc/musl/libc/ARCH-all/include/bits/l4-malloc.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -65145,16 +65229,6 @@ Third-party notices remain in their original files.
 
       ]
     },
-    "libc/musl/libc/ARCH-all/src/exit/abort.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "205906004b6d275c3d4af8ddda0748def77cc4d04cec97584c38025fe8322cce",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "libc/musl/libc/ARCH-all/src/exit/exit.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
@@ -65165,51 +65239,11 @@ Third-party notices remain in their original files.
 
       ]
     },
-    "libc/musl/libc/ARCH-all/src/network/h_errno.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dfb75f6b02fba671028c1e1e8fd83ec36bc8ab3d2b96cdffaebeedcbc023ab37",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/passwd/nscd_query.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "2e55553e4652bc2cd9b5f331a2a35a5462976d1063910a513dcf9f1e10187918",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/signal/raise.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "15862d4c2b770cee5d390fad6edde67fa050990f78d7eb772306ee2359d37d18",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "libc/musl/libc/ARCH-all/src/signal/sigsetjmp_tail.c": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "614ff27a0090b309b00706cd395b26efa9a8b3a34d56463a69c9891b67ec0c31",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/stdio/__lockfile.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e1e22c1358def622e4eb97b3f6dd46a5c8af8b9f903e4037282f867bdccd5f74",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -65240,66 +65274,6 @@ Third-party notices remain in their original files.
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "5c44682e16f927cc6b3079d205f60044d0e91e6722ab49688cd7a1ec0fb9bec2",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/thread/__lock.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "146d23178ded79b85df3999f76d627c18f7723a5ba0d59035ee891244444008f",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/thread/__tls_get_addr.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "31b2632abcb0f408bdd84d1aac0c83518b31c3640223876dc50cff22d43b4081",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-all/src/unistd/__dup3.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ea5e7253b6f961de6f36e0b489bd9f93212f41da79a0750cf9090bb56db1ec4c",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-arm/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "df1decadc8ebe0d43c504c11b5a44906f78cba838f397b1aab4c19ca7b3eb672",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-i386/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "c7512012041219b4247db28188cf67ead5f723ecfc9572b443219c490296ed6d",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-mips/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "b118eaf9630344969cc20c01965b713c63cbf81a0fe9136217ca936eb97961e9",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -65345,141 +65319,11 @@ Third-party notices remain in their original files.
 
       ]
     },
-    "libc/musl/libc/ARCH-riscv/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "6462a17b9f5d1080cd1c850ada2e11740f69f6e7f8787d6674f9f9b4d671a71a",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
     "libc/musl/libc/ARCH-riscv/include/sys/asm.h": {
       "license": "MIT",
       "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
       "reviewed": true,
       "sha256": "d68321bf75dbc20b332849b15f34128d56087f963b126dd3f73b46a87415ebaa",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ARCH-x86_64/impl-libc-api-arch.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "e5ba64f662471902cf58cde11124f8592e893a3ae35e83b30777799843da649a",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/Make.rules": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "44a473a7c40950d5def5a3a2eea19291f6fc2e002ed169290bff4494a79a0720",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "ffb22acd71b8ada683db51b9092c1cb42bbabe64962422669a06ca74ebb36243",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/impl-libc-api.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "f7868d0cb1b90caee1e233bc34ad06dc6fe4a7da952878085a55bfea565a6958",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/includes/pthread-api-libc.h": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "57a2dd8426f26d509c2b016213c36b64b001f0b2cf1ff89fae9db48b923820bd",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/mman-utcb-safe.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "beda68367f5eb77765d44db3a389e1bed93a193060faed6e7e079b8e1c4f1f49",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/musl-pthread-impl.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "3aa28e01a590d31b0fe464d324bc4f77a7b3485386ecaf28233ccb921fe8efef",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/ssp-local.c": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "67123a7cc7588562f18541853e92d8b976477d3cb7ffad133b035c8aae881dc6",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libc/vfs.cc": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "5a866919ec1309bbf50654cbf4ee103386f1ddea2ff3175123960e9eca41d238",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libm/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "72e8078d4f2bc2e15b41951386e6108feac9663073366c75ee1221e70107d77d",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/libpthread_vars.mk": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "dd9378f40f883aceec991d483653014eabbcaaefebcb1ba4c94eb0781fe78130",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc/musl/librt/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed embedded musl COPYRIGHT and original-file MIT grant; specific exceptions precede this rule",
-      "reviewed": true,
-      "sha256": "29d7023175b70fe42d1bb69d9a3e0eba7ed742b347b7afc549f4ecb4a7010800",
       "kind": "file",
       "non_ascii_lines": [
 
@@ -66253,26 +66097,6 @@ Third-party notices remain in their original files.
       "kind": "file",
       "non_ascii_lines": [
         "d09019497c240e26b8947bb33710944fc9027e702f2e00f744d8cc48e5019c9b"
-      ]
-    },
-    "libc_backends/lib/sig/Makefile": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "c40afbde640fb55881c7b8e6e9095c01535b8ec97fbe248e8ec7dba28c3d44fd",
-      "kind": "file",
-      "non_ascii_lines": [
-
-      ]
-    },
-    "libc_backends/lib/sig/sig.cc": {
-      "license": "MIT",
-      "evidence": "reviewed LICENSE.spdx package declaration for libc_backends",
-      "reviewed": true,
-      "sha256": "a42bed08334c694f1049fb9327e74a2c65e8e8bb3480a5d5fde8cccedd374515",
-      "kind": "file",
-      "non_ascii_lines": [
-        "536d0cf339b3b83f9bfa9311a2ff73e0540c8f6f7075a62780237f837dc1763b"
       ]
     },
     "libc_backends/lib/socket_noop/Makefile": {

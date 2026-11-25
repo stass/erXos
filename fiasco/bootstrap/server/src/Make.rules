@@ -1,4 +1,5 @@
-# Modified by erXos: it boots from erXos's boot image (docs/design-stopgap.md, "Boot handoff").
+# Modified by erXos: it boots from erXos's boot image (docs/design-fiasco.md, "Boot handoff").
+# Modified by erXos: no MIPS; its sources are not imported.
 # vim:set ft=make:
 # 
 # User definable variables for bootstrap:
@@ -24,9 +25,6 @@ DEFAULT_RELOC_arm   := 0x01000000
 DEFAULT_RELOC_arm64 := 0x01000000
 DEFAULT_RELOC_x86   := 0x002d0000
 DEFAULT_RELOC_amd64 := 0x002d0000
-DEFAULT_RELOC_mips32:= 0x802d0000
-DEFAULT_RELOC_mips64:= 0xffffffff802d0000
-DEFAULT_RELOC_mips   = $(DEFAULT_RELOC_mips$(CPU_ABI))
 DEFAULT_RELOC_riscv32 := 0x00400000
 DEFAULT_RELOC_riscv64 := 0x00200000
 DEFAULT_RELOC_riscv  = $(DEFAULT_RELOC_riscv$(BITS))
@@ -145,8 +143,6 @@ SRC_CC_arm      += ARCH-arm/reboot.cc ARCH-arm/head.cc ARCH-arm/platform.cc plat
 SRC_CC_arm64    += ARCH-arm/reboot.cc ARCH-arm64/platform.cc platform_common-arm.cc
 SRC_CC_arm64-$(BOOTSTRAP_DO_UEFI)  += ARCH-arm64/efi.cc
 SRC_CC_arm64-y$(BOOTSTRAP_DO_UEFI) += ARCH-arm64/head.cc
-SRC_CC_mips     += ARCH-mips/reboot.cc ARCH-mips/head.cc \
-                   ARCH-mips/cpu.cc
 SRC_CC_riscv    += ARCH-riscv/reboot.cc ARCH-riscv/head.cc \
                    ARCH-riscv/platform_riscv.cc dt.cc
 SRC_CC          += $(SUPPORT_CC_$(ARCH)-$(PLATFORM_TYPE))

@@ -405,10 +405,12 @@ module Erx
       end
     end
 
-    # An imported file erXos deleted is listed under removed with a one-line
+    # An imported file erXos deleted but whose bytes the tree still carries
+    # elsewhere (a copy's row names it) is listed under removed with a one-line
     # reason. It names a file the inventory records, once, and no explicit
-    # change, so the record of what was imported stays whole and a removal
-    # never stands in for an exclusion.
+    # change, so its row and license evidence stay on record. A path no erXos
+    # build uses is an exclusion instead: its rows leave the inventory, and
+    # check_addition keeps it from coming back.
     def validate_removals(payload)
       paths = payload.fetch('removed').map do |removal|
         raise Error, 'invalid import removal' unless removal.is_a?(Hash) && removal.keys.sort == %w[path reason]
