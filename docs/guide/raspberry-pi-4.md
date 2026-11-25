@@ -34,8 +34,8 @@ which the walk connects to and reads directly. The applet serves one
 connection: a new one, such as `nc`'s, closes the one before, so close
 `nc` before the walk starts, and do not open it while the walk runs,
 which would end the walk with its console closed. The walk asks the
-board to reboot over ssh; where ssh cannot, the reset by hand that the
-walk then asks for cannot be typed on the console it holds. The port
+board to reboot over ssh; where ssh cannot, it types `reboot` on the
+console itself. The port
 has no authentication, so serve it on localhost, or reach a Glasgow on
 another host through an ssh tunnel.
 A second adapter on UART3, the host link, is optional:

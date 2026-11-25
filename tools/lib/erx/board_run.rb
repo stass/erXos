@@ -38,6 +38,8 @@ module Erx
   class BoardRun
     ENVIRONMENT = BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}).name
     LOG = 'console.log'
+    # What the walk types on the console when ssh cannot ask for the reboot.
+    CONSOLE_REBOOT = "reboot\r"
     QUEUE_LEFT = 'the served link names a queue an earlier run left; stage a build first'
     # The boot deadline's starting value (docs/design-bench.md, "The walk", item 5).
     BOOT_SECONDS = 180
@@ -208,8 +210,7 @@ module Erx
     # raised once the link is back and walk.json written.
     def walk(plan, console)
       state = BoardWalk.start(plan, at: @clock.call)
-      say('bench: ssh could not ask the board to reboot; reset it by hand, and the walk waits the boot deadline') unless
-        @shell.reboot
+      reboot(console)
 
       until state.ended?
         console.read(state.deadline).each do |event|
@@ -221,6 +222,18 @@ module Erx
       [state, nil]
     rescue SignalException => e
       [BoardWalk.step(plan, state || BoardWalk.start(plan, at: @clock.call), BoardWalk::Stop.new(ending: 'interrupted', at: @clock.call)), e]
+    end
+
+    # Asks the board to reboot over ssh, or, when ssh cannot, by typing reboot on the
+    # console, as root's console session takes it; says when neither could.
+    def reboot(console)
+      return if @shell.reboot
+
+      if console.type(CONSOLE_REBOOT)
+        say('bench: ssh could not ask the board to reboot; the walk typed reboot on its console')
+      else
+        say('bench: neither ssh nor the console could ask the board to reboot; reset it by hand, and the walk waits the boot deadline')
+      end
     end
 
     def ended(directory, queue, walk)

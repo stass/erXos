@@ -43,10 +43,16 @@ class BoardRunTest < Minitest::Test
     end
 
     def close = nil
+
+    # What the walk typed, and whether the console takes it.
+    def typed = (@typed ||= [])
+    attr_writer :takes
+
+    def type(bytes) = (typed << bytes) && @takes != false
   end
 
-  Shell = Struct.new(:calls) do
-    def reboot = (calls << :reboot) && true
+  Shell = Struct.new(:calls, :fails) do
+    def reboot = (calls << :reboot) && !fails
     def sensors = (calls << :sensors) && SENSORS
   end
 
@@ -86,11 +92,11 @@ class BoardRunTest < Minitest::Test
     queue
   end
 
-  def walk_board(interrupt_at: nil, runs: 2, found: Fuzz::FOUND)
+  def walk_board(interrupt_at: nil, runs: 2, found: Fuzz::FOUND, takes: true)
     clock = -> { @now += 1 }
     board = Erx::BoardRun.new(
       root: @root, www: @link, shell: @shell, prepare: method(:prepare),
-      console: ->(log:) { File.write(log, ''); Console.new(@prepared.last.fetch(:names), clock: clock, found: found, interrupt_at: interrupt_at) },
+      console: ->(log:) { File.write(log, ''); @console = Console.new(@prepared.last.fetch(:names), clock: clock, found: found, interrupt_at: interrupt_at).tap { |console| console.takes = takes } },
       clock: clock, out: ->(line) { @out << line }, record: ->(ran) { @ran << ran }, codec: CODEC, pause: ->(_seconds) {}
     )
     board.call(benchmark: 'wake', subjects: [subject], runs: runs, key: '/keys/signing.pem')
@@ -161,6 +167,21 @@ class BoardRunTest < Minitest::Test
     assert_equal [File.realpath(@found), "/keys/signing.pem"], [@prepared.last.fetch(:found), @prepared.last.fetch(:key)]
     assert_equal %i[sensors reboot sensors], @shell.calls
     assert_equal [%w[before after], walk], [@ran.last.then { |ran| [ran.before.taken, ran.after.taken] }, @ran.last.walk]
+  end
+
+  def test_a_reboot_ssh_cannot_ask_for_is_typed_on_the_console_and_only_then
+    walk_board
+    assert_equal [], @console.typed
+    @shell = Shell.new([], true)
+    assert_equal 'returned', walk_board.ending
+    assert_equal ["reboot\r"], @console.typed
+    assert_includes @out, 'bench: ssh could not ask the board to reboot; the walk typed reboot on its console'
+  end
+
+  def test_a_reboot_neither_ssh_nor_the_console_can_ask_for_is_left_to_a_hand_reset
+    @shell = Shell.new([], true)
+    assert_equal 'returned', walk_board(takes: false).ending
+    assert_includes @out, 'bench: neither ssh nor the console could ask the board to reboot; reset it by hand, and the walk waits the boot deadline'
   end
 
   def test_the_boards_bytes_reach_the_output_only_escaped

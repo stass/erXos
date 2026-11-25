@@ -1188,8 +1188,10 @@ with `--http DIR` the served link that `tools/erx netboot --http` stages and
    root's session may run, since it holds the `machine` grant
    (`config/manifest/development.txt`, `facet machine`). The destination
    is checked as `CodeSsh` checks it, and batch mode makes a password or
-   host-key prompt fail at once. If ssh fails, the run says so, asks
-   for a reset by hand, and waits the boot deadline.
+   host-key prompt fail at once. If ssh fails, the run types `reboot`
+   and a carriage return on the console it holds, as root's console
+   session takes it, and says so; if that write fails too, it asks for a
+   reset by hand. Either way it then waits the boot deadline.
 4. **Each line it reads** goes to `BoardWalk`, a pure function of the
    queue's names, the found pair's return identity, the walk's state and
    the line's kind, which answers what the line means for the walk:
@@ -1245,8 +1247,9 @@ The boot server's decision is pure: the request `Web::Http.read` gives,
 the link's target, the cursor and the download in progress, to the
 answer and the next state ([design-platforms.md, The HTTP form](design-platforms.md#the-http-form)).
 `BoardWalk` and `BoardLog` are pure and tested on the host;
-`BoardConsole` opens the device and sets its line, or connects to the
-console's TCP port, and appends what it reads
+`BoardConsole` opens the device read-write and sets its line, or connects
+to the console's TCP port, types on it only the walk's reboot request, and
+appends what it reads
 to the log, yielding each line, at most a `BENCH` line's 64 KiB and its
 end, to the walk. `BoardRun` is the walk's effects around them: under
 the lock it reads the found target and its return identity, prepares

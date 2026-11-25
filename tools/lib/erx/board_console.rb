@@ -19,7 +19,8 @@ module Erx
   # at most a BENCH line's 64 KiB and its end, is handed to the walk as a BoardWalk event.
   # A line longer than that is cut there and never handed on; it and the rest of it, to
   # its newline, are handed on only as bytes, so the walk still holds them to the boot's
-  # byte limit. At most one line's bytes are held between reads.
+  # byte limit. At most one line's bytes are held between reads. The walk types on the
+  # console only to ask for a reboot that ssh could not (type).
   #
   # Every byte is the board's and untrusted: the console only classifies lines
   # (BoardLog.classify) and counts them; it shows none.
@@ -62,7 +63,7 @@ module Erx
     # The serial device at path, open, held exclusively, and its line set by line.
     def self.device(path, line:)
       io = begin
-        File.open(path, File::RDONLY | File::NOCTTY | File::NONBLOCK | File::BINARY)
+        File.open(path, File::RDWR | File::NOCTTY | File::NONBLOCK | File::BINARY)
       rescue SystemCallError => e
         raise Error, "bench: the console #{LineEscape.escape(path)} cannot be opened: #{e.class.name.split('::').last}"
       end
@@ -115,6 +116,14 @@ module Erx
       events(chunk, at: @clock.call)
     rescue Errno::EIO, Errno::ENXIO, Errno::ECONNRESET, IOError
       [BoardWalk::Stop.new(ending: 'console_closed', at: @clock.call)]
+    end
+
+    # Writes bytes to the board whole; whether it could.
+    def type(bytes)
+      @io.write(bytes)
+      true
+    rescue SystemCallError, IOError
+      false
     end
 
     def close

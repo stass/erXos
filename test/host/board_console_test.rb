@@ -150,6 +150,20 @@ class BoardConsoleTest < Minitest::Test
     end
   end
 
+  def test_the_console_types_its_bytes_whole_to_the_board_and_says_when_it_cannot
+    server = TCPServer.new('127.0.0.1', 0)
+    board = Thread.new { server.accept.then { |client| client.read.tap { client.close } } }
+    Dir.mktmpdir do |directory|
+      console = Erx::BoardConsole.open("tcp:127.0.0.1:#{server.addr[1]}", log: File.join(directory, 'typed.log'), clock: method(:monotonic))
+      assert console.type("reboot\r")
+      console.close
+      assert_equal "reboot\r", board.value
+    end
+    refute @console.type("reboot\r")
+  ensure
+    server&.close
+  end
+
   def test_a_malformed_out_of_range_or_unreachable_tcp_console_is_refused
     Dir.mktmpdir do |directory|
       %w[tcp:localhost tcp:127.0.0.1:0 tcp:127.0.0.1:65536 tcp:::1:2300].each do |endpoint|
