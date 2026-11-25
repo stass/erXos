@@ -5,15 +5,14 @@
 require 'digest'
 require 'fileutils'
 require 'json'
-require 'rubygems/package'
 require 'securerandom'
+require 'stringio'
 require 'tmpdir'
+require_relative 'checked_tar'
 require_relative 'dependencies'
 require_relative 'error'
 require_relative 'genode_fetch'
 require_relative 'guest_build'
-require_relative 'json_input'
-require_relative 'oracle_container'
 require_relative 'output_directory'
 require_relative 'peer_bench'
 
@@ -25,16 +24,18 @@ module Erx
   # whose engine the docker context names by its local UNIX socket.
   #
   # Genode is AGPL-3.0 and a test oracle: its tree, its tool chain, its ports' archives
-  # and the Debian tool packages are untrusted data that nothing on the host runs or
-  # reads beyond the headers of the archives the engine extracts (check_archive). Its
-  # run tool takes a Tcl script, which run_script writes from erXos's own values into the
-  # container's inputs; no Tcl file is in erXos's tree.
+  # and the Debian tool packages are untrusted data that nothing on the host runs. The
+  # host reads the archives the engine extracts at the container's root only to check
+  # them and write them afresh (CheckedTar), so the engine extracts exactly what was
+  # checked. Genode's run tool takes a Tcl script, which run_script writes from erXos's
+  # own values into the container's inputs; no Tcl file is in erXos's tree.
   #
-  # The decisions are pure (run_script, data_archive, check_archive, plan, record); build
-  # runs the plan's docker commands and always removes the container and its work
-  # directory.
+  # The decisions are pure (run_script, data_archive, plan, record); build stages the
+  # inputs and the checked archives, runs the plan's docker commands (GuestBuild.execute)
+  # and always removes the container and its work directory.
   module GenodeBuild
     LABEL = "Genode's build"
+    TAG = 'genode-build'
     IMAGE_ID = 'oracle-toolchain-amd64'
     PLATFORM = 'linux/amd64'
     SCRIPT = 'bench/genode/build.sh'
@@ -54,7 +55,6 @@ module Erx
     # What the container script leaves in /tmp/out, each with the most bytes it may hold.
     OUTPUTS = { 'image.elf' => 64 << 20, 'compiler' => 4096 }.freeze
     DEADLINE = 4 * 3600
-    RUN_LOG_BYTES = 64 << 20
     ARCHIVE_BYTES = OUTPUTS.values.sum + (64 << 10)
     # The most bytes a tool archive may decompress to on the host for its check.
     UNPACKED_BYTES = 8 << 30
@@ -62,15 +62,8 @@ module Erx
     # packages under usr/, the tool chain under its own install directory.
     PACKAGE_PREFIX = 'usr/'
     TOOLCHAIN_PREFIX = 'usr/local/genode/tool/'
-    # tar's type flags check_archive accepts: regular file, hard link, symbolic link, directory.
-    ENTRY_TYPES = { '0' => :file, "\0" => :file, '1' => :hard, '2' => :symbolic, '5' => :directory }.freeze
-    # A name's leading "./" or "/": the engine extracts every name beneath the root it is
-    # given, and the tool chain's archive names its entries from "/".
-    LEADING = %r{\A\.?/}
-    # GNU tar's long name ('L') and long link target ('K') entries, whose data is the next
-    # entry's name or target, as the engine reads them too; each at most LONG_BYTES.
-    LONG = { 'L' => :name, 'K' => :link }.freeze
-    LONG_BYTES = 4096
+    # An ar member's header: name, modification time, owner, group, mode, size, magic.
+    AR_MEMBER = 'A16 A12 A6 A6 A8 A10 a2'
 
     module_function
 
@@ -119,99 +112,38 @@ module Erx
     # The data archive of the Debian package bytes: its data.tar.xz member, the one the
     # engine extracts. Neither the control archive nor any script of the package is taken.
     def data_archive(bytes)
-      raise Error, "#{LABEL}: a tool package is not a Debian package (no ar header)" unless bytes.start_with?("!<arch>\n")
+      package = StringIO.new(bytes)
+      raise Error, "#{LABEL}: a tool package is not a Debian package (no ar header)" unless package.read(8) == "!<arch>\n"
 
-      offset = 8
-      while offset + 60 <= bytes.bytesize
-        header = bytes.byteslice(offset, 60)
-        name = header.byteslice(0, 16).strip.delete_suffix('/')
-        size = header.byteslice(48, 10).strip
+      until package.eof?
+        header = package.read(60).to_s
+        name, *, size, magic = header.unpack(AR_MEMBER)
+        data = package.read(size.to_i).to_s if size&.match?(/\A[0-9]{1,10}\z/)
         raise Error, "#{LABEL}: a tool package has a malformed ar member" unless
-          header.byteslice(58, 2) == "`\n" && size.match?(/\A[0-9]{1,10}\z/) && offset + 60 + size.to_i <= bytes.bytesize
-        return bytes.byteslice(offset + 60, size.to_i) if name == 'data.tar.xz'
+          header.bytesize == 60 && magic == "`\n" && data&.bytesize == size.to_i
+        return data if name.delete_suffix('/') == 'data.tar.xz'
 
-        offset += 60 + size.to_i + (size.to_i & 1)
+        package.read(size.to_i & 1)
       end
       raise Error, "#{LABEL}: a tool package has no data.tar.xz"
     end
 
-    # Refuses the tar read from io unless every entry is a directory, a regular file, or a
-    # link whose target stays under prefix, and lies under prefix itself (or is the root
-    # directory "./"): the engine extracts it at the container's root, so an entry
-    # elsewhere, an absolute or ".." path, a device, or an extended header that renames an
-    # entry would reach beyond the tools' directories. Returns the number of entries.
-    def check_archive(io, prefix:, label:)
-      long = {}
-      Gem::Package::TarReader.new(io).sum do |entry|
-        header = entry.header
-        if LONG.key?(header.typeflag)
-          raise Error, "#{label} holds a long name over #{LONG_BYTES} bytes" unless header.size <= LONG_BYTES
-    
-          long[LONG.fetch(header.typeflag)] = entry.read.to_s.delete_suffix("\0")
-          next 0
-        end
-        type = ENTRY_TYPES[header.typeflag]
-        name = long.delete(:name) || (header.prefix.empty? ? header.name : "#{header.prefix}/#{header.name}")
-        target = long.delete(:link) || header.linkname
-        path = name.sub(LEADING, '')
-        root = type == :directory && ['', '.', './', '/'].include?(name)
-        unless root || (type && under?(path, prefix) && (type == :file || type == :directory || link_inside?(type, path, target, prefix)))
-          raise Error, "#{label} holds #{name.inspect} (type #{header.typeflag.inspect}), not a directory, file or " \
-                       "link under ./#{prefix}"
-        end
-    
-        1
-      end
-    rescue Gem::Package::Error
-      raise Error, "#{label} is not a tar archive"
-    end
-
-    def under?(path, prefix)
-      parts = path.split('/')
-      path.start_with?(prefix) && !path.start_with?('/') && parts.none? { |part| ['.', '..'].include?(part) }
-    end
-    private_class_method :under?
-
-    # A symbolic link resolves against its own directory, a hard link names an entry of
-    # the archive; either target must stay under prefix.
-    def link_inside?(type, path, target, prefix)
-      return File.expand_path("/#{target.sub(LEADING, '')}").start_with?("/#{prefix}") if type == :hard
-      return false if target.empty? || target.start_with?('/')
-
-      File.expand_path(target, "/#{File.dirname(path)}").start_with?("/#{prefix}")
-    end
-    private_class_method :link_inside?
-
-    # The docker commands of one build on the engine at endpoint: create the container,
-    # inspect it, extract each tool archive (archives, each [host path, prefix]) at its
-    # root, copy the tree to /tmp/<directory> with its two directories the build writes,
-    # and the inputs to /tmp/inputs, run the script attached, and stream /tmp/out to
-    # archive as a tar.
+    # The docker commands of one build on the engine at endpoint (GuestBuild.container_steps),
+    # with the copies that feed the container: each checked tool archive (archives, host
+    # paths) on standard input, extracted at its root, then the tree to /tmp/<directory>
+    # with its two directories the build writes, and the inputs to /tmp/inputs.
     def plan(endpoint:, name:, image:, inputs:, tree:, directory:, writable:, archives:, archive:, jobs:, toolchain:)
-      docker = ['docker', '--host', endpoint]
-      memory = "#{2 * jobs}g"
-      environment = ['HOME=/tmp/home', "PATH=/usr/local/genode/tool/#{toolchain}/bin:/usr/local/bin:/usr/bin:/bin", 'LANG=C.UTF-8']
       genode = "/tmp/#{directory}"
-      copy = ->(from, to) { GuestBuild::Step.new(name: 'genode-build-copy', argv: [*docker, 'cp', from, "#{name}:#{to}"]) }
-      {
-        create: GuestBuild::Step.new(name: 'genode-build-create', argv: [
-          *docker, 'create', '--pull', 'never', '--platform', PLATFORM, '--name', name,
-          *OracleContainer::CONFINEMENT, '--user', GuestBuild::USER, '--workdir', '/tmp', '--pids-limit', '4096',
-          '--cpus', jobs.to_s, '--memory', memory, '--memory-swap', memory,
-          '--entrypoint', '/usr/bin/env', image, '-i', *environment,
-          '/usr/bin/timeout', '-k', '10', DEADLINE.to_s, '/bin/sh', '/tmp/inputs/build.sh', jobs.to_s, genode
-        ]),
-        inspect: GuestBuild::Step.new(name: 'genode-build-inspect', argv: [*docker, 'inspect', '--type', 'container', name,
-                                                                           '--format', '{{json .}}'], limit: 1 << 20),
-        extracts: archives.map do |path, _prefix|
-          GuestBuild::Step.new(name: 'genode-build-extract', argv: [*docker, 'cp', '-', "#{name}:/"], stdin: path, deadline: 1800)
-        end,
-        copies: [copy.call(tree, genode), copy.call("#{writable}/.", genode), copy.call(inputs, '/tmp/inputs')],
-        start: GuestBuild::Step.new(name: 'genode-build-run', argv: [*docker, 'start', '--attach', name],
-                                    deadline: DEADLINE + 60, limit: RUN_LOG_BYTES),
-        export: GuestBuild::Step.new(name: 'genode-build-export', argv: [*docker, 'cp', "#{name}:/tmp/out", '-'],
-                                     limit: ARCHIVE_BYTES, stdout: archive)
-      }
+      environment = ['HOME=/tmp/home', "PATH=/usr/local/genode/tool/#{toolchain}/bin:/usr/local/bin:/usr/bin:/bin",
+                     'LANG=C.UTF-8']
+      copy = lambda do |from, to, **options|
+        GuestBuild.copy_step(endpoint: endpoint, name: name, tag: TAG, from: from, to: to, **options)
+      end
+      GuestBuild.container_steps(endpoint: endpoint, name: name, tag: TAG, platform: PLATFORM, image: image,
+                                 environment: environment, command: ['/bin/sh', '/tmp/inputs/build.sh', jobs.to_s, genode],
+                                 jobs: jobs, deadline: DEADLINE, archive: archive, archive_bytes: ARCHIVE_BYTES)
+                .merge(extracts: archives.map { |path| copy.call('-', '/', stdin: path, deadline: 1800) },
+                       copies: [copy.call(tree, genode), copy.call("#{writable}/.", genode), copy.call(inputs, '/tmp/inputs')])
     end
 
     # The build record (docs/design-bench.md, "The record"): the pins of every source,
@@ -245,28 +177,20 @@ module Erx
       arguments = PeerBench.arguments('posix', cpus: cpus)
       inputs = stage_inputs(root: root, fetched: fetched, directory: directory, arguments: arguments)
       writable = File.join(directory, 'writable')
-      %w[contrib depot].each { |name| FileUtils.mkdir_p(File.join(writable, name)) && File.chmod(0o1777, File.join(writable, name)) }
-      archives = stage_archives(runner: runner, fetched: fetched, directory: directory)
+      %w[contrib depot].each do |name|
+        FileUtils.mkdir_p(File.join(writable, name))
+        File.chmod(0o1777, File.join(writable, name))
+      end
       genode = fetched.sources.find { |source| source.fetch('id') == 'genode' }
       toolchain = fetched.sources.find { |source| source.fetch('id') == 'genode-toolchain' }.fetch('version')
       name = "erx-genode-build-#{SecureRandom.hex(8)}"
       archive = File.join(directory, 'out.tar')
       steps = plan(endpoint: endpoint, name: name, image: image, inputs: inputs, tree: fetched.fetched_tree('genode'),
-                   directory: genode.fetch('directory'), writable: writable, archives: archives, archive: archive,
-                   jobs: jobs, toolchain: toolchain)
-      run = ->(step) { GuestBuild.run(runner, step) }
-      begin
-        run.call(steps.fetch(:create))
-        GuestBuild.check_container(JsonInput.parse(File.binread(run.call(steps.fetch(:inspect)).fetch('log')),
-                                                   max_bytes: 1 << 20, label: "Genode's build container"), label: LABEL)
-        steps.fetch(:extracts).each(&run)
-        steps.fetch(:copies).each(&run)
-        run.call(steps.fetch(:start))
-        run.call(steps.fetch(:export))
-      ensure
-        # Also on an interrupt; a failed removal raises only when nothing else propagates.
-        GuestBuild.remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
-      end
+                   directory: genode.fetch('directory'), writable: writable,
+                   archives: stage_archives(runner: runner, fetched: fetched, directory: directory),
+                   archive: archive, jobs: jobs, toolchain: toolchain)
+      GuestBuild.execute(runner: runner, endpoint: endpoint, name: name, steps: steps,
+                         feeds: steps.fetch(:extracts) + steps.fetch(:copies), label: LABEL)
       out = File.join(directory, 'out')
       GuestBuild.unpack(archive: archive, out: out, outputs: OUTPUTS, label: LABEL)
       publish(root: root, out: out, record: record(sources: fetched.sources, image: image, out: out, arguments: arguments))
@@ -299,22 +223,29 @@ module Erx
     end
     private_class_method :stage_inputs
 
-    # The tool archives the engine extracts at the container's root, as [path, prefix]:
-    # the tool chain's archive and each tool package's data archive, each checked whole
-    # (check_archive) after xz decompresses it on the host into a file that is then
-    # removed. Nothing of them runs on the host.
+    # The tool archives the engine extracts at the container's root: the tool chain's
+    # archive and each tool package's data archive, each decompressed by xz on the host,
+    # read and written afresh under its prefix (CheckedTar), and its decompressed
+    # original removed. Returns the checked archives' paths. Nothing of them runs on the
+    # host.
     def stage_archives(runner:, fetched:, directory:)
       packages = fetched.sources.select { |source| source.fetch('id').start_with?(GenodeFetch::TOOL) }.map do |source|
         path = File.join(directory, "#{source.fetch('id')}.tar.xz")
         File.binwrite(path, data_archive(File.binread(fetched.fetched_file(source.fetch('id')))))
         [path, PACKAGE_PREFIX]
       end
-      [[fetched.fetched_file('genode-toolchain'), TOOLCHAIN_PREFIX], *packages].each do |path, prefix|
+      [[fetched.fetched_file('genode-toolchain'), TOOLCHAIN_PREFIX], *packages].map do |path, prefix|
         unpacked = File.join(directory, 'unpacked.tar')
+        checked = File.join(directory, "#{File.basename(path, '.tar.xz')}.checked.tar")
         runner.run(['xz', '--decompress', '--stdout', path], name: 'genode-build-xz', deadline: 1800,
                                                              output_limit: UNPACKED_BYTES, stdout: unpacked)
-        File.open(unpacked, 'rb') { |io| check_archive(io, prefix: prefix, label: "#{LABEL}'s #{File.basename(path)}") }
+        File.open(unpacked, 'rb') do |input|
+          File.open(checked, 'wb') do |output|
+            CheckedTar.rewrite(input, output, prefix: prefix, label: "#{LABEL}'s #{File.basename(path)}")
+          end
+        end
         FileUtils.rm_f(unpacked)
+        checked
       end
     end
     private_class_method :stage_archives

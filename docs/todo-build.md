@@ -482,22 +482,14 @@ design does not have, to be deleted so no side-by-side table can show it under s
   prepared and the tool packages extracted into the container, built `core`, `init`, `timer`, `lib/ld`,
   `lib/libc`, `lib/libm`, `lib/vfs` and `lib/posix` for `base-hw` on `virt_qemu_arm_v8a`, the binary archives
   of `base-hw-virt_qemu_arm_v8a`, `init`, `libc`, `vfs` and `posix`, and `erx_peer_bench` against Genode's C
-library. `tools/erx build genode` (`GenodeBuild`) runs the build on the x86-64 host's engine: it writes the
-run script, checks every archive the engine extracts, and brings back `image.elf`, the configuration and the
-build record; which file the run tool names the boot image, and whether init takes the documented
-configuration, are settled by its first run. Still to do: boot the image under erXos's own QEMU harness,
-import its lines (the label dropped, as the design says), give init's start node the boot's CPUs as its
-affinity, and show by a cross-CPU handshake that `pthread_setaffinity_np` moves the thread before any row
-is published as pinned; the image takes the posix run's CPU count when built (`GenodeBuild.build`'s
-`cpus:`, 1 from the command line).
-* [Medium] Genode's build, `GenodeBuild.check_archive` (`tools/lib/erx/genode_build.rb`): the host checks the
-  decompressed tar with RubyGems' reader while the engine extracts the compressed bytes with its own, and the
-  readers differ (a V7 header's prefix field, a NUL inside a name, modes unchecked, no end block required), so a
-  malicious pinned archive could write outside its prefix in the container's root. Rewrite each accepted
-  archive on the host as a fresh ustar (normalized names, no long-name or extended records, root-owned, plain
-  modes) and give the engine that, so it extracts exactly what was checked.
-* [Medium] Guests' container contract, `L4ReBuild.plan` and `GenodeBuild.plan`: the create, inspect, start and
-  export steps are still two copies; move them into `GuestBuild` so each guest gives only its copies and record.
+  library. `tools/erx build genode` (`GenodeBuild`) runs the build on the x86-64 host's engine: it writes the
+  run script, checks every archive the engine extracts and hands it a fresh ustar copy (`CheckedTar`), and
+  brings back `image.elf`, the configuration and the build record; which file the run tool names the boot
+  image, and whether init takes the documented configuration, are settled by its first run. Still to do: boot
+  the image under erXos's own QEMU harness, import its lines (the label dropped, as the design says), give
+  init's start node the boot's CPUs as its affinity, and show by a cross-CPU handshake that
+  `pthread_setaffinity_np` moves the thread before any row is published as pinned; the image takes the posix
+  run's CPU count when built (`GenodeBuild.build`'s `cpus:`, 1 from the command line).
 * [Low] Source ids and run names, `Dependencies` (`tools/lib/erx/dependencies.rb`) and `Runner::COMMAND_NAME`: a
   lock accepts an id with a capital letter, which the fetch then refuses as a run name ("invalid command name").
   No lock has one; give ids and run names one pattern.

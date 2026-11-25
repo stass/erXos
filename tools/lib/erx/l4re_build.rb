@@ -11,10 +11,8 @@ require_relative 'bounded_file'
 require_relative 'dependencies'
 require_relative 'error'
 require_relative 'guest_build'
-require_relative 'json_input'
 require_relative 'l4re_bench'
 require_relative 'l4re_fetch'
-require_relative 'oracle_container'
 require_relative 'output_directory'
 
 module Erx
@@ -59,11 +57,11 @@ module Erx
     OUTPUTS = { 'globalconfig.out' => 1 << 20, 'l4re.kconfig' => 1 << 20, 'compiler' => 4096 }.freeze
     BOOTABLE_BYTES = 64 << 20
     DEADLINE = 4 * 3600
-    # The most bytes the attached run may log, and the archive of the outputs may hold:
-    # their bounds with room for the archive's headers.
-    RUN_LOG_BYTES = 64 << 20
+    # The most bytes the archive of the outputs may hold: their bounds with room for the
+    # archive's headers.
     ARCHIVE_BYTES = OUTPUTS.values.sum + BOOTABLE_BYTES + (64 << 10)
-    USER = GuestBuild::USER
+    LABEL = "L4Re's build"
+    TAG = 'l4re-build'
     # The script's whole environment: the container's entry starts it under env -i.
     ENVIRONMENT = ['HOME=/tmp', 'PATH=/usr/local/bin:/usr/bin:/bin', 'LANG=C'].freeze
 
@@ -104,35 +102,23 @@ module Erx
     end
     private_class_method :settings
 
-    # The docker commands of one build on the engine at endpoint: create the container,
-    # inspect it, copy the inputs and each tree in, run the script attached, and stream
-    # /tmp/out to archive as a tar. trees maps each LAYOUT path to its fetched tree on
-    # the host.
+    # The docker commands of one build on the engine at endpoint (GuestBuild.container_steps),
+    # with the copies that feed the container: the inputs, then each tree, parents first.
+    # trees maps each LAYOUT path to its fetched tree on the host.
     def plan(endpoint:, name:, image:, inputs:, trees:, archive:, jobs:, target: TARGETS.fetch('virt'))
-      docker = ['docker', '--host', endpoint]
-      memory = "#{2 * jobs}g"
       copies = [[inputs, '/tmp/inputs'], *trees.sort_by { |path, _| path.count('/') }
                                                .map { |path, tree| [tree, File.join(SOURCE_ROOT, path)] }]
-      {
-        create: GuestBuild::Step.new(name: 'l4re-build-create', argv: [
-          *docker, 'create', '--pull', 'never', '--platform', PLATFORM, '--name', name,
-          *OracleContainer::CONFINEMENT, '--user', USER, '--workdir', '/tmp', '--pids-limit', '4096',
-          '--cpus', jobs.to_s, '--memory', memory, '--memory-swap', memory,
-          '--entrypoint', '/usr/bin/env', image, '-i', *ENVIRONMENT,
-          '/usr/bin/timeout', '-k', '10', DEADLINE.to_s, '/bin/sh', '/tmp/inputs/build.sh', jobs.to_s,
-          target.platform_type, target.image_target, File.extname(target.bootable).delete_prefix('.')
-        ]),
-        inspect: GuestBuild::Step.new(name: 'l4re-build-inspect', argv: [*docker, 'inspect', '--type', 'container', name,
-                                                             '--format', '{{json .}}'], limit: 1 << 20),
-        copies: copies.map { |from, to| GuestBuild::Step.new(name: 'l4re-build-copy', argv: [*docker, 'cp', from, "#{name}:#{to}"]) },
-        start: GuestBuild::Step.new(name: 'l4re-build-run', argv: [*docker, 'start', '--attach', name],
-                        deadline: DEADLINE + 60, limit: RUN_LOG_BYTES),
-        export: GuestBuild::Step.new(name: 'l4re-build-export', argv: [*docker, 'cp', "#{name}:/tmp/out", '-'],
-                         limit: ARCHIVE_BYTES, stdout: archive)
-      }
+      command = ['/bin/sh', '/tmp/inputs/build.sh', jobs.to_s,
+                 target.platform_type, target.image_target, File.extname(target.bootable).delete_prefix('.')]
+      GuestBuild.container_steps(endpoint: endpoint, name: name, tag: TAG, platform: PLATFORM, image: image,
+                                 environment: ENVIRONMENT, command: command,
+                                 jobs: jobs, deadline: DEADLINE, archive: archive, archive_bytes: ARCHIVE_BYTES)
+                .merge(copies: copies.map do |from, to|
+                  GuestBuild.copy_step(endpoint: endpoint, name: name, tag: TAG, from: from, to: to)
+                end)
     end
 
-    def check_container(value) = GuestBuild.check_container(value, label: "L4Re's build")
+    def check_container(value) = GuestBuild.check_container(value, label: LABEL)
 
     # The build record of the exported outputs in out: the pins of every source and
     # package, the image, the compiler, the resolved configurations and the difference of
@@ -158,14 +144,14 @@ module Erx
       }
     end
 
-    def text(out, name) = GuestBuild.text(out, name, label: "L4Re's build")
+    def text(out, name) = GuestBuild.text(out, name, label: LABEL)
     private_class_method :text
 
     # Writes target's outputs (outputs_of) from archive, the tar docker cp streamed of
     # /tmp/out, into the new directory out, once the whole archive is read and checked
     # (GuestBuild.unpack).
     def unpack(archive:, out:, target: TARGETS.fetch('virt'))
-      GuestBuild.unpack(archive: archive, out: out, outputs: outputs_of(target), label: "L4Re's build")
+      GuestBuild.unpack(archive: archive, out: out, outputs: outputs_of(target), label: LABEL)
     end
 
     # Builds L4Re's guest for target on the engine of the docker context, leaving its
@@ -186,18 +172,8 @@ module Erx
       trees = L4ReFetch::LAYOUT.to_h { |id, path| [path, fetched.fetched_tree(id)] }
       archive = File.join(directory, 'out.tar')
       steps = plan(endpoint: endpoint, name: name, image: image, inputs: inputs, trees: trees, archive: archive, jobs: jobs, target: target)
-      run = ->(step) { GuestBuild.run(runner, step) }
-      begin
-        run.call(steps.fetch(:create))
-        check_container(JsonInput.parse(File.binread(run.call(steps.fetch(:inspect)).fetch('log')),
-                                        max_bytes: 1 << 20, label: "L4Re's build container"))
-        steps.fetch(:copies).each(&run)
-        run.call(steps.fetch(:start))
-        run.call(steps.fetch(:export))
-      ensure
-        # Also on an interrupt; a failed removal raises only when nothing else propagates.
-        GuestBuild.remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
-      end
+      GuestBuild.execute(runner: runner, endpoint: endpoint, name: name, steps: steps, feeds: steps.fetch(:copies),
+                         label: LABEL)
       out = File.join(directory, 'out')
       unpack(archive: archive, out: out, target: target)
       publish(root: root, out: out, target: target,

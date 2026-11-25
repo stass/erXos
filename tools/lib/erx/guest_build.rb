@@ -5,6 +5,8 @@
 require 'rubygems/package'
 require_relative 'dependencies'
 require_relative 'error'
+require_relative 'json_input'
+require_relative 'oracle_container'
 
 module Erx
   # What the container builds of the comparison guests share (docs/design-bench.md, "L4Re's
@@ -24,7 +26,58 @@ module Erx
       def initialize(name:, argv:, deadline: 600, limit: nil, stdout: nil, stdin: nil) = super
     end
 
+    # The most bytes a build's attached run may log.
+    RUN_LOG_BYTES = 64 << 20
+
     module_function
+
+    # The docker commands every guest build runs on the engine at endpoint, each named
+    # "<tag>-<step>": create the container name from image for platform, confined, as
+    # USER, with jobs CPUs and twice that many GiB, starting command under env -i with
+    # only environment and a deadline; inspect it; start it attached; and stream /tmp/out
+    # to archive as a tar of at most archive_bytes.
+    def container_steps(endpoint:, name:, tag:, platform:, image:, environment:, command:, jobs:, deadline:,
+                        archive:, archive_bytes:)
+      docker = ['docker', '--host', endpoint]
+      memory = "#{2 * jobs}g"
+      {
+        create: Step.new(name: "#{tag}-create", argv: [
+          *docker, 'create', '--pull', 'never', '--platform', platform, '--name', name,
+          *OracleContainer::CONFINEMENT, '--user', USER, '--workdir', '/tmp', '--pids-limit', '4096',
+          '--cpus', jobs.to_s, '--memory', memory, '--memory-swap', memory,
+          '--entrypoint', '/usr/bin/env', image, '-i', *environment,
+          '/usr/bin/timeout', '-k', '10', deadline.to_s, *command
+        ]),
+        inspect: Step.new(name: "#{tag}-inspect", argv: [*docker, 'inspect', '--type', 'container', name,
+                                                          '--format', '{{json .}}'], limit: 1 << 20),
+        start: Step.new(name: "#{tag}-run", argv: [*docker, 'start', '--attach', name], deadline: deadline + 60,
+                        limit: RUN_LOG_BYTES),
+        export: Step.new(name: "#{tag}-export", argv: [*docker, 'cp', "#{name}:/tmp/out", '-'], limit: archive_bytes,
+                         stdout: archive)
+      }
+    end
+
+    # A docker cp into the container name: from a host path, or from standard input when
+    # from is '-' and stdin names the archive.
+    def copy_step(endpoint:, name:, tag:, from:, to:, stdin: nil, deadline: 600)
+      Step.new(name: "#{tag}-copy", argv: ['docker', '--host', endpoint, 'cp', from, "#{name}:#{to}"], stdin: stdin,
+               deadline: deadline)
+    end
+
+    # Runs a build's steps (container_steps, with feeds the copies into the container):
+    # creates the container, refuses it unless check_container holds, feeds it, runs it
+    # and exports its outputs, and always removes it, also on an interrupt.
+    def execute(runner:, endpoint:, name:, steps:, feeds:, label:)
+      run(runner, steps.fetch(:create))
+      log = run(runner, steps.fetch(:inspect)).fetch('log')
+      check_container(JsonInput.parse(File.binread(log), max_bytes: 1 << 20, label: "#{label} container"), label: label)
+      feeds.each { |step| run(runner, step) }
+      run(runner, steps.fetch(:start))
+      run(runner, steps.fetch(:export))
+    ensure
+      # A failed removal raises only when nothing else propagates.
+      remove(runner: runner, endpoint: endpoint, name: name, raising: $!.nil?)
+    end
 
     def run(runner, step)
       runner.run(step.argv, name: step.name, deadline: step.deadline, env: Dependencies::DOCKER_ENVIRONMENT,

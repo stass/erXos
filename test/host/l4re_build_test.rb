@@ -51,7 +51,7 @@ class L4ReBuildTest < Minitest::Test
     assert_equal Erx::L4ReFetch::LAYOUT.size + 1, copies.size
     start = steps.fetch(:start)
     assert_equal ['docker', '--host', ENDPOINT, 'start', '--attach', 'erx-l4re-build-1'], start.argv
-    assert_equal Erx::L4ReBuild::RUN_LOG_BYTES, start.limit
+    assert_equal Erx::GuestBuild::RUN_LOG_BYTES, start.limit
     export = steps.fetch(:export)
     assert_equal ['docker', '--host', ENDPOINT, 'cp', 'erx-l4re-build-1:/tmp/out', '-'], export.argv
     assert_equal [Erx::L4ReBuild::ARCHIVE_BYTES, '/w/out.tar'], [export.limit, export.stdout]
@@ -142,16 +142,19 @@ class L4ReBuildTest < Minitest::Test
         archive(File.join(work, "#{label}.tar"), entries)
         assert_raises(Erx::Error, label) { Erx::L4ReBuild.unpack(archive: File.join(work, "#{label}.tar"), out: File.join(work, label)) }
       end
-# A cut archive: inside bootstrap.elf's bytes, inside its header, and before the end.
-good = File.binread(File.join(work, "good.tar"))
-{ "cut-data" => 1024 + 4, "cut-header" => 1536 + 100, "no-end" => good.bytesize - 1024 }.each do |label, size|
-  File.binwrite(File.join(work, "#{label}.tar"), good.byteslice(0, size))
-  assert_raises(Erx::Error, label) { Erx::L4ReBuild.unpack(archive: File.join(work, "#{label}.tar"), out: File.join(work, label)) }
-  refute File.exist?(File.join(work, label)), label
-end
-archive(File.join(work, "bare.tar"), {})
-File.open(File.join(work, "bare.tar"), "wb") { |io| Gem::Package::TarWriter.new(io) { |tar| expected.each { |name, body| tar.add_file_simple(name, 0o644, body.bytesize) { |file| file.write(body) } } } }
-assert_raises(Erx::Error) { Erx::L4ReBuild.unpack(archive: File.join(work, "bare.tar"), out: File.join(work, "bare")) }
+      # A cut archive: inside bootstrap.elf's bytes, inside its header, and before the end.
+      good = File.binread(File.join(work, 'good.tar'))
+      { 'cut-data' => 1024 + 4, 'cut-header' => 1536 + 100, 'no-end' => good.bytesize - 1024 }.each do |label, size|
+        File.binwrite(File.join(work, "#{label}.tar"), good.byteslice(0, size))
+        assert_raises(Erx::Error, label) { Erx::L4ReBuild.unpack(archive: File.join(work, "#{label}.tar"), out: File.join(work, label)) }
+        refute File.exist?(File.join(work, label)), label
+      end
+      File.open(File.join(work, 'bare.tar'), 'wb') do |io|
+        Gem::Package::TarWriter.new(io) do |tar|
+          expected.each { |name, body| tar.add_file_simple(name, 0o644, body.bytesize) { |file| file.write(body) } }
+        end
+      end
+      assert_raises(Erx::Error) { Erx::L4ReBuild.unpack(archive: File.join(work, 'bare.tar'), out: File.join(work, 'bare')) }
       File.write(File.join(work, 'text.tar'), 'not a tar' * 100)
       assert_raises(Erx::Error) { Erx::L4ReBuild.unpack(archive: File.join(work, 'text.tar'), out: File.join(work, 'text')) }
     end

@@ -19,7 +19,7 @@ class GenodeBuildTest < Minitest::Test
   def plan
     Erx::GenodeBuild.plan(endpoint: ENDPOINT, name: 'erx-genode-build-1', image: IMAGE, inputs: '/w/inputs',
                           tree: '/trees/genode', directory: 'genode-d18ee9e', writable: '/w/writable',
-                          archives: [['/w/toolchain.tar.xz', 'usr/local/genode/tool/'], ['/w/tcl.tar.xz', 'usr/']],
+                          archives: ['/w/toolchain.checked.tar', '/w/tcl.checked.tar'],
                           archive: '/w/out.tar', jobs: 8, toolchain: '25.05')
   end
 
@@ -66,19 +66,34 @@ class GenodeBuildTest < Minitest::Test
     writer_io.write(header.to_s)
   end
 
-  def check(prefix: 'usr/', &block) = Erx::GenodeBuild.check_archive(tar(&block), prefix: prefix, label: 'a package')
+  def rewrite(io, prefix:, output: StringIO.new(+''.b))
+    Erx::CheckedTar.rewrite(io, output, prefix: prefix, label: 'a package')
+  end
 
-  # A Debian package's tree under ./usr/, with links that stay inside it, is accepted.
-  def test_a_tree_under_its_prefix_with_inner_links_is_accepted
-    count = check do |writer, io|
+  def check(prefix: 'usr/', &block) = rewrite(tar(&block), prefix: prefix)
+
+  # A Debian package's tree under ./usr/, with links that stay inside it, is accepted and
+  # written afresh as ustar: names without "./", the root directory left out, owner 0:0.
+  def test_a_tree_under_its_prefix_with_inner_links_is_written_afresh
+    output = StringIO.new(+''.b)
+    count = rewrite(tar do |writer, io|
       writer.mkdir('./', 0o755)
       writer.mkdir('./usr/bin', 0o755)
       writer.add_file_simple('./usr/bin/tclsh8.6', 0o755, 2) { |file| file.write('#!') }
       writer.add_symlink('./usr/bin/tclsh', 'tclsh8.6', 0o777)
       writer.add_symlink('./usr/lib/x/libtcl.so', '../../lib/libtcl8.6.so', 0o777)
       raw(io, './usr/bin/tclsh-hard', '1', linkname: './usr/bin/tclsh8.6')
+    end, prefix: 'usr/', output: output)
+    assert_equal 5, count
+    output.rewind
+    entries = Gem::Package::TarReader.new(output).map do |entry|
+      header = entry.header
+      [header.name, header.typeflag, header.linkname, header.uid, header.magic, entry.read.to_s]
     end
-    assert_equal 6, count
+    assert_equal [['usr/bin/', '5', '', 0, 'ustar', ''], ['usr/bin/tclsh8.6', '0', '', 0, 'ustar', '#!'],
+                  ['usr/bin/tclsh', '2', 'tclsh8.6', 0, 'ustar', ''],
+                  ['usr/lib/x/libtcl.so', '2', '../../lib/libtcl8.6.so', 0, 'ustar', ''],
+                  ['usr/bin/tclsh-hard', '1', 'usr/bin/tclsh8.6', 0, 'ustar', '']], entries
   end
 
   # What the engine would extract beyond the tools' directory, or what could rename an
@@ -106,6 +121,34 @@ class GenodeBuildTest < Minitest::Test
     end
   end
 
+  # One raw tar header block: fields at their ustar offsets, magic as given ("" for a V7
+  # header), and its checksum.
+  def block(name, typeflag: '0', size: 0, linkname: '', magic: "ustar\0", version: '00', prefix: '')
+    fields = [[0, name], [100, '0000644'], [108, '0000000'], [116, '0000000'], [124, format('%011o', size)],
+              [136, '00000000000'], [156, typeflag], [157, linkname], [257, magic], [263, version], [345, prefix]]
+    header = fields.each_with_object("\0".b * 512) { |(offset, text), bytes| bytes[offset, text.bytesize] = text.b }
+    header[148, 8] = ' ' * 8
+    header[148, 8] = format('%06o', header.sum(0)) + "\0 "
+    header
+  end
+
+  # Archives the host reader and the engine's could read differently, each alone: a V7
+  # header whose prefix field the host would join to its name, a name hiding bytes after
+  # a NUL, a link that climbs out through another link, and an archive cut before its end.
+  def test_archives_read_two_ways_are_refused
+    end_blocks = "\0".b * 1024
+    cases = {
+      'a V7 prefix' => block('evil', magic: '', version: '', prefix: 'usr/bin') + end_blocks,
+      'a NUL in a name' => block("usr/bin/x\0y") + end_blocks,
+      'a link out through a link' => block('usr/a/x', typeflag: '2', linkname: '.') +
+                                     block('usr/a/y', typeflag: '2', linkname: 'x/x/x/x/../../../..') + end_blocks,
+      'no end block' => block('usr/bin/x')
+    }
+    cases.each do |label, bytes|
+      assert_raises(Erx::Error, label) { rewrite(StringIO.new(bytes), prefix: 'usr/') }
+    end
+  end
+
   # The container is created confined, as the non-root user, under env -i with the tool
   # chain on its path; archives reach it on standard input and trees by copy, never by a
   # mount, and the export is the only thing streamed out.
@@ -121,7 +164,7 @@ class GenodeBuildTest < Minitest::Test
     refute create.any? { |argument| argument.start_with?('--mount', '--volume', '-v', '--privileged', '--env') }
     assert_includes create, 'PATH=/usr/local/genode/tool/25.05/bin:/usr/local/bin:/usr/bin:/bin'
     assert_equal ['/bin/sh', '/tmp/inputs/build.sh', '8', '/tmp/genode-d18ee9e'], create.last(4)
-    assert_equal [['/w/toolchain.tar.xz', ['cp', '-', 'erx-genode-build-1:/']], ['/w/tcl.tar.xz', ['cp', '-', 'erx-genode-build-1:/']]],
+    assert_equal [['/w/toolchain.checked.tar', ['cp', '-', 'erx-genode-build-1:/']], ['/w/tcl.checked.tar', ['cp', '-', 'erx-genode-build-1:/']]],
                  steps.fetch(:extracts).map { |step| [step.stdin, step.argv.last(3)] }
     assert_equal [['/trees/genode', 'erx-genode-build-1:/tmp/genode-d18ee9e'], ['/w/writable/.', 'erx-genode-build-1:/tmp/genode-d18ee9e'],
                   ['/w/inputs', 'erx-genode-build-1:/tmp/inputs']], steps.fetch(:copies).map { |step| step.argv.last(2) }

@@ -2617,10 +2617,17 @@ not serve, and every tool package is installed one way: the host checks
 the package's SHA-256, takes out its `data.tar.xz` member and nothing
 else (no control archive, so no maintainer script, and nothing of the
 package runs on the host), and refuses a data archive unless each entry
-is a directory, a regular file or a relative symbolic link under
-`./usr/`; the engine extracts it into the container's file system
-(`docker cp -`, which takes the compressed archive) before the container
-starts, every file owned by uid 0 as the tree is.
+is a directory, a regular file, a hard link to an earlier file or a
+relative symbolic link under `./usr/`. Two tar readers need not read one
+archive alike (a V7 header's prefix field, bytes after a NUL in a name,
+a missing end block), so the engine never gets the archive the host
+read: the host writes each accepted archive afresh as plain ustar from
+its own reading (`CheckedTar`), every entry owned by uid 0 as the tree
+is, without set-id bits, and the engine extracts that one into the
+container's file system (`docker cp -`) before the container starts.
+A symbolic link climbs only with leading `..` from a directory no link
+of the archive replaces, and no entry lies beneath a link or file of
+the archive, so a link's text alone says where it points.
 
 `erx_peer_bench` is built as a Genode component from a target
 description of erXos's (`bench/genode/`) that links Genode's `posix`,
@@ -2655,8 +2662,8 @@ init's configuration in the notation Genode Foundations 26.05 documents
 ("The init component"), with the component's log on Genode's LOG and a
 `/tmp` in its memory, and makes the boot image; nothing of it boots
 anything. The tool chain's archive names its entries from `/` and
-carries GNU long names, which the host's check of every extracted
-archive reads as the engine does. What comes back is the boot image
+carries GNU long names; the host reads both and writes the entries
+relative, in ustar's name and prefix fields. What comes back is the boot image
 and the resolved configuration, as L4Re's build returns its files,
 bounded and read only as data.
 
