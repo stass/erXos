@@ -29,6 +29,9 @@ extern "C" {
  * The least count at which (count * scaler) >> (32 - shift) reaches us, for a
  * nonzero scaler and a shift below 32, as Scaler_shift::init gives; UINT64_MAX
  * where that count is past the counter's 64 bits, a compare value never reached.
+ * The count is exact for every us, but Fiasco's clock keeps only the low 64 bits
+ * of the shifted product, so it reads us there only before it wraps at 2^64
+ * microseconds, some 585,000 years of counting.
  */
 uint64_t	erx_clock_first_count(uint64_t us, uint32_t scaler, uint32_t shift);
 

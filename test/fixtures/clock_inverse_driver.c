@@ -46,14 +46,11 @@ model_init(uint32_t from_freq, uint32_t to_freq)
 	return (scale);
 }
 
-/*
- * Scaler_shift::transform on AArch64, the product shifted down, here in full: Fiasco keeps its low
- * 64 bits, which differ only past 2^64 microseconds.
- */
-static wide_t
+/* Scaler_shift::transform on AArch64: the product shifted down, of which Fiasco keeps the low 64 bits. */
+static uint64_t
 model_clock(uint64_t count, model_scale_t scale)
 {
-	return (((wide_t)count * scale.scaler) >> (32 - scale.shift));
+	return ((uint64_t)(((wide_t)count * scale.scaler) >> (32 - scale.shift)));
 }
 
 static uint64_t
@@ -83,7 +80,12 @@ first_count_agrees(uint64_t wakeup, uint32_t hz, model_scale_t scale)
 		    (unsigned long long)count, (unsigned long long)exact);
 		return (false);
 	}
-	/* What the timer interrupt finds: the clock at the compare value, and one count before. */
+	/*
+	 * What the timer interrupt finds: the clock at the compare value, and one count before. Past the
+	 * clock's 64 bits, 2^64 microseconds, it has wrapped and reads no such wakeup at any count.
+	 */
+	if (exact * scale.scaler >> (32 - scale.shift) > UINT64_MAX)
+		return (true);
 	if (model_clock(count, scale) < wakeup || (count != 0 && model_clock(count - 1, scale) >= wakeup)) {
 		printf("clock: hz %u wakeup %llu at count %llu reads %llu\n", hz, (unsigned long long)wakeup,
 		    (unsigned long long)count, (unsigned long long)(uint64_t)model_clock(count, scale));
