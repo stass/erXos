@@ -123,10 +123,11 @@ module Erx
     FAILED_LINE = /^erx: bench: .* FAILED/n
     # The machine's end, the boot's last line (docs/design-bench.md, "The end").
     MACHINE_END_LINE = /^erx: end (?<how>[a-z]+)\r*$/n
-    # The root's naming line in any of its forms, with its name; a line with its head
+    # The root's naming line in any of its forms, with its name and its end form (nil
+    # for a plain naming line); a line with its head
     # and anything else after it is a broken one.
     NAMING_HEAD = /\Aerx: bench: boot /n
-    NAMING_LINE = /\Aerx: bench: boot (?<name>[0-9a-f]{32})(?: done| deadline)?\r*\z/n
+    NAMING_LINE = /\Aerx: bench: boot (?<name>[0-9a-f]{32})(?: (?<form>done|deadline))?\r*\z/n
     GUEST_LINE = /\A(?:BENCH|CLOCK|WINDOW) /n
 
     module_function

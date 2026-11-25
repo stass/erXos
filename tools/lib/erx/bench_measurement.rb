@@ -53,6 +53,8 @@ module Erx
     RAW = 1000
     PHASES = 16
     # What a guest may report; the host alone decides timed_out, rejected and not_run.
+    # NOT_RUN is a cell's reason when its boot ended and printed no line for it.
+    NOT_RUN = 'the guest printed no line for it'
     GUEST_STATUSES = %w[measured partial unsupported failed].freeze
     GUEST_CLOCKS = %w[counter virtual].freeze
     REQUIRED = %w[benchmark operation conditions frequency_hz status samples counts].freeze
@@ -154,9 +156,10 @@ module Erx
     # the clock's read cost and increment. An asked cell no accepted line reported is
     # not_run, timed_out when the boot timed_out before the guest reported it, or rejected
     # when a BENCH line was refused; one reported more than once is rejected, whatever its
-    # lines said. The cells come in asked's order, and each refused line's reason is
-    # returned in refused, never its text.
-    def boot(lines, asked, timed_out: false)
+    # lines said. A not_run cell's reason is not_run, which a board's reader gives when
+    # the boot's end was not seen (BoardLog). The cells come in asked's order, and each
+    # refused line's reason is returned in refused, never its text.
+    def boot(lines, asked, timed_out: false, not_run: NOT_RUN)
       clocks, others = lines.partition { |text| line_of?(text, 'CLOCK') }
       benches, trailing = with_windows(others)
       answers = benches.map { |text, windows| judged { asked_cell(cell(text, asked, windows: windows), asked) } }
@@ -171,12 +174,16 @@ module Erx
         in [] unless refused.empty?
           unreported(entry, asked, status: 'rejected', reason: 'a line of the boot was refused')
         in [] if timed_out then unreported(entry, asked, status: 'timed_out', reason: 'the boot timed out before its line')
-        in [] then unreported(entry, asked, status: 'not_run', reason: 'the guest printed no line for it')
+        in [] then unreported(entry, asked, status: 'not_run', reason: not_run)
         else unreported(entry, asked, status: 'rejected', reason: 'the guest reported it more than once')
         end
       end
       { clock: group, cells: cells, refused: refused + [calibration].grep(String) }
     end
+
+    # Every cell asked asks, rejected for reason, with no samples: a boot whose lines the
+    # host refuses whole, as a board's reader refuses an entry that booted twice.
+    def rejected(asked, reason:) = asked.cells.map { |entry| unreported(entry, asked, status: 'rejected', reason: reason) }
 
     def line_of?(text, kind) = text.is_a?(String) && text.b.start_with?("#{kind} ")
 
