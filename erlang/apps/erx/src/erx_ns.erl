@@ -42,7 +42,9 @@
 %% each bind of one, have the provider {facet, Name, Tree}, which a resolution reads as
 %% the grant the domain's facet registry (erx_facets) holds for Name at that moment, with
 %% the lesser of the entry's rights and the grant's, or as ended when it holds none
-%% (erx_facets:table/1, through prim_file:erx_table/0).
+%% (erx_facets:table/1, through prim_file:erx_table/0). Every entry of the facet media,
+%% binds of one included, carries the nofollow mark, so no link on a drive is followed
+%% (entry/3).
 %% This is how a domain reaches a grant of another domain by path: a re-grant, such as
 %% the one a restarted server's domain is given, serves the next lookup with no change
 %% to the table, and the process monitors no facet's grant. A grant that has ended
@@ -77,9 +79,10 @@
 -type rights() :: erx_abi_enums:files_rights().
 -type provider() :: release | {erofs, erx_erofs:fs()} | {grant, pid(), Tree :: name()}
                   | {facet, Name :: atom(), Tree :: name()} | ended.
-%% An image's entry also holds the grant and fid the image is read through.
+%% An image's entry also holds the grant and fid the image is read through, and an entry
+%% of the media facet the nofollow mark (entry/3).
 -type entry() :: #{point := [name()], provider := provider(), root := [name()], rights := rights(),
-                   fid => file()}.
+                   fid => file(), nofollow => true}.
 -type file() :: {{pid(), Tree :: binary(), ro}, Fid :: non_neg_integer()}.
 -type table() :: [entry()].
 -type option() :: {tree, binary()} | rights().
@@ -441,14 +444,23 @@ plain(Names) ->
 
 -spec applied(checked(), table()) -> table().
 applied({mount, Point, Provider, Rights}, Table) ->
-    Table ++ [#{point => Point, provider => Provider, root => [], rights => Rights}];
+    Table ++ [entry(Point, Provider, Rights)];
 applied({mount, Point, Provider, Rights, File}, Table) ->
-    Table ++ [#{point => Point, provider => Provider, root => [], rights => Rights, fid => File}];
+    Table ++ [(entry(Point, Provider, Rights))#{fid => File}];
 applied({bind, Place, Point, ReadOnly}, Table) ->
     {ok, #{rights := Rights} = Holder} = holder(Place, Table),
     Table ++ [Holder#{point := Point, rights := case ReadOnly of true -> ro; false -> Rights end}];
 applied({unmount, Point}, Table) ->
     [Entry || #{point := At} = Entry <- Table, At =/= Point].
+
+%% A mount's entry at Point on Provider. The provider of a facet named media, a drive's
+%% volumes, carries the nofollow mark, derived from the facet's name and from nothing a
+%% mount names, so the resolver follows no link a stranger's stick holds; a bind copies
+%% its holder's entry, mark included (docs/design-drives.md, "Links and rights").
+entry(Point, {facet, media, _} = Provider, Rights) ->
+    #{point => Point, provider => Provider, root => [], rights => Rights, nofollow => true};
+entry(Point, Provider, Rights) ->
+    #{point => Point, provider => Provider, root => [], rights => Rights}.
 
 %% The table once the grant Pid has ended: each of its entries answers eio.
 ended(Pid, Table) ->

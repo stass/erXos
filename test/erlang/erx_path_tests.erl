@@ -107,6 +107,27 @@ a_link_text_holding_nul_or_invalid_utf8_is_einval_test() ->
     ?assertEqual({error, einval}, resolve(<<"nul/x">>, lookup, ?NOFOLLOW)),
     ?assertEqual({error, einval}, resolve(<<"bad">>, lookup, ?LOOKUP)).
 
+%% An entry marked nofollow, the tree at /m (docs/design-files.md, Symbolic
+%% links): every link the resolver would follow there answers eacces, before
+%% the link count, a trailing "/" and a create's last link included, and an
+%% operation on the link itself acts on it. A link outside the mark is
+%% followed, into the marked tree as well.
+marked_entry() -> #{point => [<<"m">>], root => [], provider => release, nofollow => true}.
+
+a_link_in_a_tree_marked_nofollow_is_never_followed_test() ->
+    Marked = marked_entry(),
+    Resolve = fun(Path, Op, Flags) -> resolve(Path, Op, Flags, [root_entry(), Marked], []) end,
+    ?assertEqual({error, eacces}, Resolve(<<"/m/lnk">>, lookup, ?LOOKUP)),
+    ?assertEqual({error, eacces}, Resolve(<<"/m/lnk/f">>, delete, ?NOFOLLOW)),
+    ?assertEqual({error, eacces}, Resolve(<<"/m/lnk/">>, lookup, ?NOFOLLOW)),
+    ?assertEqual({error, eacces}, Resolve(<<"/m/dang">>, create, ?LOOKUP)),
+    ?assertEqual({error, eacces}, Resolve(<<"/m/n1">>, lookup, ?LOOKUP)),
+    ?assertEqual({target, Marked, [<<"lnk">>]}, Resolve(<<"/m/lnk">>, lookup, ?NOFOLLOW)),
+    ?assertEqual({parent, Marked, [], <<"dang">>}, Resolve(<<"/m/dang">>, delete, ?NOFOLLOW)),
+    ?assertEqual({target, Marked, [<<"d">>, <<"e">>]}, Resolve(<<"/m/d/e">>, lookup, ?LOOKUP)),
+    ?assertEqual({parent, Marked, [<<"d">>, <<"e">>], <<"f">>},
+                 Resolve(<<"/root/m/d/e/f">>, delete, ?NOFOLLOW)).
+
 %% The degenerate "/" and a trailing "/".
 
 slash_alone_is_the_root_for_lookup_and_eisdir_otherwise_test() ->

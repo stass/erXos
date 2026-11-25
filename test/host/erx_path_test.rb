@@ -19,18 +19,34 @@ class ErxPathTest < Minitest::Test
                test/erlang/erx_path_tests.erl].map { |path| File.join(ROOT, path) }.freeze
   INCLUDE = File.join(ROOT, 'build/gen/erlang/apps/erx/include')
 
+  # A seeded resolver that ignores the nofollow mark, so a link on a drive is followed: the
+  # marked tree's case must catch it.
+  MARK = "follow(\#{nofollow := true}, _, _, _, _, _) ->\n    {error, eacces};\n"
+
   def test_resolver_cases_pass_under_eunit
-    output, status = eunit
+    output, status = eunit(File.read(SOURCES.first))
     assert status.success?, output
     assert_match(/All \d+ tests passed/, output)
   end
 
+  def test_a_resolver_that_ignores_the_nofollow_mark_is_caught
+    source = File.read(SOURCES.first)
+    assert_equal 1, source.scan(MARK).size, 'erx_path has no nofollow clause to remove'
+    output, status = eunit(source.sub(MARK, ''))
+    refute status.success?, output
+    assert_match(/a_link_in_a_tree_marked_nofollow_is_never_followed_test\.\.\.\*failed\*/, output)
+    assert_match(/Failed: 1\./, output)
+  end
+
   private
 
-  def eunit
+  # The cases over Resolver, the text of erx_path or of a seeded copy.
+  def eunit(resolver)
     Dir.mktmpdir('erx-path-test') do |work|
-      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-o', work, *SOURCES,
-                                       stdin_data: '')
+      path = File.join(work, 'erx_path.erl')
+      File.write(path, resolver)
+      output, status = Open3.capture2e(ENV.fetch('ERX_ERLC'), '-Werror', '-I', INCLUDE, '-o', work, path,
+                                       *SOURCES.drop(1), stdin_data: '')
       return [output, status] unless status.success?
 
       Open3.capture2e('gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work,

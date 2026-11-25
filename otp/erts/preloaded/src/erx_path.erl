@@ -20,7 +20,8 @@ point join the place without a walk, and the rest are walked through the
 `walk` callback from the entry's top, the entry's `root` names first, so
 every walk retraces the place. A link a walk meets is read through the
 `read_link` callback, and its text takes its name's place among the names
-still to read, from the link's directory or from `/`.
+still to read, from the link's directory or from `/`; a link in an entry
+marked `nofollow` is never followed and answers `eacces`.
 
 The last name is the operation's, FreeBSD's `nameiop`. A lookup returns the
 target, a walk to the last name that the caller sends with the operation;
@@ -63,9 +64,11 @@ table changed while it runs is not seen by it.
 -type name() :: binary().
 %% A namespace path, absolute; every name a directory the resolution reached.
 -type place() :: [name()].
-%% An entry is its caller's; the resolver reads only its mount point and the
-%% names in the provider where it starts, and hands it back in an action.
--type entry() :: #{point := [name()], root := [name()], term() => term()}.
+%% An entry is its caller's; the resolver reads only its mount point, the
+%% names in the provider where it starts and its nofollow mark, and hands it
+%% back in an action. An entry marked nofollow has no link followed in it
+%% (docs/design-files.md, Symbolic links).
+-type entry() :: #{point := [name()], root := [name()], nofollow => true, term() => term()}.
 -type table() :: [entry()].
 -type posix() :: atom().
 %% What the operation does with its last name: FreeBSD's nameiop.
@@ -443,7 +446,11 @@ kinds(_, _, _, _) ->
     {error, eio}.
 
 %% Follows the link Name, below the entry's point after the names Joined,
-%% the link's directory: its text is read before Rest.
+%% the link's directory: its text is read before Rest. No link of an entry
+%% marked nofollow is followed: eacces, as vfs_lookup answers on a
+%% nosymfollow mount, whatever the count of links followed so far.
+follow(#{nofollow := true}, _, _, _, _, _) ->
+    {error, eacces};
 follow(_, _, _, _, _, #st{links = ?LINKS_MAX}) ->
     {error, eloop};
 follow(Entry, Point, Joined, Name, Rest, St) ->
