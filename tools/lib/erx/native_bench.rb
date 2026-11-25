@@ -317,9 +317,9 @@ module Erx
     class BoardSets
       DIRECTORY = 'build/bench-board'
       # A laid-out set: its files and record (BootPartition::WrittenSet), its image
-      # (BootImage::Built), whose identity its banner names, and the guest's deadline its
-      # root is built with.
-      Laid = Data.define(:set, :image, :deadline_seconds)
+      # (BootImage::Built), whose identity its banner names, the guest's deadline its root
+      # is built with, and the root's flags.
+      Laid = Data.define(:set, :image, :deadline_seconds, :root_flags)
 
       def initialize(root:, platform:, runner: Runner.new(owner_root: root, log_dir: File.join(root, 'build/logs')),
                      compiler: ENV.fetch('ERX_CLANG', ''), linker: ENV.fetch('ERX_LLD', ''))
@@ -352,7 +352,7 @@ module Erx
                                                                       [benchmark, *(seed && ['seeded', seed.name.tr(' ', '-')])].join('-')))
         set = BootPartition.lay_out_set(root: @root, runner: @runner, platform: @platform, build_kind: BuildKind::DEVELOPMENT,
                                         bootable: image.single, directory: directory, compiler: @compiler, linker: @linker)
-        Laid.new(set: set, image: image, deadline_seconds: deadline)
+        Laid.new(set: set, image: image, deadline_seconds: deadline, root_flags: flags)
       end
     end
 

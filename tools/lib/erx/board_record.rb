@@ -1,0 +1,137 @@
+# Copyright (c) 2026, Stanislav Sedov <stas@deglitch.com>
+# SPDX-License-Identifier: BSD-2-Clause
+# frozen_string_literal: true
+
+require 'digest'
+require 'time'
+require_relative 'bench_record'
+require_relative 'bench_suite'
+require_relative 'bench_system'
+require_relative 'board_files'
+require_relative 'board_log'
+require_relative 'boot_partition'
+require_relative 'bounded_file'
+require_relative 'error'
+require_relative 'json_input'
+require_relative 'line_escape'
+require_relative 'native_bench'
+
+module Erx
+  # The record of a board run (docs/design-bench.md, "The record of a board run"): one
+  # BenchRecord::Record per set the walk booted, holding that set's boots (BoardLog::Boot,
+  # each at its entry's queue position) with the set's environment and subject, read from
+  # its build record, and the run's facts. The live walk's record (BoardRun's seam) and
+  # `tools/erx bench import`'s are the same function of the console's log, the queue and
+  # the walk's outcomes when there are any, and both are written by BenchRecord.write.
+  #
+  # The board's bytes reach a record only as BoardLog judged them, as each boot's slice of
+  # the log, kept as its serial log, and as sensor readings, kept line by line through
+  # LineEscape, so nothing of them reaches a terminal or the record's JSON raw.
+  module BoardRecord
+    # The board every walk runs on (docs/design-bench.md, "Running on the Raspberry Pi 4").
+    CPUS = 4
+    MEMORY_MIB = 4096
+
+    # What a set's record holds of the set: its environment and its subject.
+    Set = Data.define(:environment, :subject)
+
+    module_function
+
+    # The set of the queue boot_set as its records name it, from its build record, which
+    # must still be the one the walk's entries were made from: the firmware files' SHA-256
+    # as the record lists them, its source revision, its kernel8.img's SHA-256 and the
+    # compiler that built it (BL31's, the set's one compiler). A relative directory is the
+    # tree's at root.
+    def set(boot_set, root: Dir.pwd)
+      path = File.join(File.expand_path(boot_set.directory, root), BootPartition::SET_RECORD)
+      bytes = BoundedFile.read(path, maximum: BootPartition::RECORD_BYTES)
+      raise Error, "board record: #{path} is not the one the walk's entries were made from" unless
+        Digest::SHA256.hexdigest(bytes) == boot_set.record_sha256
+
+      receipt = JsonInput.parse(bytes, max_bytes: BootPartition::RECORD_BYTES, label: path)
+      files = BootPartition.listed_files(receipt)
+      receipt.fetch('source').fetch_values('commit', 'dirty') => [String => commit, dirty]
+      receipt.fetch('inputs').fetch('firmware') => Array => firmware
+      Set.new(
+        environment: BenchRecord::Environment.new(
+          kind: 'pi4', model: nil, cpus: CPUS, system: 'erxos',
+          details: { 'memory_mib' => MEMORY_MIB,
+                     'firmware' => firmware.to_h { |source| [source.fetch('filename'), files.fetch(source.fetch('filename'))] } }
+        ),
+        subject: BenchRecord::Subject.new(
+          revision: commit, dirty: dirty,
+          details: { 'kernel8_sha256' => files.fetch(BootPartition::KERNEL), 'record_sha256' => boot_set.record_sha256,
+                     'root_flags' => boot_set.root_flags, 'compiler' => receipt.dig('inputs', 'bl31', 'compiler') }.compact
+        )
+      )
+    rescue NoMatchingPatternError, KeyError, TypeError, NoMethodError
+      raise Error, "board record: #{path} does not name the set's source, firmware and kernel"
+    end
+
+    # The run's facts: the queue's date; the sensor readings, each named for when it was
+    # read and nil when none was; how the walk ended and whether the link was restored,
+    # nil without the walk; and what the board returned to (BoardLog's read).
+    def run(queue:, walk:, read:, readings:, started_by:)
+      returned = read.returned
+      BenchRecord::Run.new(
+        date: Time.iso8601(queue.date).utc, started_by: started_by, load: nil, host_cpus: nil, reused_from: nil,
+        details: { 'sensors' => readings.transform_values { |text| text&.each_line&.map { |line| LineEscape.escape(line.chomp) } },
+                   'ending' => walk&.ending, 'restored' => walk&.restored,
+                   'returned' => { 'status' => returned.status, 'identity' => returned.identity&.to_h&.transform_keys(&:to_s) } }
+      )
+    end
+
+    # One record per set of the queue, in the queue's order of sets: the set's boots of
+    # read in position order, each with its slice of the log as its serial log, and what
+    # its lines refused.
+    def records(read, queue:, sets:, run:)
+      read.boots.group_by { |boot| boot.entry.set }.sort.map do |index, boots|
+        set = sets.fetch(index)
+        BenchSystem::Recorded.new(
+          record: BenchRecord::Record.new(environment: set.environment, subject: set.subject, run: run,
+                                          boots: boots.map(&:record_boot)),
+          refused: boots.flat_map(&:refused), logs: boots.map { |boot| { serial: boot.log } }
+        )
+      end
+    end
+
+    # The records of the walk whose console log is log, of queue, with the walk's
+    # outcomes (or nil) and the sensor readings; read is BoardLog's read of it, against
+    # what the queue's benchmark asks at the landing profile on the board.
+    def recorded(log, queue:, walk:, readings:, started_by:, root:)
+      read = BoardLog.read(log, queue: queue, asked: Array.new(queue.sets.size, asked(queue.benchmark)), walk: walk)
+      yield read if block_given?
+      records(read, queue: queue, sets: queue.sets.map { |boot_set| set(boot_set, root: root) },
+                    run: run(queue: queue, walk: walk, read: read, readings: readings, started_by: started_by))
+    end
+
+    # Writes each record under history; returns the run directories.
+    def write(made, history:, root:)
+      made.map { |recorded| BenchRecord.write(recorded.record, history: history, erxos_root: root, logs: recorded.logs) }
+    end
+
+    # `tools/erx bench import NAME --queue FILE LOG` (docs/design-bench.md, "Importing a
+    # log"): the records of the walk of NAME whose queue file is queue and whose console
+    # log is log, with walk.json beside the queue when the walk wrote it, written under
+    # history. A log no line of which names a boot is refused.
+    def import(name, queue:, log:, root:, history:)
+      walked = BoardFiles.read_queue(queue)
+      raise Error, "board record: #{queue} is a walk of #{walked.benchmark}, not of #{name}" unless walked.benchmark == name
+
+      walk_path = File.join(File.dirname(queue), BoardFiles::WALK)
+      walk = File.file?(walk_path) ? BoardFiles.read_walk(walk_path) : nil
+      bytes = BoundedFile.read(log, maximum: BoardLog.max_bytes(walked))
+      made = recorded(bytes, queue: walked, walk: walk, readings: { 'before' => nil, 'after' => nil },
+                             started_by: 'manual', root: root) do |read|
+        raise Error, "board record: #{log} names no boot of the queue, so no line of it is tied to a boot" if
+          read.boots.all? { |boot| boot.cells.all? { |cell| cell.reason == BoardLog::UNNAMED } }
+      end
+      write(made, history: history, root: root)
+    end
+
+    # What a board set of benchmark asks: its native landing cells on the board's CPUs.
+    def asked(benchmark) = NativeBench.asked(BenchSuite.benchmark(benchmark), cpus: CPUS)
+
+    private_class_method :asked
+  end
+end

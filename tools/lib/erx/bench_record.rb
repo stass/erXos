@@ -473,8 +473,8 @@ module Erx
     def history = ENV.fetch('ERX_BENCH_HISTORY') { File.join(Dir.home, 'erxos-history') }
 
     # Writes record under history and returns the run directory's real path. logs is
-    # none, or one { serial:, qemu: } map of log paths per boot of the record, in its
-    # order, copied as boot-<n>.serial.log and boot-<n>.qemu.log for the boot at
+    # none, or one { serial:, qemu: } map of log bytes per boot of the record, in its
+    # order, written as boot-<n>.serial.log and boot-<n>.qemu.log for the boot at
     # position n. Everything is serialized and bounded before the directory is made, a
     # bound applying to each file, and run.json is written last, by rename, so a run is
     # complete once it exists.
@@ -505,6 +505,9 @@ module Erx
       raise Error, "bench record #{run}: not a record (#{error.class})"
     end
 
+    # The bytes of the boot log at path, as write takes them, within a log's bound.
+    def boot_log(path) = BoundedFile.read(path, maximum: LOG_BYTES)
+
     def parse(path)
       value = JsonInput.parse(BoundedFile.read(path, maximum: FILE_BYTES),
                               max_bytes: FILE_BYTES, label: "bench record #{path}")
@@ -526,9 +529,10 @@ module Erx
     def boot_logs(record, logs)
       check(logs.empty? || logs.size == record.boots.size, 'boot logs are not one map per boot')
       record.boots.zip(logs).flat_map do |boot, kept|
-        kept.to_h.map do |kind, path|
+        kept.to_h.map do |kind, bytes|
           check(BOOT_LOGS.include?(kind), 'a boot log is not serial or qemu')
-          ["#{boot.directory}.#{kind}.log", BoundedFile.read(path, maximum: LOG_BYTES)]
+          check(bytes.is_a?(String), "boot #{boot.position}'s #{kind} log is not bytes")
+          ["#{boot.directory}.#{kind}.log", bytes.b]
         end
       end.to_h
     end

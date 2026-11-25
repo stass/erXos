@@ -9,6 +9,7 @@ require 'optparse'
 require_relative '../lib/erx/bench_measurement'
 require_relative '../lib/erx/bench_suite'
 require_relative '../lib/erx/board_log'
+require_relative '../lib/erx/board_record'
 
 # The BENCH, CLOCK and WINDOW line validators (Erx::BenchMeasurement.cell, .clock and
 # .window) over mutated lines, as a guest could print them, and the board log's reader
@@ -16,8 +17,9 @@ require_relative '../lib/erx/board_log'
 # Each input either raises Erx::Error and nothing else, or answers a clock group, a
 # window of a line within its bound, or a cell whose histogram holds no more samples
 # than its profile asked for, or, for a board log, one boot per entry whose slices are
-# the log. Whether its answers are right is test/host/bench_line_test.rb's and
-# test/host/board_log_test.rb's.
+# the log, and one record boot per entry (Erx::BoardRecord). Whether its answers are right
+# is test/host/bench_line_test.rb's, test/host/board_log_test.rb's and
+# test/host/board_record_test.rb's.
 module Erx
   module BenchLineFuzz
     MEASUREMENT = BenchMeasurement
@@ -47,11 +49,18 @@ module Erx
     FIRMWARE_LINES = ['RPi: BOOTLOADER release VERSION:a1b2c3d4 DATE: 2026/01/01', 'HTTP: GET boot.sig',
                       'HTTP: GET boot.img', 'MESS:00:00:05.012712:0: arasan: arasan_emmc_open'].freeze
 
+    # The record facts of board_queue's one set, as BoardRecord.set reads them.
+    BOARD_SET = BoardRecord::Set.new(
+      environment: BenchRecord::Environment.new(kind: 'pi4', model: nil, cpus: 4, system: 'erxos', details: {}),
+      subject: BenchRecord::Subject.new(revision: 'ab' * 20, dirty: false, details: {})
+    )
+
     module_function
 
     def board_queue
       BoardFiles::Queue.new(
-        benchmark: 'wake', sets: [BoardFiles::BootSet.new(directory: 'build/bench-board/wake', record_sha256: 'ee' * 32)],
+        benchmark: 'wake', date: '2026-11-25T00:15:00Z',
+        sets: [BoardFiles::BootSet.new(directory: 'build/bench-board/wake', record_sha256: 'ee' * 32, root_flags: [])],
         entries: BOARD_NAMES.each.with_index(1).map do |name, position|
           BoardFiles::Entry.new(position: position, name: name, set: 0, image_sha256: format('%064x', position))
         end,
@@ -177,6 +186,10 @@ module Erx
       read = BoardLog.read(text, queue: queue, asked: board_asked)
       raise 'a board log read into another count of boots' unless read.boots.size == queue.entries.size
       raise "a board log's slices are not the log" unless read.boots.map(&:log).join == text.b
+
+      run = BoardRecord.run(queue: queue, walk: nil, read: read, readings: { 'before' => text, 'after' => nil }, started_by: 'manual')
+      made = BoardRecord.records(read, queue: queue, sets: [BOARD_SET], run: run)
+      raise "a board log's record dropped a boot" unless made.sum { |recorded| recorded.record.boots.size } == queue.entries.size
     rescue Erx::Error
       nil
     end

@@ -428,8 +428,7 @@ class BenchRecordTest < Minitest::Test
   end
 
   def test_each_boots_logs_are_named_by_its_position
-    serial = File.join(@scratch, 'serial.log')
-    File.write(serial, "erx: done\n")
+    serial = "erx: done\n"
     run = Record.write(two_boots, history: @history, erxos_root: @erxos, logs: [{}, { serial: serial }])
     assert_equal ['boot-3.serial.log'], Dir.children(run).grep(/\.log\z/)
     assert_raises(Erx::Error) { Record.write(two_boots, history: @history, erxos_root: @erxos, logs: [{ serial: serial }]) }

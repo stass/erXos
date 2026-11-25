@@ -6,6 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'open3'
 require 'securerandom'
+require 'time'
 require_relative 'bench_record'
 require_relative 'board_console'
 require_relative 'board_files'
@@ -43,9 +44,9 @@ module Erx
     RETRY_SECONDS = 10
 
     # A set the walk boots: its boot set (Netboot::BootSet), the path of its build record,
-    # the identity its banner names (BoardFiles::Identity, nil when unknown) and the guest's
-    # deadline its root is built with.
-    Subject = Data.define(:set, :record, :identity, :deadline_seconds)
+    # the identity its banner names (BoardFiles::Identity, nil when unknown), the guest's
+    # deadline its root is built with and the root's flags (nil when not known).
+    Subject = Data.define(:set, :record, :identity, :deadline_seconds, :root_flags)
     # A sensors' reading, named for when it was read: the board's bytes, or nil when ssh did
     # not answer with them.
     Reading = Data.define(:taken, :text)
@@ -58,15 +59,15 @@ module Erx
       Subject.new(set: Netboot.boot_set(File.dirname(laid.set.files), record: BootPartition::SET_RECORD),
                   record: laid.set.record,
                   identity: BoardFiles::Identity.new(build: laid.image.build_id, index: laid.image.index_hash),
-                  deadline_seconds: laid.deadline_seconds)
+                  deadline_seconds: laid.deadline_seconds, root_flags: laid.root_flags)
     end
 
-    # The subject of a set's directory given by --set: its banner's identity is not known
-    # here, and its root's deadline is taken as the landing form's.
+    # The subject of a set's directory given by --set: its banner's identity and its root's
+    # flags are not known here, and its root's deadline is taken as the landing form's.
     def self.directory_subject(directory)
       Subject.new(set: Netboot.boot_set(directory, record: BootPartition::SET_RECORD),
                   record: File.join(directory, BootPartition::SET_RECORD), identity: nil,
-                  deadline_seconds: NativeBench::LANDING_DEADLINE_SECONDS)
+                  deadline_seconds: NativeBench::LANDING_DEADLINE_SECONDS, root_flags: nil)
     end
 
     # The ssh calls of a run: `ssh -o BatchMode=yes -T -- DEST reboot` and the read of
@@ -268,10 +269,14 @@ module Erx
     end
 
     def queue_of(benchmark, entries, names, returning, queue_path)
-      records = entries.map(&:record).uniq
+      subjects = entries.uniq(&:record)
+      records = subjects.map(&:record)
       BoardFiles::Queue.new(
-        benchmark: benchmark,
-        sets: records.map { |record| BoardFiles::BootSet.new(directory: File.dirname(record), record_sha256: Digest::SHA256.file(record).hexdigest) },
+        benchmark: benchmark, date: Time.now.utc.iso8601,
+        sets: subjects.map do |subject|
+          BoardFiles::BootSet.new(directory: File.dirname(subject.record), record_sha256: Digest::SHA256.file(subject.record).hexdigest,
+                                  root_flags: subject.root_flags)
+        end,
         entries: entries.zip(names).each.with_index(1).map do |(entry, name), position|
           BoardFiles::Entry.new(position: position, name: name, set: records.index(entry.record),
                                 image_sha256: Digest::SHA256.file(File.join(queue_path, position.to_s, NetbootEntry::IMAGE)).hexdigest)

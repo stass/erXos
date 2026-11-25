@@ -24,6 +24,7 @@ module Erx
     NAME = /\A[0-9a-f]{32}\z/
     BUILD = /\A[0-9a-f]{16}\z/
     SHA256 = /\A[0-9a-f]{64}\z/
+    DATE = /\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\z/
 
     def self.need(valid, what) = valid || raise(Error, "board files: #{what}")
 
@@ -38,12 +39,14 @@ module Erx
 
     # A boot set of the queue: the directory its build record lies in, and that record's
     # SHA-256, so a record made later reads the firmware hashes of the record the entries
-    # were made from.
-    BootSet = Data.define(:directory, :record_sha256) do
-      def initialize(directory:, record_sha256:)
+    # were made from; and the flags its bench root was built with, which its build record
+    # does not hold, nil when the walk was handed the set without them (--set).
+    BootSet = Data.define(:directory, :record_sha256, :root_flags) do
+      def initialize(directory:, record_sha256:, root_flags:)
         BoardFiles.need(directory.is_a?(String) && !directory.empty?, 'a set names no directory')
         BoardFiles.need(record_sha256.is_a?(String) && SHA256.match?(record_sha256), "a set's record hash is not a SHA-256")
-        super
+        BoardFiles.need(root_flags.nil? || (root_flags.is_a?(Array) && root_flags.all?(String)), "a set's root flags are not strings")
+        super(directory: directory, record_sha256: record_sha256, root_flags: root_flags&.dup&.freeze)
       end
     end
 
@@ -59,19 +62,21 @@ module Erx
       end
     end
 
-    # A queue: the benchmark its sets run, its sets, its bench entries in position order
-    # (the found pair, the queue's last entry, is not one of them), and the found pair's
-    # return identity, nil when unknown.
-    Queue = Data.define(:benchmark, :sets, :entries, :return_identity) do
-      def initialize(benchmark:, sets:, entries:, return_identity:)
+    # A queue: the benchmark its sets run, when it was made (UTC, ISO 8601 to the second,
+    # the date of the run's records), its sets, its bench entries in position order (the
+    # found pair, the queue's last entry, is not one of them), and the found pair's return
+    # identity, nil when unknown.
+    Queue = Data.define(:benchmark, :date, :sets, :entries, :return_identity) do
+      def initialize(benchmark:, date:, sets:, entries:, return_identity:)
         BoardFiles.need(benchmark.is_a?(String) && BenchRecord::NAME.match?(benchmark), 'the benchmark is not a name')
+        BoardFiles.need(date.is_a?(String) && DATE.match?(date), 'the date is not a UTC time to the second')
         BoardFiles.need(sets.is_a?(Array) && !sets.empty? && sets.all?(BootSet), 'the queue holds no sets')
         BoardFiles.need(entries.is_a?(Array) && !entries.empty? && entries.all?(Entry), 'the queue holds no entries')
         BoardFiles.need(entries.map(&:position) == (1..entries.size).to_a, 'the entries are not numbered from 1 in order')
         BoardFiles.need(entries.map(&:name).uniq.size == entries.size, 'a boot name repeats')
         BoardFiles.need(entries.all? { |entry| entry.set < sets.size }, 'an entry names a set the queue does not hold')
         BoardFiles.need(return_identity.nil? || return_identity.is_a?(Identity), 'the return identity is not one')
-        super(benchmark: benchmark, sets: sets.freeze, entries: entries.freeze, return_identity: return_identity)
+        super(benchmark: benchmark, date: date, sets: sets.freeze, entries: entries.freeze, return_identity: return_identity)
       end
 
       def entry(name) = entries.find { |entry| entry.name == name }
@@ -125,7 +130,7 @@ module Erx
     module_function
 
     def queue_json(queue)
-      JSON.pretty_generate('format' => FORMAT, 'benchmark' => queue.benchmark,
+      JSON.pretty_generate('format' => FORMAT, 'benchmark' => queue.benchmark, 'date' => queue.date,
                            'sets' => queue.sets.map { |set| set.to_h.transform_keys(&:to_s) },
                            'entries' => queue.entries.map { |entry| entry.to_h.transform_keys(&:to_s) },
                            'return_identity' => queue.return_identity&.to_h&.transform_keys(&:to_s))
@@ -146,8 +151,8 @@ module Erx
 
     # The queue file at path (Queue).
     def read_queue(path)
-      keywords(parsed(path)) => { benchmark:, sets: Array => sets, entries: Array => entries, return_identity: identity, **nil }
-      Queue.new(benchmark: benchmark, sets: sets.map { |set| BootSet.new(**keywords(set)) },
+      keywords(parsed(path)) => { benchmark:, date:, sets: Array => sets, entries: Array => entries, return_identity: identity, **nil }
+      Queue.new(benchmark: benchmark, date: date, sets: sets.map { |set| BootSet.new(**keywords(set)) },
                 entries: entries.map { |entry| Entry.new(**keywords(entry)) }, return_identity: identity && Identity.new(**keywords(identity)))
     rescue NoMatchingPatternError, ArgumentError, TypeError
       raise Error, "board files: #{path} is not a queue file"

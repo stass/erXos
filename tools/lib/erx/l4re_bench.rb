@@ -95,7 +95,7 @@ module Erx
           clock: nil, cells: answer.fetch(:cells), refused: answer.fetch(:refused),
           environment: { 'memory_mib' => MEMORY_MIB, 'machine' => 'virt', 'qemu' => report['qemu_version'] }.compact,
           subject: subject,
-          logs: [{ serial: serial }], reused_from: report['reused_from']
+          logs: [{ serial: BenchRecord.boot_log(serial) }], reused_from: report['reused_from']
         )
       end
 

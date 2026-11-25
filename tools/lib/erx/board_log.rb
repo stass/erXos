@@ -45,10 +45,19 @@ module Erx
     # naming lines, their end forms, its guest lines, and whether it booted twice.
     Named = Data.define(:naming, :forms, :guest, :twice)
     NONE = Named.new(naming: [], forms: [], guest: [], twice: false)
-    # An entry's boot: the entry (BoardFiles::Entry), its slice of the log, how it ended
-    # ('done', 'deadline' or nil), and BenchMeasurement.boot's clock group, cells and
-    # refused reasons.
-    Boot = Data.define(:entry, :log, :ended, :clock, :cells, :refused)
+    # An entry's boot, the stage before its record's (BenchRecord::Boot): the entry
+    # (BoardFiles::Entry), its slice of the log, how it ended ('done', 'deadline' or nil),
+    # the walk's outcome for it (nil without the walk), and BenchMeasurement.boot's clock
+    # group, cells and refused reasons.
+    Boot = Data.define(:entry, :log, :ended, :outcome, :clock, :cells, :refused) do
+      # The boot as its record holds it, at its queue position, with the facts only it
+      # has; its slice of the log is the record's serial log of it (BenchRecord.write).
+      def record_boot
+        BenchRecord::Boot.new(position: entry.position, clock: clock || {}, cells: cells,
+                              details: { 'name' => entry.name, 'image_sha256' => entry.image_sha256,
+                                         'outcome' => outcome, 'ended' => ended })
+      end
+    end
     # The log read: one Boot per bench entry in position order, and what the board
     # booted after the last (BoardFiles::Returned), the walk's when it has one.
     Read = Data.define(:boots, :returned)
@@ -144,16 +153,16 @@ module Erx
 
     def boot(entry, slice, kept:, named:, asked:, walk:)
       ended = %w[deadline done].find { |form| named.forms.include?(form) }
+      outcome = walk&.outcome(entry.position)
       if named.twice
-        return Boot.new(entry: entry, log: slice, ended: ended, clock: nil,
+        return Boot.new(entry: entry, log: slice, ended: ended, outcome: outcome, clock: nil,
                         cells: BenchMeasurement.rejected(asked, reason: TWICE), refused: [TWICE])
       end
 
-      outcome = walk&.outcome(entry.position)
       stopped = walk.ending if outcome == 'stopped'
       judged = BenchMeasurement.boot(named.guest, asked, timed_out: ended == 'deadline' || stopped == 'end_deadline',
                                                          not_run: not_run(kept, named, ended: ended, outcome: outcome, stopped: stopped))
-      Boot.new(entry: entry, log: slice, ended: ended, clock: judged.fetch(:clock), cells: judged.fetch(:cells),
+      Boot.new(entry: entry, log: slice, ended: ended, outcome: outcome, clock: judged.fetch(:clock), cells: judged.fetch(:cells),
                refused: judged.fetch(:refused))
     end
 

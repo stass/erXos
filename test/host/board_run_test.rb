@@ -71,7 +71,7 @@ class BoardRunTest < Minitest::Test
 
   def subject
     Erx::BoardRun::Subject.new(set: Erx::Netboot::BootSet.new(directory: File.dirname(@record), digests: {}, source: {}),
-                               record: @record, identity: BENCH, deadline_seconds: 540)
+                               record: @record, identity: BENCH, deadline_seconds: 540, root_flags: [])
   end
 
   # Makes the queue as Netboot.prepare lays it out: one numbered entry a name and the way back.
