@@ -67,6 +67,9 @@ module Erx
 
     module_function
 
+    # Where the build for a boot of cpus CPUs is published, relative to the root.
+    def output(cpus) = File.join(OUTPUT, "#{cpus}cpu")
+
     # Genode's run script for erx_peer_bench given arguments: the depot's archives the
     # probe of Genode's tools built, the component built from erXos's target description,
     # and init's configuration in the notation Genode Foundations 26.05 documents ("The
@@ -168,7 +171,7 @@ module Erx
     end
 
     # Builds Genode's guest for a posix run on cpus CPUs on the engine of the docker
-    # context, leaving image.elf and the build record in build/genode.
+    # context, leaving image.elf and the build record in build/genode/<cpus>cpu.
     # Returns image.elf's path.
     def build(root:, runner:, context:, jobs:, cpus: 1)
       raise Error, 'Genode build jobs must be 1 to 64' unless jobs.is_a?(Integer) && jobs.between?(1, 64)
@@ -257,7 +260,7 @@ module Erx
     private_class_method :stage_archives
 
     def publish(root:, out:, record:)
-      destination = OutputDirectory.prepare(root: root, path: File.join(root, OUTPUT))
+      destination = OutputDirectory.prepare(root: root, path: File.join(root, output(record.fetch('cpus'))))
       FileUtils.rm_f(Dir.glob(File.join(destination, '*')))
       FileUtils.copy_file(File.join(out, 'image.elf'), File.join(destination, 'image.elf'))
       File.write(File.join(destination, 'record.json'), JSON.pretty_generate(record) + "\n")

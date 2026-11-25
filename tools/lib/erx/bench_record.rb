@@ -28,7 +28,7 @@ module Erx
     STATUSES = %w[measured partial timed_out unsupported failed rejected not_run].freeze
     CLOCKS = %w[counter host analyser virtual monotonic cycles].freeze
     PROFILES = %w[fast expensive periodic sustained].freeze
-    SYSTEMS = %w[erxos l4re freebsd linux].freeze
+    SYSTEMS = %w[erxos l4re freebsd linux genode-hw].freeze
     # A benchmark, operation, load cell or placement name, as a declaration gives it.
     NAME = /\A[a-z][a-z0-9-]{0,31}\z/
     # A host's hardware model (sysctl hw.model on macOS): no path separator, no space.

@@ -51,6 +51,7 @@ begin
   require_relative 'lib/erx/bench_g5'
   require_relative 'lib/erx/bench_session'
   require_relative 'lib/erx/l4re_bench'
+  require_relative 'lib/erx/genode_bench'
   require_relative 'lib/erx/genode_fetch'
   require_relative 'lib/erx/l4re_fetch'
   require_relative 'lib/erx/linux_guest'
@@ -1741,7 +1742,8 @@ module Erx
                 LinuxGuest::Guest.new(root: ROOT, runner: runner),
                 LinuxGuest::Guest.new(root: ROOT, runner: runner, boot: 'posix'),
                 PosixBench::Guest.new(root: ROOT, runner: runner),
-                LinuxErlangGuest::Guest.new(root: ROOT, runner: runner)]
+                LinuxErlangGuest::Guest.new(root: ROOT, runner: runner),
+                GenodeBench::Guest.new(root: ROOT, runner: runner)]
       write = ->(record, logs) { BenchRecord.write(record, history: history, erxos_root: ROOT, logs: logs) }
       session = BenchSession::Run.new(guests: guests, host: BenchSystem.host(kind: BenchSession::KIND, root: ROOT, runner: runner),
                                       write: write, load: -> { QemuGate.one_minute_load })

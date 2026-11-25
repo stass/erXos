@@ -20,7 +20,7 @@ module Erx
   # goes on with the next. A session gives no verdict: its runs are set side by side.
   module BenchSession
     # The systems that boot in QEMU under HVF; FreeBSD runs on the board only.
-    SYSTEMS = %w[erxos l4re linux].freeze
+    SYSTEMS = %w[erxos l4re linux genode-hw].freeze
     ROUNDS = { 'landing' => 1, 'full' => 3 }.freeze
     KIND = 'qemu-hvf'
 
