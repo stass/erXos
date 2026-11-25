@@ -6,7 +6,10 @@
 The media domain's supervisor (docs/design-drives.md, "Failure handling"): one drive
 process, erx_media_drive, for each drive of the registry that has been asked for, each
 started at the first ask for it under the id `{drive, N}` and restarted if it ends, so
-that the registry's drives, and no name a caller makes up, bound how many there are.
+that the registry's drives, and no name a caller makes up, bound how many there are;
+and the mint of the files service `media`, whose tree is erx_media_tree (erx_fs_mint),
+the one child it starts with. It makes the domain's mount counter
+(erx_media_volume:new_mounts/0) before any volume can start.
 """.
 
 -behaviour(supervisor).
@@ -33,4 +36,7 @@ drive(N) when is_integer(N), N >= 0 ->
 
 -doc false.
 init([]) ->
-    {ok, {#{strategy => one_for_one, intensity => 5, period => 60}, []}}.
+    ok = erx_media_volume:new_mounts(),
+    Mint = #{id => media, start => {erx_fs_mint, start_link, [media, erx_media_tree, fun() -> media end]},
+             modules => [erx_fs_mint, erx_media_tree]},
+    {ok, {#{strategy => one_for_one, intensity => 5, period => 60}, [Mint]}}.

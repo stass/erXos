@@ -1339,7 +1339,10 @@ format gives it within the volume in its low 40: EROFS's inode number,
 bounded by the image's length, and FAT's and littlefs's paths drawn per
 mount as the storage design draws them
 ([design-storage.md](design-storage.md#read-write-storage), "File
-identity and version"). The root, each `diskN`, `status` and `ctl` take
+identity and version"). A volume draws its mount number when its process
+starts, whatever its outcome, and its root takes path 0 within it, so the
+listing of `diskN` names every volume by its root's qid, one that answers
+`eio` at its walk included. The root, each `diskN`, `status` and `ctl` take
 fixed paths of mount number 0. So no path names two files while the
 media domain lives, and a medium mounted again is another set of files.
 A mount past the 24 bits' last number fails with `enfile`.

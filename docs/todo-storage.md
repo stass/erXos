@@ -146,6 +146,21 @@ each item has a `[Severity]` tag and a component pointer, and a closed item is d
     `erx_fat`, before the release check of step 4 can pass with littlefs in a development build.
   * [Medium] `erx_media_volume` shows a clean FAT volume that flushes as `rw`, though `erx_fat` has
     no write path yet, so a write through the media tree fails until that path lands.
+  * [Low] `erx_media_tree` shows a drive status's `transport` and `flush` as `unknown`: the window's
+    `info` answers neither (design-drives.md, "Status"). Show them once the window reports them.
+  * [Medium] `erx_media_volume`'s qid path table caps at 2^40 entries and frees none, where design-storage.md's
+    "File identity and version" caps it at 65,536 and drops an entry once no fid names it (the tree has no
+    `forget/2`); the table lives under the volume's heap bound, so a walk of a stick of some 20,000 files may
+    end the volume (estimated, not measured). Add `forget/2` and the cap, or bring the difference to the design.
+  * [Low] `erx_media_tree`: a link across two volumes answers `erofs`, not "Links and rights"' `exdev`; a
+    volume's waiting read answers its alias directly rather than through `erx_fs_waits`, as design-files.md's
+    "Waiting requests" asks; a GPT entry's name and GUID do not show as `sN_label` and `sN_serial`; the
+    `{volume, ...}` node carries a qid path no clause reads; `erx_media_app`'s moduledoc says the domain has no
+    files facet, and `erx_fs_mint`'s does not list `media`.
+  * [Low] `erx_media_sup` makes the mount counter at each of its starts, so paths stay unique while the domain
+    lives only because the supervisor never restarts within it; make it only when absent.
+  * [Low] A stick that stalls holds a session's `media` grant for as many window deadlines as a listing reads
+    sectors; measure whether the proxy ends at the window's deadline.
 * [Low] Step 4's medium reader refuses the table on a failed read of any sector `erx_media_table`
   asks for, and hands it only 512-byte sectors: `read/2` has no way to be told a sector is
   unreadable, so a read answered as zeros would make a failed sector 0 read as no table.

@@ -11,6 +11,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("generated/erx_abi.hrl").
 
+%% The fixtures the media tree's cases share (erx_media_tree_tests).
+-export([image/1, proxy/2, mbr/2, sectors/1, facet/1]).
+
 -define(SECTOR, 512).
 -define(START, 2048).
 
@@ -21,6 +24,7 @@ image(Name) ->
 %% A window proxy over Medium whose flush answers Flush; it sends the test process
 %% {flushed, self()} at each flush. A read answers a copy of its sector, as the window
 %% does, never a sub-binary of the whole medium, which a volume's memory bound counts.
+%% Sent `stall`, it answers nothing more, as a stick that hangs.
 proxy(Medium, Flush) ->
     Test = self(),
     spawn_link(fun() -> serve(Medium, Flush, Test) end).
@@ -30,9 +34,14 @@ serve(Medium, Flush, Test) ->
         {'$gen_call', From, Request} ->
             gen:reply(From, answer(Request, Medium, Flush, Test)),
             serve(Medium, Flush, Test);
+        stall ->
+            stalled();
         stop ->
             ok
     end.
+
+stalled() ->
+    receive stop -> ok; _Unanswered -> stalled() end.
 
 answer(info, Medium, _Flush, _Test) ->
     {ok, #{role => drive, sectors => byte_size(Medium) div ?SECTOR}};
@@ -50,6 +59,7 @@ read(Medium, Flush) ->
 
 %% The table and the supervisor of the medium behind Proxy.
 through(Proxy) ->
+    ok = erx_media_volume:new_mounts(),
     {ok, Sup} = erx_media_medium:start_link(),
     {Sup, erx_media_medium:read(Sup, Proxy)}.
 
@@ -99,7 +109,9 @@ a_flush_decides_between_rw_ro_and_none_test() ->
     {_, {none, [{_, Failing}], 0}} = read(Fat16, {error, eio}),
     ?assertMatch(#{mount := {none, {flush, eio}}}, erx_media_volume:outcome(Failing)),
     {_, {none, [{_, Malformed}], 0}} = read(Fat16, {ok, written}),
-    ?assertMatch(#{mount := {none, {flush, eio}}}, erx_media_volume:outcome(Malformed)).
+    ?assertMatch(#{mount := {none, {flush, eio}}}, erx_media_volume:outcome(Malformed)),
+    %% A refused mount serves no files: its root answers eio.
+    ?assertEqual([{error, eio}, {error, eio}], [erx_media_volume:root(Pid) || Pid <- [Failing, Malformed]]).
 
 %% A FAT volume whose dirty flag is set, the clean bit of its FAT's second entry clear,
 %% mounts read-only.
@@ -140,6 +152,7 @@ a_refused_table_or_a_silent_window_starts_no_volume_test() ->
     Proxy = proxy(<<>>, ok),
     unlink(Proxy),
     exit(Proxy, kill),
+    ok = erx_media_volume:new_mounts(),
     {ok, Again} = erx_media_medium:start_link(),
     ?assertMatch({failed, {info, {error, eio}}}, erx_media_medium:read(Again, Proxy)).
 
@@ -177,6 +190,7 @@ the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test() ->
     Proxy = proxy(image("fat16.img"), ok),
     unlink(Proxy),
     Facet = spawn(fun() -> facet(Proxy) end),
+    ok = erx_media_volume:new_mounts(),
     {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
     unlink(Drive),
     try
@@ -186,23 +200,24 @@ the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test() ->
         Monitor = monitor(process, Volume),
         exit(Proxy, kill),
         ?assertEqual(shutdown, receive {'DOWN', Monitor, process, Volume, Why} -> Why after 2000 -> running end),
-      ?assertEqual({links, []}, process_info(Drive, links)),
-      ?assertMatch(#{medium := none}, sys:get_state(Drive))
-  after
-      [exit(P, kill) || P <- [Drive, Facet, Proxy]]
-  end.
+        ?assertEqual({links, []}, process_info(Drive, links)),
+        ?assertMatch(#{medium := none}, sys:get_state(Drive))
+    after
+        [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+    end.
 
 %% A medium whose table is refused is held idle, with no volume and its supervisor
 %% stopped, until its proxy ends.
 a_refused_table_leaves_the_medium_idle_with_no_supervisor_test() ->
-  Proxy = proxy(mbr([{16#0e, ?START, 100}, {16#0e, ?START + 50, 100}], [{?START + 150, <<0:512/unit:8>>}]), ok),
-  unlink(Proxy),
-  Facet = spawn(fun() -> facet(Proxy) end),
-  {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
-  unlink(Drive),
-  try
-      ?assertMatch({ok, #{proxy := Proxy, table := {refused, _}}}, gen_server:call(Drive, medium, 5000)),
-      ?assertEqual({links, []}, process_info(Drive, links))
-  after
-      [exit(P, kill) || P <- [Drive, Facet, Proxy]]
-  end.
+    Proxy = proxy(mbr([{16#0e, ?START, 100}, {16#0e, ?START + 50, 100}], [{?START + 150, <<0:512/unit:8>>}]), ok),
+    unlink(Proxy),
+    Facet = spawn(fun() -> facet(Proxy) end),
+    ok = erx_media_volume:new_mounts(),
+    {ok, Drive} = erx_media_drive:start_link(0, fun() -> Facet end),
+    unlink(Drive),
+    try
+        ?assertMatch({ok, #{proxy := Proxy, table := {refused, _}}}, gen_server:call(Drive, medium, 5000)),
+        ?assertEqual({links, []}, process_info(Drive, links))
+    after
+        [exit(P, kill) || P <- [Drive, Facet, Proxy]]
+    end.

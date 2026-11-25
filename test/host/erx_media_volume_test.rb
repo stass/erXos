@@ -9,18 +9,22 @@ require 'fileutils'
 require_relative '../fixtures/erlang_build'
 require_relative '../fixtures/fat_volumes'
 
-# Runs test/erlang/erx_media_volume_tests.erl, the EUnit cases of a medium's supervisor,
-# reader and volume processes, against erx_media compiled from source on stock's
+# Runs test/erlang/erx_media_volume_tests.erl and erx_media_tree_tests.erl, the EUnit
+# cases of a medium's supervisor, reader and volume processes and of the media tree, against erx_media compiled from source on stock's
 # emulator (ERX_ERL and ERX_ERLC, which make check supplies), over the FAT16 and FAT32
 # volumes fsimg makes (FatVolumes), and seeds the faults docs/design-drives.md's host
 # tests name for them.
 class ErxMediaVolumeTest < Minitest::Test
   ROOT = File.expand_path('../..', __dir__)
   APPLICATIONS = %w[erx erx_fat erx_media].freeze
-  TESTS = %w[test/erlang/erx_media_volume_tests.erl].freeze
+  MODULES = %w[erx_media_volume_tests erx_media_tree_tests].freeze
+  # The suites, after the generated 9P grammar, a preloaded module outside every application
+  # that the media tree's grant calls, compiled here as a test source.
+  TESTS = ['build/gen/otp/erts/preloaded/src/erx_9p_grammar.erl', *MODULES.map { |name| "test/erlang/#{name}.erl" }].freeze
   MEDIUM = 'erlang/apps/erx_media/src/erx_media_medium.erl'
   VOLUME = 'erlang/apps/erx_media/src/erx_media_volume.erl'
   DRIVE = 'erlang/apps/erx_media/src/erx_media_drive.erl'
+  TREE = 'erlang/apps/erx_media/src/erx_media_tree.erl'
 
   Fault = Data.define(:name, :path, :from, :to, :caught_by)
 
@@ -49,7 +53,17 @@ class ErxMediaVolumeTest < Minitest::Test
               caught_by: 'the_drive_mounts_its_medium_at_the_ask_and_ends_it_with_its_proxy_test'),
     Fault.new(name: "an idle medium's supervisor left running", path: DRIVE,
               from: '_Idle -> stop(Sup), none', to: '_Idle -> none',
-              caught_by: 'a_refused_table_leaves_the_medium_idle_with_no_supervisor_test')
+              caught_by: 'a_refused_table_leaves_the_medium_idle_with_no_supervisor_test'),
+    Fault.new(name: "status's values written without the field escape", path: TREE,
+              from: 'erx_text:escape_field(iolist_to_binary(text(Value)))', to: 'iolist_to_binary(text(Value))',
+              caught_by: 'status_escapes_what_the_medium_supplies_test'),
+    Fault.new(name: 'a rename between two volumes taken as one within a volume', path: TREE,
+              from: '_NewName, _Fs) when From =/= To ->', to: '_NewName, _Fs) when From =:= To ->',
+              caught_by: 'exdev_is_decided_before_any_volume_is_asked_test'),
+    Fault.new(name: "a qid path without its volume's mount number", path: VOLUME,
+              from: "\#{Key := Number} ->\n            {ok, (Mount bsl ?NODE_BITS) bor Number, State};",
+              to: "\#{Key := Number} ->\n            {ok, Number, State};",
+              caught_by: 'two_mounts_are_distinct_test')
   ].freeze
 
   def self.images
@@ -71,7 +85,7 @@ class ErxMediaVolumeTest < Minitest::Test
       assert_equal 1, original.scan(fault.from).size, "#{fault.name}: passage not found once"
       output, status = eunit({ fault.path => original.sub(fault.from) { fault.to } })
       refute status.success?, "#{fault.name}: the tests passed\n#{output}"
-      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.(?:(?!erx_media_volume_tests: ).)*?\*failed\*/m,
+      assert_match(/#{Regexp.escape(fault.caught_by)}\.\.\.(?:(?!erx_media_\w+_tests: ).)*?\*failed\*/m,
                    output, fault.name)
     end
   end
@@ -84,7 +98,7 @@ class ErxMediaVolumeTest < Minitest::Test
       ErlangBuild.compile(work, applications: APPLICATIONS, tests: TESTS, replaced: replaced)
       Open3.capture2e({ 'ERX_FAT_IMAGES' => self.class.images },
                       'gtimeout', '-k', '10', '120', ENV.fetch('ERX_ERL'), '-noshell', '-pa', work, '-eval',
-                      'halt(case eunit:test(erx_media_volume_tests, [verbose]) of ok -> 0; _ -> 1 end)',
+                      "halt(case eunit:test([#{MODULES.join(', ')}], [verbose]) of ok -> 0; _ -> 1 end)",
                       chdir: work, stdin_data: '')
     end
   end

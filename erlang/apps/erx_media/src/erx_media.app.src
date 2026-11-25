@@ -10,9 +10,9 @@
 {application, erx_media,
  [{description, "erXos drives"},
   {vsn, "1"},
-  {modules, [erx_media_app, erx_media_drive, erx_media_medium, erx_media_probe, erx_media_sup, erx_media_table,
+  {modules, [erx_media_app, erx_media_drive, erx_media_medium, erx_media_probe, erx_media_sup, erx_media_table, erx_media_tree,
               erx_media_volume]},
   {registered, [erx_media_sup]},
   {mod, {erx_media_app, []}},
-  {applications, [kernel, stdlib, erx, erx_fat]},
+  {applications, [kernel, stdlib, erx, erx_files, erx_fat]},
   {env, []}]}.
